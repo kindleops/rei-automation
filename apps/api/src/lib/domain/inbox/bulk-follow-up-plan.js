@@ -20,9 +20,28 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+/**
+ * Entity names must never become a greeting. 312 of the active threads resolve to
+ * an owner like "2972 Sw 17 Street LLC", "Pim Six Corporation" or "Noel A Edwards
+ * Rev Liv Tr", and taking the first token of those produces "Hi 2972," or
+ * "Hi Pim," on a real SMS to a real owner. Returning "" instead routes the
+ * recipient to NEED REVIEW, which is the correct outcome: a human should decide
+ * how to address an entity.
+ */
+const ENTITY_NAME_PATTERN =
+  /(\bllc\b|l\.l\.c|\binc\b|\bcorp\b|corporation|company|\bco\b|trust|\btr\b|rev liv|properties|holdings|group|partners|\blp\b|\bltd\b|estate|bank|associates|management|realty|investments?)/i;
+
+function looksLikeEntity(value) {
+  const raw = clean(value);
+  if (!raw) return false;
+  // Leading digit is an address-derived name ("2972 Sw 17 Street LLC").
+  return /^\d/.test(raw) || ENTITY_NAME_PATTERN.test(raw);
+}
+
 function firstName(value) {
   const raw = clean(value);
   if (!raw) return "";
+  if (looksLikeEntity(raw)) return "";
   return raw.split(/\s+/)[0];
 }
 
@@ -40,20 +59,55 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
   const contexts = new Map();
   if (!keys.length) return contexts;
 
-  const { data: rows } = await supabase
+  /**
+   * Same split-identity problem as the agent lookup below: 937 phone numbers carry
+   * two thread rows, one bare 10-digit and one E.164, and only one of the twins
+   * holds the names. An exact `.in("thread_key", keys)` reads whichever twin the
+   * client sent, which for the inbox is the hollow one — every name column null.
+   * That is why 2,234 active threads reported "missing seller first name" when
+   * 2,148 of them have a usable name one row over.
+   *
+   * Match canonical_e164 as well and keep whichever row actually carries a name.
+   */
+  const digitsOfKey = (value) => String(value || "").replace(/[^0-9]/g, "").slice(-10);
+  const digitsToKey = new Map();
+  for (const key of keys) {
+    const d = digitsOfKey(key);
+    if (d.length === 10 && !digitsToKey.has(d)) digitsToKey.set(d, key);
+  }
+
+  const selectCols =
+    "thread_key,canonical_e164,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full";
+
+  const byKey = await supabase
     .from("canonical_inbox_threads")
-    .select("thread_key,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full")
+    .select(selectCols)
     .in("thread_key", keys);
 
-  for (const row of rows || []) {
-    const key = clean(row.thread_key);
+  let rows = byKey.data || [];
+  if (digitsToKey.size) {
+    const byPhone = await supabase
+      .from("canonical_inbox_threads")
+      .select(selectCols)
+      .in("canonical_e164", [...digitsToKey.keys()].map((d) => `+1${d}`));
+    rows = rows.concat(byPhone.data || []);
+  }
+
+  for (const row of rows) {
+    const key = digitsToKey.get(digitsOfKey(row.canonical_e164 || row.thread_key)) || clean(row.thread_key);
     if (!key) continue;
+    const resolvedName = firstName(
+      row.prospect_first_name || row.prospect_name || row.seller_display_name || row.owner_name,
+    );
+    const existing = contexts.get(key);
+    // Twins are the same conversation. Keep the one that actually resolved a name
+    // and an address; a hollow row must never overwrite a populated one.
+    if (existing && existing.seller_first_name && !resolvedName) continue;
+    if (existing && existing.property_address && !clean(row.property_address_full)) continue;
     contexts.set(key, {
       thread_key: key,
-      seller_first_name: firstName(
-        row.prospect_first_name || row.prospect_name || row.seller_display_name || row.owner_name,
-      ),
-      property_address: clean(row.property_address_full),
+      seller_first_name: resolvedName || (existing?.seller_first_name || ""),
+      property_address: clean(row.property_address_full) || (existing?.property_address || ""),
       timezone: null,
       contact_window: null,
       agent_name: null,
