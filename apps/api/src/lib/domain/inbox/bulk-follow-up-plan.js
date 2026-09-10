@@ -69,19 +69,73 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
   // covers ~99% of threads; the sending number is NOT a proxy for it (a single
   // number has carried seven different agents). personalizeTemplate applies
   // firstNameOnly(), so "Helen Crawford" renders as "Helen".
-  const { data: stateRows } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key,master_owner_id")
-    .in("thread_key", keys);
+  /**
+   * Resolve by PHONE DIGITS, not by exact thread_key.
+   *
+   * 937 of 8,839 phone numbers in inbox_thread_state carry TWO rows for the same
+   * conversation: one keyed bare 10-digit ("2523140557") and one keyed E.164
+   * ("+12523140557"). They are NOT equivalent — the bare-keyed row holds the real
+   * master_owner and agent_persona, while its E.164 twin resolves to an owner with
+   * no persona at all. Verified against production:
+   *     2523140557 -> Scott Harper       +12523140557 -> null
+   *     3107222747 -> Nathan Brooks      +13107222747 -> null
+   *     2063359131 -> Greg Martin        +12063359131 -> null
+   * The inbox surfaces the hollow twin, so an exact `.in("thread_key", keys)` looked
+   * up the agent-less row and sent the recipient to NEED REVIEW as "No agent assigned
+   * to this seller" — when the seller demonstrably has one. It is the same identity
+   * split that prints a phone number where a name belongs on those rows.
+   *
+   * Matching canonical_e164 as well, and keeping whichever row actually carries an
+   * owner, makes this immune to which twin the client happened to send. Nothing is
+   * merged or written here; the duplicate rows remain and cleaning them up is a
+   * separate data decision.
+   */
+  const digitsOf = (value) => String(value || "").replace(/[^0-9]/g, "").slice(-10);
+  const digitsToRequestedKey = new Map();
+  for (const key of keys) {
+    const d = digitsOf(key);
+    if (d.length === 10 && !digitsToRequestedKey.has(d)) digitsToRequestedKey.set(d, key);
+  }
+  const e164Candidates = [...digitsToRequestedKey.keys()].map((d) => `+1${d}`);
 
-  const ownerByThread = new Map();
+  let stateRows = [];
+  {
+    const byKey = await supabase
+      .from("inbox_thread_state")
+      .select("thread_key,canonical_e164,master_owner_id")
+      .in("thread_key", keys);
+    stateRows = byKey.data || [];
+
+    if (e164Candidates.length) {
+      const byPhone = await supabase
+        .from("inbox_thread_state")
+        .select("thread_key,canonical_e164,master_owner_id")
+        .in("canonical_e164", e164Candidates);
+      stateRows = stateRows.concat(byPhone.data || []);
+    }
+  }
+
+  /**
+   * Collect EVERY candidate owner per requested key rather than taking the first.
+   * The twins do not merely differ in key shape — they point at DIFFERENT
+   * master_owners, and only one of the two carries a persona (verified above:
+   * +12523140557's owner has none, 2523140557's owner is Scott Harper). Taking the
+   * first row bearing an owner would still pick the hollow one about half the time,
+   * so the winner is chosen below, after the personas are known.
+   */
+  const ownerCandidatesByKey = new Map();
   const ownerIds = [];
-  for (const row of stateRows || []) {
-    const key = clean(row.thread_key);
+  for (const row of stateRows) {
     const ownerId = clean(row.master_owner_id);
-    if (!key || !ownerId) continue;
-    ownerByThread.set(key, ownerId);
-    ownerIds.push(ownerId);
+    if (!ownerId) continue;
+    const requestedKey = digitsToRequestedKey.get(digitsOf(row.canonical_e164 || row.thread_key));
+    if (!requestedKey) continue;
+    const list = ownerCandidatesByKey.get(requestedKey) || [];
+    if (!list.includes(ownerId)) {
+      list.push(ownerId);
+      ownerCandidatesByKey.set(requestedKey, list);
+      ownerIds.push(ownerId);
+    }
   }
 
   if (ownerIds.length) {
@@ -99,6 +153,14 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
         best_language: clean(row.best_language),
       });
     }
+    // Pick the candidate that actually carries a persona. Falls back to the first
+    // candidate so behaviour is unchanged for the ~89% of threads with a single row.
+    const ownerByThread = new Map();
+    for (const [key, candidates] of ownerCandidatesByKey.entries()) {
+      const withPersona = candidates.find((id) => clean(agentByOwner.get(id)?.agent_persona));
+      ownerByThread.set(key, withPersona || candidates[0]);
+    }
+
     for (const [key, ownerId] of ownerByThread.entries()) {
       const ctx = contexts.get(key);
       const assigned = agentByOwner.get(ownerId);
