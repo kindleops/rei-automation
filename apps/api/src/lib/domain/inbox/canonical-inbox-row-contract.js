@@ -212,6 +212,24 @@ export function compactInboxThreadSummaryRow(row = {}) {
     master_owner_id: row.master_owner_id || null,
     display_name: row.display_name || row.owner_name || row.seller_display_name || row.owner_display_name || row.event_seller_display_name || null,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || row.event_seller_display_name || row.display_name || null,
+    // The dashboard's name resolver (resolveInboxProspectNameWithSource,
+    // apps/dashboard/src/lib/data/inboxData.ts:518) reads prospect_full_name / prospect_name /
+    // seller_display_name / contact_name / prospect_cnam / metadata — and reads NEITHER
+    // display_name NOR owner_name. So this mapper hydrated identity and then emitted it under
+    // two keys the client never looks at, and every row fell through to the phone-number
+    // fallback. Same trap the lead_temperature note below describes: selected is not emitted.
+    prospect_name: row.prospect_name || row.prospect_full_name || null,
+    prospect_full_name: row.prospect_full_name || row.prospect_name || null,
+    seller_display_name: row.seller_display_name || row.event_seller_display_name || null,
+    // Signal chips (SENIOR OWNER / TIRED LANDLORD / ABSENTEE …) are parsed from these flag
+    // strings by parsePropertyFlagTokens in InboxSidebar.tsx; unemitted, no chip can render.
+    property_flags_text: row.property_flags_text || null,
+    person_flags_text: row.person_flags_text || null,
+    matching_flags: row.matching_flags || null,
+    // Delivery ticks: both keys are already selected upstream and were being dropped here.
+    latest_delivery_status: row.latest_delivery_status || row.delivery_status || null,
+    delivery_status: row.delivery_status || row.latest_delivery_status || null,
+    is_read: row.is_read === true,
     property_address_full: row.property_address_full || row.display_address || row.property_address || null,
     property_address: row.property_address || row.property_address_full || row.display_address || null,
     market: row.market || row.display_market || null,

@@ -2502,7 +2502,20 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootSafeMode || options.skipDelivery === true;
   // Keep linked-context hydration on bucket tab switches so list rows show owner/address.
   // Initial boot still skips it for sub-second first paint.
-  const skipLinkedContextHydration = initialBootMode || options.listOnly === true;
+  //
+  // `options.listOnly` used to be OR'd in here, which defeated the sentence above: the live
+  // route sets listOnly for manual_bucket_switch and auto_refresh, so the one hydration pass
+  // that re-attaches owner_name / seller_display_name / prospect_name / property_flags_text
+  // onto a fast-path row never ran. The fast path reads inbox_thread_state, which has no flag
+  // columns and no populated name column, so every refresh and every bucket click replaced
+  // real names with raw phone numbers and dropped the signal chips. Names only survived the
+  // mount fetch, because the client withholds timeout_mode on initial boot and that request
+  // takes the canonical enriched path instead.
+  //
+  // listOnly still governs skipHeavyHydration below, so the expensive
+  // hydrateMissingLatestMessageEventIds pass stays off. Only the cheap linked-context join
+  // comes back — that is the one that carries identity.
+  const skipLinkedContextHydration = initialBootMode;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
