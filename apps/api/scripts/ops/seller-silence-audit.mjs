@@ -17,6 +17,7 @@
  *        scripts/ops/seller-silence-audit.mjs [--hours 168] [--salvage] [--apply]
  */
 import { createClient } from "@supabase/supabase-js";
+import { processSellerInboundMessage } from "@/lib/domain/seller-flow/process-seller-inbound-message.js";
 
 const args = process.argv.slice(2);
 const HOURS = Number(args[args.indexOf("--hours") + 1]) || 168;
@@ -134,7 +135,46 @@ async function main() {
       say(`  ${c.thread.padEnd(14)} last_inbound=${String(c.at).slice(0, 19)} intent=${c.intent}`);
     }
     say(`  ${candidates.length} distinct threads eligible.`);
-    if (!APPLY) say("  dry run only; pass --apply to resume through the canonical decision/send path.");
+    say("");
+
+    for (const c of candidates) {
+      // Re-drive the seller's OWN last message through the canonical decision
+      // and send path. Nothing bespoke: same code that will handle the next
+      // live inbound, so a salvage cannot diverge from production behaviour.
+      const { data: last } = await supabase
+        .from("message_events")
+        .select("id, message_body, created_at, thread_key, from_phone_number, to_phone_number")
+        .eq("thread_key", c.thread).eq("direction", "inbound")
+        .order("created_at", { ascending: false }).limit(1);
+      const msg = (last || [])[0];
+      if (!msg?.message_body) { say(`  ${c.thread}  SKIP no_inbound_body`); continue; }
+
+      try {
+        const res = await processSellerInboundMessage({
+          message: msg.message_body,
+          threadKey: c.thread,
+          inboundFrom: msg.from_phone_number || c.thread,
+          inboundTo: msg.to_phone_number || "",
+          inboundEventId: msg.id,
+          inboundReceivedAt: msg.created_at,
+          supabaseClient: supabase,
+          // Suppression is re-checked inside; STOP/DNC and terminal declines
+          // can never be resurrected by this path.
+          applySuppression: true,
+          // The webhook supplies this; without it the orchestrator resolves
+          // `disabled` and every dry run reports auto_reply_mode_disabled,
+          // which tells you nothing about real behaviour.
+          autoReplyMode: process.env.SALVAGE_AUTO_REPLY_MODE || "live_limited",
+          dryRun: !APPLY,
+        });
+        const q = res?.reply?.queued ?? res?.seller_stage_reply?.queued ?? false;
+        const reason = res?.reply?.reason ?? res?.seller_stage_reply?.reason ?? res?.reason ?? "-";
+        say(`  ${c.thread.padEnd(14)} ${APPLY ? "APPLIED" : "DRY   "} queued=${q} reason=${reason}`);
+      } catch (e) {
+        say(`  ${c.thread.padEnd(14)} ERROR ${e?.message || e}`);
+      }
+    }
+    if (!APPLY) say("\n  dry run only; pass --apply to actually resume.");
   }
 }
 

@@ -60,16 +60,23 @@ test("the ownership-probe overlay never flattens a compound message (the reporte
     "No that property is not for sale. But what would you pay for 456 Oak Ave?",
     OWNERSHIP_PROBE_CONTEXT
   );
-  assert.notEqual(decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+  assert.notEqual(decision.audit_reason, "s1_not_for_sale_courteous_close_then_followup");
   assert.equal(decision.audit_reason, "new_property_opportunity");
   assert.equal(decision.reply_mode, "manual_review");
 });
 
-test("a PURE property-specific decline still takes the advance-with-followup lane", async () => {
+test("a PURE property-specific decline is answered, then nurtured", async () => {
+  // The overlay still owns this lane and still advances the stage and schedules
+  // the follow-up. What changed 2026-09-10 (operator item 5) is that the seller
+  // now hears a courteous close first, so a later re-contact does not arrive out
+  // of a silence they never got to end.
   const { decision } = await decide("123 Main is not for sale.", OWNERSHIP_PROBE_CONTEXT);
-  assert.equal(decision.audit_reason, "s1_not_for_sale_advance_with_followup");
+  assert.equal(decision.audit_reason, "s1_not_for_sale_courteous_close_then_followup");
   assert.equal(decision.should_suppress_contact, false);
-  assert.equal(decision.next_action, "schedule_later_followup");
+  assert.equal(decision.next_action, "queue_auto_reply");
+  assert.equal(decision.should_queue_reply, true);
+  // The nurture schedule the overlay exists to set is preserved.
+  assert.ok(decision.follow_up_at, "the follow-up schedule must survive the close");
 });
 
 test("declined + asks-offer with NO new address stays on the same property and answers", async () => {
@@ -90,19 +97,27 @@ test("declined + asks-offer with NO new address stays on the same property and a
   }
 });
 
-test("plain not_interested is unchanged: deliberate no-reply with durable reason", async () => {
+test("plain not_interested is answered with a courteous close, never silence", async () => {
   const { decision } = await decide("Not interested, thanks");
-  // Without thread context the classifier's default Ownership stage hint
-  // routes the decline through the S1 advance-with-followup lane; with a
-  // later-stage context it is a bare do_not_reply. Both are deliberate,
-  // explained no-reply outcomes — never suppression, never a silent drop.
+  // CONTRACT CHANGED 2026-09-10 by operator decision (item 5). This previously
+  // asserted a "deliberate no-reply". In production that outcome was 11 of the
+  // 25 active-but-unanswered inbounds over 7 days, and it is Ronald's exact path
+  // (+14102940284): "Not selling" in April, no reply, silently rescheduled,
+  // re-opened 2026-09-10, opt-out 24 seconds after the second message.
+  //
+  // Every non-suppressed inbound must now end in reply_sent or an INTENTIONAL
+  // terminal suppression. A decline gets one short gracious close.
   assert.ok(
-    ["not_interested", "s1_not_for_sale_advance_with_followup"].includes(decision.audit_reason),
+    [
+      "not_interested_courteous_close",
+      "s1_not_for_sale_courteous_close_then_followup",
+    ].includes(decision.audit_reason),
     decision.audit_reason
   );
-  assert.ok(["do_not_reply", "schedule_later_followup"].includes(decision.next_action));
+  assert.equal(decision.next_action, "queue_auto_reply");
+  assert.equal(decision.should_queue_reply, true);
+  // Still never suppression, and the compound lane is untouched.
   assert.equal(decision.should_suppress_contact, false);
-  assert.equal(decision.should_queue_reply, false);
   assert.equal(decision.compound_opportunity, null);
 });
 

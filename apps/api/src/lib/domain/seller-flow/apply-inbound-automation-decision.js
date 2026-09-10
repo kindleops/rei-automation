@@ -799,17 +799,28 @@ function applyOwnershipProbeOverlay(decision = {}, args = {}) {
 
   if (!ownership_probe) return decision;
 
+  // ANSWER THE DECLINE, THEN NURTURE. This overlay used to set
+  // should_queue_reply:false and schedule a later follow-up, which is silence
+  // now plus an unannounced re-open later. That is Ronald's exact path
+  // (+14102940284, 3207 The Alameda, Baltimore): "Not selling" in April, no
+  // reply, silently rescheduled, re-opened 2026-09-10, opt-out 24 seconds after
+  // the second message. Operator item 5 forbids the silent state outright.
+  //
+  // The stage advance, the disposition and the follow-up schedule are all
+  // preserved exactly. The only change is that the seller now hears one short
+  // courteous close instead of nothing, so a later re-contact does not arrive
+  // out of a silence the seller never got to end.
   return {
     ...decision,
-    should_queue_reply: false,
+    should_queue_reply: true,
     should_suppress_contact: false,
     should_mark_human_review: false,
-    reply_mode: "none",
-    route_hint: "consider_selling",
+    reply_mode: "auto",
+    route_hint: "soft_close_or_suppress",
     stage_hint: "consider_selling",
-    allowed_template_stages: ["consider_selling", "consider_selling_follow_up"],
-    next_action: "schedule_later_followup",
-    audit_reason: "s1_not_for_sale_advance_with_followup",
+    allowed_template_stages: ["not_interested", "future_nurture", "consider_selling_follow_up"],
+    next_action: "queue_auto_reply",
+    audit_reason: "s1_not_for_sale_courteous_close_then_followup",
     ownership_status: ownership_probe.ownership_status,
     ownership_inference_reason: ownership_probe.ownership_inference_reason,
     disposition: ownership_probe.disposition,
