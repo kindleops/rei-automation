@@ -12135,20 +12135,24 @@ html.is-mobile-layout body::after {
   position: fixed;
   left: -20%;
   right: -20%;
-  height: 42vh;
-  max-height: 340px;
+  height: 34vh;
+  max-height: 300px;
   pointer-events: none;
   z-index: 100;
-  opacity: 0.5;
   will-change: transform, opacity;
 }
 
+/* Strength note: the first pass was invisible because the KEYFRAMES set opacity
+   (0.42-0.6) and therefore overrode the element's own opacity, then multiplied
+   that against a 26% color-mix — an effective ~12% wash, which is nothing. The
+   animation now stays near full opacity and the colour does the work. */
 html.is-mobile-layout body::before {
   top: 0;
   background: radial-gradient(
-    ellipse 70% 100% at 50% 0%,
-    color-mix(in srgb, var(--nx-accent, #7c3aed) 26%, transparent),
-    transparent 72%
+    ellipse 78% 100% at 50% 0%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 72%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 26%, transparent) 42%,
+    transparent 78%
   );
   animation: nx-accent-bloom-top 19s ease-in-out infinite;
 }
@@ -12156,28 +12160,45 @@ html.is-mobile-layout body::before {
 html.is-mobile-layout body::after {
   bottom: 0;
   background: radial-gradient(
-    ellipse 70% 100% at 50% 100%,
-    color-mix(in srgb, var(--nx-accent, #7c3aed) 22%, transparent),
-    transparent 72%
+    ellipse 78% 100% at 50% 100%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 64%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 22%, transparent) 42%,
+    transparent 78%
   );
   animation: nx-accent-bloom-bottom 23s ease-in-out infinite;
 }
 
-/* Light mode carries far less ink, so the same alpha reads as a colour cast.
-   Halve it and let the wash sit closer to the edge. */
-html.is-mobile-layout[data-nexus-theme='light'] body::before,
+/* Light mode needs MORE saturation, not less. The previous 0.28 was an attempt to
+   stop it reading as a colour cast, but against a near-white ground a translucent
+   accent simply disappears — which is why there was no visible top or bottom accent
+   in light mode at all. Keep the wash opaque and let the gradient's own falloff do
+   the softening. */
+html.is-mobile-layout[data-nexus-theme='light'] body::before {
+  background: radial-gradient(
+    ellipse 78% 100% at 50% 0%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 58%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 20%, transparent) 42%,
+    transparent 78%
+  );
+}
+
 html.is-mobile-layout[data-nexus-theme='light'] body::after {
-  opacity: 0.28;
+  background: radial-gradient(
+    ellipse 78% 100% at 50% 100%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 52%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 18%, transparent) 42%,
+    transparent 78%
+  );
 }
 
 @keyframes nx-accent-bloom-top {
-  0%, 100% { transform: translate3d(-3%, -4%, 0) scale(1); opacity: 0.42; }
-  50%      { transform: translate3d(3%, 0%, 0) scale(1.12); opacity: 0.6; }
+  0%, 100% { transform: translate3d(-3%, -3%, 0) scale(1); opacity: 0.88; }
+  50%      { transform: translate3d(3%, 0%, 0) scale(1.1); opacity: 1; }
 }
 
 @keyframes nx-accent-bloom-bottom {
-  0%, 100% { transform: translate3d(3%, 4%, 0) scale(1.06); opacity: 0.38; }
-  50%      { transform: translate3d(-3%, 0%, 0) scale(1); opacity: 0.56; }
+  0%, 100% { transform: translate3d(3%, 3%, 0) scale(1.05); opacity: 0.82; }
+  50%      { transform: translate3d(-3%, 0%, 0) scale(1); opacity: 0.98; }
 }
 
 @media (prefers-reduced-motion: reduce) {
