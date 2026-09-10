@@ -4593,6 +4593,13 @@ export const queueReplyFromInbox = async (
       ...templateAttachment.metadata,
     },
     created_at: now,
+    /**
+     * Same dry-run contract as scheduleReplyFromInbox: the server defaults
+     * `asBoolean(payload.dry_run, true)`, so omitting this key made every queued reply
+     * a no-op that still reported success. This path lands rows at
+     * queue_status:'approval', so they still wait on operator approval before any send.
+     */
+    dry_run: false,
   }
 
   // ALWAYS include from_phone_number (even if null)
@@ -4617,6 +4624,17 @@ export const queueReplyFromInbox = async (
   if (!result.ok) {
     if (DEV) console.error('[queueReplyFromInbox] backend call failed:', result.error, result.message)
     return { ok: false, queueId: null, status: null, errorMessage: result.message, insertPayloadKeys }
+  }
+
+  // A 200 can still be a dry-run acknowledgement or a refusal — see scheduleReplyFromInbox.
+  const queueResponse = (result.data ?? {}) as AnyRecord
+  if (queueResponse.dry_run === true || queueResponse.ok === false) {
+    const reason = asString(queueResponse.reason || queueResponse.error || '', '')
+    const errorMessage = queueResponse.dry_run === true
+      ? `Not queued — the backend accepted this as a dry run${reason ? ` (${reason})` : ''}`
+      : reason || 'Queueing was refused by the backend'
+    if (DEV) console.error('[queueReplyFromInbox] refused or dry-run', { queueResponse })
+    return { ok: false, queueId: null, status: null, errorMessage, insertPayloadKeys }
   }
 
   const queueId = asString((result.data as AnyRecord)?.queueId || (result.data as AnyRecord)?.queue_id || queueKey, '')
@@ -5407,6 +5425,18 @@ export const scheduleReplyFromInbox = async (
       ...templateAttachment.metadata,
     },
     created_at: now,
+    /**
+     * The server reads `asBoolean(payload.dry_run, true)` in runInboxAction
+     * (apps/api/src/lib/cockpit/cockpit-service.js), so OMITTING this key means dry
+     * run. It then answers from the `if (dryRun)` branch with HTTP 200 and
+     * `ok:true, dry_run:true` WITHOUT inserting anything. That is why scheduling has
+     * always reported success while no row carrying metadata.source='inbox' has ever
+     * reached send_queue.
+     *
+     * The client has to state its intent explicitly. The server default stays true on
+     * purpose — dry-run-by-default is the correct fail-safe for a send path.
+     */
+    dry_run: false,
   }
 
   // ALWAYS include from_phone_number (even if null)
@@ -5428,6 +5458,23 @@ export const scheduleReplyFromInbox = async (
   if (!result.ok) {
     if (DEV) console.error('[scheduleReplyFromInbox] backend call failed:', result.error, result.message)
     return { ok: false, queueId: null, status: null, errorMessage: result.message, insertPayloadKeys }
+  }
+
+  /**
+   * A 200 is not proof that anything was queued. runInboxAction answers a dry run with
+   * `ok:true, dry_run:true` and no insert, and answers a refused action with `ok:false`
+   * plus a machine-readable reason — both under HTTP 200. Trusting result.ok alone is
+   * what turned a permanent no-op into a green "Scheduled" toast, so treat either shape
+   * as a failure and surface the server's own reason instead of inventing one.
+   */
+  const scheduleResponse = (result.data ?? {}) as AnyRecord
+  if (scheduleResponse.dry_run === true || scheduleResponse.ok === false) {
+    const reason = asString(scheduleResponse.reason || scheduleResponse.error || '', '')
+    const errorMessage = scheduleResponse.dry_run === true
+      ? `Not scheduled — the backend accepted this as a dry run${reason ? ` (${reason})` : ''}`
+      : reason || 'Scheduling was refused by the backend'
+    if (DEV) console.error('[scheduleReplyFromInbox] refused or dry-run', { scheduleResponse })
+    return { ok: false, queueId: null, status: null, errorMessage, insertPayloadKeys }
   }
 
   const queueId = asString((result.data as AnyRecord)?.queueId || (result.data as AnyRecord)?.queue_id || queueKey, '')
