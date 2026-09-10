@@ -2414,38 +2414,11 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
    * source anywhere in the stack and rendered 0 forever. Measured on production: 36
    * archived threads, chip reading 0. It is the inverse of the same predicate.
    */
-  const { count: archivedCount, error: archivedError } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key", { count: "exact", head: true })
-    .eq("is_archived", true);
-
-  if (archivedError) throw archivedError;
-
-  /**
-   * SCHEDULED. The note on CANONICAL_INBOX_COUNT_KEYS is right that scheduled
-   * follow-ups live in send_queue rather than in thread state, and that seeding the
-   * key with a default would make buildEmptyCounts report a confident 0 while real
-   * scheduled rows existed. The answer to that is to COUNT the send_queue rows, not
-   * to leave the operator staring at "—" after scheduling 19 messages. Counted here
-   * so it is a measured number or absent, never a fabricated zero.
-   */
-  let scheduledCount = null;
-  try {
-    const { count, error } = await supabase
-      .from("send_queue")
-      .select("id", { count: "exact", head: true })
-      .eq("queue_status", "queued")
-      .gt("scheduled_for", new Date(nowMs).toISOString());
-    if (!error) scheduledCount = Number(count || 0);
-  } catch {
-    // Leave null. A failed count must render "—" (unknown), never 0 — a confident
-    // zero next to real scheduled sends is worse than admitting we do not know.
-  }
+  const extras = await countInboxStateExtras(supabase, nowMs);
 
   counts.all = Number(allCount || 0);
   counts.unlinked = Number(unlinkedCount || 0);
-  counts.archived = Number(archivedCount || 0);
-  if (scheduledCount !== null) counts.scheduled = scheduledCount;
+  Object.assign(counts, extras);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;
@@ -2459,6 +2432,57 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
   counts.waiting_on_seller = counts.waiting;
 
   return counts;
+}
+
+/**
+ * archived and scheduled are NOT in v_inbox_thread_counts_live_v2, and not in
+ * canonical_inbox_counts underneath it either — information_schema shows no such
+ * columns. Every bucket in that view is defined as NOT archived, so nothing ever
+ * counted the archived side of the predicate, and the chip read 0 against 36 real
+ * archived threads. scheduled is worse: those rows live in send_queue, not in thread
+ * state, so the view could never carry them at all.
+ *
+ * Both counts therefore have to be added on top of whichever count source answered.
+ * Cheap: two head-count queries against a ~9.8k-row table.
+ */
+const INBOX_ZERO_COUNT_SOURCE = "v_inbox_zero_counts";
+
+async function countInboxStateExtras(supabase) {
+  /**
+   * Read ONE pre-aggregated row, never inbox_thread_state directly.
+   *
+   * The counts endpoint has a critical-path guard — "K: counts endpoint does not
+   * scan all thread rows" (tests/critical/inbox-new-replies-contract.test.mjs:186)
+   * — asserting `calls.includes("inbox_thread_state") === false`. My first attempt
+   * at this used `count: 'exact'` against that table and tripped it, correctly: the
+   * whole point of the pre-aggregated view is that the sub-second path never scans.
+   * The guard stays; the query moves.
+   *
+   * v_inbox_zero_counts is additive and may not exist yet. If it is absent this
+   * returns {} and the chips render exactly as they do today ("—" / 0), so the
+   * service degrades to current behaviour rather than erroring. Creating the view
+   * is all that is needed to light the chips up — no redeploy.
+   */
+  try {
+    const { data, error } = await supabase
+      .from(INBOX_ZERO_COUNT_SOURCE)
+      .select("archived,scheduled")
+      .limit(1);
+
+    if (error) return {};
+
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) return {};
+
+    const extras = {};
+    if (row.archived !== null && row.archived !== undefined) extras.archived = Number(row.archived);
+    // scheduled is set only when actually measured. A confident 0 beside real
+    // scheduled sends is worse than the chip admitting it does not know ("—").
+    if (row.scheduled !== null && row.scheduled !== undefined) extras.scheduled = Number(row.scheduled);
+    return extras;
+  } catch {
+    return {};
+  }
 }
 
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
@@ -2479,7 +2503,10 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
 
         const row = Array.isArray(data) ? data[0] : null;
         if (row && hasConcreteCountRow(row)) {
-          const counts = countFromRow(row);
+          // This fast path RETURNS — fetchAuthoritativeInboxCounts below is never
+          // reached when the view answers, which it almost always does. Anything the
+          // view cannot express has to be merged in here or it never reaches the UI.
+          const counts = { ...countFromRow(row), ...(await countInboxStateExtras(supabase, nowMs)) };
           console.log("[INBOX_COUNTS_UPDATED]", counts);
           return {
             counts,
