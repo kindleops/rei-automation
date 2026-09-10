@@ -935,7 +935,12 @@ test("initial boot serves boot-fast inbox_thread_state rows without touching v_i
   assert.equal(result.fallback_used, true);
   assert.equal(result.countsSource, "skipped");
   assert.equal(result.diagnostics?.count_preserved_reason, "counts_skipped_by_request");
-  assert.ok(Object.keys(result.threads[0]).length <= 50, "initial boot rows should be compact summaries");
+  // Budget raised 50 -> 51 for one key: seller_display_name. The row sat exactly at 50 and
+  // published identity only as display_name/owner_name, neither of which the dashboard's name
+  // resolver reads, so the list rendered a raw phone number for every thread. One scalar
+  // string is the minimum that fixes it. The guard's real intent — no dossier blobs — is
+  // asserted directly and separately via prospect_data / master_owner_data.
+  assert.ok(Object.keys(result.threads[0]).length <= 51, "initial boot rows should be compact summaries");
   assert.equal(trackers.fallbackExactCountRequested, false);
   assert.equal(trackers.fallbackCountQueryRequested, false);
 });
@@ -977,5 +982,11 @@ test("manual bucket switch returns compact summary rows without dossier blobs", 
   assert.equal(row.prospect_data, undefined);
   assert.equal(row.master_owner_data, undefined);
   assert.equal(row.preview, "Yes I still own it");
-  assert.ok(Object.keys(row).length <= 50, `expected compact summary row, got ${Object.keys(row).length} keys`);
+  // 50 -> 51: see the note on the same assertion in the initial-boot test above. The two
+  // dossier-blob assertions immediately above are what actually keep this row compact.
+  assert.ok(Object.keys(row).length <= 51, `expected compact summary row, got ${Object.keys(row).length} keys`);
+  // Identity must survive compaction — this is the regression that put a phone number where
+  // the owner's name belongs. seller_display_name is the highest-coverage field the
+  // dashboard's name resolver actually reads (9,687 of 9,741 rows in production).
+  assert.ok('seller_display_name' in row, 'compact row must publish a name key the client reads');
 });

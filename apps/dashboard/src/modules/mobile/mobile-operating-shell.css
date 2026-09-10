@@ -7,8 +7,13 @@
   --nx-mobile-safe-top: env(safe-area-inset-top, 0px);
   --nx-mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
   --nx-dock-height: 52px;
-  --nx-dock-pad-top: 3px;
-  --nx-dock-inner-pad-y: 4px;
+  /* The dock hangs from the safe-area edge, so these two are the only slack between
+     the Dynamic Island and the menu below. Measured at 393x852 with a 59px inset,
+     chrome-top resolved to 106px while the dock actually finished painting at 94px —
+     12px of reserved-but-empty band, before the search block's own spacing on top of
+     that. Trimmed to 1px/0px so the menu sits directly under the island. */
+  --nx-dock-pad-top: 1px;
+  --nx-dock-inner-pad-y: 0px;
   --nx-mobile-chrome-top: calc(
     var(--nx-dock-pad-top) + var(--nx-dock-height) + var(--nx-dock-inner-pad-y) + var(--nx-mobile-safe-top)
   );
@@ -104,7 +109,10 @@ html.is-mobile-layout {
 
   .nx-mobile-command-dock__inner {
     position: relative;
-    overflow: hidden;
+    /* Was overflow:hidden, which clipped the outermost icons against the rounded
+       bottom corners — the left glyph read as not fitting its box. The children are
+       inside the padding box anyway, so nothing needs clipping here. */
+    overflow: visible;
     pointer-events: auto;
     display: flex;
     align-items: center;
@@ -114,8 +122,11 @@ html.is-mobile-layout {
     max-height: 56px;
     padding: 4px 6px 6px;
     border-radius: 0 0 18px 18px;
-    border: 1px solid rgba(255, 255, 255, 0.11);
-    border-top: none;
+    /* No border. The 1px hairline drew a visible rule straight across the screen
+       under the command dock, which is the line that made the top chrome look like a
+       toolbar bolted on rather than part of the surface. The blur + background alone
+       separate it from the content beneath. */
+    border: none;
     background: rgba(6, 10, 18, 0.68);
     backdrop-filter: blur(26px) saturate(1.5);
     -webkit-backdrop-filter: blur(26px) saturate(1.5);
@@ -802,11 +813,17 @@ html.is-mobile-layout {
     min-height: 0 !important;
   }
 
-  /* Content clearance below top command menu */
+  /* Content clearance below the top command menu.
+     padding-bottom is deliberately 0 here. The bottom is reserved exactly once, by
+     pinned-app-dock.css, as padding-bottom on .nx-premium-inbox /
+     .nx-fullscreen-app-shell / .nx-route-redirect-shell — and that value already
+     includes --nx-mobile-safe-bottom. Re-adding safe-bottom on this box stacked a
+     second home-indicator gap inside the first, which is a third of the dead band
+     under the list. The dock's own reservation covers the home indicator. */
   .nx-inbox-shell.is-mobile-inbox,
   .nx-os.is-mobile-os .nx-stage {
     padding-top: var(--nx-mobile-chrome-top) !important;
-    padding-bottom: var(--nx-mobile-safe-bottom) !important;
+    padding-bottom: 0 !important;
   }
 
   .nx-inbox-shell.is-mobile-inbox:has(.nx-workspace-pane.is-view-command_map),

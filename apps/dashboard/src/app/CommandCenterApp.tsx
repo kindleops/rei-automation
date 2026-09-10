@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { pushRoutePath, replaceRoutePath, useRoutePath } from './router'
 import { resolveRoute } from './routes'
 import { useCommandGrammar, type CommandBinding } from '../shared/command-grammar'
@@ -612,7 +612,16 @@ export const CommandCenterApp = () => {
 
           <main className="nx-stage">
             <ErrorBoundary label={route.title} resetKey={route.path}>
-              {route.render(routeState.data)}
+              {/*
+                Views are lazy-loaded per route (see routes.tsx), so the first render of a
+                surface suspends while its chunk downloads. The boundary lives HERE rather
+                than around the whole app so the shell — command dock, nav, notifications —
+                stays mounted and interactive while a surface loads, instead of the screen
+                blanking back to the boot state on every navigation.
+              */}
+              <Suspense fallback={<div className="nx-stage-suspense" aria-busy="true" />}>
+                {route.render(routeState.data)}
+              </Suspense>
             </ErrorBoundary>
           </main>
 

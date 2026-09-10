@@ -1988,6 +1988,21 @@ async function queryAuthoritativeInboxThreads(params = {}, {
     data: rows,
     count: rows.length,
     hasMore,
+    /**
+     * Keyset of the last row this source actually CONSUMED, so the caller can
+     * advance even when its own post-filters drop every survivor off the end of
+     * the page. Taken from `page` (what we return), never from `rawRows` — the
+     * +1 look-ahead row is not returned, and cursoring past it would silently
+     * skip a thread.
+     */
+    lastExaminedKeyset: page.length
+      ? {
+        latest_message_at: page[page.length - 1].latest_message_at
+          || page[page.length - 1].latest_activity_at
+          || null,
+        thread_key: page[page.length - 1].thread_key || null,
+      }
+      : null,
     error: null,
     sourceConfig: THREAD_SOURCE_CONFIGS[0],
   };
@@ -2391,8 +2406,19 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
 
   if (unlinkedError) throw unlinkedError;
 
+  /**
+   * ARCHIVED. Every other bucket here is defined as NOT archived
+   * (`is_archived.is.null,is_archived.eq.false`), and canonical_inbox_counts filters
+   * archived rows out of active_threads entirely — so archiving correctly decrements
+   * whichever bucket the thread came from, but the Archived chip itself had no count
+   * source anywhere in the stack and rendered 0 forever. Measured on production: 36
+   * archived threads, chip reading 0. It is the inverse of the same predicate.
+   */
+  const extras = await countInboxStateExtras(supabase, nowMs);
+
   counts.all = Number(allCount || 0);
   counts.unlinked = Number(unlinkedCount || 0);
+  Object.assign(counts, extras);
   counts.active =
     counts.priority + counts.new_replies + counts.needs_review + counts.follow_up;
   counts.hot_leads = counts.priority;
@@ -2406,6 +2432,57 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
   counts.waiting_on_seller = counts.waiting;
 
   return counts;
+}
+
+/**
+ * archived and scheduled are NOT in v_inbox_thread_counts_live_v2, and not in
+ * canonical_inbox_counts underneath it either — information_schema shows no such
+ * columns. Every bucket in that view is defined as NOT archived, so nothing ever
+ * counted the archived side of the predicate, and the chip read 0 against 36 real
+ * archived threads. scheduled is worse: those rows live in send_queue, not in thread
+ * state, so the view could never carry them at all.
+ *
+ * Both counts therefore have to be added on top of whichever count source answered.
+ * Cheap: two head-count queries against a ~9.8k-row table.
+ */
+const INBOX_ZERO_COUNT_SOURCE = "v_inbox_zero_counts";
+
+async function countInboxStateExtras(supabase) {
+  /**
+   * Read ONE pre-aggregated row, never inbox_thread_state directly.
+   *
+   * The counts endpoint has a critical-path guard — "K: counts endpoint does not
+   * scan all thread rows" (tests/critical/inbox-new-replies-contract.test.mjs:186)
+   * — asserting `calls.includes("inbox_thread_state") === false`. My first attempt
+   * at this used `count: 'exact'` against that table and tripped it, correctly: the
+   * whole point of the pre-aggregated view is that the sub-second path never scans.
+   * The guard stays; the query moves.
+   *
+   * v_inbox_zero_counts is additive and may not exist yet. If it is absent this
+   * returns {} and the chips render exactly as they do today ("—" / 0), so the
+   * service degrades to current behaviour rather than erroring. Creating the view
+   * is all that is needed to light the chips up — no redeploy.
+   */
+  try {
+    const { data, error } = await supabase
+      .from(INBOX_ZERO_COUNT_SOURCE)
+      .select("archived,scheduled")
+      .limit(1);
+
+    if (error) return {};
+
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) return {};
+
+    const extras = {};
+    if (row.archived !== null && row.archived !== undefined) extras.archived = Number(row.archived);
+    // scheduled is set only when actually measured. A confident 0 beside real
+    // scheduled sends is worse than the chip admitting it does not know ("—").
+    if (row.scheduled !== null && row.scheduled !== undefined) extras.scheduled = Number(row.scheduled);
+    return extras;
+  } catch {
+    return {};
+  }
 }
 
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
@@ -2426,7 +2503,10 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
 
         const row = Array.isArray(data) ? data[0] : null;
         if (row && hasConcreteCountRow(row)) {
-          const counts = countFromRow(row);
+          // This fast path RETURNS — fetchAuthoritativeInboxCounts below is never
+          // reached when the view answers, which it almost always does. Anything the
+          // view cannot express has to be merged in here or it never reaches the UI.
+          const counts = { ...countFromRow(row), ...(await countInboxStateExtras(supabase, nowMs)) };
           console.log("[INBOX_COUNTS_UPDATED]", counts);
           return {
             counts,
@@ -2502,7 +2582,20 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   const skipDelivery = bool(params.skip_delivery) || fastBucketMode || initialBootSafeMode || options.skipDelivery === true;
   // Keep linked-context hydration on bucket tab switches so list rows show owner/address.
   // Initial boot still skips it for sub-second first paint.
-  const skipLinkedContextHydration = initialBootMode || options.listOnly === true;
+  //
+  // `options.listOnly` used to be OR'd in here, which defeated the sentence above: the live
+  // route sets listOnly for manual_bucket_switch and auto_refresh, so the one hydration pass
+  // that re-attaches owner_name / seller_display_name / prospect_name / property_flags_text
+  // onto a fast-path row never ran. The fast path reads inbox_thread_state, which has no flag
+  // columns and no populated name column, so every refresh and every bucket click replaced
+  // real names with raw phone numbers and dropped the signal chips. Names only survived the
+  // mount fetch, because the client withholds timeout_mode on initial boot and that request
+  // takes the canonical enriched path instead.
+  //
+  // listOnly still governs skipHeavyHydration below, so the expensive
+  // hydrateMissingLatestMessageEventIds pass stays off. Only the cheap linked-context join
+  // comes back — that is the one that carries identity.
+  const skipLinkedContextHydration = initialBootMode;
 
   let cursor = params.cursor || null;
   let offset = int(params.offset || params.skip, 0, Number.MAX_SAFE_INTEGER);
@@ -2524,7 +2617,16 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
   }
 
   const threadQueryStartedAt = nowMs();
-  const { data: rawRows, count, sourceConfig } = await queryThreadSource(params, {
+  const {
+    data: rawRows,
+    count,
+    sourceConfig,
+    // The source already knows whether more rows exist — it computed it to decide
+    // where to slice. Dropping it here is what made pagination unreachable on every
+    // bucket tab; see the hasMore note further down.
+    hasMore: sourceHasMore,
+    lastExaminedKeyset,
+  } = await queryThreadSource(params, {
     supabase,
     limit,
     filter,
@@ -2594,8 +2696,26 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
     .filter((row) => threadMatchesSearch(row, params.q));
 
-  const hasMore = postFiltered.length > limit;
-  let finalRows = hasMore ? postFiltered.slice(0, limit) : postFiltered;
+  /**
+   * `postFiltered.length > limit` alone can NEVER be true on the authoritative
+   * source path: queryAuthoritativeInboxThreads already sliced rawRows down to
+   * `limit` before returning, so post-filtering can only shrink it further. That
+   * made has_more false on every bucket-tab request regardless of how much data
+   * remained, and because the cursor below is gated on has_more, next_cursor was
+   * always null too — so Load More could never advance. Measured on production:
+   * the New Replies chip read 149 while the list returned 18 rows with
+   * has_more:false. This affected EVERY bucket tab, not just new_replies;
+   * filter=all escaped only because it routes to a different source that returns
+   * its rows untruncated.
+   *
+   * Prefer the source's own answer when it gave one. The local comparison is kept
+   * as the fallback for sources that do not report exhaustion (filter=all), which
+   * preserves today's behaviour there exactly.
+   */
+  const hasMore = sourceHasMore === undefined
+    ? postFiltered.length > limit
+    : (sourceHasMore || postFiltered.length > limit);
+  let finalRows = postFiltered.length > limit ? postFiltered.slice(0, limit) : postFiltered;
   let liveCounts = buildNullCounts();
   let countQueryMs = 0;
   let countsDegraded = false;
@@ -2704,12 +2824,26 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
 
   const lastRow = finalRows[finalRows.length - 1];
   let nextCursor = null;
-  if (hasMore && lastRow) {
-    const cursorObj = {
+  if (hasMore) {
+    /**
+     * Cursor from the last row the SOURCE examined, not the last row that survived
+     * post-filtering. Those differ whenever the tail of a page is filtered out: the
+     * New Replies bucket admits ~353 candidates to yield ~152 survivors, so a page
+     * can easily end on a run of non-survivors. Cursoring from the last survivor
+     * would re-read that discarded tail forever, and a page with zero survivors
+     * would have no cursor at all and dead-end the bucket.
+     * Falls back to the last surviving row for sources that report no keyset.
+     */
+    const cursorSource = lastExaminedKeyset || (lastRow && {
       latest_message_at: lastRow.latest_message_at || lastRow.latest_activity_at,
       thread_key: lastRow.thread_key,
-    };
-    nextCursor = Buffer.from(JSON.stringify(cursorObj)).toString("base64");
+    });
+    if (cursorSource && cursorSource.latest_message_at && cursorSource.thread_key) {
+      nextCursor = Buffer.from(JSON.stringify({
+        latest_message_at: cursorSource.latest_message_at,
+        thread_key: cursorSource.thread_key,
+      })).toString("base64");
+    }
   }
 
   const diagnostics = {

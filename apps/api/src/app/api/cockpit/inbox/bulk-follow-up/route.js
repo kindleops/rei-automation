@@ -53,7 +53,9 @@ export async function POST(request) {
         payload: {
           thread_key: recipient.thread_key,
           to_phone_number: recipient.thread_key,
-          from_phone_number: payload?.from_phone_number || null,
+          // Routing authority is server-side: the sheet never manufactures a
+          // sending line. Resolved per recipient from conversation continuity.
+          from_phone_number: recipient.from_phone_number,
           message_body: recipient.message_body,
           scheduled_for: recipient.schedule.scheduled_for_utc,
           timezone: recipient.schedule.timezone,
@@ -80,11 +82,21 @@ export async function POST(request) {
     }
 
     const scheduled = results.filter((r) => r.ok)
+    const failed = results.filter((r) => !r.ok && !r.skipped)
+
+    // Surface WHY nothing scheduled. Without this the client could only say
+    // "refused", which is indistinguishable from a bug -- an operator hitting a
+    // deliberate containment brake deserves to be told that is what happened.
+    const reasons = [...new Set(failed.map((r) => r.reason).filter(Boolean))]
+    const blocked_reason = scheduled.length === 0 && reasons.length === 1 ? reasons[0] : null
+
     return NextResponse.json({
       ok: scheduled.length > 0,
       label: plan.label,
       scheduled_count: scheduled.length,
       failed_count: results.length - scheduled.length,
+      blocked_reason,
+      failure_reasons: reasons,
       results,
     }, { status: 200, headers: cors })
   } catch (error) {

@@ -6626,7 +6626,12 @@ non‑Home surfaces only ──────────────────�
 .nx-sp-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1001;
+  /* Was a bare 1001, which was inert while this overlay rendered inside the
+     z-index:0 .nx-stage stacking context. Now that the panel portals to
+     document.body it shares a stacking root with the PinnedAppDock (160), so use
+     the documented scale in styles/nexus-theme-contract.css rather than a magic
+     number — this is a modal surface and must outrank the dock. */
+  z-index: var(--nx-shell-z-popover, 13000);
   background: rgba(0, 0, 0, 0.52);
   display: flex;
   align-items: center;
@@ -11968,4 +11973,244 @@ Motion
   .nx-header-interest-v3 { width: 100%; justify-content: center; }
   .nx-header-actions-v3 { flex-direction: column; }
   .nx-header-telemetry-rail-v3 { gap: 8px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   APP BOOT / ROUTE STATE  (.app-state)
+   Rendered by CommandCenterApp while a route resolves and on route error.
+   These classes had NO stylesheet anywhere in the app, so the boot screen
+   painted as bare unstyled text in the top-left corner — which reads as a
+   broken blank page rather than "loading", especially on a phone where the
+   cold-load window is long.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.app-state {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--surface-0, #06080e);
+  color: var(--text-1, rgba(248, 250, 255, 0.92));
+  z-index: 1;
+}
+
+.app-state__panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  width: 100%;
+  padding: 28px 24px;
+  text-align: center;
+  border-radius: 16px;
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.08));
+  background: var(--surface-1, rgba(16, 22, 36, 0.72));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.app-state__eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--tone-primary, #6ea8fe);
+}
+
+.app-state__panel h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.app-state__panel p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-3, rgba(226, 232, 240, 0.6));
+  overflow-wrap: anywhere;
+}
+
+/* Indeterminate progress bar — the cold load can run many seconds, and a static
+   line of text gives the operator no signal that anything is still happening. */
+.app-state__panel::after {
+  content: '';
+  width: 120px;
+  height: 2px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--tone-primary, #6ea8fe),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: app-state-scan 1.1s ease-in-out infinite;
+}
+
+@keyframes app-state-scan {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.app-state__button {
+  margin-top: 6px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-1, #f8fafc);
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-1, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.app-state__button:hover {
+  background: var(--surface-3, rgba(255, 255, 255, 0.1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-state__panel::after { animation: none; }
+}
+
+/* Suspense fallback for a lazily-loaded route surface. Deliberately quiet: the shell
+   (command dock, nav, notifications) stays mounted around it, so a spinner here would
+   read as a second, competing loading state. */
+.nx-stage-suspense {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: var(--surface-0, #06080e);
+}
+
+/* The shell's room label is pinned to the top-left of the stage. Fullscreen surfaces
+   (entity graph, pipeline, queue, analytics, closing desk, campaigns…) render their own
+   header in that exact spot, so the two paint on top of each other — "PIPELINE" over
+   "NEXUS" reads as "PIPELINE|EXUS", and the queue's "OUTBOUND COMMAND CENTER" collides
+   with its own title. closing-desk.css:1109 already tried to patch this for one view, but
+   that selector scopes the label INSIDE .nx-fullscreen-app-shell and the label is actually
+   a SIBLING of .nx-stage, so it never matched. Scope from the shared ancestor instead. */
+.nx-os:has(.nx-fullscreen-app-shell) .nx-room-label {
+  display: none;
+}
+
+/* A backdrop must never outrank the sheet it backs.
+   The shared .nx-mobile-sheet-backdrop sits at z-index 148, which was chosen for
+   .nx-mobile-sheet (149) — that pairing is correct. But MobileBottomSheet renders the
+   SAME backdrop (with .is-bottom-sheet) in front of .nx-mobile-bottom-sheet, which is
+   z-index 140. So the 48%-black dim layer painted OVER the sheet: on the Queue, tapping
+   a row produced a popup where the whole screen — popup included — was washed out, and
+   taps on the sheet hit the dismiss layer instead of its controls. (The top command dock
+   is z-index 150, above the backdrop, which is why only it stayed bright.)
+   Verified live via elementFromPoint at 393px: the element over the sheet was the backdrop.
+
+   Pinning this variant below every bottom-sheet tier fixes it without touching the
+   .nx-mobile-sheet/148 pairing and without raising .nx-mobile-bottom-sheet (whose
+   z-index the queue/template sheets deliberately override upward to 220/225). */
+html.is-mobile-layout .nx-mobile-sheet-backdrop.is-bottom-sheet {
+  z-index: 139;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE AMBIENT ACCENT — liquid bloom at the top and bottom edges
+   Two fixed, pointer-events:none washes of the live accent that drift slowly, so
+   the shell reads as a lit surface rather than a flat sheet. Hung off body
+   pseudo-elements so no component has to render an extra node.
+
+   Layering: z-index 100 sits above ordinary route content but below every piece
+   of chrome (command dock 150, pinned dock 160, sheet backdrop 148/139, search
+   layers 145/146) — the bloom must never wash over the docks or a modal.
+
+   Colour comes from --nx-accent, which settings.ts rewrites on the accent
+   picker, so this follows the operator's chosen accent and both themes for free.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout body::before,
+html.is-mobile-layout body::after {
+  content: '';
+  position: fixed;
+  left: -20%;
+  right: -20%;
+  height: 34vh;
+  max-height: 300px;
+  pointer-events: none;
+  z-index: 100;
+  will-change: transform, opacity;
+}
+
+/* Strength note: the first pass was invisible because the KEYFRAMES set opacity
+   (0.42-0.6) and therefore overrode the element's own opacity, then multiplied
+   that against a 26% color-mix — an effective ~12% wash, which is nothing. The
+   animation now stays near full opacity and the colour does the work. */
+html.is-mobile-layout body::before {
+  top: 0;
+  background: radial-gradient(
+    ellipse 78% 100% at 50% 0%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 72%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 26%, transparent) 42%,
+    transparent 78%
+  );
+  animation: nx-accent-bloom-top 19s ease-in-out infinite;
+}
+
+html.is-mobile-layout body::after {
+  bottom: 0;
+  background: radial-gradient(
+    ellipse 78% 100% at 50% 100%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 64%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 22%, transparent) 42%,
+    transparent 78%
+  );
+  animation: nx-accent-bloom-bottom 23s ease-in-out infinite;
+}
+
+/* Light mode needs MORE saturation, not less. The previous 0.28 was an attempt to
+   stop it reading as a colour cast, but against a near-white ground a translucent
+   accent simply disappears — which is why there was no visible top or bottom accent
+   in light mode at all. Keep the wash opaque and let the gradient's own falloff do
+   the softening. */
+html.is-mobile-layout[data-nexus-theme='light'] body::before {
+  background: radial-gradient(
+    ellipse 78% 100% at 50% 0%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 58%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 20%, transparent) 42%,
+    transparent 78%
+  );
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] body::after {
+  background: radial-gradient(
+    ellipse 78% 100% at 50% 100%,
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 52%, transparent),
+    color-mix(in srgb, var(--nx-accent, #7c3aed) 18%, transparent) 42%,
+    transparent 78%
+  );
+}
+
+@keyframes nx-accent-bloom-top {
+  0%, 100% { transform: translate3d(-3%, -3%, 0) scale(1); opacity: 0.88; }
+  50%      { transform: translate3d(3%, 0%, 0) scale(1.1); opacity: 1; }
+}
+
+@keyframes nx-accent-bloom-bottom {
+  0%, 100% { transform: translate3d(3%, 3%, 0) scale(1.05); opacity: 0.82; }
+  50%      { transform: translate3d(-3%, 0%, 0) scale(1); opacity: 0.98; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout body::before,
+  html.is-mobile-layout body::after {
+    animation: none;
+  }
+}
+
+/* The map is a full-bleed canvas that supplies its own lighting — a violet wash
+   over satellite imagery reads as a rendering fault, not as design. */
+html.is-mobile-layout:has(.nx-icm.is-mobile-map) body::before,
+html.is-mobile-layout:has(.nx-icm.is-mobile-map) body::after {
+  display: none;
 }

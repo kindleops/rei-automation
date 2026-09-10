@@ -6,6 +6,7 @@
 // schedule per recipient. Produces a plan only -- it inserts nothing.
 
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { resolveFromPhoneNumber } from "@/lib/domain/inbox/send-now-service.js";
 import {
   loadFus2Templates,
   loadThreadTemplateHistory,
@@ -19,9 +20,28 @@ function clean(value) {
   return String(value ?? "").trim();
 }
 
+/**
+ * Entity names must never become a greeting. 312 of the active threads resolve to
+ * an owner like "2972 Sw 17 Street LLC", "Pim Six Corporation" or "Noel A Edwards
+ * Rev Liv Tr", and taking the first token of those produces "Hi 2972," or
+ * "Hi Pim," on a real SMS to a real owner. Returning "" instead routes the
+ * recipient to NEED REVIEW, which is the correct outcome: a human should decide
+ * how to address an entity.
+ */
+const ENTITY_NAME_PATTERN =
+  /(\bllc\b|l\.l\.c|\binc\b|\bcorp\b|corporation|company|\bco\b|trust|\btr\b|rev liv|properties|holdings|group|partners|\blp\b|\bltd\b|estate|bank|associates|management|realty|investments?)/i;
+
+function looksLikeEntity(value) {
+  const raw = clean(value);
+  if (!raw) return false;
+  // Leading digit is an address-derived name ("2972 Sw 17 Street LLC").
+  return /^\d/.test(raw) || ENTITY_NAME_PATTERN.test(raw);
+}
+
 function firstName(value) {
   const raw = clean(value);
   if (!raw) return "";
+  if (looksLikeEntity(raw)) return "";
   return raw.split(/\s+/)[0];
 }
 
@@ -39,20 +59,55 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
   const contexts = new Map();
   if (!keys.length) return contexts;
 
-  const { data: rows } = await supabase
+  /**
+   * Same split-identity problem as the agent lookup below: 937 phone numbers carry
+   * two thread rows, one bare 10-digit and one E.164, and only one of the twins
+   * holds the names. An exact `.in("thread_key", keys)` reads whichever twin the
+   * client sent, which for the inbox is the hollow one — every name column null.
+   * That is why 2,234 active threads reported "missing seller first name" when
+   * 2,148 of them have a usable name one row over.
+   *
+   * Match canonical_e164 as well and keep whichever row actually carries a name.
+   */
+  const digitsOfKey = (value) => String(value || "").replace(/[^0-9]/g, "").slice(-10);
+  const digitsToKey = new Map();
+  for (const key of keys) {
+    const d = digitsOfKey(key);
+    if (d.length === 10 && !digitsToKey.has(d)) digitsToKey.set(d, key);
+  }
+
+  const selectCols =
+    "thread_key,canonical_e164,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full";
+
+  const byKey = await supabase
     .from("canonical_inbox_threads")
-    .select("thread_key,prospect_first_name,prospect_name,owner_name,seller_display_name,property_address_full")
+    .select(selectCols)
     .in("thread_key", keys);
 
-  for (const row of rows || []) {
-    const key = clean(row.thread_key);
+  let rows = byKey.data || [];
+  if (digitsToKey.size) {
+    const byPhone = await supabase
+      .from("canonical_inbox_threads")
+      .select(selectCols)
+      .in("canonical_e164", [...digitsToKey.keys()].map((d) => `+1${d}`));
+    rows = rows.concat(byPhone.data || []);
+  }
+
+  for (const row of rows) {
+    const key = digitsToKey.get(digitsOfKey(row.canonical_e164 || row.thread_key)) || clean(row.thread_key);
     if (!key) continue;
+    const resolvedName = firstName(
+      row.prospect_first_name || row.prospect_name || row.seller_display_name || row.owner_name,
+    );
+    const existing = contexts.get(key);
+    // Twins are the same conversation. Keep the one that actually resolved a name
+    // and an address; a hollow row must never overwrite a populated one.
+    if (existing && existing.seller_first_name && !resolvedName) continue;
+    if (existing && existing.property_address && !clean(row.property_address_full)) continue;
     contexts.set(key, {
       thread_key: key,
-      seller_first_name: firstName(
-        row.prospect_first_name || row.prospect_name || row.seller_display_name || row.owner_name,
-      ),
-      property_address: clean(row.property_address_full),
+      seller_first_name: resolvedName || (existing?.seller_first_name || ""),
+      property_address: clean(row.property_address_full) || (existing?.property_address || ""),
       timezone: null,
       contact_window: null,
       agent_name: null,
@@ -68,19 +123,73 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
   // covers ~99% of threads; the sending number is NOT a proxy for it (a single
   // number has carried seven different agents). personalizeTemplate applies
   // firstNameOnly(), so "Helen Crawford" renders as "Helen".
-  const { data: stateRows } = await supabase
-    .from("inbox_thread_state")
-    .select("thread_key,master_owner_id")
-    .in("thread_key", keys);
+  /**
+   * Resolve by PHONE DIGITS, not by exact thread_key.
+   *
+   * 937 of 8,839 phone numbers in inbox_thread_state carry TWO rows for the same
+   * conversation: one keyed bare 10-digit ("2523140557") and one keyed E.164
+   * ("+12523140557"). They are NOT equivalent — the bare-keyed row holds the real
+   * master_owner and agent_persona, while its E.164 twin resolves to an owner with
+   * no persona at all. Verified against production:
+   *     2523140557 -> Scott Harper       +12523140557 -> null
+   *     3107222747 -> Nathan Brooks      +13107222747 -> null
+   *     2063359131 -> Greg Martin        +12063359131 -> null
+   * The inbox surfaces the hollow twin, so an exact `.in("thread_key", keys)` looked
+   * up the agent-less row and sent the recipient to NEED REVIEW as "No agent assigned
+   * to this seller" — when the seller demonstrably has one. It is the same identity
+   * split that prints a phone number where a name belongs on those rows.
+   *
+   * Matching canonical_e164 as well, and keeping whichever row actually carries an
+   * owner, makes this immune to which twin the client happened to send. Nothing is
+   * merged or written here; the duplicate rows remain and cleaning them up is a
+   * separate data decision.
+   */
+  const digitsOf = (value) => String(value || "").replace(/[^0-9]/g, "").slice(-10);
+  const digitsToRequestedKey = new Map();
+  for (const key of keys) {
+    const d = digitsOf(key);
+    if (d.length === 10 && !digitsToRequestedKey.has(d)) digitsToRequestedKey.set(d, key);
+  }
+  const e164Candidates = [...digitsToRequestedKey.keys()].map((d) => `+1${d}`);
 
-  const ownerByThread = new Map();
+  let stateRows = [];
+  {
+    const byKey = await supabase
+      .from("inbox_thread_state")
+      .select("thread_key,canonical_e164,master_owner_id")
+      .in("thread_key", keys);
+    stateRows = byKey.data || [];
+
+    if (e164Candidates.length) {
+      const byPhone = await supabase
+        .from("inbox_thread_state")
+        .select("thread_key,canonical_e164,master_owner_id")
+        .in("canonical_e164", e164Candidates);
+      stateRows = stateRows.concat(byPhone.data || []);
+    }
+  }
+
+  /**
+   * Collect EVERY candidate owner per requested key rather than taking the first.
+   * The twins do not merely differ in key shape — they point at DIFFERENT
+   * master_owners, and only one of the two carries a persona (verified above:
+   * +12523140557's owner has none, 2523140557's owner is Scott Harper). Taking the
+   * first row bearing an owner would still pick the hollow one about half the time,
+   * so the winner is chosen below, after the personas are known.
+   */
+  const ownerCandidatesByKey = new Map();
   const ownerIds = [];
-  for (const row of stateRows || []) {
-    const key = clean(row.thread_key);
+  for (const row of stateRows) {
     const ownerId = clean(row.master_owner_id);
-    if (!key || !ownerId) continue;
-    ownerByThread.set(key, ownerId);
-    ownerIds.push(ownerId);
+    if (!ownerId) continue;
+    const requestedKey = digitsToRequestedKey.get(digitsOf(row.canonical_e164 || row.thread_key));
+    if (!requestedKey) continue;
+    const list = ownerCandidatesByKey.get(requestedKey) || [];
+    if (!list.includes(ownerId)) {
+      list.push(ownerId);
+      ownerCandidatesByKey.set(requestedKey, list);
+      ownerIds.push(ownerId);
+    }
   }
 
   if (ownerIds.length) {
@@ -98,6 +207,14 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
         best_language: clean(row.best_language),
       });
     }
+    // Pick the candidate that actually carries a persona. Falls back to the first
+    // candidate so behaviour is unchanged for the ~89% of threads with a single row.
+    const ownerByThread = new Map();
+    for (const [key, candidates] of ownerCandidatesByKey.entries()) {
+      const withPersona = candidates.find((id) => clean(agentByOwner.get(id)?.agent_persona));
+      ownerByThread.set(key, withPersona || candidates[0]);
+    }
+
     for (const [key, ownerId] of ownerByThread.entries()) {
       const ctx = contexts.get(key);
       const assigned = agentByOwner.get(ownerId);
@@ -148,6 +265,69 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
 }
 
 /**
+ * Active sender registry, loaded once per plan.
+ *
+ * A historical conversation number is only usable if it is STILL a registered
+ * active sender: a number the seller once recognised but that has since been
+ * released or suspended is not a valid line to text from.
+ */
+async function loadActiveSenderNumbers(supabase) {
+  try {
+    const { data } = await supabase
+      .from("textgrid_numbers")
+      .select("phone_number,status,daily_limit,messages_sent_today")
+      .eq("status", "active");
+    const set = new Set();
+    for (const row of data || []) {
+      const num = clean(row.phone_number);
+      if (!num) continue;
+      // Respect the registry's own operational ceiling.
+      const sent = Number(row.messages_sent_today);
+      const cap = Number(row.daily_limit);
+      if (Number.isFinite(sent) && Number.isFinite(cap) && cap > 0 && sent >= cap) continue;
+      set.add(num);
+    }
+    return set;
+  } catch {
+    // Unreadable registry => no number can be validated => NEED REVIEW rather
+    // than sending from an unverified line.
+    return new Set();
+  }
+}
+
+/**
+ * Per-recipient sending line.
+ *
+ * Reuses the canonical resolver (send-now-service.resolveFromPhoneNumber),
+ * which already walks thread state -> send_queue history -> message_events
+ * (outbound from_phone_number, inbound to_phone_number) -> market registry.
+ * This adds only the eligibility check the brief requires, and never invents a
+ * default number: an unverifiable result becomes NEED REVIEW.
+ *
+ * Deliberately independent of agent identity and seller language. A number has
+ * carried many agents historically; that does not make it an identity source.
+ */
+async function resolveSenderForRecipient({ threadKey, toPhone, activeSenders }, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase;
+  let resolved = null;
+  try {
+    resolved = await resolveFromPhoneNumber({
+      thread_key: threadKey,
+      to_phone_number: toPhone,
+      supabase,
+    });
+  } catch {
+    resolved = null;
+  }
+  const number = clean(resolved);
+  if (!number) return { ok: false, reason: "no_eligible_sender_number" };
+  if (!activeSenders.has(number)) {
+    return { ok: false, reason: "no_eligible_sender_number", stale_number: true };
+  }
+  return { ok: true, from_phone_number: number };
+}
+
+/**
  * @param {string[]} threadKeys  Selected threads.
  *
  * Note there is deliberately NO agent-name override. {{agent_name}} always
@@ -165,9 +345,10 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     return { ok: false, error: templateResult.error, label: FUS2_OPERATOR_LABEL };
   }
 
-  const [contexts, history] = await Promise.all([
+  const [contexts, history, activeSenders] = await Promise.all([
     loadThreadContexts(keys, { supabase }),
     loadThreadTemplateHistory(keys, { supabase }),
+    loadActiveSenderNumbers(supabase),
   ]);
 
   const recipients = [];
@@ -201,6 +382,27 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
       context: { language },
     });
 
+    // Sending line, resolved server-side per recipient. Bulk recipients may
+    // legitimately resolve to DIFFERENT numbers -- continuity is per
+    // conversation, not per batch.
+    const sender = await resolveSenderForRecipient(
+      { threadKey: key, toPhone: key, activeSenders },
+      { supabase },
+    );
+    if (!sender.ok) {
+      recipients.push({
+        thread_key: key,
+        seller_name: ctx.seller_first_name || null,
+        property_address: ctx.property_address || null,
+        template_id: null,
+        eligible: false,
+        reason: sender.reason,
+        seller_language: language,
+        assigned_agent_name: ctx.agent_name || null,
+      });
+      continue;
+    }
+
     const plan = buildRecipientPlan({
       thread: ctx,
       template: selection.ok ? selection.template : null,
@@ -216,6 +418,7 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     recipients.push({
       ...plan,
       assigned_agent_name: ctx.agent_name || null,
+      from_phone_number: sender.from_phone_number,
       seller_language: language,
       language_known: known,
       rotation_reason: selection.rotation_reason || null,

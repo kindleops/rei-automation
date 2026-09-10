@@ -32,6 +32,36 @@ const describeReason = (r: FollowUpRecipient): string => {
   return raw ? raw.replace(/_/g, ' ') : 'Needs review'
 }
 
+// Failure presentation. The critical distinction: a CONTAINMENT refusal means a
+// deliberate safety control said no; a VALIDATION failure means the software
+// could not assemble a valid send. Labelling the second as the first hides real
+// bugs behind a reassuring message -- which is exactly what happened when an
+// unresolved sending number was reported as "blocked by containment".
+const CONTAINMENT_REASONS: Record<string, string> = {
+  followup_disabled: 'Blocked by containment: follow-up automation is disabled. Nothing was queued.',
+  queue_runner_disabled: 'Blocked by containment: the queue runner is disabled. Nothing was queued.',
+  outbound_sms_disabled: 'Blocked by containment: outbound SMS is disabled. Nothing was queued.',
+  auto_reply_disabled: 'Blocked by containment: auto-reply is disabled. Nothing was queued.',
+  paused_operator_review: 'Blocked: this conversation is paused for operator review. Nothing was queued.',
+}
+
+const VALIDATION_REASONS: Record<string, string> = {
+  invalid_from_phone_number: 'No valid sending number could be resolved. Nothing was queued.',
+  no_eligible_sender_number: 'No eligible sending number is available for this conversation. Nothing was queued.',
+  invalid_to_phone_number: 'The recipient number is not valid. Nothing was queued.',
+  invalid_canonical_thread_key: 'This conversation could not be identified. Nothing was queued.',
+  no_fus2_templates_available: 'No approved templates are available. Nothing was queued.',
+}
+
+const describeBlocked = (reason?: string | null): string | null => {
+  if (!reason) return null
+  if (CONTAINMENT_REASONS[reason]) return CONTAINMENT_REASONS[reason]
+  if (VALIDATION_REASONS[reason]) return VALIDATION_REASONS[reason]
+  // Unknown: neutral failure plus the raw code. Never claim containment for
+  // something we have not positively identified as a safety control.
+  return `Scheduling failed. Nothing was queued. (${reason})`
+}
+
 const PREVIEW_COUNT = 3
 
 export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
@@ -73,7 +103,11 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
       return
     }
     if (!res.data?.ok) {
-      setError(res.data?.error ?? 'Scheduling was refused')
+      setError(
+        describeBlocked(res.data?.blocked_reason)
+          ?? res.data?.error
+          ?? 'Scheduling was refused',
+      )
       return
     }
     const done = (res.data.results ?? [])
@@ -178,7 +212,11 @@ export function BulkFollowUpSheet({ threadKeys, onClose, onScheduled }: Props) {
           </>
         )}
 
-        <div className="nx-bulk-sheet__actions">
+        {/* Canonical class: .nx-bulk-sheet__confirm-actions is the one that
+            actually carries the flex layout and 46px button styling. The
+            invented .nx-bulk-sheet__actions had no rule anywhere, so both
+            buttons collapsed into unstyled inline text ("CancelSchedule 5"). */}
+        <div className="nx-bulk-sheet__confirm-actions nx-followup-actions">
           <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
           <button
             type="button"

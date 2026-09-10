@@ -34,10 +34,20 @@ html.is-mobile-layout {
   --nx-ib-text-2: rgba(178, 189, 206, 0.88);
   --nx-ib-text-3: rgba(132, 145, 166, 0.72);
 
-  /* Reserve exactly the dock the other mobile surfaces reserve. */
-  --nx-ib-dock-clear: calc(
-    var(--nx-pinned-dock-collapsed, 26px) + var(--nx-mobile-safe-bottom, 0px) + 14px
-  );
+  /* Breathing room ONLY — this is not a dock reservation.
+     The dock is already reserved once, by pinned-app-dock.css, as padding-bottom on
+     .nx-premium-inbox (collapsed + safe-bottom + 6). This token used to re-add that
+     entire amount again on the scrollport, and .nx-inbox-shell added safe-bottom a
+     third time, so a 16px bar sitting over a 34px home indicator was costing roughly
+     154px of column:
+         56  .nx-premium-inbox   (the real, correct reservation)
+       + 34  .nx-inbox-shell     (duplicate safe-area)
+       + 64  this token          (duplicate dock + safe-area)
+     Measured on a 393x852 viewport: the scrollport ended at y=770 while the dock
+     started at y=798 — that gap, plus this padding, is the dead band the operator
+     sees between "Load More" and the dock. Clearance is owned by the app shell,
+     once; this is only the gap before the last row meets it. */
+  --nx-ib-dock-clear: 8px;
 }
 
 /* ── P0.1 — kill the decorative side strips ─────────────────────────────────

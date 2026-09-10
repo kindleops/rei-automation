@@ -136,3 +136,35 @@
   color: var(--nx-contract-text);
   border-color: var(--nx-contract-border);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE TOP CHROME — one clean surface, no rules across the screen
+   Declared here because this file is the LAST global stylesheet imported by
+   main.tsx, so it settles ties against the liquid-glass skin without needing a
+   specificity arms race.
+
+   Two separate hairlines were drawing horizontal rules across the top of the
+   mobile inbox and making the chrome read as stacked toolbars:
+
+     .nx-mobile-command-dock__inner   border-bottom rgba(148,163,184,0.16)
+       — mobile-edge-chrome.css already tries to neutralise this with
+         `border-color: transparent !important`, but the element also carries
+         .nx-liquid-surface, whose border wins on import order, so the rule
+         never actually took effect. Measured live at y=94 on production.
+
+     .nx-inbox-header-shell__inner    border-bottom rgba(255,255,255,0.07)
+       — the rule directly under the search + bucket-chip block, measured at
+         y=173. This is the one that most reads as "the menu has a line".
+
+   Blur, background and elevation still separate these surfaces from the list;
+   they do not need an edge drawn on them as well.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout .nx-mobile-command-dock__inner,
+html.is-mobile-layout .nx-mobile-command-dock__inner.nx-liquid-surface,
+html.is-mobile-layout .nx-inbox-header-shell__inner,
+html.is-mobile-layout .nx-inbox-header-shell__inner.nx-sidebar-rebuilt__top-glow {
+  border-bottom: none !important;
+  border-top: none !important;
+  box-shadow: none !important;
+}

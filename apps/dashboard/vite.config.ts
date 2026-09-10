@@ -754,10 +754,29 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react(), swRecoveryBootPlugin(), pwaManifestPlugin(cacheVersion), translateApiPlugin(), underwriteApiPlugin(env), censusSyncPlugin(env), buyerActivityPlugin(env)],
     build: {
+      // The single-bundle build shipped 4.3 MB of JS and 2.5 MB of CSS as exactly two
+      // files, which is what made cold loads on a phone look like a crashed blank page.
+      // Routes are split in src/app/routes.tsx; these vendor chunks keep the big
+      // third-party libraries out of the entry so the shell can boot before them.
+      chunkSizeWarningLimit: 1200,
       rollupOptions: {
         input: {
           main: fileURLToPath(new URL('./src/main.tsx', import.meta.url)),
           index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        },
+        output: {
+          // Vite 8 builds with rolldown, which requires manualChunks to be a function
+          // (the object form throws "manualChunks is not a function" at generate time).
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return undefined
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+              return 'vendor-react'
+            }
+            if (id.includes('maplibre-gl')) return 'vendor-maplibre'
+            if (id.includes('framer-motion')) return 'vendor-motion'
+            if (id.includes('@supabase')) return 'vendor-supabase'
+            return undefined
+          },
         },
       },
     },

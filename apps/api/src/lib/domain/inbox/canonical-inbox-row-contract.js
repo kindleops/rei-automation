@@ -180,12 +180,18 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   "dnc_opt_out",
   "waiting_on_seller",
   "automated",
-  // Inbox Zero surface. Only snoozed is a THREAD-STATE count and can be
-  // derived here. "scheduled" is deliberately absent: scheduled follow-ups
-  // live in send_queue, not in thread state, so seeding the key would make
-  // buildEmptyCounts report a confident 0 while real scheduled rows existed.
-  // Left undefined, the chip renders "—" (unknown) instead of lying.
+  // Inbox Zero surface. snoozed and archived are both THREAD-STATE counts and are
+  // derived here. archived was missing entirely, which is why the chip read 0 while
+  // production held 36 archived threads — every other bucket is defined as NOT
+  // archived, but nothing ever counted the archived side of that predicate.
   "snoozed",
+  "archived",
+  // "scheduled" stays out of this list on purpose. Scheduled follow-ups live in
+  // send_queue, not in thread state, so seeding the key here would make
+  // buildEmptyCounts report a confident 0 whenever the send_queue count was
+  // unavailable — worse than admitting we do not know. fetchAuthoritativeInboxCounts
+  // sets it only when it has actually counted send_queue; otherwise it stays
+  // undefined and the chip renders "—".
 ];
 
 export function compactInboxThreadSummaryRow(row = {}) {
@@ -212,6 +218,28 @@ export function compactInboxThreadSummaryRow(row = {}) {
     master_owner_id: row.master_owner_id || null,
     display_name: row.display_name || row.owner_name || row.seller_display_name || row.owner_display_name || row.event_seller_display_name || null,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || row.event_seller_display_name || row.display_name || null,
+    // ONE added key, deliberately. The compact row is budgeted at <=50 keys and asserted
+    // twice in inbox-live-v2-service.test.mjs ("initial boot ..." and "manual bucket switch
+    // ..."); the baseline is 49, so there is exactly one slot.
+    //
+    // It goes to seller_display_name because the dashboard's name resolver
+    // (resolveInboxProspectNameWithSource, apps/dashboard/src/lib/data/inboxData.ts:518)
+    // reads prospect_full_name / prospect_name / seller_display_name / contact_name /
+    // prospect_cnam / metadata — and reads NEITHER display_name NOR owner_name, the two keys
+    // this mapper already emitted. So identity was hydrated and then published under names
+    // the client never looks at, and every row fell through to the phone-number fallback.
+    // seller_display_name is the highest-coverage field in that chain on production
+    // (9,687 of 9,741 rows, vs 7,512 for prospect_name), so one key buys ~99.4% of names.
+    //
+    // The flag strings that feed the signal chips (property_flags_text / person_flags_text /
+    // matching_flags) are ALREADY emitted further down — they were arriving null only because
+    // linked-context hydration was being skipped, which live-inbox-service.js now fixes. They
+    // need no new key here.
+    //
+    // Delivery ticks still need latest_delivery_status + is_read, which would be two more
+    // keys and would breach the budget. Left out on purpose rather than quietly raising a
+    // performance guard someone set deliberately.
+    seller_display_name: row.seller_display_name || row.event_seller_display_name || null,
     property_address_full: row.property_address_full || row.display_address || row.property_address || null,
     property_address: row.property_address || row.property_address_full || row.display_address || null,
     market: row.market || row.display_market || null,
