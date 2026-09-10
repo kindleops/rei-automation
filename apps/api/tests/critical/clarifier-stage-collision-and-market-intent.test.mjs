@@ -204,3 +204,37 @@ test("an unregistered stage vocabulary is reported, not silently bucketed", () =
   assert.equal(fb.stage_bucket_source, "unmapped");
   assert.equal(fb.presupposes_prior_offer, false);
 });
+
+// ── inbound lead phrasings ──────────────────────────────────────────────────
+// Live case 2026-09-10, thread +13055376631 (Miami): the seller texted
+// "Hi do you buy houses?" at 20:27Z and "Yes I have a house in Miami to sell"
+// at 20:33Z. Both scored unclear and both were answered with nothing. The
+// existing rule caught "I want to sell my house" at 0.90 but not "I have a
+// house to sell", which is the same statement.
+
+test("a seller announcing a property to sell is interested, not unclear", () => {
+  for (const m of [
+    "Hi do you buy houses?",
+    "Yes I have a house in Miami to sell",
+    "do you buy houses",
+    "I have a house to sell",
+    "Do you guys buy properties?",
+    "i got a property to sell",
+    "Do you still buy houses",
+    "I own a duplex to sell",
+    "are you buying",
+  ]) {
+    assert.equal(detectInboundIntent(m)?.detected_intent, "seller_interested", m);
+  }
+});
+
+test("declines and non-property solicitations are not leads", () => {
+  for (const m of [
+    "I don't have a house to sell",   // negated possession
+    "I have a house but not to sell", // possession, explicit decline
+    "Do you buy stolen cars",         // not a property
+    "not interested",
+  ]) {
+    assert.notEqual(detectInboundIntent(m)?.detected_intent, "seller_interested", m);
+  }
+});

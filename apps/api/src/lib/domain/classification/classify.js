@@ -4802,6 +4802,39 @@ function resolveIntents(
     intents.push("info_request");
   }
 
+  // INBOUND LEAD PHRASINGS. "I want to sell my house" scored seller_interested
+  // at 0.90 while "I have a house to sell" -- the same statement -- scored
+  // unclear at 0.60 and got silence. Likewise "do you buy houses?", which is how
+  // a seller who was referred to us opens the conversation. Both arrived on a
+  // live Miami thread on 2026-09-10 (+13055376631) six minutes apart and both
+  // were answered with nothing. These are POSSESSION + SALE INTENT and inbound
+  // solicitation, the two most basic ways a motivated seller announces himself.
+  // Negation-guarded: "I don't have a house to sell" must not match.
+  const has_property_to_sell_regex =
+    /\b(?<!don'?t\s)(?<!do not\s)(?<!never\s)(?:i\s+)?(?:have|got|own)\s+(?:a|an|another|two|three|\d+|some)?\s*(?:house|home|property|properties|houses|duplex|condo|land|lot)\b[^.!?]{0,40}\bto\s+sell\b/i;
+  // "I have a house but not to sell" is a decline wearing the same words.
+  const declines_to_sell_regex = /\bnot\s+(?:to\s+)?sell/i;
+  // "do you buy" is only a lead when the object is a property or absent;
+  // "do you buy stolen cars" is a troll, not a seller.
+  const asks_if_we_buy_regex =
+    /\b(?:do|does|are)\s+(?:you|u|yall|y'all|they)\s+(?:guys\s+)?(?:still\s+)?(?:buy|buying|purchase|purchasing)\b\s*([^.!?]*)/i;
+  const PROPERTY_OBJECT_RE =
+    /\b(?:house|home|propert|land|lot|duplex|triplex|fourplex|plex|condo|apartment|real\s+estate|place|building|rental)\w*|\b(?:mine|it|them|these|those|in|anything|any)\b/i;
+  const buy_match = asks_if_we_buy_regex.exec(text);
+  const asks_if_we_buy =
+    Boolean(buy_match) &&
+    (!String(buy_match[1] || "").trim() || PROPERTY_OBJECT_RE.test(buy_match[1]));
+  const has_property_to_sell =
+    has_property_to_sell_regex.test(text) && !declines_to_sell_regex.test(text);
+  if (
+    (has_property_to_sell || asks_if_we_buy) &&
+    !intents.includes("not_interested") &&
+    !intents.includes("need_time")
+  ) {
+    intents.push("seller_interested");
+    matched_rule_ids.push(asks_if_we_buy ? "asks_if_we_buy" : "has_property_to_sell");
+  }
+
   const positive_interest_regex = /\b(?<!not\s+|no\s+)(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling|would consider selling)\b/i;
   if (positive_interest_regex.test(text)) {
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
