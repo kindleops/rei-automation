@@ -1187,7 +1187,102 @@ function eligibilityLimits(subject) {
   return { radius: 4, months: 30 };
 }
 
-export function evaluateCompEligibility(subject, comp, now = new Date()) {
+/**
+ * COMP POOL INTEGRITY (2026-09-10).
+ *
+ * A package / portfolio transaction records ONE aggregate consideration against
+ * EVERY parcel in the package. Each parcel then enters the comp pool carrying
+ * the full package price, so a $16,500,000 six-parcel Pompano Beach deal made a
+ * 2-unit, 4,050 sqft duplex look like an $8,250,000-per-unit sale -- and it was
+ * flagged is_usable_comp = true.
+ *
+ * THRESHOLDS ARE MEASURED, NOT ASSUMED. Over 2,102 usable Florida comps in the
+ * live 36-month window, 279 rows (13.3%) share an exact (sale_date, sale_price)
+ * with at least one other parcel. Of the 74 two-parcel clusters, 48 (65%) are in
+ * the same ZIP and 45 (61%) are within roughly a mile -- i.e. most pairs are
+ * genuine packages, not coincidence. Clusters of 3+ at an identical price and
+ * date are a package as a matter of arithmetic.
+ *
+ * So: 3+ parcels is a package outright; exactly 2 requires corroborating
+ * proximity, which leaves a genuinely coincidental pair of distant sales in the
+ * pool. When a cluster IS a package, no member's individual price is knowable,
+ * so every member is rejected rather than one being kept -- keeping one would
+ * still attribute the whole package price to a single parcel.
+ */
+const PACKAGE_CLUSTER_MIN_PARCELS = 2;
+const PACKAGE_CERTAIN_PARCELS = 3;
+const PACKAGE_PROXIMITY_DEGREES = 0.015; // ~1 mile of latitude
+
+export function detectPackageClusters(comps = []) {
+  const groups = new Map();
+  for (const comp of comps) {
+    const price = num(comp?.sale_price);
+    const date = clean(comp?.sale_date);
+    if (!price || !date) continue;
+    const key = `${date}|${price}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(comp);
+  }
+
+  const packagedKeys = new Set();
+  const clusters = [];
+  for (const [key, members] of groups.entries()) {
+    if (members.length < PACKAGE_CLUSTER_MIN_PARCELS) continue;
+
+    let isPackage = members.length >= PACKAGE_CERTAIN_PARCELS;
+    let basis = 'parcel_count';
+    if (!isPackage) {
+      const zips = new Set(members.map((m) => clean(m.zip || m.property_address_zip)).filter(Boolean));
+      const lats = members.map((m) => num(m.latitude)).filter((v) => v !== null);
+      const lons = members.map((m) => num(m.longitude)).filter((v) => v !== null);
+      const sameZip = zips.size === 1 && zips.values().next().value;
+      const proximate =
+        lats.length === members.length &&
+        lons.length === members.length &&
+        Math.max(...lats) - Math.min(...lats) < PACKAGE_PROXIMITY_DEGREES &&
+        Math.max(...lons) - Math.min(...lons) < PACKAGE_PROXIMITY_DEGREES;
+      if (sameZip || proximate) {
+        isPackage = true;
+        basis = proximate ? 'same_date_price_and_proximity' : 'same_date_price_and_zip';
+      }
+    }
+
+    if (isPackage) {
+      packagedKeys.add(key);
+      clusters.push({
+        sale_date: members[0].sale_date,
+        sale_price: num(members[0].sale_price),
+        parcels: members.length,
+        basis,
+      });
+    }
+  }
+
+  return { packagedKeys, clusters };
+}
+
+function packageClusterKey(comp) {
+  const price = num(comp?.sale_price);
+  const date = clean(comp?.sale_date);
+  if (!price || !date) return null;
+  return `${date}|${price}`;
+}
+
+/**
+ * NON-ARM'S-LENGTH DEFENSE. The only price guard used to be
+ * `sale_price < 10_000`, which let a $25,000 nominal deed into a live score and
+ * cost that seller roughly $23,800 of offer.
+ *
+ * Measured on the same 2,102-comp pool: the price-to-assessed-value ratio has a
+ * distinct tail -- 33 rows under 0.05, 34 in 0.05-0.15, 42 in 0.15-0.25 -- and
+ * the median SALE PRICE of everything under 0.30 is $33,550, which is a family
+ * or nominal transfer, not a market sale. The band above 0.25 thickens sharply
+ * (48 rows in 0.25-0.35, 136 in 0.35-0.50) and legitimately contains distressed
+ * and as-is sales, so the cut sits at 0.25 and deliberately keeps that band.
+ */
+const NOMINAL_PRICE_TO_VALUE_RATIO = 0.25;
+
+export function evaluateCompEligibility(subject, comp, now = new Date(), options = {}) {
   const reasons = [];
   const limits = eligibilityLimits(subject);
   const age = comp.sale_age_months ?? ageMonths(comp.sale_date, now);
@@ -1196,6 +1291,22 @@ export function evaluateCompEligibility(subject, comp, now = new Date()) {
     haversineMiles(subject.latitude, subject.longitude, comp.latitude, comp.longitude);
 
   if (!num(comp.sale_price) || comp.sale_price < 10_000) reasons.push('invalid_sale_price');
+  // Non-arm's-length transfer: priced far below assessed value.
+  const compValueForRatio = num(comp.estimated_value);
+  if (
+    options?.compIntegrityEnabled !== false &&
+    num(comp.sale_price) &&
+    compValueForRatio &&
+    compValueForRatio > 0 &&
+    comp.sale_price / compValueForRatio < NOMINAL_PRICE_TO_VALUE_RATIO
+  ) {
+    reasons.push('nominal_non_arms_length_transfer');
+  }
+  // Package / portfolio consideration: the per-parcel price is unknowable.
+  if (options?.packagedKeys instanceof Set) {
+    const key = packageClusterKey(comp);
+    if (key && options.packagedKeys.has(key)) reasons.push('package_consideration_unresolved');
+  }
   if (subject.property_id && comp.property_id === subject.property_id) reasons.push('same_property');
   if (!assetCompatible(subject, comp)) reasons.push('asset_type_mismatch');
   if (age !== null && age > limits.months) reasons.push('sale_too_old');
@@ -1306,7 +1417,10 @@ export function scoreComparable(subject, rawComp, options = {}) {
           distance_miles: options.distance_miles,
           now: options.now,
         });
-  const eligibility = evaluateCompEligibility(subject, comp, options.now);
+  const eligibility = evaluateCompEligibility(subject, comp, options.now, {
+    packagedKeys: options.packagedKeys,
+    compIntegrityEnabled: options.compIntegrityEnabled,
+  });
   comp.distance_miles = eligibility.distance_miles;
   comp.sale_age_months = eligibility.sale_age_months;
 
@@ -2629,6 +2743,10 @@ function offerCalculation(subject, valuation, investor, repairs, targetAssignmen
   const marginPolicy = resolveTargetAssignmentMargin({
     effective_authorized_ceiling: effectiveCeiling,
     asset_family: subject.asset_family,
+    // Routes 2-4 unit assets to the SMALL_MULTI margin band that already
+    // existed in policy but was unreachable, rather than the band written for
+    // apartment complexes.
+    unit_count: subject.units,
     buyer_demand_score: investor.buyer_demand_score,
     liquidity_score: investor.liquidity_score,
     // Overall confidence is derived FROM the offer, so it does not exist yet at
@@ -2956,6 +3074,8 @@ export function calculateAcquisitionDecision({
   v3Enabled = readFeatureFlag('ACQUISITION_ENGINE_V3_ENABLED'),
   v3CompCandidates = null,
   v3LoaderDiagnostics = null,
+  // Read-only shadow analysis only. Defaults to ON; production never passes it.
+  compIntegrityEnabled = true,
 } = {}) {
   const subject =
     rawSubject?.asset_family
@@ -2981,11 +3101,22 @@ export function calculateAcquisitionDecision({
     v3 = { classification, qualification, loaderDiagnostics: v3LoaderDiagnostics };
   }
 
+  // Detect package clusters ACROSS the pool before scoring: a single comp cannot
+  // tell that its price is an aggregate, only the set can.
+  //
+  // compIntegrityEnabled exists ONLY so a read-only shadow analysis can measure
+  // the before/after of these defenses with everything else held identical. It
+  // defaults to ON; nothing in production ever passes it.
+  const packageDetection = compIntegrityEnabled
+    ? detectPackageClusters(compsForScoring)
+    : { packagedKeys: new Set(), clusters: [] };
   const scored = compsForScoring.map((comp) =>
     scoreComparable(subject, comp, {
       source: comp.source,
       distance_miles: comp.distance_miles,
       now,
+      packagedKeys: packageDetection.packagedKeys,
+      compIntegrityEnabled,
     }),
   );
   const eligibilityRejected = scored.filter((comp) => !comp.eligible);
@@ -3177,6 +3308,29 @@ export function calculateAcquisitionDecision({
       market: subject.market,
       asset_type: subject.asset_type,
       asset_family: subject.asset_family,
+      // ASSET IDENTITY CONFLICT (2026-09-10).
+      //
+      // A multifamily label carrying units_count <= 1 is not a property fact --
+      // source lineage shows it is a null-substitute from one county's ingest
+      // (Palm Beach single-unit rate 73.9% on a land-use code that excludes
+      // single units, against 1.1-1.9% from the identical pipeline elsewhere;
+      // 174 of the 179 live campaign conflicts are Palm Beach). It moves money
+      // twice over: the multifamily ARV factor and margin band inflate, while
+      // units=1 inside the multifamily lane hard-rejects comps on the unit
+      // ratio and marks the survivors down.
+      //
+      // Surfaced, never silently corrected. Downstream authority gates read
+      // this to withhold AUTOMATIC monetary issuance until the ingest defect is
+      // fixed; the value itself is unchanged so nothing is masked.
+      asset_identity_conflict: Boolean(
+        subject.asset_family === 'multifamily' &&
+          num(subject.units) !== null &&
+          num(subject.units) <= 1,
+      ),
+      asset_identity_conflict_reason:
+        subject.asset_family === 'multifamily' && num(subject.units) !== null && num(subject.units) <= 1
+          ? 'multifamily_label_with_unit_count_le_1'
+          : null,
       normalized_features: Object.fromEntries(
         Object.entries(subject).filter(([key]) => key !== 'raw'),
       ),

@@ -559,6 +559,59 @@ const CONDITION_FACT_KEYS = ["condition_level", "rehab_level", "condition_summar
  * internal data already covers a requirement (ADE valuation confidence, comp
  * count), the seller is not forced through unnecessary questions.
  */
+/**
+ * UNIT-COUNT SUFFICIENCY CONTRACT (2026-09-10).
+ *
+ * Two keys carry unit counts and they mean different things:
+ *   unit_count            -- CANONICAL, from the property record.
+ *   reported_units_count  -- what the SELLER said, seller_reported provenance.
+ *
+ * The extractor deliberately writes the second so a conversation can never
+ * silently overwrite canonical data. But sufficiency only ever read the first,
+ * so a seller answering "it's a triplex" could not clear the unit-count
+ * requirement no matter what they said. That is the mismatch this resolves.
+ *
+ * Resolution, deliberately NOT a silent merge:
+ *   - canonical present            -> canonical wins, seller value retained.
+ *   - canonical absent             -> a clear seller count SATISFIES the need.
+ *   - both present and disagreeing -> canonical still decides, and the conflict
+ *                                     is raised rather than hidden. Money
+ *                                     authority is the caller's decision.
+ */
+export function resolveUnitCountForSufficiency(facts = {}, canonicalUnitCount = null) {
+  const canonical = num(facts?.unit_count ?? canonicalUnitCount);
+  const reported = num(facts?.reported_units_count);
+
+  if (canonical !== null && reported !== null && canonical !== reported) {
+    return {
+      value: canonical,
+      source: "property_record",
+      reported_units_count: reported,
+      conflict: "seller_reported_units_differ_from_property_record",
+      satisfied: true,
+    };
+  }
+  if (canonical !== null) {
+    return {
+      value: canonical,
+      source: "property_record",
+      reported_units_count: reported,
+      conflict: null,
+      satisfied: true,
+    };
+  }
+  if (reported !== null && reported >= 1) {
+    return {
+      value: reported,
+      source: "seller_reported",
+      reported_units_count: reported,
+      conflict: null,
+      satisfied: true,
+    };
+  }
+  return { value: null, source: "unknown", reported_units_count: null, conflict: null, satisfied: false };
+}
+
 export function evaluateUnderwritingSufficiency({
   asset_class = null,
   property_type = null,
@@ -595,6 +648,7 @@ export function evaluateUnderwritingSufficiency({
   const valuationReliable =
     valuationConfidence !== null && valuationConfidence >= p.min_valuation_confidence && compCount >= 3;
 
+  const unitResolution = resolveUnitCountForSufficiency(facts, unit_count);
   const occupancy = lower(facts?.occupancy_status || facts?.occupancy);
   const occupancyKnown = Boolean(occupancy && occupancy !== "unknown");
   const conditionKnown =
@@ -609,13 +663,13 @@ export function evaluateUnderwritingSufficiency({
       break;
     case ASSET_CLASSES.LARGE_MULTIFAMILY:
       if (!occupancyKnown) missing.push("occupancy_status");
-      if (!num(facts?.unit_count ?? unit_count)) missing.push("unit_count");
+      if (!unitResolution.satisfied) missing.push("unit_count");
       if (!facts?.rents_summary && !facts?.rent_roll_known) missing.push("rents_summary");
       if (!valuationReliable && !conditionKnown) missing.push("condition_summary");
       break;
     case ASSET_CLASSES.SMALL_MULTIFAMILY:
       if (!occupancyKnown) missing.push("occupancy_status");
-      if (!num(facts?.unit_count ?? unit_count)) missing.push("unit_count");
+      if (!unitResolution.satisfied) missing.push("unit_count");
       if (!conditionKnown && !valuationReliable) missing.push("condition_summary");
       break;
     case ASSET_CLASSES.COMMERCIAL:
@@ -636,6 +690,10 @@ export function evaluateUnderwritingSufficiency({
     asset_class: assetClass,
     sufficient: missing.length === 0,
     missing_facts: missing,
+    // Which unit count was used, where it came from, and whether the seller
+    // contradicted the record. Both values are preserved; neither is silently
+    // overwritten.
+    unit_count_resolution: unitResolution,
     valuation_reliable: valuationReliable,
     // The highest-value question to ask next, when facts are still needed.
     // Price is the FIRST question, not an excluded one. The old ordering

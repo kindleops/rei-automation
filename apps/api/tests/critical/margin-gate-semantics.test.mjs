@@ -91,8 +91,14 @@ function compsAround(price, n = 12) {
     effective_year_built: 1975,
     building_condition: "Average",
     construction_type: "Frame",
-    sale_price: price + (i % 3) * 1000,
-    sale_date: "2026-05-01",
+    // Distinct price AND date per comp. The previous fixture used
+    // `price + (i % 3) * 1000` with one shared sale_date, which produced three
+    // groups of four adjacent parcels at an identical price on an identical day
+    // -- indistinguishable from a package consideration, and correctly rejected
+    // by the comp-integrity defense added 2026-09-10. This file is about MARGIN
+    // GATE semantics, so its comps should look like ordinary separate sales.
+    sale_price: price + i * 1000,
+    sale_date: `2026-0${(i % 5) + 1}-${String((i % 27) + 1).padStart(2, "0")}`,
     sale_source: i % 2 ? "mls_sold" : "public_record_sold",
     garage: "Attached Garage",
     pool: "No",

@@ -104,10 +104,24 @@ export const ASSIGNMENT_MARGIN_POLICY_VERSION = 'assignment_margin_v1';
 const MARGIN_MIN_PCT = 0.04;
 
 /** Asset-family key resolution, tolerant of the engine's several spellings. */
-function familyKey(assetFamily) {
+function familyKey(assetFamily, unitCount = null) {
   const f = String(assetFamily ?? '').trim().toUpperCase();
   if (f === 'RESIDENTIAL' || f === 'RESIDENTIAL_SINGLE' || f === 'SFR') return 'RESIDENTIAL_SINGLE';
   if (f === 'SMALL_MULTI') return 'SMALL_MULTI';
+  // SMALL_MULTI WAS UNREACHABLE (fixed 2026-09-10).
+  //
+  // MARGIN_BASE_PCT.SMALL_MULTI = 0.11 has existed as the intended policy for
+  // 2-4 unit assets, but the engine's assetFamily() can only return
+  // residential | multifamily | commercial | land | other -- it never emits
+  // 'SMALL_MULTI'. So every duplex, triplex and fourplex was margined at the
+  // MULTIFAMILY 0.06 band written for 100-unit apartment complexes. On the live
+  // campaign that is 618 targets.
+  //
+  // The unit count is what distinguishes the two, so it decides here. No new
+  // constant is introduced: this routes to the small-multi policy that was
+  // already written and simply could not be reached.
+  const units = num(unitCount);
+  if (f === 'MULTIFAMILY' && units !== null && units >= 2 && units <= 4) return 'SMALL_MULTI';
   if (f === 'MULTIFAMILY') return 'MULTIFAMILY';
   if (f === 'COMMERCIAL') return 'COMMERCIAL';
   if (f === 'LAND') return 'LAND';
@@ -134,6 +148,8 @@ function familyKey(assetFamily) {
 export function resolveTargetAssignmentMargin({
   effective_authorized_ceiling = null,
   asset_family = 'UNKNOWN',
+  // Distinguishes a 2-4 unit small multifamily from a large apartment complex.
+  unit_count = null,
   buyer_demand_score = null,
   liquidity_score = null,
   confidence = null,
@@ -147,7 +163,7 @@ export function resolveTargetAssignmentMargin({
   const reasons = [];
   const ceiling = num(effective_authorized_ceiling);
   const floor = Math.max(0, num(minimum_margin_floor) ?? 0);
-  const family = familyKey(asset_family);
+  const family = familyKey(asset_family, unit_count);
 
   // No ceiling => no authority => no margin to reason about.
   if (!Number.isFinite(ceiling) || ceiling <= 0) {

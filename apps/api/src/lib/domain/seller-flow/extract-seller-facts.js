@@ -228,7 +228,22 @@ function parseUnitWord(token) {
  * property record. A conflict between the two is resolved downstream, never by
  * silently overwriting canonical data here.
  */
+/**
+ * NEGATION GUARD (2026-09-10). The plex detector matched anywhere in a message,
+ * so real production sellers writing "This is not a duplex. It is a house." had
+ * two units recorded against their property. At least six such messages already
+ * exist in message_events. A count stated in order to DENY it is not a count.
+ */
+const UNIT_NEGATION_RE =
+  /\b(?:not|isn'?t|is not|ain'?t|no|never)\b[^.!?]{0,24}\b(?:duplex|triplex|fourplex|quadplex|quad|[234]plex|units?)\b|\b(?:duplex|triplex|fourplex|quadplex|[234]plex)\b[^.!?]{0,12}\b(?:no|not)\b/i;
+
+function messageNegatesUnits(message) {
+  return UNIT_NEGATION_RE.test(String(message ?? ""));
+}
+
 function extractReportedUnitCount(message, base) {
+  // A denied unit count must never be recorded as an observation.
+  if (messageNegatesUnits(message)) return null;
   const plexEvidence = findEvidence(
     message,
     /\b(duplex|triplex|fourplex|quadplex|quad|[234]plex)\b/i

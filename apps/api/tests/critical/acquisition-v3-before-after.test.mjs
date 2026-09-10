@@ -92,8 +92,22 @@ test('BEFORE/AFTER 2136762817 (Austin duplex)', () => {
   console.log('  Austin AFTER  valuation_mid=%s offer=%s state=%s flags=%j',
     after.valuation.mid, after.offer.recommended_cash_offer, after.v3.execution_state, after.v3.anomaly_flags);
 
-  assert.ok(before.valuation.mid > 100_000_000, 'V2 reproduces the contamination');
-  assert.equal(before.v3, null, 'flag OFF => no v3 block (V2 unchanged)');
+  // CONTRACT CHANGED 2026-09-10. This used to assert
+  //   before.valuation.mid > 100_000_000  ('V2 reproduces the contamination')
+  // to document that the LIVE path had no defense and only V3 protected us.
+  // V2 now carries its own package-consideration and non-arm's-length defenses,
+  // so the same fixture that produced a >$100,000,000 valuation now produces
+  // $391,000. The V3 assertions below are unchanged: V3 still quarantines, and
+  // this test still proves the contamination is caught -- now on BOTH paths.
+  assert.ok(
+    before.valuation.mid < 1_000_000,
+    `V2 must now defend against the contamination, got ${before.valuation.mid}`
+  );
+  assert.equal(before.v3, null, 'flag OFF => no v3 block');
+  // Every contaminated comp is rejected, so V2 falls back to the subject value
+  // with ZERO usable comps. That cannot become money: the spendability gate
+  // requires a real comp population before an offer is authoritative.
+  assert.equal(before.selected_comps.length, 0, 'contaminated comps must all be rejected');
 
   assert.ok(after.valuation.mid < 1_000_000, `V3 valuation must be sane, got ${after.valuation.mid}`);
   assert.equal(after.v3.canonical_asset_lane, 'DUPLEX');
@@ -109,7 +123,16 @@ test('BEFORE/AFTER 242567952 (Caldwell package)', () => {
   console.log('  Caldwell AFTER  valuation_mid=%s offer=%s state=%s flags=%j',
     after.valuation.mid, after.offer.recommended_cash_offer, after.v3.execution_state, after.v3.anomaly_flags);
 
-  assert.ok(before.valuation.mid > 10_000_000, 'V2 reproduces the package contamination');
+  // CONTRACT CHANGED 2026-09-10 -- see the Austin case above. This fixture is 12
+  // parcels sharing one $30,191,000 consideration on a single date, i.e. ONE
+  // economic transaction. V2 previously valued the subject above $10,000,000
+  // from it; the package detector now rejects all 12 and the valuation is
+  // $309,000.
+  assert.ok(
+    before.valuation.mid < 1_000_000,
+    `V2 must now defend against the package, got ${before.valuation.mid}`
+  );
+  assert.equal(before.selected_comps.length, 0, 'all 12 package parcels must be rejected');
   assert.ok(after.valuation.mid < 1_000_000, `V3 valuation must be sane, got ${after.valuation.mid}`);
   assert.equal(after.v3.execution_state, 'ANOMALY_QUARANTINE');
   assert.equal(after.v3.sample.package_cluster_count, 1, '12 rows = ONE economic transaction');
