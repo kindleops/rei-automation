@@ -453,7 +453,23 @@ export function evaluateUnderwritingSufficiency({
   const missing = [];
 
   const askKnown = num(facts?.asking_price?.value ?? facts?.asking_price) !== null;
-  if (!askKnown && facts?.wants_offer !== true) missing.push("asking_price");
+  // PRICE BEFORE CONDITION (2026-09-09).
+  //
+  // "Make me an offer I can't refuse" sets wants_offer, and this used to drop
+  // asking_price from `missing` outright -- so the very first thing we said
+  // back to a seller who asked for an offer was a condition interrogation.
+  // That is the wrong move and it reads like a script: the answer to "make me
+  // an offer" is "any ballpark price in mind?".
+  //
+  // We ask for a ballpark ONCE. Only when the seller has already been asked
+  // and comes back still demanding an offer does wants_offer excuse the
+  // question and let the flow move on to condition.
+  const askAlreadyRequested =
+    facts?.asking_price_requested === true ||
+    (num(facts?.asking_price_ask_count) ?? 0) >= 1;
+  if (!askKnown && !(facts?.wants_offer === true && askAlreadyRequested)) {
+    missing.push("asking_price");
+  }
 
   const valuationConfidence = num(ade_snapshot?.valuation_confidence);
   const compCount = num(ade_snapshot?.comp_count) ?? 0;
@@ -503,7 +519,12 @@ export function evaluateUnderwritingSufficiency({
     missing_facts: missing,
     valuation_reliable: valuationReliable,
     // The highest-value question to ask next, when facts are still needed.
+    // Price is the FIRST question, not an excluded one. The old ordering
+    // preferred occupancy and then explicitly skipped asking_price
+    // (`m !== "asking_price"`), so this function could never surface the
+    // price ask at all -- the seller went straight to occupancy/condition.
     next_discovery:
+      missing.find((m) => m === "asking_price") ||
       missing.find((m) => m === "occupancy_status") ||
       missing.find((m) => m !== "asking_price") ||
       null,

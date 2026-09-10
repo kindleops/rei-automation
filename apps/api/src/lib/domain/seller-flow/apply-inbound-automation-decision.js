@@ -14,6 +14,7 @@ import {
   normalizeUsPhoneToE164,
   prepareRenderedSmsForQueue,
 } from "@/lib/sms/sanitize.js";
+import { carriesDispositionDisclosure } from "@/lib/domain/classification/classify.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { evaluateQueueCreationRuntimeBrakes } from "@/lib/domain/queue/queue-control-safety.js";
 import {
@@ -1027,14 +1028,60 @@ const CLARIFIER_REVIEW_REASONS = new Set([
   "ambiguous_context",
   "automation_review_required",
 ]);
-export const CLARIFIER_INTENTS = new Set(["unclear", "reaction_only", "acknowledgement"]);
+// Intents eligible for the safe clarifier when the intent-specific reply path
+// has ALREADY declined (see the guards in resolveSafeFallbackClarifierDispatch:
+// this never overrides a real reply, it only replaces SILENCE).
+//
+// Widened 2026-09-09. Previously only unclear/reaction_only/acknowledgement,
+// which meant a seller whose intent WAS understood but scored below the 0.82
+// autonomy gate got nothing at all -- a bare "Yes" to an ownership question
+// scores 0.72 in some thread contexts, so a genuine owner confirming ownership
+// was answered on one thread and ignored on the next. At 10k messages/day that
+// is the difference between an auto-responder and a lottery.
+//
+// Deliberately EXCLUDED, and they must stay excluded: opt_out and wrong_number
+// (compliance silence), sold_property, hostile_or_legal, and the distress
+// lanes (title_issue, lien_tax_issue, bankruptcy_disclosed) -- those need a
+// human, and a cheerful clarifier would be the wrong answer, not a late one.
+export const CLARIFIER_INTENTS = new Set([
+  "unclear",
+  "reaction_only",
+  "acknowledgement",
+  "ownership_confirmed",
+  "seller_interested",
+  "latent_interest",
+  "asks_offer",
+  "asking_price_provided",
+  "condition_disclosed",
+  "tenant_occupied",
+  "need_time",
+  "who_is_this",
+  "info_request",
+  "callback_requested",
+  "voicemail_call_request",
+  "requests_email",
+  "property_correction",
+  "language_switch",
+  "trust_ownership",
+  "llc_corporation",
+]);
 
-// The clarifier converts LOW-INFORMATION ambiguity ("hmm", "ok?", "maybe"),
-// never unparsed CONTENT. A longer unclear message ("we closed on it in
-// March") means the classifier under-detected a potentially disposition-
-// relevant disclosure — fail-closed review is the containment for classifier
-// gaps, and the adversarial corpus pins that. Word-bounded, deterministic.
-const CLARIFIER_MAX_MESSAGE_WORDS = 4;
+// The clarifier used to be capped at 4 words on the theory that a longer
+// unparsed message ("we closed on it in March") hides a disposition-relevant
+// disclosure that deserves a human. In production that theory produced
+// SILENCE, not review: nobody reads the review lane in real time, so a seller
+// writing one ordinary sentence got nothing back. "I call u but u not
+// answering di phone" (9 words) is the case that proved it.
+//
+// The cap is now a sanity bound, not a policy. Containment for genuinely
+// sensitive content does not come from message length -- it comes from the
+// guards below, which are unchanged: compliance_flag, any active suppression,
+// high-risk and review-only objections (probate, distress, divorce), emoji-only
+// messages, and the CLARIFIER_INTENTS allowlist that keeps opt-out,
+// wrong-number, sold-property, hostility and the distress lanes out entirely.
+// Past this length a message is a narrative, and a clarifying question really
+// would be the wrong response.
+const CLARIFIER_MAX_MESSAGE_WORDS = 60;
 
 export function resolveSafeFallbackClarifierDispatch({
   decision = null,
@@ -1056,6 +1103,15 @@ export function resolveSafeFallbackClarifierDispatch({
   // review, never a cheerful clarifier. 👍/👎 still context-bind upstream as
   // yes/no before this gate is ever reached.
   if (!/[\p{L}\p{N}]/u.test(message_text)) {
+    return null;
+  }
+  // A disposition-relevant disclosure gets a HUMAN, never a clarifying
+  // question. "We closed on it in March" parses as `unclear` because the
+  // classifier under-detected it, and answering that with "are you open to a
+  // proposal?" is the wrong reply, not a late one. This is the real test that
+  // the old 4-word cap was standing in for; it reuses the canonical
+  // sold/transferred and wrong-number matchers from the intent resolver.
+  if (carriesDispositionDisclosure(message_text)) {
     return null;
   }
 
@@ -3083,6 +3139,17 @@ export async function executeInboundAutomationDecision({
     metadata: {
       source: "auto_reply",
       action_type: "autopilot_inbound_reply",
+      // IDENTITY ANCHOR so a FAILED send can be re-dispatched with an
+      // alternate body (2026-09-09). resolveQueueRowIdentity refuses any row
+      // whose action it cannot name ('queue_row_identity_underivable'), and an
+      // auto-reply row carried no anchor at all -- so when TextGrid's content
+      // filter blocked a live reply, the template rotation that exists for
+      // exactly that failure class never ran and the seller was left with
+      // silence. One inbound produces one auto-reply decision, so the inbound
+      // event id is a stable, replay-safe anchor; it is also what
+      // autonomy-invariants already falls back to when reconstructing which
+      // inbound a row answers.
+      decision_id: clean(inboundEventId) || `autoreply:${clean(threadKey) || "unknown"}`,
       auto_reply_mode: effective_auto_reply_mode,
       internal_test_phone: queue_permission.internal_test_phone,
       proof: Boolean(proofRun),

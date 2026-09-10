@@ -32,7 +32,14 @@ function cleanMessage(value) {
 }
 
 function lower(value) {
-  return cleanMessage(value).toLowerCase();
+  // Internal whitespace is collapsed (2026-09-09). Every phrase list in this
+  // file is written with single spaces, and includesAny does literal substring
+  // matching, so a seller typing "Wrong  #" (double space) missed the
+  // wrong-number list entirely and fell through to unclear/0.60 -- a real
+  // production miss that left a wrong number sitting in the active
+  // conversation lane instead of suppressed. Collapsing here fixes every
+  // phrase list at once rather than duplicating spaced variants.
+  return cleanMessage(value).toLowerCase().replace(/\s+/g, " ");
 }
 
 function includesAny(text, phrases = []) {
@@ -4010,6 +4017,39 @@ function matchesWrongNumberDisconnect(text = "") {
 }
 
 /**
+ * Does this message carry a DISPOSITION-RELEVANT disclosure -- the property was
+ * sold or transferred, or this is the wrong person / a non-owner -- even though
+ * the primary intent came out `unclear`?
+ *
+ * Added 2026-09-09 for the safe clarifier. The clarifier used to be capped at 4
+ * words on the theory that anything longer might hide exactly this kind of
+ * disclosure. That cap traded a real defect (silence for ordinary sentences)
+ * against a real risk (a chatty question answering "we closed on it in March").
+ * This predicate replaces the proxy with the actual test, reusing the SAME
+ * canonical matchers the intent resolver uses rather than a second keyword list,
+ * so the clarifier can cover ordinary messages while these still route to a
+ * human.
+ */
+export function carriesDispositionDisclosure(text = "") {
+  const normalized = lower(text);
+  if (!normalized) return false;
+  if (matchesWrongNumberDisconnect(normalized) || matchesSoldTransfer(normalized)) {
+    return true;
+  }
+  // Transaction language the intent resolver deliberately does NOT treat as a
+  // sale (it is too weak to drive sold_property on its own, and "we closed on
+  // the refinance" exists) but which is far too disposition-shaped to answer
+  // with a clarifying question. "We closed on it in March" is the live corpus
+  // case: it parses as `unclear`, and the only safe destination is a human.
+  // Deliberately clarifier-local -- this widens nothing about how intent is
+  // classified, only what the clarifier refuses to touch, and refusing sends
+  // the message to review rather than to silence.
+  return /\b(?:closed\s+on|closing\s+on|we\s+closed|already\s+closed|under\s+contract|in\s+escrow|quit\s*claim(?:ed)?|deeded(?:\s+it)?|transferred\s+(?:it|the\s+(?:property|title|deed))|no\s+longer\s+(?:own|the\s+owner)|foreclos(?:ed|ure)|bank\s+took\s+it)\b/i.test(
+    normalized
+  );
+}
+
+/**
  * Sold / transferred — a PROPERTY-scoped disposition, distinct from a
  * phone-identity disconnect. "I already sold that house" ends the
  * seller×property pairing; the person remains a legitimate contact who may
@@ -4910,7 +4950,33 @@ function resolveIntents(
     "i"
   );
 
+  // The seller reporting that THEY called US (2026-09-09). Every pattern above
+  // models a request directed at us ("call me", "give me a call"); none matched
+  // a seller saying they already tried. Live miss: "I call u but u not
+  // answering di phone" classified unclear/0.60 and got silence from a real
+  // owner who was actively dialling. These are the same conversational move --
+  // the seller wants voice contact -- so they route to callback_requested and
+  // get its text-first reply. Opt-out precedence is unaffected: "don't call me"
+  // and "stop calling" terminate at the opt-out early return ~400 lines above,
+  // long before this block is reachable.
+  // Bounded gap so contractions and aspect markers ride along ("I'm trying to
+  // call you", "I been trying to call u") without letting the subject drift to
+  // a third party -- the object must still be US ("you"/"u"/"back"), so
+  // "I called my agent about the roof" stays out. The gap forbids negation so
+  // "I never called you" is not read as a call attempt.
+  const called_us_report_re =
+    /\b(?:i|we)\b(?:(?!\b(?:not|never|didn'?t|don'?t|won'?t|cannot|can'?t)\b)[\s\S]){0,24}?\b(?:call|called|calling|phoned|rang|ring)\b\s*(?:you|u|ya|yall|y'all|back|the\s+number)\b/i;
+  const no_answer_complaint_re =
+    /\b(?:no(?:body|\s+one)?\s+(?:answer|answered|answers|picked\s+up|picking\s+up)|(?:you|u|ya)\s+(?:never|not|don'?t|didn'?t|dont|didnt)\s+(?:answer|answered|answering|pick(?:ed|ing)?\s+up)|not\s+answering|never\s+answer(?:ed|ing)?|went\s+to\s+voicemail|straight\s+to\s+voicemail)\b/i;
+  const pickup_imperative_re = /\b(?:pick\s+up\s+(?:the|your|ur)\s+phone|answer\s+(?:the|your|ur)\s+phone|answer\s+my\s+call)\b/i;
+  const spanish_call_report_re =
+    /\b(?:te\s+llam(?:e|é|amos)|le\s+llam(?:e|é)|te\s+he\s+llamado|no\s+contest(?:as|a|aste|an)|no\s+me\s+contest(?:as|a|aste)|llamame|llámame|llameme|llámeme)\b/i;
+
   if (
+    called_us_report_re.test(text) ||
+    no_answer_complaint_re.test(text) ||
+    pickup_imperative_re.test(text) ||
+    spanish_call_report_re.test(text) ||
     includesAny(text, [
       "call me", "phone me", "talk on phone", "give me a call",
       "text me", "send me a text", "message me", "whatsapp",

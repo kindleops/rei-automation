@@ -125,14 +125,37 @@ test("clarifier never fires for protected review reasons or non-ambiguous intent
       `protected reason must keep review: ${reason}`
     );
   }
-  // a review on a NON-ambiguous intent (e.g. probate-gated ownership) keeps review
-  assert.equal(
+  // POLICY CHANGED 2026-09-09. An understood-but-low-confidence intent used to
+  // keep review here, which in practice meant SILENCE -- nobody reads the
+  // review lane in real time, so a seller who confirmed ownership at 0.72
+  // (a bare "Yes" scores that in some thread contexts) simply got nothing back
+  // while the identical message on another thread was answered. The operator
+  // directive is that every seller gets a response, so these intents are now
+  // clarifier-eligible and receive a safe, non-committal question instead.
+  // The genuinely protected lanes above still keep review, and the compliance
+  // lanes (opt-out, wrong number, sold, hostile) are excluded from
+  // CLARIFIER_INTENTS entirely.
+  assert.ok(
     resolveSafeFallbackClarifierDispatch({
       decision: reviewDecision({ human_review_reason: "ambiguous_intent" }),
       classification: unclearClassification({ primary_intent: "ownership_confirmed" }),
       message: "hmm",
     }),
-    null
+    "an understood-but-low-confidence seller must get a clarifier, not silence"
+  );
+  // A protected-lane OBJECTION still overrides that, even on a clarifier-
+  // eligible intent: probate and the other distress lanes need a human.
+  assert.equal(
+    resolveSafeFallbackClarifierDispatch({
+      decision: reviewDecision({ human_review_reason: "ambiguous_intent" }),
+      classification: unclearClassification({
+        primary_intent: "ownership_confirmed",
+        objection: "probate",
+      }),
+      message: "hmm",
+    }),
+    null,
+    "probate must keep review even when the intent is clarifier-eligible"
   );
   // an already-queueing decision is untouched
   assert.equal(

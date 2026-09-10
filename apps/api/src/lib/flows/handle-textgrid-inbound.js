@@ -2223,9 +2223,20 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
       );
 
       // ── SEGMENT: auto-reply live cap ─────────────────────────────────────
-      // Cap live auto-replies at AUTO_REPLY_LIVE_CAP (default 5) for Phase 8 validation.
+      // AUTO_REPLY_LIVE_CAP is a GLOBAL per-UTC-day ceiling on live auto-replies.
+      // It defaulted to 5 as a Phase 8 validation guard, paired with the
+      // auto_reply_thread_allowlist canary. Both were artifacts of that
+      // controlled rollout, never an operator policy. With the allowlist
+      // cleared on 2026-09-09 this cap became the binding limit, and a global
+      // 5/day ceiling is not an auto-responder: the 6th seller of the day gets
+      // silence. At the target volume (10,000 outbound/day) it would leave
+      // effectively every replying seller unanswered.
+      // Default is now 0 (no cap). The real bounds are the per-thread duplicate
+      // window, the compliance suppressions (opt-out, wrong number), and
+      // inbound volume itself. Set AUTO_REPLY_LIVE_CAP to a positive integer to
+      // re-impose a ceiling without a deploy.
       let cap_reached = false;
-      const auto_reply_live_cap = asPositiveInt(process.env.AUTO_REPLY_LIVE_CAP, 5);
+      const auto_reply_live_cap = asPositiveInt(process.env.AUTO_REPLY_LIVE_CAP, 0);
       if (auto_reply_live_cap > 0 && inbound_autopilot_enabled) {
         try {
           const supabase = runtimeDeps.getSupabaseClient?.();

@@ -45,15 +45,38 @@ test("db-backed template use cases are REPORTED, not failed (honest CI boundary)
 
 test("ADVERSARIAL: removing a route makes an intent uncovered (intent_no_route)", () => {
   const g = clone(loadProductionCoverageGraph());
-  // who_is_this: terminal_hint reply_sent, not escalate/clarifier/review/terminal
-  // -> its ONLY destination is its route. Remove it and coverage breaks.
+  // The mutation needs an intent whose ONLY destination is its route.
+  // who_is_this used to qualify, but on 2026-09-09 it became clarifier-eligible
+  // (CLARIFIER_INTENTS was widened so an understood-but-low-confidence seller
+  // gets a question instead of silence), so deleting its route no longer
+  // breaks coverage -- that is the improvement, not a regression, and the
+  // second assertion below pins it. not_interested is now the single-
+  // destination case: it has a route and is deliberately NOT clarifier-eligible.
+  // Since 2026-09-09 EVERY routed intent also has clarifier backup, so no
+  // single deletion can strand one -- that is the anti-silence property, and
+  // the second half of this test pins it. To prove the guard still DETECTS an
+  // uncovered intent, the mutation must remove both destinations.
   delete g.routeProfiles.who_is_this;
+  g.clarifierIntents = (g.clarifierIntents || []).filter((i) => i !== "who_is_this");
   const r = auditCoverageGraph(g);
   assert.equal(r.ok, false);
   assert.ok(
     r.gaps.some((x) => x.code === "intent_no_route" && x.node === "who_is_this"),
     `expected intent_no_route for who_is_this, got ${JSON.stringify(codes(r))}`
   );
+
+  // ANTI-SILENCE GUARANTEE: removing a route ALONE must never strand an
+  // intent, for any routed intent. Deleting each route in turn must leave
+  // every one of them still covered, because the clarifier backs them up.
+  for (const intent of Object.keys(loadProductionCoverageGraph().routeProfiles)) {
+    const g2 = clone(loadProductionCoverageGraph());
+    delete g2.routeProfiles[intent];
+    const r2 = auditCoverageGraph(g2);
+    assert.ok(
+      !r2.gaps.some((x) => x.code === "intent_no_route" && x.node === intent),
+      `${intent} lost its only destination when its route was removed`
+    );
+  }
 });
 
 test("ADVERSARIAL: emptying a route's template candidates (immediate_send_no_template)", () => {
