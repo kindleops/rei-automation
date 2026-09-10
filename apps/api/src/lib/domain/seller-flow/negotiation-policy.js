@@ -61,8 +61,10 @@ const ASSET_CLASS_ALIASES = Object.freeze({
   fourplex: ASSET_CLASSES.SMALL_MULTIFAMILY,
   quadplex: ASSET_CLASSES.SMALL_MULTIFAMILY,
   multi_2_4: ASSET_CLASSES.SMALL_MULTIFAMILY,
-  multifamily: ASSET_CLASSES.LARGE_MULTIFAMILY,
-  apartment: ASSET_CLASSES.LARGE_MULTIFAMILY,
+  multi_family_2_4: ASSET_CLASSES.SMALL_MULTIFAMILY,
+  multifamily_2_4: ASSET_CLASSES.SMALL_MULTIFAMILY,
+  two_to_four: ASSET_CLASSES.SMALL_MULTIFAMILY,
+  plex: ASSET_CLASSES.SMALL_MULTIFAMILY,
   multi_5_plus: ASSET_CLASSES.LARGE_MULTIFAMILY,
   land: ASSET_CLASSES.LAND,
   lot: ASSET_CLASSES.LAND,
@@ -77,18 +79,135 @@ const ASSET_CLASS_ALIASES = Object.freeze({
   manufactured: ASSET_CLASSES.MOBILE_HOME,
 });
 
+/**
+ * Generic multifamily words that say "more than one unit" but NOT how many.
+ * Deliberately NOT in ASSET_CLASS_ALIASES: mapping them straight to a class is
+ * what produced the two live defects this replaces.
+ *   - "Multi-Family" (the literal on 32,164 production rows) normalized to
+ *     `multi_family`, matched no alias and no alias-substring, and fell through
+ *     to SFR -- so every multifamily seller was underwritten as a house.
+ *   - bare "Multifamily" matched the 5-plus alias, so a duplex was classed as a
+ *     commercial-style apartment building and had a rent roll demanded of it.
+ * Unit count decides the class; these words only establish that it is income
+ * residential and that the unit count is worth resolving.
+ */
+const GENERIC_MULTIFAMILY_TOKENS = Object.freeze([
+  "multi_family",
+  "multifamily",
+  "multi_unit",
+  "multiunit",
+  "apartment",
+  "residential_income",
+  "income_property",
+]);
+
+function normalizeAssetKey(input) {
+  return lower(input)
+    .replace(/[\s\-/]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
+function isGenericMultifamilyKey(key) {
+  if (!key) return false;
+  return GENERIC_MULTIFAMILY_TOKENS.some((token) => key.includes(token));
+}
+
+/**
+ * UNIT COUNT IS MORE SPECIFIC THAN PROPERTY TYPE.
+ *
+ * A credible numeric unit count answers the only question that separates SFR /
+ * 2-4 / 5-plus, so it wins over a broad text label for that decision. A label
+ * can still classify land, commercial or mobile home, which a unit count says
+ * nothing about.
+ */
 export function normalizeAssetClass(input, { unitCount = null } = {}) {
   const units = num(unitCount);
-  if (units !== null) {
+  const key = normalizeAssetKey(input);
+
+  // Non-residential labels are about USE, not unit count -- a 3-building
+  // industrial park is not a triplex. Resolve them from the label first.
+  const labelClass = ASSET_CLASS_ALIASES[key] || null;
+  if (
+    labelClass === ASSET_CLASSES.LAND ||
+    labelClass === ASSET_CLASSES.COMMERCIAL ||
+    labelClass === ASSET_CLASSES.MOBILE_HOME
+  ) {
+    return labelClass;
+  }
+
+  if (units !== null && units >= 1) {
     if (units >= 5) return ASSET_CLASSES.LARGE_MULTIFAMILY;
     if (units >= 2) return ASSET_CLASSES.SMALL_MULTIFAMILY;
+    // Exactly one unit is a single residence no matter what the label says.
+    // This used to fall through to the label, so a 1-unit row typed
+    // "Multifamily" resolved to 5-plus.
+    return ASSET_CLASSES.SFR;
   }
-  const key = lower(input).replace(/[\s-]+/g, "_");
-  if (ASSET_CLASS_ALIASES[key]) return ASSET_CLASS_ALIASES[key];
+
+  if (labelClass) return labelClass;
+
+  // Generic multifamily with an UNKNOWN unit count. Resolve to 2-4 rather than
+  // 5-plus: 2-4 requires unit_count (so the flow asks for it) and does NOT
+  // require a rent roll. Once the seller or the property record supplies a
+  // count of 5+, the branch above reclassifies and the 5-plus rent-roll
+  // requirement applies in full -- it is deferred, never skipped.
+  if (isGenericMultifamilyKey(key)) return ASSET_CLASSES.SMALL_MULTIFAMILY;
+
   for (const [alias, cls] of Object.entries(ASSET_CLASS_ALIASES)) {
     if (key && key.includes(alias)) return cls;
   }
   return ASSET_CLASSES.SFR;
+}
+
+/**
+ * Asset class WITH provenance and contradiction reporting.
+ *
+ * normalizeAssetClass answers "which class"; this answers "which class, decided
+ * by what, and did the two sources disagree?" so a bad property record is
+ * observable instead of silently steering a conversation.
+ */
+export function resolveAssetClassification({
+  property_type = null,
+  units_count = null,
+  reported_units_count = null,
+} = {}) {
+  const units = num(units_count);
+  const reportedUnits = num(reported_units_count);
+  const key = normalizeAssetKey(property_type);
+  const labelClass = key ? normalizeAssetClass(property_type, { unitCount: null }) : null;
+  const asset_class = normalizeAssetClass(property_type, { unitCount: units });
+
+  const genericMultifamily = isGenericMultifamilyKey(key);
+  const unit_source =
+    units !== null ? "property_record" : reportedUnits !== null ? "seller_reported" : "unknown";
+
+  let conflict = null;
+  if (units !== null && genericMultifamily && units === 1) {
+    conflict = "multifamily_label_with_single_unit";
+  } else if (
+    units !== null &&
+    units >= 2 &&
+    labelClass === ASSET_CLASSES.SFR &&
+    key &&
+    !genericMultifamily
+  ) {
+    conflict = "single_family_label_with_multiple_units";
+  } else if (reportedUnits !== null && units !== null && reportedUnits !== units) {
+    conflict = "seller_reported_units_differ_from_property_record";
+  }
+
+  return {
+    asset_class,
+    unit_count: units,
+    reported_units_count: reportedUnits,
+    unit_source,
+    property_type: String(property_type ?? "").trim() || null,
+    property_type_source: String(property_type ?? "").trim() ? "property_record" : "unknown",
+    units_known: units !== null,
+    generic_multifamily_label: genericMultifamily,
+    conflict,
+  };
 }
 
 export function resolveValueBand(referenceValue) {

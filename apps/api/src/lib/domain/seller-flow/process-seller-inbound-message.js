@@ -64,6 +64,7 @@ import {
   normalizeLifecycleStage,
   lifecycleStageNumber,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
+import { loadCanonicalPropertyMetadata } from "@/lib/domain/property/load-canonical-property-metadata.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import { summarizeSellerInboundSideEffects } from "@/lib/domain/seller-flow/seller-inbound-orchestration-summary.js";
 import {
@@ -1438,6 +1439,45 @@ export async function processSellerInboundMessage({
   const effective_ade_snapshot = fresh_ade_snapshot || persisted_ade || null;
 
   // ── Negotiation strategy (spec §6/§7): deterministic zone + single strategy.
+  // CANONICAL PROPERTY METADATA (2026-09-10).
+  //
+  // property_type and units_count decide the asset class, and the live context
+  // summary carries neither -- so every seller, including 2-4 unit multifamily
+  // owners, was underwritten as a single-family house and the multifamily
+  // branch was dead code in production. Read the canonical property row and
+  // merge it onto the SAME context summary the policy and sufficiency checks
+  // already consume, rather than introducing a parallel field.
+  //
+  // Non-fatal by construction: a miss leaves both null and the turn behaves
+  // exactly as it did before.
+  const canonical_property_metadata = await loadCanonicalPropertyMetadata(
+    supabase,
+    propertyId,
+    {
+      onError: (err) =>
+        runtimeDeps.warn?.("[PROPERTY_METADATA_LOOKUP_FAILED]", {
+          thread_key: threadKey || inboundFrom,
+          property_id: propertyId || null,
+          error: err?.message || "property_metadata_lookup_failed",
+        }),
+    }
+  );
+
+  const negotiation_context_summary = {
+    ...(context?.summary || {}),
+    // The property record is authoritative; only fill where the summary is
+    // silent so an existing explicit value is never clobbered.
+    property_type:
+      context?.summary?.property_type ||
+      canonical_property_metadata.property_type ||
+      null,
+    unit_count:
+      context?.summary?.unit_count ?? canonical_property_metadata.units_count ?? null,
+    unit_count_source: canonical_property_metadata.property_metadata_found
+      ? canonical_property_metadata.property_metadata_source
+      : null,
+  };
+
   const negotiation = resolveNegotiationTurn({
     transition,
     priceSignal: price_signal,
@@ -1446,7 +1486,7 @@ export async function processSellerInboundMessage({
     engineDecision: stage_engine_decision,
     intent: contract.normalized_intent,
     classificationConfidence: classification?.confidence ?? null,
-    contextSummary: context?.summary || {},
+    contextSummary: negotiation_context_summary,
     sourceMessageId: providerMessageId || inboundEventId,
   });
 

@@ -382,7 +382,14 @@ const KIND_CUES = Object.freeze([
   // price makes a rental look like a $1,450 house.
   // "bimonthly" and "mensualidad" are likewise not inflections of "monthly" /
   // "mensual" — both are recurring payments, never an asking price.
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad"] },
+  // RENT CUES CARRY THE MONTHLY MEANING ON THEIR OWN (2026-09-09).
+  // Sellers quote rent without ever saying "month": "rents are 1200 and 1350",
+  // "3 units, 1500 each", "they bring in 3200". Those were classified as
+  // ASKING_PRICE, so a duplex looked like it was for sale for $1,200 and the
+  // rent figure became the negotiation anchor. A rent token in the clause is
+  // as decisive as "/mo". "rental" is NOT included: the matcher is
+  // word-boundary based, and "I want 400k for the rental" is an asking price.
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
   // "repairman" is listed explicitly: it is not a regular inflection of
   // "repair", so the boundary matcher misses it and "the repairman quoted

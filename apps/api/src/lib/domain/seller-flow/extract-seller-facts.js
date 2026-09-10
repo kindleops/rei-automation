@@ -176,7 +176,7 @@ function extractTimeline(message, base) {
 // ── Occupancy ────────────────────────────────────────────────────────────────
 
 const OCCUPANCY_RULES = [
-  { status: "tenant_occupied", re: /\btenants? (live|living|there|in it|occup)|renters? (live|living|in it)|it'?s rented|i rent it out|rented out|inquilinos?\b|est[aá] rentad|arrendatario/i },
+  { status: "tenant_occupied", re: /\btenants? (live|living|there|in it|occup)|renters? (live|living|in it)|it'?s rented|i rent it out|rented out|(?:fully|currently|all) occupied|occupied with|active lease|under lease|inquilinos?\b|est[aá] rentad|arrendatario/i },
   { status: "vacant", re: /\bvacant|empty|no one (lives|living)|nobody (lives|living)|sitting empty|boarded( |-)?up|desocupad|vac[ií]a|nadie vive/i },
   { status: "owner_occupied", re: /\b(i|we) live (in|there|here)|my primary (home|residence)|owner[- ]occupied|vivo (aqu[ií]|ah[ií]|en la casa)|vivimos (aqu[ií]|ah[ií])/i },
 ];
@@ -189,6 +189,188 @@ function extractOccupancy(message, base) {
     }
   }
   return null;
+}
+
+// ── Rents and unit count (multifamily) ──────────────────────────────────────
+//
+// The parsing already existed (extractRentSignals, monetary-understanding) but
+// nothing carried the result into the flat fact store that
+// evaluateUnderwritingSufficiency reads, so a seller could answer "they bring
+// in 3200" and the number had no durable consequence. These extractors close
+// that gap. They record what the SELLER SAID, with seller_reported provenance;
+// the canonical property record remains authoritative for unit_count.
+//
+// TOTAL vs PER-UNIT is preserved as two different facts and never collapsed:
+// "1500 each" on a triplex is not the same statement as "1500 total", and
+// throwing away which one was said would make the derived total unfalsifiable.
+
+const UNIT_WORD_NUMBERS = Object.freeze({
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12,
+  dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8,
+});
+
+const PLEX_UNIT_COUNTS = Object.freeze({
+  duplex: 2, triplex: 3, fourplex: 4, quadplex: 4, quad: 4, "4plex": 4, "3plex": 3, "2plex": 2,
+});
+
+function parseUnitWord(token) {
+  const key = String(token ?? "").trim().toLowerCase();
+  if (!key) return null;
+  if (UNIT_WORD_NUMBERS[key] !== undefined) return UNIT_WORD_NUMBERS[key];
+  const n = Number(key);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The seller stating how many units the building has. Recorded as
+ * `reported_units_count` -- deliberately NOT `unit_count`, which belongs to the
+ * property record. A conflict between the two is resolved downstream, never by
+ * silently overwriting canonical data here.
+ */
+function extractReportedUnitCount(message, base) {
+  const plexEvidence = findEvidence(
+    message,
+    /\b(duplex|triplex|fourplex|quadplex|quad|[234]plex)\b/i
+  );
+  if (plexEvidence) {
+    const word = String(plexEvidence.text || "").trim().toLowerCase();
+    const units = PLEX_UNIT_COUNTS[word] ?? null;
+    if (units) {
+      return fact(
+        { reported_units_count: units },
+        { ...base, confidence: 0.85, evidence: plexEvidence }
+      );
+    }
+  }
+
+  const countEvidence = findEvidence(
+    message,
+    /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|dos|tres|cuatro|cinco|seis|siete|ocho)\s*(?:total\s+)?(?:units?|apartments?|apts?|doors?|unidades?)\b/i
+  );
+  if (countEvidence) {
+    const match = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|dos|tres|cuatro|cinco|seis|siete|ocho)\b/i.exec(
+      countEvidence.text
+    );
+    const units = match ? parseUnitWord(match[1]) : null;
+    // A "unit" count above 50 from free text is far more likely a misread than
+    // a real building on this list; refuse rather than record a wild number.
+    if (units !== null && units >= 1 && units <= 50) {
+      return fact(
+        { reported_units_count: units },
+        { ...base, confidence: 0.8, evidence: countEvidence }
+      );
+    }
+  }
+  return null;
+}
+
+const RENT_TOTAL_RE =
+  /(?:gross rents?|rent roll|total rents?|rents? total|bringing in|brings in|bring in|collect(?:ing|s)?|in total|total)[^\d$]{0,20}\$?\s*([\d,]{3,8})|\$?\s*([\d,]{3,8})\s*(?:a month |per month |monthly )?(?:total|in total|all together|altogether|combined)/i;
+
+const RENT_PER_UNIT_RE =
+  /(?:each|apiece|a piece|per unit|a unit|per door|a door|each unit|every unit|por unidad|cada uno|cada una)[^\d$]{0,20}\$?\s*([\d,]{3,6})|\$?\s*([\d,]{3,6})\s*(?:a month |per month |monthly )?(?:each|apiece|a piece|per unit|a unit|per door|por unidad|cada uno)/i;
+
+function firstNumberFromMatch(match) {
+  if (!match) return null;
+  const raw = match[1] ?? match[2] ?? null;
+  if (raw === null) return null;
+  const n = Number(String(raw).replace(/,/g, ""));
+  // Monthly residential rent outside this band is a parse error, not a rent.
+  return Number.isFinite(n) && n >= 100 && n <= 100000 ? n : null;
+}
+
+/**
+ * Seller-stated rent. Emits the TOTAL and the PER-UNIT figure as separate
+ * facts, plus the individual per-unit amounts when the seller enumerates them
+ * ("unit 1 is 1200, unit 2 is 1350"). Never fabricates a figure for a unit the
+ * seller did not price -- a vacant third unit stays absent, and completeness is
+ * reported rather than guessed.
+ */
+/**
+ * Human-readable rent summary. This is the key `evaluateUnderwritingSufficiency`
+ * already reads (`facts.rents_summary`) to decide whether a 5-plus property
+ * still owes us a rent roll, so it must be a non-empty scalar whenever any rent
+ * fact was captured -- and empty when none was, so the requirement still binds.
+ * Completeness is stated, never implied: a partially-priced building says so.
+ */
+function summarizeRentFacts(value = {}) {
+  const parts = [];
+  if (value.monthly_gross_rent !== undefined) {
+    parts.push(`total ${value.monthly_gross_rent}/mo`);
+  }
+  if (value.average_monthly_unit_rent !== undefined) {
+    parts.push(`${value.average_monthly_unit_rent}/mo per unit`);
+  }
+  if (Array.isArray(value.reported_unit_rents) && value.reported_unit_rents.length) {
+    parts.push(`units: ${value.reported_unit_rents.join(", ")}`);
+  }
+  if (!parts.length) return null;
+  return `seller reported ${parts.join("; ")}`;
+}
+
+function extractRents(message, base) {
+  const totalEvidence = findEvidence(message, RENT_TOTAL_RE);
+  const perUnitEvidence = findEvidence(message, RENT_PER_UNIT_RE);
+
+  const monthly_gross_rent = firstNumberFromMatch(RENT_TOTAL_RE.exec(message));
+  const average_monthly_unit_rent = firstNumberFromMatch(RENT_PER_UNIT_RE.exec(message));
+
+  // Enumerated per-unit rents, two shapes:
+  //   (a) explicitly labelled -- "unit 1 is 1200, unit 2 is 1350"
+  //   (b) a bare list inside a sentence that already names rent -- "rents are
+  //       1200 and 1350"
+  // Shape (a) needs no rent keyword, because "unit N is <amount>" is already
+  // unambiguous. Shape (b) requires one, so a list of unrelated numbers is
+  // never mistaken for a rent roll. Neither shape invents a figure for a unit
+  // the seller did not price: "the third one is vacant" contributes nothing.
+  let reported_unit_rents = [];
+  const labelled = [
+    ...String(message).matchAll(
+      /\bunit\s*#?\s*\d{1,2}\s*(?:is|at|rents?\s+for|=|\-|:)?\s*\$?\s*([\d,]{3,6})/gi
+    ),
+  ]
+    .map((m) => Number(String(m[1]).replace(/,/g, "")))
+    .filter((n) => Number.isFinite(n) && n >= 100 && n <= 100000);
+
+  if (labelled.length >= 1) {
+    reported_unit_rents = labelled;
+  } else if (/\brent|renting|tenant|lease|bring(?:s|ing)? in|collect/i.test(message)) {
+    const amounts = String(message).match(/\$?\s*\b\d{3,5}\b/g) || [];
+    reported_unit_rents = amounts
+      .map((a) => Number(a.replace(/[^\d]/g, "")))
+      .filter((n) => Number.isFinite(n) && n >= 100 && n <= 100000);
+    if (reported_unit_rents.length < 2) reported_unit_rents = [];
+  }
+
+  if (
+    monthly_gross_rent === null &&
+    average_monthly_unit_rent === null &&
+    reported_unit_rents.length === 0
+  ) {
+    return null;
+  }
+
+  const value = {};
+  if (monthly_gross_rent !== null) value.monthly_gross_rent = monthly_gross_rent;
+  if (average_monthly_unit_rent !== null) {
+    value.average_monthly_unit_rent = average_monthly_unit_rent;
+  }
+  if (reported_unit_rents.length > 0) value.reported_unit_rents = reported_unit_rents;
+  value.rent_basis =
+    monthly_gross_rent !== null && average_monthly_unit_rent === null
+      ? "total"
+      : average_monthly_unit_rent !== null && monthly_gross_rent === null
+        ? "per_unit"
+        : monthly_gross_rent !== null && average_monthly_unit_rent !== null
+          ? "mixed"
+          : "enumerated";
+
+  return fact(value, {
+    ...base,
+    confidence: 0.8,
+    evidence: totalEvidence || perUnitEvidence || findEvidence(message, /\brents?\b/i),
+  });
 }
 
 // ── Listing / agent involvement ──────────────────────────────────────────────
@@ -643,6 +825,12 @@ export function extractSellerFacts({
   const occupancy = extractOccupancy(text, base);
   if (occupancy) result.facts.occupancy = occupancy;
 
+  const reportedUnits = extractReportedUnitCount(text, base);
+  if (reportedUnits) result.facts.reported_units = reportedUnits;
+
+  const rents = extractRents(text, base);
+  if (rents) result.facts.rents = rents;
+
   const listing = extractListingStatus(text, base);
   if (listing) result.facts.listing_status = listing;
 
@@ -717,6 +905,32 @@ export function extractionToResolverFacts(extraction = null) {
   }
   if (facts.timeline?.value?.urgency) {
     out.timeline = facts.timeline.value.urgency;
+  }
+  // FLAT KEYS ONLY. mergeSellerFacts -> facts_patch -> metadata.seller_facts
+  // carries scalars; a nested object here would persist but never be read by
+  // evaluateUnderwritingSufficiency. Provenance is explicit because a
+  // seller-stated rent must never be mistaken for a verified one.
+  if (facts.reported_units?.value?.reported_units_count) {
+    out.reported_units_count = facts.reported_units.value.reported_units_count;
+    out.reported_units_count_source = "seller_reported";
+  }
+  if (facts.rents?.value) {
+    const rentValue = facts.rents.value;
+    if (rentValue.monthly_gross_rent !== undefined) {
+      out.monthly_gross_rent = rentValue.monthly_gross_rent;
+    }
+    if (rentValue.average_monthly_unit_rent !== undefined) {
+      out.average_monthly_unit_rent = rentValue.average_monthly_unit_rent;
+    }
+    if (Array.isArray(rentValue.reported_unit_rents) && rentValue.reported_unit_rents.length) {
+      // Stored as a delimited scalar to respect the flat-key constraint while
+      // keeping every individually quoted rent recoverable.
+      out.reported_unit_rents = rentValue.reported_unit_rents.join(",");
+      out.reported_unit_rent_count = rentValue.reported_unit_rents.length;
+    }
+    out.rent_basis = rentValue.rent_basis || null;
+    out.rents_summary = summarizeRentFacts(rentValue);
+    out.rents_source = "seller_reported";
   }
   if (facts.offer_interest?.value?.wants_offer) {
     out.wants_offer = true;
