@@ -212,24 +212,28 @@ export function compactInboxThreadSummaryRow(row = {}) {
     master_owner_id: row.master_owner_id || null,
     display_name: row.display_name || row.owner_name || row.seller_display_name || row.owner_display_name || row.event_seller_display_name || null,
     owner_name: row.owner_name || row.owner_display_name || row.seller_display_name || row.event_seller_display_name || row.display_name || null,
-    // The dashboard's name resolver (resolveInboxProspectNameWithSource,
-    // apps/dashboard/src/lib/data/inboxData.ts:518) reads prospect_full_name / prospect_name /
-    // seller_display_name / contact_name / prospect_cnam / metadata — and reads NEITHER
-    // display_name NOR owner_name. So this mapper hydrated identity and then emitted it under
-    // two keys the client never looks at, and every row fell through to the phone-number
-    // fallback. Same trap the lead_temperature note below describes: selected is not emitted.
-    prospect_name: row.prospect_name || row.prospect_full_name || null,
-    prospect_full_name: row.prospect_full_name || row.prospect_name || null,
+    // ONE added key, deliberately. The compact row is budgeted at <=50 keys and asserted
+    // twice in inbox-live-v2-service.test.mjs ("initial boot ..." and "manual bucket switch
+    // ..."); the baseline is 49, so there is exactly one slot.
+    //
+    // It goes to seller_display_name because the dashboard's name resolver
+    // (resolveInboxProspectNameWithSource, apps/dashboard/src/lib/data/inboxData.ts:518)
+    // reads prospect_full_name / prospect_name / seller_display_name / contact_name /
+    // prospect_cnam / metadata — and reads NEITHER display_name NOR owner_name, the two keys
+    // this mapper already emitted. So identity was hydrated and then published under names
+    // the client never looks at, and every row fell through to the phone-number fallback.
+    // seller_display_name is the highest-coverage field in that chain on production
+    // (9,687 of 9,741 rows, vs 7,512 for prospect_name), so one key buys ~99.4% of names.
+    //
+    // The flag strings that feed the signal chips (property_flags_text / person_flags_text /
+    // matching_flags) are ALREADY emitted further down — they were arriving null only because
+    // linked-context hydration was being skipped, which live-inbox-service.js now fixes. They
+    // need no new key here.
+    //
+    // Delivery ticks still need latest_delivery_status + is_read, which would be two more
+    // keys and would breach the budget. Left out on purpose rather than quietly raising a
+    // performance guard someone set deliberately.
     seller_display_name: row.seller_display_name || row.event_seller_display_name || null,
-    // Signal chips (SENIOR OWNER / TIRED LANDLORD / ABSENTEE …) are parsed from these flag
-    // strings by parsePropertyFlagTokens in InboxSidebar.tsx; unemitted, no chip can render.
-    property_flags_text: row.property_flags_text || null,
-    person_flags_text: row.person_flags_text || null,
-    matching_flags: row.matching_flags || null,
-    // Delivery ticks: both keys are already selected upstream and were being dropped here.
-    latest_delivery_status: row.latest_delivery_status || row.delivery_status || null,
-    delivery_status: row.delivery_status || row.latest_delivery_status || null,
-    is_read: row.is_read === true,
     property_address_full: row.property_address_full || row.display_address || row.property_address || null,
     property_address: row.property_address || row.property_address_full || row.display_address || null,
     market: row.market || row.display_market || null,
