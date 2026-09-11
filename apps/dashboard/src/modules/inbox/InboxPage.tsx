@@ -129,6 +129,8 @@ import {
   OPEN_INBOX_DEAL_INTEL_EVENT,
   openInboxDealIntelligence,
   peekPendingInboxDealIntelligence,
+  peekPendingInboxDealIntelligenceIdentity,
+  clearPendingInboxDealIntelligenceIdentity,
   publishMobileInboxBadge,
 } from '../mobile/mobile-inbox-bridge'
 
@@ -160,6 +162,7 @@ import {
   type InboxLayoutState,
   type MapSourceMode,
 } from '../../domain/inbox/inbox-layout-state'
+import { readPropertyLocator, setPropertyLocator } from '../../domain/locator/property-locator'
 import {
   buildContextFromActivityEvent,
   buildContextFromCalendarEvent,
@@ -2019,9 +2022,81 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [focusWorkspaceView, isMobile, isMobileInboxShell, isRouteFullscreen, selectFromExternalContext, threads])
 
+  /**
+   * SEED FROM THE LOCATOR ON MOUNT.
+   *
+   * Map, Pipeline, Calendar and Comp Intelligence all focus off the inbox
+   * activeContext rather than a URL parameter, and every route change unmounts
+   * this component - so arriving from a dock tap they booted with an empty
+   * context and rendered the generic surface even though the operator had a
+   * property selected moments earlier.
+   *
+   * Runs once, only when there is no context already, so it can never override
+   * a live in-session selection or fight selectFromExternalContext.
+   */
+  const locatorSeededRef = useRef(false)
+  useEffect(() => {
+    if (locatorSeededRef.current) return
+    if (activeContext?.propertyId || activeContext?.threadKey) {
+      // Something already focused this view - a live selection, or
+      // selectFromExternalContext. Never override it.
+      locatorSeededRef.current = true
+      return
+    }
+    const locator = readPropertyLocator()
+    if (!locator) return
+    locatorSeededRef.current = true
+    setActiveContext(
+      {
+        propertyId: locator.propertyId,
+        threadKey: locator.threadKey,
+        masterOwnerId: locator.masterOwnerId,
+        sellerId: locator.masterOwnerId,
+        prospectId: locator.prospectId,
+        propertyAddress: locator.address,
+        entityType: locator.propertyId ? 'property' : locator.masterOwnerId ? 'master_owner' : null,
+        entityId: locator.propertyId || locator.masterOwnerId || null,
+        sourceView: 'list',
+      },
+      { preserveCurrentViews: true },
+    )
+  }, [activeContext, setActiveContext])
+
   const resolveDealIntelThreadId = useCallback((): string | null => {
     const active = selectedRef.current
     if (active?.id) return active.id
+
+    // ARRIVING FROM ANOTHER APP. The dock records WHICH deal to open before it
+    // navigates, because this component remounts with no selection. Without
+    // that identity the fallback below returns whatever happens to sit first in
+    // the list - i.e. Deal Intelligence opened somebody else's deal.
+    const pending = peekPendingInboxDealIntelligenceIdentity()
+    if (pending) {
+      const norm = (value: unknown) => {
+        const text = String(value ?? '').trim()
+        return text.length > 0 ? text.toLowerCase() : null
+      }
+      const wanted = {
+        threadKey: norm(pending.threadKey),
+        propertyId: norm(pending.propertyId),
+        prospectId: norm(pending.prospectId),
+        masterOwnerId: norm(pending.masterOwnerId),
+      }
+      const matches = (row: InboxWorkflowThread) => {
+        const candidate = row as unknown as Record<string, unknown>
+        // threadKey is the strongest identity; the rest are ordered by how
+        // specific they are to one property.
+        if (wanted.threadKey && norm(candidate.threadKey ?? row.id) === wanted.threadKey) return true
+        if (wanted.propertyId && norm(candidate.propertyId) === wanted.propertyId) return true
+        if (wanted.prospectId && norm(candidate.prospectId) === wanted.prospectId) return true
+        if (wanted.masterOwnerId
+          && norm(candidate.ownerId ?? candidate.masterOwnerId) === wanted.masterOwnerId) return true
+        return false
+      }
+      const match = threads.find(matches) ?? filtered.find(matches) ?? null
+      if (match?.id) return match.id
+    }
+
     const fallback = filtered[0] ?? threads[0] ?? null
     return fallback?.id ?? null
   }, [filtered, threads])
@@ -2051,6 +2126,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         setMobileThreadOpen(true)
         setMobileIntelOpen(true)
         clearPendingInboxDealIntelligence()
+    clearPendingInboxDealIntelligenceIdentity()
+        clearPendingInboxDealIntelligenceIdentity()
       }
       return
     }
@@ -3661,14 +3738,41 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     handleThreadAction(selected, selected.isArchived ? 'unarchive' : 'archive')
   }, [handleThreadAction, selected])
 
+
+  /**
+   * Publish the GLOBAL PROPERTY LOCATOR at selection time.
+   *
+   * The bottom dock needs to know which property the operator is looking at,
+   * but by the time a dock tap is handled the in-memory selection is already
+   * gone: pushRoutePath fires popstate, the shared entity snapshot is cleared,
+   * and the view unmounts. So the locator has to be written the moment the
+   * operator picks a thread, not when they navigate away from it.
+   */
+  const publishPropertyLocator = useCallback((thread: InboxWorkflowThread | null | undefined) => {
+    if (!thread) return
+    const ctx = buildContextFromThread(thread, 'inbox')
+    setPropertyLocator({
+      propertyId: ctx.propertyId ?? null,
+      threadKey: ctx.threadKey ?? null,
+      masterOwnerId: ctx.masterOwnerId ?? null,
+      prospectId: ctx.prospectId ?? null,
+      opportunityId:
+        (ctx as { opportunityId?: string | null }).opportunityId
+        ?? (thread as unknown as { opportunityId?: string | null }).opportunityId
+        ?? null,
+      address: ctx.propertyAddress ?? null,
+    })
+  }, [])
+
   const anchorThreadSelection = useCallback((id: string) => {
     const thread = findThreadByRef(threads, id)
     // Without a resolvable thread there is no identity to select. Anchoring on a bare id
     // used to create a phantom selection whose panels could never hydrate.
     if (!thread) return
     setActiveContext(buildContextFromThread(thread, 'pipeline'), { preserveCurrentViews: true })
+    publishPropertyLocator(thread)
     selectThread(thread)
-  }, [selectThread, setActiveContext, threads])
+  }, [publishPropertyLocator, selectThread, setActiveContext, threads])
 
   const handleMobileBack = useCallback(() => {
     setMobileThreadOpen(false)
@@ -3707,6 +3811,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }
       }
       setActiveContext(buildContextFromThread(thread, 'inbox'), { preserveCurrentViews: true })
+      publishPropertyLocator(thread)
       selectThread(thread)
     } else if (DEV) {
       // A row id that resolves to no thread carries no identity to select. Anchoring on
