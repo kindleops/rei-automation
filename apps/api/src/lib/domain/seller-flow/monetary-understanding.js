@@ -235,6 +235,50 @@ function hasAddressSubjectBefore(text, match) {
   );
 }
 
+/**
+ * PHONE NUMBERS. Every component of one, not just the whole.
+ *
+ * "Please call me. 1-209-505-5314" yielded TWO asking prices: the 4-digit
+ * line number 5314, and the area code 209 scaled to $209,000 by the
+ * hundreds-shorthand rule. Sub-token extraction is the real hazard, so the
+ * guard works on SPANS: any amount whose digits fall inside a phone-shaped run
+ * is not money.
+ *
+ * Covers 1-209-505-5314, 209-505-5314, (209) 505-5314, 209.505.5314,
+ * 209 505 5314 and the bare 2095055314.
+ */
+const PHONE_SHAPES = [
+  // The separator after the area code is OPTIONAL, because "(561)706-4622"
+  // writes none. Missing that cost a $561,000 asking price from an area code -
+  // and only surfaced once the line-number component stopped winning selection.
+  /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]\d{4}\b/g,
+  /\b\d{10}\b/g,
+  /\b\d{3}[\s.-]\d{4}\b/g,
+];
+
+function phoneSpans(text) {
+  const spans = [];
+  for (const re of PHONE_SHAPES) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) spans.push([m.index, m.index + m[0].length]);
+  }
+  return spans;
+}
+
+function isInsidePhoneNumber(text, match, spans = null) {
+  // OVERLAP, not containment. The amount regex begins with `\$?\s*`, so
+  // match.index points at the whitespace BEFORE the digits - one character
+  // outside the phone span. Strict containment therefore missed every
+  // component that followed a space, which is most of them.
+  const start = match.index;
+  const end = match.index + match[0].length;
+  for (const [a, b] of spans ?? phoneSpans(text)) {
+    if (start < b && end > a) return true;
+  }
+  return false;
+}
+
 function isAddressAdjacent(text, match) {
   if (hasAddressSubjectBefore(text, match)) return true;
   const after = text.slice(match.index + match[0].length);
@@ -345,6 +389,8 @@ function isCalendarYear(text, match, digits, value) {
 /** Extract every numeric token (digits or words) with its position + suffix scale. */
 function tokenizeAmounts(text) {
   const amounts = [];
+  // Computed once per message, not per amount.
+  const phone_spans = phoneSpans(text);
 
   // Digit-based: $100,000 / 100k / 95.5k / 1.2m / 80 / $500.000 (dot-thousands)
   const numRe = /\$?\s*(\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+(?!\d)|\d+(?:\.\d+)?)\s*(k|m|mil|grand|thousand|million|hundred)?\b/gi;
@@ -373,9 +419,20 @@ function tokenizeAmounts(text) {
     }
     // A postal code ("zip is 55407", "Minneapolis, MN 55407") and a calendar
     // year ("built in 1987") are not money either.
+    // A phone number is never money, whatever punctuation it carries. This sits
+    // OUTSIDE the no-separator branch on purpose: "561.706.4622" parses as
+    // European dot-thousands, so hadThousandsSeparator is true and the guarded
+    // block below would never run - leaving $561,706.
+    if (isInsidePhoneNumber(text, match, phone_spans)) continue;
+
     if (!suffix && !hasCurrency && !hadThousandsSeparator) {
       if (isPostalCode(text, match, match[1])) continue;
       if (isCalendarYear(text, match, match[1], value)) continue;
+      // A SPLIT ADDRESS or a fraction: "121/123 Congress Ave", "1145 1/2".
+      // The number is glued to a slash on one side, which no price ever is.
+      const slash_before = /\d\s*\/\s*$/.test(text.slice(Math.max(0, match.index - 6), match.index + (match[0].length - match[1].length)));
+      const slash_after = /^\s*\/\s*\d/.test(text.slice(match.index + match[0].length));
+      if (slash_before || slash_after) continue;
     }
     // Percentages are not monetary values.
     if (/^\s*%/.test(after) || /percent/i.test(trailingWord)) continue;
@@ -407,6 +464,14 @@ function tokenizeAmounts(text) {
       end: match.index + match[0].length,
       has_currency: hasCurrency,
       has_scale: Boolean(suffix) || hadThousandsSeparator || value >= 1000,
+      // EXPLICIT magnitude: the seller actually marked the scale - a suffix
+      // (k / m / mil / thousand), a thousands separator, or a currency symbol.
+      //
+      // has_scale above treats ANY value >= 1000 as scaled, which conflates
+      // "big enough to be money" with "the seller said how big". That is why
+      // 1720 Pannell, 77020, 2020 and a phone fragment 5314 all arrived as
+      // asking prices at confidence 0.75. Size is not a statement of magnitude.
+      has_explicit_magnitude: Boolean(suffix) || hadThousandsSeparator || hasCurrency,
       from_words: false,
     });
   }
@@ -432,6 +497,7 @@ function tokenizeAmounts(text) {
         end: index + tokens.slice(i, i + parsed.length).join(" ").length,
         has_currency: false,
         has_scale: true,
+        has_explicit_magnitude: true,
         from_words: true,
       });
       i += parsed.length - 1;
@@ -593,6 +659,69 @@ function includesCue(window, cues) {
  * ("I owe $60k but I want $110k") must each bind to their own cue — a single
  * shared window would smear the first cue across both numbers.
  */
+/**
+ * PHRASE-LEVEL EXCLUSIONS. Specificity wins over a bare cue word.
+ *
+ * "clear" is a legitimate NET cue - "I need 400 clear" means $400k in hand.
+ * But "paid for free and clear" is DEBT STATUS, not a net price, and it turned
+ * "6245 Mozart is paid for free and clear" into a $6,245 NET asking price.
+ *
+ * So the cue word survives; only the phrase is excluded, and only where it
+ * actually occurs.
+ */
+const CUE_PHRASE_EXCLUSIONS = Object.freeze([
+  { cue: "clear", phrase: /\b(?:free\s+and\s+clear|paid\s+(?:for\s+)?free\s+and\s+clear|owned?\s+free\s+and\s+clear|clear\s+title|clear\s+of\s+(?:any\s+)?(?:liens?|debt))\b/gi },
+]);
+
+/** Character spans where a cue word is part of an excluded phrase. */
+function excludedCueSpans(text) {
+  const spans = new Map();
+  for (const { cue, phrase } of CUE_PHRASE_EXCLUSIONS) {
+    phrase.lastIndex = 0;
+    let m;
+    while ((m = phrase.exec(text)) !== null) {
+      if (!spans.has(cue)) spans.set(cue, []);
+      spans.get(cue).push([m.index, m.index + m[0].length]);
+    }
+  }
+  return spans;
+}
+
+/**
+ * EXPLICIT REFUSAL DOMINATES ANY NUMBER IN THE SAME CLAUSE.
+ *
+ * "7k x 12months/ no sale" is a rent calculation with the word "no sale"
+ * attached; "1246 is not for sale" is a street number. Neither is an ask, and
+ * a number sharing a clause with a refusal must never become one.
+ *
+ * Clause-bounded, never sentence-bounded: "Not for sale but if you gave me 400
+ * I would think about it" contains a genuine $400k ask after the conjunction,
+ * and suppressing the whole sentence would throw away a live lead.
+ */
+const REFUSAL_PHRASES =
+  /\b(?:not\s+for\s+sale|not\s+for\s+sell|no\s+sale|not\s+selling|won'?t\s+sell|will\s+not\s+sell|no\s+esta?\s+a\s+la\s+venta|no\s+vendo)\b/i;
+
+function isInRefusalClause(text, amount) {
+  const start = amount.index;
+  const clauseStart = Math.max(
+    ...[".", "?", "!", ",", ";", "\n"].map((ch) => text.lastIndexOf(ch, start - 1)),
+    // "unless" and "except" REVERSE a refusal - "not for sale unless you have
+    // $400,000" is a conditional ask, and treating the refusal as governing
+    // the whole sentence threw away a real $400k price.
+    ...[" but ", " however ", " though ", " unless ", " except ", " if you "].map((w) => {
+      const i = text.toLowerCase().lastIndexOf(w, start);
+      return i === -1 ? -1 : i + w.length;
+    }),
+    0,
+  );
+  let clauseEnd = text.length;
+  for (const ch of [".", "?", "!", ",", ";", "\n"]) {
+    const i = text.indexOf(ch, amount.end ?? start);
+    if (i !== -1 && i < clauseEnd) clauseEnd = i;
+  }
+  return REFUSAL_PHRASES.test(text.slice(clauseStart, clauseEnd));
+}
+
 function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) {
   const lowerText = lower(text);
   const radius = 60;
@@ -601,12 +730,19 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   const window = lowerText.slice(windowStart, windowEnd);
 
   const matches = [];
+  const excluded = excludedCueSpans(text);
   const consider = (kind, cue) => {
     const re = cueBoundaryRegex(cue);
+    const excludedForCue = excluded.get(cue);
     let m;
     while ((m = re.exec(window)) !== null) {
       const start = m.index;
       const end = m.index + m[0].length;
+      if (excludedForCue) {
+        const absStart = windowStart + start;
+        const absEnd = windowStart + end;
+        if (excludedForCue.some(([a, b]) => absStart < b && absEnd > a)) continue;
+      }
       const cueMid = windowStart + start + cue.length / 2;
       const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
       matches.push({ kind, dist, start, end });
@@ -691,6 +827,35 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       confidence = Math.min(confidence, 0.3);
     }
 
+    // ── BARE 4-5 DIGIT SAFETY GATE ──────────────────────────────────────
+    //
+    // An integer in [1000, 99999] with NO explicit magnitude marker and NO
+    // asking-price cue tied to it is overwhelmingly a street number, a ZIP, a
+    // calendar year, a phone fragment, a rent or a payment - not a sale price.
+    // Being in an asking-price conversation does not change what the number
+    // IS, so stage/context deliberately does not rescue it.
+    //
+    // The band stops at 99999 on purpose: no ZIP, year or street number
+    // reaches six figures, so a bare 150000 or 425000 is still a real ask.
+    // And a cue still rescues it - "I need 2500 for the property" keeps the
+    // LITERAL 2500 rather than being invented into $2.5M.
+    // ROUNDNESS is the discriminator, not magnitude.
+    //
+    // A real-estate price in this band is essentially always a round multiple
+    // of 1,000 - 32000, 55000, 95000. The hazards are not: 1720 and 1246 and
+    // 6245 are street numbers, 2020 is a year, 77020 and 55407 are ZIPs, 5314
+    // and 4875 and 7286 are phone fragments. Every one of them carries a
+    // non-zero remainder.
+    //
+    // This keeps "I'm interested in 95000" - a genuine price with no ask cue -
+    // while still refusing "we are in 55407".
+    const bare_midrange_integer =
+      !amount.has_explicit_magnitude &&
+      !scaled_from_reference &&
+      value >= 1000 &&
+      value <= 99_999 &&
+      value % 1000 !== 0;
+
     let kind = classifyByNearestCue(text, amount, { negotiationActive });
     const boundToAskCue =
       kind === MONETARY_KINDS.ASKING_PRICE || kind === MONETARY_KINDS.COUNTER_OFFER;
@@ -706,11 +871,34 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       contingent_on_closing_costs: kind === MONETARY_KINDS.CLOSING_COST_TERM,
     };
 
+    // THE GATE APPLIES TO EVERY KIND, not just UNKNOWN.
+    //
+    // "6245 Mozart is paid for free and clear inside of an irrevocable trust..."
+    // is a long message, and a ceiling cue far from the number promoted the
+    // street number to MAXIMUM_PRICE at confidence 0.7 - straight past a gate
+    // that only ran for UNKNOWN. A cue somewhere in the sentence is not a cue
+    // TIED TO THE AMOUNT.
+    //
+    // An explicit ask cue still rescues it, because that IS tied to the amount.
+    if (bare_midrange_integer && !boundToAskCue) {
+      confidence = Math.min(confidence, 0.3);
+    }
+
+    // An explicit refusal in the same clause outranks every price cue.
+    if (isInRefusalClause(text, amount)) {
+      confidence = Math.min(confidence, 0.3);
+    }
+
     if (kind === MONETARY_KINDS.UNKNOWN) {
       // No semantic cue at all: currency/scale marks it a price statement;
       // a bare plausible number stays low-confidence so the caller clarifies
       // instead of guessing (spec §3).
-      if (amount.has_currency || amount.has_scale || scaled_from_reference) {
+      if (bare_midrange_integer) {
+        // Fails unresolved rather than entering ADE as a fabricated economic
+        // fact. The >= 0.5 acceptance gate in resolveAskingPriceSignal drops it.
+        kind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
+        confidence = Math.min(confidence, 0.3);
+      } else if (amount.has_currency || amount.has_scale || scaled_from_reference) {
         kind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
         confidence = Math.min(confidence, scaled_from_reference ? confidence : 0.75);
       } else if (value >= 1000 || (value >= 20 && value < 1000)) {
@@ -729,8 +917,10 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       kind === MONETARY_KINDS.PACKAGE_PRICE ||
       kind === MONETARY_KINDS.CLOSING_COST_TERM
     ) {
-      // These are all price-type statements — they set/refine the ask.
-      confidence = Math.max(confidence, 0.7);
+      // These are all price-type statements — they set/refine the ask. But a
+      // bare mid-range integer that only caught a distant cue must not be
+      // lifted back over the acceptance gate.
+      if (!bare_midrange_integer) confidence = Math.max(confidence, 0.7);
     }
 
     if (qualifiers.approximate) confidence = Math.min(confidence, 0.75);
@@ -756,6 +946,11 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       lower(text).indexOf(lower(a.raw)) + a.raw.length,
       lower(text).lastIndexOf(lower(b.raw))
     );
+    // A genuine range is TIGHT and ASCENDING: "350 to 400". "$2000 and $650."
+    // is two unrelated figures - a rent pair - and merging them handed the
+    // acquisition engine a $650 asking price off the "low end" rule.
+    const ratio = Math.max(a.value, b.value) / Math.max(1, Math.min(a.value, b.value));
+    if (ratio > 2) continue;
     if (/^\s*(to|-|–|and|or)\s*$/.test(betweenText) || /between/.test(precedingWindow(text, { index: text.toLowerCase().indexOf(a.raw.toLowerCase()), end: 0 }, 20))) {
       a.qualifiers.range = true;
       a.range = { low: Math.min(a.value, b.value), high: Math.max(a.value, b.value) };
