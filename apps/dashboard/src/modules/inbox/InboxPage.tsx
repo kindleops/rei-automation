@@ -3532,7 +3532,27 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (action === 'archive') {
         // Archived threads leave every operational bucket. They remain in All
         // Threads and appear under Archived.
-        if (!staysVisibleEverywhere && activeBucket !== 'archived' && !isOpenThread) hideThreadLocally(thread.id)
+        //
+        // ARCHIVE IS THE EXCEPTION to the never-hide-the-open-thread rule above.
+        // The operator archives the conversation they are READING, so exempting
+        // the open thread meant the one case that actually happens did nothing:
+        // "when we archive, they don't go away."
+        //
+        // The rule exists for a real bug - hiding the open row blanks the
+        // conversation pane, because `selected` is resolved from the list. So
+        // the fix is not to drop the rule, it is to ADVANCE first: move to the
+        // next thread (or the previous one at the end of the list, or clear the
+        // selection if nothing is left), and only then hide the row. The pane
+        // never renders empty, and the archived thread is gone from the list.
+        if (!staysVisibleEverywhere && activeBucket !== 'archived') {
+          if (isOpenThread) {
+            const index = filtered.findIndex((row) => row.id === thread.id)
+            const nextThread = index >= 0 ? (filtered[index + 1] ?? filtered[index - 1] ?? null) : null
+            if (nextThread) selectThread(nextThread)
+            else clearThreadSelection()
+          }
+          hideThreadLocally(thread.id)
+        }
       } else if (action === 'unarchive' || action === 'unread') {
         unhideThreadLocally(thread.id)
       } else {
@@ -3548,7 +3568,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }
       }
     }
-  }, [threads, handleWorkflowMutation, DEV])
+  }, [threads, handleWorkflowMutation, DEV, filtered, selectThread, clearThreadSelection])
 
   const handleStatusChange = useCallback(async (status: InboxStatus | 'sent_message') => {
     if (!selected) return
