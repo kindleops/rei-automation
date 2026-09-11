@@ -225,19 +225,22 @@ export const ROUTE_PROFILES = Object.freeze({
     template_use_case_candidates: [],
     next_action: "queue_auto_reply",
   },
-  // A DECLINE DESERVES A COURTEOUS CLOSE, NOT SILENCE. This was the single
-  // largest silence category: 11 of the 25 unanswered-but-active inbounds in the
-  // 7 days to 2026-09-10 were not_interested. Two separate reasons, both here:
-  // next_action was "do_not_reply", and the only candidate use case
-  // "not_interested_soft_close" does not exist in the catalog -- the real one is
-  // "not_interested" (3 active EN templates, already safe_for_auto_reply).
-  // Ronald in Baltimore said "Not selling" in April, was silently deferred
-  // instead of closed, got re-opened today and opted out 24 seconds later.
+  // LATENT CATALOG BUG, fixed without changing behaviour. The only candidate
+  // use case was "not_interested_soft_close", which does not exist in
+  // sms_templates -- the real use case is "not_interested" (3 active English
+  // templates, already safe_for_auto_reply). Template selection could therefore
+  // never have found anything for a decline even if a reply were permitted.
+  //
+  // next_action stays do_not_reply. Actually SENDING the courteous close that
+  // operator item 5 asks for additionally requires moving not_interested off the
+  // REVIEW safety tier in seller-flow-safety-policy.js, which is what makes
+  // resolveV2ReplyWithhold suppress it downstream. That is a safety-posture
+  // change across the whole seller flow and is deliberately NOT bundled here.
   not_interested: {
     route_hint: "soft_close_or_suppress",
     allowed_template_stages: ["not_interested", "not_interested_soft_close", "future_nurture"],
     template_use_case_candidates: ["not_interested", "not_interested_soft_close", "future_nurture"],
-    next_action: "queue_auto_reply",
+    next_action: "do_not_reply",
   },
 });
 
@@ -659,18 +662,12 @@ function computeInboundAutomationDecisionRaw({
         compound_opportunity: compound,
       });
     }
-    // Close the loop out loud. The seller hears one short, gracious message and
-    // the thread ends deliberately instead of decaying into a 30 day deferral
-    // that later re-opens and reads as harassment.
-    const decline_profile = ROUTE_PROFILES.not_interested;
     return buildDecisionResult({
-      should_queue_reply: true,
-      reply_mode: "auto",
-      route_hint: decline_profile.route_hint,
+      route_hint,
       stage_hint,
-      allowed_template_stages: decline_profile.allowed_template_stages,
-      next_action: "queue_auto_reply",
-      audit_reason: "not_interested_courteous_close",
+      allowed_template_stages,
+      next_action: "do_not_reply",
+      audit_reason: "not_interested",
       compound_opportunity: compound.is_compound_opportunity ? compound : null,
     });
   }
@@ -799,28 +796,17 @@ function applyOwnershipProbeOverlay(decision = {}, args = {}) {
 
   if (!ownership_probe) return decision;
 
-  // ANSWER THE DECLINE, THEN NURTURE. This overlay used to set
-  // should_queue_reply:false and schedule a later follow-up, which is silence
-  // now plus an unannounced re-open later. That is Ronald's exact path
-  // (+14102940284, 3207 The Alameda, Baltimore): "Not selling" in April, no
-  // reply, silently rescheduled, re-opened 2026-09-10, opt-out 24 seconds after
-  // the second message. Operator item 5 forbids the silent state outright.
-  //
-  // The stage advance, the disposition and the follow-up schedule are all
-  // preserved exactly. The only change is that the seller now hears one short
-  // courteous close instead of nothing, so a later re-contact does not arrive
-  // out of a silence the seller never got to end.
   return {
     ...decision,
-    should_queue_reply: true,
+    should_queue_reply: false,
     should_suppress_contact: false,
     should_mark_human_review: false,
-    reply_mode: "auto",
-    route_hint: "soft_close_or_suppress",
+    reply_mode: "none",
+    route_hint: "consider_selling",
     stage_hint: "consider_selling",
-    allowed_template_stages: ["not_interested", "future_nurture", "consider_selling_follow_up"],
-    next_action: "queue_auto_reply",
-    audit_reason: "s1_not_for_sale_courteous_close_then_followup",
+    allowed_template_stages: ["consider_selling", "consider_selling_follow_up"],
+    next_action: "schedule_later_followup",
+    audit_reason: "s1_not_for_sale_advance_with_followup",
     ownership_status: ownership_probe.ownership_status,
     ownership_inference_reason: ownership_probe.ownership_inference_reason,
     disposition: ownership_probe.disposition,
@@ -1113,6 +1099,11 @@ export const CLARIFIER_INTENTS = new Set([
   "latent_interest",
   "asks_offer",
   "asking_price_provided",
+  // ANTI-SILENCE: every routed intent must ALSO have clarifier backup, so
+  // losing its route can never strand it. coverage-graph-audit enforces this
+  // and caught both of these arriving with a route and no backup.
+  "asking_price_absent",
+  "going_to_market",
   "condition_disclosed",
   "tenant_occupied",
   "need_time",
