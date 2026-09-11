@@ -997,7 +997,13 @@ export function extractionToResolverFacts(extraction = null) {
       const enumerated = Array.isArray(rentValue.reported_unit_rents)
         ? rentValue.reported_unit_rents
         : [];
-      if (enumerated.length >= 2) {
+      // COMPLETENESS, not merely "two or more". "unit 1 is 1200, unit 2 is 1350,
+      // third one is vacant" enumerates 2 rents for a 3 unit building; summing
+      // them would publish 2550 as the gross and silently price the vacant unit
+      // at zero without saying so. Sum ONLY when the enumeration covers every
+      // unit we know about.
+      const knownUnits = out.reported_units_count;
+      if (enumerated.length >= 2 && knownUnits !== undefined && enumerated.length === knownUnits) {
         const sum = enumerated.reduce((a, b) => a + b, 0);
         if (Number.isFinite(sum) && sum > 0 && sum <= 2000000) {
           out.monthly_gross_rent = sum;
