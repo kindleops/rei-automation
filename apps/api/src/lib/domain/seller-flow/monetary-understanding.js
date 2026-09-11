@@ -144,8 +144,13 @@ function parseNumberWords(tokens, startIdx) {
       // "mil" is genuinely ambiguous: Spanish "150 mil" is 150,000, American
       // slang "2 mil" is 2,000,000. A FRACTION settles it - half a thousand is
       // $500, which is not a house. "Half mil and its yours" is $500,000.
+      // A NON-INTEGER settles it, in both directions. "Half mil" is 0.5 and
+      // "1.5 mil" is 1.5; neither is $500 or $1,500, because nobody sells a
+      // house for either. Spanish "150 mil" = 150,000 is an INTEGER and is
+      // therefore untouched, which is the whole point of testing the fraction
+      // rather than the magnitude.
       if (scale === 1_000 && word !== "thousand" && word !== "grand" && word !== "k"
-        && current > 0 && current < 1) {
+        && current > 0 && !Number.isInteger(current)) {
         scale = 1_000_000;
       }
       if (scale >= 1000) {
@@ -359,7 +364,15 @@ function tokenizeAmounts(text) {
       // classify.js scalePriceToken so the two parsers cannot disagree by three
       // orders of magnitude on the same string.
       const redundant_mil = suffix === "mil" && (hadThousandsSeparator || value >= 1000);
-      if (!redundant_mil) value *= SCALE_WORDS[suffix];
+
+      // Same fraction rule the word parser uses, applied to the digit form:
+      // "1.5 mil" is 1,500,000, not $1,500. A non-integer before "mil" cannot
+      // be the Spanish reading, because "150.5 mil" is not how anyone writes
+      // 150,500. Integers are untouched, so "150 mil" stays 150,000.
+      const fractional_mil =
+        suffix === "mil" && !redundant_mil && !Number.isInteger(value) && value < 1000;
+
+      if (!redundant_mil) value *= fractional_mil ? 1_000_000 : SCALE_WORDS[suffix];
     }
 
     amounts.push({
@@ -737,6 +750,14 @@ const PRICE_SETTING_KINDS = new Set([
 // would invent a $400,000 seller expectation out of a scheduling remark.
 const DIGIT_ANCHOR_UNIT_GUARD =
   "(?!\\s*(?:day|days|week|weeks|month|months|year|years|yr|yrs|bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|unit|units|acre|acres|percent|%|am|pm|hour|hours|pm\\b))";
+
+// The guard above only looks FORWARD, at the unit after the digit. These look
+// BACKWARD, because "my address starts with 4" was yielding a $400,000 asking
+// price - a fabricated ask from a seller who was describing their street
+// number. The subject of "starts with" has to be the PRICE, not an address, a
+// phone number or a zip code.
+const DIGIT_ANCHOR_SUBJECT_BLOCKLIST =
+  /\b(?:address|street|st\.?|road|rd\.?|avenue|ave\.?|zip|zipcode|postal|phone|number\s+is|house\s+number|apt|apartment|unit\s+number|account|case|parcel|apn)\b/i;
 const DIGIT_ANCHOR_FLOOR_RE = new RegExp(
   "\\b(?:has\\s+to|have\\s+to|needs?\\s+to|gotta|must|should)\\s+(?:start|begin)\\s+with\\s+(?:a|an)?\\s*\\$?\\s*([1-9])\\b" + DIGIT_ANCHOR_UNIT_GUARD,
   "i",
@@ -746,12 +767,38 @@ const DIGIT_ANCHOR_FLOOR_ALT_RE = new RegExp(
   "i",
 );
 
+const DIGIT_WORD_ALTERNATION = "(one|two|three|four|five|six|seven|eight|nine)";
+const DIGIT_ANCHOR_WORD_RE = new RegExp(
+  "\\b(?:has\\s+to|have\\s+to|needs?\\s+to|gotta|must|should)\\s+(?:start|begin)\\s+with\\s+(?:a|an)?\\s*" +
+    DIGIT_WORD_ALTERNATION + "\\b" + DIGIT_ANCHOR_UNIT_GUARD,
+  "i",
+);
+const DIGIT_ANCHOR_WORD_ALT_RE = new RegExp(
+  "\\b(?:start|begin)s?\\s+with\\s+(?:a|an)?\\s*" +
+    DIGIT_WORD_ALTERNATION + "\\b" + DIGIT_ANCHOR_UNIT_GUARD,
+  "i",
+);
+
+/** Sellers say "starts with a four" as often as "starts with a 4". */
+const DIGIT_ANCHOR_WORDS = Object.freeze({
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+});
+
 export function resolveDigitAnchoredFloor(message) {
   const text = clean(message);
   if (!text) return null;
-  const match = DIGIT_ANCHOR_FLOOR_RE.exec(text) || DIGIT_ANCHOR_FLOOR_ALT_RE.exec(text);
+
+  // A street number is not an asking price.
+  if (DIGIT_ANCHOR_SUBJECT_BLOCKLIST.test(text)) return null;
+
+  const match =
+    DIGIT_ANCHOR_FLOOR_RE.exec(text) ||
+    DIGIT_ANCHOR_FLOOR_ALT_RE.exec(text) ||
+    DIGIT_ANCHOR_WORD_RE.exec(text) ||
+    DIGIT_ANCHOR_WORD_ALT_RE.exec(text);
   if (!match) return null;
-  const digit = Number(match[1]);
+  const token = String(match[1] ?? "").toLowerCase();
+  const digit = DIGIT_ANCHOR_WORDS[token] ?? Number(token);
   if (!Number.isFinite(digit) || digit < 1 || digit > 9) return null;
   return {
     value: digit * 100_000,
