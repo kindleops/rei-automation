@@ -61,7 +61,7 @@ const SMALL_WORDS = Object.freeze({
   ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
-  eighty: 80, ninety: 90, a: 1, an: 1, half: 0.5,
+  eighty: 80, ninety: 90, a: 1, an: 1, half: 0.5, quarter: 0.25,
   // Spanish spelled-out numbers ("ciento veinte mil" = 120,000). "cien"/
   // "ciento" are additive hundreds in Spanish, so SMALL_WORDS (not scale) is
   // correct: ciento(100) + veinte(20), then the "mil" scale multiplies.
@@ -95,6 +95,19 @@ const SCALE_WORDS = Object.freeze({
  * million", "a hundred and fifty"). Returns { value, length } (tokens consumed)
  * or null.
  */
+/**
+ * Words that are a FRACTION OF the scale that follows, not an addend.
+ *
+ * "half a million" is 0.5 x 1,000,000. It was parsed as half(0.5) + a(1) = 1.5,
+ * then multiplied, producing $1,500,000 - a 3x overstatement of a seller's
+ * asking price, in the same class as the $4,100 rent-as-contract-price
+ * incident. "a half million" had the mirror-image bug.
+ *
+ * The article between a fraction and its scale is grammar, not arithmetic.
+ */
+const FRACTION_WORDS = new Set(["half", "quarter", "medio", "media"]);
+const ARTICLE_WORDS = new Set(["a", "an", "un", "una"]);
+
 function parseNumberWords(tokens, startIdx) {
   let total = 0;
   let current = 0;
@@ -108,13 +121,33 @@ function parseNumberWords(tokens, startIdx) {
       continue;
     }
     if (SMALL_WORDS[word] !== undefined) {
+      // "half a million" / "a half million": the article is grammar, not 1.
+      if (FRACTION_WORDS.has(word) && ARTICLE_WORDS.has(tokens[i + 1])) {
+        current += SMALL_WORDS[word];
+        consumed += 2;
+        i += 1;
+        sawAnything = true;
+        continue;
+      }
+      if (ARTICLE_WORDS.has(word) && FRACTION_WORDS.has(tokens[i + 1])) {
+        consumed += 1;
+        sawAnything = true;
+        continue;
+      }
       current += SMALL_WORDS[word];
       consumed += 1;
       sawAnything = true;
       continue;
     }
     if (SCALE_WORDS[word] !== undefined) {
-      const scale = SCALE_WORDS[word];
+      let scale = SCALE_WORDS[word];
+      // "mil" is genuinely ambiguous: Spanish "150 mil" is 150,000, American
+      // slang "2 mil" is 2,000,000. A FRACTION settles it - half a thousand is
+      // $500, which is not a house. "Half mil and its yours" is $500,000.
+      if (scale === 1_000 && word !== "thousand" && word !== "grand" && word !== "k"
+        && current > 0 && current < 1) {
+        scale = 1_000_000;
+      }
       if (scale >= 1000) {
         total += (current || 1) * scale;
         current = 0;
@@ -682,6 +715,55 @@ const PRICE_SETTING_KINDS = new Set([
  * conflicting price statements return needs_clarification=true and NO price —
  * clarification is asked instead of driving an offer (spec §3).
  */
+/**
+ * DIGIT-ANCHORED FLOORS: "it has to start with a 4".
+ *
+ * A real seller phrasing that carried no parseable number at all, so it
+ * extracted nothing and the thread sat with no price while the operator
+ * watched us reply as though nothing had been said. Verbatim from production:
+ * "Number has to start with a 4. Otherwise, nothing to talk about."
+ *
+ * The seller is stating a FLOOR, not an asking price: a single leading digit
+ * in the hundred-thousands. 4 -> $400,000 minimum. It is deliberately typed
+ * `minimum` rather than `exact`, because "starts with a 4" permits $499,000 and
+ * forbids $399,000, and collapsing that to an exact $400,000 would misstate the
+ * seller's position in both directions.
+ *
+ * Scoped tightly: a single digit 1-9, immediately governed by start-with
+ * language. Anything else is left to the normal parser.
+ */
+// The digit must not be a COUNT of something. "start with a 4 day notice" and
+// "starts with a 3 bedroom" are not prices, and a floor inferred from them
+// would invent a $400,000 seller expectation out of a scheduling remark.
+const DIGIT_ANCHOR_UNIT_GUARD =
+  "(?!\\s*(?:day|days|week|weeks|month|months|year|years|yr|yrs|bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|unit|units|acre|acres|percent|%|am|pm|hour|hours|pm\\b))";
+const DIGIT_ANCHOR_FLOOR_RE = new RegExp(
+  "\\b(?:has\\s+to|have\\s+to|needs?\\s+to|gotta|must|should)\\s+(?:start|begin)\\s+with\\s+(?:a|an)?\\s*\\$?\\s*([1-9])\\b" + DIGIT_ANCHOR_UNIT_GUARD,
+  "i",
+);
+const DIGIT_ANCHOR_FLOOR_ALT_RE = new RegExp(
+  "\\b(?:start|begin)s?\\s+with\\s+(?:a|an)?\\s*\\$?\\s*([1-9])\\b" + DIGIT_ANCHOR_UNIT_GUARD,
+  "i",
+);
+
+export function resolveDigitAnchoredFloor(message) {
+  const text = clean(message);
+  if (!text) return null;
+  const match = DIGIT_ANCHOR_FLOOR_RE.exec(text) || DIGIT_ANCHOR_FLOOR_ALT_RE.exec(text);
+  if (!match) return null;
+  const digit = Number(match[1]);
+  if (!Number.isFinite(digit) || digit < 1 || digit > 9) return null;
+  return {
+    value: digit * 100_000,
+    currency: "USD",
+    price_type: "minimum",
+    confidence: 0.7,
+    extracted_text: clean(match[0]),
+    qualifiers: { minimum: true, firm: false, approximate: false, range: false },
+    inference: "leading_digit_hundred_thousands",
+  };
+}
+
 export function resolveAskingPriceSignal(message, {
   reference = null,
   negotiationActive = false,
@@ -689,6 +771,27 @@ export function resolveAskingPriceSignal(message, {
   now = null,
 } = {}) {
   const mentions = extractMonetaryMentions(message, { reference, negotiationActive });
+
+  // A digit-anchored floor ("has to start with a 4") carries no parseable
+  // amount, so the tokenizer finds nothing. Consulted ONLY when no real
+  // monetary mention exists, so it can never override a stated number.
+  if (!mentions.length) {
+    const floor = resolveDigitAnchoredFloor(message);
+    if (floor) {
+      return {
+        asking_price: {
+          ...floor,
+          source_message_id: sourceMessageId || null,
+          captured_at: now || new Date().toISOString(),
+        },
+        is_counter: false,
+        needs_clarification: false,
+        clarification_reason: null,
+        informational_mentions: [],
+        all_mentions: [],
+      };
+    }
+  }
   const priceMentions = mentions.filter((m) => PRICE_SETTING_KINDS.has(m.kind));
   const informational = mentions.filter((m) => !PRICE_SETTING_KINDS.has(m.kind));
 

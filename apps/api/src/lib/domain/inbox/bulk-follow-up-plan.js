@@ -355,6 +355,50 @@ function streetAddressOnly(value) {
   return clean(street) || full;
 }
 
+/**
+ * Threads that ALREADY have a follow-up pending or just sent.
+ *
+ * dedupe_key for an inbox send is `inbox:send_now:<fresh uuid>`, so it is
+ * unique per row and dedupes nothing. Nothing else stopped the same thread
+ * being scheduled twice, and on 2026-09-11 twenty-four sellers received two
+ * re-engagements on the same day - "Hey X, wanted to see if you'd be open to
+ * talking numbers" followed by "Hi X, wanted to follow up regarding..." - from
+ * two separate bulk batches.
+ *
+ * Matched on the last 10 digits because the thread twins carry different
+ * thread_key spellings for the same person; keying on thread_key alone would
+ * let the duplicate straight through, which is how it happened.
+ */
+async function loadThreadsWithPendingFollowUp(keys = [], { supabase } = {}) {
+  const blocked = new Set();
+  if (!keys.length || !supabase) return blocked;
+
+  const digitsOf = (value) => String(value || "").replace(/[^0-9]/g, "").slice(-10);
+  const wanted = new Map();
+  for (const key of keys) {
+    const d = digitsOf(key);
+    if (d.length === 10) wanted.set(d, key);
+  }
+  if (!wanted.size) return blocked;
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("send_queue")
+    .select("thread_key,to_phone_number,queue_status,use_case_template,created_at")
+    .in("queue_status", ["scheduled", "queued", "pending", "approved", "ready", "processing", "sent", "delivered"])
+    .gte("created_at", since)
+    .limit(5000);
+  if (error) return blocked;
+
+  for (const row of data || []) {
+    if (clean(row.use_case_template).toLowerCase() !== "reengagement") continue;
+    const d = digitsOf(row.to_phone_number || row.thread_key);
+    const key = wanted.get(d);
+    if (key) blocked.add(key);
+  }
+  return blocked;
+}
+
 export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];
@@ -367,15 +411,30 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     return { ok: false, error: templateResult.error, label: FUS2_OPERATOR_LABEL };
   }
 
-  const [contexts, history, activeSenders] = await Promise.all([
+  const [contexts, history, activeSenders, alreadyPending] = await Promise.all([
     loadThreadContexts(keys, { supabase }),
     loadThreadTemplateHistory(keys, { supabase }),
     loadActiveSenderNumbers(supabase),
+    loadThreadsWithPendingFollowUp(keys, { supabase }),
   ]);
 
   const recipients = [];
   for (const key of keys) {
     const ctx = contexts.get(key) || { thread_key: key };
+
+    // One re-engagement per seller per day. See loadThreadsWithPendingFollowUp.
+    if (alreadyPending.has(key)) {
+      recipients.push({
+        thread_key: key,
+        seller_name: ctx.seller_first_name || null,
+        property_address: ctx.property_address || null,
+        template_id: null,
+        eligible: false,
+        reason: "followup_already_pending",
+        assigned_agent_name: ctx.agent_name || null,
+      });
+      continue;
+    }
     // Language follows the SELLER. Candidates are scoped to the seller's own
     // language BEFORE ranking, and a KNOWN language never silently degrades to
     // English: "we have no information" and "we know this seller reads Spanish"
