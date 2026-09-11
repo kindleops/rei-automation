@@ -100,92 +100,182 @@ test("a street number is not an asking price", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// DOCUMENTED GAPS — current behaviour, stated plainly
+// CEILINGS — the natural inverse of `minimum`
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * GAP 1: THE SCHEMA HAS NO `maximum`.
- *
- * price_type supports exact | approximate | minimum | net | per_unit |
- * package | range. A ceiling has nowhere to live, so "under 500" yields
- * nothing at all.
- *
- * Returning null is the correct behaviour GIVEN the schema - calling a ceiling
- * "exact" would tell the acquisition engine the seller wants $500,000 when
- * they said at MOST $500,000, and those route to opposite bands. The fix is a
- * schema change, which is an operator decision, not a parser patch.
+ * `maximum` exists because a ceiling is a real negotiating position. Collapsing
+ * it to "exact" would tell the acquisition engine the seller WANTS the number
+ * when they said at MOST that number, and those route to opposite bands.
  */
-test("GAP: a ceiling is dropped rather than misreported as exact", () => {
-  for (const phrase of ["under 500", "no more than 500", "500 at the most"]) {
-    const parsed = ask(phrase);
-    assert.notEqual(parsed?.price_type, "exact", `"${phrase}" must never be called exact`);
-    assert.notEqual(parsed?.price_type, "minimum", `"${phrase}" is a ceiling, not a floor`);
+test("ceiling language resolves to price_type maximum", () => {
+  for (const phrase of [
+    "under 500k",
+    "below 500k",
+    "less than 500k",
+    "no more than 500k",
+    "at most 500k",
+    "nothing over 500k",
+    "500k is my ceiling",
+    "I wouldn't need more than 500k",
+  ]) {
+    assert.equal(type(phrase), "maximum", phrase);
+    assert.equal(value(phrase), 500_000, phrase);
   }
 });
 
-/**
- * GAP 2: BARE HUNDREDS ARE NOT SCALED TO THOUSANDS.
- *
- * "400 net" yields 400, not 400,000. The price_type is captured correctly -
- * net, per_unit and minimum all survive - only the magnitude is literal.
- *
- * This is deliberately NOT patched here. Auto-scaling a bare number by 1000x
- * is the same class of inference that turned a $4,100 monthly rent into a
- * contract price, and the safe direction is not obvious: reading "400" as $400
- * makes the deal look absurd and gets reviewed, while reading it as $400,000
- * could silently authorise a real offer. Which way this should go is a product
- * call.
- */
-test("GAP: bare hundreds keep their qualifier but not a thousands magnitude", () => {
-  assert.equal(type("400 net"), "net", "the NET qualifier survives");
-  assert.equal(type("400 per unit"), "per_unit", "the PER-UNIT qualifier survives");
-  assert.equal(type("at least 400"), "minimum", "the FLOOR qualifier survives");
-  assert.equal(type("no less than 400"), "minimum");
-
-  // Magnitude is literal. Pinned so a future change is a decision, not a drift.
-  assert.equal(value("400 net"), 400);
-  assert.equal(value("at least 400"), 400);
+test("a bare 'more than' is still a FLOOR — only negation makes a ceiling", () => {
+  // "I need more than 400k" raises the bar; it does not cap it. Adding the
+  // bare phrase to the ceiling cues would have inverted this.
+  assert.notEqual(type("I need more than 400k"), "maximum");
+  assert.equal(type("at least 400k"), "minimum");
+  assert.equal(type("no less than 400k"), "minimum");
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// CONTEXTUAL THOUSANDS SHORTHAND
+// ══════════════════════════════════════════════════════════════════════════
+
 /**
- * GAP 3: RANGE AND BAND LANGUAGE ON BARE HUNDREDS.
- *
- * The range machinery exists and populates {low, high}, but both endpoints
- * must clear the confidence bar first, and bare hundreds do not. Band language
- * ("in the fours", "low/mid/high fours") has no support at all.
- *
- * Both currently yield nothing, which is the safe failure: the turn falls to
- * review instead of inventing a number.
+ * A bare "400" becomes $400,000 ONLY when a contextual anchor establishes the
+ * magnitude - the deal's own reference price (current ask, recommended offer,
+ * or valuation). There is no global 400 -> 400000 rule; without an anchor the
+ * number stays literal and low-confidence so the turn goes to review.
  */
-test("GAP: bare-hundred ranges and band language yield nothing, not a guess", () => {
+const anchored = (text) => resolveAskingPriceSignal(text, { reference: 200_000 })?.asking_price ?? null;
+
+test("bare hundreds scale only against a contextual anchor", () => {
+  for (const [text, expected] of [
+    ["400", 400_000],
+    ["425", 425_000],
+    ["275", 275_000],
+    ["I'd take 350", 350_000],
+    ["need 425", 425_000],
+    ["probably 375", 375_000],
+    ["220", 220_000],
+  ]) {
+    assert.equal(anchored(text)?.value, expected, text);
+  }
+
+  // NO anchor: the same strings must not be promoted.
+  for (const text of ["400", "425", "275"]) {
+    const unanchored = resolveAskingPriceSignal(text)?.asking_price ?? null;
+    assert.notEqual(unanchored?.value, Number(text) * 1000, `"${text}" must not scale without context`);
+  }
+});
+
+test("shorthand preserves the SEMANTIC, not just the magnitude", () => {
+  assert.equal(anchored("400 net")?.value, 400_000);
+  assert.equal(anchored("400 net")?.price_type, "net");
+  assert.equal(anchored("around 400")?.value, 400_000);
+  assert.equal(anchored("around 400")?.price_type, "approximate");
+  assert.equal(anchored("at least 400")?.value, 400_000);
+  assert.equal(anchored("at least 400")?.price_type, "minimum");
+  assert.equal(anchored("under 500")?.value, 500_000);
+  assert.equal(anchored("under 500")?.price_type, "maximum");
+  assert.equal(anchored("nothing over 475")?.value, 475_000);
+  assert.equal(anchored("nothing over 475")?.price_type, "maximum");
+
+  const range = anchored("between 350 and 400");
+  assert.equal(range?.price_type, "range");
+  assert.equal(range?.range?.low, 350_000);
+  assert.equal(range?.range?.high, 400_000);
+  assert.equal(anchored("350 to 400")?.range?.high, 400_000);
+});
+
+test("an INFERRED magnitude is never indistinguishable from a stated one", () => {
+  // The whole point: "400" read as $400,000 is a reading, not a quotation.
+  const inferred = anchored("400");
+  assert.equal(inferred.value, 400_000);
+  assert.equal(inferred.scaled_from_reference, true, "provenance must travel with the fact");
+  assert.equal(inferred.extracted_text, "400", "the seller's raw words are kept");
+
+  for (const explicit of ["$400,000", "400k", "400 thousand", "0.4 million"]) {
+    const stated = anchored(explicit);
+    assert.equal(stated.value, 400_000, explicit);
+    assert.equal(stated.scaled_from_reference, false, `${explicit} states its own magnitude`);
+  }
+  // And the big scale words need no contextual help at all.
+  assert.equal(value("half a million"), 500_000);
+  assert.equal(value("1.5 mil"), 1_500_000);
+});
+
+test("competing semantics defeat the shorthand, anchor or not", () => {
+  const NEGATIVE = [
+    "rent is 400",
+    "rent is 4100",
+    "payment is 400",
+    "monthly payment is 400",
+    "mortgage is 2100",
+    "I have 4 units",
+    "I've owned it 4 years",
+    "call after 4",
+    "my address starts with 400",
+    "repairs are 400",
+    "deposit was 500",
+    "tenant pays 1400",
+    "taxes are 4200",
+    "Rent is 2200 but I'd sell",
+  ];
+  for (const text of NEGATIVE) {
+    assert.equal(anchored(text)?.value ?? null, null, `"${text}" must not become an asking price`);
+  }
+});
+
+test("a clause boundary rescues a real ask from a suppressed one", () => {
+  // The address guard is clause-bounded: suppressing the whole sentence would
+  // have dropped a genuine number the seller gave in the same breath.
+  assert.equal(anchored("my address starts with 400")?.value ?? null, null);
+  assert.equal(anchored("my address starts with 400 but I want 350")?.value, 350_000);
+});
+
+test("4100 does not become $4.1M just because the topic is real estate", () => {
+  // Shorthand is conventional hundreds-as-thousands, not arbitrary scaling.
+  assert.notEqual(anchored("4100")?.value, 4_100_000);
+  assert.notEqual(anchored("I'd take 4100")?.value, 4_100_000);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// WHAT STILL FAILS SAFELY
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * CORRECTION to an earlier report in this session: bare hundreds were NOT an
+ * unfixed gap. They already scaled through the reference anchor; the matrix
+ * that "found" the gap simply called the parser without a reference, which
+ * production never does. The two remaining items below are real.
+ */
+
+test("band language is still unsupported, and yields nothing rather than a guess", () => {
+  // "in the fours" has no numeral to anchor. Returning null sends the turn to
+  // review instead of inventing $400,000 / $450,000 / $480,000 from an adverb.
   for (const phrase of [
-    "between 350 and 400",
-    "350 to 400",
     "needs to be in the fours",
     "I'm thinking low fours",
     "mid fours",
     "high fours",
-    "north of 400",
-    "425 each",
-    "around 425",
-    "roughly 425",
   ]) {
-    assert.equal(value(phrase), null, `"${phrase}" must not invent a price`);
+    assert.equal(anchored(phrase)?.value ?? null, null, `"${phrase}" must not invent a price`);
   }
 });
 
-test("ranges DO work once the endpoints carry scale", () => {
-  // Same sentences, magnitudes stated. This proves the range machinery is
-  // present and that GAP 3 is a confidence-threshold issue, not a missing
-  // feature.
+test("without any anchor, a bare number stays unresolved rather than guessing", () => {
+  // No reference, no currency, no scale word: the magnitude is genuinely
+  // unknown, so the parser declines. This is the fail-safe the shorthand rule
+  // depends on - inference requires context, never enthusiasm.
+  for (const text of ["400", "425", "350"]) {
+    const unanchored = resolveAskingPriceSignal(text)?.asking_price ?? null;
+    assert.notEqual(unanchored?.value, Number(text) * 1000, `"${text}" must not scale unanchored`);
+  }
+});
+
+test("ranges and approximates behave identically with explicit scale", () => {
   const parsed = ask("between 350k and 400k");
   assert.equal(parsed?.price_type, "range");
   assert.equal(parsed?.range?.low, 350_000);
   assert.equal(parsed?.range?.high, 400_000);
   assert.equal(parsed?.value, 350_000, "negotiate from the seller's low end");
-});
 
-test("approximate language IS preserved when the magnitude is clear", () => {
   assert.equal(value("around 425k"), 425_000);
   assert.equal(type("around 425k"), "approximate");
   assert.equal(value("roughly 425k"), 425_000);

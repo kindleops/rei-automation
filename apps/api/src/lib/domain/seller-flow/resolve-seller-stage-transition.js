@@ -158,6 +158,11 @@ export function normalizeAskingPriceFact(input, { sourceMessageId = null, confid
     confidence: input.confidence ?? confidence ?? null,
     source_message_id: input.source_message_id || sourceMessageId || null,
     extracted_text: clean(input.extracted_text || input.raw) || null,
+    // Whether the MAGNITUDE was inferred from a contextual anchor ("400"
+    // against a $200,000 reference) rather than stated ("$400,000"). It must
+    // survive into the persisted fact, or a later reader cannot tell a
+    // conventional shorthand reading from a number the seller actually wrote.
+    scaled_from_reference: input.scaled_from_reference === true,
     captured_at: input.captured_at || now || new Date().toISOString(),
   };
 }

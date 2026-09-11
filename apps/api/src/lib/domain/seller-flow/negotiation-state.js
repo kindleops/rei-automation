@@ -332,6 +332,7 @@ export function applyNegotiationTurn(previous, {
       next.asking_price_history.push({
         value,
         price_type: signal.price_type || "exact",
+        scaled_from_reference: signal.scaled_from_reference === true,
         confidence: signal.confidence ?? null,
         extracted_text: signal.extracted_text || null,
         source_message_id: signal.source_message_id || source_message_id || null,

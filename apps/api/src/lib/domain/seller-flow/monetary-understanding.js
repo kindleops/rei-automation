@@ -32,6 +32,11 @@ export const MONETARY_KINDS = Object.freeze({
   ASKING_PRICE: "asking_price",
   COUNTER_OFFER: "counter_offer",
   MINIMUM_PRICE: "minimum_price",
+  // The natural inverse of MINIMUM_PRICE. A ceiling is a real negotiating
+  // position and collapsing it to "exact" tells the acquisition engine the
+  // seller WANTS the number when they said at MOST that number - and those
+  // route to opposite bands.
+  MAXIMUM_PRICE: "maximum_price",
   NET_REQUIREMENT: "net_requirement",
   MORTGAGE_PAYOFF: "mortgage_payoff",
   REPAIR_AMOUNT: "repair_amount",
@@ -211,7 +216,27 @@ const ADDRESS_WORD_RE =
  * ("327 Pennsylvania"). Deliberately conservative — it only ever fires for
  * numbers carrying no monetary evidence at all.
  */
+/**
+ * A number the seller is reciting AS an address/phone/zip, where the giveaway
+ * comes BEFORE it: "my address starts with 400".
+ *
+ * isAddressAdjacent only looks forward, at the street type after the number, so
+ * it never saw this shape - and with a reference anchor present the bare 400
+ * was scaled to a $400,000 asking price out of a seller reciting their street
+ * number. Same defect as the digit-anchor one, in the tokenizer path.
+ */
+function hasAddressSubjectBefore(text, match) {
+  const before = text.slice(Math.max(0, match.index - 48), match.index);
+  // Bounded to the CLAUSE, not the sentence: "my address starts with 400 but I
+  // want 350" contains a real ask after the conjunction, and suppressing the
+  // whole sentence would drop it.
+  return /\b(?:address|street\s+number|house\s+number|zip|zipcode|postal|phone|apt|apartment|parcel|apn|account\s+number|case\s+number)\b(?:(?!\b(?:but|however|though|although)\b)[^.?!,;])*$/i.test(
+    before,
+  );
+}
+
 function isAddressAdjacent(text, match) {
+  if (hasAddressSubjectBefore(text, match)) return true;
   const after = text.slice(match.index + match[0].length);
   const next = ADDRESS_WORD_RE.exec(after);
   if (!next) return false;
@@ -422,7 +447,7 @@ function tokenizeAmounts(text) {
 
 const KIND_CUES = Object.freeze([
   // Most specific first; a window is the ±60 chars of text around the amount.
-  { kind: MONETARY_KINDS.MORTGAGE_PAYOFF, cues: ["owe", "payoff", "pay off", "mortgage balance", "balance on the mortgage", "loan balance", "left on the mortgage", "left on the loan", "still owe", "debo"] },
+  { kind: MONETARY_KINDS.MORTGAGE_PAYOFF, cues: ["owe", "payoff", "pay off", "mortgage balance", "balance on the mortgage", "loan balance", "left on the mortgage", "left on the loan", "still owe", "mortgage is", "mortgage was", "the mortgage", "hipoteca", "debo"] },
   // "/month" is listed alongside "/mo": the word-boundary matcher will not find
   // "/mo" inside "/month", and a seller's monthly rent misread as an asking
   // price makes a rental look like a $1,450 house.
@@ -435,7 +460,7 @@ const KIND_CUES = Object.freeze([
   // rent figure became the negotiation anchor. A rent token in the clause is
   // as decisive as "/mo". "rental" is NOT included: the matcher is
   // word-boundary based, and "I want 400k for the rental" is an asking price.
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler"] },
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "payment", "payments", "monthly payment", "note payment", "piti", "pago", "pagos", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
   // "repairman" is listed explicitly: it is not a regular inflection of
   // "repair", so the boundary matcher misses it and "the repairman quoted
@@ -446,7 +471,12 @@ const KIND_CUES = Object.freeze([
   { kind: MONETARY_KINDS.PACKAGE_PRICE, cues: ["for both", "for all", "the pair", "package", "portfolio", "together", "for the two", "for the three", "por los dos", "por todas"] },
   { kind: MONETARY_KINDS.CLOSING_COST_TERM, cues: ["you pay closing", "pay the closing", "cover closing", "closing costs", "plus closing", "gastos de cierre"] },
   { kind: MONETARY_KINDS.NET_REQUIREMENT, cues: ["net", "walk away with", "in my pocket", "clear", "after everything", "neto"] },
+  // MINIMUM IS MATCHED FIRST, deliberately. Several ceiling cues are
+  // SUBSTRINGS of floor cues - "no less than 400" contains "less than" -
+  // and first-match wins, so listing ceilings first inverted every
+  // "no less than" into a ceiling.
   { kind: MONETARY_KINDS.MINIMUM_PRICE, cues: ["at least", "no less than", "minimum", "won't take less", "wont take less", "not a penny less", "bottom dollar", "lowest i", "por lo menos", "mínimo", "minimo"] },
+  { kind: MONETARY_KINDS.MAXIMUM_PRICE, cues: ["under", "below", "less than", "no more than", "not more than", "cant do more than", "can't do more than", "cannot do more than", "wouldn't need more than", "wouldnt need more than", "wouldn't want more than", "wouldnt want more than", "wouldn't take more than", "wouldnt take more than", "don't need more than", "dont need more than", "wouldn't go over", "wouldnt go over", "won't go over", "wont go over", "no puedo pasar de", "at most", "most i", "ceiling", "nothing over", "no higher than", "not over", "up to", "tope", "como máximo", "como maximo", "no más de", "no mas de", "menos de"] },
 ]);
 
 const ASK_CUES = ["want", "asking", "ask", "take", "sell for", "let it go", "looking for", "need", "give me", "i'd do", "id do", "price is", "worth", "quiero", "pido", "lo doy en", "how about", "what about", "meet me at"];
@@ -570,14 +600,16 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   const windowEnd = Math.min(lowerText.length, amount.end + radius);
   const window = lowerText.slice(windowStart, windowEnd);
 
-  let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
+  const matches = [];
   const consider = (kind, cue) => {
     const re = cueBoundaryRegex(cue);
     let m;
     while ((m = re.exec(window)) !== null) {
-      const cueMid = windowStart + m.index + cue.length / 2;
+      const start = m.index;
+      const end = m.index + m[0].length;
+      const cueMid = windowStart + start + cue.length / 2;
       const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
-      if (dist < best.dist) best = { kind, dist };
+      matches.push({ kind, dist, start, end });
     }
   };
 
@@ -586,6 +618,31 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   }
   const askKind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
   for (const cue of ASK_CUES) consider(askKind, cue);
+
+  // A CUE CONTAINED INSIDE A LONGER CUE IS NOT A SEPARATE SIGNAL.
+  //
+  // "no less than 400" contains "less than", and "not a penny less than 400"
+  // OVERLAPS it without containing it. Distance is measured from the cue
+  // MIDPOINT, so in both shapes the shorter, less specific cue sits closer to
+  // the amount and won - inverting a floor into a ceiling. Nearest-cue is
+  // still the rule; it is applied after dropping any match a longer,
+  // overlapping cue already accounts for. This kills the whole collision
+  // class, not one phrase.
+  const specific = matches.filter(
+    (candidate) =>
+      !matches.some(
+        (other) =>
+          other !== candidate &&
+          other.start < candidate.end &&
+          other.end > candidate.start &&
+          other.end - other.start > candidate.end - candidate.start,
+      ),
+  );
+
+  let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
+  for (const candidate of specific) {
+    if (candidate.dist < best.dist) best = { kind: candidate.kind, dist: candidate.dist };
+  }
 
   return best.kind;
 }
@@ -643,6 +700,7 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       approximate: includesCue(before, APPROX_CUES),
       net: kind === MONETARY_KINDS.NET_REQUIREMENT,
       minimum: kind === MONETARY_KINDS.MINIMUM_PRICE,
+      maximum: kind === MONETARY_KINDS.MAXIMUM_PRICE,
       per_unit: kind === MONETARY_KINDS.PER_UNIT_PRICE,
       package: kind === MONETARY_KINDS.PACKAGE_PRICE,
       contingent_on_closing_costs: kind === MONETARY_KINDS.CLOSING_COST_TERM,
@@ -665,6 +723,7 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       // Ask-cue-bound amounts keep their tokenizer confidence.
     } else if (
       kind === MONETARY_KINDS.MINIMUM_PRICE ||
+      kind === MONETARY_KINDS.MAXIMUM_PRICE ||
       kind === MONETARY_KINDS.NET_REQUIREMENT ||
       kind === MONETARY_KINDS.PER_UNIT_PRICE ||
       kind === MONETARY_KINDS.PACKAGE_PRICE ||
@@ -716,6 +775,7 @@ const PRICE_SETTING_KINDS = new Set([
   MONETARY_KINDS.ASKING_PRICE,
   MONETARY_KINDS.COUNTER_OFFER,
   MONETARY_KINDS.MINIMUM_PRICE,
+  MONETARY_KINDS.MAXIMUM_PRICE,
   MONETARY_KINDS.NET_REQUIREMENT,
   MONETARY_KINDS.PER_UNIT_PRICE,
   MONETARY_KINDS.PACKAGE_PRICE,
@@ -883,15 +943,17 @@ export function resolveAskingPriceSignal(message, {
     ? "range"
     : best.qualifiers.minimum
       ? "minimum"
-      : best.qualifiers.net
-        ? "net"
-        : best.qualifiers.per_unit
-          ? "per_unit"
-          : best.qualifiers.package
-            ? "package"
-            : best.qualifiers.approximate
-              ? "approximate"
-              : "exact";
+      : best.qualifiers.maximum
+        ? "maximum"
+        : best.qualifiers.net
+          ? "net"
+          : best.qualifiers.per_unit
+            ? "per_unit"
+            : best.qualifiers.package
+              ? "package"
+              : best.qualifiers.approximate
+                ? "approximate"
+                : "exact";
 
   return {
     asking_price: {
@@ -900,6 +962,13 @@ export function resolveAskingPriceSignal(message, {
       price_type,
       confidence: best.confidence,
       extracted_text: best.raw,
+      // THE MAGNITUDE WAS INFERRED, NOT STATED. "400" against a $200,000
+      // anchor becomes $400,000 by conventional hundreds-as-thousands
+      // shorthand - a reading, not a quotation. Downstream must be able to
+      // tell that apart from a seller who actually wrote "$400,000", so the
+      // existing scaled_from_reference provenance travels with the fact
+      // instead of dying on the mention. extracted_text keeps the raw words.
+      scaled_from_reference: Boolean(best.scaled_from_reference),
       qualifiers: best.qualifiers,
       ...(best.range ? { range: best.range } : {}),
       source_message_id: sourceMessageId || null,

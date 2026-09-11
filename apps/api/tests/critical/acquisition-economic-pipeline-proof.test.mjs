@@ -75,9 +75,9 @@ function templatesFor(use_case) {
  * One priced inbound turn, end to end: text -> parser -> resolver ->
  * persistence -> re-read, plus the recommender's independent answer.
  */
-async function pricedTurn(message, ade, { negotiation_state = null } = {}) {
+async function pricedTurn(message, ade, { negotiation_state = null, priceOptions = undefined } = {}) {
   const store = makeStore();
-  const signal = resolveAskingPriceSignal(message);
+  const signal = resolveAskingPriceSignal(message, priceOptions);
   const ask = signal?.asking_price;
 
   const transition = resolveSellerStageTransition({
@@ -389,4 +389,81 @@ test("a workable price presents our number and never probes vacancy", async () =
     );
     assert.equal(r.gate.acquisition_action, "present_approved_cash_offer");
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// SHORTHAND AND BOUNDS, THROUGH THE REAL ECONOMICS
+// ══════════════════════════════════════════════════════════════════════════
+
+/** Same call shape process-seller-inbound-message uses: an anchored reference. */
+async function anchoredTurn(message, ade, opts = {}) {
+  return pricedTurn(message, ade, { ...opts, priceOptions: { reference: ade.recommended_cash_offer } });
+}
+
+test("bare shorthand '220' routes on real economics, not on a literal $220", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const r = await anchoredTurn("220", ADE);
+
+  assert.equal(r.ask.value, 220_000, "conventional hundreds-as-thousands");
+  assert.equal(r.ask.scaled_from_reference, true, "and we remember it was inferred");
+  assert.equal(r.ask.extracted_text, "220", "the seller's raw words survive");
+
+  assert.equal(r.gate.offer_band, "close_range");
+  assert.equal(r.gate.offer_revealed, false);
+  assert.equal(r.gate.route_id, "close_range_initial_offer");
+  assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.OFFER);
+  assert.equal(r.gate.template_use_case, "offer_reveal_cash");
+});
+
+test("the same shorthand after a reveal is a counter", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const r = await anchoredTurn("220", ADE, {
+    negotiation_state: { latest_offer: 200_000, offers_made: [{ amount: 200_000 }] },
+  });
+  assert.equal(r.ask.value, 220_000);
+  assert.equal(r.gate.route_id, "close_range_counter");
+  assert.equal(r.gate.template_use_case, "counter_offer");
+});
+
+test("net shorthand keeps BOTH the magnitude and the net semantic", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const r = await anchoredTurn("250 net", ADE);
+
+  assert.equal(r.ask.value, 250_000);
+  assert.equal(r.ask.price_type, "net", "a net requirement is not a gross ask");
+  // $250k against a $230k ceiling is above MAO but inside 1.15x.
+  assert.equal(r.gate.offer_band, "negotiable");
+  assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.PROPERTY_CONDITION);
+});
+
+test("a ceiling is stored as a ceiling, even when the economics look great", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const r = await anchoredTurn("I wouldn't need more than 200", ADE);
+
+  // The stored fact is an UPPER BOUND. The seller did not ask for $200,000.
+  assert.equal(r.ask.price_type, "maximum", "must not be recorded as exact");
+  assert.equal(r.ask.value, 200_000);
+  assert.equal(r.ask.extracted_text, "200", "raw seller language preserved");
+
+  // The ADE may still route on the bound - and here it is genuinely promising.
+  assert.equal(r.gate.offer_band, "auto_accept");
+  assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.OFFER);
+  assert.equal(r.transition.lead_temperature, "hot");
+
+  // But the persisted fact keeps the semantic, not the routing convenience.
+  assert.equal(
+    r.persisted.metadata?.seller_facts?.asking_price?.price_type,
+    "maximum",
+    "persistence must not flatten the bound to exact",
+  );
+});
+
+test("a rent figure does not become an asking price, even alongside selling intent", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const r = await anchoredTurn("Rent is 2200 but I'd sell", ADE);
+
+  assert.equal(r.ask ?? null, null, "no $2.2M ask");
+  assert.equal(r.gate?.applied, false, "the economic gate never engaged");
+  assert.equal(r.gate?.route_id ?? null, null, "and no route was chosen off a rent figure");
+  assert.notEqual(r.transition.stage_after, LIFECYCLE_STAGE_CODES.OFFER);
 });
