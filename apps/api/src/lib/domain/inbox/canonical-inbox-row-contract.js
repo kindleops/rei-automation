@@ -186,12 +186,16 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   // archived, but nothing ever counted the archived side of that predicate.
   "snoozed",
   "archived",
-  // "scheduled" stays out of this list on purpose. Scheduled follow-ups live in
-  // send_queue, not in thread state, so seeding the key here would make
-  // buildEmptyCounts report a confident 0 whenever the send_queue count was
-  // unavailable — worse than admitting we do not know. fetchAuthoritativeInboxCounts
-  // sets it only when it has actually counted send_queue; otherwise it stays
-  // undefined and the chip renders "—".
+  // "scheduled" is now a THREAD-STATE count like the two above.
+  //
+  // It was deliberately excluded while scheduled follow-ups lived only in
+  // send_queue: seeding the key would have made buildEmptyCounts report a
+  // confident 0 whenever the send_queue count was unavailable, which is worse
+  // than admitting we do not know. That reasoning no longer applies -- the
+  // schedule path now stamps inbox_thread_state.next_scheduled_for, so the
+  // count is derived from the same rows every other bucket is derived from and
+  // a 0 here is a real 0.
+  "scheduled",
 ];
 
 export function compactInboxThreadSummaryRow(row = {}) {

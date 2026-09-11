@@ -107,7 +107,7 @@ export async function loadThreadContexts(threadKeys = [], deps = {}) {
     contexts.set(key, {
       thread_key: key,
       seller_first_name: resolvedName || (existing?.seller_first_name || ""),
-      property_address: clean(row.property_address_full) || (existing?.property_address || ""),
+      property_address: streetAddressOnly(row.property_address_full) || (existing?.property_address || ""),
       timezone: null,
       contact_window: null,
       agent_name: null,
@@ -333,6 +333,27 @@ async function resolveSenderForRecipient({ threadKey, toPhone, activeSenders }, 
  * Note there is deliberately NO agent-name override. {{agent_name}} always
  * resolves to the agent assigned to that seller.
  */
+/**
+ * The STREET line only, for use in a text message.
+ *
+ * property_address_full is a full postal address -
+ * "3426 Sophia St, Memphis, Tn 38118". Dropping that whole string into a
+ * follow-up reads like a mail-merge and tells the seller nothing they do not
+ * already know; they know which city they live in. The street line alone reads
+ * like a person talking about their house.
+ *
+ * Everything from the first comma on is city/state/ZIP in every row inspected,
+ * and a unit designator stays attached because it precedes that comma
+ * ("1211 Nw 29th Ter # 1-2, Fort Lauderdale, Fl 33311"). An address with no
+ * comma is returned unchanged rather than guessed at.
+ */
+function streetAddressOnly(value) {
+  const full = clean(value);
+  if (!full) return "";
+  const [street] = full.split(",");
+  return clean(street) || full;
+}
+
 export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const keys = [...new Set(threadKeys.map(clean).filter(Boolean))];

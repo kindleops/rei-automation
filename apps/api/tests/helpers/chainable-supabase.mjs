@@ -219,6 +219,20 @@ function rowMatchesOrClause(row = {}, clause = "") {
     if (operator === "eq") return cleanInboxValue(row?.[column]) === cleanInboxValue(value);
     if (operator === "neq") return cleanInboxValue(row?.[column]) !== cleanInboxValue(value);
     if (operator === "lt") return asInboxTime(row?.[column]) < asInboxTime(value);
+    // PostgREST parity for the pending-schedule predicate. Without `is` and
+    // `lte` the stub silently answered false for every row and the priority
+    // bucket returned nothing -- a stub gap reading as a product regression.
+    if (operator === "is") {
+      const target = String(value).toLowerCase();
+      const actual = row?.[column];
+      if (target === "null") return actual === null || actual === undefined;
+      if (target === "true") return actual === true;
+      if (target === "false") return actual === false;
+      return false;
+    }
+    if (operator === "lte") return asInboxTime(row?.[column]) <= asInboxTime(value);
+    if (operator === "gt") return asInboxTime(row?.[column]) > asInboxTime(value);
+    if (operator === "gte") return asInboxTime(row?.[column]) >= asInboxTime(value);
     // Contract re-pin: getLiveInbox keyword search issues `.or("col.ilike.%q%")`
     // clauses — mirror PostgREST ilike (case-insensitive contains) in the stub.
     if (operator === "ilike") {

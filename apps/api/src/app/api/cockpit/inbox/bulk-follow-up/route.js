@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, corsHeaders, parseJsonSafe } from '../../_shared.js'
 import { buildBulkFollowUpPlan } from '@/lib/domain/inbox/bulk-follow-up-plan.js'
 import { runInboxAction } from '@/lib/cockpit/cockpit-service.js'
+import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -83,6 +84,43 @@ export async function POST(request) {
 
     const scheduled = results.filter((r) => r.ok)
     const failed = results.filter((r) => !r.ok && !r.skipped)
+
+    // TELL THE THREAD IT IS SCHEDULED.
+    //
+    // Writing the send_queue row alone left inbox_thread_state untouched, so a
+    // successful bulk schedule was indistinguishable from doing nothing: the
+    // Priority chip never moved and the Scheduled tab stayed empty.
+    //
+    // MEASURED 2026-09-11: the operator scheduled 16 follow-ups; all 16 rows
+    // landed in send_queue with queue_status='scheduled' and a future
+    // scheduled_for, while all 16 threads still read inbox_bucket='priority'
+    // with next_scheduled_for = NULL.
+    //
+    // next_scheduled_for is the column built for exactly this, and using it
+    // rather than overwriting inbox_bucket is deliberate: the bucket is the
+    // classifier's opinion about the CONVERSATION, and a pending send is a
+    // separate, temporary fact. Stamping it here lets the read path move the
+    // thread out of the operational buckets until the send fires, after which
+    // the timestamp falls into the past and the thread returns to whatever
+    // bucket it genuinely belongs in - with nothing to unwind.
+    if (scheduled.length > 0) {
+      try {
+        const supabase = getDefaultSupabaseClient()
+        if (supabase) {
+          await Promise.all(scheduled.map((row) => {
+            const dueAt = row.effective_send_at_utc
+            if (!row.thread_key || !dueAt) return Promise.resolve()
+            return supabase
+              .from('inbox_thread_state')
+              .update({ next_scheduled_for: dueAt, updated_at: new Date().toISOString() })
+              .eq('thread_key', row.thread_key)
+          }))
+        }
+      } catch {
+        // The sends are already queued and are the thing that matters. A failure
+        // to stamp the marker must not turn a successful schedule into an error.
+      }
+    }
 
     // Surface WHY nothing scheduled. Without this the client could only say
     // "refused", which is indistinguishable from a bug -- an operator hitting a
