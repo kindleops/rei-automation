@@ -1,3 +1,5 @@
+import { loadContextWithFallback as realLoadContextWithFallback } from "@/lib/domain/context/load-context-with-fallback.js";
+
 /**
  * Chainable PostgREST-style supabase mock for critical tests.
  * Supports .select().eq().in().lt().order().range().limit().maybeSingle() and `.then`.
@@ -57,9 +59,54 @@ export function makeChainableSupabase(handlers = {}) {
   };
 }
 
+/**
+ * Hermetic identity-resolution deps for any suite that drives
+ * handleTextgridInboundWebhook.
+ *
+ * Spread this into __setTextgridInboundTestDeps. Without it the handler's
+ * brain_lookup segment reaches the live network, and the suite silently tests
+ * a degraded path instead of the one it names.
+ */
+export function makeHermeticContextDeps() {
+  return {
+    // The webhook resolves identity through loadContextWithFallback, and that
+    // function's FIRST leg is a Supabase-only outbound-pair lookup. That leg
+    // builds its own client from process.env.SUPABASE_URL — which the critical
+    // test environment deletes, so supabase/client.js falls back to the
+    // literal `https://placeholder.supabase.co` — and it is NOT reachable
+    // through the handler's dep seam, because the handler passes only
+    // loadContextImpl down.
+    //
+    // Two things then go wrong, and they are the same bug:
+    //   1. The critical fetch guard rejects the placeholder host, and
+    //      postgrest-js v2 retries a REJECTED fetch four times with 1s/2s/4s
+    //      backoff. Four query sites x 7s = the ~28s every one of these tests
+    //      was burning.
+    //   2. The blocked lookup returns not-found, execution falls through to
+    //      the podio-availability containment branch, Podio has no credentials
+    //      in tests, and that branch returns EARLY — without ever calling
+    //      loadContextImpl. So the injected loadContext never ran and every
+    //      assertion downstream of it read undefined.
+    //
+    // Keep the real fallback logic under test. Stub only the two impls the
+    // handler cannot inject, so the suite exercises the actual resolution
+    // order rather than a mock of it.
+    loadContextWithFallback: (args = {}) =>
+      realLoadContextWithFallback({
+        findRecentOutboundContextPairImpl: async () => ({
+          found: false,
+          reason: "test_outbound_pair_lookup_stubbed",
+        }),
+        getPodioAvailabilityImpl: () => ({ ok: true, reason: null, missing: [] }),
+        ...args,
+      }),
+  };
+}
+
 /** Default inbound webhook deps — avoids live Supabase via sms-engine second pass. */
 export function makeInboundWebhookBaseDeps(overrides = {}) {
   return {
+    ...makeHermeticContextDeps(),
     logInboundMessageEventSupabase: async () => ({ ok: true, id: "evt-mock-1" }),
     getSupabaseClient: () => makeInboundLifecycleSupabase(),
     getSystemFlags: async () => ({
