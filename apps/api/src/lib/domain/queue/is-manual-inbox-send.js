@@ -108,6 +108,55 @@ export const IMMEDIATE_INBOUND_REPLY_MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes
 // texted). Anchored on the row's created_at (DB-default populated at insert,
 // ~60s after the inbound). Fails CLOSED (not exempt) if no parseable timestamp,
 // so a malformed row defers rather than sends outside the window.
+/**
+ * An operator-initiated inbox send is exempt from quiet hours only while FRESH.
+ *
+ * `isManualInboxSend` answers "did a human originate this", which is the right
+ * question for an operator typing a reply and pressing send: they are looking at
+ * the conversation, and holding that message for the contact window would be
+ * absurd. It is the WRONG question for a row that has been sitting in the queue.
+ *
+ * INCIDENT 2026-09-11. Bulk "Conversation Restart" follow-ups are written with
+ * message_type='manual_scheduled_reply', so they satisfied isManualInboxSend and
+ * skipped the contact-window deferral entirely. When the processor was switched
+ * on at 07:49 UTC it drained a backlog whose scheduled_for was 9 hours past:
+ * fifteen messages went out at 12:51am-3:51am in the recipients' own timezones,
+ * and eleven of the fifteen were rejected by the carrier - a 73% failure rate
+ * against a 1.9% baseline.
+ *
+ * The exemption is anchored to scheduled_for rather than created_at because
+ * that is the instant the operator actually chose. A row sent within the grace
+ * period of its intended time is still "the operator meant now"; nine hours
+ * later it is a backlog item and must respect the window like anything else.
+ *
+ * This mirrors isImmediateInboundAutoReply directly below, which already draws
+ * exactly this distinction for auto-replies - "aged/backlogged replies respect
+ * the window". Manual sends simply never got the same treatment.
+ */
+export const MANUAL_INBOX_SEND_FRESHNESS_MS = 60 * 60 * 1000;
+
+export function isFreshManualInboxSend(
+  queue_item = null,
+  now = null,
+  maxAgeMs = MANUAL_INBOX_SEND_FRESHNESS_MS
+) {
+  if (!isManualInboxSend(queue_item)) return false;
+
+  // An unscheduled manual send is an immediate one: nothing to be late for.
+  const scheduled = clean(
+    queue_item?.scheduled_for || queue_item?.scheduled_for_utc
+  );
+  if (!scheduled) return true;
+
+  const scheduled_ms = Date.parse(scheduled);
+  const now_ms = now ? Date.parse(clean(now)) : Date.now();
+  if (!Number.isFinite(scheduled_ms) || !Number.isFinite(now_ms)) return true;
+
+  // Not yet due is not stale. Only lateness past the grace period revokes it.
+  const late_ms = now_ms - scheduled_ms;
+  return late_ms <= maxAgeMs;
+}
+
 export function isImmediateInboundAutoReply(
   queue_item = null,
   now = null,
