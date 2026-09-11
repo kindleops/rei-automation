@@ -4,7 +4,7 @@ import { pushRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
 import { captureAppSession, resolveAppIdFromRoute, restoreAppSession } from './app-session-cache'
 import { isCommandNavRouteActive, type CommandNavRoute } from './command-navigation-registry'
-import { openInboxDealIntelligence } from './mobile-inbox-bridge'
+import { closeInboxDealIntelligence, isInboxRoute, openInboxDealIntelligence } from './mobile-inbox-bridge'
 import { readPropertyLocator, resolveDockDestination } from '../../domain/locator/property-locator'
 import {
   DOCKABLE_APPS,
@@ -64,6 +64,15 @@ const navigateToApp = (app: CommandNavRoute) => {
         }
         : undefined,
     )
+    return
+  }
+
+  // RETURNING FROM DEAL INTELLIGENCE. It is a panel inside the inbox workspace,
+  // not a route, so tapping Inbox while it was open pushed /inbox onto /inbox -
+  // a no-op - and the operator was stranded in the panel with no way back to the
+  // thread list. Fire the close event instead of a dead navigation.
+  if (app.path === '/inbox' && typeof window !== 'undefined' && isInboxRoute(window.location.pathname)) {
+    closeInboxDealIntelligence()
     return
   }
 

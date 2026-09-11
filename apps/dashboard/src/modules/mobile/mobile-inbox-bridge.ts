@@ -3,6 +3,7 @@ import { normalizeRoutePath, pushRoutePath } from '../../app/router'
 export const MOBILE_INBOX_BADGE_EVENT = 'nx:mobile-inbox-badge'
 export const OPEN_INBOX_DEAL_INTEL_EVENT = 'nx:open-inbox-deal-intelligence'
 
+
 export interface MobileInboxBadgeDetail {
   unreadCount: number
 }
@@ -96,4 +97,27 @@ export function consumePendingInboxDealIntelligence(): boolean {
   const pending = peekPendingInboxDealIntelligence()
   if (pending) clearPendingInboxDealIntelligence()
   return pending
+}
+
+/**
+ * Deal Intelligence is a PANEL inside the inbox workspace, not a route of its
+ * own - it lives at /inbox just like the thread list. So tapping Inbox in the
+ * dock to get back out of it called pushRoutePath('/inbox') while already on
+ * /inbox, which is a no-op: the panel stayed open and the operator was stuck
+ * with no way back to the list.
+ *
+ * This is the counterpart event. The dock fires it instead of a dead navigation
+ * when Inbox is tapped while already on an inbox route.
+ */
+export const CLOSE_INBOX_DEAL_INTEL_EVENT = 'nx:close-inbox-deal-intelligence'
+
+export function closeInboxDealIntelligence() {
+  if (typeof window === 'undefined') return
+  clearPendingInboxDealIntelligence()
+  clearPendingInboxDealIntelligenceIdentity()
+  window.dispatchEvent(new CustomEvent(CLOSE_INBOX_DEAL_INTEL_EVENT))
+}
+
+export function isInboxRoute(path: string): boolean {
+  return INBOX_DEAL_INTEL_ROUTES.has(normalizeRoutePath(path))
 }
