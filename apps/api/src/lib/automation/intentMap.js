@@ -61,7 +61,12 @@ export const INTENT_MAP = Object.freeze({
   asking_price_provided: {
     stage: STAGES.CONDITION_COLLECTION,
     action: ACTIONS.QUEUE_REPLY,
-    use_case: "price_works_confirm_basics",
+    // RETIRED 2026-09-11 (operator ruling): was "price_works_confirm_basics",
+    // whose auto-reply-safe template asks whether the property is vacant the
+    // moment a price arrives. A captured asking price routes through the
+    // canonical Stage-3 band now; when condition genuinely helps the number,
+    // the canonical condition purpose is the one that asks.
+    use_case: "price_high_condition_probe",
   },
   condition_disclosed: {
     stage: STAGES.UNDERWRITING,

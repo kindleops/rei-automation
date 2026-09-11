@@ -6,6 +6,7 @@ import {
   // the recommender and the stage resolver cannot answer it differently.
   resolveCreativeAllowed,
 } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
+import { hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { classifyStage4Condition } from "@/lib/domain/seller-flow/stage4-condition-justification-engine.js";
 import { classifyStage5Negotiation } from "@/lib/domain/seller-flow/stage5-offer-negotiation-engine.js";
 import { classifyStage6Contract } from "@/lib/domain/seller-flow/stage6-seller-contract-engine.js";
@@ -167,6 +168,9 @@ function runStageEngine(universal_stage, input) {
               underwriting,
               negotiation_state,
             }),
+            // Ruling 2: an ask inside the buy box is a FIRST REVEAL until our offer
+            // has actually been presented. Same predicate the resolver uses.
+            offer_revealed: hasRevealedOffer(negotiation_state),
           },
           seller_asking_price:
             negotiation_state.current_asking_price ?? negotiation_state.current_ask ?? null,

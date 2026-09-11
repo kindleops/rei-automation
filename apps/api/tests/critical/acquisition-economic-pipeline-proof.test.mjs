@@ -261,48 +261,132 @@ test("only a seller acceptance advances toward S6 — and it comes from seller e
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// TEMPLATE GAP: a missing template must HOLD, never improvise
+// CLOSE RANGE: a first asking price is NOT a counter
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * close_range routes to `narrow_range`, and production has ZERO sms_templates
- * rows for that use case (verified 2026-09-11 against lcppdrmrdfblstpcbgpf).
- * Two local candidates exist, but neither is in the auto-reply approval
- * registry, so both fail closed and the turn holds for operator review.
+ * The narrow_range gap is closed by SEMANTICS, not by new copy.
  *
- * This test exists so that stops being luck. If someone adds a narrow_range
- * approval without an operator signing off on the copy, this fails.
+ * An ask inside MAO used to route to `narrow_range`, which had zero production
+ * templates and whose two local candidates both asked the seller for a number
+ * they had just given. The real question was never "which template is
+ * missing?" - it was "has this seller seen an offer from us yet?".
+ *
+ *   no prior reveal  -> they countered NOTHING -> present our number
+ *   prior reveal     -> they countered         -> counter-offer copy
+ *
+ * Both reuse already-approved families. No near-duplicate use case was added.
  */
-test("narrow_range has no approved auto-reply template, so it holds for review", async () => {
-  const { LOCAL_TEMPLATE_CANDIDATES: candidates, verifyLocalAutoReplyApproval } = await import(
-    "@/lib/domain/templates/local-template-registry.js"
-  );
-  const narrowRange = candidates.filter((t) => t.use_case === "narrow_range");
-  assert.ok(narrowRange.length > 0, "the local candidates still exist");
 
-  for (const template of narrowRange) {
-    const verdict = verifyLocalAutoReplyApproval(template, { env: { NODE_ENV: "production" } });
-    assert.equal(
-      verdict.approved,
-      false,
-      `${template.item_id} must not be auto-sendable without an operator approval record`,
-    );
-    assert.ok(verdict.reasons.includes("no_approval_record"));
-  }
-});
-
-test("close_range still routes to narrow_range — the gap is a hold, not a reroute", async () => {
+test("CASE A: ask inside the buy box with no prior reveal is a FIRST OFFER", async () => {
   const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
   const r = await pricedTurn("I want 220k", ADE);
 
   assert.equal(r.gate.offer_band, "close_range");
-  assert.equal(r.gate.route_id, "close_range_negotiation");
-  assert.equal(r.gate.template_use_case, "narrow_range");
-  assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.OFFER);
+  assert.equal(r.gate.offer_revealed, false, "we have presented nothing");
+  assert.equal(r.gate.route_id, "close_range_initial_offer");
+  assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.OFFER, "S5");
 
-  // The missing template must NOT cause the route to silently become some
-  // other stage's message. The purpose stays correct and unsent.
-  assert.notEqual(r.gate.template_use_case, "price_high_condition_probe");
-  assert.notEqual(r.gate.template_use_case, "asking_price_follow_up");
-  assert.notEqual(r.gate.template_use_case, "seller_asking_price");
+  // The communication is "here is the number we can do".
+  assert.equal(r.gate.template_use_case, "offer_reveal_cash");
+  assert.equal(r.gate.acquisition_action, "present_approved_cash_offer");
+  assert.equal(r.recommendation.template_use_case, "offer_reveal_cash");
+  assert.ok(Object.is(r.gate.route, r.recommendation.canonical_route));
+
+  // Ineligible: a counter they never made, a price they already gave, and the
+  // retired vacancy shortcut.
+  for (const forbidden of [
+    "counter_offer",
+    "narrow_range",
+    "seller_asking_price",
+    "asking_price_follow_up",
+    "price_works_confirm_basics",
+    "vacancy_probe",
+    "occupancy_probe",
+  ]) {
+    assert.notEqual(r.gate.template_use_case, forbidden, `must not select ${forbidden}`);
+  }
+});
+
+test("CASE B: the same ask AFTER our offer was revealed is a real counter", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const r = await pricedTurn("I want 220k", ADE, {
+    // Our $200k was presented. negotiation-state records it; hasRevealedOffer
+    // reads it.
+    negotiation_state: { latest_offer: 200_000, offers_made: [{ amount: 200_000 }] },
+  });
+
+  assert.equal(r.gate.offer_band, "close_range", "identical economics");
+  assert.equal(r.gate.offer_revealed, true);
+  assert.equal(r.gate.route_id, "close_range_counter");
+  assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.OFFER, "still S5");
+
+  assert.equal(r.gate.template_use_case, "counter_offer");
+  assert.equal(r.gate.acquisition_action, "negotiate_within_buy_box");
+  assert.notEqual(r.gate.template_use_case, "offer_reveal_cash", "not a first reveal any more");
+});
+
+test("the two close-range cases differ ONLY by whether we had revealed an offer", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const first = await pricedTurn("I want 220k", ADE);
+  const counter = await pricedTurn("I want 220k", ADE, {
+    negotiation_state: { latest_offer: 200_000, offers_made: [{ amount: 200_000 }] },
+  });
+
+  assert.equal(first.gate.offer_band, counter.gate.offer_band);
+  assert.equal(first.gate.offer_gap_amount, counter.gate.offer_gap_amount);
+  assert.equal(first.transition.stage_after, counter.transition.stage_after);
+  assert.notEqual(first.gate.route_id, counter.gate.route_id);
+  assert.notEqual(first.gate.template_use_case, counter.gate.template_use_case);
+});
+
+test("A COUNTER REQUIRES OUR OFFER FIRST — the parser and the route agree", async () => {
+  const { resolveAskingPriceSignal } = await import(
+    "@/lib/domain/seller-flow/monetary-understanding.js"
+  );
+  const { hasRevealedOffer } = await import("@/lib/domain/seller-flow/negotiation-state.js");
+
+  // Nothing presented: the seller's first number is not a counter.
+  assert.equal(hasRevealedOffer(null), false);
+  assert.equal(hasRevealedOffer({}), false);
+  assert.equal(hasRevealedOffer({ offers_made: [] }), false);
+  assert.equal(resolveAskingPriceSignal("I want 220k", { negotiationActive: false })?.is_counter, false);
+
+  // Presented: now it is.
+  assert.equal(hasRevealedOffer({ latest_offer: 200_000 }), true);
+  assert.equal(hasRevealedOffer({ offers_made: [{ amount: 200_000 }] }), true);
+  assert.equal(hasRevealedOffer({ offers_made: 1 }), true, "legacy count form still counts");
+  assert.equal(resolveAskingPriceSignal("I want 220k", { negotiationActive: true })?.is_counter, true);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// THE RETIRED VACANCY SHORTCUT
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * narrow_range is no longer reachable at all: close_range now resolves to the
+ * approved offer-reveal or counter-offer families depending on negotiation
+ * history, so the zero-template gap is closed by semantics rather than by
+ * writing new copy.
+ */
+test("no Stage-3 route asks for narrow_range any more", async () => {
+  const { STAGE3_ROUTES } = await import("@/lib/domain/seller-flow/stage3-asking-price-engine.js");
+  for (const [key, route] of Object.entries(STAGE3_ROUTES)) {
+    assert.notEqual(route.template_use_case, "narrow_range", `${key} still points at the empty family`);
+  }
+});
+
+test("a workable price presents our number and never probes vacancy", async () => {
+  const ADE = { recommended_cash_offer: 200_000, max_allowable_offer: 230_000 };
+  const RETIRED = ["price_works_confirm_basics", "vacancy_probe", "occupancy_probe"];
+
+  // The exact situation the retired shortcut keyed on: the price works.
+  for (const ask of ["I want 220k", "I'd take 195k"]) {
+    const r = await pricedTurn(ask, ADE);
+    assert.ok(
+      !RETIRED.includes(r.gate.template_use_case),
+      `"${ask}" selected the retired ${r.gate.template_use_case}`,
+    );
+    assert.equal(r.gate.acquisition_action, "present_approved_cash_offer");
+  }
 });

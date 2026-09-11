@@ -392,15 +392,10 @@ test("the acquisition queue path always supplies an explicit use case", async ()
   );
 });
 
-test("flow_map's price-works branch is a known hazard and is not the canonical route", async () => {
-  const { readFileSync } = await import("node:fs");
-  const flowMap = readFileSync("src/lib/sms/flow_map.js", "utf8");
-
-  // Documented, not silently tolerated: if this branch ever disappears or
-  // changes target, this test should be revisited deliberately.
-  assert.match(flowMap, /price_works_confirm_basics/, "the second router still has this branch");
-
-  // The canonical Stage-3 routes must never name it.
+test("the canonical routes never adopt the retired vacancy alias", () => {
+  // Previously this test recorded flow_map's price_works branch as a live
+  // hazard. That branch is retired now (see test 9), so all that remains to
+  // hold is that no canonical route ever adopts the alias itself.
   for (const purpose of ROUTE_PURPOSES) {
     assert.notEqual(
       purpose.use_case,
@@ -423,5 +418,79 @@ test("price_works_confirm_basics cannot be reached from a Stage-3 purpose reques
       false,
       `${purpose.route_id} must not resolve to the vacancy probe`,
     );
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 9. THE RETIRED VACANCY FAMILY IS UNREACHABLE FROM EVERY BAND
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Operator ruling 2026-09-11: kill the price_works -> vacancy shortcut rather
+ * than merely fence it.
+ *
+ *   - flow_map.js price_works branch: removed
+ *   - intentMap.js asking_price_provided: now price_high_condition_probe
+ *   - production: the 6 auto-reply-safe rows across price_works_confirm_basics,
+ *     vacancy_probe and occupancy_probe had safe_for_auto_reply set false, with
+ *     the previous values stamped into metadata. All 58 rows preserved.
+ *
+ * Condition is still askable - under the canonical purpose, when the economic
+ * route says condition information is useful. What is gone is the independent
+ * shortcut that said "price seems workable, therefore ask about vacancy".
+ */
+const RETIRED_USE_CASES = ["price_works_confirm_basics", "vacancy_probe", "occupancy_probe"];
+
+test("no band, in any negotiation or creative posture, routes to a retired family", () => {
+  for (const band of Object.values(STAGE3_OFFER_BANDS)) {
+    for (const creative_allowed of [false, true]) {
+      for (const offer_revealed of [false, true]) {
+        const route = routeForBand(band, { creative_allowed, offer_revealed });
+        assert.ok(
+          !RETIRED_USE_CASES.includes(route.template_use_case),
+          `band ${band} (creative=${creative_allowed}, revealed=${offer_revealed}) -> retired ${route.template_use_case}`,
+        );
+      }
+    }
+  }
+});
+
+test("no fallback can resurrect a retired family for any Stage-3 purpose", () => {
+  // Every retired template present, active and auto-safe in the pool.
+  const pool = RETIRED_USE_CASES.map((uc, i) => row({ id: `retired-${i}`, use_case: uc }));
+  for (const purpose of ROUTE_PURPOSES) {
+    const resolved = resolveTemplateFromPool(ASK(purpose.use_case), pool);
+    assert.equal(resolved.ok, false, `${purpose.route_id} resurrected a retired family`);
+  }
+});
+
+test("the legacy routers no longer name the vacancy shortcut", async () => {
+  const { readFileSync } = await import("node:fs");
+  for (const file of ["src/lib/sms/flow_map.js", "src/lib/automation/intentMap.js"]) {
+    const live = readFileSync(file, "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n");
+    assert.ok(
+      !live.includes("price_works_confirm_basics"),
+      `${file} can still select the retired vacancy probe`,
+    );
+  }
+});
+
+test("close_range now resolves inside approved offer families, both cases", () => {
+  const first = routeForBand(STAGE3_OFFER_BANDS.CLOSE_RANGE, { offer_revealed: false });
+  const counter = routeForBand(STAGE3_OFFER_BANDS.CLOSE_RANGE, { offer_revealed: true });
+
+  assert.equal(first.template_use_case, "offer_reveal_cash");
+  assert.equal(counter.template_use_case, "counter_offer");
+  assert.equal(first.lifecycle_stage_code, counter.lifecycle_stage_code, "both are S5 offer");
+
+  // Both purposes have approved production copy, so neither is a new gap.
+  for (const route of [first, counter]) {
+    const resolved = resolveTemplateFromPool(ASK(route.template_use_case), [
+      row({ id: `ok-${route.route_id}`, use_case: route.template_use_case }),
+    ]);
+    assert.equal(resolved.ok, true, `${route.route_id} must resolve within its own purpose`);
   }
 });

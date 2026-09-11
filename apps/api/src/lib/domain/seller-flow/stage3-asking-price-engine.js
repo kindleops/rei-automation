@@ -213,14 +213,43 @@ export const STAGE3_ROUTES = Object.freeze({
     event_type: EV.ASKING_PRICE_EVALUATED,
   }),
 
-  // Ask within MAO -> negotiate to land near our target. Still S5: negotiating
-  // a number IS the offer stage, not a condition question.
-  CLOSE_RANGE_NEGOTIATION: defineRoute("close_range_negotiation", {
+  // Ask within MAO -> the deal is workable, so the next act is OUR NUMBER.
+  // Still S5: negotiating a number IS the offer stage, not a condition
+  // question. Which MESSAGE that is depends entirely on whether the seller has
+  // ever seen an offer from us.
+  //
+  // CASE A - we have not revealed anything yet. The seller named a price that
+  // happens to be inside the buy box. They have countered NOTHING, so the
+  // message is a first reveal: "here is the number we can do". Saying
+  // "appreciate the counter" would be nonsense, and asking "what number would
+  // get it done?" re-asks the question they just answered.
+  //
+  // This previously routed to `narrow_range`, whose two local candidates both
+  // ASK THE SELLER FOR A NUMBER AGAIN, and which has zero production
+  // templates. Reusing the approved offer-reveal family says the right thing
+  // and needs no new copy.
+  CLOSE_RANGE_INITIAL_OFFER: defineRoute("close_range_initial_offer", {
+    stage_code: "S5",
+    next_stage: S.OFFER_REVEAL_CASH,
+    brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
+    status: "present_offer",
+    template_use_case: "offer_reveal_cash",
+    inbox_bucket: "priority",
+    acquisition_action: "present_approved_cash_offer",
+    route: "s5_offer",
+    follow_up_policy: null,
+    event_type: EV.ASKING_PRICE_EVALUATED,
+  }),
+
+  // CASE B - our offer WAS presented and the seller came back higher, still
+  // inside MAO. Now it is a genuine counter and the counter family is exactly
+  // right: acknowledge their number, restate the most we can responsibly do.
+  CLOSE_RANGE_COUNTER: defineRoute("close_range_counter", {
     stage_code: "S5",
     next_stage: S.NARROW_RANGE,
     brain_stage: CONVERSATION_STAGES.NEGOTIATION,
     status: "negotiating",
-    template_use_case: "narrow_range",
+    template_use_case: "counter_offer",
     inbox_bucket: "priority",
     acquisition_action: "negotiate_within_buy_box",
     route: "s5_negotiation",
@@ -310,12 +339,13 @@ export const STAGE3_ROUTES = Object.freeze({
  * same reference, which is what makes "one decision, many consumers" provable
  * rather than asserted.
  */
-export function routeForBand(band, { creative_allowed = false } = {}) {
+export function routeForBand(band, { creative_allowed = false, offer_revealed = false } = {}) {
   switch (band) {
     case STAGE3_OFFER_BANDS.AUTO_ACCEPT:
       return STAGE3_ROUTES.AUTO_ACCEPT_OFFER;
     case STAGE3_OFFER_BANDS.CLOSE_RANGE:
-      return STAGE3_ROUTES.CLOSE_RANGE_NEGOTIATION;
+      // A seller's FIRST asking price is not a counter. See hasRevealedOffer.
+      return offer_revealed ? STAGE3_ROUTES.CLOSE_RANGE_COUNTER : STAGE3_ROUTES.CLOSE_RANGE_INITIAL_OFFER;
     case STAGE3_OFFER_BANDS.NEGOTIABLE:
       return STAGE3_ROUTES.NEGOTIABLE_CONDITION;
     case STAGE3_OFFER_BANDS.WIDE_GAP:
@@ -405,7 +435,12 @@ export function resolveCreativeAllowed({
  * underwriting), so callers fall back to milestone completeness rather than to
  * a guess.
  */
-export function resolveStage3Route({ ask = null, underwriting = {}, creative_allowed = false } = {}) {
+export function resolveStage3Route({
+  ask = null,
+  underwriting = {},
+  creative_allowed = false,
+  offer_revealed = false,
+} = {}) {
   const price = numberOrNull(ask);
   if (!(price > 0)) return null;
 
@@ -415,7 +450,7 @@ export function resolveStage3Route({ ask = null, underwriting = {}, creative_all
   return {
     band: economics.offer_band,
     economics,
-    route: routeForBand(economics.offer_band, { creative_allowed }),
+    route: routeForBand(economics.offer_band, { creative_allowed, offer_revealed }),
   };
 }
 
@@ -429,6 +464,7 @@ export function classifyStage3AskingPrice({
   const source_message_id = context?.source_message_id ?? null;
   const now = context?.now ?? null;
   const creative_allowed = Boolean(context?.creative_allowed);
+  const offer_revealed = Boolean(context?.offer_revealed);
 
   // 1. Accept the asking price from Stage 2; fall back to extracting from text.
   let ask = numberOrNull(seller_asking_price);
@@ -441,7 +477,7 @@ export function classifyStage3AskingPrice({
   const decision = evaluateAskingPrice(ask, underwriting);
 
   // 3. Route by band.
-  const route = routeForBand(decision.offer_band, { creative_allowed });
+  const route = routeForBand(decision.offer_band, { creative_allowed, offer_revealed });
 
   // 4. Build canonical events: always emit ASKING_PRICE_EVALUATED, plus the
   //    band-specific routing event when one applies.
@@ -455,7 +491,10 @@ export function classifyStage3AskingPrice({
       data: { ...decision },
     }),
   ];
-  if (route.event_type) {
+  // The offer routes carry ASKING_PRICE_EVALUATED as their own event_type,
+  // which is already emitted above. Emitting it twice would double-count the
+  // evaluation in the lifecycle ledger.
+  if (route.event_type && route.event_type !== EV.ASKING_PRICE_EVALUATED) {
     events.push(
       buildLifecycleEvent(route.event_type, {
         entities,

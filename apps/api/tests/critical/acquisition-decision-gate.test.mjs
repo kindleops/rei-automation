@@ -62,13 +62,16 @@ test("the band decides the active stage across the whole range", () => {
   const ade = UW(200_000, 230_000);
   const at = (ask) => priced(`I want ${ask / 1000}k`, ade);
   assert.equal(at(195_000).stage_after, "offer", "at/below our number the next act is the OFFER");
-  // close_range used to persist property_condition here while the engine's own
-  // route said S5 / narrow_range / negotiate_within_buy_box. Two mappings, two
-  // answers. The route wins: an ask inside MAO is a NEGOTIATION, and
-  // negotiating a number is the offer stage - not a question about the roof.
-  assert.equal(at(220_000).stage_after, "offer", "close range: inside MAO is a negotiation");
-  assert.equal(at(220_000).economic_gate.route_id, "close_range_negotiation");
-  assert.equal(at(220_000).economic_gate.template_use_case, "narrow_range");
+  // close_range used to persist property_condition while the engine's own route
+  // said S5. Two mappings, two answers. The route wins: an ask inside MAO is
+  // the offer stage, not a question about the roof.
+  //
+  // Which MESSAGE it is depends on negotiation history, and these fixtures
+  // carry none - so this is a FIRST reveal, not a counter.
+  assert.equal(at(220_000).stage_after, "offer", "close range: inside MAO is the offer stage");
+  assert.equal(at(220_000).economic_gate.route_id, "close_range_initial_offer");
+  assert.equal(at(220_000).economic_gate.template_use_case, "offer_reveal_cash");
+  assert.equal(at(220_000).economic_gate.offer_revealed, false);
   assert.equal(at(250_000).stage_after, "property_condition", "negotiable: condition can justify the gap");
   assert.equal(at(300_000).stage_after, "property_condition", "stretch: still worth qualifying");
   assert.equal(at(500_000).stage_after, "asking_price", "very wide: nurture, never a condition probe");

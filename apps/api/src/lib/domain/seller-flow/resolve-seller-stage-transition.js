@@ -31,6 +31,7 @@ import {
   resolveStage3Route,
   resolveCreativeAllowed,
 } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
+import { hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
 
 export const TRANSITION_RESOLVER_VERSION = "seller_stage_transition_v2_authority_gated";
 
@@ -314,7 +315,12 @@ function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = 
     negotiation_state: { ...(signals?.negotiation_state || {}), current_asking_price: ask },
   });
 
-  const decision = resolveStage3Route({ ask, underwriting, creative_allowed });
+  // Whether our offer has ever been presented decides the MESSAGE for an ask
+  // inside the buy box: a first reveal, or a reply to a real counter. Same
+  // canonical predicate the monetary parser uses for `is_counter`.
+  const offer_revealed = hasRevealedOffer(signals?.negotiation_state);
+
+  const decision = resolveStage3Route({ ask, underwriting, creative_allowed, offer_revealed });
   if (!decision) return null;
 
   // The route CARRIES its lifecycle stage. Reading it is a lookup, not a
@@ -328,6 +334,7 @@ function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = 
     economics: decision.economics,
     route: decision.route,
     creative_allowed,
+    offer_revealed,
     economic_fit: economicFitForBand(decision.band),
   };
 }
@@ -1135,6 +1142,7 @@ export function resolveSellerStageTransition({
         route_id: economic_gate.route.route_id,
         route: economic_gate.route,
         creative_allowed: economic_gate.creative_allowed,
+        offer_revealed: economic_gate.offer_revealed,
         template_use_case: economic_gate.route.template_use_case,
         acquisition_action: economic_gate.route.acquisition_action,
         workflow_stage_idx: economic_gate.stage_idx,
