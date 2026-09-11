@@ -2064,14 +2064,18 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const locator = readPropertyLocator()
     if (!locator) return
     locatorSeededRef.current = true
+    // The locator stores `string | null`; ActiveInboxContext uses
+    // `string | undefined`. Normalise here rather than widening the context
+    // type, which every other caller already satisfies.
+    const orUndefined = (value: string | null) => value ?? undefined
     setActiveContext(
       {
-        propertyId: locator.propertyId,
-        threadKey: locator.threadKey,
-        masterOwnerId: locator.masterOwnerId,
-        sellerId: locator.masterOwnerId,
-        prospectId: locator.prospectId,
-        propertyAddress: locator.address,
+        propertyId: orUndefined(locator.propertyId),
+        threadKey: orUndefined(locator.threadKey),
+        masterOwnerId: orUndefined(locator.masterOwnerId),
+        sellerId: orUndefined(locator.masterOwnerId),
+        prospectId: orUndefined(locator.prospectId),
+        propertyAddress: orUndefined(locator.address),
         entityType: locator.propertyId ? 'property' : locator.masterOwnerId ? 'master_owner' : null,
         entityId: locator.propertyId || locator.masterOwnerId || null,
         sourceView: 'list',
@@ -3660,7 +3664,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             const index = filtered.findIndex((row) => row.id === thread.id)
             const nextThread = index >= 0 ? (filtered[index + 1] ?? filtered[index - 1] ?? null) : null
             if (nextThread) selectThread(nextThread)
-            else clearThreadSelection()
+            else clearThreadSelection('archived_last_thread')
           }
           hideThreadLocally(thread.id)
         }
