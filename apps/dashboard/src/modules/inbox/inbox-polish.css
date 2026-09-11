@@ -1005,6 +1005,38 @@
   animation: nx-orb-expand 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: top right;
 }
+/* DRAWER / MOBILE-SHEET VARIANT.
+ *
+ * .nx-orb-dashboard above is the DESKTOP POPOVER: absolutely positioned at
+ * `top: calc(100% + 16px); right: 0` relative to the orb button. Inside a mobile
+ * sheet there is no such anchor, so the panel was laid out 100% of the sheet
+ * body BELOW its own container - off-screen. The sheet opened, the header
+ * rendered, and the body looked completely empty.
+ *
+ * The drawer variant is ordinary in-flow content: it fills its container and
+ * scrolls with the sheet. It also drops the pop-in animation, which reads as a
+ * glitch when the sheet itself is already animating up from the bottom.
+ */
+.nx-orb-dashboard--drawer {
+  position: static;
+  top: auto;
+  right: auto;
+  width: 100%;
+  max-width: 100%;
+  min-height: 0;
+  z-index: auto;
+  animation: none;
+  display: flex;
+  flex-direction: column;
+  /* The sheet already supplies the glass surface; a second one double-darkens. */
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 @keyframes nx-orb-expand {
   from { opacity: 0; transform: translateY(-12px) scale(0.95); filter: blur(4px); }
   to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }

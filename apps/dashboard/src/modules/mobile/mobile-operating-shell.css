@@ -2567,6 +2567,31 @@ html.is-mobile-layout {
     flex-direction: column;
     min-height: 0;
     height: 100%;
+
+    /* ESCAPE THE SHEET, LITERALLY.
+     *
+     * The base .nx-activity-panel (nx-glass-system.css) is the DESKTOP RAIL:
+     * `position: fixed; top: 64px; right: 0; width: clamp(380px,32vw,540px);
+     * height: calc(100dvh - 64px)`. Those were never reset for the sheet
+     * variant, so inside a MobileSheet the panel was still pinned to the
+     * viewport rather than laid out in the sheet body - which is why "Live
+     * Activity" opened to an empty box.
+     *
+     * Also drops its own glass: the sheet already supplies the frosted surface,
+     * and stacking a second one double-darkens the panel. */
+    position: static;
+    top: auto;
+    right: auto;
+    left: auto;
+    width: 100%;
+    max-width: 100%;
+    z-index: auto;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .nx-activity-panel--sheet .lac-list {
@@ -2586,6 +2611,16 @@ html.is-mobile-layout {
   }
 
   .lac-filter-rail::-webkit-scrollbar { display: none; }
+
+  /* The filter chips scroll horizontally with the scrollbar hidden, so on a
+   * phone there was no indication that anything existed past the right edge -
+   * the operator reported the sections "are not visible on mobile". A soft
+   * fade on the trailing edge is the standard iOS affordance for "this keeps
+   * going"; it costs no height, which a sheet cannot spare. */
+  .lac-filter-rail {
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  }
 
   .lac-chip {
     flex-shrink: 0;
