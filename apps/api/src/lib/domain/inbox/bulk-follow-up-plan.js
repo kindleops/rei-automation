@@ -12,6 +12,7 @@ import {
   loadThreadTemplateHistory,
   selectFus2Template,
   buildRecipientPlan,
+  neutralGreetingMode,
   resolveSellerLanguage,
   FUS2_OPERATOR_LABEL,
 } from "@/lib/domain/inbox/fus2-follow-up-service.js";
@@ -425,28 +426,32 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
     }
 
     /**
-     * Neutral greeting instead of NEED REVIEW when no human name exists.
+     * A MISSING NAME MUST NOT PARK A RECIPIENT.
      *
-     * The operator's goal is an inbox that runs without human involvement, so a
-     * missing name must not park a recipient. Measured on production: after the
-     * split-identity fix above, 7,506 threads resolve a name from the prospect and
-     * 1,834 from a person-style owner, leaving 400 with no human name anywhere —
-     * 249 English, 86 unknown, 55 Spanish, 7 Portuguese, 3 Vietnamese.
+     * The operator's goal is an inbox that clears without human involvement, so
+     * "we do not know their first name" cannot be a dead end. After the
+     * split-identity fix above, 7,506 threads resolve a name from the prospect
+     * and 1,834 from a person-style owner, leaving a few hundred with no human
+     * name anywhere - almost all of them LLC-owned.
      *
-     * "there" renders "Hi there, Mason here." which is natural and correct for an
-     * LLC-owned property where we only know the entity. It is applied ONLY to
-     * English and unknown-language recipients: the Spanish templates open
-     * "Hola {{name}}, habla Carlos" and there is no equivalent one-word neutral I
-     * can validate, so those 65 still route to review rather than ship copy I am
-     * guessing at. That is 0.7% of the inbox, not 23%.
+     * Two shapes, because one size does not fit both:
+     *   word -> "Hi there, Jake here."      (English: a real neutral noun)
+     *   omit -> "Hola, habla Carlos."       (drop the name entirely)
      *
-     * Entity names still never become greetings — firstName() rejects them — so
-     * this replaces "Hi 2972," with "Hi there,", never with the company name.
+     * The omit form exists because Spanish has no one-word equivalent of
+     * "there". Restricting the neutral greeting to English was my earlier
+     * choice, made to avoid shipping copy I could not validate - but it meant a
+     * Spanish-language LLC thread went to NEED REVIEW forever. Deleting a name
+     * from a greeting is a grammatical operation, not invented copy, so it is
+     * safe in a way that inventing a word is not, and it applies to every
+     * non-English language rather than needing one guess per language.
+     *
+     * Entity names still never become greetings - firstName() rejects them - so
+     * this yields "Hola, habla Carlos", never "Hola Coolidge South Properties
+     * LLC, habla Carlos".
      */
-    const languageKey = String(language || "").trim().toLowerCase();
-    const acceptsNeutralGreeting =
-      !languageKey || languageKey === "english" || languageKey === "en" || languageKey === "unknown";
-    const threadCtx = (!ctx.seller_first_name && acceptsNeutralGreeting)
+    const greetingMode = ctx.seller_first_name ? null : neutralGreetingMode(language);
+    const threadCtx = greetingMode === "word"
       ? { ...ctx, seller_first_name: "there" }
       : ctx;
 
@@ -460,6 +465,7 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
       // recipient into NEED REVIEW, which is the correct outcome.
       agentName: ctx.agent_name,
       now,
+      neutralGreeting: greetingMode,
     });
 
     recipients.push({

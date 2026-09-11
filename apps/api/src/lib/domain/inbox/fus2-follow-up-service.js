@@ -153,7 +153,40 @@ export function selectFus2Template({ templates = [], usedTemplateIds = [], conte
  * Build the per-recipient plan: eligibility, rendered copy, and an individually
  * resolved schedule. Renders nothing itself and schedules nothing itself.
  */
-export function buildRecipientPlan({ thread = {}, template = null, agentName = null, now = new Date() } = {}) {
+/**
+ * A name-shaped placeholder that survives rendering and is then removed.
+ *
+ * Some languages have no one-word neutral equivalent of "there". Spanish
+ * templates open "Hola {{name}}, habla Carlos" and there is no word to insert -
+ * but the name can simply be DROPPED, and "Hola, habla Carlos" is ordinary,
+ * correct Spanish. That is a grammatical deletion, not invented copy, which is
+ * why it is safe where guessing a word is not.
+ *
+ * Deliberately plain ASCII: an invisible Unicode marker would flip the message
+ * to UCS-2 and change the segment count before it was stripped.
+ */
+const NEUTRAL_NAME_SENTINEL = "ZZNEUTRALNAMEZZ";
+
+/**
+ * How to greet a seller whose human name we do not have.
+ *   word -> insert a neutral noun ("Hi there, Jake here")
+ *   omit -> delete the name and tidy the punctuation ("Hola, habla Carlos")
+ * Both keep the recipient in the automated flow instead of parking it for a
+ * human, which is the whole point: a missing name is not a reason to stop.
+ */
+export function neutralGreetingMode(language) {
+  const key = String(language || "").trim().toLowerCase();
+  if (!key || key === "english" || key === "en" || key === "unknown") return "word";
+  return "omit";
+}
+
+export function buildRecipientPlan({
+  thread = {},
+  template = null,
+  agentName = null,
+  now = new Date(),
+  neutralGreeting = null,
+} = {}) {
   const threadKey = clean(thread.thread_key) || clean(thread.threadKey);
   const base = {
     thread_key: threadKey,
@@ -166,8 +199,11 @@ export function buildRecipientPlan({ thread = {}, template = null, agentName = n
 
   // Canonical renderer + every canonical safety gate. A rejection here is an
   // ELIGIBILITY verdict, never something to paper over with partial copy.
+  // A missing name is filled with the sentinel ONLY when the caller asked for
+  // the omit mode, so nothing changes for recipients that have a real name.
+  const omitName = neutralGreeting === "omit" && !clean(thread.seller_first_name);
   const rendered = renderSafeTemplate(template, {
-    seller_first_name: clean(thread.seller_first_name),
+    seller_first_name: omitName ? NEUTRAL_NAME_SENTINEL : clean(thread.seller_first_name),
     agent_name: clean(agentName) || clean(thread.agent_name),
     property_address: clean(thread.property_address),
   });
@@ -199,14 +235,22 @@ export function buildRecipientPlan({ thread = {}, template = null, agentName = n
   // a long seller name or address can push a message to a second segment, and a
   // non-Latin name can flip an otherwise GSM-7 message to UCS-2. Reported for
   // operator cost visibility only -- copy is never auto-edited to reduce it.
-  const segments = countSegments(rendered.text);
-  const encoding = isGsm7(rendered.text) ? "GSM-7" : "Unicode";
+  // Strip the placeholder BEFORE counting: segment cost and encoding must
+  // describe the text the seller actually receives. Any whitespace in front of
+  // the placeholder goes with it, so "Hola X, habla Carlos" becomes
+  // "Hola, habla Carlos" rather than "Hola , habla Carlos".
+  const finalText = omitName
+    ? rendered.text.replace(new RegExp(`\\s*${NEUTRAL_NAME_SENTINEL}`, "g"), "")
+    : rendered.text;
+
+  const segments = countSegments(finalText);
+  const encoding = isGsm7(finalText) ? "GSM-7" : "Unicode";
 
   return {
     ...base,
     eligible: true,
     reason: null,
-    message_body: rendered.text,
+    message_body: finalText,
     segments,
     encoding,
     template_name: clean(template.template_name) || null,
@@ -215,4 +259,4 @@ export function buildRecipientPlan({ thread = {}, template = null, agentName = n
   };
 }
 
-export default { loadFus2Templates, loadThreadTemplateHistory, selectFus2Template, buildRecipientPlan };
+export default { loadFus2Templates, loadThreadTemplateHistory, selectFus2Template, buildRecipientPlan, neutralGreetingMode };
