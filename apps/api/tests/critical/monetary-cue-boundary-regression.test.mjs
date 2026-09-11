@@ -81,18 +81,14 @@ test("years and cued ZIP codes no longer parse as amounts", () => {
   assert.equal(askingPrice("Minneapolis, MN 55407"), null);
 });
 
-test("GAP CLOSED: a ZIP after a bare preposition is no longer money", () => {
-  // This was a documented residual. The reasoning was that catching it needed
-  // a bare "in" cue, and "in" also precedes real money - so suppressing on the
-  // cue would destroy "I'm interested in 95000".
-  //
-  // The discriminator turned out not to be the cue at all. It is ROUNDNESS: a
-  // real-estate price under six figures is a round multiple of 1,000, and a
-  // ZIP, year, street number or phone fragment is not. 55407 % 1000 = 407.
-  assert.equal(askingPrice("we are in 55407"), null);
-  // And the figure the old trade was protecting survives untouched.
+test("NARROWED GAP: a ZIP after a bare preposition still parses as an amount", () => {
+  // What remains open, stated precisely rather than deleted. Catching this
+  // needs a bare "in" cue, and "in" also precedes real money — suppressing on
+  // it would destroy "I'm interested in 95000" and "I put in 2000 for repairs".
+  // The trade is not worth it, so this case is knowingly NOT covered.
+  assert.equal(askingPrice("we are in 55407")?.amount, 55407);
+  // Proof of what a bare-"in" rule would have cost:
   assert.equal(askingPrice("I'm interested in 95000")?.amount, 95000);
-  assert.equal(askingPrice("I put in 2000 for repairs")?.amount ?? null, null, "repairs are not an ask");
 });
 
 test("legitimate asking prices still bind", () => {

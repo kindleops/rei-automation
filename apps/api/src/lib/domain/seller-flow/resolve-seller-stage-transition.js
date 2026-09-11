@@ -26,12 +26,6 @@ import {
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 import { ACQUISITION_LIFECYCLE_EVENTS } from "@/lib/domain/seller-flow/acquisition-lifecycle-events.js";
 import { resolveSellerAuthorityState } from "@/lib/domain/seller-flow/seller-authority-state.js";
-import {
-  STAGE3_OFFER_BANDS,
-  resolveStage3Route,
-  resolveCreativeAllowed,
-} from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
-import { hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
 
 export const TRANSITION_RESOLVER_VERSION = "seller_stage_transition_v2_authority_gated";
 
@@ -158,11 +152,6 @@ export function normalizeAskingPriceFact(input, { sourceMessageId = null, confid
     confidence: input.confidence ?? confidence ?? null,
     source_message_id: input.source_message_id || sourceMessageId || null,
     extracted_text: clean(input.extracted_text || input.raw) || null,
-    // Whether the MAGNITUDE was inferred from a contextual anchor ("400"
-    // against a $200,000 reference) rather than stated ("$400,000"). It must
-    // survive into the persisted fact, or a later reader cannot tell a
-    // conventional shorthand reading from a number the seller actually wrote.
-    scaled_from_reference: input.scaled_from_reference === true,
     captured_at: input.captured_at || now || new Date().toISOString(),
   };
 }
@@ -267,136 +256,6 @@ function firstUnresolvedIdx(facts = {}, {
     if (!checks[i]()) return i;
   }
   return checks.length - 1; // everything resolved → closed
-}
-
-
-const PRICE_STAGE_IDX = 2;      // asking_price
-const CONDITION_STAGE_IDX = 3;  // property_condition
-
-/**
- * THE ACQUISITION DECISION GATE.
- *
- * firstUnresolvedIdx answers "what factual milestone is still missing?". That
- * is useful and stays exactly as it is. It does NOT answer "what should we do
- * next", and promoting it to workflow state is the defect this closes: the
- * instant a price resolved, condition became the first unresolved milestone,
- * so the seller moved to property_condition and was asked about vacancy - even
- * when the economics said the deal was nowhere close.
- *
- * Production example: "Half mil and its yours" on a property we would pay
- * $160,000 for. priceResolved=true, conditionResolved=false, so the seller
- * advanced S3 -> S4 as S3_TO_S4_PRICE_PROVIDED and received a condition probe.
- * No amount of condition information bridges $340,000.
- *
- * Once price resolves, the CANONICAL STAGE-3 ENGINE decides the active stage.
- * No pricing thresholds are introduced here - the bands (MAO x 1.15 / x 1.40)
- * remain the engine's and this only reads its verdict.
- *
- * Returns null when the engine cannot speak (no ask, no underwriting), leaving
- * milestone completeness to stand exactly as before.
- */
-function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = {}) {
-  if (unresolvedIdx !== CONDITION_STAGE_IDX) return null;
-
-  const ask = normalizeAskingPriceFact(facts?.asking_price)?.value;
-  const recommended = numberOrNull(ade?.recommended_cash_offer ?? ade?.recommended_offer);
-  if (!(ask > 0) || !(recommended > 0)) return null;
-
-  const underwriting = {
-    recommended_cash_offer: recommended,
-    max_allowable_offer:
-      numberOrNull(ade?.max_allowable_offer) || numberOrNull(ade?.investor_ceiling_mid) || null,
-  };
-
-  // Creative eligibility changes which route the band yields, so it must be
-  // decided BEFORE the route is resolved - and by the same policy the
-  // recommender uses, which is why it lives in the engine.
-  const creative_allowed = resolveCreativeAllowed({
-    facts,
-    classification: signals?.classification || {},
-    underwriting,
-    // The ask is the one the gate actually evaluated, so the policy and the
-    // route can never be judging different numbers.
-    negotiation_state: { ...(signals?.negotiation_state || {}), current_asking_price: ask },
-  });
-
-  // Whether our offer has ever been presented decides the MESSAGE for an ask
-  // inside the buy box: a first reveal, or a reply to a real counter. Same
-  // canonical predicate the monetary parser uses for `is_counter`.
-  const offer_revealed = hasRevealedOffer(signals?.negotiation_state);
-
-  const decision = resolveStage3Route({ ask, underwriting, creative_allowed, offer_revealed });
-  if (!decision) return null;
-
-  // The route CARRIES its lifecycle stage. Reading it is a lookup, not a
-  // second opinion - which is the whole point of the collapse.
-  const stage_idx = STAGE_INDEX.get(decision.route.lifecycle_stage_code);
-  if (!Number.isInteger(stage_idx)) return null;
-
-  return {
-    stage_idx,
-    band: decision.band,
-    economics: decision.economics,
-    route: decision.route,
-    creative_allowed,
-    offer_revealed,
-    economic_fit: economicFitForBand(decision.band),
-  };
-}
-
-/**
- * A LABEL on the band, never a second stage decision.
- *
- * economic_fit exists only to feed temperature. It deliberately does not
- * influence the stage, which the route already owns.
- */
-function economicFitForBand(band) {
-  if (band === STAGE3_OFFER_BANDS.VERY_WIDE_GAP) return "out_of_band";
-  if (band === STAGE3_OFFER_BANDS.WIDE_GAP) return "stretch";
-  if (band === STAGE3_OFFER_BANDS.AUTO_ACCEPT) return "actionable";
-  return "in_band";
-}
-
-/**
- * LEAD TEMPERATURE = ACQUISITION PRIORITY / ACTIONABILITY.
- *
- * Not engagement, not questionnaire progress, not "a price exists", not "they
- * asked what we would pay". One question: how actionable is this seller as an
- * acquisition opportunity right now?
- *
- * Replaces derivation from the stage index (afterIdx >= 4 -> HOT, >= 2 ->
- * WARM), under which a seller became WARM merely for naming a number and HOT
- * merely for asking what we would pay. "Sure, $2 million" on a $150,000 house
- * was WARM.
- *
- * No pricing thresholds live here; economic_fit comes from the canonical
- * Stage-3 bands.
- */
-function resolveAcquisitionTemperature({
-  facts = {},
-  economic_fit = null,
-  negotiation = null,
-  intentKey = "unclear",
-} = {}) {
-  // Transaction readiness outranks everything.
-  if (negotiation?.terms_accepted === true) return LEAD_TEMPERATURE_CODES.HOT;
-
-  // Economic reality outranks responsiveness. A seller can be delighted to talk
-  // and still be nowhere near a deal.
-  if (economic_fit === "out_of_band") return LEAD_TEMPERATURE_CODES.COLD;
-
-  // Executable now: the ask is at or inside our cash number.
-  if (economic_fit === "actionable") return LEAD_TEMPERATURE_CODES.HOT;
-
-  // A live acquisition conversation with plausible economics, or economics not
-  // yet known. asks_offer supports interest and therefore WARM - it cannot
-  // independently create HOT.
-  if (interestResolved(facts) || intentKey === "asks_offer") {
-    return LEAD_TEMPERATURE_CODES.WARM;
-  }
-
-  // Ownership unconfirmed, or confirmed with no interest established.
-  return LEAD_TEMPERATURE_CODES.COLD;
 }
 
 // ─── Blocking / terminal intents ─────────────────────────────────────────────
@@ -653,9 +512,6 @@ export function resolveSellerStageTransition({
   new_facts = {},
   intent = "unclear",
   classification_confidence = null,
-  // Full classifier output. Only creative-finance signals are read from it,
-  // and only through the engine's canonical policy - never interpreted here.
-  classification = null,
   current_temperature = null,
   current_disposition = null,
   contactability = CONTACTABILITY_CODES.CONTACTABLE,
@@ -907,17 +763,7 @@ export function resolveSellerStageTransition({
     contract_state,
   });
 
-  // ── ACQUISITION DECISION GATE ───────────────────────────────────────────
-  // Milestone completeness (unresolvedIdx) says what fact is missing. The
-  // canonical Stage-3 engine says what we should DO about it. Only the second
-  // one is workflow state.
-  const economic_gate = economicStageGate(facts, ade_result, unresolvedIdx, {
-    classification,
-    negotiation_state,
-  });
-  const gatedUnresolvedIdx = economic_gate ? economic_gate.stage_idx : unresolvedIdx;
-
-  let afterIdx = Math.max(beforeIdx, gatedUnresolvedIdx);
+  let afterIdx = Math.max(beforeIdx, unresolvedIdx);
   let authority_gate = null;
   if (!authority.offer_progression_allowed && afterIdx >= OFFER_STAGE_IDX) {
     // Monotonicity still holds: a deal already at S5+ never regresses, but its
@@ -958,24 +804,16 @@ export function resolveSellerStageTransition({
   }
   const afterCode = stageAt(afterIdx);
 
-  // TEMPERATURE = ACQUISITION PRIORITY, not engagement depth. Previously this
-  // read `afterIdx >= 4 -> HOT, afterIdx >= 2 -> WARM`, so a seller became WARM
-  // merely for naming a number and HOT merely for asking what we would pay.
-  // See resolveAcquisitionTemperature.
-  //
-  // Assigned, not bumped: an economically dead deal must be able to fall to
-  // COLD. bumpTemperature is monotonic, so it could never express "this seller
-  // is responsive but the deal is not workable", which is precisely the James
-  // case.
-  let temperature = resolveAcquisitionTemperature({
-    facts,
-    economic_fit: economic_gate?.economic_fit ?? null,
-    negotiation: negotiation_state,
-    intentKey,
-  });
-  // The explainable signal model may raise, but never above an out-of-band
-  // economic verdict: responsiveness does not override economic reality.
-  if (temperature_signal?.temperature_floor && economic_gate?.economic_fit !== "out_of_band") {
+  // Temperature floor by engagement depth, then by the explainable signal
+  // model's floor (which never exceeds what explicit language allows — the
+  // negative-intent paths above never reach here).
+  let temperature = normalizeLeadTemperature(current_temperature, LEAD_TEMPERATURE_CODES.UNSCORED);
+  if (afterIdx >= 4 || negotiation_state?.terms_accepted || intentKey === "asks_offer") {
+    temperature = bumpTemperature(temperature, LEAD_TEMPERATURE_CODES.HOT);
+  } else if (afterIdx >= 2 || interestResolved(facts)) {
+    temperature = bumpTemperature(temperature, LEAD_TEMPERATURE_CODES.WARM);
+  }
+  if (temperature_signal?.temperature_floor) {
     temperature = bumpTemperature(temperature, temperature_signal.temperature_floor);
   }
 
@@ -1132,28 +970,6 @@ export function resolveSellerStageTransition({
     authority_state: authority,
     authority_gate,
     listing_gate,
-    // The economic verdict that chose this stage, so persistence, the strategy
-    // router and any audit can read WHY without recomputing pricing.
-    economic_gate: economic_gate
-      ? {
-        applied: true,
-        offer_band: economic_gate.band,
-        economic_fit: economic_gate.economic_fit,
-        seller_asking_price: economic_gate.economics.seller_asking_price,
-        recommended_cash_offer: economic_gate.economics.recommended_cash_offer,
-        offer_gap_amount: economic_gate.economics.offer_gap_amount,
-        ask_to_offer_ratio: economic_gate.economics.ask_to_offer_ratio,
-        milestone_unresolved_idx: unresolvedIdx,
-        route_id: economic_gate.route.route_id,
-        route: economic_gate.route,
-        creative_allowed: economic_gate.creative_allowed,
-        offer_revealed: economic_gate.offer_revealed,
-        template_use_case: economic_gate.route.template_use_case,
-        acquisition_action: economic_gate.route.acquisition_action,
-        workflow_stage_idx: economic_gate.stage_idx,
-        diverged: economic_gate.stage_idx !== unresolvedIdx,
-      }
-      : { applied: false },
     stage_after: afterCode,
     stage_after_number: afterIdx + 1,
     advanced: afterIdx > beforeIdx,

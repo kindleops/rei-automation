@@ -10,7 +10,6 @@
 process.env.RUNTIME_STATE_ROOT = `/tmp/rea-runtime-state-test-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 import { after, before, beforeEach } from 'node:test'
-import { __setDeps as setNotificationIntelligenceDeps } from '../../src/lib/domain/notifications/notification-intelligence-service.js'
 import {
   clearSystemControlCache,
   primeSystemControlCache,
@@ -114,38 +113,8 @@ export function bindCriticalTestFile(fileUrl) {
   activeFile = fileUrl
 }
 
-/**
- * The notification intelligence service builds its own Supabase client, so a
- * test that triggers a notification upsert reaches the placeholder host, gets
- * blocked by the guard, and then burns 1s+2s+4s of postgrest retry backoff
- * before warning and continuing. It only ever cost latency - it warns rather
- * than failing - but seven seconds per affected test is seven seconds.
- *
- * The module already exposes a supabase_override seam, so making it hermetic
- * costs nothing and changes no runtime behaviour: this stub is installed only
- * inside the critical-test environment.
- */
-function makeInertNotificationClient() {
-  const result = { data: null, error: null }
-  const chain = new Proxy(
-    {
-      then: (onF, onR) => Promise.resolve(result).then(onF, onR),
-      maybeSingle: async () => result,
-      single: async () => result,
-    },
-    {
-      get(target, prop) {
-        if (prop in target) return target[prop]
-        return () => chain
-      },
-    }
-  )
-  return { from: () => chain }
-}
-
 before(() => {
   installCriticalFetchGuard()
-  setNotificationIntelligenceDeps({ supabase_override: makeInertNotificationClient() })
 })
 
 beforeEach(() => {

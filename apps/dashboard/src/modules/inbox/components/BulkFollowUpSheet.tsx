@@ -13,7 +13,6 @@ const REASON_LABEL: Record<string, string> = {
   blank_greeting_detected: 'Name missing — would send a blank greeting',
   unresolved_tokens_detected: 'Unresolved template fields',
   schedule_unresolvable: 'No eligible send window',
-  followup_already_pending: 'Follow-up already sent or pending today',
   no_fus2_templates_available: 'No approved templates available',
 }
 

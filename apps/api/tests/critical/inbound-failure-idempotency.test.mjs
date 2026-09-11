@@ -7,8 +7,7 @@ import {
   __resetTextgridInboundTestDeps,
 } from "@/lib/flows/handle-textgrid-inbound.js";
 import { createInMemoryIdempotencyLedger, createPodioItem } from "../helpers/test-helpers.js";
-import { makeInboundWebhookBaseDeps,
-  makeHermeticContextDeps } from "../helpers/chainable-supabase.mjs";
+import { makeInboundWebhookBaseDeps } from "../helpers/chainable-supabase.mjs";
 
 // ─── Shared payload & setup helpers ─────────────────────────────────────
 
@@ -23,12 +22,6 @@ const INBOUND_PAYLOAD = {
 
 function baseDeps(ledger) {
   return {
-    // Required even in the failure suites: without it the brain_lookup segment
-    // reaches the real outbound-pair lookup, degrades to podio-unavailable, and
-    // returns found:false instead of propagating the injected throw — so a test
-    // named "brain_lookup failure" silently asserted against the unknown-inbound
-    // path instead.
-    ...makeHermeticContextDeps(),
     beginIdempotentProcessing: ledger.begin,
     completeIdempotentProcessing: ledger.complete,
     failIdempotentProcessing: ledger.fail,

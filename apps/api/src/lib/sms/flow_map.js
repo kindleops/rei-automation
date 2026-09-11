@@ -241,28 +241,10 @@ function resolveStageProgression(brain_state, classify_result, property_context)
   // Asking price
   if (current_stage === "asking_price" || current_stage === "s3") {
     if (signal_set.has("price_given") || signal_set.has("price_curious")) {
-      // RETIRED 2026-09-11 (operator ruling): price_works -> vacancy probe.
-      //
-      //   if (property_context?.price_works) {
-      //     return { use_case: "price_works_confirm_basics", stage_code: STAGES.S4A };
-      //   }
-      //
-      // That branch sent template 540001 - "Got it. That may work on our end.
-      // Is the property vacant right now?" - the moment a price looked
-      // workable. It is the vacancy-probe-immediately-after-price-capture that
-      // was explicitly killed, surviving under a different use-case key in a
-      // SECOND router that never consults the canonical Stage-3 band.
-      //
-      // There is no independent price_works -> vacancy shortcut any more. A
-      // workable price now means PRESENT OUR NUMBER, and condition is asked
-      // only when the economic route says condition information is useful:
-      //
-      //   asking price captured -> ADE band -> canonical route -> approved
-      //   route-specific template
-      //
-      // Vacancy and occupancy remain legitimate questions; they must be asked
-      // under the canonical condition workflow (price_high_condition_probe),
-      // not through an independent legacy use case.
+      // Price received — branch based on viability
+      if (property_context?.price_works) {
+        return { use_case: "price_works_confirm_basics", stage_code: STAGES.S4A };
+      }
       if (property_context?.needs_condition_info) {
         return { use_case: "price_high_condition_probe", stage_code: STAGES.S4B };
       }

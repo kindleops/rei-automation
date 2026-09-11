@@ -32,11 +32,6 @@ export const MONETARY_KINDS = Object.freeze({
   ASKING_PRICE: "asking_price",
   COUNTER_OFFER: "counter_offer",
   MINIMUM_PRICE: "minimum_price",
-  // The natural inverse of MINIMUM_PRICE. A ceiling is a real negotiating
-  // position and collapsing it to "exact" tells the acquisition engine the
-  // seller WANTS the number when they said at MOST that number - and those
-  // route to opposite bands.
-  MAXIMUM_PRICE: "maximum_price",
   NET_REQUIREMENT: "net_requirement",
   MORTGAGE_PAYOFF: "mortgage_payoff",
   REPAIR_AMOUNT: "repair_amount",
@@ -66,7 +61,7 @@ const SMALL_WORDS = Object.freeze({
   ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
-  eighty: 80, ninety: 90, a: 1, an: 1, half: 0.5, quarter: 0.25,
+  eighty: 80, ninety: 90, a: 1, an: 1, half: 0.5,
   // Spanish spelled-out numbers ("ciento veinte mil" = 120,000). "cien"/
   // "ciento" are additive hundreds in Spanish, so SMALL_WORDS (not scale) is
   // correct: ciento(100) + veinte(20), then the "mil" scale multiplies.
@@ -100,19 +95,6 @@ const SCALE_WORDS = Object.freeze({
  * million", "a hundred and fifty"). Returns { value, length } (tokens consumed)
  * or null.
  */
-/**
- * Words that are a FRACTION OF the scale that follows, not an addend.
- *
- * "half a million" is 0.5 x 1,000,000. It was parsed as half(0.5) + a(1) = 1.5,
- * then multiplied, producing $1,500,000 - a 3x overstatement of a seller's
- * asking price, in the same class as the $4,100 rent-as-contract-price
- * incident. "a half million" had the mirror-image bug.
- *
- * The article between a fraction and its scale is grammar, not arithmetic.
- */
-const FRACTION_WORDS = new Set(["half", "quarter", "medio", "media"]);
-const ARTICLE_WORDS = new Set(["a", "an", "un", "una"]);
-
 function parseNumberWords(tokens, startIdx) {
   let total = 0;
   let current = 0;
@@ -126,38 +108,13 @@ function parseNumberWords(tokens, startIdx) {
       continue;
     }
     if (SMALL_WORDS[word] !== undefined) {
-      // "half a million" / "a half million": the article is grammar, not 1.
-      if (FRACTION_WORDS.has(word) && ARTICLE_WORDS.has(tokens[i + 1])) {
-        current += SMALL_WORDS[word];
-        consumed += 2;
-        i += 1;
-        sawAnything = true;
-        continue;
-      }
-      if (ARTICLE_WORDS.has(word) && FRACTION_WORDS.has(tokens[i + 1])) {
-        consumed += 1;
-        sawAnything = true;
-        continue;
-      }
       current += SMALL_WORDS[word];
       consumed += 1;
       sawAnything = true;
       continue;
     }
     if (SCALE_WORDS[word] !== undefined) {
-      let scale = SCALE_WORDS[word];
-      // "mil" is genuinely ambiguous: Spanish "150 mil" is 150,000, American
-      // slang "2 mil" is 2,000,000. A FRACTION settles it - half a thousand is
-      // $500, which is not a house. "Half mil and its yours" is $500,000.
-      // A NON-INTEGER settles it, in both directions. "Half mil" is 0.5 and
-      // "1.5 mil" is 1.5; neither is $500 or $1,500, because nobody sells a
-      // house for either. Spanish "150 mil" = 150,000 is an INTEGER and is
-      // therefore untouched, which is the whole point of testing the fraction
-      // rather than the magnitude.
-      if (scale === 1_000 && word !== "thousand" && word !== "grand" && word !== "k"
-        && current > 0 && !Number.isInteger(current)) {
-        scale = 1_000_000;
-      }
+      const scale = SCALE_WORDS[word];
       if (scale >= 1000) {
         total += (current || 1) * scale;
         current = 0;
@@ -216,71 +173,7 @@ const ADDRESS_WORD_RE =
  * ("327 Pennsylvania"). Deliberately conservative — it only ever fires for
  * numbers carrying no monetary evidence at all.
  */
-/**
- * A number the seller is reciting AS an address/phone/zip, where the giveaway
- * comes BEFORE it: "my address starts with 400".
- *
- * isAddressAdjacent only looks forward, at the street type after the number, so
- * it never saw this shape - and with a reference anchor present the bare 400
- * was scaled to a $400,000 asking price out of a seller reciting their street
- * number. Same defect as the digit-anchor one, in the tokenizer path.
- */
-function hasAddressSubjectBefore(text, match) {
-  const before = text.slice(Math.max(0, match.index - 48), match.index);
-  // Bounded to the CLAUSE, not the sentence: "my address starts with 400 but I
-  // want 350" contains a real ask after the conjunction, and suppressing the
-  // whole sentence would drop it.
-  return /\b(?:address|street\s+number|house\s+number|zip|zipcode|postal|phone|apt|apartment|parcel|apn|account\s+number|case\s+number)\b(?:(?!\b(?:but|however|though|although)\b)[^.?!,;])*$/i.test(
-    before,
-  );
-}
-
-/**
- * PHONE NUMBERS. Every component of one, not just the whole.
- *
- * "Please call me. 1-209-505-5314" yielded TWO asking prices: the 4-digit
- * line number 5314, and the area code 209 scaled to $209,000 by the
- * hundreds-shorthand rule. Sub-token extraction is the real hazard, so the
- * guard works on SPANS: any amount whose digits fall inside a phone-shaped run
- * is not money.
- *
- * Covers 1-209-505-5314, 209-505-5314, (209) 505-5314, 209.505.5314,
- * 209 505 5314 and the bare 2095055314.
- */
-const PHONE_SHAPES = [
-  // The separator after the area code is OPTIONAL, because "(561)706-4622"
-  // writes none. Missing that cost a $561,000 asking price from an area code -
-  // and only surfaced once the line-number component stopped winning selection.
-  /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]\d{4}\b/g,
-  /\b\d{10}\b/g,
-  /\b\d{3}[\s.-]\d{4}\b/g,
-];
-
-function phoneSpans(text) {
-  const spans = [];
-  for (const re of PHONE_SHAPES) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(text)) !== null) spans.push([m.index, m.index + m[0].length]);
-  }
-  return spans;
-}
-
-function isInsidePhoneNumber(text, match, spans = null) {
-  // OVERLAP, not containment. The amount regex begins with `\$?\s*`, so
-  // match.index points at the whitespace BEFORE the digits - one character
-  // outside the phone span. Strict containment therefore missed every
-  // component that followed a space, which is most of them.
-  const start = match.index;
-  const end = match.index + match[0].length;
-  for (const [a, b] of spans ?? phoneSpans(text)) {
-    if (start < b && end > a) return true;
-  }
-  return false;
-}
-
 function isAddressAdjacent(text, match) {
-  if (hasAddressSubjectBefore(text, match)) return true;
   const after = text.slice(match.index + match[0].length);
   const next = ADDRESS_WORD_RE.exec(after);
   if (!next) return false;
@@ -389,8 +282,6 @@ function isCalendarYear(text, match, digits, value) {
 /** Extract every numeric token (digits or words) with its position + suffix scale. */
 function tokenizeAmounts(text) {
   const amounts = [];
-  // Computed once per message, not per amount.
-  const phone_spans = phoneSpans(text);
 
   // Digit-based: $100,000 / 100k / 95.5k / 1.2m / 80 / $500.000 (dot-thousands)
   const numRe = /\$?\s*(\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+(?!\d)|\d+(?:\.\d+)?)\s*(k|m|mil|grand|thousand|million|hundred)?\b/gi;
@@ -419,20 +310,9 @@ function tokenizeAmounts(text) {
     }
     // A postal code ("zip is 55407", "Minneapolis, MN 55407") and a calendar
     // year ("built in 1987") are not money either.
-    // A phone number is never money, whatever punctuation it carries. This sits
-    // OUTSIDE the no-separator branch on purpose: "561.706.4622" parses as
-    // European dot-thousands, so hadThousandsSeparator is true and the guarded
-    // block below would never run - leaving $561,706.
-    if (isInsidePhoneNumber(text, match, phone_spans)) continue;
-
     if (!suffix && !hasCurrency && !hadThousandsSeparator) {
       if (isPostalCode(text, match, match[1])) continue;
       if (isCalendarYear(text, match, match[1], value)) continue;
-      // A SPLIT ADDRESS or a fraction: "121/123 Congress Ave", "1145 1/2".
-      // The number is glued to a slash on one side, which no price ever is.
-      const slash_before = /\d\s*\/\s*$/.test(text.slice(Math.max(0, match.index - 6), match.index + (match[0].length - match[1].length)));
-      const slash_after = /^\s*\/\s*\d/.test(text.slice(match.index + match[0].length));
-      if (slash_before || slash_after) continue;
     }
     // Percentages are not monetary values.
     if (/^\s*%/.test(after) || /percent/i.test(trailingWord)) continue;
@@ -446,15 +326,7 @@ function tokenizeAmounts(text) {
       // classify.js scalePriceToken so the two parsers cannot disagree by three
       // orders of magnitude on the same string.
       const redundant_mil = suffix === "mil" && (hadThousandsSeparator || value >= 1000);
-
-      // Same fraction rule the word parser uses, applied to the digit form:
-      // "1.5 mil" is 1,500,000, not $1,500. A non-integer before "mil" cannot
-      // be the Spanish reading, because "150.5 mil" is not how anyone writes
-      // 150,500. Integers are untouched, so "150 mil" stays 150,000.
-      const fractional_mil =
-        suffix === "mil" && !redundant_mil && !Number.isInteger(value) && value < 1000;
-
-      if (!redundant_mil) value *= fractional_mil ? 1_000_000 : SCALE_WORDS[suffix];
+      if (!redundant_mil) value *= SCALE_WORDS[suffix];
     }
 
     amounts.push({
@@ -464,14 +336,6 @@ function tokenizeAmounts(text) {
       end: match.index + match[0].length,
       has_currency: hasCurrency,
       has_scale: Boolean(suffix) || hadThousandsSeparator || value >= 1000,
-      // EXPLICIT magnitude: the seller actually marked the scale - a suffix
-      // (k / m / mil / thousand), a thousands separator, or a currency symbol.
-      //
-      // has_scale above treats ANY value >= 1000 as scaled, which conflates
-      // "big enough to be money" with "the seller said how big". That is why
-      // 1720 Pannell, 77020, 2020 and a phone fragment 5314 all arrived as
-      // asking prices at confidence 0.75. Size is not a statement of magnitude.
-      has_explicit_magnitude: Boolean(suffix) || hadThousandsSeparator || hasCurrency,
       from_words: false,
     });
   }
@@ -497,7 +361,6 @@ function tokenizeAmounts(text) {
         end: index + tokens.slice(i, i + parsed.length).join(" ").length,
         has_currency: false,
         has_scale: true,
-        has_explicit_magnitude: true,
         from_words: true,
       });
       i += parsed.length - 1;
@@ -513,7 +376,7 @@ function tokenizeAmounts(text) {
 
 const KIND_CUES = Object.freeze([
   // Most specific first; a window is the ±60 chars of text around the amount.
-  { kind: MONETARY_KINDS.MORTGAGE_PAYOFF, cues: ["owe", "payoff", "pay off", "mortgage balance", "balance on the mortgage", "loan balance", "left on the mortgage", "left on the loan", "still owe", "mortgage is", "mortgage was", "the mortgage", "hipoteca", "debo"] },
+  { kind: MONETARY_KINDS.MORTGAGE_PAYOFF, cues: ["owe", "payoff", "pay off", "mortgage balance", "balance on the mortgage", "loan balance", "left on the mortgage", "left on the loan", "still owe", "debo"] },
   // "/month" is listed alongside "/mo": the word-boundary matcher will not find
   // "/mo" inside "/month", and a seller's monthly rent misread as an asking
   // price makes a rental look like a $1,450 house.
@@ -526,7 +389,7 @@ const KIND_CUES = Object.freeze([
   // rent figure became the negotiation anchor. A rent token in the clause is
   // as decisive as "/mo". "rental" is NOT included: the matcher is
   // word-boundary based, and "I want 400k for the rental" is an asking price.
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "payment", "payments", "monthly payment", "note payment", "piti", "pago", "pagos", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler"] },
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
   // "repairman" is listed explicitly: it is not a regular inflection of
   // "repair", so the boundary matcher misses it and "the repairman quoted
@@ -537,12 +400,7 @@ const KIND_CUES = Object.freeze([
   { kind: MONETARY_KINDS.PACKAGE_PRICE, cues: ["for both", "for all", "the pair", "package", "portfolio", "together", "for the two", "for the three", "por los dos", "por todas"] },
   { kind: MONETARY_KINDS.CLOSING_COST_TERM, cues: ["you pay closing", "pay the closing", "cover closing", "closing costs", "plus closing", "gastos de cierre"] },
   { kind: MONETARY_KINDS.NET_REQUIREMENT, cues: ["net", "walk away with", "in my pocket", "clear", "after everything", "neto"] },
-  // MINIMUM IS MATCHED FIRST, deliberately. Several ceiling cues are
-  // SUBSTRINGS of floor cues - "no less than 400" contains "less than" -
-  // and first-match wins, so listing ceilings first inverted every
-  // "no less than" into a ceiling.
   { kind: MONETARY_KINDS.MINIMUM_PRICE, cues: ["at least", "no less than", "minimum", "won't take less", "wont take less", "not a penny less", "bottom dollar", "lowest i", "por lo menos", "mínimo", "minimo"] },
-  { kind: MONETARY_KINDS.MAXIMUM_PRICE, cues: ["under", "below", "less than", "no more than", "not more than", "cant do more than", "can't do more than", "cannot do more than", "wouldn't need more than", "wouldnt need more than", "wouldn't want more than", "wouldnt want more than", "wouldn't take more than", "wouldnt take more than", "don't need more than", "dont need more than", "wouldn't go over", "wouldnt go over", "won't go over", "wont go over", "no puedo pasar de", "at most", "most i", "ceiling", "nothing over", "no higher than", "not over", "up to", "tope", "como máximo", "como maximo", "no más de", "no mas de", "menos de"] },
 ]);
 
 const ASK_CUES = ["want", "asking", "ask", "take", "sell for", "let it go", "looking for", "need", "give me", "i'd do", "id do", "price is", "worth", "quiero", "pido", "lo doy en", "how about", "what about", "meet me at"];
@@ -659,69 +517,6 @@ function includesCue(window, cues) {
  * ("I owe $60k but I want $110k") must each bind to their own cue — a single
  * shared window would smear the first cue across both numbers.
  */
-/**
- * PHRASE-LEVEL EXCLUSIONS. Specificity wins over a bare cue word.
- *
- * "clear" is a legitimate NET cue - "I need 400 clear" means $400k in hand.
- * But "paid for free and clear" is DEBT STATUS, not a net price, and it turned
- * "6245 Mozart is paid for free and clear" into a $6,245 NET asking price.
- *
- * So the cue word survives; only the phrase is excluded, and only where it
- * actually occurs.
- */
-const CUE_PHRASE_EXCLUSIONS = Object.freeze([
-  { cue: "clear", phrase: /\b(?:free\s+and\s+clear|paid\s+(?:for\s+)?free\s+and\s+clear|owned?\s+free\s+and\s+clear|clear\s+title|clear\s+of\s+(?:any\s+)?(?:liens?|debt))\b/gi },
-]);
-
-/** Character spans where a cue word is part of an excluded phrase. */
-function excludedCueSpans(text) {
-  const spans = new Map();
-  for (const { cue, phrase } of CUE_PHRASE_EXCLUSIONS) {
-    phrase.lastIndex = 0;
-    let m;
-    while ((m = phrase.exec(text)) !== null) {
-      if (!spans.has(cue)) spans.set(cue, []);
-      spans.get(cue).push([m.index, m.index + m[0].length]);
-    }
-  }
-  return spans;
-}
-
-/**
- * EXPLICIT REFUSAL DOMINATES ANY NUMBER IN THE SAME CLAUSE.
- *
- * "7k x 12months/ no sale" is a rent calculation with the word "no sale"
- * attached; "1246 is not for sale" is a street number. Neither is an ask, and
- * a number sharing a clause with a refusal must never become one.
- *
- * Clause-bounded, never sentence-bounded: "Not for sale but if you gave me 400
- * I would think about it" contains a genuine $400k ask after the conjunction,
- * and suppressing the whole sentence would throw away a live lead.
- */
-const REFUSAL_PHRASES =
-  /\b(?:not\s+for\s+sale|not\s+for\s+sell|no\s+sale|not\s+selling|won'?t\s+sell|will\s+not\s+sell|no\s+esta?\s+a\s+la\s+venta|no\s+vendo)\b/i;
-
-function isInRefusalClause(text, amount) {
-  const start = amount.index;
-  const clauseStart = Math.max(
-    ...[".", "?", "!", ",", ";", "\n"].map((ch) => text.lastIndexOf(ch, start - 1)),
-    // "unless" and "except" REVERSE a refusal - "not for sale unless you have
-    // $400,000" is a conditional ask, and treating the refusal as governing
-    // the whole sentence threw away a real $400k price.
-    ...[" but ", " however ", " though ", " unless ", " except ", " if you "].map((w) => {
-      const i = text.toLowerCase().lastIndexOf(w, start);
-      return i === -1 ? -1 : i + w.length;
-    }),
-    0,
-  );
-  let clauseEnd = text.length;
-  for (const ch of [".", "?", "!", ",", ";", "\n"]) {
-    const i = text.indexOf(ch, amount.end ?? start);
-    if (i !== -1 && i < clauseEnd) clauseEnd = i;
-  }
-  return REFUSAL_PHRASES.test(text.slice(clauseStart, clauseEnd));
-}
-
 function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) {
   const lowerText = lower(text);
   const radius = 60;
@@ -729,23 +524,14 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   const windowEnd = Math.min(lowerText.length, amount.end + radius);
   const window = lowerText.slice(windowStart, windowEnd);
 
-  const matches = [];
-  const excluded = excludedCueSpans(text);
+  let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
   const consider = (kind, cue) => {
     const re = cueBoundaryRegex(cue);
-    const excludedForCue = excluded.get(cue);
     let m;
     while ((m = re.exec(window)) !== null) {
-      const start = m.index;
-      const end = m.index + m[0].length;
-      if (excludedForCue) {
-        const absStart = windowStart + start;
-        const absEnd = windowStart + end;
-        if (excludedForCue.some(([a, b]) => absStart < b && absEnd > a)) continue;
-      }
-      const cueMid = windowStart + start + cue.length / 2;
+      const cueMid = windowStart + m.index + cue.length / 2;
       const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
-      matches.push({ kind, dist, start, end });
+      if (dist < best.dist) best = { kind, dist };
     }
   };
 
@@ -754,31 +540,6 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
   }
   const askKind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
   for (const cue of ASK_CUES) consider(askKind, cue);
-
-  // A CUE CONTAINED INSIDE A LONGER CUE IS NOT A SEPARATE SIGNAL.
-  //
-  // "no less than 400" contains "less than", and "not a penny less than 400"
-  // OVERLAPS it without containing it. Distance is measured from the cue
-  // MIDPOINT, so in both shapes the shorter, less specific cue sits closer to
-  // the amount and won - inverting a floor into a ceiling. Nearest-cue is
-  // still the rule; it is applied after dropping any match a longer,
-  // overlapping cue already accounts for. This kills the whole collision
-  // class, not one phrase.
-  const specific = matches.filter(
-    (candidate) =>
-      !matches.some(
-        (other) =>
-          other !== candidate &&
-          other.start < candidate.end &&
-          other.end > candidate.start &&
-          other.end - other.start > candidate.end - candidate.start,
-      ),
-  );
-
-  let best = { kind: MONETARY_KINDS.UNKNOWN, dist: Infinity };
-  for (const candidate of specific) {
-    if (candidate.dist < best.dist) best = { kind: candidate.kind, dist: candidate.dist };
-  }
 
   return best.kind;
 }
@@ -827,35 +588,6 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       confidence = Math.min(confidence, 0.3);
     }
 
-    // ── BARE 4-5 DIGIT SAFETY GATE ──────────────────────────────────────
-    //
-    // An integer in [1000, 99999] with NO explicit magnitude marker and NO
-    // asking-price cue tied to it is overwhelmingly a street number, a ZIP, a
-    // calendar year, a phone fragment, a rent or a payment - not a sale price.
-    // Being in an asking-price conversation does not change what the number
-    // IS, so stage/context deliberately does not rescue it.
-    //
-    // The band stops at 99999 on purpose: no ZIP, year or street number
-    // reaches six figures, so a bare 150000 or 425000 is still a real ask.
-    // And a cue still rescues it - "I need 2500 for the property" keeps the
-    // LITERAL 2500 rather than being invented into $2.5M.
-    // ROUNDNESS is the discriminator, not magnitude.
-    //
-    // A real-estate price in this band is essentially always a round multiple
-    // of 1,000 - 32000, 55000, 95000. The hazards are not: 1720 and 1246 and
-    // 6245 are street numbers, 2020 is a year, 77020 and 55407 are ZIPs, 5314
-    // and 4875 and 7286 are phone fragments. Every one of them carries a
-    // non-zero remainder.
-    //
-    // This keeps "I'm interested in 95000" - a genuine price with no ask cue -
-    // while still refusing "we are in 55407".
-    const bare_midrange_integer =
-      !amount.has_explicit_magnitude &&
-      !scaled_from_reference &&
-      value >= 1000 &&
-      value <= 99_999 &&
-      value % 1000 !== 0;
-
     let kind = classifyByNearestCue(text, amount, { negotiationActive });
     const boundToAskCue =
       kind === MONETARY_KINDS.ASKING_PRICE || kind === MONETARY_KINDS.COUNTER_OFFER;
@@ -865,40 +597,16 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       approximate: includesCue(before, APPROX_CUES),
       net: kind === MONETARY_KINDS.NET_REQUIREMENT,
       minimum: kind === MONETARY_KINDS.MINIMUM_PRICE,
-      maximum: kind === MONETARY_KINDS.MAXIMUM_PRICE,
       per_unit: kind === MONETARY_KINDS.PER_UNIT_PRICE,
       package: kind === MONETARY_KINDS.PACKAGE_PRICE,
       contingent_on_closing_costs: kind === MONETARY_KINDS.CLOSING_COST_TERM,
     };
 
-    // THE GATE APPLIES TO EVERY KIND, not just UNKNOWN.
-    //
-    // "6245 Mozart is paid for free and clear inside of an irrevocable trust..."
-    // is a long message, and a ceiling cue far from the number promoted the
-    // street number to MAXIMUM_PRICE at confidence 0.7 - straight past a gate
-    // that only ran for UNKNOWN. A cue somewhere in the sentence is not a cue
-    // TIED TO THE AMOUNT.
-    //
-    // An explicit ask cue still rescues it, because that IS tied to the amount.
-    if (bare_midrange_integer && !boundToAskCue) {
-      confidence = Math.min(confidence, 0.3);
-    }
-
-    // An explicit refusal in the same clause outranks every price cue.
-    if (isInRefusalClause(text, amount)) {
-      confidence = Math.min(confidence, 0.3);
-    }
-
     if (kind === MONETARY_KINDS.UNKNOWN) {
       // No semantic cue at all: currency/scale marks it a price statement;
       // a bare plausible number stays low-confidence so the caller clarifies
       // instead of guessing (spec §3).
-      if (bare_midrange_integer) {
-        // Fails unresolved rather than entering ADE as a fabricated economic
-        // fact. The >= 0.5 acceptance gate in resolveAskingPriceSignal drops it.
-        kind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
-        confidence = Math.min(confidence, 0.3);
-      } else if (amount.has_currency || amount.has_scale || scaled_from_reference) {
+      if (amount.has_currency || amount.has_scale || scaled_from_reference) {
         kind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
         confidence = Math.min(confidence, scaled_from_reference ? confidence : 0.75);
       } else if (value >= 1000 || (value >= 20 && value < 1000)) {
@@ -911,16 +619,13 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       // Ask-cue-bound amounts keep their tokenizer confidence.
     } else if (
       kind === MONETARY_KINDS.MINIMUM_PRICE ||
-      kind === MONETARY_KINDS.MAXIMUM_PRICE ||
       kind === MONETARY_KINDS.NET_REQUIREMENT ||
       kind === MONETARY_KINDS.PER_UNIT_PRICE ||
       kind === MONETARY_KINDS.PACKAGE_PRICE ||
       kind === MONETARY_KINDS.CLOSING_COST_TERM
     ) {
-      // These are all price-type statements — they set/refine the ask. But a
-      // bare mid-range integer that only caught a distant cue must not be
-      // lifted back over the acceptance gate.
-      if (!bare_midrange_integer) confidence = Math.max(confidence, 0.7);
+      // These are all price-type statements — they set/refine the ask.
+      confidence = Math.max(confidence, 0.7);
     }
 
     if (qualifiers.approximate) confidence = Math.min(confidence, 0.75);
@@ -946,11 +651,6 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       lower(text).indexOf(lower(a.raw)) + a.raw.length,
       lower(text).lastIndexOf(lower(b.raw))
     );
-    // A genuine range is TIGHT and ASCENDING: "350 to 400". "$2000 and $650."
-    // is two unrelated figures - a rent pair - and merging them handed the
-    // acquisition engine a $650 asking price off the "low end" rule.
-    const ratio = Math.max(a.value, b.value) / Math.max(1, Math.min(a.value, b.value));
-    if (ratio > 2) continue;
     if (/^\s*(to|-|–|and|or)\s*$/.test(betweenText) || /between/.test(precedingWindow(text, { index: text.toLowerCase().indexOf(a.raw.toLowerCase()), end: 0 }, 20))) {
       a.qualifiers.range = true;
       a.range = { low: Math.min(a.value, b.value), high: Math.max(a.value, b.value) };
@@ -970,7 +670,6 @@ const PRICE_SETTING_KINDS = new Set([
   MONETARY_KINDS.ASKING_PRICE,
   MONETARY_KINDS.COUNTER_OFFER,
   MONETARY_KINDS.MINIMUM_PRICE,
-  MONETARY_KINDS.MAXIMUM_PRICE,
   MONETARY_KINDS.NET_REQUIREMENT,
   MONETARY_KINDS.PER_UNIT_PRICE,
   MONETARY_KINDS.PACKAGE_PRICE,
@@ -983,89 +682,6 @@ const PRICE_SETTING_KINDS = new Set([
  * conflicting price statements return needs_clarification=true and NO price —
  * clarification is asked instead of driving an offer (spec §3).
  */
-/**
- * DIGIT-ANCHORED FLOORS: "it has to start with a 4".
- *
- * A real seller phrasing that carried no parseable number at all, so it
- * extracted nothing and the thread sat with no price while the operator
- * watched us reply as though nothing had been said. Verbatim from production:
- * "Number has to start with a 4. Otherwise, nothing to talk about."
- *
- * The seller is stating a FLOOR, not an asking price: a single leading digit
- * in the hundred-thousands. 4 -> $400,000 minimum. It is deliberately typed
- * `minimum` rather than `exact`, because "starts with a 4" permits $499,000 and
- * forbids $399,000, and collapsing that to an exact $400,000 would misstate the
- * seller's position in both directions.
- *
- * Scoped tightly: a single digit 1-9, immediately governed by start-with
- * language. Anything else is left to the normal parser.
- */
-// The digit must not be a COUNT of something. "start with a 4 day notice" and
-// "starts with a 3 bedroom" are not prices, and a floor inferred from them
-// would invent a $400,000 seller expectation out of a scheduling remark.
-const DIGIT_ANCHOR_UNIT_GUARD =
-  "(?!\\s*(?:day|days|week|weeks|month|months|year|years|yr|yrs|bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|unit|units|acre|acres|percent|%|am|pm|hour|hours|pm\\b))";
-
-// The guard above only looks FORWARD, at the unit after the digit. These look
-// BACKWARD, because "my address starts with 4" was yielding a $400,000 asking
-// price - a fabricated ask from a seller who was describing their street
-// number. The subject of "starts with" has to be the PRICE, not an address, a
-// phone number or a zip code.
-const DIGIT_ANCHOR_SUBJECT_BLOCKLIST =
-  /\b(?:address|street|st\.?|road|rd\.?|avenue|ave\.?|zip|zipcode|postal|phone|number\s+is|house\s+number|apt|apartment|unit\s+number|account|case|parcel|apn)\b/i;
-const DIGIT_ANCHOR_FLOOR_RE = new RegExp(
-  "\\b(?:has\\s+to|have\\s+to|needs?\\s+to|gotta|must|should)\\s+(?:start|begin)\\s+with\\s+(?:a|an)?\\s*\\$?\\s*([1-9])\\b" + DIGIT_ANCHOR_UNIT_GUARD,
-  "i",
-);
-const DIGIT_ANCHOR_FLOOR_ALT_RE = new RegExp(
-  "\\b(?:start|begin)s?\\s+with\\s+(?:a|an)?\\s*\\$?\\s*([1-9])\\b" + DIGIT_ANCHOR_UNIT_GUARD,
-  "i",
-);
-
-const DIGIT_WORD_ALTERNATION = "(one|two|three|four|five|six|seven|eight|nine)";
-const DIGIT_ANCHOR_WORD_RE = new RegExp(
-  "\\b(?:has\\s+to|have\\s+to|needs?\\s+to|gotta|must|should)\\s+(?:start|begin)\\s+with\\s+(?:a|an)?\\s*" +
-    DIGIT_WORD_ALTERNATION + "\\b" + DIGIT_ANCHOR_UNIT_GUARD,
-  "i",
-);
-const DIGIT_ANCHOR_WORD_ALT_RE = new RegExp(
-  "\\b(?:start|begin)s?\\s+with\\s+(?:a|an)?\\s*" +
-    DIGIT_WORD_ALTERNATION + "\\b" + DIGIT_ANCHOR_UNIT_GUARD,
-  "i",
-);
-
-/** Sellers say "starts with a four" as often as "starts with a 4". */
-const DIGIT_ANCHOR_WORDS = Object.freeze({
-  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
-});
-
-export function resolveDigitAnchoredFloor(message) {
-  const text = clean(message);
-  if (!text) return null;
-
-  // A street number is not an asking price.
-  if (DIGIT_ANCHOR_SUBJECT_BLOCKLIST.test(text)) return null;
-
-  const match =
-    DIGIT_ANCHOR_FLOOR_RE.exec(text) ||
-    DIGIT_ANCHOR_FLOOR_ALT_RE.exec(text) ||
-    DIGIT_ANCHOR_WORD_RE.exec(text) ||
-    DIGIT_ANCHOR_WORD_ALT_RE.exec(text);
-  if (!match) return null;
-  const token = String(match[1] ?? "").toLowerCase();
-  const digit = DIGIT_ANCHOR_WORDS[token] ?? Number(token);
-  if (!Number.isFinite(digit) || digit < 1 || digit > 9) return null;
-  return {
-    value: digit * 100_000,
-    currency: "USD",
-    price_type: "minimum",
-    confidence: 0.7,
-    extracted_text: clean(match[0]),
-    qualifiers: { minimum: true, firm: false, approximate: false, range: false },
-    inference: "leading_digit_hundred_thousands",
-  };
-}
-
 export function resolveAskingPriceSignal(message, {
   reference = null,
   negotiationActive = false,
@@ -1073,27 +689,6 @@ export function resolveAskingPriceSignal(message, {
   now = null,
 } = {}) {
   const mentions = extractMonetaryMentions(message, { reference, negotiationActive });
-
-  // A digit-anchored floor ("has to start with a 4") carries no parseable
-  // amount, so the tokenizer finds nothing. Consulted ONLY when no real
-  // monetary mention exists, so it can never override a stated number.
-  if (!mentions.length) {
-    const floor = resolveDigitAnchoredFloor(message);
-    if (floor) {
-      return {
-        asking_price: {
-          ...floor,
-          source_message_id: sourceMessageId || null,
-          captured_at: now || new Date().toISOString(),
-        },
-        is_counter: false,
-        needs_clarification: false,
-        clarification_reason: null,
-        informational_mentions: [],
-        all_mentions: [],
-      };
-    }
-  }
   const priceMentions = mentions.filter((m) => PRICE_SETTING_KINDS.has(m.kind));
   const informational = mentions.filter((m) => !PRICE_SETTING_KINDS.has(m.kind));
 
@@ -1138,17 +733,15 @@ export function resolveAskingPriceSignal(message, {
     ? "range"
     : best.qualifiers.minimum
       ? "minimum"
-      : best.qualifiers.maximum
-        ? "maximum"
-        : best.qualifiers.net
-          ? "net"
-          : best.qualifiers.per_unit
-            ? "per_unit"
-            : best.qualifiers.package
-              ? "package"
-              : best.qualifiers.approximate
-                ? "approximate"
-                : "exact";
+      : best.qualifiers.net
+        ? "net"
+        : best.qualifiers.per_unit
+          ? "per_unit"
+          : best.qualifiers.package
+            ? "package"
+            : best.qualifiers.approximate
+              ? "approximate"
+              : "exact";
 
   return {
     asking_price: {
@@ -1157,13 +750,6 @@ export function resolveAskingPriceSignal(message, {
       price_type,
       confidence: best.confidence,
       extracted_text: best.raw,
-      // THE MAGNITUDE WAS INFERRED, NOT STATED. "400" against a $200,000
-      // anchor becomes $400,000 by conventional hundreds-as-thousands
-      // shorthand - a reading, not a quotation. Downstream must be able to
-      // tell that apart from a seller who actually wrote "$400,000", so the
-      // existing scaled_from_reference provenance travels with the fact
-      // instead of dying on the mention. extracted_text keeps the raw words.
-      scaled_from_reference: Boolean(best.scaled_from_reference),
       qualifiers: best.qualifiers,
       ...(best.range ? { range: best.range } : {}),
       source_message_id: sourceMessageId || null,

@@ -476,7 +476,6 @@ export async function persistSellerTransitionArtifacts({
               price_type: priceFact.price_type || "exact",
               confidence: priceFact.confidence ?? null,
               extracted_text: priceFact.extracted_text || null,
-              scaled_from_reference: priceFact.scaled_from_reference === true,
               source_message_id: priceFact.source_message_id || null,
               captured_at: priceFact.captured_at || nowIso,
             },

@@ -1,12 +1,6 @@
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { classifyStage2OfferInterest } from "@/lib/domain/seller-flow/stage2-offer-interest-engine.js";
-import {
-  classifyStage3AskingPrice,
-  // The canonical creative-finance policy lives with the route it gates, so
-  // the recommender and the stage resolver cannot answer it differently.
-  resolveCreativeAllowed,
-} from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
-import { hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { classifyStage3AskingPrice } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
 import { classifyStage4Condition } from "@/lib/domain/seller-flow/stage4-condition-justification-engine.js";
 import { classifyStage5Negotiation } from "@/lib/domain/seller-flow/stage5-offer-negotiation-engine.js";
 import { classifyStage6Contract } from "@/lib/domain/seller-flow/stage6-seller-contract-engine.js";
@@ -159,19 +153,7 @@ function runStageEngine(universal_stage, input) {
         universal_stage,
         stage_decision: classifyStage3AskingPrice({
           message: input.message,
-          context: {
-            ...input.context,
-            // Seller-signal driven, never gap-driven. See resolveCreativeAllowed.
-            creative_allowed: resolveCreativeAllowed({
-              facts: input.context?.facts || input.facts || {},
-              classification: input.classification || {},
-              underwriting,
-              negotiation_state,
-            }),
-            // Ruling 2: an ask inside the buy box is a FIRST REVEAL until our offer
-            // has actually been presented. Same predicate the resolver uses.
-            offer_revealed: hasRevealedOffer(negotiation_state),
-          },
+          context: input.context,
           seller_asking_price:
             negotiation_state.current_asking_price ?? negotiation_state.current_ask ?? null,
           underwriting,
@@ -319,27 +301,6 @@ function buildRecommendationFromEngine({
  * Authoritative stage-engine domain recommendation.
  * Orchestrator Layer B must derive from this — not recreate stage logic.
  */
-/**
- * CREATIVE FINANCE REQUIRES A SELLER SIGNAL, NOT A PRICE GAP.
- *
- * classifyStage3AskingPrice reads context.creative_allowed, and nothing ever
- * supplied it - so it defaulted false and the WIDE_GAP band always fell through
- * to a condition probe. Creative financing was implemented, named, and
- * unreachable.
- *
- * The canonical policy already exists as isCreativeEligible
- * (route-seller-conversation.js): the ask must be outside the straightforward
- * cash path AND the seller must have supplied an explicit creative signal
- * (creative_terms_interest / novation_interest / creative_strategy).
- *
- * A large gap is NOT consent. A seller asking $300k against a $230k cash MAO
- * has not thereby agreed to seller finance, subject-to or novation. The
- * separate `price_gap_to_target > 25_000` heuristic in
- * communications-engine/state-machine.js is deliberately NOT used here; it
- * resolves to DEAL_STRATEGY_BRANCHES.CASH anyway, so it is an analytical hint
- * rather than permission to pitch terms.
- */
-
 export function resolveStageDomainRecommendation({
   message = "",
   classification = null,

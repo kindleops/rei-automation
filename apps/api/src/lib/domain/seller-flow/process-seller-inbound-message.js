@@ -46,7 +46,7 @@ import {
   classifyNegotiationZone,
   evaluateUnderwritingSufficiency,
 } from "@/lib/domain/seller-flow/negotiation-policy.js";
-import { applyNegotiationTurn, hasRevealedOffer } from "@/lib/domain/seller-flow/negotiation-state.js";
+import { applyNegotiationTurn } from "@/lib/domain/seller-flow/negotiation-state.js";
 import { routeNegotiationStrategy } from "@/lib/domain/seller-flow/negotiation-strategy-router.js";
 import { selectCredibleCompAnchor } from "@/lib/domain/seller-flow/comp-anchor-policy.js";
 import {
@@ -983,10 +983,12 @@ export async function processSellerInboundMessage({
   // evidence-backed fact extraction below shares the same monetary authority
   // and the extraction record persists with the intelligence snapshot.
   const prior_negotiation_state = deal_state?.negotiation_state || null;
-  // Canonical predicate (negotiation-state.js). The SAME function decides
-  // whether the route is a first reveal or a counter, so the parser and the
-  // workflow cannot disagree about whether a negotiation is under way.
-  const negotiation_active = hasRevealedOffer(prior_negotiation_state);
+  const negotiation_active = Boolean(
+    (Array.isArray(prior_negotiation_state?.offers_made)
+      ? prior_negotiation_state.offers_made.length > 0
+      : Number(prior_negotiation_state?.offers_made) > 0) ||
+      prior_negotiation_state?.latest_offer != null
+  );
   const price_signal_options = {
     reference:
       prior_negotiation_state?.current_asking_price ??

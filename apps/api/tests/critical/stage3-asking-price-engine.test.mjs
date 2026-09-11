@@ -61,41 +61,20 @@ test("falls back to extracting price from message text", () => {
 
 // ── Band assignment + routing ────────────────────────────────────────────────
 
-test("auto_accept (ask <= RCO) → S5 OFFER, never a contract", () => {
-  // This test previously asserted S6 / asks_contract / ADVANCED_TO_SELLER_CONTRACT.
-  // It was encoding a lifecycle bug: `ask <= recommended_cash_offer` means only
-  // "we can afford this". The seller named a number; they have not seen our
-  // offer, agreed to our closing window, earnest money or as-is terms.
-  // An economic calculation can never fabricate seller acceptance.
+test("auto_accept (ask <= RCO) → S6 contract", () => {
   const d = run({ seller_asking_price: 160000 });
   assert.equal(d.offer_band, STAGE3_OFFER_BANDS.AUTO_ACCEPT);
-  assert.equal(d.route, "s5_offer");
-  assert.equal(d.stage_code, "S5");
-  assert.equal(d.template_use_case, "offer_reveal_cash");
-  assert.notEqual(d.template_use_case, "asks_contract");
-  assert.ok(!eventTypes(d).includes(EV.ADVANCED_TO_SELLER_CONTRACT),
-    "no contract event may fire from economics alone");
+  assert.equal(d.route, "s6_contract");
+  assert.equal(d.stage_code, "S6");
+  assert.equal(d.template_use_case, "asks_contract");
+  assert.deepEqual(eventTypes(d), [EV.ASKING_PRICE_EVALUATED, EV.ADVANCED_TO_SELLER_CONTRACT]);
 });
 
-test("close_range with NO prior reveal → S5 first cash offer", () => {
-  // A seller's first asking price is not a counter, so the message is a
-  // reveal: "here is the number we can do", not "appreciate the counter".
+test("close_range (RCO < ask <= MAO) → S5 negotiation", () => {
   const d = run({ seller_asking_price: 182000 });
   assert.equal(d.offer_band, STAGE3_OFFER_BANDS.CLOSE_RANGE);
-  assert.equal(d.route, "s5_offer");
-  assert.equal(d.route_id, "close_range_initial_offer");
-  assert.equal(d.stage_code, "S5");
-  assert.equal(d.template_use_case, "offer_reveal_cash");
-  assert.deepEqual(eventTypes(d), [EV.ASKING_PRICE_EVALUATED]);
-});
-
-test("close_range AFTER our offer was revealed → S5 counter", () => {
-  const d = run({ seller_asking_price: 182000, context: { offer_revealed: true } });
-  assert.equal(d.offer_band, STAGE3_OFFER_BANDS.CLOSE_RANGE, "identical economics");
   assert.equal(d.route, "s5_negotiation");
-  assert.equal(d.route_id, "close_range_counter");
   assert.equal(d.stage_code, "S5");
-  assert.equal(d.template_use_case, "counter_offer");
   assert.deepEqual(eventTypes(d), [EV.ASKING_PRICE_EVALUATED, EV.OFFER_NEGOTIATION_OPENED]);
 });
 

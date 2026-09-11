@@ -152,10 +152,12 @@ test("repair, payoff, tax and monthly figures are reclassified, never deleted", 
 
 // ── documented residual ─────────────────────────────────────────────────────
 
-test("RESIDUAL CLOSED: a ZIP after a bare preposition is no longer read as money", () => {
-  // Closed without touching the cue table. A bare mid-range integer now needs
-  // either an asking-price cue or a round-thousand shape, and 55407 has
-  // neither - while 95000 keeps both its magnitude and its meaning.
-  assert.equal(factPrice("we are in 55407"), null);
-  assert.equal(factPrice("I'm interested in 95000"), 95000);
+test("DOCUMENTED RESIDUAL: a ZIP after a bare preposition is still read as money", () => {
+  // NOT delivered, and deliberately so. The only cue that would catch this is a
+  // bare "in", and "in" is unsafe: it also precedes real figures — see the
+  // "bare preposition" test above ("I'm interested in 95000" -> 95000,
+  // "I put in 2000 for repairs" -> 2000). Suppressing those to catch this would
+  // trade a cosmetic miss for real seller money. Asserting the true behaviour
+  // rather than weakening the claim.
+  assert.equal(factPrice("we are in 55407"), 55407);
 });
