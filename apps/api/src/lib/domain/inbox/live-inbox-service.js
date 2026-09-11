@@ -74,6 +74,12 @@ const BOOT_FAST_THREAD_FIELDS = [
   // SELECTs cannot be filtered in memory, so snoozed_until has to travel.
   "snoozed_until",
   "snooze_reason",
+  // Pending scheduled send. Exactly the same lesson as is_archived and
+  // snoozed_until a few lines up: a column the list never SELECTs cannot be
+  // filtered or counted in memory. Without it every row arrives with
+  // next_scheduled_for undefined and a scheduled thread is indistinguishable
+  // from an untouched one.
+  "next_scheduled_for",
   // Universal lead state. This list serves filter=all -- the DEFAULT view --
   // and omitted every state column, so operational_status / seller_stage /
   // lead_temperature came back null on the rows the dashboard shows first.
@@ -712,6 +718,22 @@ function computeCountsFromThreads(rows = []) {
     const snoozedUntilMs = new Date(row?.snoozed_until ?? 0).getTime();
     if (Number.isFinite(snoozedUntilMs) && snoozedUntilMs > nowMs) {
       counts.snoozed += 1;
+      if (threadMatchesBucketFilter(row, "all_messages", nowMs)) counts.all_messages += 1;
+      if (!row.property_id) counts.unlinked += 1;
+      continue;
+    }
+    // A thread with a PENDING SCHEDULED SEND is handled, not waiting. Counted
+    // once under `scheduled` and withheld from every actionable counter -- the
+    // identical treatment snoozed threads get directly above, and for the
+    // identical reason: the operator acts on a thread and must see the number
+    // fall. MEASURED 2026-09-11: 16 follow-ups scheduled, Priority unchanged at
+    // 110, which made a successful schedule look like a no-op.
+    //
+    // Time-bounded rather than a bucket rewrite, so it unwinds itself once the
+    // send fires.
+    const nextScheduledMs = new Date(row?.next_scheduled_for ?? 0).getTime();
+    if (Number.isFinite(nextScheduledMs) && nextScheduledMs > nowMs) {
+      counts.scheduled += 1;
       if (threadMatchesBucketFilter(row, "all_messages", nowMs)) counts.all_messages += 1;
       if (!row.property_id) counts.unlinked += 1;
       continue;
@@ -1521,10 +1543,31 @@ function bucketNotIn(...buckets) {
   return `or(inbox_bucket.is.null,and(${buckets.map((b) => `inbox_bucket.neq.${b}`).join(",")}))`;
 }
 
+/**
+ * A thread with a PENDING scheduled send is not awaiting operator attention.
+ *
+ * The operator's whole workflow is "act on it, watch the number drop". Before
+ * this, scheduling a follow-up left the thread sitting in Priority exactly as
+ * it was, so the count never moved and there was no way to tell handled threads
+ * from untouched ones. MEASURED 2026-09-11: 16 follow-ups scheduled, all 16
+ * threads still reading inbox_bucket='priority'.
+ *
+ * Expressed as a time bound rather than a bucket rewrite, so it unwinds itself:
+ * once the send fires the timestamp is in the past and the thread returns to
+ * whatever bucket it genuinely belongs in. NULL-safe, because
+ * next_scheduled_for is null on almost every thread and `is.null` must be
+ * treated as "nothing pending", not as a failed comparison.
+ */
+const NO_PENDING_SCHEDULE = () =>
+  `next_scheduled_for.is.null,next_scheduled_for.lte.${new Date().toISOString()}`;
+
 function applyInboxThreadStateBucketFilter(query, normalized) {
   switch (normalized) {
     case "priority":
       query = query.eq("inbox_bucket", "priority");
+      // A scheduled follow-up means this one is handled; it should not keep
+      // occupying the operator's attention queue.
+      if (typeof query.or === "function") query = query.or(NO_PENDING_SCHEDULE());
       break;
     case "new_replies":
       if (typeof query.or === "function") {
@@ -1587,6 +1630,13 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
       // An expired snoozed_until is simply a past timestamp, so this bound lets
       // a thread age out on its own -- no sweeper, nothing to get stuck.
       if (typeof query.gt === "function") query = query.gt("snoozed_until", new Date().toISOString());
+      return query;
+    case "scheduled":
+      // There was NO case for this at all, so the Scheduled tab fell through to
+      // `default` and went out unfiltered.
+      if (typeof query.gt === "function") {
+        query = query.gt("next_scheduled_for", new Date().toISOString());
+      }
       return query;
     case "archived":
       // The AUTHORITATIVE (fast-bucket) path. Without this the switch hit
