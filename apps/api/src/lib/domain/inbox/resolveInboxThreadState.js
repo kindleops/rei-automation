@@ -59,9 +59,17 @@ export const resolveInboxThreadState = (thread, _now = new Date()) => {
     reasons.push('suppressed via intent/keywords')
     return { bucket: 'suppressed', reasons }
   }
-  if (hasAny(intent, ['not_interested', 'wrong_number', 'opt_out'])) {
+  // Terminal means STOP or wrong number. "Not interested" is neither.
+  // Operator policy: a first decline is the opening of a negotiation, not the
+  // end of it, so those threads stay reachable for follow-up instead of being
+  // suppressed out of every operational view.
+  if (hasAny(intent, ['wrong_number', 'opt_out'])) {
     reasons.push('terminal intent suppression')
     return { bucket: 'suppressed', reasons }
+  }
+  if (hasAny(intent, ['not_interested'])) {
+    reasons.push('soft decline - nurture, not suppression')
+    return { bucket: 'follow_up', reasons }
   }
 
   // 2. New Replies

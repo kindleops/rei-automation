@@ -198,7 +198,23 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
         return (nowMs - outMs) > WAITING_REPLY_WINDOW_MS;
       }
     case "dead":
-      return bucket === "dead" || isWrongNumberContact(thread) || lower(thread.disposition) === "not_interested" || thread.not_interested === true;
+      // "NOT INTERESTED" IS NOT DEAD.
+      //
+      // Operator policy, stated plainly: "most people are gonna be not
+      // interested at first, and then we follow up and we get them under
+      // contract". A first no is the normal opening of a negotiation, not the
+      // end of one. Only an explicit STOP/opt-out or a wrong number is terminal.
+      //
+      // The suppression predicate above already reached this conclusion in the
+      // 2026-08-26 closure pass and stopped treating not_interested as hard
+      // suppression - but this branch kept routing the same threads to `dead`,
+      // which buries them just as effectively. MEASURED 2026-09-11: 329 threads
+      // carry not_interested with ZERO opt-out and ZERO wrong-number, and 301
+      // of them sit in suppressed/dead where no follow-up can reach them.
+      //
+      // Genuine opt-outs are untouched: 309 threads carry opt_out and stay
+      // blocked, as do the 173 carrier-level STOP records (TextGrid 21610).
+      return bucket === "dead" || isWrongNumberContact(thread);
     case "suppressed":
       return bucket === "suppressed" || isSuppressedContact(thread);
     case "active":
