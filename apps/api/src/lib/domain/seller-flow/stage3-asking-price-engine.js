@@ -17,7 +17,10 @@
 //   4. The engine BUILDS canonical lifecycle events; persistence/fan-out is the
 //      caller's job.
 //
-// Standalone: this module is not imported by the live inbound path.
+// NOT standalone. stage-domain-recommendation.js consumes classifyStage3AskingPrice
+// to produce recommended_use_case, and resolve-seller-stage-transition.js consumes
+// resolveStage3Route to produce the persisted acquisition_stage. This module is the
+// single economic authority for a resolved seller price; both of those are readers.
 
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { SELLER_FLOW_SAFETY_TIERS } from "@/lib/domain/seller-flow/seller-flow-safety-policy.js";
@@ -27,6 +30,7 @@ import {
   buildLifecycleEvent,
 } from "@/lib/domain/seller-flow/acquisition-lifecycle-events.js";
 import { extractAskingPrice } from "@/lib/domain/seller-flow/stage2-offer-interest-engine.js";
+import { LIFECYCLE_STAGE_CODES } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
 
 const T = SELLER_FLOW_SAFETY_TIERS;
 const S = SELLER_FLOW_STAGES;
@@ -147,119 +151,180 @@ const STRATEGY_BY_BAND = Object.freeze({
 // ROUTING BY BAND
 // ══════════════════════════════════════════════════════════════════════════
 
-function routeForBand(band, { creative_allowed = false } = {}) {
+// ══════════════════════════════════════════════════════════════════════════
+// THE CANONICAL ROUTE TABLE
+// ══════════════════════════════════════════════════════════════════════════
+//
+// There is exactly ONE route object per reachable outcome, frozen and shared.
+// Both consumers - the stage resolver (which persists acquisition_stage) and
+// the domain recommender (which picks the template use case) - receive the SAME
+// object reference, so they cannot drift into two mappings that merely agree
+// today.
+//
+// They HAD drifted. A second band->stage mapping lived in the resolver, and it
+// disagreed with this table on two bands: close_range (table says S5 negotiate,
+// resolver persisted property_condition) and wide_gap-with-creative-signal
+// (table says S5 creative probe, resolver persisted property_condition). The
+// price could be inside our buy box while the persisted stage still said we
+// were asking about the roof.
+//
+// lifecycle_stage_code is carried ON the route, so deriving the persisted stage
+// is a lookup, never a decision.
+
+const ROUTE_STAGE_TO_LIFECYCLE = Object.freeze({
+  S3: LIFECYCLE_STAGE_CODES.ASKING_PRICE,
+  S3F: LIFECYCLE_STAGE_CODES.ASKING_PRICE,
+  S4: LIFECYCLE_STAGE_CODES.PROPERTY_CONDITION,
+  S5: LIFECYCLE_STAGE_CODES.OFFER,
+  S6: LIFECYCLE_STAGE_CODES.FORMAL_CONTRACT,
+});
+
+function defineRoute(route_id, spec) {
+  return Object.freeze({
+    route_id,
+    ...spec,
+    lifecycle_stage_code: ROUTE_STAGE_TO_LIFECYCLE[spec.stage_code] || null,
+  });
+}
+
+export const STAGE3_ROUTES = Object.freeze({
+  // AN ECONOMIC CALCULATION CANNOT FABRICATE SELLER ACCEPTANCE.
+  //
+  // This route returned stage_code "S6" with brain_stage VERBAL_ACCEPTANCE_LOCK
+  // and acquisition_action "verify_signers_and_generate_contract" - on the
+  // strength of `ask <= recommended_cash_offer` alone. That test says only "we
+  // can afford this". It is not verbal acceptance, not agreed terms, and not a
+  // contract: the seller named a number, and we have not yet even presented an
+  // offer, let alone had one accepted.
+  //
+  // Canonical: ask at or below our approved number means MAKE THE OFFER. S6
+  // formal_contract is reachable only from an inbound seller message accepting
+  // executable terms, which the acceptance resolver owns.
+  AUTO_ACCEPT_OFFER: defineRoute("auto_accept_offer", {
+    stage_code: "S5",
+    next_stage: S.OFFER_REVEAL_CASH,
+    brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
+    status: "present_offer",
+    template_use_case: "offer_reveal_cash",
+    inbox_bucket: "priority",
+    acquisition_action: "present_approved_cash_offer",
+    route: "s5_offer",
+    follow_up_policy: null,
+    event_type: EV.ASKING_PRICE_EVALUATED,
+  }),
+
+  // Ask within MAO -> negotiate to land near our target. Still S5: negotiating
+  // a number IS the offer stage, not a condition question.
+  CLOSE_RANGE_NEGOTIATION: defineRoute("close_range_negotiation", {
+    stage_code: "S5",
+    next_stage: S.NARROW_RANGE,
+    brain_stage: CONVERSATION_STAGES.NEGOTIATION,
+    status: "negotiating",
+    template_use_case: "narrow_range",
+    inbox_bucket: "priority",
+    acquisition_action: "negotiate_within_buy_box",
+    route: "s5_negotiation",
+    follow_up_policy: null,
+    event_type: EV.OFFER_NEGOTIATION_OPENED,
+  }),
+
+  // Modestly above MAO -> gather condition to justify a lower number.
+  NEGOTIABLE_CONDITION: defineRoute("negotiable_condition", {
+    stage_code: "S4",
+    next_stage: S.PRICE_HIGH_CONDITION_PROBE,
+    brain_stage: CONVERSATION_STAGES.CONDITION_TIMELINE_DISCOVERY,
+    status: "justify_with_condition",
+    template_use_case: "price_high_condition_probe",
+    inbox_bucket: "priority",
+    acquisition_action: "gather_condition_to_justify",
+    route: "s4_condition",
+    follow_up_policy: null,
+    event_type: EV.CONDITION_PROBE_REQUESTED,
+  }),
+
+  // Well above the cash range, and the seller has given NO creative signal.
+  // Condition is the only lever left that can move the number.
+  WIDE_GAP_CONDITION: defineRoute("wide_gap_condition", {
+    stage_code: "S4",
+    next_stage: S.PRICE_HIGH_CONDITION_PROBE,
+    brain_stage: CONVERSATION_STAGES.CONDITION_TIMELINE_DISCOVERY,
+    status: "gather_condition",
+    template_use_case: "price_high_condition_probe",
+    inbox_bucket: "needs_review",
+    acquisition_action: "gather_condition_then_reveal",
+    route: "s4_condition",
+    follow_up_policy: null,
+    event_type: EV.CONDITION_PROBE_REQUESTED,
+  }),
+
+  // Reachable ONLY when the seller has already raised terms themselves. A price
+  // gap is not consent: the system never introduces creative financing on the
+  // strength of arithmetic. See resolveCreativeAllowed.
+  WIDE_GAP_CREATIVE: defineRoute("wide_gap_creative", {
+    stage_code: "S5",
+    next_stage: S.CREATIVE_PROBE,
+    brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
+    status: "creative_finance_probe",
+    template_use_case: "creative_probe",
+    inbox_bucket: "needs_review",
+    acquisition_action: "propose_creative_finance",
+    route: "creative_finance",
+    follow_up_policy: null,
+    event_type: EV.CREATIVE_FINANCE_PROPOSED,
+  }),
+
+  // Far above range -> park in a nurture drip. The deal stays alive; it is
+  // simply not a fit at this number today.
+  VERY_WIDE_GAP_NURTURE: defineRoute("very_wide_gap_nurture", {
+    stage_code: "S3F",
+    next_stage: S.ASKING_PRICE_FOLLOW_UP,
+    brain_stage: CONVERSATION_STAGES.SELLER_PRICE_DISCOVERY,
+    status: "nurture",
+    template_use_case: "asking_price_follow_up",
+    inbox_bucket: "follow_up",
+    acquisition_action: "enter_nurture_drip",
+    route: "nurture",
+    follow_up_policy: { schedule: true, step: "nurture", default_delay_days: 60 },
+    event_type: EV.DEAL_NURTURE_TRIGGERED,
+  }),
+
+  // No underwriting -> capture and route to a human. Never blind-route.
+  UNKNOWN_REVIEW: defineRoute("unknown_review", {
+    stage_code: "S3",
+    next_stage: S.ASKING_PRICE,
+    brain_stage: CONVERSATION_STAGES.SELLER_PRICE_DISCOVERY,
+    status: "price_captured_review",
+    template_use_case: "seller_asking_price",
+    inbox_bucket: "needs_review",
+    acquisition_action: "run_underwriting",
+    route: "human_review",
+    follow_up_policy: null,
+    event_type: null,
+  }),
+});
+
+/**
+ * Band (+ creative eligibility) -> the one canonical route object.
+ *
+ * Returns a SHARED frozen instance. Two callers handed the same band get the
+ * same reference, which is what makes "one decision, many consumers" provable
+ * rather than asserted.
+ */
+export function routeForBand(band, { creative_allowed = false } = {}) {
   switch (band) {
     case STAGE3_OFFER_BANDS.AUTO_ACCEPT:
-      // AN ECONOMIC CALCULATION CANNOT FABRICATE SELLER ACCEPTANCE.
-      //
-      // This returned stage_code "S6" with brain_stage VERBAL_ACCEPTANCE_LOCK
-      // and acquisition_action "verify_signers_and_generate_contract" - on the
-      // strength of `ask <= recommended_cash_offer` alone. That test says only
-      // "we can afford this". It is not verbal acceptance, not agreed terms,
-      // and not a contract: the seller named a number, and we have not yet even
-      // presented an offer, let alone had one accepted.
-      //
-      // Canonical: ask at or below our approved number means MAKE THE OFFER.
-      // S6 formal_contract is reachable only from an inbound seller message
-      // that accepts executable terms, which the acceptance resolver owns.
-      // Same shape the Stage-4 engine already uses for its offer route.
-      return {
-        stage_code: "S5",
-        next_stage: S.OFFER_REVEAL_CASH,
-        brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
-        status: "present_offer",
-        template_use_case: "offer_reveal_cash",
-        inbox_bucket: "priority",
-        acquisition_action: "present_approved_cash_offer",
-        route: "s5_offer",
-        follow_up_policy: null,
-        event_type: EV.ASKING_PRICE_EVALUATED,
-      };
+      return STAGE3_ROUTES.AUTO_ACCEPT_OFFER;
     case STAGE3_OFFER_BANDS.CLOSE_RANGE:
-      // Ask within MAO → negotiate to land near our target (S5).
-      return {
-        stage_code: "S5",
-        next_stage: S.NARROW_RANGE,
-        brain_stage: CONVERSATION_STAGES.NEGOTIATION,
-        status: "negotiating",
-        template_use_case: "narrow_range",
-        inbox_bucket: "priority",
-        acquisition_action: "negotiate_within_buy_box",
-        route: "s5_negotiation",
-        follow_up_policy: null,
-        event_type: EV.OFFER_NEGOTIATION_OPENED,
-      };
+      return STAGE3_ROUTES.CLOSE_RANGE_NEGOTIATION;
     case STAGE3_OFFER_BANDS.NEGOTIABLE:
-      // Modestly above MAO → gather condition to justify a lower number (S4).
-      return {
-        stage_code: "S4",
-        next_stage: S.PRICE_HIGH_CONDITION_PROBE,
-        brain_stage: CONVERSATION_STAGES.CONDITION_TIMELINE_DISCOVERY,
-        status: "justify_with_condition",
-        template_use_case: "price_high_condition_probe",
-        inbox_bucket: "priority",
-        acquisition_action: "gather_condition_to_justify",
-        route: "s4_condition",
-        follow_up_policy: null,
-        event_type: EV.CONDITION_PROBE_REQUESTED,
-      };
+      return STAGE3_ROUTES.NEGOTIABLE_CONDITION;
     case STAGE3_OFFER_BANDS.WIDE_GAP:
-      // Well above cash range → creative finance if allowed, else condition probe.
-      if (creative_allowed) {
-        return {
-          stage_code: "S5",
-          next_stage: S.CREATIVE_PROBE,
-          brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
-          status: "creative_finance_probe",
-          template_use_case: "creative_probe",
-          inbox_bucket: "needs_review",
-          acquisition_action: "propose_creative_finance",
-          route: "creative_finance",
-          follow_up_policy: null,
-          event_type: EV.CREATIVE_FINANCE_PROPOSED,
-        };
-      }
-      return {
-        stage_code: "S4",
-        next_stage: S.PRICE_HIGH_CONDITION_PROBE,
-        brain_stage: CONVERSATION_STAGES.CONDITION_TIMELINE_DISCOVERY,
-        status: "gather_condition",
-        template_use_case: "price_high_condition_probe",
-        inbox_bucket: "needs_review",
-        acquisition_action: "gather_condition_then_reveal",
-        route: "s4_condition",
-        follow_up_policy: null,
-        event_type: EV.CONDITION_PROBE_REQUESTED,
-      };
+      return creative_allowed ? STAGE3_ROUTES.WIDE_GAP_CREATIVE : STAGE3_ROUTES.WIDE_GAP_CONDITION;
     case STAGE3_OFFER_BANDS.VERY_WIDE_GAP:
-      // Far above range → park in a nurture drip (deal stays alive, not a fit now).
-      return {
-        stage_code: "S3F",
-        next_stage: S.ASKING_PRICE_FOLLOW_UP,
-        brain_stage: CONVERSATION_STAGES.SELLER_PRICE_DISCOVERY,
-        status: "nurture",
-        template_use_case: "asking_price_follow_up",
-        inbox_bucket: "follow_up",
-        acquisition_action: "enter_nurture_drip",
-        route: "nurture",
-        follow_up_policy: { schedule: true, step: "nurture", default_delay_days: 60 },
-        event_type: EV.DEAL_NURTURE_TRIGGERED,
-      };
+      return STAGE3_ROUTES.VERY_WIDE_GAP_NURTURE;
     case STAGE3_OFFER_BANDS.UNKNOWN:
     default:
-      // No underwriting → capture and route to human review (never blind-route).
-      return {
-        stage_code: "S3",
-        next_stage: S.ASKING_PRICE,
-        brain_stage: CONVERSATION_STAGES.SELLER_PRICE_DISCOVERY,
-        status: "price_captured_review",
-        template_use_case: "seller_asking_price",
-        inbox_bucket: "needs_review",
-        acquisition_action: "run_underwriting",
-        route: "human_review",
-        follow_up_policy: null,
-        event_type: null,
-      };
+      return STAGE3_ROUTES.UNKNOWN_REVIEW;
   }
 }
 
@@ -282,6 +347,78 @@ function routeForBand(band, { creative_allowed = false } = {}) {
  * @param {string|Date}   [params.context.now] - Injectable timestamp.
  * @returns {object} decision
  */
+/**
+ * THE CANONICAL SELLER-SIGNAL CREATIVE-FINANCE POLICY.
+ *
+ * Two conditions, both required:
+ *   1. the economics are outside the straightforward cash path, AND
+ *   2. the SELLER already raised terms - creative_terms_interest,
+ *      novation_interest, or a named creative_strategy.
+ *
+ * A price gap alone is neither consent nor interest. A $300k ask against a
+ * $230k ceiling is not permission to pitch seller financing, subject-to, or
+ * novation, and the system must never introduce those on its own initiative.
+ *
+ * Lives here, next to the route it gates, because both the resolver and the
+ * recommender need the identical answer.
+ */
+export function resolveCreativeAllowed({
+  facts = {},
+  classification = {},
+  underwriting = {},
+  negotiation_state = {},
+} = {}) {
+  const signals = {
+    creative_terms_interest:
+      facts.creative_terms_interest === true || classification?.signals?.creative_terms_interest === true,
+    novation_interest:
+      facts.novation_interest === true || classification?.signals?.novation_interest === true,
+    creative_strategy:
+      facts.creative_strategy ||
+      classification?.signals?.creative_strategy ||
+      negotiation_state?.creative_strategy ||
+      null,
+  };
+  const hasSellerSignal = Boolean(
+    signals.creative_terms_interest ||
+      signals.novation_interest ||
+      String(signals.creative_strategy ?? "").trim(),
+  );
+  if (!hasSellerSignal) return false;
+
+  const ask = Number(negotiation_state?.current_asking_price ?? negotiation_state?.current_ask ?? NaN);
+  const maxCash = Number(
+    underwriting?.max_allowable_offer ?? underwriting?.recommended_cash_offer ?? NaN,
+  );
+  if (!Number.isFinite(ask) || !Number.isFinite(maxCash)) return false;
+  return ask > maxCash;
+}
+
+/**
+ * The single economic decision for a resolved seller asking price.
+ *
+ * Every consumer calls THIS. The returned `route` is a shared frozen instance
+ * from STAGE3_ROUTES, so two consumers of the same decision hold the same
+ * object - not two equal objects produced by two mappings.
+ *
+ * Returns null when the engine genuinely cannot speak (no price, or no
+ * underwriting), so callers fall back to milestone completeness rather than to
+ * a guess.
+ */
+export function resolveStage3Route({ ask = null, underwriting = {}, creative_allowed = false } = {}) {
+  const price = numberOrNull(ask);
+  if (!(price > 0)) return null;
+
+  const economics = evaluateAskingPrice(price, underwriting);
+  if (!economics?.has_underwriting) return null;
+
+  return {
+    band: economics.offer_band,
+    economics,
+    route: routeForBand(economics.offer_band, { creative_allowed }),
+  };
+}
+
 export function classifyStage3AskingPrice({
   seller_asking_price = null,
   message = "",
@@ -357,6 +494,11 @@ function buildDecision({ decision, route, events }) {
     brain_stage: route.brain_stage,
     status: route.status,
     route: route.route,
+    route_id: route.route_id,
+    lifecycle_stage_code: route.lifecycle_stage_code,
+    // The shared frozen instance, exposed so a consumer (or a test) can prove
+    // it holds the SAME route the stage resolver acted on - not an equal copy.
+    canonical_route: route,
 
     // Inbox + templating + follow-up
     inbox_bucket: route.inbox_bucket,

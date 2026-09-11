@@ -27,8 +27,9 @@ import {
 import { ACQUISITION_LIFECYCLE_EVENTS } from "@/lib/domain/seller-flow/acquisition-lifecycle-events.js";
 import { resolveSellerAuthorityState } from "@/lib/domain/seller-flow/seller-authority-state.js";
 import {
-  evaluateAskingPrice,
   STAGE3_OFFER_BANDS,
+  resolveStage3Route,
+  resolveCreativeAllowed,
 } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
 
 export const TRANSITION_RESOLVER_VERSION = "seller_stage_transition_v2_authority_gated";
@@ -288,43 +289,60 @@ const CONDITION_STAGE_IDX = 3;  // property_condition
  * Returns null when the engine cannot speak (no ask, no underwriting), leaving
  * milestone completeness to stand exactly as before.
  */
-function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0) {
+function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = {}) {
   if (unresolvedIdx !== CONDITION_STAGE_IDX) return null;
 
   const ask = normalizeAskingPriceFact(facts?.asking_price)?.value;
   const recommended = numberOrNull(ade?.recommended_cash_offer ?? ade?.recommended_offer);
   if (!(ask > 0) || !(recommended > 0)) return null;
 
-  const economics = evaluateAskingPrice(ask, {
+  const underwriting = {
     recommended_cash_offer: recommended,
     max_allowable_offer:
       numberOrNull(ade?.max_allowable_offer) || numberOrNull(ade?.investor_ceiling_mid) || null,
+  };
+
+  // Creative eligibility changes which route the band yields, so it must be
+  // decided BEFORE the route is resolved - and by the same policy the
+  // recommender uses, which is why it lives in the engine.
+  const creative_allowed = resolveCreativeAllowed({
+    facts,
+    classification: signals?.classification || {},
+    underwriting,
+    // The ask is the one the gate actually evaluated, so the policy and the
+    // route can never be judging different numbers.
+    negotiation_state: { ...(signals?.negotiation_state || {}), current_asking_price: ask },
   });
-  if (!economics?.has_underwriting) return null;
 
-  const band = economics.offer_band;
+  const decision = resolveStage3Route({ ask, underwriting, creative_allowed });
+  if (!decision) return null;
 
-  // Out of band: the price question IS answered, but the next useful act is a
-  // nurture follow-up on price, not a condition probe. The seller stays at
-  // asking_price - which is what the engine's own route already says
-  // (stage_code S3F / ASKING_PRICE_FOLLOW_UP).
-  if (band === STAGE3_OFFER_BANDS.VERY_WIDE_GAP) {
-    return { stage_idx: PRICE_STAGE_IDX, band, economics, economic_fit: "out_of_band" };
-  }
-  if (band === STAGE3_OFFER_BANDS.WIDE_GAP) {
-    return { stage_idx: CONDITION_STAGE_IDX, band, economics, economic_fit: "stretch" };
-  }
-  // At or below our cash number: condition cannot make this a worse deal, so
-  // the next act is the OFFER, not another question. The engine's own route
-  // says the same thing (stage_code S6 / CLOSE_HANDOFF). Progression past the
-  // offer stage is still subject to the authority gate below, which caps it
-  // when signer/probate authority is unproven - that rail is untouched.
-  if (band === STAGE3_OFFER_BANDS.AUTO_ACCEPT) {
-    return { stage_idx: OFFER_STAGE_IDX, band, economics, economic_fit: "actionable" };
-  }
-  // close_range / negotiable: condition genuinely can move the number, so
-  // milestone completeness and workflow agree.
-  return { stage_idx: CONDITION_STAGE_IDX, band, economics, economic_fit: "in_band" };
+  // The route CARRIES its lifecycle stage. Reading it is a lookup, not a
+  // second opinion - which is the whole point of the collapse.
+  const stage_idx = STAGE_INDEX.get(decision.route.lifecycle_stage_code);
+  if (!Number.isInteger(stage_idx)) return null;
+
+  return {
+    stage_idx,
+    band: decision.band,
+    economics: decision.economics,
+    route: decision.route,
+    creative_allowed,
+    economic_fit: economicFitForBand(decision.band),
+  };
+}
+
+/**
+ * A LABEL on the band, never a second stage decision.
+ *
+ * economic_fit exists only to feed temperature. It deliberately does not
+ * influence the stage, which the route already owns.
+ */
+function economicFitForBand(band) {
+  if (band === STAGE3_OFFER_BANDS.VERY_WIDE_GAP) return "out_of_band";
+  if (band === STAGE3_OFFER_BANDS.WIDE_GAP) return "stretch";
+  if (band === STAGE3_OFFER_BANDS.AUTO_ACCEPT) return "actionable";
+  return "in_band";
 }
 
 /**
@@ -623,6 +641,9 @@ export function resolveSellerStageTransition({
   new_facts = {},
   intent = "unclear",
   classification_confidence = null,
+  // Full classifier output. Only creative-finance signals are read from it,
+  // and only through the engine's canonical policy - never interpreted here.
+  classification = null,
   current_temperature = null,
   current_disposition = null,
   contactability = CONTACTABILITY_CODES.CONTACTABLE,
@@ -878,7 +899,10 @@ export function resolveSellerStageTransition({
   // Milestone completeness (unresolvedIdx) says what fact is missing. The
   // canonical Stage-3 engine says what we should DO about it. Only the second
   // one is workflow state.
-  const economic_gate = economicStageGate(facts, ade_result, unresolvedIdx);
+  const economic_gate = economicStageGate(facts, ade_result, unresolvedIdx, {
+    classification,
+    negotiation_state,
+  });
   const gatedUnresolvedIdx = economic_gate ? economic_gate.stage_idx : unresolvedIdx;
 
   let afterIdx = Math.max(beforeIdx, gatedUnresolvedIdx);
@@ -1108,6 +1132,11 @@ export function resolveSellerStageTransition({
         offer_gap_amount: economic_gate.economics.offer_gap_amount,
         ask_to_offer_ratio: economic_gate.economics.ask_to_offer_ratio,
         milestone_unresolved_idx: unresolvedIdx,
+        route_id: economic_gate.route.route_id,
+        route: economic_gate.route,
+        creative_allowed: economic_gate.creative_allowed,
+        template_use_case: economic_gate.route.template_use_case,
+        acquisition_action: economic_gate.route.acquisition_action,
         workflow_stage_idx: economic_gate.stage_idx,
         diverged: economic_gate.stage_idx !== unresolvedIdx,
       }

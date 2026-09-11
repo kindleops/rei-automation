@@ -1,6 +1,11 @@
 import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-flow.js";
 import { classifyStage2OfferInterest } from "@/lib/domain/seller-flow/stage2-offer-interest-engine.js";
-import { classifyStage3AskingPrice } from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
+import {
+  classifyStage3AskingPrice,
+  // The canonical creative-finance policy lives with the route it gates, so
+  // the recommender and the stage resolver cannot answer it differently.
+  resolveCreativeAllowed,
+} from "@/lib/domain/seller-flow/stage3-asking-price-engine.js";
 import { classifyStage4Condition } from "@/lib/domain/seller-flow/stage4-condition-justification-engine.js";
 import { classifyStage5Negotiation } from "@/lib/domain/seller-flow/stage5-offer-negotiation-engine.js";
 import { classifyStage6Contract } from "@/lib/domain/seller-flow/stage6-seller-contract-engine.js";
@@ -330,30 +335,6 @@ function buildRecommendationFromEngine({
  * resolves to DEAL_STRATEGY_BRANCHES.CASH anyway, so it is an analytical hint
  * rather than permission to pitch terms.
  */
-function resolveCreativeAllowed({ facts = {}, classification = {}, underwriting = {}, negotiation_state = {} } = {}) {
-  const signals = {
-    creative_terms_interest:
-      facts.creative_terms_interest === true || classification?.signals?.creative_terms_interest === true,
-    novation_interest:
-      facts.novation_interest === true || classification?.signals?.novation_interest === true,
-    creative_strategy:
-      facts.creative_strategy || classification?.signals?.creative_strategy || negotiation_state?.creative_strategy || null,
-  };
-  const hasSellerSignal = Boolean(
-    signals.creative_terms_interest || signals.novation_interest || clean(signals.creative_strategy),
-  );
-  if (!hasSellerSignal) return false;
-
-  const ask = Number(
-    negotiation_state?.current_asking_price ?? negotiation_state?.current_ask ?? NaN,
-  );
-  const maxCash = Number(
-    underwriting?.max_allowable_offer ?? underwriting?.recommended_cash_offer ?? NaN,
-  );
-  if (!Number.isFinite(ask) || !Number.isFinite(maxCash)) return false;
-  // Outside the straightforward cash path, per the canonical policy.
-  return ask > maxCash;
-}
 
 export function resolveStageDomainRecommendation({
   message = "",
