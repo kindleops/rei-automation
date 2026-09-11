@@ -7840,7 +7840,23 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
   if (action === 'resume' && fromStatus === 'paused') {
     const { evaluateCampaignLaunchReadiness } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
     const { buildCampaignCommandSummary } = await import('@/lib/domain/campaigns/campaign-command-summary.js')
-    const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps)
+    // RESUME IS AN EXPLICIT OPERATOR ACTION, and was being gated strictly HARDER
+    // than activation. Called with no options it took the uncontrolled branch of
+    // evaluateCampaignLaunchReadiness, which blocks on global_auto_enqueue,
+    // campaign_auto_queue_enabled and auto_send_enabled - none of which the
+    // activation path applies, and none of which the dashboard exposes a control
+    // to flip. The operator got CAMPAIGN_BLOCKED on a campaign that the Activate
+    // button would have accepted, with no way forward.
+    //
+    // A human pressing Resume is exactly the "controlled hydration" this flag
+    // describes. It does NOT weaken the send rails: the emergency stop and a
+    // paused processor become warnings on hydration rather than silent blocks,
+    // transmission itself is still governed by queue_processor_mode, and an
+    // auto_send_enabled campaign is still blocked as unrestricted_auto_send
+    // unless it carries a guarded live launch.
+    const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps, {
+      explicit_operator_action: true,
+    })
     if (readiness.launch_readiness === 'blocked') {
       const summary = await buildCampaignCommandSummary(campaignId, deps)
       return {
