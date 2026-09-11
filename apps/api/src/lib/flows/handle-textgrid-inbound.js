@@ -1669,10 +1669,22 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
           .eq("thread_key", inbound_from)
           .maybeSingle();
 
-        if (
-          thread_state?.is_archived === true
-          && clean(thread_state.archive_scope).toLowerCase() === "conversation"
-        ) {
+        // A SELLER REPLY UN-ARCHIVES THE THREAD, whatever scope archived it.
+        //
+        // This used to require archive_scope === "conversation". Archiving from
+        // the inbox leaves archive_scope NULL, so the common case never
+        // un-archived: MEASURED 2026-09-10, 28 archived threads had a NULL
+        // scope AND an inbound last message, the most recent 4 hours old, while
+        // only 7 carried the "conversation" scope and their newest reply was
+        // from August. A live seller answering "yes, I want to sell" landed in
+        // a thread visible in no operational tab.
+        //
+        // identity_alignment is the one scope deliberately preserved: it
+        // archives a duplicate thread identity rather than a conversation, so
+        // resurrecting it on inbound would reintroduce the split-identity row
+        // the dedup exists to collapse.
+        const archive_scope_value = clean(thread_state?.archive_scope).toLowerCase();
+        if (thread_state?.is_archived === true && archive_scope_value !== "identity_alignment") {
           await patchUniversalLeadState({
             threadKey: inbound_from,
             patch: {
@@ -1684,6 +1696,7 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
               change_source: STATE_SOURCE_CODES.SYSTEM,
               source_view: "inbound_auto_unarchive",
               reason: "inbound_message_received",
+              prior_archive_scope: archive_scope_value || null,
             },
           });
         }

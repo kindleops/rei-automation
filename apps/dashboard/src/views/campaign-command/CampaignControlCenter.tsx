@@ -139,10 +139,29 @@ export function CampaignControlCenter({
         await load(true)
         onLifecycleChange?.()
       } else {
-        const msg = (res.ok ? res.data?.error : res.message) || 'transition_failed'
+        // SURFACE THE ACTUAL BLOCKERS. This read only res.message/res.data.error,
+        // so a refused resume showed the operator "transition_failed" or a
+        // truncated JSON fragment - never the reason. The server already returns
+        // a blockers[] array naming each unmet precondition ("No ready
+        // recipients", "Campaign transmission is disabled"); it was simply being
+        // thrown away, leaving a dead end with nothing to act on.
+        const payload = (res.ok ? res.data : (res as { upstream?: unknown }).upstream) as
+          | { error?: string; message?: string; blockers?: unknown }
+          | undefined
+        const blockers = Array.isArray(payload?.blockers)
+          ? payload.blockers
+            .map((entry) => (typeof entry === 'string' ? entry : (entry as { label?: string; code?: string })?.label ?? (entry as { code?: string })?.code))
+            .filter((entry): entry is string => Boolean(entry))
+          : []
+        const rawMsg = (res.ok ? res.data?.error : res.message) || 'transition_failed'
+        const detail = blockers.length > 0
+          ? blockers.join(' · ')
+          : rawMsg === 'illegal_campaign_transition'
+            ? `Not allowed from "${status}".`
+            : String(rawMsg)
         emitNotification({
           title: `Could not ${label.toLowerCase()}`,
-          detail: msg === 'illegal_campaign_transition' ? `Not allowed from "${status}".` : String(msg),
+          detail,
           severity: 'critical',
         })
       }

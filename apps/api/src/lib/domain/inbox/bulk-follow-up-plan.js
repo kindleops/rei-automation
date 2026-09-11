@@ -403,8 +403,34 @@ export async function buildBulkFollowUpPlan({ threadKeys = [], now = new Date() 
       continue;
     }
 
+    /**
+     * Neutral greeting instead of NEED REVIEW when no human name exists.
+     *
+     * The operator's goal is an inbox that runs without human involvement, so a
+     * missing name must not park a recipient. Measured on production: after the
+     * split-identity fix above, 7,506 threads resolve a name from the prospect and
+     * 1,834 from a person-style owner, leaving 400 with no human name anywhere —
+     * 249 English, 86 unknown, 55 Spanish, 7 Portuguese, 3 Vietnamese.
+     *
+     * "there" renders "Hi there, Mason here." which is natural and correct for an
+     * LLC-owned property where we only know the entity. It is applied ONLY to
+     * English and unknown-language recipients: the Spanish templates open
+     * "Hola {{name}}, habla Carlos" and there is no equivalent one-word neutral I
+     * can validate, so those 65 still route to review rather than ship copy I am
+     * guessing at. That is 0.7% of the inbox, not 23%.
+     *
+     * Entity names still never become greetings — firstName() rejects them — so
+     * this replaces "Hi 2972," with "Hi there,", never with the company name.
+     */
+    const languageKey = String(language || "").trim().toLowerCase();
+    const acceptsNeutralGreeting =
+      !languageKey || languageKey === "english" || languageKey === "en" || languageKey === "unknown";
+    const threadCtx = (!ctx.seller_first_name && acceptsNeutralGreeting)
+      ? { ...ctx, seller_first_name: "there" }
+      : ctx;
+
     const plan = buildRecipientPlan({
-      thread: ctx,
+      thread: threadCtx,
       template: selection.ok ? selection.template : null,
       // The agent ASSIGNED TO THIS SELLER, and nothing else. A batch-level name
       // must never speak for a seller: the templates say "this is {{agent_name}}",

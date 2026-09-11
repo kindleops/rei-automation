@@ -129,6 +129,9 @@ import {
   OPEN_INBOX_DEAL_INTEL_EVENT,
   openInboxDealIntelligence,
   peekPendingInboxDealIntelligence,
+  CLOSE_INBOX_DEAL_INTEL_EVENT,
+  peekPendingInboxDealIntelligenceIdentity,
+  clearPendingInboxDealIntelligenceIdentity,
   publishMobileInboxBadge,
 } from '../mobile/mobile-inbox-bridge'
 
@@ -160,6 +163,7 @@ import {
   type InboxLayoutState,
   type MapSourceMode,
 } from '../../domain/inbox/inbox-layout-state'
+import { readPropertyLocator, setPropertyLocator } from '../../domain/locator/property-locator'
 import {
   buildContextFromActivityEvent,
   buildContextFromCalendarEvent,
@@ -1968,6 +1972,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [activeWorkspaceView, advancedFilters.market, commandMapMarket, commandMapTheme, searchQuery, selected?.market, sourceMode, stageFilter, viewFilter])
 
   const setActiveContext = useCallback((nextContext: ActiveInboxContext, options?: SetActiveContextOptions) => {
+    // GLOBAL PROPERTY LOCATOR, published from the ONE choke point every view
+    // funnels a selection through.
+    //
+    // Publishing it only from InboxPage.handleSelect was too narrow: selecting a
+    // row in Map, Pipeline, Queue, Lists, Calendar or the activity feed also
+    // sets the active context, and the operator expects any of those to carry to
+    // the dock exactly like an inbox selection. setPropertyLocator ignores a
+    // payload with no identifiers, so the partial contexts these views emit
+    // while clearing state cannot wipe a good locator.
+    setPropertyLocator({
+      propertyId: nextContext.propertyId ?? null,
+      threadKey: nextContext.threadKey ?? null,
+      masterOwnerId: nextContext.masterOwnerId ?? nextContext.sellerId ?? null,
+      prospectId: nextContext.prospectId ?? null,
+      opportunityId: nextContext.opportunityId ?? null,
+      address: nextContext.propertyAddress ?? null,
+    })
     setActiveContextState((current) => {
       const merged = { ...current, ...nextContext }
       if (nextContext.sourceView === 'inbox' && nextContext.opportunityId === undefined) {
@@ -2019,9 +2040,85 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [focusWorkspaceView, isMobile, isMobileInboxShell, isRouteFullscreen, selectFromExternalContext, threads])
 
+  /**
+   * SEED FROM THE LOCATOR ON MOUNT.
+   *
+   * Map, Pipeline, Calendar and Comp Intelligence all focus off the inbox
+   * activeContext rather than a URL parameter, and every route change unmounts
+   * this component - so arriving from a dock tap they booted with an empty
+   * context and rendered the generic surface even though the operator had a
+   * property selected moments earlier.
+   *
+   * Runs once, only when there is no context already, so it can never override
+   * a live in-session selection or fight selectFromExternalContext.
+   */
+  const locatorSeededRef = useRef(false)
+  useEffect(() => {
+    if (locatorSeededRef.current) return
+    if (activeContext?.propertyId || activeContext?.threadKey) {
+      // Something already focused this view - a live selection, or
+      // selectFromExternalContext. Never override it.
+      locatorSeededRef.current = true
+      return
+    }
+    const locator = readPropertyLocator()
+    if (!locator) return
+    locatorSeededRef.current = true
+    // The locator stores `string | null`; ActiveInboxContext uses
+    // `string | undefined`. Normalise here rather than widening the context
+    // type, which every other caller already satisfies.
+    const orUndefined = (value: string | null) => value ?? undefined
+    setActiveContext(
+      {
+        propertyId: orUndefined(locator.propertyId),
+        threadKey: orUndefined(locator.threadKey),
+        masterOwnerId: orUndefined(locator.masterOwnerId),
+        sellerId: orUndefined(locator.masterOwnerId),
+        prospectId: orUndefined(locator.prospectId),
+        propertyAddress: orUndefined(locator.address),
+        entityType: locator.propertyId ? 'property' : locator.masterOwnerId ? 'master_owner' : null,
+        entityId: locator.propertyId || locator.masterOwnerId || null,
+        sourceView: 'list',
+      },
+      { preserveCurrentViews: true },
+    )
+  }, [activeContext, setActiveContext])
+
   const resolveDealIntelThreadId = useCallback((): string | null => {
     const active = selectedRef.current
     if (active?.id) return active.id
+
+    // ARRIVING FROM ANOTHER APP. The dock records WHICH deal to open before it
+    // navigates, because this component remounts with no selection. Without
+    // that identity the fallback below returns whatever happens to sit first in
+    // the list - i.e. Deal Intelligence opened somebody else's deal.
+    const pending = peekPendingInboxDealIntelligenceIdentity()
+    if (pending) {
+      const norm = (value: unknown) => {
+        const text = String(value ?? '').trim()
+        return text.length > 0 ? text.toLowerCase() : null
+      }
+      const wanted = {
+        threadKey: norm(pending.threadKey),
+        propertyId: norm(pending.propertyId),
+        prospectId: norm(pending.prospectId),
+        masterOwnerId: norm(pending.masterOwnerId),
+      }
+      const matches = (row: InboxWorkflowThread) => {
+        const candidate = row as unknown as Record<string, unknown>
+        // threadKey is the strongest identity; the rest are ordered by how
+        // specific they are to one property.
+        if (wanted.threadKey && norm(candidate.threadKey ?? row.id) === wanted.threadKey) return true
+        if (wanted.propertyId && norm(candidate.propertyId) === wanted.propertyId) return true
+        if (wanted.prospectId && norm(candidate.prospectId) === wanted.prospectId) return true
+        if (wanted.masterOwnerId
+          && norm(candidate.ownerId ?? candidate.masterOwnerId) === wanted.masterOwnerId) return true
+        return false
+      }
+      const match = threads.find(matches) ?? filtered.find(matches) ?? null
+      if (match?.id) return match.id
+    }
+
     const fallback = filtered[0] ?? threads[0] ?? null
     return fallback?.id ?? null
   }, [filtered, threads])
@@ -2051,6 +2148,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         setMobileThreadOpen(true)
         setMobileIntelOpen(true)
         clearPendingInboxDealIntelligence()
+        clearPendingInboxDealIntelligenceIdentity()
       }
       return
     }
@@ -2058,6 +2156,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedWorkspaceViews(['deal_intelligence'])
     clearPendingInboxDealIntelligence()
   }, [isMobile, isRouteFullscreen, resolveDealIntelThreadId, selectThreadForDealIntel])
+
+  // Close Deal Intelligence and return to the thread list. Counterpart to the
+  // open event: the dock fires this when Inbox is tapped while the panel is
+  // already showing, which is otherwise a dead navigation (/inbox onto /inbox).
+  useEffect(() => {
+    const onCloseDealIntel = () => {
+      setMobileIntelOpen(false)
+      setSelectedWorkspaceViews((current) => (
+        current.length === 1 && current[0] === 'deal_intelligence'
+          ? cloneDefaultWorkspaceViews()
+          : current
+      ))
+      setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
+    }
+    window.addEventListener(CLOSE_INBOX_DEAL_INTEL_EVENT, onCloseDealIntel)
+    return () => window.removeEventListener(CLOSE_INBOX_DEAL_INTEL_EVENT, onCloseDealIntel)
+  }, [])
 
   useEffect(() => {
     const onOpenDealIntel = () => {
@@ -3532,7 +3647,27 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (action === 'archive') {
         // Archived threads leave every operational bucket. They remain in All
         // Threads and appear under Archived.
-        if (!staysVisibleEverywhere && activeBucket !== 'archived' && !isOpenThread) hideThreadLocally(thread.id)
+        //
+        // ARCHIVE IS THE EXCEPTION to the never-hide-the-open-thread rule above.
+        // The operator archives the conversation they are READING, so exempting
+        // the open thread meant the one case that actually happens did nothing:
+        // "when we archive, they don't go away."
+        //
+        // The rule exists for a real bug - hiding the open row blanks the
+        // conversation pane, because `selected` is resolved from the list. So
+        // the fix is not to drop the rule, it is to ADVANCE first: move to the
+        // next thread (or the previous one at the end of the list, or clear the
+        // selection if nothing is left), and only then hide the row. The pane
+        // never renders empty, and the archived thread is gone from the list.
+        if (!staysVisibleEverywhere && activeBucket !== 'archived') {
+          if (isOpenThread) {
+            const index = filtered.findIndex((row) => row.id === thread.id)
+            const nextThread = index >= 0 ? (filtered[index + 1] ?? filtered[index - 1] ?? null) : null
+            if (nextThread) selectThread(nextThread)
+            else clearThreadSelection('archived_last_thread')
+          }
+          hideThreadLocally(thread.id)
+        }
       } else if (action === 'unarchive' || action === 'unread') {
         unhideThreadLocally(thread.id)
       } else {
@@ -3548,7 +3683,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }
       }
     }
-  }, [threads, handleWorkflowMutation, DEV])
+  }, [threads, handleWorkflowMutation, DEV, filtered, selectThread, clearThreadSelection])
 
   const handleStatusChange = useCallback(async (status: InboxStatus | 'sent_message') => {
     if (!selected) return
@@ -3640,6 +3775,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (!selected) return
     handleThreadAction(selected, selected.isArchived ? 'unarchive' : 'archive')
   }, [handleThreadAction, selected])
+
 
   const anchorThreadSelection = useCallback((id: string) => {
     const thread = findThreadByRef(threads, id)

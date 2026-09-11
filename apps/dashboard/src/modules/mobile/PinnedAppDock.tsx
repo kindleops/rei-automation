@@ -4,7 +4,8 @@ import { pushRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
 import { captureAppSession, resolveAppIdFromRoute, restoreAppSession } from './app-session-cache'
 import { isCommandNavRouteActive, type CommandNavRoute } from './command-navigation-registry'
-import { openInboxDealIntelligence } from './mobile-inbox-bridge'
+import { closeInboxDealIntelligence, isInboxRoute, openInboxDealIntelligence } from './mobile-inbox-bridge'
+import { readPropertyLocator, resolveDockDestination } from '../../domain/locator/property-locator'
 import {
   DOCKABLE_APPS,
   addPinApp,
@@ -32,12 +33,50 @@ const formatBadge = (count?: number) => {
   return count > 99 ? '99+' : String(count)
 }
 
+/**
+ * GLOBAL PROPERTY LOCATOR.
+ *
+ * Every dock item used to navigate with zero payload - a bare
+ * pushRoutePath(app.path) - so tapping a destination after selecting a
+ * conversation landed on a generic, unfocused view. The operator's ask is the
+ * opposite: pick a property in the Inbox, tap anywhere in the dock, arrive at
+ * THAT property.
+ *
+ * The locator is published at selection time (InboxPage) and read here at tap
+ * time. Destinations that already know how to focus get a focused path; the
+ * rest keep their plain path, so this can only ever add precision, never break
+ * a route that worked.
+ */
 const navigateToApp = (app: CommandNavRoute) => {
+  const locator = readPropertyLocator()
+
   if (app.action === 'deal_intelligence') {
-    openInboxDealIntelligence()
+    // Deal Intelligence resolved to the FIRST thread in the list when arrived at
+    // from another app, which meant opening somebody else's deal. Hand it the
+    // identity explicitly.
+    openInboxDealIntelligence(
+      locator
+        ? {
+          threadKey: locator.threadKey,
+          propertyId: locator.propertyId,
+          prospectId: locator.prospectId,
+          masterOwnerId: locator.masterOwnerId,
+        }
+        : undefined,
+    )
     return
   }
-  pushRoutePath(app.path)
+
+  // RETURNING FROM DEAL INTELLIGENCE. It is a panel inside the inbox workspace,
+  // not a route, so tapping Inbox while it was open pushed /inbox onto /inbox -
+  // a no-op - and the operator was stranded in the panel with no way back to the
+  // thread list. Fire the close event instead of a dead navigation.
+  if (app.path === '/inbox' && typeof window !== 'undefined' && isInboxRoute(window.location.pathname)) {
+    closeInboxDealIntelligence()
+    return
+  }
+
+  pushRoutePath(resolveDockDestination(app.path, locator) ?? app.path)
 }
 
 export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {

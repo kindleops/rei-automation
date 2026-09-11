@@ -1501,6 +1501,26 @@ function toSupabaseBoolean(value) {
   return value ? "true" : "false";
 }
 
+/**
+ * NULL-SAFE bucket exclusion.
+ *
+ * `inbox_bucket.neq.dead` compiles to `inbox_bucket <> 'dead'`, which evaluates
+ * to NULL - not TRUE - when inbox_bucket IS NULL. PostgREST keeps only rows
+ * where the predicate is TRUE, so every NULL-bucket thread was silently
+ * dropped from New Replies, Waiting and Cold.
+ *
+ * MEASURED 2026-09-10: inbox_bucket is NULL on 8,688 of 9,776 threads, and 321
+ * of those have an INBOUND last message. Those 321 are live seller replies that
+ * the operator could not see in any operational tab. Of 48 threads that replied
+ * in the last 72 hours, only 5 reached the New Replies list.
+ *
+ * A NULL bucket means "not yet classified", which is emphatically not the same
+ * as dead or suppressed, so it must be INCLUDED by an exclusion filter.
+ */
+function bucketNotIn(...buckets) {
+  return `or(inbox_bucket.is.null,and(${buckets.map((b) => `inbox_bucket.neq.${b}`).join(",")}))`;
+}
+
 function applyInboxThreadStateBucketFilter(query, normalized) {
   switch (normalized) {
     case "priority":
@@ -1510,7 +1530,7 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
       if (typeof query.or === "function") {
         query = query.or(
           "inbox_bucket.eq.new_replies,"
-          + `and(latest_direction.eq.inbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed)`,
+          + `and(latest_direction.eq.inbound,${bucketNotIn("dead", "suppressed")})`,
         );
       } else {
         query = query.eq("inbox_bucket", "new_replies");
@@ -1527,7 +1547,11 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
         query = query.or(
           "inbox_bucket.eq.cold,"
           + "automation_lane.eq.cold_reactivation,"
-          + `and(latest_message_direction.eq.outbound,last_outbound_at.lt.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
+          // latest_message_direction DOES NOT EXIST on inbox_thread_state
+          // (information_schema, 2026-09-10). PostgREST fails the WHOLE query on
+          // one unknown column, so the Cold tab was not merely under-filtered -
+          // it was hard-erroring. The real column is latest_direction.
+          + `and(latest_direction.eq.outbound,last_outbound_at.lt.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
         );
       } else {
         query = query.eq("inbox_bucket", "cold");
@@ -1543,7 +1567,7 @@ function applyInboxThreadStateBucketFilter(query, normalized) {
       if (typeof query.or === "function") {
         query = query.or(
           "inbox_bucket.eq.waiting,"
-          + "and(latest_direction.eq.outbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed,"
+          + `and(latest_direction.eq.outbound,${bucketNotIn("dead", "suppressed")},`
           + `last_outbound_at.gte.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
         );
       } else {
@@ -1642,6 +1666,16 @@ async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
 }
 
 function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]) {
+  // The direction column is RELATION-SPECIFIC and the two names are not
+  // interchangeable (information_schema, 2026-09-10):
+  //   inbox_thread_state       -> latest_direction         (no latest_message_direction)
+  //   canonical_inbox_threads  -> latest_message_direction (no latest_direction)
+  //   inbox_threads_view       -> latest_message_direction
+  // This function runs against the FALLBACK sources, so it must take the column
+  // from the source config rather than hardcode one. Naming the wrong one does
+  // not merely mis-filter: PostgREST fails the WHOLE query on one unknown
+  // column, so the tab returns nothing at all.
+  const dirCol = sourceConfig?.directionColumn || "latest_message_direction";
   if (sourceConfig.key === "enriched") {
     switch (filter) {
       case "priority":
@@ -1684,7 +1718,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
       return typeof query.or === "function"
         ? query.or(
           "inbox_bucket.eq.new_replies,"
-          + `and(latest_message_direction.eq.inbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed)`,
+          + `and(${dirCol}.eq.inbound,${bucketNotIn("dead", "suppressed")})`,
         )
         : query.eq("inbox_bucket", "new_replies");
     case "needs_review":
@@ -1698,7 +1732,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
         ? query.or(
           "inbox_bucket.eq.cold,"
           + "automation_lane.eq.cold_reactivation,"
-          + `and(latest_message_direction.eq.outbound,last_outbound_at.lt.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
+          + `and(${dirCol}.eq.outbound,last_outbound_at.lt.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
         )
         : query.eq("inbox_bucket", "cold");
     case "dead":
@@ -1720,7 +1754,7 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
       return typeof query.or === "function"
         ? query.or(
           "inbox_bucket.eq.waiting,"
-          + "and(latest_message_direction.eq.outbound,inbox_bucket.neq.dead,inbox_bucket.neq.suppressed,"
+          + `and(${dirCol}.eq.outbound,${bucketNotIn("dead", "suppressed")},`
           + `last_outbound_at.gte.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
         )
         : query.eq("inbox_bucket", "waiting");
