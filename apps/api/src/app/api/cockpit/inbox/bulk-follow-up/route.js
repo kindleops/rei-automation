@@ -42,13 +42,39 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'unsupported_mode' }, { status: 400, headers: cors })
     }
 
-    const results = []
-    for (const recipient of plan.recipients) {
+    /**
+     * SCHEDULE RECIPIENTS CONCURRENTLY, with a small bound.
+     *
+     * This was a sequential `for ... await` loop. Each recipient costs roughly
+     * twenty seconds (template load, sender resolution, contact-window
+     * evaluation, queue insert), so a batch of six ran for over two minutes -
+     * long enough for the request to be cut off in transit while the server
+     * happily kept writing.
+     *
+     * MEASURED 2026-09-11: an operator pressed "Schedule 6"; rows landed at
+     * 06:29 (1) and 06:31 (5). All six were written. The client, no longer
+     * listening, reported "1 follow-up scheduled". The work was never the
+     * problem - the wall-clock was.
+     *
+     * Bounded at four: enough to collapse a batch into one round trip, low
+     * enough that a large selection cannot stampede the queue writer or the
+     * per-sender throttles. Recipients are independent - one thread each, one
+     * row each - so there is no ordering requirement to preserve.
+     */
+    const SCHEDULE_CONCURRENCY = 4;
+    const results = new Array(plan.recipients.length);
+    let cursor = 0;
+
+    const scheduleOne = async (recipient, index) => {
       if (!recipient.eligible) {
-        results.push({ thread_key: recipient.thread_key, ok: false, reason: recipient.reason, skipped: true })
-        continue
+        results[index] = {
+          thread_key: recipient.thread_key,
+          ok: false,
+          reason: recipient.reason,
+          skipped: true,
+        };
+        return;
       }
-      // Canonical single-recipient path. Each call resolves its OWN schedule.
       const result = await runInboxAction({
         action: 'schedule-reply',
         payload: {
@@ -71,16 +97,38 @@ export async function POST(request) {
           source: 'inbox_bulk_follow_up',
           dry_run: false,
         },
-      })
-      results.push({
+      });
+      results[index] = {
         thread_key: recipient.thread_key,
         ok: result?.ok === true,
         reason: result?.reason || null,
         template_id: recipient.template_id,
         effective_send_at_utc: result?.effective_send_at_utc || null,
         effective_local_label: result?.effective_local_label || null,
-      })
-    }
+      };
+    };
+
+    const worker = async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= plan.recipients.length) return;
+        try {
+          await scheduleOne(plan.recipients[index], index);
+        } catch (error) {
+          // One recipient failing must never abort the rest of the batch.
+          results[index] = {
+            thread_key: plan.recipients[index]?.thread_key || null,
+            ok: false,
+            reason: error?.message || 'schedule_failed',
+          };
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(SCHEDULE_CONCURRENCY, plan.recipients.length) }, worker),
+    );
 
     const scheduled = results.filter((r) => r.ok)
     const failed = results.filter((r) => !r.ok && !r.skipped)
