@@ -153,7 +153,16 @@ function runStageEngine(universal_stage, input) {
         universal_stage,
         stage_decision: classifyStage3AskingPrice({
           message: input.message,
-          context: input.context,
+          context: {
+            ...input.context,
+            // Seller-signal driven, never gap-driven. See resolveCreativeAllowed.
+            creative_allowed: resolveCreativeAllowed({
+              facts: input.context?.facts || input.facts || {},
+              classification: input.classification || {},
+              underwriting,
+              negotiation_state,
+            }),
+          },
           seller_asking_price:
             negotiation_state.current_asking_price ?? negotiation_state.current_ask ?? null,
           underwriting,
@@ -301,6 +310,51 @@ function buildRecommendationFromEngine({
  * Authoritative stage-engine domain recommendation.
  * Orchestrator Layer B must derive from this — not recreate stage logic.
  */
+/**
+ * CREATIVE FINANCE REQUIRES A SELLER SIGNAL, NOT A PRICE GAP.
+ *
+ * classifyStage3AskingPrice reads context.creative_allowed, and nothing ever
+ * supplied it - so it defaulted false and the WIDE_GAP band always fell through
+ * to a condition probe. Creative financing was implemented, named, and
+ * unreachable.
+ *
+ * The canonical policy already exists as isCreativeEligible
+ * (route-seller-conversation.js): the ask must be outside the straightforward
+ * cash path AND the seller must have supplied an explicit creative signal
+ * (creative_terms_interest / novation_interest / creative_strategy).
+ *
+ * A large gap is NOT consent. A seller asking $300k against a $230k cash MAO
+ * has not thereby agreed to seller finance, subject-to or novation. The
+ * separate `price_gap_to_target > 25_000` heuristic in
+ * communications-engine/state-machine.js is deliberately NOT used here; it
+ * resolves to DEAL_STRATEGY_BRANCHES.CASH anyway, so it is an analytical hint
+ * rather than permission to pitch terms.
+ */
+function resolveCreativeAllowed({ facts = {}, classification = {}, underwriting = {}, negotiation_state = {} } = {}) {
+  const signals = {
+    creative_terms_interest:
+      facts.creative_terms_interest === true || classification?.signals?.creative_terms_interest === true,
+    novation_interest:
+      facts.novation_interest === true || classification?.signals?.novation_interest === true,
+    creative_strategy:
+      facts.creative_strategy || classification?.signals?.creative_strategy || negotiation_state?.creative_strategy || null,
+  };
+  const hasSellerSignal = Boolean(
+    signals.creative_terms_interest || signals.novation_interest || clean(signals.creative_strategy),
+  );
+  if (!hasSellerSignal) return false;
+
+  const ask = Number(
+    negotiation_state?.current_asking_price ?? negotiation_state?.current_ask ?? NaN,
+  );
+  const maxCash = Number(
+    underwriting?.max_allowable_offer ?? underwriting?.recommended_cash_offer ?? NaN,
+  );
+  if (!Number.isFinite(ask) || !Number.isFinite(maxCash)) return false;
+  // Outside the straightforward cash path, per the canonical policy.
+  return ask > maxCash;
+}
+
 export function resolveStageDomainRecommendation({
   message = "",
   classification = null,

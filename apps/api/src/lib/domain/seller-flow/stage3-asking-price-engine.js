@@ -150,18 +150,30 @@ const STRATEGY_BY_BAND = Object.freeze({
 function routeForBand(band, { creative_allowed = false } = {}) {
   switch (band) {
     case STAGE3_OFFER_BANDS.AUTO_ACCEPT:
-      // Ask at/below our cash number → move to Seller Contract (S6).
+      // AN ECONOMIC CALCULATION CANNOT FABRICATE SELLER ACCEPTANCE.
+      //
+      // This returned stage_code "S6" with brain_stage VERBAL_ACCEPTANCE_LOCK
+      // and acquisition_action "verify_signers_and_generate_contract" - on the
+      // strength of `ask <= recommended_cash_offer` alone. That test says only
+      // "we can afford this". It is not verbal acceptance, not agreed terms,
+      // and not a contract: the seller named a number, and we have not yet even
+      // presented an offer, let alone had one accepted.
+      //
+      // Canonical: ask at or below our approved number means MAKE THE OFFER.
+      // S6 formal_contract is reachable only from an inbound seller message
+      // that accepts executable terms, which the acceptance resolver owns.
+      // Same shape the Stage-4 engine already uses for its offer route.
       return {
-        stage_code: "S6",
-        next_stage: S.CLOSE_HANDOFF,
-        brain_stage: CONVERSATION_STAGES.VERBAL_ACCEPTANCE_LOCK,
-        status: "asks_contract",
-        template_use_case: "asks_contract",
+        stage_code: "S5",
+        next_stage: S.OFFER_REVEAL_CASH,
+        brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
+        status: "present_offer",
+        template_use_case: "offer_reveal_cash",
         inbox_bucket: "priority",
-        acquisition_action: "verify_signers_and_generate_contract",
-        route: "s6_contract",
+        acquisition_action: "present_approved_cash_offer",
+        route: "s5_offer",
         follow_up_policy: null,
-        event_type: EV.ADVANCED_TO_SELLER_CONTRACT,
+        event_type: EV.ASKING_PRICE_EVALUATED,
       };
     case STAGE3_OFFER_BANDS.CLOSE_RANGE:
       // Ask within MAO → negotiate to land near our target (S5).

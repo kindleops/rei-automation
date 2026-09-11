@@ -640,16 +640,26 @@ function routeAskingPrice(decision) {
 
   switch (decision.negotiation_band) {
     case "inside_range":
-      // Ask is at/below our contract ceiling → move to Seller Contract (S6).
+      // AN ECONOMIC CALCULATION CANNOT FABRICATE SELLER ACCEPTANCE.
+      //
+      // Identical defect to the Stage-3 router: "the seller's ask is inside our
+      // range" was treated as VERBAL_ACCEPTANCE_LOCK and
+      // verify_signers_and_generate_contract. The seller has named a number.
+      // They have not seen our offer, agreed to our closing window, our earnest
+      // money, or our as-is terms.
+      //
+      // Canonical: inside range means PRESENT THE OFFER (S5). S6
+      // formal_contract requires an inbound seller message accepting executable
+      // terms, which the acceptance resolver owns.
       return {
-        stage_code: "S6",
-        next_stage: S.CLOSE_HANDOFF,
-        brain_stage: CONVERSATION_STAGES.VERBAL_ACCEPTANCE_LOCK,
-        status: "asks_contract",
-        template_use_case: "asks_contract",
+        stage_code: "S5",
+        next_stage: S.OFFER_REVEAL_CASH,
+        brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
+        status: "present_offer",
+        template_use_case: "offer_reveal_cash",
         inbox_bucket: "priority",
         safety_tier: T.REVIEW,
-        acquisition_action: "verify_signers_and_generate_contract",
+        acquisition_action: "present_approved_cash_offer",
       };
     case "near":
       // Reasonably close → justify offer / negotiate (S4/S5).

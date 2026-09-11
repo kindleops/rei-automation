@@ -61,13 +61,20 @@ test("falls back to extracting price from message text", () => {
 
 // ── Band assignment + routing ────────────────────────────────────────────────
 
-test("auto_accept (ask <= RCO) → S6 contract", () => {
+test("auto_accept (ask <= RCO) → S5 OFFER, never a contract", () => {
+  // This test previously asserted S6 / asks_contract / ADVANCED_TO_SELLER_CONTRACT.
+  // It was encoding a lifecycle bug: `ask <= recommended_cash_offer` means only
+  // "we can afford this". The seller named a number; they have not seen our
+  // offer, agreed to our closing window, earnest money or as-is terms.
+  // An economic calculation can never fabricate seller acceptance.
   const d = run({ seller_asking_price: 160000 });
   assert.equal(d.offer_band, STAGE3_OFFER_BANDS.AUTO_ACCEPT);
-  assert.equal(d.route, "s6_contract");
-  assert.equal(d.stage_code, "S6");
-  assert.equal(d.template_use_case, "asks_contract");
-  assert.deepEqual(eventTypes(d), [EV.ASKING_PRICE_EVALUATED, EV.ADVANCED_TO_SELLER_CONTRACT]);
+  assert.equal(d.route, "s5_offer");
+  assert.equal(d.stage_code, "S5");
+  assert.equal(d.template_use_case, "offer_reveal_cash");
+  assert.notEqual(d.template_use_case, "asks_contract");
+  assert.ok(!eventTypes(d).includes(EV.ADVANCED_TO_SELLER_CONTRACT),
+    "no contract event may fire from economics alone");
 });
 
 test("close_range (RCO < ask <= MAO) → S5 negotiation", () => {

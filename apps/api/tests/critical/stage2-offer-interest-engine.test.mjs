@@ -172,18 +172,22 @@ const UW = {
   lowest_relevant_comp: 210000,
 };
 
-test("asking price below our offer → inside range → S6 seller contract", () => {
+test("asking price below our offer → inside range → S5 OFFER, never a contract", () => {
+  // Was asserting S6 / asks_contract. Same lifecycle bug as the Stage-3 router:
+  // the seller naming an affordable number is not acceptance of our terms.
   const d = run("I'd take 150k", { context: { underwriting: UW } });
   assert.equal(d.outcome, STAGE2_OUTCOMES.SELLER_PROVIDES_ASKING_PRICE);
   assert.equal(d.acquisition.negotiation_band, "inside_range");
-  assert.equal(d.stage_code, "S6");
-  assert.equal(d.template_use_case, "asks_contract");
+  assert.equal(d.stage_code, "S5");
+  assert.equal(d.template_use_case, "offer_reveal_cash");
+  assert.notEqual(d.template_use_case, "asks_contract");
 });
 
-test("asking price inside approval range → S6 seller contract", () => {
+test("asking price inside approval range → S5 offer, not a contract", () => {
   const d = run("looking for 180k", { context: { underwriting: UW } });
   assert.equal(d.acquisition.negotiation_band, "inside_range");
-  assert.equal(d.stage_code, "S6");
+  assert.equal(d.stage_code, "S5");
+  assert.notEqual(d.template_use_case, "asks_contract");
 });
 
 test("asking price above offer (near) → S4/S5 justify & negotiate", () => {
