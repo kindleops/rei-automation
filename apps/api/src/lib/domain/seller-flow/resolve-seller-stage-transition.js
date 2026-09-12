@@ -135,9 +135,21 @@ function addDaysIso(now, days) {
  * A bare occupancy/condition disclosure is deliberately absent: a tenant or
  * neighbour can state those about a property they do not own.
  */
+/**
+ * `latent_interest` is DELIBERATELY ABSENT. Its phrase list matches the bare
+ * substrings "interested" and "let it go", which the live classifier resolves
+ * to latent_interest for third-party commentary ("I heard they're
+ * interested."), buyer-directed questions ("Are you still interested?") and a
+ * plain idiom ("You should just let it go."). None of those is a seller
+ * POSITION, so none may resolve ownership.
+ *
+ * The intent itself is untouched and still drives interest/routing — only the
+ * ownership-inference predicate is narrowed, which is the smaller change.
+ * Genuine conditional-sale phrasing is still covered: "Maybe, what would you
+ * offer?" classifies as asks_offer, which IS seller-level.
+ */
 export const SELLER_LEVEL_ENGAGEMENT_INTENTS = new Set([
   "seller_interested",
-  "latent_interest",
   "asks_offer",
   "not_interested",
   "asking_price_provided",

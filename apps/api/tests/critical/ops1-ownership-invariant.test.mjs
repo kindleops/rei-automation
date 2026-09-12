@@ -226,3 +226,65 @@ test('RONALD: three repeats are idempotent and never regress', () => {
   assert.equal(facts.asking_price.value, 150_000)
   assert.equal(facts.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
 })
+
+// ── latent_interest is NOT safe for ownership inference ────────────────────
+
+test('LATENT: latent_interest is excluded from ownership inference', () => {
+  // Evidence from the live classifier (heuristic path):
+  //   "I heard they're interested."  -> latent_interest   (third-party)
+  //   "Are you still interested?"    -> latent_interest   (buyer-directed)
+  //   "You should just let it go."   -> latent_interest   (idiom)
+  // None is a seller POSITION, so the intent cannot resolve ownership.
+  assert.ok(!SELLER_LEVEL_ENGAGEMENT_INTENTS.has('latent_interest'))
+})
+
+test('LATENT: a latent_interest turn does not resolve ownership', () => {
+  const t = turn({ message: "I heard they're interested.", intent: 'latent_interest' })
+  const owner = String(t.facts_patch?.ownership_status ?? '')
+  assert.ok(owner === '' || owner === 'unknown',
+    `third-party commentary fabricated ownership=${owner}`)
+})
+
+test('LATENT: genuine conditional-sale phrasing is still covered elsewhere', () => {
+  // "Maybe, what would you offer?" classifies as asks_offer, which IS
+  // seller-level — so narrowing latent_interest loses no real coverage.
+  const t = turn({ message: 'Maybe, what would you offer?', intent: 'asks_offer' })
+  assert.equal(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+})
+
+// ── §6 required final proofs ───────────────────────────────────────────────
+
+test('PROOF: explicit contradiction routes to contact resolution, not regression', () => {
+  // An earlier turn inferred ownership from engagement; the seller now denies
+  // it. The denial wins, and this is an EXIT from the contact path.
+  const t = turn({
+    message: "I don't own it.", intent: 'wrong_number',
+    known: { ownership_status: OWNERSHIP_INFERRED_FROM_ENGAGEMENT, asking_price: { value: 150_000 } },
+    stage: 'asking_price',
+  })
+  assert.notEqual(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+  // Monotonicity still holds for the thread itself.
+  assert.ok(idx(t.stage_after) >= idx('asking_price'))
+})
+
+test('PROOF: S5 never regresses to an earlier acquisition stage', () => {
+  for (const [message, intent] of [
+    ["I'm interested.", 'seller_interested'],
+    ['It needs a roof.', 'condition_disclosed'],
+    ["It's rented for 1400.", 'tenant_occupied'],
+    ['Not interested.', 'not_interested'],
+  ]) {
+    const t = turn({ message, intent, stage: 'offer' })
+    assert.ok(idx(t.stage_after) >= idx('offer'), `S5 regressed to ${t.stage_after} on "${message}"`)
+  }
+})
+
+test('PROOF: S4 never regresses to S1/S2/S3', () => {
+  for (const [message, intent] of [
+    ["I'm interested.", 'seller_interested'],
+    ['I want 150k.', 'asking_price_provided'],
+  ]) {
+    const t = turn({ message, intent, stage: 'property_condition' })
+    assert.ok(idx(t.stage_after) >= idx('property_condition'), `regressed to ${t.stage_after}`)
+  }
+})
