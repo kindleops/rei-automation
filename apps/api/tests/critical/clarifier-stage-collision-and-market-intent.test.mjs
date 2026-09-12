@@ -326,7 +326,7 @@ test("a stated price is evaluated by the asking-price engine on the same turn", 
   assert.equal(r.authority, "stage3_asking_price_engine");
   assert.equal(r.engine_stage_source, "semantic_event");
   assert.equal(r.engine_result.stage_decision.offer_band, "very_wide_gap");
-  assert.equal(r.engine_result.stage_decision.recommended_strategy, "nurture_drip");
+  assert.equal(r.engine_result.stage_decision.recommended_strategy, "evaluate_strategy_ladder");
   assert.equal(r.unmapped_stage, null);
 });
 

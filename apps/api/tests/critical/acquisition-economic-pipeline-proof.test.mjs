@@ -119,7 +119,7 @@ async function pricedTurn(message, ade, { negotiation_state = null, priceOptions
 // JAMES — "Half mil and its yours" on a house we would pay $160,000 for
 // ══════════════════════════════════════════════════════════════════════════
 
-test("JAMES: half a million against a $160k offer is cold nurture, not a condition probe", async () => {
+test("JAMES: half a million against a $160k offer is cold, and enters the strategy ladder", async () => {
   const ADE = { recommended_cash_offer: 160_000, max_allowable_offer: 184_000 };
   const r = await pricedTurn("Half mil and its yours", ADE);
 
@@ -128,7 +128,7 @@ test("JAMES: half a million against a $160k offer is cold nurture, not a conditi
 
   assert.equal(r.gate.offer_band, "very_wide_gap");
   assert.equal(r.gate.economic_fit, "out_of_band");
-  assert.equal(r.gate.route_id, "very_wide_gap_nurture");
+  assert.equal(r.gate.route_id, "very_wide_gap_strategy_ladder");
   assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.ASKING_PRICE);
   assert.equal(r.transition.lead_temperature, "cold");
 
@@ -162,7 +162,7 @@ test("LORRIE: a digit-anchored floor is a MINIMUM of $400k, and it is cold", asy
 
   assert.equal(r.gate.offer_band, "very_wide_gap");
   assert.equal(r.gate.economic_fit, "out_of_band");
-  assert.equal(r.gate.route_id, "very_wide_gap_nurture");
+  assert.equal(r.gate.route_id, "very_wide_gap_strategy_ladder");
   assert.equal(r.transition.stage_after, LIFECYCLE_STAGE_CODES.ASKING_PRICE);
   assert.equal(r.transition.lead_temperature, "cold");
 

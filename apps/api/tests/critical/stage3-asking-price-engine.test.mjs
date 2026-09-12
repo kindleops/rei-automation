@@ -122,12 +122,15 @@ test("wide_gap without creative allowed → S4 condition", () => {
   assert.equal(d.template_use_case, "price_high_condition_probe");
 });
 
-test("very_wide_gap (ask > MAO*1.40) → nurture (S3F)", () => {
+test("very_wide_gap (ask > MAO*1.40) → strategy ladder (S3F)", () => {
+  // V2-3: a far-above-ceiling ask evaluates creative and novation before any
+  // nurture. It also starts NO timer, because the cadence belongs to whichever
+  // objective the ladder selects and we have not asked that question yet.
   const d = run({ seller_asking_price: 300000 });
   assert.equal(d.offer_band, STAGE3_OFFER_BANDS.VERY_WIDE_GAP);
-  assert.equal(d.route, "nurture");
+  assert.equal(d.route, "strategy_ladder");
   assert.equal(d.stage_code, "S3F");
-  assert.equal(d.follow_up_policy.schedule, true);
+  assert.equal(d.follow_up_policy.schedule, false);
   assert.deepEqual(eventTypes(d), [EV.ASKING_PRICE_EVALUATED, EV.DEAL_NURTURE_TRIGGERED]);
 });
 

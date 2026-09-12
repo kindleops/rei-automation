@@ -171,11 +171,13 @@ test("Spanish acceptance (acepto)", () => {
 
 // ── Band-driven defaults ─────────────────────────────────────────────────────
 
-test("very wide gap (neutral msg) → deal_nurture", () => {
+test("very wide gap (neutral msg) → creative probe, not nurture", () => {
+  // V2-3: rejecting/being far from our CASH number is the trigger to ask
+  // whether terms could work, not to drip. Nurture requires ladder exhaustion.
   const d = run("", { seller_asking_price: 300000 });
   assert.equal(d.negotiation_band, NEGOTIATION_BANDS.VERY_WIDE_GAP);
-  assert.equal(d.outcome, STAGE5_OUTCOMES.DEAL_NURTURE);
-  assert.ok(has(d, EV.DEAL_NURTURE_TRIGGERED));
+  assert.equal(d.outcome, STAGE5_OUTCOMES.CREATIVE_FINANCE_CANDIDATE);
+  assert.ok(has(d, EV.CREATIVE_FINANCE_CANDIDATE));
 });
 
 test("narrow gap (close range, neutral msg) → narrow_gap_negotiation", () => {
