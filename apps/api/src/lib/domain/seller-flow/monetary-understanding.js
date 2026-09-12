@@ -526,7 +526,17 @@ const KIND_CUES = Object.freeze([
   // rent figure became the negotiation anchor. A rent token in the clause is
   // as decisive as "/mo". "rental" is NOT included: the matcher is
   // word-boundary based, and "I want 400k for the rental" is an asking price.
-  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "payment", "payments", "monthly payment", "note payment", "piti", "pago", "pagos", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler"] },
+  { kind: MONETARY_KINDS.MONTHLY_AMOUNT, cues: ["a month", "per month", "monthly", "bimonthly", "/mo", "/month", "/mos", "/mth", "each month", "al mes", "mensual", "mensualidad", "rent", "rents", "rented", "rent roll", "renting for", "rents for", "brings in", "bring in", "bringing in", "tenant pays", "tenants pay", "they pay", "payment", "payments", "monthly payment", "note payment", "piti", "pago", "pagos", "collects", "collecting", "gross rents", "renta", "rentas", "alquiler",
+    // INCOME LANGUAGE IS MONTHLY LANGUAGE. Sellers use rent / income / cash
+    // flow interchangeably for the same figure: "gross income is 4500", "noi
+    // about 2800", "it brings 3200 income". None of those carried a monthly
+    // cue, so every one fell through to ASKING_PRICE — a $4,500/mo building
+    // reading as a $4,500 purchase price. Same failure mode as the $4,100
+    // rent-as-contract-price incident. Brought forward from
+    // feat/underwriting-integrity, which fixed it but was never shipped.
+    // cueBoundaryRegex matches on word boundaries, so "cash flow" cannot match
+    // "cash offer" and "income" cannot match "incoming".
+    "income", "gross income", "monthly income", "noi", "cash flow", "cashflow", "ingresos"] },
   { kind: MONETARY_KINDS.TAX_AMOUNT, cues: ["taxes", "tax bill", "property tax", "impuestos"] },
   // "repairman" is listed explicitly: it is not a regular inflection of
   // "repair", so the boundary matcher misses it and "the repairman quoted

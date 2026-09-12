@@ -1,4 +1,7 @@
 import { buildContextResolutionResult } from "@/lib/domain/context/context-resolution-result.js";
+// V2-1B: durable contact×property resolution. Decides the next contact after
+// an S1 ownership outcome; has no path to a send.
+import { runContactResolutionPhase } from "@/lib/domain/seller-flow/resolve-contact-outcome-phase.js";
 import { probeDealContextAmbiguity as probeDealContextAmbiguityDefault } from "@/lib/domain/deal-context/deal-context-service.js";
 import { classify, CLASSIFY_VERSION } from "@/lib/domain/classification/classify.js";
 import { buildConversationContext } from "@/lib/domain/classification/build-conversation-context.js";
@@ -1127,6 +1130,47 @@ export async function processSellerInboundMessage({
   });
 
   let intelligence_snapshot = intelligence?.intelligence_snapshot || null;
+
+  // ── V2-1B contact resolution ───────────────────────────────────────────
+  // Wired HERE because this is the one point where the canonical relationship
+  // outcome exists: the intelligence phase has resolved it and no second
+  // inbound path is introduced. It persists the contact×property outcome and
+  // decides the next contact; it sends nothing, and every action it returns
+  // carries send_message:false / automation_authority:'review_hold'.
+  //
+  // Deliberately non-fatal. A failure here must not break inbound processing —
+  // the seller's message is still classified, extracted and recorded. The
+  // consequence of failure is that no next contact is planned, which is the
+  // safe direction: no send is created either way.
+  let contact_resolution = null;
+  try {
+    contact_resolution = await (runtimeDeps.runContactResolutionPhase || runContactResolutionPhase)({
+      supabaseClient: supabase,
+      property_id: propertyId,
+      master_owner_id: ownerId,
+      prospect_id: prospectId,
+      inbound_from: inboundFrom,
+      canonical_intent: intelligence?.canonical_decision?.canonical_intent || classification?.intent || null,
+      relationship: {
+        relationship_outcome: intelligence_snapshot?.relationship_outcome || null,
+        relationship_claim: intelligence_snapshot?.relationship_claim || null,
+      },
+      referral: intelligence?.referral || null,
+      source_message_id: inboundEventId,
+      source_thread_key: threadKey || inboundFrom,
+    });
+  } catch (error) {
+    contact_resolution = {
+      ran: false,
+      reason: "contact_resolution_threw",
+      error: error?.message || String(error),
+      sends: 0,
+    };
+  }
+
+  if (intelligence_snapshot && contact_resolution) {
+    intelligence_snapshot.contact_resolution = contact_resolution;
+  }
 
   // The audit row persists the whole snapshot as metadata, so attaching the
   // extraction record here makes every evidence-backed fact durable and
