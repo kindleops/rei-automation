@@ -181,21 +181,20 @@ test('Journey B: S2 offer-interest cadence is ~3 days', () => {
   assert.equal(p.no_reply_delay_days, 3)
 })
 
-test('Journey C: S3 asking-price cadence is 3 days — the V2-2 24h change is BLOCKED', () => {
-  // V2-2 asks for ~24h here. The permanent monotonic-tightening invariant in
-  // lifecycle-stage-policy-registry.test.mjs forbids it unless every later
-  // enabled stage is tightened to <= 1 day too. Pinned at the proven value so
-  // the conflict stays visible instead of being quietly resolved either way.
+test('Journey C: S3 asking-price cadence is 24 HOURS (V2-2B ruling applied)', () => {
+  // Unblocked by replacing the scalar monotonic guard with the profile-aware
+  // invariants in cadence-matrix.test.mjs. Kept in step with the STANDARD
+  // profile's first attempt so registry and scheduler cannot disagree.
   const p = resolveFollowUpPolicyForStage(C.ASKING_PRICE).policy
-  assert.equal(p.no_reply_delay_days, 3)
-  assert.equal(p.no_reply_delay_hours, undefined)
+  assert.equal(p.no_reply_delay_hours, 24)
+  assert.equal(p.no_reply_delay_days, 1)
 })
 
-test('V2-2: no stage currently carries a sub-day cadence (pending the S3 ruling)', () => {
+test('V2-2B: S3 is the only registry stage carrying a sub-day cadence', () => {
   const subDay = Object.entries(FOLLOWUP_POLICY_BY_STAGE)
     .filter(([, p]) => p.no_reply_delay_hours)
     .map(([stage]) => stage)
-  assert.deepEqual(subDay, [])
+  assert.deepEqual(subDay, [C.ASKING_PRICE])
 })
 
 test('V2-2: operational stages schedule no seller follow-ups', () => {
