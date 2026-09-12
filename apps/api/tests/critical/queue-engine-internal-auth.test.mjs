@@ -122,7 +122,18 @@ test("LEAST PRIVILEGE: only queue-engine execution routes use this helper", asyn
   // The control-plane credential must not become a skeleton key. Acquisition
   // scoring, the AI router, automation rules, Discord and inbound purges stay
   // on env-only auth.
-  assert.deepEqual(users, ["internal/campaigns/enqueue-target-one", "internal/queue/status"]);
+  //
+  // repair-target-readiness is admitted on exactly the principle that excludes
+  // the generative routes below: it CANNOT create outbound inventory. It
+  // prepares one already-existing target (market + governance-selected
+  // template) and writes only that row, with no path to a send_queue insert or
+  // a dispatch. The list stays an exact match on purpose — a new consumer of
+  // this credential has to be an explicit decision, never an inherited one.
+  assert.deepEqual(users, [
+    "internal/campaigns/enqueue-target-one",
+    "internal/campaigns/repair-target-readiness",
+    "internal/queue/status",
+  ]);
 
   for (const forbidden of [
     "internal/ai-router", "internal/automation/rules", "internal/discord/reply-sms",
