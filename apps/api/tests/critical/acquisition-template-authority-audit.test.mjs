@@ -227,11 +227,11 @@ test("the offer route selects offer copy and can never reach contract copy", () 
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// 5. VERY-WIDE-GAP NURTURE — nothing but nurture is eligible
+// 5. VERY-WIDE-GAP -> STRATEGY LADDER (V2-3: no longer a direct nurture drip)
 // ══════════════════════════════════════════════════════════════════════════
 
 test("the nurture route excludes condition, offer, creative and contract copy", () => {
-  const route = STAGE3_ROUTES.VERY_WIDE_GAP_NURTURE;
+  const route = STAGE3_ROUTES.VERY_WIDE_GAP_STRATEGY_LADDER;
   assert.equal(route.template_use_case, "asking_price_follow_up");
   assert.equal(route.lifecycle_stage_code, LIFECYCLE_STAGE_CODES.ASKING_PRICE);
 

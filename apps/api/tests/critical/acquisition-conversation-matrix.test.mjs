@@ -185,7 +185,7 @@ const BANDS = [
   { ask: 220_000, band: "close_range",    route: "close_range_initial_offer", stage: "offer",             temp: "warm", uc: "offer_reveal_cash" },
   { ask: 250_000, band: "negotiable",     route: "negotiable_condition",     stage: "property_condition", temp: "warm", uc: "price_high_condition_probe" },
   { ask: 300_000, band: "wide_gap",       route: "wide_gap_condition",       stage: "property_condition", temp: "warm", uc: "price_high_condition_probe" },
-  { ask: 500_000, band: "very_wide_gap",  route: "very_wide_gap_nurture",    stage: "asking_price",       temp: "cold", uc: "asking_price_follow_up" },
+  { ask: 500_000, band: "very_wide_gap",  route: "very_wide_gap_strategy_ladder", stage: "asking_price",       temp: "cold", uc: "asking_price_follow_up" },
 ];
 
 test("S3 economic bands route deterministically", () => {

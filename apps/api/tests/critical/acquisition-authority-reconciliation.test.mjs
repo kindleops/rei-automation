@@ -62,10 +62,16 @@ test("AUTO_ACCEPT presents an offer and never claims acceptance", () => {
   assert.notEqual(t.negotiation_patch?.terms_accepted, true, "economics cannot set terms_accepted");
 });
 
-test("VERY_WIDE_GAP nurtures on BOTH authorities", () => {
+test("VERY_WIDE_GAP routes to the STRATEGY LADDER on BOTH authorities", () => {
+  // V2-3: a far-above-ceiling ask no longer drips straight to nurture. Cash
+  // being infeasible is the trigger to evaluate creative and novation; nurture
+  // is reachable only after the ladder exhausts every rung.
   const route = routeFor(500_000);
   assert.equal(route.offer_band, STAGE3_OFFER_BANDS.VERY_WIDE_GAP);
-  assert.equal(route.route, "nurture");
+  assert.equal(route.route, "strategy_ladder");
+  // The exhaustion flag lives on the canonical route object; the classifier
+  // composes a subset of keys, so assert it where it is authoritative.
+  assert.equal(STAGE3_ROUTES.VERY_WIDE_GAP_STRATEGY_LADDER.nurture_requires_ladder_exhaustion, true);
   assert.equal(route.template_use_case, "asking_price_follow_up");
   assert.notEqual(route.template_use_case, "price_high_condition_probe");
 
@@ -91,7 +97,7 @@ test("no band may route to a condition probe once economics are out of band", ()
     `out-of-band must not select a condition template, got ${route.template_use_case}`);
   assert.ok(!/condition/i.test(String(route.next_stage)),
     `out-of-band must not enter a condition stage, got ${route.next_stage}`);
-  assert.equal(route.route, "nurture");
+  assert.equal(route.route, "strategy_ladder");
 });
 
 test("CREATIVE requires an explicit seller signal, never a price gap", () => {

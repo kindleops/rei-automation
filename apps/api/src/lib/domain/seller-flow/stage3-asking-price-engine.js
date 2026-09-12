@@ -44,7 +44,7 @@ export const STAGE3_OFFER_BANDS = Object.freeze({
   CLOSE_RANGE: "close_range",     // ask within max allowable offer
   NEGOTIABLE: "negotiable",       // ask modestly above MAO
   WIDE_GAP: "wide_gap",           // ask well above MAO (creative territory)
-  VERY_WIDE_GAP: "very_wide_gap", // ask far above MAO (nurture)
+  VERY_WIDE_GAP: "very_wide_gap", // ask far above MAO (V2-3: strategy ladder, not nurture)
   UNKNOWN: "unknown",             // no underwriting available
 });
 
@@ -143,7 +143,7 @@ const STRATEGY_BY_BAND = Object.freeze({
   [STAGE3_OFFER_BANDS.CLOSE_RANGE]: "negotiate_within_buy_box",
   [STAGE3_OFFER_BANDS.NEGOTIABLE]: "justify_with_condition",
   [STAGE3_OFFER_BANDS.WIDE_GAP]: "creative_or_condition",
-  [STAGE3_OFFER_BANDS.VERY_WIDE_GAP]: "nurture_drip",
+  [STAGE3_OFFER_BANDS.VERY_WIDE_GAP]: "evaluate_strategy_ladder",
   [STAGE3_OFFER_BANDS.UNKNOWN]: "capture_price_human_review",
 });
 
@@ -302,19 +302,35 @@ export const STAGE3_ROUTES = Object.freeze({
     event_type: EV.CREATIVE_FINANCE_PROPOSED,
   }),
 
-  // Far above range -> park in a nurture drip. The deal stays alive; it is
-  // simply not a fit at this number today.
-  VERY_WIDE_GAP_NURTURE: defineRoute("very_wide_gap_nurture", {
+  // V2-3 CHANGE. This route previously went straight to `enter_nurture_drip`
+  // on a 60-day schedule, skipping creative and novation entirely.
+  //
+  // That was backwards. A seller asking far above our CASH ceiling is exactly
+  // the seller for whom structured terms or a retail-oriented disposition
+  // might close the gap; "the cash number is far apart" was being read as
+  // "there is no deal here". Cash being infeasible is the trigger to evaluate
+  // the REST of the ladder, not to stop.
+  //
+  // This route presents nothing. It hands off to the strategy ladder, which
+  // chooses between creative, novation and nurture on deterministic
+  // eligibility (offer-strategy-ladder.js). Nurture is now reachable only
+  // after every rung resolves.
+  //
+  // `schedule: false` is deliberate: cadence belongs to whichever objective
+  // the ladder selects, and starting a timer for a question we have not asked
+  // would break the V2-2 rule that a cadence begins only after its outbound.
+  VERY_WIDE_GAP_STRATEGY_LADDER: defineRoute("very_wide_gap_strategy_ladder", {
     stage_code: "S3F",
     next_stage: S.ASKING_PRICE_FOLLOW_UP,
     brain_stage: CONVERSATION_STAGES.SELLER_PRICE_DISCOVERY,
-    status: "nurture",
+    status: "strategy_ladder_evaluation",
     template_use_case: "asking_price_follow_up",
     inbox_bucket: "follow_up",
-    acquisition_action: "enter_nurture_drip",
-    route: "nurture",
-    follow_up_policy: { schedule: true, step: "nurture", default_delay_days: 60 },
+    acquisition_action: "evaluate_strategy_ladder",
+    route: "strategy_ladder",
+    follow_up_policy: { schedule: false, step: "strategy_ladder", default_delay_days: null },
     event_type: EV.DEAL_NURTURE_TRIGGERED,
+    nurture_requires_ladder_exhaustion: true,
   }),
 
   // No underwriting -> capture and route to a human. Never blind-route.
@@ -351,7 +367,7 @@ export function routeForBand(band, { creative_allowed = false, offer_revealed = 
     case STAGE3_OFFER_BANDS.WIDE_GAP:
       return creative_allowed ? STAGE3_ROUTES.WIDE_GAP_CREATIVE : STAGE3_ROUTES.WIDE_GAP_CONDITION;
     case STAGE3_OFFER_BANDS.VERY_WIDE_GAP:
-      return STAGE3_ROUTES.VERY_WIDE_GAP_NURTURE;
+      return STAGE3_ROUTES.VERY_WIDE_GAP_STRATEGY_LADDER;
     case STAGE3_OFFER_BANDS.UNKNOWN:
     default:
       return STAGE3_ROUTES.UNKNOWN_REVIEW;

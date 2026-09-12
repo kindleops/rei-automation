@@ -310,6 +310,38 @@ function creativeRoute(kind) {
   const cfg = map[kind] || map.generic;
   return { stage_code: "S5C", next_stage: cfg.next_stage, brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING, status: "creative_finance_probe", template_use_case: cfg.template_use_case, inbox_bucket: "needs_review", acquisition_action: cfg.action, route: "creative_finance", follow_up_policy: null };
 }
+/**
+ * V2-3 — creative INTEREST probe, distinct from creativeRoute() which PROPOSES
+ * a structure.
+ *
+ * resolveCreativeAllowed() requires a prior seller signal before a structure
+ * may be proposed, which is correct. But it was also gating whether creative
+ * got CONSIDERED at all: every `creative_allowed ? creativeRoute : nurtureRoute`
+ * branch below sent a seller who had merely rejected our cash NUMBER straight
+ * into a nurture drip, skipping creative and novation entirely. A seller far
+ * above our cash ceiling is exactly who terms might work for, so cash
+ * rejection is the trigger to ASK, not to stop.
+ *
+ * This route asks only "would different terms interest you?". It proposes
+ * nothing and names no structure; the objective is `creative_interest`, never
+ * "force seller finance". A structure still requires a seller signal via
+ * creativeRoute().
+ */
+function creativeProbeRoute() {
+  return {
+    stage_code: "S5C",
+    next_stage: S.CREATIVE_PROBE,
+    brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING,
+    status: "creative_interest_probe",
+    template_use_case: "creative_probe",
+    inbox_bucket: "needs_review",
+    acquisition_action: "probe_creative_interest",
+    route: "strategy_ladder",
+    strategy_objective: "creative_interest",
+    proposes_structure: false,
+    follow_up_policy: null,
+  };
+}
 function proofRoute() {
   return { stage_code: "S5", next_stage: S.OFFER_REVEAL_CASH, brain_stage: CONVERSATION_STAGES.OFFER_POSITIONING, status: "proof_requested", template_use_case: "proof_of_funds", inbox_bucket: "priority", acquisition_action: "send_proof_of_funds", route: "proof", follow_up_policy: null };
 }
@@ -503,7 +535,7 @@ function resolveOutcomeAndRoute(ctx) {
     const cband = bandFor(counter.normalized_amount, recommended_cash_offer, max_allowable_offer);
     const route =
       cband === B.VERY_WIDE_GAP
-        ? (creative_allowed ? creativeRoute("generic") : nurtureRoute())
+        ? (creative_allowed ? creativeRoute("generic") : creativeProbeRoute())
         : cband === B.WIDE_GAP && creative_allowed
           ? creativeRoute("generic")
           : wideRoute("counter_too_high_justify");
@@ -524,7 +556,7 @@ function resolveOutcomeAndRoute(ctx) {
   }
   // 9. Explicit rejection.
   if (flags.reject) {
-    const route = negotiation_band === B.VERY_WIDE_GAP ? nurtureRoute() : narrowRoute("re_anchor_after_rejection");
+    const route = negotiation_band === B.VERY_WIDE_GAP ? creativeProbeRoute() : narrowRoute("re_anchor_after_rejection");
     return { outcome: O.SELLER_REJECTS_OFFER, route, events: [EV.SELLER_REJECTED_OFFER] };
   }
   // 10. Firm posture → band-driven pivot.
@@ -532,7 +564,7 @@ function resolveOutcomeAndRoute(ctx) {
     if (negotiation_band === B.VERY_WIDE_GAP) {
       return creative_allowed
         ? { outcome: O.CREATIVE_FINANCE_CANDIDATE, route: creativeRoute("generic"), events: [EV.CREATIVE_FINANCE_CANDIDATE] }
-        : { outcome: O.DEAL_NURTURE, route: nurtureRoute(), events: [EV.DEAL_NURTURE_TRIGGERED] };
+        : { outcome: O.CREATIVE_FINANCE_CANDIDATE, route: creativeProbeRoute(), events: [EV.CREATIVE_FINANCE_CANDIDATE] };
     }
     if (negotiation_band === B.WIDE_GAP) {
       return creative_allowed
@@ -564,7 +596,7 @@ function resolveOutcomeAndRoute(ctx) {
     case B.VERY_WIDE_GAP:
       return creative_allowed
         ? { outcome: O.CREATIVE_FINANCE_CANDIDATE, route: creativeRoute("generic"), events: [EV.CREATIVE_FINANCE_CANDIDATE] }
-        : { outcome: O.DEAL_NURTURE, route: nurtureRoute(), events: [EV.DEAL_NURTURE_TRIGGERED] };
+        : { outcome: O.CREATIVE_FINANCE_CANDIDATE, route: creativeProbeRoute(), events: [EV.CREATIVE_FINANCE_CANDIDATE] };
     default:
       return { outcome: O.HUMAN_REVIEW_REQUIRED, route: humanReviewRoute(), events: [] };
   }
