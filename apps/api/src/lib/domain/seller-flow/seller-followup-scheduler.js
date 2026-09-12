@@ -184,7 +184,53 @@ export function resolveFollowUpPlan(intent, opts = {}) {
   }
 
   if (SUPPRESSED_INTENTS.has(intent)) {
-    return { suppressed: true, followup_created: false, reason: `permanent_suppression:${intent}` };
+    // SCOPE SPLIT (V2-1 §7). Every intent here suppresses follow-up, but they
+    // do not all mean the same thing about the PROPERTY.
+    //
+    // `property_specific_non_owner` / `former_owner_respondent` say: this
+    // CONTACT is wrong for this property. They previously returned the same
+    // bare `permanent_suppression` as an opt-out, and with no waterfall behind
+    // it the property simply stopped — indistinguishable, in the data, from a
+    // deliberate compliance termination. The suppression of the pair is
+    // correct and is kept; what is added is the statement that the property
+    // itself is NOT finished and is awaiting contact resolution.
+    //
+    // Opt-out / DNC / hostility remain channel-compliance outcomes and are
+    // deliberately NOT routed into contact resolution here: "STOP" must never
+    // become a trigger to cycle the remaining numbers.
+    const CONTACT_SCOPED_INTENTS = new Set([
+      "property_specific_non_owner",
+      "former_owner_respondent",
+      "wrong_number",
+      "wrong_person",
+    ]);
+
+    // The `permanent_suppression:` reason string is UNCHANGED on purpose.
+    // three-layer-decision-contract.js and shadow-comparison-contract.js both
+    // classify by substring-matching it, and a live test asserts it. Rewording
+    // it would silently reclassify every suppression in those consumers, so
+    // the scope split is carried by explicit new FIELDS instead — additive,
+    // and invisible to anything still reading only the string.
+    if (CONTACT_SCOPED_INTENTS.has(intent)) {
+      return {
+        suppressed: true,
+        followup_created: false,
+        reason: `permanent_suppression:${intent}`,
+        suppression_scope: "contact_property_pair",
+        property_opportunity_terminated: false,
+        property_contact_state: "contact_resolution_pending",
+        contact_resolution_required: true,
+      };
+    }
+
+    return {
+      suppressed: true,
+      followup_created: false,
+      reason: `permanent_suppression:${intent}`,
+      suppression_scope: "channel_compliance",
+      property_opportunity_terminated: false,
+      contact_resolution_required: false,
+    };
   }
 
   if (ACTIVE_INTENTS.has(intent)) {

@@ -15,6 +15,20 @@ export const ACQUISITION_LIFECYCLE_EVENTS = Object.freeze({
   // ── Stage 1 → Stage 2 entry ───────────────────────────────────────────────
   OWNER_CONFIRMED: "OWNER_CONFIRMED",
 
+  // ── Stage 1 contact resolution (V2-1) ─────────────────────────────────────
+  // These describe the CONTACT GRAPH, not the property's acquisition posture.
+  // A rejection here disqualifies one contact for one property; the property
+  // continues through the waterfall. They live in this enum rather than a
+  // parallel vocabulary because there is one lifecycle event architecture and
+  // these belong to it.
+  OWNERSHIP_CONTACT_REJECTED: "OWNERSHIP_CONTACT_REJECTED",
+  OWNER_REFERRAL_RECEIVED: "OWNER_REFERRAL_RECEIVED",
+  REFERRED_CONTACT_LINKED: "REFERRED_CONTACT_LINKED",
+  NEXT_PHONE_SELECTED: "NEXT_PHONE_SELECTED",
+  PHONE_POOL_EXHAUSTED: "PHONE_POOL_EXHAUSTED",
+  EMAIL_FALLBACK_SELECTED: "EMAIL_FALLBACK_SELECTED",
+  CONTACT_RESOLUTION_EXHAUSTED: "CONTACT_RESOLUTION_EXHAUSTED",
+
   // ── Stage 2 (Offer Interest) ──────────────────────────────────────────────
   OFFER_INTEREST_CONFIRMED: "OFFER_INTEREST_CONFIRMED",
   CONDITIONAL_INTEREST_DETECTED: "CONDITIONAL_INTEREST_DETECTED",
