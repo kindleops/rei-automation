@@ -2,161 +2,227 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { extractSellerFacts, extractionToResolverFacts } from '@/lib/domain/seller-flow/extract-seller-facts.js'
-import { resolveSellerStageTransition, mergeSellerFacts } from '@/lib/domain/seller-flow/resolve-seller-stage-transition.js'
+import {
+  resolveSellerStageTransition,
+  mergeSellerFacts,
+  SELLER_LEVEL_ENGAGEMENT_INTENTS,
+  OWNERSHIP_INFERRED_FROM_ENGAGEMENT,
+} from '@/lib/domain/seller-flow/resolve-seller-stage-transition.js'
 import { transitionQualifiesForOpportunity } from '@/lib/domain/seller-flow/persist-seller-transition.js'
+import { LIFECYCLE_STAGE_ORDER } from '@/lib/domain/lead-state/universal-lead-state-registry.js'
 
 /**
- * OPS-1 — THE OWNERSHIP INVARIANT.
+ * MONOTONIC SEMANTIC STAGE PROGRESSION.
  *
- *   Ownership is its own durable fact.
+ * The acquisition flow is not a questionnaire. A seller-LEVEL response
+ * operationally resolves the ownership milestone: someone naming their price,
+ * asking us to make an offer, expressing interest, countering, or declining to
+ * sell is answering AS THE SELLER, and we must not then ask "do you own it?".
  *
- * It may be resolved only from explicit seller confirmation or authoritative
- * ownership data. It is never a by-product of engagement: a price, an offer
- * request, a rent figure, a repair disclosure or even "I'd sell" are all
- * things a tenant, a relative, an agent or the wrong person entirely can say
- * about a property they do not own.
+ * Two things this is NOT:
+ *   - it is not title/legal verification (provenance is explicit);
+ *   - it is not licence to infer from any statement ABOUT a property. A bare
+ *     rent or condition disclosure is something a tenant or neighbour could
+ *     equally say, so it resolves nothing.
  *
- * FACTS MAY ARRIVE OUT OF STAGE ORDER. That is allowed and must not be
- * "corrected" by inventing the upstream fact they arrived ahead of. The
- * out-of-order fact is REMEMBERED, so once ownership is confirmed the resolver
- * skips straight past questions already answered.
+ * Explicit contradiction always wins and routes to contact resolution, which
+ * is an EXIT from the contact path rather than a stage regression.
  */
 
 const seam = (message) => extractionToResolverFacts(extractSellerFacts({ message }))
+const idx = (stage) => LIFECYCLE_STAGE_ORDER.indexOf(stage)
 
-const turn = ({ message, intent, known = {}, stage = 'ownership_confirmation' }) =>
+const turn = ({ message, intent, known = {}, stage = 'ownership_confirmation', ade = null }) =>
   resolveSellerStageTransition({
-    stage_before: stage, intent, known_facts: known, new_facts: seam(message),
+    stage_before: stage, intent, known_facts: known, new_facts: seam(message), ade_result: ade,
   })
 
-// ── Facts that must NOT resolve ownership ──────────────────────────────────
+const UW = { recommended_cash_offer: 80_000, max_allowable_offer: 85_000 }
 
-const NON_OWNERSHIP_EVIDENCE = [
-  ["price only", '150k', 'asking_price_provided'],
-  ["interest only", "I'd consider selling.", 'seller_interested'],
-  ["interest + price", "I'd sell for 150k.", 'seller_interested'],
-  ["asks offer", 'Make me an offer.', 'asks_offer'],
-  ["counter-ish", '200 works for me.', 'asking_price_provided'],
-  ["rent disclosure", "It's rented for 1400.", 'tenant_occupied'],
-  ["condition", 'It needs a roof.', 'condition_disclosed'],
+// ── Seller-level engagement resolves ownership ─────────────────────────────
+
+const SELLER_LEVEL = [
+  ['interest', "I'm interested.", 'seller_interested'],
+  ['asks offer', 'Make me an offer.', 'asks_offer'],
+  ['asking price', 'I want 150k.', 'asking_price_provided'],
+  ['not interested', 'Not interested.', 'not_interested'],
 ]
 
-for (const [label, message, intent] of NON_OWNERSHIP_EVIDENCE) {
-  test(`OWNERSHIP INVARIANT: "${label}" does not resolve ownership`, () => {
+for (const [label, message, intent] of SELLER_LEVEL) {
+  test(`SELLER-LEVEL "${label}" operationally resolves ownership`, () => {
     const t = turn({ message, intent })
-    const owner = String(t.facts_patch?.ownership_status ?? '')
-    assert.ok(
-      owner === '' || owner === 'unknown',
-      `"${message}" fabricated ownership_status=${owner}`
-    )
+    assert.equal(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT,
+      `"${message}" must resolve ownership for acquisition purposes`)
+    assert.equal(t.facts_patch?.ownership_resolution_basis, 'seller_level_engagement')
   })
 }
 
-test('OWNERSHIP INVARIANT: "not interested" does not resolve ownership', () => {
-  const t = turn({ message: 'Not interested.', intent: 'not_interested' })
-  const owner = String(t.facts_patch?.ownership_status ?? '')
-  assert.ok(owner === '' || owner === 'unknown', `fabricated ownership_status=${owner}`)
+test('provenance is explicit and is NOT title/legal verification', () => {
+  const t = turn({ message: 'I want 150k.', intent: 'asking_price_provided' })
+  assert.equal(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+  assert.notEqual(t.facts_patch?.ownership_status, 'confirmed')
+  assert.equal(t.facts_patch?.title_verified, undefined)
+  assert.equal(t.facts_patch?.legal_owner_verified, undefined)
 })
 
-// ── Facts that MAY resolve ownership ───────────────────────────────────────
+// ── Statements ABOUT a property resolve nothing ────────────────────────────
 
-test('OWNERSHIP: an explicit confirmation resolves it', () => {
+const NOT_SELLER_LEVEL = [
+  ['rent disclosure', "It's rented for 1400.", 'tenant_occupied'],
+  ['condition disclosure', 'It needs a roof.', 'condition_disclosed'],
+]
+
+for (const [label, message, intent] of NOT_SELLER_LEVEL) {
+  test(`"${label}" is a statement ABOUT a property and resolves nothing`, () => {
+    // A tenant or neighbour could say exactly this.
+    const t = turn({ message, intent })
+    const owner = String(t.facts_patch?.ownership_status ?? '')
+    assert.ok(owner === '' || owner === 'unknown', `fabricated ownership from "${message}"`)
+    assert.equal(t.stage_after, 'ownership_confirmation')
+  })
+}
+
+test('the engagement intent set is exactly the seller-level responses', () => {
+  for (const i of ['seller_interested', 'asks_offer', 'not_interested', 'asking_price_provided', 'counter_offer']) {
+    assert.ok(SELLER_LEVEL_ENGAGEMENT_INTENTS.has(i), `${i} must be seller-level`)
+  }
+  for (const i of ['tenant_occupied', 'condition_disclosed', 'wrong_number', 'opt_out']) {
+    assert.ok(!SELLER_LEVEL_ENGAGEMENT_INTENTS.has(i), `${i} must NOT resolve ownership`)
+  }
+})
+
+// ── Explicit contradiction overrides inference ─────────────────────────────
+
+test('CONTRADICTION: an explicit denial overrides engagement inference', () => {
+  const t = turn({
+    message: "I don't own it.", intent: 'asking_price_provided',
+    known: { ownership_status: 'not_owner' },
+  })
+  assert.notEqual(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+})
+
+test('CONTRADICTION: a denied claim blocks inference even mid-engagement', () => {
+  const t = turn({
+    message: 'I want 150k.', intent: 'asking_price_provided',
+    known: { ownership_claim: 'denied' },
+  })
+  assert.notEqual(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+})
+
+test('CONTRADICTION: an explicit confirmation still outranks inference', () => {
   const t = turn({ message: 'Yes, I own it.', intent: 'ownership_confirmed' })
   assert.equal(t.facts_patch?.ownership_status, 'confirmed')
 })
 
-test('OWNERSHIP: an explicit denial is respected over any other signal', () => {
-  const t = turn({
-    message: "No, my brother owns it. He wants 150k.", intent: 'ownership_confirmed',
-    known: { ownership_status: 'not_owner' },
-  })
-  assert.notEqual(t.facts_patch?.ownership_status, 'confirmed')
-})
+// ── Semantic skipping matrix ───────────────────────────────────────────────
 
-// ── Required scenario matrix ───────────────────────────────────────────────
-
-test('SCENARIO price only: price persists, ownership unknown, objective = ownership', () => {
-  const t = turn({ message: '150k', intent: 'asking_price_provided' })
-  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
-  assert.equal(t.stage_after, 'ownership_confirmation')
-  assert.equal(transitionQualifiesForOpportunity(t), true, 'opportunity must still be created')
-})
-
-test('SCENARIO interest only: interest persists, objective = ownership', () => {
-  const t = turn({ message: "I'd consider selling.", intent: 'seller_interested' })
-  assert.equal(t.stage_after, 'ownership_confirmation')
-})
-
-test('SCENARIO interest + price: both persist, objective = ownership', () => {
-  const t = turn({ message: "I'd sell for 150k.", intent: 'seller_interested' })
-  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
-  assert.equal(t.stage_after, 'ownership_confirmation')
-})
-
-test('SCENARIO ownership + interest + price: skips S2/S3 to discovery', () => {
-  // Semantic skipping: never re-ask what has already been answered.
-  const t = turn({ message: 'Yeah I own it. I would sell for 150k.', intent: 'ownership_confirmed' })
-  assert.equal(t.facts_patch?.ownership_status, 'confirmed')
-  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
+test('S1 → ≥S2 on interest', () => {
+  const t = turn({ message: "I'm interested.", intent: 'seller_interested' })
+  assert.ok(idx(t.stage_after) >= idx('offer_interest'), `got ${t.stage_after}`)
   assert.notEqual(t.stage_after, 'ownership_confirmation')
-  assert.notEqual(t.stage_after, 'offer_interest')
-  assert.notEqual(t.stage_after, 'asking_price')
 })
 
-// ── Out-of-order accumulation + semantic skipping ──────────────────────────
-
-test('OUT OF ORDER: price first, ownership later — no re-asking', () => {
-  // Turn 1: price arrives with ownership unknown.
-  const t1 = turn({ message: '150k', intent: 'asking_price_provided' })
-  assert.equal(t1.stage_after, 'ownership_confirmation')
-  const carried = mergeSellerFacts({}, t1.facts_patch, {})
-  assert.equal(carried.asking_price.value, 150_000)
-
-  // Turn 2: ownership confirmed. The remembered price must let the resolver
-  // skip the asking-price objective entirely.
-  const t2 = resolveSellerStageTransition({
-    stage_before: 'ownership_confirmation', intent: 'ownership_confirmed',
-    known_facts: carried, new_facts: seam('Yes I own it.'),
-  })
-  assert.equal(t2.facts_patch?.ownership_status, 'confirmed')
-  assert.notEqual(t2.stage_after, 'asking_price', 'must not re-ask a known price')
-  assert.notEqual(t2.stage_after, 'ownership_confirmation')
+test('S1 → ≥S3 on an asking price', () => {
+  const t = turn({ message: 'I want 150k.', intent: 'asking_price_provided' })
+  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
+  assert.ok(idx(t.stage_after) >= idx('asking_price'), `got ${t.stage_after}`)
 })
 
-test('OUT OF ORDER: the accumulated state is valid and complete-as-far-as-it-goes', () => {
-  const carried = mergeSellerFacts({}, turn({ message: "I'd sell for 150k.", intent: 'seller_interested' }).facts_patch, {})
-  assert.equal(carried.asking_price.value, 150_000)
-  // ownership legitimately absent
-  const owner = String(carried.ownership_status ?? '')
-  assert.ok(owner === '' || owner === 'unknown')
-})
-
-test('OPPORTUNITY: creation is independent of ownership resolution', () => {
-  const t = turn({ message: '150k', intent: 'asking_price_provided' })
-  assert.equal(transitionQualifiesForOpportunity(t), true)
-  // ...and creating it asserts nothing about ownership or interest.
-  const owner = String(t.facts_patch?.ownership_status ?? '')
-  assert.ok(owner === '' || owner === 'unknown')
+test('S1 → S5 when economics already authorize an offer', () => {
+  // ask 70k <= executable 80k: discovery is not needed to complete a stage.
+  const t = turn({ message: "I'd take 70k.", intent: 'asking_price_provided', ade: UW })
+  assert.equal(t.facts_patch?.asking_price?.value, 70_000)
+  assert.equal(t.stage_after, 'offer')
+  // ...and favourable economics are still not acceptance.
+  assert.notEqual(t.stage_after, 'formal_contract')
   assert.equal(t.facts_patch?.terms_accepted, undefined)
 })
 
-// ── Ronald, end to end ─────────────────────────────────────────────────────
-
-test('RONALD: the final canonical state after the latest 150k', () => {
-  const t = turn({ message: '150k', intent: 'asking_price_provided' })
-  assert.equal(t.facts_patch?.asking_price?.value, 150_000, 'price must persist')
-  assert.equal(transitionQualifiesForOpportunity(t), true, 'opportunity must exist')
-  const owner = String(t.facts_patch?.ownership_status ?? '')
-  assert.ok(owner === '' || owner === 'unknown', 'ownership must remain unresolved')
-  assert.equal(t.stage_after, 'ownership_confirmation', 'next objective is ownership')
+test('S1 → S4 when the gap requires discovery', () => {
+  const t = turn({ message: "I'd take 100k.", intent: 'asking_price_provided', ade: UW })
+  assert.equal(t.facts_patch?.asking_price?.value, 100_000)
+  assert.equal(t.stage_after, 'property_condition')
 })
 
-test('RONALD: repeating 150k three times is idempotent', () => {
+test('economics, not stage order, decides S4 vs S5', () => {
+  const favourable = turn({ message: "I'd take 70k.", intent: 'asking_price_provided', ade: UW })
+  const gap = turn({ message: "I'd take 100k.", intent: 'asking_price_provided', ade: UW })
+  assert.notEqual(favourable.stage_after, gap.stage_after)
+})
+
+test('not interested from S1 resolves ownership and nurtures', () => {
+  const t = turn({ message: 'Not interested.', intent: 'not_interested' })
+  assert.equal(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+  assert.notEqual(t.stage_after, 'ownership_confirmation')
+  // and it must NOT be read as a wrong-owner signal
+  assert.ok(!['not_owner', 'wrong_person', 'wrong_number'].includes(String(t.facts_patch?.ownership_status)))
+})
+
+// ── Monotonicity ───────────────────────────────────────────────────────────
+
+test('MONOTONIC: stage never regresses for the same thread', () => {
+  const stages = ['asking_price', 'property_condition', 'offer']
+  for (const before of stages) {
+    for (const [message, intent] of [["I'm interested.", 'seller_interested'], ['Not interested.', 'not_interested'], ['I want 150k.', 'asking_price_provided']]) {
+      const t = turn({ message, intent, stage: before })
+      assert.ok(idx(t.stage_after) >= idx(before),
+        `REGRESSION ${before} -> ${t.stage_after} on "${message}"`)
+    }
+  }
+})
+
+test('MONOTONIC: a late low-signal reply cannot pull a deal backwards', () => {
+  const t = turn({ message: "It's rented for 1400.", intent: 'tenant_occupied', stage: 'offer' })
+  assert.ok(idx(t.stage_after) >= idx('offer'))
+})
+
+// ── Out-of-order facts are remembered ──────────────────────────────────────
+
+test('OUT OF ORDER: downstream facts are kept, never discarded for arriving early', () => {
+  const t = turn({ message: "Give me 150k. It's rented for 1400 month-to-month.", intent: 'asking_price_provided' })
+  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
+  assert.equal(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+  assert.equal(t.facts_patch?.occupancy_status, 'tenant_occupied')
+})
+
+test('OUT OF ORDER: a known price is never re-asked after ownership confirms', () => {
+  const t1 = turn({ message: 'I want 150k.', intent: 'asking_price_provided' })
+  const carried = mergeSellerFacts({}, t1.facts_patch, {})
+  const t2 = resolveSellerStageTransition({
+    stage_before: t1.stage_after, intent: 'ownership_confirmed',
+    known_facts: carried, new_facts: seam('Yes I own it.'),
+  })
+  assert.notEqual(t2.stage_after, 'asking_price', 'must not re-ask a known price')
+  assert.ok(idx(t2.stage_after) >= idx(t1.stage_after), 'monotonic')
+})
+
+// ── Opportunity ────────────────────────────────────────────────────────────
+
+test('OPPORTUNITY: a price-bearing turn creates the canonical aggregate', () => {
+  const t = turn({ message: '150k', intent: 'asking_price_provided' })
+  assert.equal(transitionQualifiesForOpportunity(t), true)
+  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
+})
+
+// ── Ronald ─────────────────────────────────────────────────────────────────
+
+test('RONALD: "150k" resolves ownership, captures price, reaches ≥S3', () => {
+  const t = turn({ message: '150k', intent: 'asking_price_provided' })
+  assert.equal(t.facts_patch?.asking_price?.value, 150_000)
+  assert.equal(t.facts_patch?.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
+  assert.ok(idx(t.stage_after) >= idx('asking_price'), `got ${t.stage_after}`)
+  assert.equal(transitionQualifiesForOpportunity(t), true)
+})
+
+test('RONALD: three repeats are idempotent and never regress', () => {
   let facts = {}
+  let stage = 'ownership_confirmation'
   for (let i = 0; i < 3; i += 1) {
-    facts = mergeSellerFacts(facts, turn({ message: '150k', intent: 'asking_price_provided', known: facts }).facts_patch, {})
+    const t = turn({ message: '150k', intent: 'asking_price_provided', known: facts, stage })
+    assert.ok(idx(t.stage_after) >= idx(stage), 'monotonic across repeats')
+    facts = mergeSellerFacts(facts, t.facts_patch, {})
+    stage = t.stage_after
   }
   assert.equal(facts.asking_price.value, 150_000)
-  const owner = String(facts.ownership_status ?? '')
-  assert.ok(owner === '' || owner === 'unknown', 'three repeats must not accumulate into ownership')
+  assert.equal(facts.ownership_status, OWNERSHIP_INFERRED_FROM_ENGAGEMENT)
 })

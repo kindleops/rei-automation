@@ -130,7 +130,27 @@ function addDaysIso(now, days) {
 
 // ─── Fact model ──────────────────────────────────────────────────────────────
 
-const POSITIVE_OWNERSHIP = new Set(["confirmed", "inferred", "likely", "yes", "owner", "authorized_representative", "co_owner", "executor"]);
+/**
+ * Seller-LEVEL intents whose very form answers "are you the seller?".
+ * A bare occupancy/condition disclosure is deliberately absent: a tenant or
+ * neighbour can state those about a property they do not own.
+ */
+export const SELLER_LEVEL_ENGAGEMENT_INTENTS = new Set([
+  "seller_interested",
+  "latent_interest",
+  "asks_offer",
+  "not_interested",
+  "asking_price_provided",
+  "counter_offer",
+]);
+
+/**
+ * Provenance-bearing ownership value. Acquisition-workflow resolution ONLY --
+ * never title or legal verification.
+ */
+export const OWNERSHIP_INFERRED_FROM_ENGAGEMENT = "inferred_from_seller_engagement";
+
+const POSITIVE_OWNERSHIP = new Set(["confirmed", "inferred", OWNERSHIP_INFERRED_FROM_ENGAGEMENT, "likely", "yes", "owner", "authorized_representative", "co_owner", "executor"]);
 const NEGATIVE_OWNERSHIP = new Set(["not_owner", "wrong_number", "wrong_person", "former_owner", "tenant", "denied"]);
 const POSITIVE_INTEREST = new Set(["interested", "conditional", "depends_on_price", "make_offer", "asks_offer", "yes", "future"]);
 
@@ -845,14 +865,25 @@ export function resolveSellerStageTransition({
     intentKey === "tenant_occupied" &&
     (Boolean(normalizeAskingPriceFact(new_facts?.asking_price)?.value) || facts.asking_price?.value > 0);
   if (NURTURE_DAYS[intentKey] != null && !tenantDisclosureWithPrice) {
-    // "Not for sale" at S1 used to imply ownership so the deal could advance
-    // to S2 and nurture there. Removed: declining to sell is not a claim of
-    // ownership. A tenant, a relative or the wrong person can all say "not
-    // interested" about a property they do not own, and stamping them as the
-    // owner both fabricates a fact and hides them from contact resolution.
+    // "Not for sale" is a SELLER-LEVEL response: the person is declining to
+    // sell their property, which answers "are you the seller?" just as a price
+    // or an offer request does. Asking "do you own it?" after "not interested"
+    // reads as though we were not listening.
     //
-    // The disinterest itself is still recorded below; only the invented
-    // ownership is gone. The thread simply nurtures from S1 rather than S2.
+    // This branch returns before the shared engagement block below, so the
+    // resolution is applied here too — same provenance value, same
+    // acquisition-workflow-only meaning, and still overridden by any explicit
+    // negative ownership fact (which routes to contact resolution instead).
+    if (
+      intentKey === "not_interested" &&
+      !NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status)) &&
+      lower(facts.ownership_claim) !== "denied" &&
+      !ownershipResolved(facts)
+    ) {
+      facts.ownership_status = OWNERSHIP_INFERRED_FROM_ENGAGEMENT;
+      facts.ownership_resolution_basis = "seller_level_engagement";
+      facts.ownership_resolution_intent = intentKey;
+    }
     const unresolved = firstUnresolvedIdx(facts, {
       ade: ade_result, negotiation: negotiation_state, contract: contract_state,
       disposition: disposition_state, closing: mergeClosing(closing_readiness, closing_evidence),
@@ -949,36 +980,42 @@ export function resolveSellerStageTransition({
     facts.occupancy_status = facts.occupancy_status || "tenant_occupied";
   }
 
-  // ── OWNERSHIP IS ITS OWN DURABLE FACT ────────────────────────────────────
+  // ── OWNERSHIP RESOLVED BY SELLER-LEVEL ENGAGEMENT ────────────────────────
   //
-  // "Engaged facts imply upstream milestones" used to live here, and it was
-  // wrong in both of its forms. It first read
-  // `interestResolved(facts) || facts.asking_price?.value > 0`, and
-  // interestResolved() itself returns true on a price — so naming a number set
-  // ownership_status = "inferred", which POSITIVE_OWNERSHIP treats as
-  // RESOLVED. Narrowing it to an explicit interest signal was no better: "I'd
-  // sell" is still not "I own it".
+  // A SELLER-LEVEL response operationally resolves the ownership milestone.
+  // Someone who names their price, asks us to make an offer, says they are
+  // interested, counters, or declines to sell is answering AS THE SELLER. We
+  // do not then turn around and ask "do you own the property?" — that reads as
+  // though we were not listening.
   //
-  // Ownership may be resolved ONLY by explicit seller confirmation (the
-  // ownership_confirmed intent above), or by authoritative ownership data. It
-  // is never a by-product of engagement. Tenants, relatives, agents and the
-  // wrong person entirely can all say "I'd sell" or "I want 150k" about a
-  // property they do not own.
+  // Scope matters. Only these SELLER-LEVEL intents qualify:
   //
-  // FACTS MAY ARRIVE OUT OF STAGE ORDER, and that is fine. This state:
+  //   seller_interested · asks_offer · not_interested
+  //   asking_price_provided · counter_offer
   //
-  //     ownership   = unknown
-  //     interest    = interested
-  //     asking_price = 150000
+  // Deliberately NOT included: a bare occupancy or condition disclosure
+  // ("it's rented for 1400", "it needs a roof"). Those are statements ABOUT a
+  // property that a tenant, neighbour or relative could equally make; they
+  // carry no claim about the speaker's own relationship to it.
   //
-  // is valid and complete-as-far-as-it-goes. The next objective is still
-  // ownership_confirmation because that is the earliest UNRESOLVED
-  // prerequisite — but interest and price are remembered, so once ownership is
-  // confirmed the resolver skips S2/S3 and moves to the first genuinely
-  // unresolved objective instead of re-asking questions already answered.
+  // PROVENANCE IS EXPLICIT. The value is `inferred_from_seller_engagement`,
+  // never plain "confirmed", so a later reader can always tell how ownership
+  // came to be resolved. This is an ACQUISITION-WORKFLOW resolution and is NOT
+  // title or legal verification: nothing here sets title_verified or
+  // legal_owner_verified, and a contract path must still establish those
+  // independently.
   //
-  // The fix is therefore to REMEMBER out-of-order facts, never to fabricate
-  // the upstream ones they arrived ahead of.
+  // EXPLICIT CONTRADICTION ALWAYS WINS. A negative ownership fact ("I don't
+  // own it", "wrong person", "my brother owns it") overrides the inference and
+  // routes to V2-1 contact resolution — which is an exit from this contact
+  // path, not a stage regression.
+  const negativeOwnership = NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status)) ||
+    lower(facts.ownership_claim) === "denied";
+  if (!negativeOwnership && SELLER_LEVEL_ENGAGEMENT_INTENTS.has(intentKey) && !ownershipResolved(facts)) {
+    facts.ownership_status = OWNERSHIP_INFERRED_FROM_ENGAGEMENT;
+    facts.ownership_resolution_basis = "seller_level_engagement";
+    facts.ownership_resolution_intent = intentKey;
+  }
 
   const closing = mergeClosing(closing_readiness, closing_evidence);
   const unresolvedIdx = firstUnresolvedIdx(facts, {

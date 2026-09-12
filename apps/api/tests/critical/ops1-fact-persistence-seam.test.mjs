@@ -64,8 +64,10 @@ test('P0-1: a price-bearing turn qualifies for a canonical opportunity', () => {
   assert.equal(t.facts_patch?.asking_price?.value, 150_000)
 })
 
-test('P0-1: the price is kept even though ownership is unresolved', () => {
-  // "Do not throw away the price merely because ownership remains unresolved."
+test('P0-1: the price is kept AND seller engagement resolves ownership', () => {
+  // Corrected: a price is a seller-LEVEL response, so it both persists the
+  // number and operationally resolves the ownership milestone. What it must
+  // never do is claim title verification.
   const t = resolveSellerStageTransition({
     stage_before: 'ownership_confirmation',
     intent: 'asking_price_provided',
@@ -73,18 +75,20 @@ test('P0-1: the price is kept even though ownership is unresolved', () => {
     new_facts: seam('150k'),
   })
   assert.equal(t.facts_patch?.asking_price?.value, 150_000)
-  // and ownership is NOT invented
-  assert.equal(t.facts_patch?.ownership_status, undefined)
+  assert.equal(t.facts_patch?.ownership_status, 'inferred_from_seller_engagement')
+  assert.equal(t.facts_patch?.title_verified, undefined)
 })
 
-test('P0-1: opportunity qualification does not imply ownership or acceptance', () => {
+test('P0-1: opportunity qualification never implies ACCEPTANCE', () => {
+  // Ownership is resolved by seller-level engagement; acceptance is not, and
+  // creating the aggregate asserts nothing about agreed terms.
   const t = resolveSellerStageTransition({
     stage_before: 'ownership_confirmation', intent: 'asking_price_provided',
     known_facts: {}, new_facts: seam('150k'),
   })
   assert.equal(transitionQualifiesForOpportunity(t), true)
-  assert.equal(t.facts_patch?.ownership_status, undefined)
   assert.equal(t.facts_patch?.terms_accepted, undefined)
+  assert.equal(t.facts_patch?.accepted_price, undefined)
 })
 
 // ── Idempotency: three identical "150k" statements ─────────────────────────
