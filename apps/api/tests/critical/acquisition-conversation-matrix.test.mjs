@@ -554,45 +554,134 @@ test("JOURNEY F — a rich reply extracts every fact correctly", () => {
 });
 
 /**
- * KNOWN DEFECT — DELIBERATELY LEFT FAILING.
+ * POST-CONDITION ECONOMIC AUTHORITY.
  *
- * economicStageGate opens with `if (unresolvedIdx !== CONDITION_STAGE_IDX)
- * return null`, so it governs ONLY the price->condition decision point. The
- * moment condition resolves, firstUnresolvedIdx returns the offer milestone
- * and milestone completeness alone decides the stage - the economics are never
- * consulted again.
+ * economicStageGate used to open with `if (unresolvedIdx !== CONDITION_STAGE_IDX)
+ * return null`, so economics governed only the instant where condition was the
+ * next missing milestone. The moment a seller answered the condition question
+ * the gate fell silent and milestone completeness walked them to the offer
+ * stage regardless of band - James, having disclosed a condition, was routed to
+ * an OFFER on a property he wanted $340,000 more for than we could pay.
  *
- *   250k ask (negotiable),     condition unresolved -> property_condition  OK
- *   250k ask (negotiable),     condition RESOLVED   -> offer               WRONG
- *   300k ask (wide_gap),       condition RESOLVED   -> offer               WRONG
- *   500k ask (very_wide_gap),  condition RESOLVED   -> offer               WRONG
- *
- * The last line is the operator-visible one: James, with a disclosed
- * condition, lands at S5 offer instead of cold nurture. The "very_wide_gap ->
- * nurture -> cold" guarantee currently holds only while condition is
- * unresolved.
- *
- * This is the same defect class the program already fixed AT the price->
- * condition point, surviving one milestone later. It needs a product ruling on
- * whether the economic route governs the whole post-price lifecycle, so it is
- * NOT patched here - it is recorded, and this test fails until it is decided.
+ * The gate now runs for every post-price milestone up to the offer milestone,
+ * and stops at acceptance, where seller evidence outranks arithmetic.
  */
-test("DEFECT: economics must still govern once condition is resolved", () => {
-  const withCondition = (value) =>
+test("POST-CONDITION LOCK: economics still govern after condition resolves", () => {
+  const withCondition = (value, ade = UW) =>
     resolveSellerStageTransition({
-      stage_before: "asking_price",
+      stage_before: "property_condition",
       known_facts: {
         ownership_status: "confirmed", interest: "interested",
         asking_price: { value, raw: `${value / 1000}k` },
         occupancy_status: "vacant", condition_level: "needs work",
       },
-      new_facts: {}, intent: "price_provided", ade_result: UW,
+      new_facts: {}, intent: "condition_disclosed", ade_result: ade,
     });
 
-  assert.notEqual(withCondition(500_000).stage_after, "offer",
-    "an out-of-band 500k ask must never be an OFFER just because condition is known");
-  assert.notEqual(withCondition(300_000).stage_after, "offer",
-    "a wide-gap 300k ask must not become an offer on condition alone");
-  assert.notEqual(withCondition(250_000).stage_after, "offer",
-    "a negotiable 250k ask must not become an offer on condition alone");
+  // Out of band stays out of band, and returns to nurture.
+  const james = withCondition(500_000, { recommended_cash_offer: 160_000, max_allowable_offer: 184_000, sufficient_facts: true });
+  assert.equal(james.economic_gate?.offer_band, "very_wide_gap");
+  assert.equal(james.stage_after, "asking_price", "an out-of-band ask is never an offer");
+  assert.equal(james.lead_temperature, "cold", "condition cannot promote temperature");
+  assert.equal(james.economic_gate?.template_use_case, "asking_price_follow_up");
+
+  // Lorrie, condition disclosed.
+  const lorrie = withCondition(400_000);
+  assert.equal(lorrie.economic_gate?.offer_band, "very_wide_gap");
+  assert.equal(lorrie.stage_after, "asking_price");
+  assert.equal(lorrie.lead_temperature, "cold");
+
+  // Wide gap and negotiable stay in the condition/negotiation lane.
+  assert.equal(withCondition(300_000).stage_after, "property_condition");
+  assert.equal(withCondition(250_000).stage_after, "property_condition");
+
+  // And an actionable ask still reaches the offer, on economics.
+  const actionable = withCondition(195_000);
+  assert.equal(actionable.economic_gate?.offer_band, "auto_accept");
+  assert.equal(actionable.stage_after, "offer");
+  assert.equal(actionable.lead_temperature, "hot");
+});
+
+test("POST-CONDITION LOCK: acceptance outranks economics, both ways", () => {
+  const F = {
+    ownership_status: "confirmed", interest: "interested",
+    asking_price: { value: 200_000, raw: "200k" },
+    occupancy_status: "vacant", condition_level: "needs work",
+  };
+  const ns = { latest_offer: 200_000, offers_made: [{ amount: 200_000 }] };
+
+  // Acceptance reaches S6 even though the gate is now active post-condition.
+  const accepted = resolveSellerStageTransition({
+    stage_before: "offer", known_facts: F, new_facts: {}, intent: "contract_requested",
+    ade_result: UW, negotiation_state: { ...ns, terms_accepted: true, accepted_price: 200_000 },
+  });
+  assert.equal(accepted.stage_after, "formal_contract");
+
+  // And bad economics can never pull an accepted deal back out of S6.
+  const stillS6 = resolveSellerStageTransition({
+    stage_before: "formal_contract", known_facts: F, new_facts: {}, intent: "acknowledgement",
+    ade_result: { recommended_cash_offer: 160_000, max_allowable_offer: 184_000, sufficient_facts: true },
+    negotiation_state: { ...ns, terms_accepted: true },
+  });
+  assert.equal(stillS6.stage_after, "formal_contract", "arithmetic may not undo acceptance");
+});
+
+test("POST-CONDITION LOCK: a revealed offer floors the stage, James does not", () => {
+  // Once we have actually presented an offer the deal is in negotiation, and a
+  // wider counter must not walk it back to a condition probe. Nothing was ever
+  // presented to James, which is why he DOES return to nurture.
+  const negotiating = resolveSellerStageTransition({
+    stage_before: "offer",
+    known_facts: { ownership_status: "confirmed", interest: "interested", asking_price: { value: 300_000, raw: "300k" } },
+    new_facts: {}, intent: "price_provided", ade_result: UW,
+    negotiation_state: { latest_offer: 200_000, offers_made: [{ amount: 200_000 }] },
+  });
+  assert.equal(negotiating.stage_after, "offer", "a presented offer floors the lifecycle");
+
+  const neverOffered = resolveSellerStageTransition({
+    stage_before: "property_condition",
+    known_facts: { ownership_status: "confirmed", interest: "interested", asking_price: { value: 500_000, raw: "500k" },
+                   occupancy_status: "vacant", condition_level: "needs work" },
+    new_facts: {}, intent: "price_provided",
+    ade_result: { recommended_cash_offer: 160_000, max_allowable_offer: 184_000, sufficient_facts: true },
+  });
+  assert.equal(neverOffered.stage_after, "asking_price", "nothing presented, so nurture wins");
+});
+
+test("JOURNEY G — dead economics with condition known never reaches S5", () => {
+  const ADE = { recommended_cash_offer: 160_000, max_allowable_offer: 184_000, sufficient_facts: true };
+  const c = journey();
+  c.say("ownership_confirmed", { ownership_status: "confirmed" });
+  c.say("seller_interested", { interest: "interested" });
+  c.say("price_provided", askFact("Half mil"), { ade: ADE });
+  const afterCondition = c.say("condition_disclosed", { occupancy_status: "vacant", condition_level: "needs work" }, { ade: ADE });
+  assert.equal(afterCondition.economic_gate?.offer_band, "very_wide_gap");
+  assert.equal(afterCondition.stage_after, "asking_price", "condition does not rescue dead economics");
+  assert.equal(afterCondition.lead_temperature, "cold");
+  assert.notEqual(afterCondition.economic_gate?.template_use_case, "offer_reveal_cash");
+});
+
+test("JOURNEY H — condition that changes the economics changes the workflow", () => {
+  // Deterministic: the SAME ask, evaluated against underwriting before and
+  // after condition moves the numbers. Proves condition feeds economics rather
+  // than ticking a milestone box.
+  const ask = { asking_price: { value: 195_000, raw: "195k" } };
+  const facts = { ownership_status: "confirmed", interest: "interested", ...ask };
+  const withCond = { ...facts, occupancy_status: "vacant", condition_level: "full_rehab" };
+
+  const before = resolveSellerStageTransition({
+    stage_before: "asking_price", known_facts: facts, new_facts: {}, intent: "price_provided",
+    ade_result: { recommended_cash_offer: 200_000, max_allowable_offer: 230_000, sufficient_facts: true },
+  });
+  // Condition reveals a full rehab; underwriting drops.
+  const after = resolveSellerStageTransition({
+    stage_before: "property_condition", known_facts: withCond, new_facts: {}, intent: "condition_disclosed",
+    ade_result: { recommended_cash_offer: 120_000, max_allowable_offer: 138_000, sufficient_facts: true },
+  });
+
+  assert.equal(before.economic_gate?.offer_band, "auto_accept", "before condition the deal looked executable");
+  assert.equal(before.stage_after, "offer");
+  assert.notEqual(after.economic_gate?.offer_band, "auto_accept", "after condition it is not");
+  assert.notEqual(after.stage_after, "offer", "and the workflow follows the AFTER economics");
+  assert.notEqual(before.economic_gate?.offer_band, after.economic_gate?.offer_band);
 });

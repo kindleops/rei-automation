@@ -296,7 +296,28 @@ const CONDITION_STAGE_IDX = 3;  // property_condition
  * milestone completeness to stand exactly as before.
  */
 function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = {}) {
-  if (unresolvedIdx !== CONDITION_STAGE_IDX) return null;
+  // ECONOMICS GOVERN THE WHOLE POST-PRICE LIFECYCLE, not one instant of it.
+  //
+  // This used to read `if (unresolvedIdx !== CONDITION_STAGE_IDX) return null`,
+  // so the economic route held authority ONLY while condition was the next
+  // missing milestone. The moment a seller answered the condition question,
+  // the gate fell silent and milestone completeness walked them to the offer
+  // stage on its own - regardless of the band:
+  //
+  //   250k ask (negotiable)     + condition -> offer
+  //   300k ask (wide_gap)       + condition -> offer
+  //   500k ask (very_wide_gap)  + condition -> offer
+  //
+  // James, having disclosed a condition, would have been routed to an OFFER on
+  // a property he wants $340,000 more for than we can pay. Condition is an
+  // INPUT to the acquisition decision; it is not a ticket to the offer stage.
+  //
+  // The gate now runs for every post-price milestone up to and including the
+  // offer milestone. It deliberately stops at acceptance: once
+  // negotiation.terms_accepted is true, checks[4] passes, unresolvedIdx is the
+  // contract milestone or beyond, and SELLER ACCEPTANCE outranks economics -
+  // arithmetic must never be able to pull a deal back out of S6.
+  if (unresolvedIdx > OFFER_STAGE_IDX) return null;
 
   const ask = normalizeAskingPriceFact(facts?.asking_price)?.value;
   const recommended = numberOrNull(ade?.recommended_cash_offer ?? ade?.recommended_offer);
@@ -330,8 +351,26 @@ function economicStageGate(facts = {}, ade = null, unresolvedIdx = 0, signals = 
 
   // The route CARRIES its lifecycle stage. Reading it is a lookup, not a
   // second opinion - which is the whole point of the collapse.
-  const stage_idx = STAGE_INDEX.get(decision.route.lifecycle_stage_code);
+  let stage_idx = STAGE_INDEX.get(decision.route.lifecycle_stage_code);
   if (!Number.isInteger(stage_idx)) return null;
+
+  // ONCE WE HAVE ACTUALLY PRESENTED AN OFFER, THE DEAL IS IN NEGOTIATION.
+  //
+  // Economics govern the ROUTE and the template from here on, but they may not
+  // walk the lifecycle back below the offer stage: a seller who countered our
+  // real offer is not returned to a condition probe or to price discovery just
+  // because their counter landed in a wider band. The offer was a transaction
+  // event, not a milestone guess.
+  //
+  // James is the opposite case and is exactly why this is a floor rather than a
+  // blanket monotonicity rule: nothing was ever presented to him, so an
+  // out-of-band ask correctly pulls him back to nurture.
+  //
+  // Same canonical predicate that decides first-reveal vs counter, so the two
+  // cannot disagree about whether an offer exists.
+  if (offer_revealed && stage_idx < OFFER_STAGE_IDX) {
+    stage_idx = OFFER_STAGE_IDX;
+  }
 
   return {
     stage_idx,
@@ -944,9 +983,18 @@ export function resolveSellerStageTransition({
     classification,
     negotiation_state,
   });
-  const gatedUnresolvedIdx = economic_gate ? economic_gate.stage_idx : unresolvedIdx;
-
-  let afterIdx = Math.max(beforeIdx, gatedUnresolvedIdx);
+  // The economic route is AUTHORITATIVE when it speaks. Max-ing it against the
+  // prior stage would have kept a deal wherever milestone depth had already
+  // carried it: an out-of-band James sitting at property_condition would stay
+  // there instead of returning to nurture, because max(3, 2) = 3. Monotonicity
+  // is the right default for milestone completeness, but it is not a reason to
+  // keep treating a dead deal as live.
+  //
+  // Milestone completeness is untouched and still answers "what is missing?" -
+  // it simply no longer decides "what do we do next" once a price exists.
+  let afterIdx = economic_gate
+    ? economic_gate.stage_idx
+    : Math.max(beforeIdx, unresolvedIdx);
   let authority_gate = null;
   if (!authority.offer_progression_allowed && afterIdx >= OFFER_STAGE_IDX) {
     // Monotonicity still holds: a deal already at S5+ never regresses, but its
