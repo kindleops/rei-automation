@@ -41,9 +41,16 @@ export const FOLLOWUP_POLICY_BY_STAGE = Object.freeze({
     max_automated_followups: 3,
     requires_delivery_confirmation: true,
   }),
+  // V2-2: asking price is the one stage with a SUB-DAY cadence. A seller who
+  // has just said they are interested is warm, and a three-day gap after "do
+  // you have a price in mind?" reads as abandonment. Expressed in hours
+  // because whole days cannot represent it; `no_reply_delay_days` stays
+  // populated as the derived equivalent so every existing consumer that reads
+  // only the days field keeps working.
   [C.ASKING_PRICE]: Object.freeze({
     enabled: true,
-    no_reply_delay_days: 3,
+    no_reply_delay_hours: 24,
+    no_reply_delay_days: 1,
     max_automated_followups: 3,
     requires_delivery_confirmation: true,
   }),
