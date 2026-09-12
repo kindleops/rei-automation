@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { child } from "@/lib/logging/logger.js";
-import { requireInternalSecret } from "@/lib/security/require-internal-secret.js";
+// Queue-engine EXECUTION route: authenticates via the canonical operational
+// credential (Worker env + control-plane fallback, rotation-tolerant) rather
+// than env-only. Authorization is unchanged - enqueueCampaignTargetOne still
+// runs the full eligibility stack below.
+import { requireQueueEngineInternalAuth } from "@/lib/security/queue-engine-internal-auth.js";
 import { supabase } from "@/lib/supabase/client.js";
 import {
   enqueueCampaignTargetOne,
@@ -33,7 +37,7 @@ const logger = child({ module: "api.internal.campaigns.enqueue_target_one" });
  * send_one_queue_row.
  */
 async function handle(request) {
-  const auth = requireInternalSecret(request);
+  const auth = await requireQueueEngineInternalAuth(request);
   if (!auth.ok) {
     return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status ?? 401 });
   }

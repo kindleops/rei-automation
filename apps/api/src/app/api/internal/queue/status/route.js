@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabase, hasSupabaseConfig } from "@/lib/supabase/client.js";
-import { requireInternalSecret } from "@/lib/security/require-internal-secret.js";
+import { requireQueueEngineInternalAuth } from "@/lib/security/queue-engine-internal-auth.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
-  const auth = requireInternalSecret(request);
+  const auth = await requireQueueEngineInternalAuth(request);
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error || "unauthorized" }, { status: auth.status || 401 });
   if (!hasSupabaseConfig()) return NextResponse.json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
   try {
