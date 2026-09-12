@@ -952,6 +952,14 @@ const OBJECTION_MAP = [
       "won't sell", "will not sell", "not going to sell",
       "don't want to sell", "dont want to sell",
       "not looking to sell", "not considering selling",
+      // Contraction forms. "We are not looking to sell" matched; "We aren't
+      // looking to sell" did not, and fell through to seller_interested.
+      "aren't looking to sell", "arent looking to sell",
+      "isn't looking to sell", "isnt looking to sell",
+      "ain't looking to sell", "aint looking to sell",
+      "aren't interested in selling", "arent interested in selling",
+      "ain't interested in selling", "aint interested in selling",
+      "aren't selling", "arent selling", "isn't selling", "isnt selling",
       "not considering it", "keeping it", "going to keep it",
       "going to keep the property", "holding onto it",
       "not ready to part with it", "plan to keep",
@@ -4737,6 +4745,14 @@ function resolveIntents(
       "keeping it", "holding onto it", "answer is no", "real estate agent",
       "real estate broker", "realtor", "nfs", "is not on sale", "nopienso",
       "not looking to sell", "not considering selling",
+      // Contraction forms. "We are not looking to sell" matched; "We aren't
+      // looking to sell" did not, and fell through to seller_interested.
+      "aren't looking to sell", "arent looking to sell",
+      "isn't looking to sell", "isnt looking to sell",
+      "ain't looking to sell", "aint looking to sell",
+      "aren't interested in selling", "arent interested in selling",
+      "ain't interested in selling", "aint interested in selling",
+      "aren't selling", "arent selling", "isn't selling", "isnt selling",
       "not interested in selling", "dont want to sell", "don't want to sell",
       "not for rent", "no esta d vents",
       // Spanish
@@ -4854,7 +4870,23 @@ function resolveIntents(
     matched_rule_ids.push(asks_if_we_buy ? "asks_if_we_buy" : "has_property_to_sell");
   }
 
-  const positive_interest_regex = /\b(?<!not\s+|no\s+)(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling|would consider selling)\b/i;
+  // A CONTRACTION IS STILL A NEGATION.
+  //
+  // The lookbehind covered only "not " and "no ", so "We aren't looking to
+  // sell" matched `looking to sell` and classified as seller_interested - an
+  // explicit refusal read as interest, which put the seller back in the active
+  // outbound pool. Found in production: a real S1 candidate whose only reply
+  // was "Yes we do, but It's not a duplex, and we aren't looking to sell".
+  //
+  // "We are not looking to sell" worked; "We aren't looking to sell" did not.
+  // The apostrophe was the entire difference.
+  const NEG_LOOKBEHIND =
+    "(?<!not\\s+|no\\s+|never\\s+|aren'?t\\s+|isn'?t\\s+|ain'?t\\s+|wasn'?t\\s+|weren'?t\\s+|won'?t\\s+|wouldn'?t\\s+|don'?t\\s+|doesn'?t\\s+|didn'?t\\s+|can'?t\\s+|cannot\\s+|couldn'?t\\s+|shouldn'?t\\s+)";
+  const positive_interest_regex = new RegExp(
+    "\\b" + NEG_LOOKBEHIND +
+      "(want to sell|interested in selling|looking to sell|ready to sell|let's talk|lets talk|i'm open|im open|i'm interested|im interested|interested in an offer|willing to sell|considering selling|would consider selling)\\b",
+    "i"
+  );
   if (positive_interest_regex.test(text)) {
     if (!intents.includes("not_interested") && !intents.includes("need_time")) {
       intents.push("seller_interested");
