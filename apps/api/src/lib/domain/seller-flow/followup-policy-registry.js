@@ -41,16 +41,26 @@ export const FOLLOWUP_POLICY_BY_STAGE = Object.freeze({
     max_automated_followups: 3,
     requires_delivery_confirmation: true,
   }),
-  // V2-2: asking price is the one stage with a SUB-DAY cadence. A seller who
-  // has just said they are interested is warm, and a three-day gap after "do
-  // you have a price in mind?" reads as abandonment. Expressed in hours
-  // because whole days cannot represent it; `no_reply_delay_days` stays
-  // populated as the derived equivalent so every existing consumer that reads
-  // only the days field keeps working.
+  // V2-2 OPEN DECISION — asking price is still 3 days, NOT the 24h the V2-2
+  // brief asks for, because the two requirements are in direct conflict and
+  // the resolution is a product call rather than a mechanical one.
+  //
+  // `lifecycle-stage-policy-registry.test.mjs` pins a permanent business rule:
+  // the no-reply delay must never LOOSEN as the seller advances, so that
+  // discovery can never be slower than a later stage. Setting this stage to
+  // 24h while PROPERTY_CONDITION stays at 3 days creates exactly the "cadence
+  // hump" that guard exists to prevent, and the guard failed as designed.
+  //
+  // Satisfying both would require tightening every later enabled stage to <= 1
+  // day (condition 3->1, offer 2->1), which roughly triples outbound frequency
+  // across three stages for real sellers. That is a change in how often people
+  // get texted, it was not requested, and it is not mine to make silently.
+  //
+  // Left at the proven value pending a ruling. Changing ONLY this number
+  // re-breaks the invariant; see the V2-2 report for the two options.
   [C.ASKING_PRICE]: Object.freeze({
     enabled: true,
-    no_reply_delay_hours: 24,
-    no_reply_delay_days: 1,
+    no_reply_delay_days: 3,
     max_automated_followups: 3,
     requires_delivery_confirmation: true,
   }),

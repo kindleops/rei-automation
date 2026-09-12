@@ -181,19 +181,21 @@ test('Journey B: S2 offer-interest cadence is ~3 days', () => {
   assert.equal(p.no_reply_delay_days, 3)
 })
 
-test('Journey C: S3 asking-price cadence is 24 HOURS', () => {
+test('Journey C: S3 asking-price cadence is 3 days — the V2-2 24h change is BLOCKED', () => {
+  // V2-2 asks for ~24h here. The permanent monotonic-tightening invariant in
+  // lifecycle-stage-policy-registry.test.mjs forbids it unless every later
+  // enabled stage is tightened to <= 1 day too. Pinned at the proven value so
+  // the conflict stays visible instead of being quietly resolved either way.
   const p = resolveFollowUpPolicyForStage(C.ASKING_PRICE).policy
-  assert.equal(p.no_reply_delay_hours, 24)
-  // The derived days field stays populated so existing day-only consumers
-  // keep working rather than reading undefined.
-  assert.equal(p.no_reply_delay_days, 1)
+  assert.equal(p.no_reply_delay_days, 3)
+  assert.equal(p.no_reply_delay_hours, undefined)
 })
 
-test('V2-2: S3 is the only sub-day stage cadence', () => {
+test('V2-2: no stage currently carries a sub-day cadence (pending the S3 ruling)', () => {
   const subDay = Object.entries(FOLLOWUP_POLICY_BY_STAGE)
     .filter(([, p]) => p.no_reply_delay_hours)
     .map(([stage]) => stage)
-  assert.deepEqual(subDay, [C.ASKING_PRICE])
+  assert.deepEqual(subDay, [])
 })
 
 test('V2-2: operational stages schedule no seller follow-ups', () => {
