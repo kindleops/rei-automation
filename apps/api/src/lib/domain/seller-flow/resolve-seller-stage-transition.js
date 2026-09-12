@@ -845,10 +845,14 @@ export function resolveSellerStageTransition({
     intentKey === "tenant_occupied" &&
     (Boolean(normalizeAskingPriceFact(new_facts?.asking_price)?.value) || facts.asking_price?.value > 0);
   if (NURTURE_DAYS[intentKey] != null && !tenantDisclosureWithPrice) {
-    // "Not for sale" at S1 implies ownership — advance to S2 and nurture there.
-    if (intentKey === "not_interested" && beforeIdx === 0) {
-      facts.ownership_status = facts.ownership_status || "inferred";
-    }
+    // "Not for sale" at S1 used to imply ownership so the deal could advance
+    // to S2 and nurture there. Removed: declining to sell is not a claim of
+    // ownership. A tenant, a relative or the wrong person can all say "not
+    // interested" about a property they do not own, and stamping them as the
+    // owner both fabricates a fact and hides them from contact resolution.
+    //
+    // The disinterest itself is still recorded below; only the invented
+    // ownership is gone. The thread simply nurtures from S1 rather than S2.
     const unresolved = firstUnresolvedIdx(facts, {
       ade: ade_result, negotiation: negotiation_state, contract: contract_state,
       disposition: disposition_state, closing: mergeClosing(closing_readiness, closing_evidence),
@@ -945,33 +949,36 @@ export function resolveSellerStageTransition({
     facts.occupancy_status = facts.occupancy_status || "tenant_occupied";
   }
 
-  // Engaged facts imply upstream milestones unless explicitly negative.
+  // ── OWNERSHIP IS ITS OWN DURABLE FACT ────────────────────────────────────
   //
-  // A PRICE DOES NOT IMPLY OWNERSHIP. This previously read
+  // "Engaged facts imply upstream milestones" used to live here, and it was
+  // wrong in both of its forms. It first read
   // `interestResolved(facts) || facts.asking_price?.value > 0`, and
   // interestResolved() itself returns true on a price — so naming a number set
   // ownership_status = "inferred", which POSITIVE_OWNERSHIP treats as
-  // RESOLVED. A seller who had never answered the ownership question was
-  // therefore recorded as an owner and the lifecycle skipped straight past S1.
+  // RESOLVED. Narrowing it to an explicit interest signal was no better: "I'd
+  // sell" is still not "I own it".
   //
-  // That is a fabricated seller fact. Plenty of people can quote a number for
-  // a property they do not own — tenants, relatives, agents, and the wrong
-  // person entirely. The price is still captured and still creates the
-  // opportunity; what it may not do is answer a question the seller was never
-  // asked.
+  // Ownership may be resolved ONLY by explicit seller confirmation (the
+  // ownership_confirmed intent above), or by authoritative ownership data. It
+  // is never a by-product of engagement. Tenants, relatives, agents and the
+  // wrong person entirely can all say "I'd sell" or "I want 150k" about a
+  // property they do not own.
   //
-  // Interest inference is retained where it rests on an actual interest
-  // signal, because saying "yes, I'd sell" is a claim about the speaker's own
-  // relationship to the property in a way that naming a number is not.
-  const negativeOwnership = NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status));
-  if (!negativeOwnership) {
-    const explicitInterest = POSITIVE_INTEREST.has(lower(facts.interest || facts.seller_intent)) ||
-      facts.wants_offer === true ||
-      facts.make_me_an_offer === true;
-    if (explicitInterest && !ownershipResolved(facts)) {
-      facts.ownership_status = "inferred";
-    }
-  }
+  // FACTS MAY ARRIVE OUT OF STAGE ORDER, and that is fine. This state:
+  //
+  //     ownership   = unknown
+  //     interest    = interested
+  //     asking_price = 150000
+  //
+  // is valid and complete-as-far-as-it-goes. The next objective is still
+  // ownership_confirmation because that is the earliest UNRESOLVED
+  // prerequisite — but interest and price are remembered, so once ownership is
+  // confirmed the resolver skips S2/S3 and moves to the first genuinely
+  // unresolved objective instead of re-asking questions already answered.
+  //
+  // The fix is therefore to REMEMBER out-of-order facts, never to fabricate
+  // the upstream ones they arrived ahead of.
 
   const closing = mergeClosing(closing_readiness, closing_evidence);
   const unresolvedIdx = firstUnresolvedIdx(facts, {
