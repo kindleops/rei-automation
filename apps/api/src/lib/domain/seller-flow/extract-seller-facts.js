@@ -20,8 +20,13 @@
 //     existing production module) — no second price parser.
 
 import {
+  MONETARY_KINDS,
+  extractMonetaryMentions,
   resolveAskingPriceSignal,
 } from "@/lib/domain/seller-flow/monetary-understanding.js";
+// Projection detection is shared with the V2 discovery extractor so "should
+// rent for 1800" is recognised as a future claim in exactly one place.
+import { extractProjectedRent } from "@/lib/domain/seller-flow/discovery-facts.js";
 // Estate/probate/heirship patterns come from the canonical production contract
 // engine so there is exactly ONE probate taxonomy in the codebase.
 import {
@@ -383,7 +388,11 @@ function extractRents(message, base) {
   let reported_unit_rents = [];
   const labelled = [
     ...String(message).matchAll(
-      /\bunit\s*#?\s*\d{1,2}\s*(?:is|at|rents?\s+for|=|\-|:)?\s*\$?\s*([\d,]{3,6})/gi
+      // Unit labels are numeric OR alphabetic in the field ("Unit 1", "Unit
+      // A", "Apt B"), and the connector may be a payment verb ("Unit A pays
+      // 1200"). Restricting to `unit \d` silently dropped the entire rent roll
+      // of any duplex whose seller labels units by letter.
+      /\b(?:unit|apt|apartment)\s*#?\s*(?:\d{1,2}|[a-z])\b\s*(?:is|at|pays?|paying|rents?\s+for|rented\s+at|=|\-|:)?\s*\$?\s*([\d,]{3,6})/gi
     ),
   ]
     .map((m) => Number(String(m[1]).replace(/,/g, "")))
@@ -395,10 +404,59 @@ function extractRents(message, base) {
     /\brent|renting|tenant|lease|bring(?:s|ing)? in|collect/i.test(message) ||
     /\bper\s+month|a\s+month|monthly|\/\s*mo\b/i.test(message)
   ) {
-    const amounts = String(message).match(/\$?\s*\b\d{3,5}\b/g) || [];
-    reported_unit_rents = amounts
-      .map((a) => Number(a.replace(/[^\d]/g, "")))
-      .filter((n) => Number.isFinite(n) && n >= 100 && n <= 100000);
+    // The bare list used to be `message.match(/\$?\s*\b\d{3,5}\b/g)`, which
+    // took EVERY 3-5 digit run once any rent word appeared anywhere in the
+    // sentence. Two defects followed, both of which put a wrong number into
+    // underwriting rather than merely missing one:
+    //
+    //   "It's rented for 1800 and I want 250"  -> rents [1800, 250]
+    //   "$1,400 month-to-month and I'd take 220" -> rents [400, 220]
+    //
+    // The asking price was absorbed into the rent roll, and `\b\d{3,5}\b`
+    // matched the "400" inside "1,400" because the comma is a word boundary.
+    //
+    // Both are already solved one layer down: extractMonetaryMentions()
+    // tokenizes with separators intact and classifies each amount. So the list
+    // is now built from CLASSIFIED mentions, keeping only kinds that can
+    // actually be rent. That is a reuse of the canonical parser, not a second
+    // one, and it means a new price phrasing improves this automatically.
+    const PRICE_KINDS = new Set([
+      MONETARY_KINDS.ASKING_PRICE,
+      MONETARY_KINDS.COUNTER_OFFER,
+      MONETARY_KINDS.MINIMUM_PRICE,
+      MONETARY_KINDS.MAXIMUM_PRICE,
+      MONETARY_KINDS.NET_REQUIREMENT,
+      MONETARY_KINDS.MORTGAGE_PAYOFF,
+      MONETARY_KINDS.PER_UNIT_PRICE,
+      MONETARY_KINDS.PACKAGE_PRICE,
+      MONETARY_KINDS.REPAIR_AMOUNT,
+      MONETARY_KINDS.TAX_AMOUNT,
+      MONETARY_KINDS.EARNEST_MONEY,
+      MONETARY_KINDS.CLOSING_COST_TERM,
+    ]);
+
+    // A projected figure ("should rent for 1800") is a claim about a future
+    // state. It is captured separately by the discovery extractor and must
+    // never enter the current rent roll, or speculation reaches NOI.
+    const projected = extractProjectedRent(message);
+    const projectedValue = projected?.seller_projected_rent ?? null;
+
+    let mentions = [];
+    try {
+      const parsed = extractMonetaryMentions(message);
+      mentions = Array.isArray(parsed) ? parsed : (parsed?.mentions ?? []);
+    } catch {
+      // A parser failure must not silently produce a WRONG rent roll; it
+      // produces none, and the rent objective simply stays unresolved.
+      mentions = [];
+    }
+
+    reported_unit_rents = mentions
+      .filter((m) => !PRICE_KINDS.has(m?.kind))
+      .map((m) => Number(m?.value))
+      .filter((n) => Number.isFinite(n) && n >= 100 && n <= 100000)
+      .filter((n) => projectedValue === null || n !== projectedValue);
+
     if (reported_unit_rents.length < 2) reported_unit_rents = [];
   }
 
