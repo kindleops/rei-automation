@@ -367,11 +367,33 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
         owner_id: ownerId,
         master_owner_id: ownerId,
         property_id: propertyId,
-        strategy: 'cash',
-        recommended_offer: asNumber(context.raw.cash_offer),
+        // LEGACY AUTHORITY REMOVED.
+        //
+        // `properties.cash_offer` and `properties.final_acquisition_score` are
+        // Podio-era import columns — the whole `properties` table was written
+        // on five distinct days. They previously populated `recommended_offer`
+        // and `confidence` directly, so a Podio number presented as the current
+        // acquisition decision and a legacy score presented as model confidence.
+        //
+        // `offersById` is created empty and populated ONLY here, so this was
+        // never a fallback sitting behind canonical economics — it was the only
+        // path. Canonical economics live in property_acquisition_scores and are
+        // surfaced by the deal-intelligence dossier.
+        //
+        // Missing canonical economics now fails CLOSED: the property still
+        // appears in the workspace, but with no offer rather than a fabricated
+        // one. Legacy values remain visible under explicitly legacy names for
+        // provenance, and can never be mistaken for current authority.
+        strategy: null,
+        recommended_offer: null,
         seller_asking_price: asNumber(context.property.list_price),
         status: context.stage || context.status || 'draft',
-        confidence: asNumber(context.raw.final_acquisition_score),
+        confidence: null,
+        economics_status: 'unavailable',
+        economics_source: 'none',
+        requires_recompute: true,
+        legacy_cash_offer: asNumber(context.raw.cash_offer),
+        legacy_acquisition_score: asNumber(context.raw.final_acquisition_score),
         next_action: context.bucket === 'new_replies' ? 'Review response' : 'Review offer',
         updated_at: asString(context.raw.updated_at),
       })
@@ -386,13 +408,26 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
         estimated_value: asNumber(context.raw.estimated_value),
         repair_estimate: asNumber(context.property.estimated_repair_cost),
         equity: asNumber(context.property.equity_amount),
-        mao: asNumber(context.raw.cash_offer),
-        cash_offer: asNumber(context.raw.cash_offer),
-        creative_offer: asNumber(context.raw.cash_offer),
+        // ONE legacy number previously populated THREE distinct economic
+        // concepts — mao, cash_offer and creative_offer — which also made a
+        // creative-terms offer identical to the cash offer by construction.
+        // They now fail closed; the legacy value stays visible under a name
+        // that cannot be mistaken for current authority.
+        mao: null,
+        cash_offer: null,
+        creative_offer: null,
+        economics_status: 'unavailable',
+        economics_source: 'none',
+        requires_recompute: true,
+        legacy_cash_offer: asNumber(context.raw.cash_offer),
         novation_path: asString(context.buyerMatch.best_candidate ? 'Buyer match available' : 'Evaluate novation path'),
         multifamily_noi: asString(context.property.multifamily_noi),
         rent_estimate: asNumber(context.property.rent_estimate),
-        ai_confidence: asNumber(context.raw.final_acquisition_score),
+        // `final_acquisition_score` is a Podio-era import, not output of the
+        // current model. Presenting it as `ai_confidence` claimed a provenance
+        // it does not have.
+        ai_confidence: null,
+        legacy_acquisition_score: asNumber(context.raw.final_acquisition_score),
         risk_notes: asString(context.raw.suppression_status ? 'Suppressed contact' : context.threadState.needs_review ? 'Needs review' : 'No critical risk notes'),
       })
     }
