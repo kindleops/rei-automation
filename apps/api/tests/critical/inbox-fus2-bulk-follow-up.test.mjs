@@ -206,7 +206,7 @@ const CANARY_B = "+15555550101"; // Pacific
 function planSupabase() {
   const table = (rows) => {
     const q = {
-      select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+      select: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
       maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
       then: (res) => Promise.resolve({ data: rows, error: null }).then(res),
     };
@@ -298,7 +298,7 @@ test("PROOF 15: containment refuses every bulk recipient and writes nothing", as
   const recorder = {
     from: (t) => {
       const q = {
-        select: () => q, eq: () => q, gt: () => q, not: () => q, order: () => q, limit: () => q,
+        select: () => q, eq: () => q, gt: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
         maybeSingle: async () => ({ data: null, error: null }),
         insert: (p) => { writes.push({ t, op: "insert", p }); return q; },
         update: (p) => { writes.push({ t, op: "update", p }); return q; },
@@ -374,7 +374,7 @@ test("a seller with no assigned agent is NEED REVIEW, never signed by someone el
   const noAgent = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
           maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
@@ -428,7 +428,7 @@ test("missing assignment + PRESENT queue-history agent => still NEED REVIEW", as
   const noAssignment = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
           maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
@@ -488,7 +488,7 @@ test("a KNOWN Spanish seller now receives SPANISH copy, not English", async () =
   const spanish = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
           maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
@@ -519,7 +519,7 @@ test("a known language with NO approved FUS2 family is NEED REVIEW, never Englis
   const thai = {
     from(name) {
       const t = (rows) => {
-        const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+        const q = { select: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
           maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
           then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
         return q;
@@ -556,7 +556,7 @@ test("UNKNOWN language uses the existing English default; agent family is never 
 const senderSupabase = ({ threadOurNumber = null, activeNumbers = ["+15551110001"] } = {}) => ({
   from(name) {
     const t = (rows) => {
-      const q = { select: () => q, eq: () => q, in: () => q, not: () => q, order: () => q, limit: () => q,
+      const q = { select: () => q, eq: () => q, in: () => q, gte: () => q, not: () => q, order: () => q, limit: () => q,
         maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
         then: (r) => Promise.resolve({ data: rows, error: null }).then(r) };
       return q;

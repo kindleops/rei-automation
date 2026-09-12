@@ -225,8 +225,21 @@ const FALLBACK_MATRIX = Object.freeze({
     negotiation_close: "Before we move toward paperwork, can you confirm you're the owner or have authority to sign?",
   },
   intent: {
-    ownership: "Thanks for getting back to me. Are you open to a quick conversation about the property, or would you rather I not reach out?",
-    consider_selling: "Appreciate the reply. Would you consider selling it, or is it not something you'd part with?",
+    // NEVER INVITE A NO.
+    //
+    // This said: "Are you open to a quick conversation about the property, or
+    // would you rather I not reach out?" - which hands the seller a scripted
+    // exit and asks for a phone call nobody wants. It went to a seller who had
+    // just said "number has to start with a 4", i.e. someone already talking
+    // price.
+    //
+    // Operator rule, verbatim: "If they say yes to that or if they say
+    // anything, we go into: okay, did you have an asking price in mind?" A
+    // reply to a re-engagement is interest. The next question is the number.
+    ownership: "Thanks for getting back to me. Did you have an asking price in mind for it?",
+    // Same defect as the line above: "or is it not something you'd part with?"
+    // writes the seller's refusal for them. Ask the number instead.
+    consider_selling: "Appreciate the reply. What would you want for it if the number was right?",
     asking_price: "Got it. Do you have a ballpark number in mind for it?",
     condition: "Thanks. Would you want me to work up a number on it, or are you just gathering info?",
     offer: "Thanks for getting back to me. What are your thoughts on the number I sent over?",

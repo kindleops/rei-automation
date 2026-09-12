@@ -827,6 +827,9 @@ export function extractSellerFacts({
         amount: price.asking_price.value,
         price_type: price.asking_price.price_type || "exact",
         range: price.asking_price.range || null,
+        // Inferred magnitude ("400" -> $400,000) must stay distinguishable
+        // from a stated one all the way to persistence.
+        scaled_from_reference: price.asking_price.scaled_from_reference === true,
         is_counter: Boolean(price.is_counter),
       },
       {

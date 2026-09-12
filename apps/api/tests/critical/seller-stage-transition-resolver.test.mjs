@@ -109,7 +109,12 @@ const MATRIX = [
       stage_after: "asking_price",
       required_template_use_case: "condition_probe",
       ade_action: ADE_ACTIONS.RUN_PRELIMINARY,
-      lead_temperature: "hot",
+      // "asks_offer alone is NOT HOT" - operator ruling on lead temperature.
+      // A seller asking what we would pay is engagement, not qualification:
+      // they have named no number and we have run no economics, so nothing
+      // here says the deal is actionable. It supports WARM and cannot reach
+      // HOT on its own.
+      lead_temperature: "warm",
     },
   },
   {
@@ -182,7 +187,12 @@ const MATRIX = [
       stage_after: "offer",
       next_action: NEXT_ACTIONS.EXECUTE_ADE,
       ade_action: ADE_ACTIONS.RUN_FULL,
-      lead_temperature: "hot",
+      // WARM, not HOT. This fixture supplies NO ade_result, so the economics
+      // are unknown - and temperature is acquisition priority, not stage depth.
+      // The old expectation came from the retired `afterIdx >= 4 -> HOT` rule,
+      // which made a $120,000 ask on an unvalued property look executable.
+      // HOT now requires actionable economics or accepted terms.
+      lead_temperature: "warm",
     },
   },
   {

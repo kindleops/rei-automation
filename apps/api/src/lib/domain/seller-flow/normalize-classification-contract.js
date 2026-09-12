@@ -81,7 +81,10 @@ function deriveSecondarySignals(classification = {}) {
 
 function deriveInterestSignal(classification = {}) {
   const primary = normalizeCanonicalIntent(classification.primary_intent);
-  if (["seller_interested", "latent_interest", "asks_offer", "asking_price_provided"].includes(primary)) {
+  // A seller asking for the contract is, unambiguously, interested. Omitting
+  // it left the most committed message in the funnel deriving interest
+  // "unknown".
+  if (["seller_interested", "latent_interest", "asks_offer", "asking_price_provided", "contract_requested"].includes(primary)) {
     return "interested";
   }
   if (primary === "not_interested") return "not_interested";

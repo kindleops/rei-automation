@@ -3889,7 +3889,19 @@ export const INTENT_PRIORITY = Object.freeze([
   // Absent value, seller still active. Ranked with the pricing tier because it
   // IS a price answer, just an empty one.
   "asking_price_absent",
+  // A seller asking for the paperwork is a transaction-readiness signal and
+  // must outrank acknowledgement. "Ok send over the contract and we will sign
+  // it" was classified `acknowledgement` purely because it contains "ok",
+  // which put the strongest message a seller can send at the bottom of the
+  // operator queue. Canonical key - already known to the lead-state registry
+  // as contract_requested -> FORMAL_CONTRACT; not a new taxonomy.
+  //
+  // This is INTENT, never accepted economics. It does not set terms_accepted,
+  // an accepted price, or the formal-contract stage; those still come only
+  // from the acceptance resolver reading real seller evidence.
+  "contract_requested",
   "asks_offer",
+
   "callback_requested",
   // Contact-modality tier: voicemail/email preferences route like callbacks
   // (acknowledge by SMS, human follows up on the requested channel).
@@ -5554,6 +5566,22 @@ function resolveIntents(
   const is_system_reaction = text.includes("to \u201c");
   if (is_emoji_only || is_system_reaction) {
      intents.push("reaction_only");
+  }
+
+  // 13b. CONTRACT REQUESTED — the seller is asking to paper the deal.
+  //
+  // Deliberately phrase-level, not word-level: "contract" alone appears in
+  // "under contract with another buyer" and "my contract with the realtor",
+  // neither of which is a request. The verb matters.
+  if (
+    /\b(?:send|shoot|email|text|get|bring|forward|draw\s*up|draft|prepare)\s+(?:me\s+|us\s+|it\s+|over\s+|through\s+)*(?:the\s+|a\s+|your\s+)?(?:contract|agreement|paperwork|papers|docs?|documents?|purchase\s+agreement|psa)\b/i.test(text) ||
+    /\b(?:contract|agreement|paperwork|papers)\b[^.?!]{0,40}\b(?:send|over)\b/i.test(text) ||
+    /\bwhere\s+(?:do|can)\s+i\s+sign\b/i.test(text) ||
+    /\b(?:ready|happy|willing)\s+to\s+sign\b/i.test(text) ||
+    /\blet'?s\s+(?:get\s+)?(?:the\s+)?(?:contract|paperwork|agreement|deal)\s+(?:done|going|started|moving)\b/i.test(text) ||
+    /\b(?:manda|env[ií]a|mandame|env[ií]ame)\s+(?:el\s+)?(?:contrato|papeleo|acuerdo)\b/i.test(text)
+  ) {
+    intents.push("contract_requested");
   }
 
   // 14. ACKNOWLEDGEMENT (avoid "bien"/"bueno" substring traps inside longer Spanish interest)

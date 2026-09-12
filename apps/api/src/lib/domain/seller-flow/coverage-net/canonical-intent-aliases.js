@@ -36,6 +36,13 @@ export const CANONICAL_INTENTS = Object.freeze([
   "seller_interested",
   "asking_price_provided",
   "asks_offer",
+  // A seller asking for the paperwork. Canonical because the lead-state
+  // registry (contract_requested -> FORMAL_CONTRACT) and the intent ontology
+  // (contract_request, lead_temperature hot, automation pause) both already
+  // name it - it simply had no canonical intent to arrive on, so it folded to
+  // "unclear" and the strongest buying signal a seller can send reached the
+  // resolver as noise.
+  "contract_requested",
   "callback_requested",
   "property_correction",
   "ownership_confirmed",

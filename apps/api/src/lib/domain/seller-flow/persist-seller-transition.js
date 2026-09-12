@@ -43,6 +43,24 @@ function num(value) {
 /** Deals become trackable once real engagement exists past bare S1 contact. */
 /** Canonical facts whose loss between turns would break known-vs-missing. */
 const DURABLE_FACT_KEYS = [
+  // SELLER INTENT IS A DURABLE FACT, and its absence here was a silent
+  // amnesia bug. A seller saying "Yes we want to sell, send us your offer"
+  // resolves interest but does NOT resolve ownership, so the turn stayed at
+  // stage 1 and failed the `stage_after_number >= 2` qualification below. No
+  // opportunity row was created, nothing was persisted, and the next inbound
+  // arrived with known_facts.interest = null - as if the seller had never
+  // said it.
+  //
+  // That was invisible while temperature came from stage depth: the funnel
+  // position carried the lead even though the FACT had evaporated. Remove the
+  // stage-depth crutch and the seller's clearest statement of intent vanishes
+  // between turns.
+  //
+  // Cumulative state means a sparse later turn may not erase an earlier one.
+  // These are established by the seller and must survive.
+  "interest",
+  "wants_offer",
+  "contract_requested",
   "ownership_status",
   "ownership_claim",
   "authority_claims",
@@ -476,6 +494,7 @@ export async function persistSellerTransitionArtifacts({
               price_type: priceFact.price_type || "exact",
               confidence: priceFact.confidence ?? null,
               extracted_text: priceFact.extracted_text || null,
+              scaled_from_reference: priceFact.scaled_from_reference === true,
               source_message_id: priceFact.source_message_id || null,
               captured_at: priceFact.captured_at || nowIso,
             },

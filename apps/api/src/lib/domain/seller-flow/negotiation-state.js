@@ -70,6 +70,35 @@ export function evaluateContractReadiness(contractFacts = {}) {
 }
 
 /** Full §2 field set, null-initialized. */
+/**
+ * HAS OUR OFFER ACTUALLY BEEN PRESENTED TO THIS SELLER?
+ *
+ * This is the difference between a first asking price and a counter, and the
+ * two are not interchangeable. A counter requires BOTH:
+ *
+ *   1. our offer was actually presented, and
+ *   2. the seller responded with different terms.
+ *
+ * A seller naming a number before they have seen anything from us has
+ * countered nothing. Replying "appreciate the counter" to that is nonsense,
+ * and replying "what number would get it done?" re-asks a question they just
+ * answered.
+ *
+ * The same predicate already drove `negotiationActive` in the monetary parser,
+ * which is what makes resolveAskingPriceSignal mark a price as a counter. It
+ * lives here now so the parser and the route decision cannot disagree about
+ * whether a negotiation is under way.
+ *
+ * `offers_made` is an array in v2 and was a bare count in v1; both readings are
+ * handled, because a legacy row must not read as "never offered".
+ */
+export function hasRevealedOffer(negotiationState = null) {
+  if (!negotiationState) return false;
+  const made = negotiationState.offers_made;
+  const offerCount = Array.isArray(made) ? made.length : Number(made) || 0;
+  return offerCount > 0 || negotiationState.latest_offer != null;
+}
+
 export function createNegotiationState({
   deal_id = null,
   property_id = null,
@@ -303,6 +332,7 @@ export function applyNegotiationTurn(previous, {
       next.asking_price_history.push({
         value,
         price_type: signal.price_type || "exact",
+        scaled_from_reference: signal.scaled_from_reference === true,
         confidence: signal.confidence ?? null,
         extracted_text: signal.extracted_text || null,
         source_message_id: signal.source_message_id || source_message_id || null,

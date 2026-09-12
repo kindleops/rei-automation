@@ -452,7 +452,12 @@ const RAW = {
     terminal_hint: "human_review_required",
     reply_policy: { reply_required: true, reply_permitted: true, escalate_to_human: true, objective: "A human prepares and sends binding paperwork." },
     state_hints: { lifecycle_stage: "formal_contract", operational_status: "needs_review", lead_temperature: "hot", disposition: "interested", automation: "pause" },
-    classifier_aliases: ["wants_written_offer"],
+    // contract_requested is the canonical key the lead-state registry already
+    // uses (contract_requested -> FORMAL_CONTRACT). Until now this entry had no
+    // detector firing it - one of the documented gaps noted at the top of this
+    // file - so "Ok send over the contract and we will sign it" fell through to
+    // `acknowledgement` on the strength of the word "ok".
+    classifier_aliases: ["wants_written_offer", "contract_requested"],
     compliance: NO_COMPLIANCE,
   },
   contract_question: {
