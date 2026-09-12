@@ -946,9 +946,29 @@ export function resolveSellerStageTransition({
   }
 
   // Engaged facts imply upstream milestones unless explicitly negative.
+  //
+  // A PRICE DOES NOT IMPLY OWNERSHIP. This previously read
+  // `interestResolved(facts) || facts.asking_price?.value > 0`, and
+  // interestResolved() itself returns true on a price — so naming a number set
+  // ownership_status = "inferred", which POSITIVE_OWNERSHIP treats as
+  // RESOLVED. A seller who had never answered the ownership question was
+  // therefore recorded as an owner and the lifecycle skipped straight past S1.
+  //
+  // That is a fabricated seller fact. Plenty of people can quote a number for
+  // a property they do not own — tenants, relatives, agents, and the wrong
+  // person entirely. The price is still captured and still creates the
+  // opportunity; what it may not do is answer a question the seller was never
+  // asked.
+  //
+  // Interest inference is retained where it rests on an actual interest
+  // signal, because saying "yes, I'd sell" is a claim about the speaker's own
+  // relationship to the property in a way that naming a number is not.
   const negativeOwnership = NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status));
   if (!negativeOwnership) {
-    if ((interestResolved(facts) || facts.asking_price?.value > 0) && !ownershipResolved(facts)) {
+    const explicitInterest = POSITIVE_INTEREST.has(lower(facts.interest || facts.seller_intent)) ||
+      facts.wants_offer === true ||
+      facts.make_me_an_offer === true;
+    if (explicitInterest && !ownershipResolved(facts)) {
       facts.ownership_status = "inferred";
     }
   }

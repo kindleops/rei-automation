@@ -1136,6 +1136,35 @@ export function extractionToResolverFacts(extraction = null) {
     if (estate.deceased_owner) out.deceased_owner = true;
   }
 
+  // ── CANONICAL ASKING PRICE ────────────────────────────────────────────────
+  // This seam mapped the AMBIGUOUS `asking_price_mention` (below) but never the
+  // CONFIDENT `facts.asking_price`. So a clean, unambiguous price was the one
+  // kind that never reached the resolver:
+  //
+  //   "150k" -> facts.asking_price.value.amount = 150000   (confidence 0.9)
+  //          -> new_facts: {}                              (dropped here)
+  //          -> facts_patch: {}                            (nothing to persist)
+  //          -> transitionQualifiesForOpportunity(): false (no opportunity)
+  //          -> economics never learn the seller named a price
+  //
+  // A real seller said "150k" three times across 2.5 months. Each time the
+  // classifier reported asking_price_provided and each time the number died at
+  // this line, so the system kept asking whether he was open to discussing
+  // numbers.
+  //
+  // Emitted FLAT per the constraint above. normalizeAskingPriceFact() accepts a
+  // bare number and rebuilds the canonical fact, so the resolver stays the one
+  // authority on price shape.
+  if (facts.asking_price?.value?.amount > 0) {
+    out.asking_price = facts.asking_price.value.amount;
+    out.asking_price_type = facts.asking_price.value.price_type || "exact";
+    out.asking_price_source = "seller_stated";
+    out.asking_price_confidence = facts.asking_price.confidence ?? null;
+    // Provenance for the counter-vs-first-ask distinction, which the resolver
+    // decides from negotiation state rather than from this flag alone.
+    out.asking_price_is_counter = facts.asking_price.value.is_counter === true;
+  }
+
   // ── Ambiguous money: evidence only, never a canonical price ──────────────
   if (facts.asking_price_mention?.value) {
     out.asking_price_needs_clarification = true;
