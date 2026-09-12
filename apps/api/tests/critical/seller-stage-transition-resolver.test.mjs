@@ -77,7 +77,10 @@ const MATRIX = [
       disposition: "not_interested",
       required_template_use_case: "consider_selling_follow_up",
     },
-    ownership: "inferred",
+    // V2: the provenance-bearing value. Behaviour is unchanged (ownership is
+    // still operationally resolved and the stage still advances); the label now
+    // records HOW it was resolved, and is explicitly not title verification.
+    ownership: "inferred_from_seller_engagement",
     followup_days: 30,
   },
   {
@@ -144,7 +147,10 @@ const MATRIX = [
       ade_action: ADE_ACTIONS.RUN_PRELIMINARY,
     },
     min_temperature: "warm",
-    ownership: "inferred",
+    // V2: the provenance-bearing value. Behaviour is unchanged (ownership is
+    // still operationally resolved and the stage still advances); the label now
+    // records HOW it was resolved, and is explicitly not title verification.
+    ownership: "inferred_from_seller_engagement",
   },
   {
     name: "direct price from S2 (spec example: \"$95,000\")",

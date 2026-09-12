@@ -230,8 +230,35 @@ export function hasMinimumConditionFacts(facts = {}) {
   return Boolean(occupancy && occupancy !== "unknown" && conditionKnown);
 }
 
+/**
+ * Durable facts that could only have come from a SELLER-LEVEL turn.
+ *
+ * A persisted asking price or offer request did not appear from nowhere: the
+ * seller named their number or asked us to make an offer, and that exchange
+ * resolves ownership for acquisition purposes exactly as it would today.
+ *
+ * This matters for continuity. Resolving ownership only from the CURRENT
+ * turn's intent froze every thread whose seller-level turn happened earlier
+ * and was never stamped — a deal sitting at S3 with a persisted $250,000 ask
+ * could not advance on a condition reply, because "condition_disclosed" is not
+ * itself seller-level.
+ *
+ * Deliberately excludes occupancy, condition, rent and unit facts: those are
+ * statements ABOUT a property that a tenant or neighbour could equally make.
+ */
+function hasDurableSellerLevelEvidence(facts = {}) {
+  if (facts.asking_price?.value > 0) return true;
+  if (facts.wants_offer === true || facts.make_me_an_offer === true) return true;
+  if (POSITIVE_INTEREST.has(lower(facts.interest || facts.seller_intent))) return true;
+  return false;
+}
+
 function ownershipResolved(facts = {}) {
-  return POSITIVE_OWNERSHIP.has(lower(facts.ownership_status));
+  if (POSITIVE_OWNERSHIP.has(lower(facts.ownership_status))) return true;
+  // An explicit negative always wins and is never overridden by history.
+  if (NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status))) return false;
+  if (lower(facts.ownership_claim) === "denied") return false;
+  return hasDurableSellerLevelEvidence(facts);
 }
 
 function interestResolved(facts = {}) {
@@ -283,9 +310,30 @@ function firstUnresolvedIdx(facts = {}, {
   // "disposition started" alone keeps the deal in Dispo. S8→S9 requires an
   // escrow/title event; S9→S10 requires a verified closing. None of these can
   // be satisfied by seller text — they read only external state objects.
+  // AUTHORITATIVE TRANSACTION STATE RESOLVES OWNERSHIP AND INTEREST.
+  //
+  // You cannot hold an EXECUTED purchase contract with someone who is not the
+  // owner, and you cannot have accepted terms with someone who is not
+  // interested. These are external state objects — a signed contract, a
+  // selected buyer, an escrow event — not seller text, so this is
+  // authoritative ownership data rather than chat inference.
+  //
+  // Without this, narrowing the chat-based inference silently froze late-stage
+  // deals: a fixture at S7 with contract.executed and buyer_selected, but no
+  // explicitly recorded ownership_status, resolved to unresolvedIdx 0 and
+  // could no longer advance to S8/S9/S10. That is absurd on its face and was a
+  // genuine regression, not a stale expectation.
+  const transactionAuthority =
+    negotiation?.terms_accepted === true ||
+    contract?.executed === true ||
+    contract?.signed === true ||
+    disposition?.buyer_selected === true ||
+    closing?.ready === true ||
+    closing?.closed === true;
+
   const checks = [
-    () => ownershipResolved(facts),                                      // S1
-    () => interestResolved(facts),                                       // S2
+    () => ownershipResolved(facts) || transactionAuthority,              // S1
+    () => interestResolved(facts) || transactionAuthority,               // S2
     () => priceResolved(facts, ade),                                     // S3
     () => conditionResolved(facts, ade),                                 // S4
     () => negotiation?.terms_accepted === true,                          // S5
@@ -890,7 +938,7 @@ export function resolveSellerStageTransition({
       intentKey === "not_interested" &&
       !NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status)) &&
       lower(facts.ownership_claim) !== "denied" &&
-      !ownershipResolved(facts)
+      !POSITIVE_OWNERSHIP.has(lower(facts.ownership_status))
     ) {
       facts.ownership_status = OWNERSHIP_INFERRED_FROM_ENGAGEMENT;
       facts.ownership_resolution_basis = "seller_level_engagement";
@@ -1023,7 +1071,11 @@ export function resolveSellerStageTransition({
   // path, not a stage regression.
   const negativeOwnership = NEGATIVE_OWNERSHIP.has(lower(facts.ownership_status)) ||
     lower(facts.ownership_claim) === "denied";
-  if (!negativeOwnership && SELLER_LEVEL_ENGAGEMENT_INTENTS.has(intentKey) && !ownershipResolved(facts)) {
+  // Gate on an explicit POSITIVE status rather than ownershipResolved():
+  // ownershipResolved() now also returns true from durable seller-level facts,
+  // so reusing it here would satisfy the milestone while never writing the
+  // provenance value.
+  if (!negativeOwnership && SELLER_LEVEL_ENGAGEMENT_INTENTS.has(intentKey) && !POSITIVE_OWNERSHIP.has(lower(facts.ownership_status))) {
     facts.ownership_status = OWNERSHIP_INFERRED_FROM_ENGAGEMENT;
     facts.ownership_resolution_basis = "seller_level_engagement";
     facts.ownership_resolution_intent = intentKey;
