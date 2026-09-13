@@ -36,4 +36,6 @@ export {
   mapThreadToUniversalStatus,
   mapThreadToUniversalTemperature,
   shouldPromoteThreadToOpportunity,
+  shouldEnterAcquisitionPipeline,
+  PIPELINE_ADMISSION_REASONS,
 } from '@/lib/domain/opportunity/universal-pipeline-registry.js';

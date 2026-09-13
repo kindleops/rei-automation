@@ -17,7 +17,7 @@ import {
   normalizeUniversalStatusCode,
   normalizeUniversalTemperatureCode,
   normalizeWorkflowState,
-  shouldPromoteThreadToOpportunity,
+  shouldEnterAcquisitionPipeline,
   validateStageTransition,
   validateStatusTransition,
   validateTemperatureTransition,
@@ -420,8 +420,20 @@ export async function getPipelineMetrics(params = {}, deps = {}) {
 }
 
 export async function promoteThreadToOpportunity(thread = {}, options = {}, deps = {}) {
-  if (!shouldPromoteThreadToOpportunity(thread)) {
-    return { ok: false, skipped: true, reason: 'promotion_criteria_not_met' };
+  // One admission authority. The verdict travels with the result so a skip is
+  // explainable (`legacy_pipeline_candidate` vs `terminal_disposition` vs
+  // nothing current) instead of a single opaque 'promotion_criteria_not_met'.
+  const admission = shouldEnterAcquisitionPipeline({
+    ...thread,
+    admission_source: options.source || 'system',
+  });
+  if (!admission.eligible) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'promotion_criteria_not_met',
+      admission,
+    };
   }
 
   const client = db(deps);
@@ -484,7 +496,10 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
     seller_display_name: thread.owner_name || thread.seller_first_name || null,
     last_activity_at: thread.latest_message_at || thread.updated_at || new Date().toISOString(),
     last_contact_at: thread.last_inbound_at || thread.last_outbound_at || null,
-    promotion_reason: options.reason || 'seller_engagement',
+    // The default used to be a hardcoded 'seller_engagement', which claimed a
+    // reason the thread might not have had. It is now whatever actually
+    // admitted it.
+    promotion_reason: options.reason || admission.reason,
     last_updated_source: options.source || 'system',
     last_updated_by: options.actor || null,
   };

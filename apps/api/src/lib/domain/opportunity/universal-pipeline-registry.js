@@ -635,27 +635,182 @@ export function mapThreadStageToOpportunityStage(thread = {}) {
   };
 }
 
+/**
+ * Why a thread is (or is not) in the current acquisition pipeline.
+ *
+ * Every reason here names a CURRENT-system acquisition event. None of them is a
+ * score, because a score is a priority, not a membership: a real conversation
+ * with a low score belongs in the pipeline, and a high historical score with no
+ * conversation does not.
+ */
+export const PIPELINE_ADMISSION_REASONS = Object.freeze({
+  MANUAL_OPERATOR_ENROLLMENT: 'manual_operator_enrollment',
+  SELLER_INBOUND: 'seller_inbound',
+  OPERATOR_REVIEW_REQUESTED: 'operator_review_requested',
+  SELLER_ENGAGEMENT: 'seller_engagement',
+  ACQUISITION_STAGE_IN_PROGRESS: 'acquisition_stage_in_progress',
+  ACTIVE_ACQUISITION_OPPORTUNITY: 'active_acquisition_opportunity',
+  ASKING_PRICE_CAPTURED: 'asking_price_captured',
+  ACTIVE_CAMPAIGN_TARGET: 'active_campaign_target',
+  /** Not admitted. Terminal seller disposition with no current engagement. */
+  TERMINAL_DISPOSITION: 'terminal_disposition',
+  /** Not admitted. Historical score only — review, never active workflow. */
+  LEGACY_PIPELINE_CANDIDATE: 'legacy_pipeline_candidate',
+  /** Not admitted. */
+  NO_CURRENT_ACQUISITION_EVIDENCE: 'no_current_acquisition_evidence',
+});
+
+const ENGAGED_UNIVERSAL_STATUSES = new Set([
+  'seller_replied', 'needs_review', 'hot_lead', 'negotiating', 'underwriting',
+  'offer_needed', 'offer_sent', 'contract_requested', 'contract_sent', 'closing',
+]);
+
+const IN_PROGRESS_STAGES = new Set([
+  'interest_probe', 'price_discovery', 'underwriting_needed', 'offer_pending',
+  'offer_sent', 'negotiation', 'contract_requested', 'contract_sent', 'closing',
+  'offer_interest', 'asking_price', 'property_condition', 'formal_contract',
+]);
+
+const ENGAGED_INBOX_BUCKETS = new Set(['new_replies', 'needs_review', 'priority', 'follow_up']);
+
+function num(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * THE admission predicate for the current V2 acquisition pipeline.
+ *
+ * WHY THIS REPLACED A SCORE COMPARISON.
+ * Admission used to end with `final_acquisition_score >= 70`. That column is a
+ * Podio-era import on `properties`, surfaced through `inbox_threads_hydrated`,
+ * and it decided membership in a pipeline it predates. It was reachable only by
+ * accident: the two production callers pass a synthesised object and a
+ * `deal_thread_state` row, and NEITHER carries the column, so the branch has
+ * never fired. But `inbox_threads_hydrated` is the one row shape that does carry
+ * it — and of its 8,887 threads, 1,949 have the score at 70+ with no inbound at
+ * all, against 999 with a real inbound. One call site passing a hydrated row
+ * would have admitted twice as many threads on a legacy import as the system has
+ * ever had conversations.
+ *
+ * ORDERING IS LOAD-BEARING. Terminal disposition is checked AFTER the positive
+ * signals, exactly as before: a seller who replied and then opted out still
+ * belongs in the pipeline, because suppression is something the pipeline has to
+ * carry, not a reason to forget the conversation happened.
+ *
+ * @param {object} context thread state, synthesised transition, or workflow row
+ * @returns {{eligible: boolean, reason: string, evidence: object, source: string,
+ *            legacy_pipeline_candidate: boolean}}
+ */
+export function shouldEnterAcquisitionPipeline(context = {}) {
+  const source = clean(context.admission_source) || 'thread_state';
+  const status = normalizeKey(context.universal_status);
+  const stage = normalizeKey(context.universal_stage);
+  const bucket = normalizeLegacyBucket(context.inbox_bucket);
+  const legacyScore = num(context.final_acquisition_score);
+  // Recorded so a legacy-only thread is classifiable for review. It never
+  // contributes to `eligible`.
+  const legacyCandidate = legacyScore !== null && legacyScore >= 70;
+
+  const admit = (reason, evidence) => ({
+    eligible: true,
+    reason,
+    evidence,
+    source,
+    legacy_pipeline_candidate: legacyCandidate,
+  });
+  const deny = (reason, evidence) => ({
+    eligible: false,
+    reason,
+    evidence,
+    source,
+    legacy_pipeline_candidate: legacyCandidate,
+  });
+
+  if (context.manually_promoted === true || context.manual_enrollment === true) {
+    return admit(PIPELINE_ADMISSION_REASONS.MANUAL_OPERATOR_ENROLLMENT, { manually_promoted: true });
+  }
+
+  // A seller actually said something. `deal_thread_state` has no
+  // `last_inbound_at`, so the direction columns are the only inbound evidence
+  // the workflow path ever sees.
+  //
+  // `latest_message_direction` only proves an inbound when the LAST message was
+  // inbound: 65 threads have a real seller reply followed by an outbound and are
+  // invisible to it. `has_seller_inbound` is the explicit escape hatch for a
+  // caller that already knows — the predicate stays pure and never issues its
+  // own query to find out.
+  const inboundAt = context.last_inbound_at || null;
+  const latestDirection = normalizeKey(context.latest_message_direction || context.direction);
+  if (inboundAt || latestDirection === 'inbound' || context.has_seller_inbound === true) {
+    return admit(PIPELINE_ADMISSION_REASONS.SELLER_INBOUND, {
+      last_inbound_at: inboundAt,
+      latest_message_direction: latestDirection || null,
+      has_seller_inbound: context.has_seller_inbound === true || null,
+    });
+  }
+
+  if (context.needs_review === true) {
+    return admit(PIPELINE_ADMISSION_REASONS.OPERATOR_REVIEW_REQUESTED, { needs_review: true });
+  }
+
+  if (ENGAGED_INBOX_BUCKETS.has(bucket)) {
+    return admit(PIPELINE_ADMISSION_REASONS.SELLER_ENGAGEMENT, { inbox_bucket: bucket });
+  }
+
+  if (ENGAGED_UNIVERSAL_STATUSES.has(status)) {
+    return admit(PIPELINE_ADMISSION_REASONS.SELLER_ENGAGEMENT, { universal_status: status });
+  }
+
+  if (IN_PROGRESS_STAGES.has(stage)) {
+    return admit(PIPELINE_ADMISSION_REASONS.ACQUISITION_STAGE_IN_PROGRESS, { universal_stage: stage });
+  }
+
+  // A seller-stated price is an acquisition interaction by itself. It could not
+  // have been captured without one.
+  const askingPrice = num(context.asking_price);
+  if (askingPrice !== null && askingPrice > 0) {
+    return admit(PIPELINE_ADMISSION_REASONS.ASKING_PRICE_CAPTURED, { asking_price: askingPrice });
+  }
+
+  if (clean(context.opportunity_id) || clean(context.acquisition_opportunity_id)) {
+    return admit(PIPELINE_ADMISSION_REASONS.ACTIVE_ACQUISITION_OPPORTUNITY, {
+      opportunity_id: clean(context.opportunity_id) || clean(context.acquisition_opportunity_id),
+    });
+  }
+
+  if (clean(context.campaign_target_id) && normalizeKey(context.campaign_target_state) !== 'cancelled') {
+    return admit(PIPELINE_ADMISSION_REASONS.ACTIVE_CAMPAIGN_TARGET, {
+      campaign_target_id: clean(context.campaign_target_id),
+    });
+  }
+
+  if (context.not_interested || context.opt_out || context.wrong_number) {
+    return deny(PIPELINE_ADMISSION_REASONS.TERMINAL_DISPOSITION, {
+      not_interested: context.not_interested === true,
+      opt_out: context.opt_out === true,
+      wrong_number: context.wrong_number === true,
+    });
+  }
+
+  // Reached only with a legacy score and nothing current. Classified for review,
+  // NOT enrolled: no V2 automation, no cadence, no seller fact is invented from
+  // the number. The score stays exactly what it is — historical data.
+  if (legacyCandidate) {
+    return deny(PIPELINE_ADMISSION_REASONS.LEGACY_PIPELINE_CANDIDATE, {
+      final_acquisition_score: legacyScore,
+      disposition: 'legacy_unenrolled',
+    });
+  }
+
+  return deny(PIPELINE_ADMISSION_REASONS.NO_CURRENT_ACQUISITION_EVIDENCE, {
+    universal_status: status || null,
+    universal_stage: stage || null,
+  });
+}
+
+/** Boolean face of `shouldEnterAcquisitionPipeline` for existing callers. */
 export function shouldPromoteThreadToOpportunity(thread = {}) {
-  if (thread.manually_promoted) return true;
-  if (thread.last_inbound_at) return true;
-  if (thread.needs_review) return true;
-  const bucket = normalizeLegacyBucket(thread.inbox_bucket);
-  if (['new_replies', 'needs_review', 'priority', 'follow_up'].includes(bucket)) return true;
-  const status = normalizeKey(thread.universal_status);
-  if ([
-    'seller_replied', 'needs_review', 'hot_lead', 'negotiating', 'underwriting',
-    'offer_needed', 'offer_sent', 'contract_requested', 'contract_sent', 'closing',
-  ].includes(status)) return true;
-  const stage = normalizeKey(thread.universal_stage);
-  if ([
-    'interest_probe', 'price_discovery', 'underwriting_needed', 'offer_pending',
-    'offer_sent', 'negotiation', 'contract_requested', 'contract_sent', 'closing',
-    'offer_interest', 'asking_price', 'property_condition', 'formal_contract',
-  ].includes(stage)) return true;
-  const aos = Number(thread.final_acquisition_score);
-  if (Number.isFinite(aos) && aos >= 70) return true;
-  if (thread.not_interested || thread.opt_out || thread.wrong_number) return false;
-  if (status === 'awaiting_response' && !thread.last_inbound_at) return false;
-  if (status === 'outbound_sent' && !thread.last_inbound_at) return false;
-  return false;
+  return shouldEnterAcquisitionPipeline(thread).eligible;
 }
