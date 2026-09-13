@@ -51,7 +51,14 @@ export type SellerMapCardViewModel = {
 
   property: {
     address: string
+    /** Street View, when the property can have one. Gated by the metadata probe. */
     imageUrl: string | null
+    /**
+     * Aerial/roadmap imagery, used ONLY when Street View reports no panorama.
+     * Rural and new-construction parcels frequently have no street-level coverage,
+     * and an aerial of the right parcel beats an empty frame.
+     */
+    fallbackImageUrl: string | null
     assetType: string
     assetClassKey: string
     units: number | null

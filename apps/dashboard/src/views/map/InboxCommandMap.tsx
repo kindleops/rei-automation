@@ -3624,6 +3624,16 @@ interface Props {
   selectedBuyerKey?: string | null
   onSelectBuyerKey?: (buyerKey: string | null) => void
   selectedThread: InboxWorkflowThread | null
+  /**
+   * The globally active property, as the canonical property_id.
+   *
+   * Map used to learn about an arrival only through `selectedThread`, which set the
+   * pin id and flew the camera but never built a seller card — so arriving from the
+   * Inbox landed in the right neighbourhood with nothing selected and no detail open.
+   * The property id is the durable anchor (a property can have no thread at all), so
+   * arrival resolves from this and never from address text.
+   */
+  activePropertyId?: string | null
   selectedThreadMessages?: ThreadMessage[]
   selectedThreadMessagesLoading?: boolean
   quickReplyDraft?: string
@@ -4010,6 +4020,7 @@ export function InboxCommandMap({
   selectedBuyerKey = null,
   onSelectBuyerKey,
   selectedThread,
+  activePropertyId = null,
   selectedThreadMessages: _selectedThreadMessages = [],
   selectedThreadMessagesLoading: _selectedThreadMessagesLoading = false,
   quickReplyDraft = '',
@@ -4855,10 +4866,6 @@ export function InboxCommandMap({
       })
     }
   }, [sellerPinLayers.sellerPins])
-  const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => ({
-    type: 'FeatureCollection',
-    features: [],
-  }), [])
   const activeThemeDefinition = useMemo(() => getCommandMapTheme(mapStyleMode), [mapStyleMode])
   const mapThemeStyle = useMemo(
     () => ({
@@ -4877,6 +4884,48 @@ export function InboxCommandMap({
       || text((selectedPin as any)?.property_id)
       || null
   ), [selectedHydratedThread, selectedPin])
+
+  /**
+   * THE GOLD STAR — where the operator's selected property is.
+   *
+   * This was hardcoded to an empty FeatureCollection and its layer was installed with
+   * `visibility:'none'`, `icon-size:0`, `icon-opacity:0`, so the marker existed in the
+   * codebase and could never appear. With cross-app arrival now selecting a property,
+   * "which pin is my subject" became a question the map had to answer, and a ringed
+   * house glyph among hundreds of house glyphs does not answer it.
+   *
+   * Coordinates come from the canonical selection — the card's own coordinates first
+   * (they are what the map flew to), then the pin indexes. Never from address text.
+   */
+  const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => {
+    const card = selectedMapCard?.kind === 'seller' ? selectedMapCard : null
+    const cardCoords = card?.coordinates
+    let coords: [number, number] | null =
+      cardCoords && isMappableCoord(cardCoords[1], cardCoords[0]) ? cardCoords : null
+
+    if (!coords && selectedPropertyId) {
+      const sellerPin = sellerPinsByPropertyIdRef.current.get(selectedPropertyId)
+      const pin = sellerPin ?? allPins.find((item) => item.property_id === selectedPropertyId)
+      const lat = Number(pin?.lat)
+      const lng = Number(pin?.lng)
+      if (isMappableCoord(lat, lng)) coords = [lng, lat]
+    }
+
+    if (!coords && focusPin && isMappableCoord(focusPin.lat, focusPin.lng)) {
+      coords = [focusPin.lng, focusPin.lat]
+    }
+
+    if (!coords) return { type: 'FeatureCollection', features: [] }
+
+    return {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: coords },
+        properties: { property_id: selectedPropertyId ?? card?.id ?? '' },
+      }],
+    }
+  }, [allPins, focusPin, selectedMapCard, selectedPropertyId])
 
   const liveActivityFeed = useMemo(() => (
     loadLiveActivityFeedSnapshot({
@@ -7054,8 +7103,28 @@ export function InboxCommandMap({
           id: SELECTED_STAR_LAYER_ID,
           type: 'symbol',
           source: SELECTED_STAR_SOURCE_ID,
-          layout: { visibility: 'none', 'icon-image': PIN_ICON.selected, 'icon-size': 0 },
-          paint: { 'icon-opacity': 0 },
+          layout: {
+            visibility: 'visible',
+            'icon-image': PIN_ICON.selected,
+            // Grows with zoom so the star stays findable when zoomed out to the
+            // market and does not swamp the parcel when zoomed into the street.
+            'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.42, 13, 0.62, 17, 0.8],
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            // Sits above its own property pin rather than centred on it, so the pin
+            // underneath stays readable.
+            'icon-offset': [0, -26],
+          } as maplibregl.SymbolLayerSpecification['layout'],
+          paint: {
+            // The gold lives HERE, not in the canvas drawing: the icon is an SDF mask,
+            // so the layer is the only thing that can colour it. Gold is the one hue
+            // no other pin uses, which is what makes the subject findable at a glance.
+            'icon-color': '#f5b02e',
+            'icon-halo-color': 'rgba(18, 13, 2, 0.92)',
+            'icon-halo-width': 1.8,
+            'icon-halo-blur': 0.4,
+            'icon-opacity': 1,
+          },
         })
       }
 
@@ -9517,6 +9586,135 @@ export function InboxCommandMap({
     return 'No visible pins found.'
   }, [allPins.length, filteredPins.length, pinPipeline.unmapped.length, visiblePins.length, sellerPins.length, sellerPinLayers.sellerPins])
 
+  /**
+   * ── CANONICAL ARRIVAL SELECTION ───────────────────────────────────────────
+   *
+   * Selecting a property in another app and opening Map must be behaviourally
+   * equivalent to locating and tapping that exact property here. That means the
+   * arrival path has to end in the SAME state a tap produces, not a parallel one:
+   *
+   *   selectedMapCard   the one canonical selection — also what the seller sheet
+   *                     renders from, so there is no second Map-only concept
+   *   selectedPinId     the pin highlight
+   *   onSelectThreadId  the inbox thread, when the property has one
+   *
+   * It resolves coordinates from the pin/thread INDEXES rather than from rendered
+   * features, because on arrival the property is usually outside the current viewport
+   * and therefore has no rendered feature to query. Identity is always the canonical
+   * property_id; address text is never used to match.
+   *
+   * Returns true when it selected something, so the caller can tell "not found yet"
+   * (data still loading) from "found and selected".
+   */
+  const selectPropertyOnMapRef = useRef<((propertyId: string) => boolean) | null>(null)
+  selectPropertyOnMapRef.current = (propertyId: string): boolean => {
+    const map = mapRef.current
+    if (!map || !propertyId) return false
+
+    const sellerPin = sellerPinsByPropertyIdRef.current.get(propertyId)
+    const matchedThread = hydratedThreadsByPropertyIdRef.current.get(propertyId) ?? null
+    // `selectPropertyOnMapRef.current` is reassigned every render, so this closes
+    // over the current pin set; the interval below reads through the ref and therefore
+    // always calls the freshest version.
+    const conversationPin = matchedThread
+      ? allPins.find((pin) => pin.conversation_id === matchedThread.id)
+      : allPins.find((pin) => pin.property_id === propertyId)
+
+    const lat = Number(sellerPin?.lat ?? conversationPin?.lat)
+    const lng = Number(sellerPin?.lng ?? conversationPin?.lng)
+    if (!isMappableCoord(lat, lng)) return false
+
+    const coordinates: [number, number] = [lng, lat]
+
+    // Mirrors the property-tile tap: fly first so the card anchors over the pin
+    // rather than over wherever the camera happened to be.
+    map.easeTo({
+      center: coordinates,
+      zoom: Math.max(map.getZoom(), 14.2),
+      duration: 620,
+    })
+
+    const { anchor: cardAnchor, containerSize } = buildMapCardContainerContext(
+      map,
+      containerRef.current,
+      coordinates,
+    )
+
+    const feature: Record<string, unknown> = sellerPin
+      ? { ...(sellerPin as unknown as Record<string, unknown>) }
+      : conversationPin
+        ? commandMapPinToSellerCardRecord(conversationPin, null)
+        : { property_id: propertyId }
+    if (matchedThread) Object.assign(feature, matchedThread as unknown as Record<string, unknown>)
+
+    setSelectedClusterSummary(null)
+    setSelectedCensusFeature(null)
+    setSelectedBuyerPurchase(null)
+    setSelectedSoldComp(null)
+    setHoveredMapCard(null)
+    setShowSelectedHidden(true)
+    setPropertySheetYielded(false)
+    setSelectedPinId(matchedThread ? matchedThread.id : propertyId)
+    setSelectedMapCard({
+      kind: 'seller',
+      // 'selected', not the mobile tap's 'hover' peek: the operator already chose this
+      // property in another app, so re-asking them to confirm it would be a step
+      // backwards. The card TREATMENT is identical either way.
+      intent: 'selected',
+      id: matchedThread ? matchedThread.id : propertyId,
+      anchor: cardAnchor,
+      coordinates,
+      feature,
+      containerSize,
+    })
+
+    if (matchedThread) onSelectThreadIdRef.current?.(matchedThread.id)
+    return true
+  }
+
+  /**
+   * Arrival. Runs when the globally active property changes, and retries while the
+   * pin indexes are still filling — the seller pins load in two stages, so the first
+   * pass after a route change frequently has no coordinates yet.
+   *
+   * It deliberately does NOT depend on the viewport: once a property is selected it
+   * stays selected through pan and zoom until something explicitly selects another.
+   */
+  const arrivedPropertyRef = useRef<string | null>(null)
+  useEffect(() => {
+    const propertyId = text(activePropertyId)
+    if (!propertyId) {
+      arrivedPropertyRef.current = null
+      return
+    }
+    if (arrivedPropertyRef.current === propertyId) return
+    if (selectPropertyOnMapRef.current?.(propertyId)) {
+      arrivedPropertyRef.current = propertyId
+      return
+    }
+    // Not resolvable yet. Poll briefly rather than giving up: the alternative is an
+    // arrival that silently does nothing whenever Map wins the race against its data.
+    let cancelled = false
+    let attempts = 0
+    const timer = window.setInterval(() => {
+      attempts += 1
+      if (cancelled || attempts > 40) {
+        window.clearInterval(timer)
+        return
+      }
+      if (selectPropertyOnMapRef.current?.(propertyId)) {
+        arrivedPropertyRef.current = propertyId
+        window.clearInterval(timer)
+      }
+    }, 250)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+    // Seller pins arrive in two stages; re-running as they land is what lets a
+    // first-pass miss resolve without waiting out the whole poll budget.
+  }, [activePropertyId, mapInstanceEpoch, allPins.length, sellerPins.length])
+
   const openActivityTarget = (event: LiveActivityEvent, center: [number, number] | null) => {
     if (event.targetType === 'seller' && event.targetId) {
       const resolvedCenter = center ?? centerMapOnActivity(event)
@@ -9535,6 +9733,30 @@ export function InboxCommandMap({
           ? commandMapPinToSellerCardRecord(pin, null)
           : { property_id: event.targetId }
       const { anchor, containerSize } = buildMapCardContainerContext(mapRef.current, containerRef.current, resolvedCenter)
+
+      /**
+       * Publish the property to the GLOBAL context, exactly as the two pin-tap paths
+       * do. Without this, focusing a seller from the Live Activity rail moved the map
+       * and opened the card but left the rest of the product pointed at the previous
+       * property — so a jump to Comps or Deal Intelligence afterwards showed the wrong
+       * subject. Selection is only bidirectional if EVERY way of selecting publishes.
+       */
+      const activityPropertyId = text(
+        (sellerRecord as Record<string, unknown>).property_id
+        ?? (sellerRecord as Record<string, unknown>).propertyId,
+      )
+      if (activityPropertyId) {
+        onSelectSellerContextRef.current?.({
+          propertyId: activityPropertyId,
+          masterOwnerId: text(
+            (sellerRecord as Record<string, unknown>).master_owner_id
+            ?? (sellerRecord as Record<string, unknown>).masterOwnerId,
+          ) || undefined,
+          sourceView: 'map',
+          intent: 'open_seller',
+        })
+      }
+
       setHoveredMapCard(null)
       setSelectedMapCard({
         kind: 'seller',

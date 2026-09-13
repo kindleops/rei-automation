@@ -214,24 +214,74 @@ export const SellerMapCard = ({
     <button type="button" className="smc-close" onClick={onClose} aria-label="Close seller card">×</button>
   ) : null
   const heroClass = cls('smc-image', isPeek && 'is-peek', !isPeek && 'is-focus', isMobile && 'is-mobile-hero')
-  const imageBlock = heroState === 'available' && viewModel.property.imageUrl ? (
-    <div className={heroClass} data-hero-state="available">
-      <img src={viewModel.property.imageUrl} alt={viewModel.property.address} loading="eager" decoding="sync" />
-      <div className="smc-image__gradient" />
-      {closeButton}
-    </div>
-  ) : (
+
+  /**
+   * ── HERO IMAGE LOADING ────────────────────────────────────────────────────
+   *
+   * This used to render EITHER an <img> or a placeholder <div>, switching between
+   * them on the metadata verdict. Three problems, which together are the reported
+   * "choppy, loads sometimes, then cuts off":
+   *
+   *  1. SERIAL fetches. With no <img> in the tree during `loading`, the browser had
+   *     not begun downloading the photo. The metadata round trip had to finish before
+   *     the image request even started, so the hero took two sequential network hops.
+   *  2. REMOUNT on promotion. Swapping the placeholder div for an img at the same
+   *     position unmounts one and mounts the other, so any progress was discarded and
+   *     the download restarted.
+   *  3. decoding="sync" blocked the main thread while a full-width JPEG decoded,
+   *     which is the stutter as the card opens.
+   *
+   * Now: one container, and the <img> mounts as soon as a URL exists so the download
+   * runs CONCURRENTLY with the metadata probe. The metadata verdict still gates
+   * VISIBILITY — that gate is load-bearing, because the image endpoint answers 200
+   * with a grey "no imagery" apology JPEG that an <img> cannot distinguish from a real
+   * photo. Decoding is async, and a failed request falls back to the placeholder
+   * instead of leaving an empty frame.
+   */
+  const [heroFailed, setHeroFailed] = useState(false)
+  const streetViewUrl = viewModel.property.imageUrl
+  useEffect(() => { setHeroFailed(false) }, [streetViewUrl])
+
+  /**
+   * When Street View reports no panorama — common on rural parcels, new builds and
+   * gated streets — fall back to aerial imagery of the same coordinates rather than
+   * an empty grey frame. The operator still sees the actual property.
+   */
+  const streetViewRejected = heroFailed || heroState === 'unavailable' || heroState === 'error'
+  const usingFallback = streetViewRejected && Boolean(viewModel.property.fallbackImageUrl)
+  const heroUrl = usingFallback ? viewModel.property.fallbackImageUrl : streetViewUrl
+
+  const heroReady = Boolean(heroUrl) && (usingFallback || (heroState === 'available' && !heroFailed))
+  const heroPlaceholderState = heroFailed ? 'error' : heroState
+
+  const imageBlock = (
     <div
-      className={cls(heroClass, 'is-placeholder', heroState === 'loading' && 'is-loading')}
-      data-hero-state={heroState}
+      className={cls(heroClass, !heroReady && 'is-placeholder', !heroReady && heroState === 'loading' && 'is-loading')}
+      data-hero-state={heroReady ? 'available' : heroPlaceholderState}
     >
-      <span className="smc-image__empty">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M3 11.2 12 4l9 7.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M5.6 10.2V19h12.8v-8.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <em>{heroState === 'loading' ? 'Loading imagery' : 'No street view'}</em>
-      </span>
+      {heroUrl ? (
+        <img
+          // Keyed on the URL so switching to the aerial fallback replaces the source
+          // cleanly instead of leaving a half-decoded Street View frame behind.
+          key={heroUrl}
+          className={cls('smc-image__photo', heroReady && 'is-ready')}
+          src={heroUrl}
+          alt={viewModel.property.address}
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
+          onError={() => { if (!usingFallback) setHeroFailed(true) }}
+        />
+      ) : null}
+      {heroReady ? <div className="smc-image__gradient" /> : (
+        <span className="smc-image__empty">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 11.2 12 4l9 7.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M5.6 10.2V19h12.8v-8.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <em>{heroState === 'loading' && !heroFailed ? 'Loading imagery' : 'No imagery'}</em>
+        </span>
+      )}
       {closeButton}
     </div>
   )

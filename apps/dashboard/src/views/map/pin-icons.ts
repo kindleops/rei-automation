@@ -531,14 +531,25 @@ function drawMHP(ctx: CanvasRenderingContext2D) {
 
 // ─── Selected property golden star ───────────────────────────────────────
 
+/**
+ * THE SELECTED-PROPERTY MARKER — a star.
+ *
+ * Only the ALPHA MASK of this drawing survives: every icon here is registered with
+ * `sdf: true`, which discards painted colour and lets the layer tint the shape via
+ * `icon-color`. An earlier attempt painted a gold gradient plus a shadow halo here and
+ * it rendered flat black with a blurred edge — SDF threw the colour away and turned the
+ * shadow into part of the mask.
+ *
+ * So: draw one solid, hard-edged star and let the layer own the gold — see
+ * SELECTED_STAR_LAYER_ID in InboxCommandMap, which sets icon-color plus a dark halo so
+ * the star keeps its silhouette over pale satellite imagery.
+ */
 function drawSelectedStar(ctx: CanvasRenderingContext2D) {
-  setup(ctx, 2.4)
-  ctx.fillStyle = 'rgba(255,255,255,0.96)'
-
   const cx = 32 * S, cy = 32 * S
-  const outer = 27 * S, inner = 11 * S
+  const outer = 27 * S, inner = 11.5 * S
   const spikes = 5
 
+  ctx.fillStyle = '#ffffff'
   ctx.beginPath()
   for (let i = 0; i < spikes * 2; i++) {
     const angle = (i * Math.PI) / spikes - Math.PI / 2
@@ -550,7 +561,6 @@ function drawSelectedStar(ctx: CanvasRenderingContext2D) {
   }
   ctx.closePath()
   ctx.fill()
-  ctx.stroke()
 }
 
 // ─── Loader ───────────────────────────────────────────────────────────────

@@ -279,12 +279,37 @@
 .smc-shell.is-reduced-motion .smc-image.is-focus {
   transition: none;
 }
-.smc-image img {
+/* The photo is ABSOLUTE and always mounted, so its download starts immediately and
+   runs alongside the Street View metadata probe. It stays invisible until that probe
+   confirms real imagery — Google answers 200 with a grey apology JPEG otherwise — and
+   fades in rather than popping, which is what made the promotion read as a flicker. */
+.smc-image__photo {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
   filter: brightness(1.02) contrast(1.03) saturate(1.04);
+  opacity: 0;
+  transition: opacity 220ms ease;
+  /* Its own layer, so the fade cannot force the card body to repaint. */
+  will-change: opacity;
+}
+
+.smc-image__photo.is-ready {
+  opacity: 1;
+}
+
+.smc-shell.is-reduced-motion .smc-image__photo {
+  transition: none;
+}
+
+/* The placeholder glyph must not stretch across a grid cell that now also holds the
+   absolutely positioned photo. */
+.smc-image.is-placeholder .smc-image__empty {
+  position: relative;
+  z-index: 1;
 }
 .smc-image__gradient {
   position: absolute;

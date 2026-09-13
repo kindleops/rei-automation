@@ -1,4 +1,4 @@
-import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { buildAerialViewUrl, buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
 import { safeHumanName } from '../../../lib/identity/entityDetection'
 import type { SellerMapCardViewModel } from './seller-map-card.types'
 import {
@@ -42,20 +42,68 @@ const resolveHeaderDisplayName = (record: Record<string, unknown>): string => {
   return resolveMasterOwnerName(record)
 }
 
+const httpsOnly = (value: string | null): string | null =>
+  value ? value.replace(/^http:\/\//i, 'https://') : null
+
+const recordCoords = (record: Record<string, unknown>): { lat: number | null; lng: number | null } => {
+  const num = (value: unknown): number | null => {
+    const n = Number(value)
+    return Number.isFinite(n) && Math.abs(n) > 0.001 ? n : null
+  }
+  return {
+    lat: num(firstDefined(record, ['lat', 'latitude', 'property_lat'])),
+    lng: num(firstDefined(record, ['lng', 'longitude', 'property_lng'])),
+  }
+}
+
+/**
+ * THE HERO IMAGE — Street View first.
+ *
+ * The previous priority list put `map_image` and `satellite_image` ABOVE the
+ * Street View fallback, so any property carrying a stored static-map URL rendered a
+ * flat roadmap tile and Street View never ran. That is the reported "street view
+ * doesn't work": it was not failing, it was being outranked.
+ *
+ * Observed on property 232714379 (1115 Nw 64th St, Miami FL): the card rendered a
+ * roadmap tile centred on 35.94336,-77.783619 — Rocky Mount, North Carolina — because
+ * a stale stored `map_image` won the priority contest. A stored value is only trusted
+ * now when it is genuinely a Street View asset; anything else is demoted to fallback.
+ *
+ * Coordinates are preferred over the address string because the address goes through
+ * Google's geocoder, and a geocoder miss is exactly how imagery ends up in the wrong
+ * state.
+ */
 const resolvePropertyImage = (record: Record<string, unknown>, address: string): string | null => {
-  const direct = text(firstDefined(record, [
+  const storedStreetView = text(firstDefined(record, [
     'streetview_image',
     'streetViewImage',
     'street_view_image',
-    'map_image',
-    'mapImage',
+  ]))
+  if (storedStreetView) return httpsOnly(storedStreetView)
+
+  const { lat, lng } = recordCoords(record)
+  if (lat !== null && lng !== null) return buildStreetViewUrl(null, lat, lng)
+  if (address && address !== 'Property Unknown') return buildStreetViewUrl(address) || null
+  return null
+}
+
+/** Aerial/roadmap imagery, used only when Street View reports no panorama. */
+const resolvePropertyFallbackImage = (
+  record: Record<string, unknown>,
+  address: string,
+): string | null => {
+  const stored = text(firstDefined(record, [
     'satellite_image',
     'satelliteImage',
+    'map_image',
+    'mapImage',
   ]))
-  if (direct) return direct.replace(/^http:\/\//i, 'https://')
-  if (address && address !== 'Property Unknown') {
-    return buildStreetViewUrl(address) || null
-  }
+  const { lat, lng } = recordCoords(record)
+  // A stored static map is only trustworthy when we cannot derive one ourselves —
+  // see the Rocky Mount case above.
+  if (lat !== null && lng !== null) return buildAerialViewUrl(null, lat, lng)
+  if (stored) return httpsOnly(stored)
+  if (address && address !== 'Property Unknown') return buildAerialViewUrl(address) || null
   return null
 }
 
@@ -167,6 +215,7 @@ export const buildSellerMapCardViewModel = (record: Record<string, unknown>): Se
     property: {
       address,
       imageUrl: resolvePropertyImage(record, address),
+      fallbackImageUrl: resolvePropertyFallbackImage(record, address),
       assetType: presentation.label,
       assetClassKey: presentation.key,
       units: assetInput.units,
