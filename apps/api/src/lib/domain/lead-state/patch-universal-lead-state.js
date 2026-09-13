@@ -12,6 +12,10 @@ import {
   UNIVERSAL_LEAD_STATE_PATCH_FIELDS,
 } from '@/lib/domain/lead-state/universal-lead-state-registry.js';
 import { validateLifecycleTransition } from '@/lib/domain/lead-state/seller-lifecycle-stage-registry.js';
+import {
+  resolveProjectedLifecycleStage,
+  PROJECTION_GUARDS,
+} from '@/lib/domain/lead-state/project-acquisition-stage.js';
 import { isCanonicalThreadKey } from '@/lib/cockpit/cockpit-service.js';
 
 function clean(value) {
@@ -43,6 +47,31 @@ const TRACKED_FIELDS = new Set([
   'manual_stage_lock',
   'manual_temperature_lock',
 ]);
+
+/**
+ * The canonical acquisition stage for a thread.
+ *
+ * `acquisition_opportunities.primary_thread_key` is stored in both the E.164
+ * and the bare-digit spelling depending on when the row was written, so both
+ * are matched — a miss here would silently disable the fence.
+ */
+async function fetchCanonicalAcquisitionStage(supabase, threadKey) {
+  try {
+    const bare = String(threadKey || '').replace(/^\+1/, '');
+    const candidates = [...new Set([threadKey, bare].filter(Boolean))];
+    const { data, error } = await supabase
+      .from('acquisition_opportunities')
+      .select('acquisition_stage, updated_at')
+      .in('primary_thread_key', candidates)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) return null;
+    const row = Array.isArray(data) ? data[0] : data;
+    return row?.acquisition_stage || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchCurrentLeadState(supabase, threadKey) {
   const { data, error } = await supabase
@@ -354,6 +383,16 @@ export async function patchUniversalLeadState({
 
   const previous = await fetchCurrentLeadState(supabase, key);
 
+  // The canonical acquisition stage this projection must not outrun. Read once,
+  // only when a lifecycle_stage write is actually in flight, and only when the
+  // caller has not already supplied it. A failed read leaves it null, which
+  // simply means "nothing to clamp against" — the fence never blocks a write it
+  // cannot justify.
+  let canonicalAcquisitionStage = clean(meta.canonical_acquisition_stage) || null;
+  if (!canonicalAcquisitionStage && 'lifecycle_stage' in canonicalPatch) {
+    canonicalAcquisitionStage = await fetchCanonicalAcquisitionStage(supabase, key);
+  }
+
   // Lifecycle stage writes pass the single registry transition validator:
   // automated writers (autopilot/AI/system) can only hold or advance, never
   // override an operator's manual stage lock, and can only enter the
@@ -379,15 +418,44 @@ export async function patchUniversalLeadState({
       delete canonicalPatch.lifecycle_stage;
       stageGuards.push('manual_stage_lock_blocked_stage_write');
     } else {
-      const validation = validateLifecycleTransition({
-        from: previous?.lifecycle_stage || null,
-        to: canonicalPatch.lifecycle_stage,
-        change_source: changeSource,
-        authority_evidence: meta.authority_evidence || null,
+      // ── PROJECTION FENCE ───────────────────────────────────────────────
+      // `inbox_thread_state.lifecycle_stage` mirrors the canonical
+      // acquisition stage; it may trail it, never lead it. Enforced at this
+      // single writer so every caller is fenced rather than one repaired path.
+      //
+      // Thread +19549807015 is why: a misparsed rent promoted the projection
+      // asking_price -> formal_contract, and when the canonical opportunity
+      // was corrected back to asking_price the projection could not follow —
+      // the monotonic guard below refuses automated regressions, so the
+      // overshoot became permanent. Clamping stops the overshoot; the explicit
+      // reconciliation path repairs one that already happened.
+      const projection = resolveProjectedLifecycleStage({
+        requested: canonicalPatch.lifecycle_stage,
+        canonical: canonicalAcquisitionStage,
+        reconciliation: meta.projection_reconciliation === true,
       });
-      if (!validation.allowed) {
-        delete canonicalPatch.lifecycle_stage;
-        stageGuards.push(validation.reason);
+      if (projection.changed && projection.stage) {
+        canonicalPatch.lifecycle_stage = projection.stage;
+        stageGuards.push(projection.guard);
+      }
+
+      // An administrative reconciliation writes exactly the canonical stage in
+      // either direction. It is a correction of a mirror, not a seller-stage
+      // regression, so it bypasses the monotonic guard — and deliberately does
+      // NOT take a manual stage lock, which would freeze the projection.
+      if (meta.projection_reconciliation === true && canonicalAcquisitionStage) {
+        stageGuards.push(PROJECTION_GUARDS.RECONCILED);
+      } else {
+        const validation = validateLifecycleTransition({
+          from: previous?.lifecycle_stage || null,
+          to: canonicalPatch.lifecycle_stage,
+          change_source: changeSource,
+          authority_evidence: meta.authority_evidence || null,
+        });
+        if (!validation.allowed) {
+          delete canonicalPatch.lifecycle_stage;
+          stageGuards.push(validation.reason);
+        }
       }
     }
   }
