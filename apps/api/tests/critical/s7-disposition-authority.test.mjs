@@ -6,7 +6,7 @@ import {
   BUYER_FORBIDDEN_FIELDS,
   DISPOSITION_DENIALS,
   POF_STATES,
-  authorizeDisposition,
+  authorizeDispositionPreparation,
   buildDispositionHandoff,
   projectBuyerFacingDeal,
   resolveBuyerEngagementStage,
@@ -51,8 +51,17 @@ const ACCEPTED_OFFER = Object.freeze({
   metadata: {},
 })
 
-const gate = (over = {}) => authorizeDisposition({
+const gate = (over = {}) => authorizeDispositionPreparation({
   opportunity: OPPORTUNITY, acceptedOffer: ACCEPTED_OFFER, ...over,
+})
+
+/** A seller contract that actually executed, with traceable evidence. */
+const EXECUTED_CASE = Object.freeze({
+  closing_case_id: 'closing:opp-A',
+  contract_status: 'fully_executed',
+  universal_stage: 'disposition',
+  docusign_envelope_id: 'env-1',
+  contract_signed_date: '2026-09-13T00:00:00.000Z',
 })
 
 // ── Entry gate ────────────────────────────────────────────────────────────
@@ -113,7 +122,7 @@ test('S7 STORES: a thread projection AHEAD of canonical cannot create S7', () =>
 
 test('S7 STORES: the gate takes no thread-projection input at all', () => {
   // Passing one changes nothing — it is not a parameter.
-  const withProjection = authorizeDisposition({
+  const withProjection = authorizeDispositionPreparation({
     opportunity: { ...OPPORTUNITY, acquisition_stage: 'asking_price' },
     acceptedOffer: ACCEPTED_OFFER,
     threadLifecycleStage: 'disposition',
@@ -264,7 +273,7 @@ test('S7 → S8: the handoff carries the acquisition basis without seller messag
   const handoff = buildDispositionHandoff({
     opportunity: OPPORTUNITY,
     acceptedOffer: ACCEPTED_OFFER,
-    closingCase: { closing_case_id: 'closing:opp-A', contract_status: 'draft', universal_stage: 'formal_contract' },
+    closingCase: EXECUTED_CASE,
     buyerOffers: [
       { id: 'boffer-1', buyer_id: 'buyer-1', buyer_name: 'Acme', price: 79_000, earnest_money: 5_000,
         submitted_at: '2026-09-13T00:00:00Z', pof: { document_present: true } },
@@ -295,7 +304,9 @@ test('S7 → S8: an unauthorized deal produces no handoff at all', () => {
 })
 
 test('S7 → S8: economics absent reads as decision-engine-not-run, never a legacy number', () => {
-  const handoff = buildDispositionHandoff({ opportunity: OPPORTUNITY, acceptedOffer: ACCEPTED_OFFER })
+  const handoff = buildDispositionHandoff({
+    opportunity: OPPORTUNITY, acceptedOffer: ACCEPTED_OFFER, closingCase: EXECUTED_CASE,
+  })
   assert.equal(handoff.economics.source, 'decision_engine_not_run')
   assert.equal(handoff.economics.valuation_mid, null)
 })
@@ -304,6 +315,7 @@ test('S7 → S8: many buyer offers still select nobody', () => {
   const handoff = buildDispositionHandoff({
     opportunity: OPPORTUNITY,
     acceptedOffer: ACCEPTED_OFFER,
+    closingCase: EXECUTED_CASE,
     buyerOffers: Array.from({ length: 5 }, (_, i) => ({
       id: `boffer-${i}`, buyer_id: `buyer-${i}`, price: 70_000 + i * 1_000,
     })),

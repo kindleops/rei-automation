@@ -44,7 +44,15 @@ export const CLOSING_WORKFLOW_STEPS = Object.freeze({
     milestone_type: "contract_fully_executed",
     patch: {
       contract_status: "fully_executed",
-      universal_stage: "under_contract",
+      // SELLER contract execution is S7 disposition, NOT S8.
+      //
+      // This wrote `under_contract`, which in the canonical V2 model means
+      // "under contract with a SELECTED BUYER" -- a buyer-side commitment that
+      // has not happened. A fully executed SELLER contract is precisely what
+      // authorizes us to go find that buyer, so it opens disposition. Writing
+      // S8 here skipped disposition entirely and claimed a buyer commitment
+      // from a seller signature.
+      universal_stage: "disposition",
       closing_status: "title_pending",
     },
     seller_use_case: "contract_signed_confirmation",

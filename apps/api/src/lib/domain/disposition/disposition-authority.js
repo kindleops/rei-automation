@@ -26,17 +26,28 @@
 //     buyer-match / offer machinery in lib/domain/buyers is Podio-native, and
 //     Podio is dead in production.
 //   * `disposition_status` has ZERO writers anywhere in the codebase.
-//   * `advance-closing-workflow.js` goes formal_contract -> under_contract ->
-//     prepared_to_close -> closed and never produces 'disposition' at all. Its
-//     `under_contract` means "the SELLER contract is fully executed", which is
-//     NOT the canonical S8 meaning ("under contract / buyer selection"). That
-//     collision is reported, not silently redefined here.
+//   * Two writers mapped a fully executed SELLER contract to
+//     `universal_stage = under_contract` (advance-closing-workflow.js and
+//     reconcile-closing-case-from-envelope.js). Under the canonical V2 model
+//     `under_contract` is S8 — under contract with a SELECTED BUYER. A seller
+//     signature is not a buyer commitment, and that mapping skipped disposition
+//     entirely. Both now write `disposition`. Production carried ZERO
+//     `under_contract` rows anywhere (opportunities, closing cases, thread
+//     states, lead-state events, opportunity history), so the correction
+//     reinterprets no data.
 //   * Production: 0 opportunities at S7-S9, 0 closing cases at disposition, 0
 //     with a buyer, 0 with a disposition_status. 350 buyer_match_candidates
 //     across 23 runs — intelligence only, carrying no commitment.
 //
-// So S7 is an authority question, not a subsystem to build. This module decides
-// entry and pins the buyer ladder; it writes nothing and sends nothing.
+// TWO LEVELS, NOT ONE BOOLEAN
+//   Seller ACCEPTANCE authorizes contract preparation and internal work.
+//   Seller contract FULLY EXECUTED authorizes ACTIVE, buyer-facing disposition.
+//   Nothing external — no buyer SMS, email, publication or campaign — may
+//   happen in between. A verbal yes is not a signed contract, and marketing a
+//   deal we have not actually secured is the failure this separation prevents.
+//
+// This module decides entry and pins the buyer ladder; it writes nothing and
+// sends nothing.
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -61,7 +72,57 @@ const STAGE_ORDER = Object.freeze([
 const STAGE_RANK = new Map(STAGE_ORDER.map((s, i) => [s, i]));
 const FORMAL_CONTRACT_RANK = STAGE_RANK.get("formal_contract");
 
+/**
+ * Seller contract states, in the order the DocuSign reconciler produces them.
+ * `reconcile-closing-case-from-envelope.js` is the canonical source: the
+ * envelope id is the resolution key and the ladder is rank-gated so a status
+ * can never regress.
+ */
+export const SELLER_CONTRACT_STATES = Object.freeze({
+  TERMS_ACCEPTED: "terms_accepted",     // S6. No contract object yet.
+  DRAFT: "draft",                        // closing case created
+  SENT_FOR_SIGNATURE: "sent_for_signature",
+  VIEWED: "viewed",
+  SELLER_SIGNED: "seller_signed",        // ONE signer. Not executed.
+  BUYER_SIGNED: "buyer_signed",
+  FULLY_EXECUTED: "fully_executed",      // envelope Completed
+  DECLINED: "declined",
+  CANCELLED: "cancelled",
+});
+
+/** Only this state authorizes ACTIVE disposition. */
+const EXECUTED_CONTRACT_STATES = new Set([SELLER_CONTRACT_STATES.FULLY_EXECUTED]);
+
+/**
+ * Holds. Built from vocabulary that already exists on these rows rather than a
+ * new hold table: a paused/terminal opportunity, an approval that has not been
+ * granted, or a terminal contract state.
+ */
+export const DISPOSITION_HOLDS = Object.freeze({
+  OPPORTUNITY_PAUSED: "opportunity_paused",
+  OPPORTUNITY_TERMINAL: "opportunity_terminal",
+  APPROVAL_PENDING: "approval_pending",
+  CONTRACT_TERMINAL: "contract_terminal",
+  OPERATOR_HOLD: "operator_hold",
+});
+
+export const DISPOSITION_STATES = Object.freeze({
+  /** S6. Internal work only — no buyer may learn this deal exists. */
+  PREPARATION: "preparation",
+  /** Executed and clear. S7, buyer-facing activity permitted. */
+  ACTIVE: "active",
+  /** Executed but blocked. S7-ready, nothing external. */
+  HELD: "held",
+  /** Seller deal invalidated. No new buyer activity. */
+  CANCELLED: "cancelled",
+  /** Not authorized at all. */
+  NOT_AUTHORIZED: "not_authorized",
+});
+
 export const DISPOSITION_DENIALS = Object.freeze({
+  SELLER_CONTRACT_NOT_EXECUTED: "seller_contract_not_fully_executed",
+  NO_CLOSING_CASE: "no_closing_case",
+  NO_EXECUTION_EVIDENCE: "no_contract_execution_evidence",
   NO_OPPORTUNITY: "no_opportunity",
   STAGE_BELOW_FORMAL_CONTRACT: "canonical_stage_below_formal_contract",
   NO_ACCEPTED_OFFER: "no_accepted_seller_offer",
@@ -96,7 +157,7 @@ const TERMINAL_OPPORTUNITY_STATUSES = new Set(["lost", "dead", "suppressed", "ar
  * @param {object} [args.closingCase]  existing closing_cases row, if any
  * @returns {{authorized, reason, evidence, disposition_case_id}}
  */
-export function authorizeDisposition({
+export function authorizeDispositionPreparation({
   opportunity = null,
   acceptedOffer = null,
   closingCase = null,
@@ -169,6 +230,9 @@ export function authorizeDisposition({
   return {
     authorized: true,
     reason: "seller_deal_contract_authorized",
+    /** Internal work only. Externally silent until the contract executes. */
+    disposition_state: DISPOSITION_STATES.PREPARATION,
+    external_activity_permitted: false,
     evidence: {
       canonical_stage: stage,
       accepted_offer_id: acceptedOffer.offer_id,
@@ -178,6 +242,137 @@ export function authorizeDisposition({
     // Deterministic and already unique per opportunity in the database, so a
     // repeated activation converges on the same row instead of a second one.
     disposition_case_id: resolveDispositionCaseId(opportunity.id),
+  };
+}
+
+/**
+ * Holds that block ACTIVE disposition without invalidating the deal.
+ *
+ * Built from vocabulary already on these rows. A hold is not a failure state:
+ * the deal is S7-ready and simply stays internally silent until it clears.
+ */
+export function resolveDispositionHolds({ opportunity = null, closingCase = null } = {}) {
+  const holds = [];
+  const status = clean(opportunity?.opportunity_status).toLowerCase();
+  if (status === "paused") holds.push(DISPOSITION_HOLDS.OPPORTUNITY_PAUSED);
+  if (TERMINAL_OPPORTUNITY_STATUSES.has(status)) holds.push(DISPOSITION_HOLDS.OPPORTUNITY_TERMINAL);
+
+  const approval = clean(opportunity?.approval_state).toLowerCase();
+  if (approval && !["approved", "auto_approved", "not_required"].includes(approval)) {
+    holds.push(DISPOSITION_HOLDS.APPROVAL_PENDING);
+  }
+  if (opportunity?.operator_hold === true || opportunity?.legal_hold === true) {
+    holds.push(DISPOSITION_HOLDS.OPERATOR_HOLD);
+  }
+
+  const contractStatus = clean(closingCase?.contract_status).toLowerCase();
+  if (contractStatus === "declined" || VOIDING_CONTRACT_STATUSES.has(contractStatus)) {
+    holds.push(DISPOSITION_HOLDS.CONTRACT_TERMINAL);
+  }
+  return holds;
+}
+
+/**
+ * Is the SELLER contract fully executed, on evidence rather than a flag?
+ *
+ * A UI toggle is not enough, and none of these is execution: contract sent,
+ * one signer signed, the seller asked for a contract, the seller accepted
+ * terms, a closing case exists. The canonical source is the DocuSign envelope
+ * reconciled by reconcile-closing-case-from-envelope.js — the envelope id is
+ * the resolution key and `Completed` is the only status that produces
+ * `fully_executed`, on a rank ladder that cannot regress.
+ */
+export function resolveSellerContractExecution({ closingCase = null, executionEvidence = null } = {}) {
+  if (!closingCase) {
+    return { executed: false, reason: DISPOSITION_DENIALS.NO_CLOSING_CASE, evidence: null };
+  }
+  const status = clean(closingCase.contract_status).toLowerCase();
+  if (!EXECUTED_CONTRACT_STATES.has(status)) {
+    return {
+      executed: false,
+      reason: DISPOSITION_DENIALS.SELLER_CONTRACT_NOT_EXECUTED,
+      evidence: { contract_status: status || null },
+    };
+  }
+
+  // `fully_executed` must be traceable to the event that produced it.
+  const envelopeId = clean(closingCase.docusign_envelope_id) || clean(executionEvidence?.envelope_id);
+  const signedAt = iso(closingCase.contract_signed_date) || iso(executionEvidence?.completed_at);
+  const milestone = clean(executionEvidence?.milestone_type);
+  if (!envelopeId && !signedAt && milestone !== "contract_fully_executed") {
+    return {
+      executed: false,
+      reason: DISPOSITION_DENIALS.NO_EXECUTION_EVIDENCE,
+      evidence: { contract_status: status },
+    };
+  }
+
+  return {
+    executed: true,
+    reason: "seller_contract_fully_executed",
+    evidence: {
+      contract_status: status,
+      docusign_envelope_id: envelopeId || null,
+      contract_signed_date: signedAt,
+      execution_milestone: milestone || null,
+    },
+  };
+}
+
+/**
+ * ACTIVE disposition: buyer-facing activity is permitted.
+ *
+ * Requires everything preparation requires, PLUS a fully executed seller
+ * contract, PLUS no hold. Activation is automatic once those hold — a normal
+ * valid deal does not wait on an operator click — but a hold keeps it
+ * internally silent rather than letting it out.
+ */
+export function authorizeActiveDisposition({
+  opportunity = null,
+  acceptedOffer = null,
+  closingCase = null,
+  executionEvidence = null,
+} = {}) {
+  const preparation = authorizeDispositionPreparation({ opportunity, acceptedOffer, closingCase });
+  if (!preparation.authorized) {
+    return { ...preparation, disposition_state: DISPOSITION_STATES.NOT_AUTHORIZED, external_activity_permitted: false };
+  }
+
+  const execution = resolveSellerContractExecution({ closingCase, executionEvidence });
+  if (!execution.executed) {
+    return {
+      authorized: false,
+      reason: execution.reason,
+      disposition_state: DISPOSITION_STATES.PREPARATION,
+      external_activity_permitted: false,
+      evidence: { ...preparation.evidence, ...(execution.evidence || {}) },
+      disposition_case_id: preparation.disposition_case_id,
+    };
+  }
+
+  const holds = resolveDispositionHolds({ opportunity, closingCase });
+  if (holds.length) {
+    return {
+      authorized: false,
+      reason: "disposition_held",
+      disposition_state: DISPOSITION_STATES.HELD,
+      external_activity_permitted: false,
+      holds,
+      evidence: { ...preparation.evidence, ...execution.evidence },
+      disposition_case_id: preparation.disposition_case_id,
+    };
+  }
+
+  return {
+    authorized: true,
+    reason: "seller_contract_fully_executed",
+    disposition_state: DISPOSITION_STATES.ACTIVE,
+    external_activity_permitted: true,
+    holds: [],
+    /** S7. Never `under_contract`, which is S8 buyer-side commitment. */
+    canonical_stage: "disposition",
+    evidence: { ...preparation.evidence, ...execution.evidence },
+    disposition_case_id: preparation.disposition_case_id,
   };
 }
 
@@ -331,11 +526,20 @@ export function buildDispositionHandoff({
   opportunity = null,
   acceptedOffer = null,
   closingCase = null,
+  executionEvidence = null,
   buyerOffers = [],
   economics = null,
 } = {}) {
-  const authorization = authorizeDisposition({ opportunity, acceptedOffer, closingCase });
-  if (!authorization.authorized) return { ok: false, reason: authorization.reason, evidence: authorization.evidence };
+  const authorization = authorizeActiveDisposition({ opportunity, acceptedOffer, closingCase, executionEvidence });
+  if (!authorization.authorized) {
+    return {
+      ok: false,
+      reason: authorization.reason,
+      disposition_state: authorization.disposition_state,
+      holds: authorization.holds ?? [],
+      evidence: authorization.evidence,
+    };
+  }
 
   const offers = (Array.isArray(buyerOffers) ? buyerOffers : []).map((offer) => ({
     buyer_offer_id: clean(offer.id ?? offer.buyer_offer_id) || null,
@@ -387,8 +591,11 @@ export function buildDispositionHandoff({
     buyer_offer_count: offers.length,
     /** No buyer is selected in S7, by construction. */
     selected_buyer_id: null,
-    disposition_state: "active",
+    seller_contract_status: SELLER_CONTRACT_STATES.FULLY_EXECUTED,
+    seller_contract_execution: authorization.evidence,
+    disposition_status: DISPOSITION_STATES.ACTIVE,
+    disposition_state: DISPOSITION_STATES.ACTIVE,
   };
 }
 
-export default authorizeDisposition;
+export default authorizeDispositionPreparation;

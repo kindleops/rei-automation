@@ -41,7 +41,10 @@ const STATUS_MAP = Object.freeze({
   Delivered: { contract_status: "viewed", rank: 3 },
   "Seller Signed": { contract_status: "seller_signed", rank: 4 },
   "Buyer Signed": { contract_status: "buyer_signed", rank: 5 },
-  Completed: { contract_status: "fully_executed", rank: 6, universal_stage: "under_contract" },
+  // A completed envelope is a fully executed SELLER contract, which authorizes
+  // S7 disposition. `under_contract` is reserved for S8 buyer-side commitment
+  // and cannot be produced by a seller signature.
+  Completed: { contract_status: "fully_executed", rank: 6, universal_stage: "disposition" },
   // Terminal negatives are always applied (rank 0 bypasses the monotonic gate):
   // a void/decline is authoritative regardless of prior progress.
   Declined: { contract_status: "declined", rank: 0, terminal: true },

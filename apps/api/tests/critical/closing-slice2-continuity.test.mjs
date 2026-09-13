@@ -204,7 +204,11 @@ test("a fully-executed signature advances the case and records a milestone", asy
   assert.equal(supabase._state.milestones.length, 1);
   const c = supabase._state.cases[0];
   assert.equal(c.contract_status, "fully_executed");
-  assert.equal(c.universal_stage, "under_contract");
+  // SELLER contract execution is S7 disposition, not S8. `under_contract` in
+  // the canonical V2 model means "under contract with a SELECTED BUYER", a
+  // buyer-side commitment a seller signature cannot create. This test pinned
+  // the old overload.
+  assert.equal(c.universal_stage, "disposition");
   assert.equal(c.closing_status, "title_pending");
 });
 

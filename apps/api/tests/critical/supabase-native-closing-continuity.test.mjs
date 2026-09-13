@@ -427,7 +427,11 @@ test("webhook resolves the closing case BY ENVELOPE ID and advances Supabase sta
   assert.equal(r.normalized_status, "Completed");
   const c = supabase._state.cases[0];
   assert.equal(c.contract_status, "fully_executed", "completed signature advances Supabase state");
-  assert.equal(c.universal_stage, "under_contract");
+  // SELLER contract execution is S7 disposition, not S8. `under_contract` in
+  // the canonical V2 model means "under contract with a SELECTED BUYER", a
+  // buyer-side commitment a seller signature cannot create. This test pinned
+  // the old overload.
+  assert.equal(c.universal_stage, "disposition");
   assert.equal(c.contract_signed_date, "2026-08-28T15:00:00.000Z");
 });
 
