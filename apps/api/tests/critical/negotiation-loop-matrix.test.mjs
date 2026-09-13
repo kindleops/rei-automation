@@ -59,6 +59,28 @@ const ADE = Object.freeze({
   },
 });
 
+/**
+ * A state in which an offer HAS been presented to the seller.
+ *
+ * S6 authority: `terms_accepted` is the S5 -> S6 milestone, and it now requires
+ * that the seller was actually shown a number. These tests used
+ * `strategy_decision: { strategy: "accept_seller_terms" }` as the acceptance
+ * trigger, which is OUR decision that the ask is affordable -- the exact
+ * fabrication that put all three production opportunities at formal_contract
+ * with `offers_made: 0`. The scenarios they cover (price lock, duplicate
+ * suppression, event derivation, post-lock routing) are all still real; they
+ * just need a presented offer and a SELLER acceptance to reach them.
+ */
+function presentedOfferState(state, amount) {
+  return {
+    ...state,
+    latest_offer: amount,
+    offers_made: [{ amount, at: "2026-07-01T12:00:00.000Z", within_authority: true }],
+  };
+}
+
+const SELLER_ACCEPTS = { engine_decision: { outcome: "seller_accepts_offer" } };
+
 function stateWith({ ask = null, ade = ADE, extra = {} } = {}) {
   const base = applyNegotiationTurn(null, {
     price_signal: ask
@@ -338,13 +360,14 @@ test("§2: seller lowering price appends history and records concession — neve
 });
 
 test("§14: accepted terms lock the economics — accepted price never above seller ask", () => {
-  const state = stateWith({ ask: 85000 });
+  // The offer PRESENTED to this seller was their own ask of 85,000.
+  const state = presentedOfferState(stateWith({ ask: 85000 }), 85000);
   const accepted = applyNegotiationTurn(state, {
-    strategy_decision: { strategy: "accept_seller_terms" },
+    ...SELLER_ACCEPTS,
     now: "2026-07-02T00:00:00.000Z",
   });
   assert.equal(accepted.terms_accepted, true);
-  assert.equal(accepted.accepted_price, 85000, "must accept the ask, not our 90k ceiling or 80k+recommendation");
+  assert.equal(accepted.accepted_price, 85000, "must accept the presented 85k, not our 90k ceiling or 80k recommendation");
   assert.ok(accepted.terms_accepted_at);
   // Further price movement is ignored after lock.
   const afterLock = applyNegotiationTurn(accepted, {
@@ -356,11 +379,32 @@ test("§14: accepted terms lock the economics — accepted price never above sel
 });
 
 test("§14: duplicate acceptance is suppressed", () => {
-  const state = stateWith({ ask: 85000 });
-  const once = applyNegotiationTurn(state, { strategy_decision: { strategy: "accept_seller_terms" } });
-  const twice = applyNegotiationTurn(once, { strategy_decision: { strategy: "accept_seller_terms" } });
+  const state = presentedOfferState(stateWith({ ask: 85000 }), 85000);
+  const once = applyNegotiationTurn(state, SELLER_ACCEPTS);
+  const twice = applyNegotiationTurn(once, SELLER_ACCEPTS);
   assert.equal(twice.duplicate_acceptance_suppressed, true);
   assert.equal(twice.terms_accepted_at, once.terms_accepted_at);
+});
+
+test("S6: deciding the ask is affordable is NOT seller acceptance", () => {
+  // The production shape: ask within authority, nothing presented, router
+  // selects accept_seller_terms. This used to lock terms_accepted and freeze
+  // accepted_price from the ask -- with no offer ever shown to the seller.
+  const state = stateWith({ ask: 85000 });
+  const next = applyNegotiationTurn(state, {
+    strategy_decision: { strategy: "accept_seller_terms" },
+    now: "2026-07-02T00:00:00.000Z",
+  });
+  assert.notEqual(next.terms_accepted, true);
+  assert.equal(next.accepted_price ?? null, null);
+  assert.equal(next.ask_within_authority_acknowledged, true, "the router's intent is recorded, not promoted");
+});
+
+test("S6: a seller acceptance with nothing presented is blocked and explained", () => {
+  const state = stateWith({ ask: 85000 });
+  const next = applyNegotiationTurn(state, SELLER_ACCEPTS);
+  assert.notEqual(next.terms_accepted, true);
+  assert.equal(next.acceptance_blocked_reason, "no_presented_offer");
 });
 
 test("§14: contract readiness requires the minimum contract facts", () => {
@@ -383,8 +427,8 @@ test("§14: contract readiness requires the minimum contract facts", () => {
 });
 
 test("§7: locked terms route to contract-information collection, not price talk", () => {
-  const state = stateWith({ ask: 85000 });
-  const locked = applyNegotiationTurn(state, { strategy_decision: { strategy: "accept_seller_terms" } });
+  const state = presentedOfferState(stateWith({ ask: 85000 }), 85000);
+  const locked = applyNegotiationTurn(state, SELLER_ACCEPTS);
   const d = routeNegotiationStrategy({ zone: zoneFor(locked, POLICY), state: locked, policy: POLICY, sufficiency: { sufficient: true } });
   assert.equal(d.strategy, S.ACCEPT_SELLER_TERMS);
   assert.equal(d.template_use_case, "contract_information_request");
@@ -549,8 +593,9 @@ test("stage monotonicity: S5 price update never regresses to S3", () => {
 // ─── §16 event derivation ───────────────────────────────────────────────────
 
 test("§16: one accepted-terms turn derives capture, strategy, acceptance and contract events", () => {
-  const prior = stateWith({ ask: 85000 });
+  const prior = presentedOfferState(stateWith({ ask: 85000 }), 85000);
   const next = applyNegotiationTurn(prior, {
+    ...SELLER_ACCEPTS,
     strategy_decision: { strategy: "accept_seller_terms", reason_code: "ASK_WITHIN_AUTHORITY_CONDITIONAL_ACCEPT" },
   });
   const events = deriveNegotiationWorkflowEvents({

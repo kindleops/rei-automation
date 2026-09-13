@@ -374,6 +374,11 @@ export function classifyStage5Negotiation(input = {}) {
   const now = context?.now ?? null;
   const creative_allowed = Boolean(context?.creative_allowed);
   const should_reveal_offer = Boolean(input.should_reveal_offer ?? context?.should_reveal_offer);
+  // Has the seller actually BEEN SHOWN a number? Acceptance and contract
+  // readiness both require it; see resolveOutcomeAndRoute.
+  const offer_presented = Boolean(
+    input.offer_presented ?? context?.offer_presented ?? context?.has_revealed_offer,
+  );
 
   // ── Economics snapshot ───────────────────────────────────────────────────
   const recommended_cash_offer = numberOrNull(input.recommended_cash_offer);
@@ -414,6 +419,7 @@ export function classifyStage5Negotiation(input = {}) {
   const resolved = resolveOutcomeAndRoute({
     flags, has_counter, counter, negotiation_band, recommended_cash_offer,
     max_allowable_offer, creative_allowed, should_reveal_offer, underwriting_ready,
+    offer_presented,
   });
   const { outcome, route, events: eventTypes } = resolved;
 
@@ -489,12 +495,28 @@ function resolveOutcomeAndRoute(ctx) {
   const {
     flags, has_counter, counter, negotiation_band, recommended_cash_offer,
     max_allowable_offer, creative_allowed, should_reveal_offer, underwriting_ready,
+    offer_presented,
   } = ctx;
   const O = STAGE5_OUTCOMES;
   const B = NEGOTIATION_BANDS;
 
-  // 1. Contract request → Stage 6.
+  // 1. Contract request.
+  //
+  // A request for paperwork is NOT agreement to terms: "send me the contract so
+  // I can look at it" is a seller doing diligence. It only reaches the S6 route
+  // once a number has actually been presented -- and even then the S5 -> S6
+  // milestone is `terms_accepted`, which only seller-acceptance-authority may
+  // set. With nothing presented this stays an S5 offer reveal, which is the
+  // truthful next move: show them the number they are asking to paper.
   if (flags.contract) {
+    if (!offer_presented) {
+      return {
+        outcome: O.SELLER_REQUESTS_CONTRACT,
+        route: offerRevealRoute(),
+        events: [],
+        contract_request_without_presented_offer: true,
+      };
+    }
     return { outcome: O.SELLER_REQUESTS_CONTRACT, route: readyForContractRoute(), events: [EV.READY_FOR_CONTRACT] };
   }
   // 2. Proof of funds.
@@ -514,7 +536,23 @@ function resolveOutcomeAndRoute(ctx) {
     return { outcome: O.SELLER_NEEDS_TIME, route: followUpRoute("timing"), events: [] };
   }
   // 6. Acceptance (no counter amount).
+  //
+  // `flags.accept` is a substring scan over ACCEPT_PHRASES, so "sounds good,
+  // what would you offer?" matches "sounds good", "deal with it" matches
+  // "deal", and "I accepted another offer" matches "accepted". Routing is a
+  // cheap place for that; authorizing a contract is not. An acceptance outcome
+  // now requires that a number was presented, and the real S5 -> S6 decision
+  // belongs to seller-acceptance-authority.js, which applies the negation,
+  // interrogative, third-party and deferral filters this flag cannot.
   if (flags.accept && !has_counter) {
+    if (!offer_presented) {
+      return {
+        outcome: O.SELLER_ACCEPTS_OFFER,
+        route: offerRevealRoute(),
+        events: [],
+        acceptance_without_presented_offer: true,
+      };
+    }
     return { outcome: O.SELLER_ACCEPTS_OFFER, route: readyForContractRoute(), events: [EV.SELLER_ACCEPTED_OFFER, EV.READY_FOR_CONTRACT] };
   }
   // 7. Counter offer.

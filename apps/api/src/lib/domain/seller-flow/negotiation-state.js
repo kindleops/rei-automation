@@ -434,11 +434,40 @@ export function applyNegotiationTurn(previous, {
   }
 
   // ── 7. Accepted-terms lock (spec §14) ───────────────────────────────────
-  const acceptanceSignal = Boolean(
-    strategy_decision?.strategy === "accept_seller_terms" ||
-      transition?.workflow_event_types?.includes("SELLER_ACCEPTED_OFFER") ||
+  //
+  // S6 AUTHORITY. `terms_accepted` is the S5 -> S6 milestone, so whatever sets
+  // it authorizes formal contract. Two of the three signals that used to set it
+  // were not seller acceptance at all:
+  //
+  //   * `strategy === "accept_seller_terms"` is OUR economic decision that the
+  //     seller's ask is affordable (required_facts: ["ask_within_authority"]).
+  //     It fires in exactly the favorable-ask case -- ask 70k against 80k of
+  //     authority -- and recorded the SELLER as having accepted. All three
+  //     production opportunities at formal_contract carry basis
+  //     `we_accepted_seller_ask` with `offers_made: 0`; one of them froze
+  //     accepted_price = 331, a known corrupt extraction, as a contract price.
+  //     Deciding we can afford their number is a reason to PRESENT an offer at
+  //     it, never a substitute for them agreeing.
+  //
+  //   * a bare acceptance outcome with nothing presented. `hasRevealedOffer`
+  //     is the existing primitive for "the seller has actually been shown a
+  //     number"; without one there is nothing to accept.
+  //
+  // favorable economics != seller acceptance.
+  const presentedOffer = hasRevealedOffer(next);
+  const sellerAcceptanceSignal = Boolean(
+    transition?.workflow_event_types?.includes("SELLER_ACCEPTED_OFFER") ||
       engine_decision?.outcome === "seller_accepts_offer"
   );
+  const acceptanceSignal = presentedOffer && sellerAcceptanceSignal;
+  if (sellerAcceptanceSignal && !presentedOffer) {
+    next.acceptance_blocked_reason = "no_presented_offer";
+  }
+  if (strategy_decision?.strategy === "accept_seller_terms" && !next.terms_accepted) {
+    // Recorded so the router's intent is not lost: we are willing to transact
+    // at the ask. It is a proposal to present, not an acceptance.
+    next.ask_within_authority_acknowledged = true;
+  }
   if (acceptanceSignal) {
     if (next.terms_accepted) {
       // Duplicate acceptance: economics are already locked — suppress.
@@ -450,13 +479,17 @@ export function applyNegotiationTurn(previous, {
       // Accepted price: when the seller accepts OUR offer it is that offer;
       // when WE accept the seller's ask it is their ask — never more than the
       // seller requested, never above the ceiling.
+      // The accepted price is the PRESENTED one. Deriving it from the ask was
+      // how a seller's unconfirmed number -- including the corrupt 331 --
+      // became a frozen contract price. `presentedOffer` is already proven
+      // above, so latestOffer is the agreed figure; the ask legs remain only
+      // for a seller who explicitly accepted at their own number after we
+      // presented it, which is the same presented value.
       let accepted = null;
-      if (engine_decision?.outcome === "seller_accepts_offer" && latestOffer !== null) {
+      if (latestOffer !== null) {
         accepted = latestOffer;
       } else if (ask !== null) {
         accepted = ceiling !== null ? Math.min(ask, ceiling) : ask;
-      } else if (latestOffer !== null) {
-        accepted = latestOffer;
       }
       if (accepted !== null) {
         next.terms_accepted = true;

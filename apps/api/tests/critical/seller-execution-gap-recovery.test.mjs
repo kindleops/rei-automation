@@ -13,6 +13,10 @@ function makeFakeSupabase(seed = {}) {
     acquisition_opportunities: seed.acquisition_opportunities || [],
     send_queue: seed.send_queue || [],
     message_events: seed.message_events || [],
+    // The durable offer ledger. Unseeded tables fall through to `other` (an
+    // empty array), so without this the S6 accepted-offer check would read
+    // empty for every fixture and no repair could ever be proven.
+    seller_offers: seed.seller_offers || [],
     other: [],
   };
 
@@ -128,6 +132,23 @@ test("accepted terms without contract advances the deal and flags review", async
         metadata: { negotiation_state: { terms_accepted: true, accepted_price: 87500 } },
       },
     ],
+    // S6 authority: a repair may only advance to formal_contract when a durable
+    // ACCEPTED offer exists AND was presented. Without this row the sweep
+    // inherited whatever set terms_accepted -- including our own "their ask is
+    // affordable" decision, which is how all three production opportunities
+    // reached formal_contract with zero backing offers.
+    seller_offers: [
+      {
+        offer_id: "offer:opp-2:v1",
+        opportunity_id: "opp-2",
+        offer_version: 1,
+        status: "accepted",
+        purchase_price: 87500,
+        terms_hash: "hash-1",
+        sent_at: "2026-06-30T00:00:00.000Z",
+        accepted_at: "2026-07-01T00:00:00.000Z",
+      },
+    ],
     inbox_thread_state: [
       { thread_key: "+13125550111", lifecycle_stage: "offer", operational_status: "active_communication", updated_at: OLD, is_archived: false },
     ],
@@ -139,6 +160,32 @@ test("accepted terms without contract advances the deal and flags review", async
   assert.equal(supabase._state.acquisition_opportunities[0].acquisition_stage, "formal_contract");
   assert.equal(supabase._state.inbox_thread_state[0].lifecycle_stage, "formal_contract");
   assert.equal(supabase._state.inbox_thread_state[0].next_action, "generate_contract");
+});
+
+test("S6: terms_accepted with NO durable accepted offer is not repaired to S6", async () => {
+  // The exact production shape: metadata says accepted, seller_offers is empty.
+  const supabase = makeFakeSupabase({
+    acquisition_opportunities: [
+      {
+        id: "opp-3",
+        primary_thread_key: "+13125550199",
+        acquisition_stage: "offer",
+        opportunity_status: "active",
+        version: 1,
+        metadata: { negotiation_state: { terms_accepted: true, accepted_price: 331 } },
+      },
+    ],
+    seller_offers: [],
+    inbox_thread_state: [
+      { thread_key: "+13125550199", lifecycle_stage: "offer", operational_status: "active_communication", updated_at: OLD, is_archived: false },
+    ],
+  });
+
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
+  const sweep = result.sweeps.find((s) => s.gap === "accepted_terms_without_contract");
+  assert.equal(sweep.repaired, 0, JSON.stringify(sweep));
+  assert.equal(supabase._state.acquisition_opportunities[0].acquisition_stage, "offer");
+  assert.ok(sweep.results.some((r) => r.reason === "no_accepted_offer"));
 });
 
 test("stale reply-pending follow-up is cancelled after a newer inbound", async () => {

@@ -286,6 +286,27 @@ async function recoverAcceptedTermsWithoutContract(supabase, { limit, dryRun }) 
       if ((lifecycleStageNumber(opp.acquisition_stage) || 1) >= 6) return; // healthy
       outcome.scanned += 1;
 
+      // S6 AUTHORITY. This sweep selects on metadata terms_accepted = true and
+      // advanced straight to formal_contract, so it inherited whatever set that
+      // flag -- including our own "their ask is affordable" decision. All three
+      // production opportunities at formal_contract have ZERO backing rows in
+      // seller_offers. A repair may only move a deal to S6 when a durable
+      // ACCEPTED offer exists, was presented, and belongs to this opportunity.
+      const { data: acceptedOffer } = await supabase
+        .from("seller_offers")
+        .select("offer_id,offer_version,terms_hash,purchase_price,sent_at,accepted_at,opportunity_id")
+        .eq("opportunity_id", opp.id)
+        .eq("status", "accepted")
+        .maybeSingle();
+      if (!acceptedOffer?.offer_id || !acceptedOffer.sent_at) {
+        outcome.results.push({
+          opportunity_id: opp.id,
+          ok: false,
+          reason: acceptedOffer?.offer_id ? "accepted_offer_never_presented" : "no_accepted_offer",
+        });
+        return;
+      }
+
       if (dryRun) {
         outcome.repaired += 1;
         outcome.results.push({ opportunity_id: opp.id, ok: true, dry_run: true });

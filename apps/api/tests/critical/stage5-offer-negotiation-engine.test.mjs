@@ -17,11 +17,19 @@ const FIXED_NOW = "2026-06-23T12:00:00.000Z";
 const RCO = 175000;
 const MAO = 185000;
 
+/**
+ * Stage 5 IS the offer stage, so the default fixture is a seller who has been
+ * shown a number. Acceptance and contract-readiness routing now require that:
+ * `flags.accept` is a substring scan, and letting it reach S6 with nothing
+ * presented is how "sounds good, what would you offer?" became an accepted
+ * offer. Individual tests override `offer_presented` to cover the other side.
+ */
 function run(message, overrides = {}) {
   return classifyStage5Negotiation({
     message,
     recommended_cash_offer: RCO,
     max_allowable_offer: MAO,
+    offer_presented: true,
     ...overrides,
     context: {
       now: FIXED_NOW,
@@ -43,6 +51,21 @@ test("seller accepts offer → ready_for_contract", () => {
   assert.equal(d.stage_code, "S6");
   assert.ok(has(d, EV.SELLER_ACCEPTED_OFFER));
   assert.ok(has(d, EV.READY_FOR_CONTRACT));
+});
+
+test("S6: acceptance language with NOTHING presented cannot reach S6", () => {
+  const d = run("I accept your offer", { offer_presented: false });
+  assert.equal(d.stage_code, "S5", "nothing was presented, so there is nothing to accept");
+  assert.ok(!has(d, EV.SELLER_ACCEPTED_OFFER));
+  assert.ok(!has(d, EV.READY_FOR_CONTRACT));
+});
+
+test("S6: a contract request with NOTHING presented stays at the offer reveal", () => {
+  const d = run("send me the contract", { offer_presented: false });
+  assert.equal(d.stage_code, "S5");
+  assert.ok(!has(d, EV.READY_FOR_CONTRACT));
+  // The truthful next move is to show them the number they want papered.
+  assert.equal(d.route, "offer_reveal");
 });
 
 test("seller rejects offer → SELLER_REJECTED_OFFER", () => {
