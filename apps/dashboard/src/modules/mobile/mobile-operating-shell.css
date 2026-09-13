@@ -47,6 +47,24 @@
   );
 }
 
+/* The DEV runtime-identity banner is fixed to the bottom edge at z-index 9999, which
+   placed it on top of the app dock and made the dock untappable in dev — Playwright
+   reported it "intercepts pointer events" on every rail click. It is dev-only so it
+   never shipped, but it blocked every manual and automated check of the dock.
+
+   Three corrections, all mobile-scoped:
+     bottom         lifted clear of the dock via the shared contract token, so it
+                    tracks the dock's real height instead of a copied constant
+     z-index        below the dock (160) and the app launcher (180), so shell surfaces
+                    are never cut in half by a diagnostic
+     pointer-events the banner has no interactive children, so it has no business
+                    consuming taps at all */
+html.is-mobile-layout .nx-dev-runtime-banner {
+  bottom: var(--nx-mobile-chrome-bottom, 0px) !important;
+  z-index: 150 !important;
+  pointer-events: none !important;
+}
+
 .nx-sr-only {
   position: absolute;
   width: 1px;

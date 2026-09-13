@@ -304,9 +304,13 @@ html.is-mobile-layout {
       opacity 240ms ease;
   }
 
+  /* Was a flat 120px — exactly one row of 60px cells plus the head. A wrapping track
+     would have been clipped to that first row, which is the same defect in a new place.
+     Capped in vh so a long pin list scrolls inside the panel rather than growing the
+     dock past the screen. */
   .nx-pinned-app-dock.is-docked .nx-pinned-app-dock__panel,
   .nx-pinned-app-dock.is-expanded .nx-pinned-app-dock__panel {
-    max-height: 120px;
+    max-height: min(232px, 30vh);
     opacity: 1;
   }
 
@@ -315,7 +319,7 @@ html.is-mobile-layout {
      Scoped to open phases so a collapsed dock can never pop the panel open. */
   .nx-pinned-app-dock.is-expanded .nx-pinned-app-dock__panel,
   .nx-pinned-app-dock.is-docked.is-reordering .nx-pinned-app-dock__panel {
-    max-height: 168px;
+    max-height: min(300px, 38vh);
   }
 
   .nx-pinned-app-dock__panel-head {
@@ -348,16 +352,27 @@ html.is-mobile-layout {
     cursor: pointer;
   }
 
+  /* The pinned track WRAPS.
+     It was `display:flex; flex-wrap:nowrap; overflow-x:auto` — one non-wrapping row.
+     With four pins that fits, but the dock exists to be customised: pin a fifth and
+     it scrolled off the right edge with no affordance saying so, which made the open
+     dock show fewer apps than the operator had actually put in it. Measured at 390px:
+     trackRows 1, scrollWidth 388 against a 364px client.
+
+     A wrapping grid shows every pinned app at once, which is the whole point of
+     opening the dock. auto-fill at 68px gives five columns at 390px and more on a
+     larger phone, without hard-coding a count. */
   .nx-pinned-app-dock__track {
     position: relative;
     z-index: 1;
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    justify-items: center;
+    align-items: start;
+    gap: 8px 4px;
     padding: 0 10px 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x proximity;
+    overflow-x: hidden;
+    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     transition: box-shadow 220ms ease;
@@ -402,8 +417,8 @@ html.is-mobile-layout {
   }
 
   .nx-pinned-app-dock__drop-slot {
-    flex: 0 0 auto;
-    min-width: 72px;
+    width: 100%;
+    min-width: 0;
     height: 58px;
     border-radius: 12px;
     border: 1px dashed rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.35);
@@ -434,12 +449,12 @@ html.is-mobile-layout {
     transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* Uniform cells in the dock track so labels truncate on a consistent grid.
-     The catalog sheet keeps its own grid sizing. */
+  /* The grid owns the column width now, so the cell fills its track instead of
+     pinning itself to 68px and overflowing a narrower column. */
   .nx-pinned-app-dock__track .nx-pinned-app-dock__app {
-    width: 68px;
-    min-width: 68px;
-    max-width: 68px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .nx-pinned-app-dock__app:active {

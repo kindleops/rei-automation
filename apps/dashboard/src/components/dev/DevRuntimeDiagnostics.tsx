@@ -99,6 +99,12 @@ export const DevRuntimeDiagnostics = () => {
   return (
     <div
       role="alert"
+      // The banner is fixed to bottom:0 with z-index 9999, which on a phone put it
+      // directly on top of the app dock and swallowed every tap on it — the dock was
+      // unusable in dev, and Playwright reported the banner "intercepts pointer events"
+      // on every rail click. The class lifts it clear of the dock on mobile using the
+      // shared safe-area contract token, so it tracks the dock's real height.
+      className="nx-dev-runtime-banner"
       data-testid="dev-runtime-banner"
       style={{
         position: 'fixed',

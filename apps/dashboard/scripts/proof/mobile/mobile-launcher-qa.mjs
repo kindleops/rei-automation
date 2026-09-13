@@ -23,8 +23,8 @@ const context = await browser.newContext({
 })
 await context.addInitScript((theme) => {
   try {
-    const raw = localStorage.getItem('nexus:settings')
-    localStorage.setItem('nexus:settings', JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), nexusTheme: theme }))
+    const raw = localStorage.getItem('nexus-settings')
+    localStorage.setItem('nexus-settings', JSON.stringify({ ...(raw ? JSON.parse(raw) : {}), nexusTheme: theme }))
   } catch { /* first run */ }
 }, THEME)
 

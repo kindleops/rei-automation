@@ -2052,18 +2052,35 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
    * Runs once, only when there is no context already, so it can never override
    * a live in-session selection or fight selectFromExternalContext.
    */
-  const locatorSeededRef = useRef(false)
+  /**
+   * Seeded PER ROUTE, not once per mount.
+   *
+   * This component backs /inbox, /conversation, /map, /pipeline, /calendar and
+   * /comp-intelligence, and React reuses the same instance across all of them — so a
+   * once-per-mount seed ran exactly once, on the first of those routes the operator
+   * happened to open, and never again.
+   *
+   * Measured consequence: select a seller in the Inbox, tap Comp Intelligence, and the
+   * comp workspace rendered empty. activeContext still held the property, but the
+   * workspace reads the SELECTED THREAD, and nothing re-established it for the newly
+   * mounted workspace view. Re-seeding on the route key runs setActiveContext again,
+   * which re-resolves the thread through findThreadForActiveContext and re-selects it.
+   *
+   * Re-seeding cannot fight a live selection: setActiveContext is also what PUBLISHES
+   * the locator, so a newer in-session selection has already overwritten it and the two
+   * agree by construction.
+   */
+  const locatorRouteKey = `${routeMode}:${initialWorkspaceView ?? 'default'}`
+  const locatorSeededRef = useRef<string | null>(null)
   useEffect(() => {
-    if (locatorSeededRef.current) return
-    if (activeContext?.propertyId || activeContext?.threadKey) {
-      // Something already focused this view - a live selection, or
-      // selectFromExternalContext. Never override it.
-      locatorSeededRef.current = true
+    if (locatorSeededRef.current === locatorRouteKey) return
+    const locator = readPropertyLocator()
+    if (!locator) {
+      // No locator yet — leave the ref alone so the next render can still seed once
+      // a selection is published.
       return
     }
-    const locator = readPropertyLocator()
-    if (!locator) return
-    locatorSeededRef.current = true
+    locatorSeededRef.current = locatorRouteKey
     // The locator stores `string | null`; ActiveInboxContext uses
     // `string | undefined`. Normalise here rather than widening the context
     // type, which every other caller already satisfies.
@@ -2082,7 +2099,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       },
       { preserveCurrentViews: true },
     )
-  }, [activeContext, setActiveContext])
+  }, [locatorRouteKey, setActiveContext])
 
   const resolveDealIntelThreadId = useCallback((): string | null => {
     const active = selectedRef.current

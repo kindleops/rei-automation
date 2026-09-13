@@ -376,7 +376,16 @@
     color: rgba(15, 23, 42, 0.6);
   }
 
-  .nx-app-launcher__search input { color: rgba(15, 23, 42, 0.92); }
+  /* The light theme paints a solid white field on bare inputs, which showed through
+     as a hard white rectangle inside the search pill's rounded container. The pill IS
+     the field here, so the input keeps no surface of its own. */
+  .nx-app-launcher__search input {
+    color: rgba(15, 23, 42, 0.92);
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
   .nx-app-launcher__search input::placeholder { color: rgba(15, 23, 42, 0.42); }
 
   .nx-app-launcher__clear {

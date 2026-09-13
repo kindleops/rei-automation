@@ -125,9 +125,9 @@ const run = async () => {
   // Theme is an operator setting in localStorage; set it before the app boots.
   await context.addInitScript((theme) => {
     try {
-      const raw = localStorage.getItem('nexus:settings')
+      const raw = localStorage.getItem('nexus-settings')
       const parsed = raw ? JSON.parse(raw) : {}
-      localStorage.setItem('nexus:settings', JSON.stringify({ ...parsed, nexusTheme: theme }))
+      localStorage.setItem('nexus-settings', JSON.stringify({ ...parsed, nexusTheme: theme }))
     } catch { /* first run has no settings yet */ }
   }, THEME)
 
