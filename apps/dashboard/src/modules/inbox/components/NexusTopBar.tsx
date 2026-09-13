@@ -22,6 +22,7 @@ import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { MobileCommandDock, type DockSurface } from '../../mobile/MobileCommandDock'
 import { MobileSearchOverlay } from '../../mobile/MobileSearchOverlay'
 import { MobileSheet } from '../../mobile/MobileSheet'
+import { onNotificationsSurfaceRequested } from '../../mobile/shell-surface-bridge'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -219,6 +220,19 @@ export const NexusTopBar = ({
     window.addEventListener('nexus:focus-search', focusSearch as EventListener)
     return () => window.removeEventListener('nexus:focus-search', focusSearch as EventListener)
   }, [])
+
+  /**
+   * The App Launcher lives in the bottom dock and the notification centre lives here,
+   * so the launcher raises it by event rather than mounting a second centre of its own.
+   * On inbox-family routes THIS component is the owner; PortableCommandShell owns it
+   * everywhere else. Exactly one listener is mounted at a time because the two top bars
+   * are mutually exclusive by route.
+   */
+  useEffect(() => onNotificationsSurfaceRequested(() => {
+    setActiveSurface(null)
+    setSearchOpen(false)
+    onOpenOverlay('notifications')
+  }), [onOpenOverlay, setActiveSurface])
 
   const openExclusiveSurface = (surface: Exclude<typeof activeSurface, null>) => {
     onCloseOverlay()

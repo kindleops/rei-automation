@@ -1,99 +1,48 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { pushRoutePath, useRoutePath } from '../../app/router'
-import { Icon } from '../../shared/icons'
-import { applyThemeToDOM, loadSettings, updateSetting, type AccentPalette } from '../../shared/settings'
+import { useEffect, useState } from 'react'
+import { pushRoutePath } from '../../app/router'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotificationCenter'
-import { getQueueProcessorHealth, type QueueProcessorHealth } from '../../lib/data/inboxData'
 import { InboxKpiOrb } from '../inbox/components/InboxKpiOrb'
-import { QueueCommandCenter, type QueueCommandMode, type QueueCommandCaps } from '../inbox/components/QueueCommandCenter'
+import { QueueCommandCenter } from '../inbox/components/QueueCommandCenter'
+import { useQueueCommandState } from './useQueueCommandState'
+import { onNotificationsSurfaceRequested } from './shell-surface-bridge'
+import { APP_LAUNCHER_OPEN_EVENT } from './AppLauncher'
 import { useShellSurface } from '../shell/useShellSurface'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
-import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
-import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from './command-navigation-registry'
-import { openInboxDealIntelligence } from './mobile-inbox-bridge'
 import { MobileCommandDock, type DockSurface } from './MobileCommandDock'
 import { MobileSheet } from './MobileSheet'
 
-const cls = (...tokens: Array<string | false | null | undefined>) =>
-  tokens.filter(Boolean).join(' ')
-
-const THEME_OPTIONS: Array<{ id: NexusGlobalThemeId; label: string }> = [
-  { id: 'dark', label: 'Dark' },
-  { id: 'true_black', label: 'True Black' },
-  { id: 'red_ops', label: 'Red Ops' },
-  { id: 'light', label: 'Light' },
-]
-
-const ACCENT_OPTIONS: Array<{ id: AccentPalette; label: string }> = [
-  { id: 'cyan', label: 'Cyan' },
-  { id: 'blue', label: 'Blue' },
-  { id: 'teal', label: 'Teal' },
-  { id: 'emerald', label: 'Emerald' },
-  { id: 'amber', label: 'Amber' },
-  { id: 'rose', label: 'Rose' },
-  { id: 'violet', label: 'Violet' },
-]
+/**
+ * The mobile top bar for every route OUTSIDE the inbox family.
+ *
+ * It used to carry its own copy of the application list and its own theme/accent
+ * pickers — a second launcher with a Settings row that navigated to /analytics. Both
+ * now live in one place: the App Launcher renders the canonical registry, and Settings
+ * opens MobileSettingsSheet, which is the real settings surface.
+ */
 
 interface PortableCommandShellProps {
   onOpenSearch?: () => void
 }
 
 export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps) => {
-  const routePath = useRoutePath()
-  const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const { activeSurface, toggleSurface, closeAndRestoreFocus, registerTrigger, setActiveSurface } = useShellSurface()
+  const { activeSurface, toggleSurface, closeAndRestoreFocus, setActiveSurface } = useShellSurface()
   const [notifOpen, setNotifOpen] = useState(false)
-  const [workspaceSection, setWorkspaceSection] = useState<'apps' | 'appearance'>('apps')
-  const [workspaceQuery, setWorkspaceQuery] = useState('')
-  const [queueHealth, setQueueHealth] = useState<QueueProcessorHealth | null>(null)
-  const [queueLoading, setQueueLoading] = useState(false)
+  const queueState = useQueueCommandState()
   const { unreadCount } = useNotificationIntelligence()
 
-  const settings = loadSettings()
-  const activeThemeId = (settings.nexusTheme ?? 'dark') as NexusGlobalThemeId
-  const activeAccentId = (settings.accentPalette ?? 'cyan') as AccentPalette
+  // The App Launcher lives in the dock; the notification centre lives here. One owner
+  // per surface, raised by event — see shell-surface-bridge.
+  useEffect(() => onNotificationsSurfaceRequested(() => {
+    setActiveSurface(null)
+    setNotifOpen(true)
+  }), [setActiveSurface])
 
-  const refreshQueueHealth = useCallback(async () => {
-    setQueueLoading(true)
-    try {
-      setQueueHealth(await getQueueProcessorHealth())
-    } catch {
-      setQueueHealth(null)
-    } finally {
-      setQueueLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void refreshQueueHealth()
-    const interval = window.setInterval(() => { void refreshQueueHealth() }, 60_000)
-    return () => window.clearInterval(interval)
-  }, [refreshQueueHealth])
-
-  useEffect(() => {
-    registerTrigger('workspace', workspaceTriggerRef.current)
-  })
-
-  useEffect(() => {
-    if (activeSurface !== 'workspace') setWorkspaceQuery('')
-  }, [activeSurface])
-
-  const processorStatus = queueHealth?.status ?? 'unknown'
+  const processorStatus = queueState.health?.status ?? 'unknown'
 
   const openSearch = () => {
     if (onOpenSearch) onOpenSearch()
     else window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT, { detail: {} }))
-  }
-
-  const queueMode: QueueCommandMode = 'assisted'
-  const queueCaps: QueueCommandCaps = {
-    sends_per_run: 25,
-    auto_replies_per_run: 10,
-    followups_per_run: 10,
-    first_touches_per_run: 10,
-    max_per_number_per_day: 200,
-    max_per_market_per_hour: 60,
   }
 
   const resolveDockSurface = (): DockSurface => {
@@ -102,14 +51,6 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
     if (notifOpen) return 'notifications'
     return null
   }
-
-  const filteredApplications = useMemo(() => {
-    const q = workspaceQuery.trim().toLowerCase()
-    if (!q) return COMMAND_NAV_ROUTES
-    return COMMAND_NAV_ROUTES.filter((item) =>
-      `${item.label} ${item.description ?? ''}`.toLowerCase().includes(q),
-    )
-  }, [workspaceQuery])
 
   const handleDockSurfaceChange = (surface: DockSurface) => {
     if (surface === null) {
@@ -122,21 +63,17 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
       return
     }
     if (surface === 'workspace') {
+      // The canonical App Launcher, not the duplicate application list this shell
+      // used to carry. That list was a second registry rendering and its Settings row
+      // navigated to /analytics — a straightforwardly wrong destination.
       setNotifOpen(false)
-      toggleSurface('workspace')
+      setActiveSurface(null)
+      window.dispatchEvent(new CustomEvent(APP_LAUNCHER_OPEN_EVENT))
       return
     }
     if (surface === 'queue') {
       setNotifOpen(false)
       toggleSurface('queue')
-      return
-    }
-    if (surface === 'tasks') {
-      pushRoutePath('/inbox')
-      return
-    }
-    if (surface === 'activity') {
-      pushRoutePath('/inbox')
       return
     }
     if (surface === 'notifications') {
@@ -147,8 +84,12 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
 
   return (
     <>
-      <span ref={workspaceTriggerRef} className="nx-sr-only" aria-hidden />
-
+      {/*
+        showTasks / showActivity are false here because this shell has no attention
+        queue and no activity feed to open. Both buttons used to render and then
+        silently push /inbox — a control that does not do what its icon says is worse
+        than an absent one. The inbox top bar, which HAS both, still shows them.
+      */}
       <MobileCommandDock
         activeSurface={resolveDockSurface()}
         onSurfaceChange={handleDockSurfaceChange}
@@ -157,116 +98,9 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
         queueStatus={processorStatus}
         notificationCount={unreadCount}
         notificationsActive={notifOpen}
+        showTasks={false}
+        showActivity={false}
       />
-
-      <MobileSheet
-        open={activeSurface === 'workspace'}
-        title="Workspace Launcher"
-        height="full"
-        className="is-mobile-wsl"
-        onClose={() => closeAndRestoreFocus('workspace')}
-      >
-        <div className="nx-wsl-root">
-          <div className="nx-wsl-search">
-            <Icon name="search" />
-            <input
-              type="search"
-              value={workspaceQuery}
-              placeholder="Search applications…"
-              aria-label="Search applications"
-              onChange={(event) => setWorkspaceQuery(event.target.value)}
-            />
-          </div>
-          <div className="nx-wsl-body is-mobile-shell">
-            <nav className="nx-wsl-nav" aria-label="Workspace launcher categories">
-              {(['apps', 'appearance'] as const).map((section) => (
-                <button
-                  key={section}
-                  type="button"
-                  className={cls('nx-wsl-nav__item', workspaceSection === section && 'is-active')}
-                  onClick={() => setWorkspaceSection(section)}
-                >
-                  {section === 'apps' ? 'Applications' : 'Appearance'}
-                </button>
-              ))}
-            </nav>
-            <div className="nx-wsl-panel">
-              {workspaceSection === 'apps' ? (
-                <div className="nx-wsl-panel__section">
-                  <h4>Applications</h4>
-                  {filteredApplications.map((item) => (
-                    <button
-                      key={item.path}
-                      type="button"
-                      className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
-                      onClick={() => {
-                        if (item.action === 'notifications') setNotifOpen(true)
-                        else if (item.action === 'settings') pushRoutePath('/analytics')
-                        else if (item.action === 'deal_intelligence') openInboxDealIntelligence()
-                        else pushRoutePath(item.path)
-                        closeAndRestoreFocus('workspace')
-                      }}
-                    >
-                      <Icon name={item.icon} size={14} />
-                      <strong>{item.label}</strong>
-                      {item.description ? <small>{item.description}</small> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {workspaceSection === 'appearance' ? (
-                <>
-                  <div className="nx-wsl-panel__section">
-                    <h4>Theme</h4>
-                    {THEME_OPTIONS.map((theme) => (
-                      <button
-                        key={theme.id}
-                        type="button"
-                        className={cls('nx-wsl-menu-row', activeThemeId === theme.id && 'is-active')}
-                        onClick={() => {
-                          updateSetting('nexusTheme', theme.id)
-                          applyThemeToDOM()
-                        }}
-                      >
-                        <span className="nx-theme-dot" data-theme={theme.id} />
-                        <strong>{theme.label}</strong>
-                        {activeThemeId === theme.id ? (
-                          <span className="nx-wsl-menu-row__check" aria-hidden>
-                            <Icon name="check" size={14} />
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="nx-wsl-panel__section nx-wsl-panel__section--accents">
-                    <h4>Accent Palette</h4>
-                    {ACCENT_OPTIONS.map((accent) => (
-                      <button
-                        key={accent.id}
-                        type="button"
-                        className={cls('nx-wsl-menu-row', activeAccentId === accent.id && 'is-active')}
-                        onClick={() => {
-                          updateSetting('accentPalette', accent.id)
-                          applyThemeToDOM()
-                        }}
-                      >
-                        <span className="nx-accent-dot" data-accent={accent.id} />
-                        <strong>{accent.label}</strong>
-                        {activeAccentId === accent.id ? (
-                          <span className="nx-wsl-menu-row__check" aria-hidden>
-                            <Icon name="check" size={14} />
-                          </span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </MobileSheet>
 
       <MobileSheet
         open={activeSurface === 'queue'}
@@ -275,15 +109,15 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
         onClose={() => closeAndRestoreFocus('queue')}
       >
         <QueueCommandCenter
-          health={queueHealth}
-          control={null}
-          loading={queueLoading}
-          mode={queueMode}
-          caps={queueCaps}
+          health={queueState.health}
+          control={queueState.control}
+          loading={queueState.loading}
+          mode={queueState.mode}
+          caps={queueState.caps}
           actionLoading={null}
           onModeChange={() => {}}
           onCapsChange={() => {}}
-          onRefresh={() => { void refreshQueueHealth() }}
+          onRefresh={queueState.refresh}
           onRunSafeBatch={() => pushRoutePath('/queue')}
           onQueueMore={() => pushRoutePath('/queue')}
           onRunQueueNow={() => pushRoutePath('/queue')}

@@ -29,6 +29,14 @@ export interface MobileCommandDockProps {
   activityActive?: boolean
   notificationCount?: number
   notificationsActive?: boolean
+  /**
+   * Tasks and Live Activity are only rendered by a host that can actually open them.
+   * PortableCommandShell has neither, and painted both anyway — each one silently
+   * pushed /inbox. An icon that lies about its destination costs more than the slot
+   * it occupies, so the host now has to opt in.
+   */
+  showTasks?: boolean
+  showActivity?: boolean
 }
 
 const DockGlyph = ({
@@ -54,14 +62,19 @@ export const MobileCommandDock = ({
   activityActive = false,
   notificationCount = 0,
   notificationsActive = false,
+  showTasks = true,
+  showActivity = true,
 }: MobileCommandDockProps) => {
   const toggle = (surface: Exclude<DockSurface, null>) => {
     onSurfaceChange(activeSurface === surface ? null : surface)
   }
 
+  /* `activity` for unknown collided with the KPI orb and the live-activity button,
+     which both paint a waveform — the bar read as three copies of one control.
+     A queue whose health has not resolved is genuinely unknown, so it says so. */
   const queueIcon =
     queueStatus === 'healthy' ? 'check'
-      : queueStatus === 'unknown' ? 'activity'
+      : queueStatus === 'unknown' ? 'slash'
         : 'alert'
 
   const dock = (
@@ -124,35 +137,42 @@ export const MobileCommandDock = ({
           </DockGlyph>
         </button>
 
-        <button
-          type="button"
-          className={cls('nx-mobile-command-dock__btn', activeSurface === 'tasks' && 'is-active')}
-          aria-label="Tasks"
-          aria-expanded={activeSurface === 'tasks'}
-          onClick={() => toggle('tasks')}
-        >
-          <DockGlyph>
-            <Icon name="check" size={DOCK_ICON} strokeWidth={1.55} />
-          </DockGlyph>
-          {tasksCount > 0 ? (
-            <span className="nx-mobile-command-dock__badge">{tasksCount > 99 ? '99+' : tasksCount}</span>
-          ) : null}
-        </button>
+        {showTasks ? (
+          <button
+            type="button"
+            className={cls('nx-mobile-command-dock__btn', activeSurface === 'tasks' && 'is-active')}
+            aria-label="Tasks"
+            aria-expanded={activeSurface === 'tasks'}
+            onClick={() => toggle('tasks')}
+          >
+            <DockGlyph>
+              <Icon name="check" size={DOCK_ICON} strokeWidth={1.55} />
+            </DockGlyph>
+            {tasksCount > 0 ? (
+              <span className="nx-mobile-command-dock__badge">{tasksCount > 99 ? '99+' : tasksCount}</span>
+            ) : null}
+          </button>
+        ) : null}
 
-        <button
-          type="button"
-          className={cls(
-            'nx-mobile-command-dock__btn',
-            (activityActive || activeSurface === 'activity') && 'is-active',
-          )}
-          aria-label="Live activity"
-          aria-expanded={activityActive || activeSurface === 'activity'}
-          onClick={() => toggle('activity')}
-        >
-          <DockGlyph>
-            <Icon name="activity" size={DOCK_ICON} strokeWidth={1.55} />
-          </DockGlyph>
-        </button>
+        {showActivity ? (
+          <button
+            type="button"
+            className={cls(
+              'nx-mobile-command-dock__btn',
+              (activityActive || activeSurface === 'activity') && 'is-active',
+            )}
+            aria-label="Live activity"
+            aria-expanded={activityActive || activeSurface === 'activity'}
+            onClick={() => toggle('activity')}
+          >
+            <DockGlyph>
+              {/* `zap` rather than `activity`: the KPI orb already renders a
+                  waveform, and two identical squiggles in a seven-slot bar are
+                  indistinguishable at 15px. */}
+              <Icon name="zap" size={DOCK_ICON} strokeWidth={1.55} />
+            </DockGlyph>
+          </button>
+        ) : null}
 
         <button
           type="button"

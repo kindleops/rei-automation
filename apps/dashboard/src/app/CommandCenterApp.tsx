@@ -24,6 +24,7 @@ import { useBreakpoint } from '../modules/mobile/useBreakpoint'
 import { PortableCommandShell } from '../modules/mobile/PortableCommandShell'
 import { PinnedAppDock } from '../modules/mobile/PinnedAppDock'
 import { routeHasInboxCommandShell } from '../modules/mobile/inbox-shell-routes'
+import { NEXUS_APPS, canonicalizeRoutePath, resolveAppForRoute } from '../domain/app-registry/app-registry'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,49 +42,29 @@ const initialState: RouteLoadState = {
   message: '',
 }
 
-// ── Nav Items ──────────────────────────────────────────────────────────────
+// ── Navigation, derived from the canonical registry ───────────────────────
 
-type NavIconName =
-  | 'radar'
-  | 'inbox'
-  | 'alert'
-  | 'stats'
-  | 'map'
-  | 'users'
-  | 'file-text'
-  | 'settings'
-  | 'bell'
-  | 'star'
-  | 'grid'
-  | 'target'
-  | 'send'
-  | 'mail'
-
+/**
+ * These used to be a hand-written 15-entry `navItems` array plus a second copy of the
+ * legacy-alias table (routes.tsx held the other). The two alias tables had already
+ * drifted, and `navItems` was missing /properties entirely — so the Properties surface
+ * had no keyboard shortcut and no room label even on desktop.
+ */
 interface NavItem {
   path: string
   label: string
-  icon: NavIconName
   shortcut: string
   room: string
 }
 
-const navItems: NavItem[] = [
-  { path: '/inbox', label: 'Inbox', icon: 'inbox', shortcut: 'I', room: 'Inbox' },
-  { path: '/conversation', label: 'Conversation', icon: 'inbox', shortcut: 'C', room: 'Conversation' },
-  { path: '/deal-intelligence', label: 'Deal Intelligence', icon: 'target', shortcut: 'D', room: 'Deal Intelligence' },
-  { path: '/entity-graph', label: 'Entity Graph', icon: 'grid', shortcut: 'E', room: 'Entity Graph' },
-  { path: '/comp-intelligence', label: 'Comp Intelligence', icon: 'stats', shortcut: 'O', room: 'Comp Intelligence' },
-  { path: '/buyer-match', label: 'Buyer Match', icon: 'users', shortcut: 'B', room: 'Buyer Match' },
-  { path: '/queue', label: 'Outbound Command Center', icon: 'send', shortcut: 'Q', room: 'Outbound Command Center' },
-  { path: '/pipeline', label: 'Pipeline', icon: 'radar', shortcut: 'P', room: 'Pipeline' },
-  { path: '/calendar', label: 'Calendar', icon: 'bell', shortcut: 'L', room: 'Calendar' },
-  { path: '/map', label: 'Map', icon: 'map', shortcut: 'M', room: 'Map' },
-  { path: '/analytics', label: 'Analytics', icon: 'stats', shortcut: 'A', room: 'Analytics' },
-  { path: '/closing-desk', label: 'Closing Desk', icon: 'file-text', shortcut: 'K', room: 'Closing Desk' },
-  { path: '/campaign-command', label: 'Campaign Command', icon: 'send', shortcut: 'G', room: 'Campaign Command' },
-  { path: '/email-command', label: 'Email Command', icon: 'mail', shortcut: 'Y', room: 'Email Command' },
-  { path: '/workflow-studio', label: 'Workflow Studio', icon: 'grid', shortcut: 'W', room: 'Workflow Studio' },
-]
+const navItems: NavItem[] = NEXUS_APPS
+  .filter((app) => app.desktop && app.shortcut && !app.action)
+  .map((app) => ({
+    path: app.route,
+    label: app.label,
+    shortcut: app.shortcut as string,
+    room: app.label,
+  }))
 
 const THEME_ALIASES: Record<string, NexusTheme> = {
   light: 'light',
@@ -116,37 +97,6 @@ const THEME_ALIASES: Record<string, NexusTheme> = {
   'arctic signal': 'arctic-signal',
   'operator-black': 'operator-black',
   'operator black': 'operator-black',
-}
-
-const canonicalizeRoutePath = (target?: string) => {
-  switch (target) {
-    case '/':
-      return '/inbox'
-    case '/markets':
-      return '/map'
-    case '/dashboard/kpis':
-    case '/agents':
-      return '/analytics'
-    case '/buyer':
-      return '/buyer-match'
-    case '/campaigns':
-      return '/campaign-command'
-    case '/email':
-      return '/email-command'
-    case '/workflows-v2':
-      return '/workflow-studio'
-    case '/list':
-      return '/entity-graph'
-    case '/dossier':
-      return '/deal-intelligence'
-    case '/watchlists':
-      return '/properties'
-    case '/mobile':
-    case '/notifications':
-      return '/inbox'
-    default:
-      return target || '/inbox'
-  }
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -558,43 +508,61 @@ export const CommandCenterApp = () => {
 
   const isRouteLoading = routeState.path !== route.path || routeState.status === 'loading'
   const activeNav = navItems.find((item) => item.path === route.path)
+  const activeApp = resolveAppForRoute(route.path)
 
-  // ── Loading State ──────────────────────────────────────────────────────
+  /**
+   * THE SHELL IS NOT A ROUTE.
+   *
+   * Loading and error used to be EARLY RETURNS that replaced the entire application
+   * with a centred boot panel — no dock, no top bar, no way to leave. Two routes carry
+   * a blocking data loader, and measured at 390x844 that cost /queue 5.6s and
+   * /properties 31s of a dead screen with zero navigation on it. A phone showing
+   * nothing for half a minute reads as a crash, and the operator's only recovery was
+   * to reload.
+   *
+   * The states now render INSIDE the stage, so the shell that the whole mobile program
+   * is built on stays mounted and interactive throughout: the operator can always tap
+   * away to another application while a slow surface resolves behind them.
+   */
+  const stageContent = isRouteLoading ? (
+    <div className="app-state" aria-busy="true">
+      <div className="app-state__panel">
+        <span className="app-state__eyebrow">{activeApp.label}</span>
+        <h1>Loading {activeApp.label}</h1>
+        <p>Fetching live intelligence for `{route.path}`.</p>
+      </div>
+    </div>
+  ) : routeState.status === 'error' ? (
+    <div className="app-state" role="alert">
+      <div className="app-state__panel">
+        <span className="app-state__eyebrow">Route Error</span>
+        <h1>Unable to load {activeApp.label}</h1>
+        <p>{routeState.message}</p>
+        <button
+          className="app-state__button"
+          type="button"
+          onClick={() => replaceRoutePath(route.path)}
+        >
+          Retry live route
+        </button>
+      </div>
+    </div>
+  ) : (
+    <ErrorBoundary label={route.title} resetKey={route.path}>
+      {/*
+        Views are lazy-loaded per route (see routes.tsx), so the first render of a
+        surface suspends while its chunk downloads. The boundary lives HERE rather
+        than around the whole app so the shell — command dock, nav, notifications —
+        stays mounted and interactive while a surface loads, instead of the screen
+        blanking back to the boot state on every navigation.
+      */}
+      <Suspense fallback={<div className="nx-stage-suspense" aria-busy="true" />}>
+        {route.render(routeState.data)}
+      </Suspense>
+    </ErrorBoundary>
+  )
 
-  if (isRouteLoading) {
-    return (
-      <main className="app-state">
-        <div className="app-state__panel">
-          <span className="app-state__eyebrow">NEXUS</span>
-          <h1>Initializing command center</h1>
-          <p>Loading live route intelligence for `{route.path}`.</p>
-        </div>
-      </main>
-    )
-  }
-
-  // ── Error State ────────────────────────────────────────────────────────
-
-  if (routeState.status === 'error') {
-    return (
-      <main className="app-state">
-        <div className="app-state__panel">
-          <span className="app-state__eyebrow">Route Error</span>
-          <h1>Unable to load surface</h1>
-          <p>{routeState.message}</p>
-          <button
-            className="app-state__button"
-            type="button"
-            onClick={() => replaceRoutePath('/map')}
-          >
-            Retry live route
-          </button>
-        </div>
-      </main>
-    )
-  }
-
-  // ── Ready State — Command-First Layout ─────────────────────────────────
+  // ── Command-First Layout ───────────────────────────────────────────────
 
   return (
     <NotificationIntelligenceProvider>
@@ -611,18 +579,7 @@ export const CommandCenterApp = () => {
           )}
 
           <main className="nx-stage">
-            <ErrorBoundary label={route.title} resetKey={route.path}>
-              {/*
-                Views are lazy-loaded per route (see routes.tsx), so the first render of a
-                surface suspends while its chunk downloads. The boundary lives HERE rather
-                than around the whole app so the shell — command dock, nav, notifications —
-                stays mounted and interactive while a surface loads, instead of the screen
-                blanking back to the boot state on every navigation.
-              */}
-              <Suspense fallback={<div className="nx-stage-suspense" aria-busy="true" />}>
-                {route.render(routeState.data)}
-              </Suspense>
-            </ErrorBoundary>
+            {stageContent}
           </main>
 
           <GlobalCommandOverlay

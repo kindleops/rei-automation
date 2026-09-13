@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react'
 
 import { FullscreenAppShell } from '../shared/FullscreenAppShell'
+import { canonicalizeRoutePath } from '../domain/app-registry/app-registry'
 
 import type { AcquisitionWorkspaceModel } from '../domain/acquisition/acquisition.types'
 import type { BuyerModel } from '../domain/buyer/buyer.adapter'
@@ -321,24 +322,6 @@ const routes = [
   ...(import.meta.env.DEV ? [devCompIntelligenceV4Route, devBuyerMatchV4Route] : []),
 ]
 
-const legacyRouteAliases: Record<string, string> = {
-  '/dashboard/kpis': '/analytics',
-  '/buyer': '/buyer-match',
-  '/campaigns': '/campaign-command',
-  '/email': '/email-command',
-  '/workflows-v2': '/workflow-studio',
-  '/workflow-studio-v1': '/workflow-studio',
-
-  '/list': '/entity-graph',
-
-  '/markets': '/map',
-  '/dossier': '/deal-intelligence',
-  '/agents': '/analytics',
-  '/mobile': '/inbox',
-  '/notifications': '/inbox',
-  '/watchlists': '/properties',
-}
-
 const normalizePath = (path: string) => {
   if (!path || path === '/') return '/'
   return path.endsWith('/') ? path.slice(0, -1) : path
@@ -356,7 +339,14 @@ export const resolveRoute = (path: string) => {
   const normalizedPath = normalizePath(path)
   const entityGraphMatch = matchEntityGraphRoute(normalizedPath)
   if (entityGraphMatch) return entityGraphMatch
-  const canonicalPath = legacyRouteAliases[normalizedPath] ?? normalizedPath
+  // ONE alias table, in the canonical registry. routes.tsx and CommandCenterApp each
+  // carried a copy and they had already drifted.
+  //
+  // '/' is excluded deliberately: the registry's canonicaliser maps it to /inbox (that
+  // is the right default for a command-palette result with no route), but this table
+  // has a real rootRoute and folding '/' into /inbox here would change which component
+  // renders at the root.
+  const canonicalPath = normalizedPath === '/' ? '/' : canonicalizeRoutePath(normalizedPath)
 
   return routes.find((route) => route.path === canonicalPath) ?? inboxRoute
 }

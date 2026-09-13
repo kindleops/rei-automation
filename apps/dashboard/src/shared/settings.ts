@@ -277,17 +277,21 @@ export const DEFAULT_SETTINGS: NexusSettings = {
   glowIntensity: 0.6,
   labelDensity: 0.5,
 
+  /**
+   * Intentionally EMPTY.
+   *
+   * This used to restate the default dock as a literal eight-id list — a fifth copy
+   * of "which applications exist", and the one that actually won at runtime: because
+   * it was non-empty, pinned-app-dock-store's fallback to the canonical registry
+   * never fired, so changing the registry's defaultDock set had no visible effect.
+   *
+   * An empty list makes that store's sanitiser fall through to
+   * DEFAULT_PINNED_APP_IDS, which is derived from domain/app-registry. Settings holds
+   * the operator's CHOICE; the registry holds the default. An operator who has pinned
+   * apps still has their list here, untouched.
+   */
   pinnedAppDock: {
-    pinnedIds: [
-      '/inbox',
-      '/map',
-      '/pipeline',
-      '/campaign-command',
-      '/queue',
-      '/workflow-studio',
-      '/closing-desk',
-      '__deal_intelligence__',
-    ],
+    pinnedIds: [],
     recentIds: [],
   },
 }

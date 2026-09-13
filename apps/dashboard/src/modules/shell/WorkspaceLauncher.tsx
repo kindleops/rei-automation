@@ -5,7 +5,13 @@ import { Icon } from '../../shared/icons'
 import type { AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
-import { COMMAND_NAV_ROUTES, isCommandNavRouteActive } from '../mobile/command-navigation-registry'
+import {
+  appForCommandNavRoute,
+  COMMAND_NAV_ROUTES,
+  isCommandNavRouteActive,
+  type CommandNavRoute,
+} from '../mobile/command-navigation-registry'
+import { navigateToApp } from '../../domain/app-registry/contextual-navigation'
 import { openInboxDealIntelligence } from '../mobile/mobile-inbox-bridge'
 import { MobileSheet } from '../mobile/MobileSheet'
 import { CommandDrawer } from './primitives/CommandDrawer'
@@ -347,16 +353,24 @@ export const WorkspaceLauncher = ({
     )
   }, [query])
 
-  const handleApplicationSelect = (path: string, action?: typeof COMMAND_NAV_ROUTES[number]['action']) => {
-    if (action === 'settings') {
-      onSettings?.()
-    } else if (action === 'notifications') {
-      onOpenNotifications?.()
-    } else if (action === 'deal_intelligence') {
-      openInboxDealIntelligence()
-    } else {
-      pushRoutePath(path)
+  /**
+   * Desktop launcher navigation, through the SAME contextual primitive the mobile dock
+   * uses. It used to `pushRoutePath(path)` with no payload, so selecting a property and
+   * then opening Entity Graph from here landed on the unfocused graph while the identical
+   * jump from the dock landed on that property. One navigator, one behaviour.
+   */
+  const handleApplicationSelect = (item: CommandNavRoute) => {
+    const app = appForCommandNavRoute(item)
+    if (!app) {
+      pushRoutePath(item.path)
+      onClose()
+      return
     }
+    navigateToApp(app, {
+      openDealIntelligence: (identity) => openInboxDealIntelligence(identity ?? undefined),
+      openNotifications: () => onOpenNotifications?.(),
+      openSettings: () => onSettings?.(),
+    })
     onClose()
   }
 
@@ -370,7 +384,7 @@ export const WorkspaceLauncher = ({
               key={item.path}
               type="button"
               className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
-              onClick={() => handleApplicationSelect(item.path, item.action)}
+              onClick={() => handleApplicationSelect(item)}
             >
               <Icon name={item.icon} size={14} />
               <strong>{item.label}</strong>

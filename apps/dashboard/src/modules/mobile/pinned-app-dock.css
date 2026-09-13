@@ -4,14 +4,16 @@
 
 :root {
   --nx-pinned-dock-height: 88px;
-  /* Visible height of the collapsed command shelf. Content reserves this exact
-     amount, so no inbox row can hide underneath the dock.
-     Lowered 26px -> 16px: the shelf is a grab affordance, not a surface, and every
-     pixel here is taken straight off the conversation. Because the reservation is
-     driven by this one token, dropping it lowers the bar AND returns 10px to the
-     inbox in the same change. The drag handle keeps its own 44px hit area, so the
-     target does not shrink with the paint. */
-  --nx-pinned-dock-collapsed: 16px;
+  /* Visible height of the collapsed dock. Content reserves this EXACT amount, so no
+     row can hide underneath it — the reservation below is driven by this one token,
+     which is why it must track the real painted height.
+
+     16px -> 62px. At 16px the dock was a bare grab handle: measured at 390x844 it
+     painted 20px tall and showed ZERO applications, so every destination sat behind
+     an undiscoverable upward drag and the phone effectively had no navigation. 62px
+     is what one row of 38px glyphs with a readable label underneath actually costs.
+     The pixels are not free, but navigation you cannot see is not a saving. */
+  --nx-pinned-dock-collapsed: 62px;
   --nx-pinned-dock-expanded: min(56vh, 460px);
 }
 
@@ -68,11 +70,14 @@ html.is-mobile-layout {
       background 260ms ease;
   }
 
+  /* The collapsed dock carries applications now, so it is a surface rather than the
+     translucent pill a bare handle could get away with. The opacity lift is what
+     keeps a 9px label legible over a scrolling photo-heavy inbox underneath. */
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
-    border-radius: 999px;
-    background: rgba(6, 10, 18, 0.42);
-    border-color: rgba(255, 255, 255, 0.08);
-    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.28);
+    border-radius: 20px 20px 14px 14px;
+    background: rgba(6, 10, 18, 0.8);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 -8px 26px rgba(0, 0, 0, 0.36);
   }
 
   .nx-pinned-app-dock__sheen {
@@ -86,7 +91,7 @@ html.is-mobile-layout {
   }
 
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__sheen {
-    opacity: 0.45;
+    opacity: 0.7;
   }
 
   .nx-pinned-app-dock__rim {
@@ -100,8 +105,10 @@ html.is-mobile-layout {
     opacity: 0.75;
   }
 
+  /* The accent rim reads as the dock's lit edge. It was hidden while the dock was a
+     bare handle because there was no surface for it to edge. */
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__rim {
-    display: none;
+    opacity: 0.5;
   }
 
   .nx-pinned-app-dock__handle {
@@ -118,22 +125,46 @@ html.is-mobile-layout {
     touch-action: none;
   }
 
-  /* Collapsed = slim command shelf. The glass is only 26px tall, but the handle
-     stays a full 44px touch target by extending invisibly above the shelf. */
+  /* Height comes from the content, not from the reservation token.
+     Pinning the glass to `height: var(--nx-pinned-dock-collapsed)` while the rail
+     inside it needed 64px meant the last 2px — and with them the whole label row —
+     overflowed past the viewport edge and was cut off. The token's job is to tell
+     content how much room to leave; it is not a layout constraint on the dock. The
+     two are kept in step by the measurement in the QA harness. */
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
     overflow: visible;
-    height: var(--nx-pinned-dock-collapsed);
+    height: auto;
   }
 
+  /* The handle sits ABOVE the rail as a slim grab strip. Absolutely positioning it
+     over the full dock (which is what the bare-handle layout did) would put a
+     transparent 44px button on top of every app button and swallow their taps.
+
+     `!important` is load-bearing, not laziness: mobile-responsive.css §10 applies
+     `button { min-height: 44px !important }` to every button under 768px. Measured,
+     that inflated this 12px grab strip to 44px and pushed the rail's label row off
+     the bottom of the viewport. The blanket rule is right for ordinary controls and
+     is left alone; this is a scoped exception for one element whose real target is
+     provided by the ::after below. */
   .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle {
+    position: relative;
+    height: 12px !important;
+    min-height: 12px !important;
+    min-width: 0 !important;
+    padding: 4px 0 0;
+    align-content: start;
+  }
+
+  /* The painted strip is 12px; the TARGET is 44px, extended upward into the dead
+     space above the dock where nothing else is interactive. Growing the paint to
+     reach 44px would cost 32px of conversation on every screen. */
+  .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle::after {
+    content: '';
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
     height: 44px;
-    min-height: 44px;
-    padding: 0 0 11px;
-    align-content: end;
   }
 
   .nx-pinned-app-dock__handle i {
@@ -152,6 +183,99 @@ html.is-mobile-layout {
     box-shadow:
       0 0 12px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.22),
       0 0 0 1px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.18);
+  }
+
+  /* ── The permanent rail ───────────────────────────────────────────────────
+     Four destinations plus the launcher, evenly distributed so the thumb lands
+     on a target rather than between two. Targets are 44px tall via padding, not
+     via a taller glyph, so the dock stays 62px while every hit area is legal.
+     ──────────────────────────────────────────────────────────────────────── */
+  .nx-pinned-app-dock__rail {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    align-items: center;
+    padding: 0 4px 4px;
+  }
+
+  .nx-pinned-app-dock__rail-app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    /* 44px of target from 38px of glyph + label, without growing the dock. */
+    min-height: 44px;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.62);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 160ms ease, transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .nx-pinned-app-dock__rail-app:active {
+    transform: scale(0.9);
+  }
+
+  .nx-pinned-app-dock__rail-glyph {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 30px;
+    border-radius: 10px;
+    transition: background 180ms ease, box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .nx-pinned-app-dock__rail-label {
+    max-width: 100%;
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Active state is a lit pill behind the glyph plus an accent label — tactile
+     without the whole bar changing colour. */
+  .nx-pinned-app-dock__rail-app.is-active {
+    color: var(--tone-primary, #5eead4);
+  }
+
+  .nx-pinned-app-dock__rail-app.is-active .nx-pinned-app-dock__rail-glyph {
+    background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.16);
+    box-shadow:
+      inset 0 0 0 1px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.26),
+      0 3px 12px rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.14);
+  }
+
+  .nx-pinned-app-dock__rail-app.is-launcher.is-active .nx-pinned-app-dock__rail-glyph {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  }
+
+  .nx-pinned-app-dock__rail-app:focus-visible {
+    outline: 2px solid rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.75);
+    outline-offset: -2px;
+    border-radius: 10px;
+  }
+
+  /* The rail is the dock's identity, so it keeps the badges the old track had. */
+  .nx-pinned-app-dock__rail-glyph .nx-pinned-app-dock__badge {
+    top: -3px;
+    right: -1px;
+  }
+
+  .nx-pinned-app-dock__rail-glyph .nx-pinned-app-dock__dot {
+    top: 1px;
+    right: 3px;
   }
 
   .nx-pinned-app-dock__hint {
@@ -465,7 +589,9 @@ html.is-mobile-layout {
   .nx-os.is-mobile-os .nx-premium-inbox,
   .nx-os.is-mobile-os .nx-fullscreen-app-shell,
   .nx-os.is-mobile-os .nx-route-redirect-shell {
-    padding-bottom: calc(var(--nx-pinned-dock-collapsed) + var(--nx-mobile-safe-bottom, 0px) + 6px) !important;
+    /* The one reservation, expressed through the shared contract token so a change
+       to the dock's height moves the clearance with it. */
+    padding-bottom: var(--nx-mobile-chrome-bottom) !important;
   }
 
   /* ...and only the OUTERMOST of them reserves. These shells nest — Pipeline
@@ -508,14 +634,25 @@ html.is-mobile-layout {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
+  /* Over the map the dock floats rather than sitting flush, so it keeps softer
+     corners — but NOT the 999px pill it used as a bare handle, which clipped the
+     outermost rail glyphs against the curve. */
   .nx-os.is-mobile-os:has(.nx-workspace-pane.is-view-command_map) .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass,
   .nx-os.is-mobile-os:has(.nx-icm.is-mobile-map) .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
-    border-radius: 999px;
+    border-radius: 22px;
   }
 
+  /* An open dock is taller, so the clearance has to grow with it.
+     --nx-mobile-chrome-bottom is restated here on purpose: a custom property's
+     var() references are substituted on the element that DECLARES it, so the
+     :root definition already baked in the collapsed height and would not pick up
+     this override on its own. */
   body:has(.nx-pinned-app-dock.is-docked),
   body:has(.nx-pinned-app-dock.is-expanded) {
     --nx-pinned-dock-collapsed: var(--nx-pinned-dock-height);
+    --nx-mobile-chrome-bottom: calc(
+      var(--nx-pinned-dock-height) + var(--nx-mobile-safe-bottom, 0px) + 6px
+    );
   }
 
   [data-nexus-theme='light'] .nx-pinned-app-dock__glass {
@@ -531,6 +668,51 @@ html.is-mobile-layout {
 
   [data-nexus-theme='light'] .nx-pinned-app-dock__label {
     color: rgba(15, 23, 42, 0.62);
+  }
+
+  /* Light mode is retuned, not inverted. The dark rail leans on a translucent dark
+     glass for contrast; over a light page the same recipe leaves a 9px label at
+     roughly 2:1 against the background, so the rail takes a solid-ish surface, a
+     real border and darker ink. */
+  [data-nexus-theme='light'] .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__glass {
+    background: rgba(252, 253, 255, 0.93);
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 -8px 26px rgba(15, 23, 42, 0.12);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__rail-app {
+    color: rgba(15, 23, 42, 0.6);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__rail-app.is-active {
+    color: var(--tone-primary, #0d9488);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__rail-app.is-launcher.is-active .nx-pinned-app-dock__rail-glyph {
+    background: rgba(15, 23, 42, 0.07);
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.12);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__handle i {
+    background: rgba(15, 23, 42, 0.22);
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock.is-collapsed .nx-pinned-app-dock__handle i {
+    background: rgba(var(--nexus-accent-rgb, 13, 148, 136), 0.5);
+    box-shadow: none;
+  }
+
+  [data-nexus-theme='light'] .nx-pinned-app-dock__badge,
+  [data-nexus-theme='light'] .nx-pinned-app-dock__dot {
+    box-shadow: 0 0 0 2px rgba(252, 253, 255, 0.96);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nx-pinned-app-dock__glass,
+    .nx-pinned-app-dock__rail-app,
+    .nx-pinned-app-dock__rail-glyph {
+      transition: none;
+    }
   }
 }
 

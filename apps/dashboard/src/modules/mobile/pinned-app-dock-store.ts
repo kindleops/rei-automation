@@ -1,27 +1,30 @@
 import { loadSettings, saveSettings } from '../../shared/settings'
-import { COMMAND_NAV_ROUTES, type CommandNavRoute } from './command-navigation-registry'
+import { NEXUS_APPS } from '../../domain/app-registry/app-registry'
+import { COMMAND_NAV_ROUTES, dockIdForApp, type CommandNavRoute } from './command-navigation-registry'
 import type { PinnedAppDockSettings, PinnedAppId } from './pinned-app-dock.types'
 
 const LEGACY_STORAGE_KEY = 'nx.pinned-app-dock.v1'
 
 export const DEAL_INTELLIGENCE_APP_ID = '__deal_intelligence__' as const
 
-export const DEFAULT_PINNED_APP_IDS: PinnedAppId[] = [
-  '/inbox',
-  '/map',
-  '/pipeline',
-  '/campaign-command',
-  '/queue',
-  '/workflow-studio',
-  '/closing-desk',
-  DEAL_INTELLIGENCE_APP_ID,
-]
+/**
+ * The permanent dock rail, derived from the canonical registry's `defaultDock` flag.
+ *
+ * This was a hand-written list of EIGHT ids. Eight 44px targets plus their labels do
+ * not fit across 390px without shrinking every one of them below a usable size, which
+ * is how the dock ended up collapsed to a bare 16px handle with no apps visible at all.
+ * Four destinations plus the Apps launcher is what a phone actually has room for;
+ * everything else stays one tap away in the launcher, and the operator can still pin
+ * whatever they want.
+ */
+export const DEFAULT_PINNED_APP_IDS: PinnedAppId[] = NEXUS_APPS
+  .filter((app) => app.defaultDock)
+  .map(dockIdForApp)
 
-const DOCK_EXCLUDED_ACTIONS = new Set(['notifications', 'settings'])
-
-export const DOCKABLE_APPS: CommandNavRoute[] = COMMAND_NAV_ROUTES.filter(
-  (route) => !route.action || !DOCK_EXCLUDED_ACTIONS.has(route.action),
-)
+export const DOCKABLE_APPS: CommandNavRoute[] = COMMAND_NAV_ROUTES.filter((route) => {
+  const app = NEXUS_APPS.find((candidate) => dockIdForApp(candidate) === route.path)
+  return Boolean(app?.dockable)
+})
 
 const DOCKABLE_BY_ID = new Map(DOCKABLE_APPS.map((app) => [app.path, app]))
 

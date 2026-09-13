@@ -1,112 +1,51 @@
-export const CANONICAL_VIEW_IDS = [
-  'inbox',
-  'conversation',
-  'deal-intelligence',
-  'comp-intelligence',
-  'buyer-match',
-  'queue',
-  'pipeline',
-  'calendar',
-  'map',
-  'analytics',
-  'closing-desk',
-  'campaign-command',
-  'email-command',
-  'workflow-studio',
-] as const
+/**
+ * DERIVED VIEW of the canonical application registry.
+ *
+ * This was a fourth hand-maintained list of applications with zero consumers. It had
+ * already drifted — it knew nothing about Entity Graph or Properties, and it described
+ * Comp Intelligence and Pipeline as if they had their own top-level folders when both
+ * render through the inbox workspace.
+ *
+ * It is kept only as a folder map (the one fact it held that the canonical registry
+ * does not) and now derives everything else. Add applications in domain/app-registry.
+ */
+import { NEXUS_APPS, type AppId } from '../domain/app-registry/app-registry'
 
-export type CanonicalViewId = (typeof CANONICAL_VIEW_IDS)[number]
+export type CanonicalViewId = AppId
+
+export const CANONICAL_VIEW_IDS: readonly CanonicalViewId[] = NEXUS_APPS.map((app) => app.id)
 
 export interface CanonicalViewMeta {
   id: CanonicalViewId
   label: string
   route: string
+  /** Where the surface's source lives. Several views render through views/inbox. */
   folder: string
 }
 
-export const CANONICAL_VIEWS: Record<CanonicalViewId, CanonicalViewMeta> = {
-  inbox: {
-    id: 'inbox',
-    label: 'Inbox',
-    route: '/inbox',
-    folder: 'views/inbox',
-  },
-  conversation: {
-    id: 'conversation',
-    label: 'Conversation',
-    route: '/conversation',
-    folder: 'views/conversation',
-  },
-  'deal-intelligence': {
-    id: 'deal-intelligence',
-    label: 'Deal Intelligence',
-    route: '/deal-intelligence',
-    folder: 'views/deal-intelligence',
-  },
-  'comp-intelligence': {
-    id: 'comp-intelligence',
-    label: 'Comp Intelligence',
-    route: '/comp-intelligence',
-    folder: 'views/comp-intelligence',
-  },
-  'buyer-match': {
-    id: 'buyer-match',
-    label: 'Buyer Match',
-    route: '/buyer-match',
-    folder: 'views/buyer-match',
-  },
-  queue: {
-    id: 'queue',
-    label: 'Queue',
-    route: '/queue',
-    folder: 'views/queue',
-  },
-  pipeline: {
-    id: 'pipeline',
-    label: 'Pipeline',
-    route: '/pipeline',
-    folder: 'views/pipeline',
-  },
-  calendar: {
-    id: 'calendar',
-    label: 'Calendar',
-    route: '/calendar',
-    folder: 'views/calendar',
-  },
-  map: {
-    id: 'map',
-    label: 'Map',
-    route: '/map',
-    folder: 'views/map',
-  },
-  analytics: {
-    id: 'analytics',
-    label: 'Analytics',
-    route: '/analytics',
-    folder: 'views/analytics',
-  },
-  'closing-desk': {
-    id: 'closing-desk',
-    label: 'Closing Desk',
-    route: '/closing-desk',
-    folder: 'views/closing-desk',
-  },
-  'campaign-command': {
-    id: 'campaign-command',
-    label: 'Campaign Command',
-    route: '/campaign-command',
-    folder: 'views/campaign-command',
-  },
-  'email-command': {
-    id: 'email-command',
-    label: 'Email Command',
-    route: '/email-command',
-    folder: 'views/email-command',
-  },
-  'workflow-studio': {
-    id: 'workflow-studio',
-    label: 'Workflow Studio',
-    route: '/workflow-studio',
-    folder: 'views/workflow-studio',
-  },
+/** Only the surfaces whose implementation does NOT live in its own same-named folder. */
+const FOLDER_OVERRIDES: Partial<Record<AppId, string>> = {
+  conversation: 'views/conversation',
+  'deal-intelligence': 'views/deal-intelligence',
+  'comp-intelligence': 'views/comp-intelligence',
+  pipeline: 'views/pipeline',
+  map: 'views/map',
+  calendar: 'views/calendar',
+  properties: 'views/deal-intelligence',
+  'entity-graph': 'modules/entity-graph',
+  analytics: 'views/analytics',
+  notifications: 'modules/notifications',
+  settings: 'modules/mobile',
 }
+
+export const CANONICAL_VIEWS: Record<CanonicalViewId, CanonicalViewMeta> = Object.fromEntries(
+  NEXUS_APPS.map((app) => [
+    app.id,
+    {
+      id: app.id,
+      label: app.label,
+      route: app.route,
+      folder: FOLDER_OVERRIDES[app.id] ?? `views/${app.id}`,
+    },
+  ]),
+) as Record<CanonicalViewId, CanonicalViewMeta>

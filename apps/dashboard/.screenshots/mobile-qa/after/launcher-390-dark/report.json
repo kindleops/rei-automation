@@ -1,0 +1,75 @@
+{
+  "rail": [
+    {
+      "label": "Inbox",
+      "h": 44
+    },
+    {
+      "label": "Entity Graph",
+      "h": 44
+    },
+    {
+      "label": "Map",
+      "h": 44
+    },
+    {
+      "label": "Pipeline",
+      "h": 44
+    },
+    {
+      "label": "All applications",
+      "h": 44
+    }
+  ],
+  "launcher": {
+    "groups": [
+      {
+        "group": "Communication",
+        "apps": [
+          "Inbox",
+          "Conversation",
+          "Email Command",
+          "Notifications"
+        ]
+      },
+      {
+        "group": "Acquisition Intelligence",
+        "apps": [
+          "Deal Intelligence",
+          "Properties",
+          "Entity Graph",
+          "Comp Intelligence",
+          "Buyer Match",
+          "Map"
+        ]
+      },
+      {
+        "group": "Operations",
+        "apps": [
+          "Pipeline",
+          "Queue",
+          "Campaign Command",
+          "Workflow Studio",
+          "Closing Desk",
+          "Calendar"
+        ]
+      },
+      {
+        "group": "System",
+        "apps": [
+          "Analytics",
+          "Settings"
+        ]
+      }
+    ],
+    "total": 18,
+    "context": null,
+    "sheetTop": 186,
+    "sheetBottom": 844,
+    "horizontalOverflowPx": 0
+  },
+  "searched": [
+    "Comp Intelligence"
+  ],
+  "errors": []
+}

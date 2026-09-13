@@ -17,6 +17,34 @@
   --nx-mobile-chrome-top: calc(
     var(--nx-dock-pad-top) + var(--nx-dock-height) + var(--nx-dock-inner-pad-y) + var(--nx-mobile-safe-top)
   );
+
+  /* ── THE SAFE-AREA CONTRACT ──────────────────────────────────────────────
+     Four tokens, defined once, that every mobile surface should reserve against.
+
+     `--nx-mobile-chrome-bottom` did not exist: chrome-TOP was tokenised but the
+     bottom never was (the 390x844 probe read chrome-top fine and chrome-bottom as
+     null). With no shared way to say "clear the dock", 21 stylesheets each
+     hand-rolled `env(safe-area-inset-bottom)` with their own guess at the dock's
+     height — 50 occurrences — which is why raising the dock from 16px to 62px could
+     not be done in one place before now.
+
+     The left/right insets matter in landscape on a notched iPhone, where the notch
+     eats one edge; there was exactly one raw use of each in the whole codebase.
+
+     Direct `env(safe-area-inset-*)` still appears in 21 stylesheets. Those are not
+     wrong, but they cannot be corrected centrally — if the dock's height changes,
+     every one of them has to be found again. New work should reserve against these.
+     ───────────────────────────────────────────────────────────────────────── */
+  --nx-mobile-safe-left: env(safe-area-inset-left, 0px);
+  --nx-mobile-safe-right: env(safe-area-inset-right, 0px);
+
+  /* What the bottom dock actually occupies: its painted height, the home-indicator
+     inset it hangs off, and the gutter between the two. Kept as ONE expression so
+     raising --nx-pinned-dock-collapsed (16px -> 62px when the dock gained its rail)
+     moves every reservation with it. */
+  --nx-mobile-chrome-bottom: calc(
+    var(--nx-pinned-dock-collapsed, 62px) + var(--nx-mobile-safe-bottom) + 6px
+  );
 }
 
 .nx-sr-only {

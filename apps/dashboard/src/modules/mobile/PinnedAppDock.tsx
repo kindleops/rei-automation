@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { pushRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
 import { captureAppSession, resolveAppIdFromRoute, restoreAppSession } from './app-session-cache'
-import { isCommandNavRouteActive, type CommandNavRoute } from './command-navigation-registry'
+import {
+  appForCommandNavRoute,
+  isCommandNavRouteActive,
+  type CommandNavRoute,
+} from './command-navigation-registry'
 import { closeInboxDealIntelligence, isInboxRoute, openInboxDealIntelligence } from './mobile-inbox-bridge'
-import { readPropertyLocator, resolveDockDestination } from '../../domain/locator/property-locator'
+import { AppLauncher, APP_LAUNCHER_OPEN_EVENT } from './AppLauncher'
+import { navigateToApp as navigateToRegistryApp } from '../../domain/app-registry/contextual-navigation'
+import type { NexusApp } from '../../domain/app-registry/app-registry'
+import { MobileSettingsSheet } from './MobileSettingsSheet'
+import { requestNotificationsSurface } from './shell-surface-bridge'
 import {
   DOCKABLE_APPS,
   addPinApp,
@@ -34,49 +41,29 @@ const formatBadge = (count?: number) => {
 }
 
 /**
- * GLOBAL PROPERTY LOCATOR.
+ * Dock navigation, delegated to the ONE contextual navigator.
  *
- * Every dock item used to navigate with zero payload - a bare
- * pushRoutePath(app.path) - so tapping a destination after selecting a
- * conversation landed on a generic, unfocused view. The operator's ask is the
- * opposite: pick a property in the Inbox, tap anywhere in the dock, arrive at
- * THAT property.
- *
- * The locator is published at selection time (InboxPage) and read here at tap
- * time. Destinations that already know how to focus get a focused path; the
- * rest keep their plain path, so this can only ever add precision, never break
- * a route that worked.
+ * This used to be a hand-written switch living only in the dock, so tapping a
+ * destination from the dock carried the operator's selected property while the
+ * workspace launcher and the command palette — which push the same paths — dropped it.
+ * Context preservation now belongs to the platform (domain/app-registry), and every
+ * entry point inherits it.
  */
-const navigateToApp = (app: CommandNavRoute) => {
-  const locator = readPropertyLocator()
+const navigateToApp = (item: CommandNavRoute, effects: DockNavigationEffects) => {
+  const app = appForCommandNavRoute(item)
+  if (!app) return
+  navigateToRegistryApp(app, {
+    openDealIntelligence: (identity) => openInboxDealIntelligence(identity ?? undefined),
+    openNotifications: effects.openNotifications,
+    openSettings: effects.openSettings,
+    closeInboxDealIntelligence,
+    isInboxRoute,
+  })
+}
 
-  if (app.action === 'deal_intelligence') {
-    // Deal Intelligence resolved to the FIRST thread in the list when arrived at
-    // from another app, which meant opening somebody else's deal. Hand it the
-    // identity explicitly.
-    openInboxDealIntelligence(
-      locator
-        ? {
-          threadKey: locator.threadKey,
-          propertyId: locator.propertyId,
-          prospectId: locator.prospectId,
-          masterOwnerId: locator.masterOwnerId,
-        }
-        : undefined,
-    )
-    return
-  }
-
-  // RETURNING FROM DEAL INTELLIGENCE. It is a panel inside the inbox workspace,
-  // not a route, so tapping Inbox while it was open pushed /inbox onto /inbox -
-  // a no-op - and the operator was stranded in the panel with no way back to the
-  // thread list. Fire the close event instead of a dead navigation.
-  if (app.path === '/inbox' && typeof window !== 'undefined' && isInboxRoute(window.location.pathname)) {
-    closeInboxDealIntelligence()
-    return
-  }
-
-  pushRoutePath(resolveDockDestination(app.path, locator) ?? app.path)
+interface DockNavigationEffects {
+  openNotifications: () => void
+  openSettings: () => void
 }
 
 export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
@@ -87,6 +74,16 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
   const [dragSource, setDragSource] = useState<'pinned' | 'catalog' | null>(null)
   const [dragOverId, setDragOverId] = useState<PinnedAppId | 'track' | 'unpin' | null>(null)
   const [hint, setHint] = useState<string | null>(null)
+  /**
+   * The route the launcher was opened ON, rather than a bare boolean.
+   *
+   * Openness is then DERIVED: a route change makes it false with no effect and no
+   * setState-in-effect, which is what keeps a back-navigation from leaving the
+   * launcher floating over a surface the operator never opened it from.
+   */
+  const [launcherRoute, setLauncherRoute] = useState<string | null>(null)
+  const launcherOpen = launcherRoute !== null && launcherRoute === routePath
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const trackRef = useRef<HTMLDivElement | null>(null)
   const dragYRef = useRef(0)
@@ -131,12 +128,40 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
     prevRouteRef.current = routePath
   }, [persistDockSettings, routePath])
 
+  const navigationEffects = useMemo(() => ({
+    openNotifications: requestNotificationsSurface,
+    openSettings: () => setSettingsOpen(true),
+  }), [])
+
   const switchToApp = useCallback((app: CommandNavRoute) => {
     captureAppSession(activeAppId)
-    navigateToApp(app)
+    navigateToApp(app, navigationEffects)
     persistDockSettings((current) => recordRecentApp(current, app.path))
     collapse()
-  }, [activeAppId, collapse, persistDockSettings])
+  }, [activeAppId, collapse, navigationEffects, persistDockSettings])
+
+  /** Launcher selections arrive as canonical apps; reuse the same one path. */
+  const switchToRegistryApp = useCallback((app: NexusApp) => {
+    captureAppSession(activeAppId)
+    navigateToRegistryApp(app, {
+      openDealIntelligence: (identity) => openInboxDealIntelligence(identity ?? undefined),
+      openNotifications: navigationEffects.openNotifications,
+      openSettings: navigationEffects.openSettings,
+      closeInboxDealIntelligence,
+      isInboxRoute,
+    })
+    persistDockSettings((current) => recordRecentApp(current, app.route))
+    setLauncherRoute(null)
+    collapse()
+  }, [activeAppId, collapse, navigationEffects, persistDockSettings])
+
+  // The top bar and the command palette can raise the launcher without knowing
+  // where it is mounted.
+  useEffect(() => {
+    const open = () => setLauncherRoute(routePath)
+    window.addEventListener(APP_LAUNCHER_OPEN_EVENT, open)
+    return () => window.removeEventListener(APP_LAUNCHER_OPEN_EVENT, open)
+  }, [routePath])
 
   const handleReorder = useCallback((fromId: PinnedAppId, toId: PinnedAppId) => {
     if (fromId === toId) return
@@ -244,6 +269,71 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
     return null
   }
 
+  /**
+   * THE PERMANENT RAIL.
+   *
+   * The collapsed dock used to be a bare 16px shelf with a drag handle and nothing
+   * else — measured at 390x844 the dock was 20px tall and showed zero applications.
+   * Every destination was behind an undiscoverable upward drag, so on a phone the
+   * product had no navigation at all.
+   *
+   * The rail shows the first four pinned destinations plus the launcher. Four is the
+   * ceiling: five 44px targets plus gutters is 280px of a 390px viewport before the
+   * launcher, and shrinking them to fit is how touch targets die. Anything beyond four
+   * is one tap away in the launcher, and pinning still reorders what those four are.
+   */
+  const railApps = pinnedApps.slice(0, 4)
+
+  const renderRailButton = (app: CommandNavRoute) => {
+    const isActive = isCommandNavRouteActive(routePath, app)
+    const badge = badgeForApp(badges, app.path)
+    const canonical = appForCommandNavRoute(app)
+    return (
+      <button
+        key={`rail-${app.path}`}
+        type="button"
+        className={cls('nx-pinned-app-dock__rail-app', isActive && 'is-active')}
+        aria-label={app.label}
+        aria-current={isActive ? 'page' : undefined}
+        onClick={() => {
+          if (suppressClickRef.current) return
+          switchToApp(app)
+        }}
+        onPointerDown={() => startLongPress(app.path)}
+        onPointerUp={clearLongPress}
+        onPointerLeave={clearLongPress}
+        onPointerCancel={clearLongPress}
+      >
+        <span className="nx-pinned-app-dock__rail-glyph">
+          <Icon name={app.icon} size={19} strokeWidth={1.6} />
+          {renderBadge(badge)}
+        </span>
+        <span className="nx-pinned-app-dock__rail-label">
+          {canonical?.shortLabel ?? app.label}
+        </span>
+      </button>
+    )
+  }
+
+  const rail = (
+    <nav className="nx-pinned-app-dock__rail" aria-label="Primary applications">
+      {railApps.map(renderRailButton)}
+      <button
+        type="button"
+        className={cls('nx-pinned-app-dock__rail-app', 'is-launcher', launcherOpen && 'is-active')}
+        aria-label="All applications"
+        aria-haspopup="dialog"
+        aria-expanded={launcherOpen}
+        onClick={() => setLauncherRoute(routePath)}
+      >
+        <span className="nx-pinned-app-dock__rail-glyph">
+          <Icon name="grid" size={19} strokeWidth={1.6} />
+        </span>
+        <span className="nx-pinned-app-dock__rail-label">Apps</span>
+      </button>
+    </nav>
+  )
+
   const renderAppButton = (
     app: CommandNavRoute,
     opts?: { pinned?: boolean; draggable?: boolean; catalog?: boolean },
@@ -343,6 +433,8 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
 
           {hint ? <div className="nx-pinned-app-dock__hint" role="status">{hint}</div> : null}
 
+          {phase === 'collapsed' ? rail : null}
+
           <div className="nx-pinned-app-dock__panel">
             <div className="nx-pinned-app-dock__panel-head">
               <strong>Apps</strong>
@@ -439,6 +531,16 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
           </div>
         </div>
       </div>
+
+      {launcherOpen ? (
+        <AppLauncher
+          routePath={routePath}
+          onClose={() => setLauncherRoute(null)}
+          onSelect={switchToRegistryApp}
+        />
+      ) : null}
+
+      <MobileSettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   )
 

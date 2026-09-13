@@ -1,3 +1,5 @@
+import { NEXUS_APPS, isAppActive } from '../../domain/app-registry/app-registry'
+import { dockIdForApp } from './command-navigation-registry'
 import type { AppSessionSnapshot, PinnedAppId } from './pinned-app-dock.types'
 
 const STORAGE_KEY = 'nx.app-session-cache.v1'
@@ -30,27 +32,14 @@ function writeStore(store: SessionMap) {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(store))
 }
 
+/**
+ * Which app owns this route? Derived from the canonical registry rather than the
+ * hand-written prefix list this used to carry — that list was missing /properties, so
+ * the Properties surface never captured or restored a scroll session.
+ */
 export function resolveAppIdFromRoute(routePath: string): PinnedAppId {
-  if (routePath === '/' || routePath.startsWith('/conversation')) return '/inbox'
-  if (routePath === '/deal-intelligence' || routePath.startsWith('/deal-intelligence/')) {
-    return '__deal_intelligence__'
-  }
-  const match = [
-    '/campaign-command',
-    '/workflow-studio',
-    '/email-command',
-    '/buyer-match',
-    '/comp-intelligence',
-    '/closing-desk',
-    '/entity-graph',
-    '/analytics',
-    '/calendar',
-    '/pipeline',
-    '/inbox',
-    '/queue',
-    '/map',
-  ].find((prefix) => routePath === prefix || routePath.startsWith(`${prefix}/`))
-  return match ?? routePath
+  const app = NEXUS_APPS.find((candidate) => isAppActive(routePath, candidate))
+  return app ? dockIdForApp(app) : routePath
 }
 
 function collectContainerScrolls(): Record<string, number> {
