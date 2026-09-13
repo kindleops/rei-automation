@@ -269,71 +269,6 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
     return null
   }
 
-  /**
-   * THE PERMANENT RAIL.
-   *
-   * The collapsed dock used to be a bare 16px shelf with a drag handle and nothing
-   * else — measured at 390x844 the dock was 20px tall and showed zero applications.
-   * Every destination was behind an undiscoverable upward drag, so on a phone the
-   * product had no navigation at all.
-   *
-   * The rail shows the first four pinned destinations plus the launcher. Four is the
-   * ceiling: five 44px targets plus gutters is 280px of a 390px viewport before the
-   * launcher, and shrinking them to fit is how touch targets die. Anything beyond four
-   * is one tap away in the launcher, and pinning still reorders what those four are.
-   */
-  const railApps = pinnedApps.slice(0, 4)
-
-  const renderRailButton = (app: CommandNavRoute) => {
-    const isActive = isCommandNavRouteActive(routePath, app)
-    const badge = badgeForApp(badges, app.path)
-    const canonical = appForCommandNavRoute(app)
-    return (
-      <button
-        key={`rail-${app.path}`}
-        type="button"
-        className={cls('nx-pinned-app-dock__rail-app', isActive && 'is-active')}
-        aria-label={app.label}
-        aria-current={isActive ? 'page' : undefined}
-        onClick={() => {
-          if (suppressClickRef.current) return
-          switchToApp(app)
-        }}
-        onPointerDown={() => startLongPress(app.path)}
-        onPointerUp={clearLongPress}
-        onPointerLeave={clearLongPress}
-        onPointerCancel={clearLongPress}
-      >
-        <span className="nx-pinned-app-dock__rail-glyph">
-          <Icon name={app.icon} size={19} strokeWidth={1.6} />
-          {renderBadge(badge)}
-        </span>
-        <span className="nx-pinned-app-dock__rail-label">
-          {canonical?.shortLabel ?? app.label}
-        </span>
-      </button>
-    )
-  }
-
-  const rail = (
-    <nav className="nx-pinned-app-dock__rail" aria-label="Primary applications">
-      {railApps.map(renderRailButton)}
-      <button
-        type="button"
-        className={cls('nx-pinned-app-dock__rail-app', 'is-launcher', launcherOpen && 'is-active')}
-        aria-label="All applications"
-        aria-haspopup="dialog"
-        aria-expanded={launcherOpen}
-        onClick={() => setLauncherRoute(routePath)}
-      >
-        <span className="nx-pinned-app-dock__rail-glyph">
-          <Icon name="grid" size={19} strokeWidth={1.6} />
-        </span>
-        <span className="nx-pinned-app-dock__rail-label">Apps</span>
-      </button>
-    </nav>
-  )
-
   const renderAppButton = (
     app: CommandNavRoute,
     opts?: { pinned?: boolean; draggable?: boolean; catalog?: boolean },
@@ -432,8 +367,6 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
           </button>
 
           {hint ? <div className="nx-pinned-app-dock__hint" role="status">{hint}</div> : null}
-
-          {phase === 'collapsed' ? rail : null}
 
           <div className="nx-pinned-app-dock__panel">
             <div className="nx-pinned-app-dock__panel-head">

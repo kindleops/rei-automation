@@ -12,26 +12,30 @@ import {
 
 describe('pinned-app-dock-store', () => {
   /**
-   * The default dock is now DERIVED from domain/app-registry's `defaultDock` flag and
-   * deliberately holds four destinations, not the eight this used to freeze.
+   * The default pins are DERIVED from domain/app-registry's `defaultDock` flag rather
+   * than frozen as a literal list here — that literal was one of five competing
+   * definitions of "which applications exist".
    *
-   * Eight 44px targets plus their labels do not fit across a 390px viewport without
-   * shrinking every one below a usable size — which is how the dock ended up collapsed
-   * to a bare 16px handle showing no applications at all. Everything unpinned stays one
-   * tap away in the App Launcher.
-   *
-   * The size ceiling is asserted rather than the exact list, so reordering the rail is
-   * a registry decision and does not need a test edit — but overflowing it does fail.
+   * The set is asserted by membership, not by index, so reordering the dock is a
+   * registry decision and does not need a test edit. What IS pinned down is that every
+   * default resolves, because a default that is not dockable gets silently dropped by
+   * the sanitiser and the operator quietly gets a shorter dock than intended.
    */
-  it('ships a dock rail small enough to fit a 390px viewport', () => {
-    expect(DEFAULT_PINNED_APP_IDS.length).toBeGreaterThan(0)
-    expect(DEFAULT_PINNED_APP_IDS.length).toBeLessThanOrEqual(4)
-    expect(DEFAULT_PINNED_APP_IDS).toEqual(['/inbox', '/entity-graph', '/map', '/pipeline'])
+  it('ships the operator default dock, derived from the canonical registry', () => {
+    expect(DEFAULT_PINNED_APP_IDS).toContain(DEAL_INTELLIGENCE_APP_ID)
+    expect(new Set(DEFAULT_PINNED_APP_IDS)).toEqual(new Set([
+      '/inbox',
+      '/map',
+      '/pipeline',
+      '/queue',
+      '/campaign-command',
+      '/workflow-studio',
+      '/closing-desk',
+      DEAL_INTELLIGENCE_APP_ID,
+    ]))
   })
 
   it('derives every default from the canonical registry', () => {
-    // A default that is not dockable would be silently dropped by the sanitiser,
-    // leaving the operator with a shorter rail than intended.
     for (const id of DEFAULT_PINNED_APP_IDS) {
       expect(isDockableAppId(id)).toBe(true)
     }
