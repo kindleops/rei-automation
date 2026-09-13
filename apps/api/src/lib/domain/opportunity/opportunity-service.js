@@ -433,7 +433,6 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
   if (!dedupeKey) return { ok: false, error: 'dedupe_key_required' };
 
   const mapped = mapThreadStageToOpportunityStage(thread);
-  const hasEngineRun = clean(thread.acquisition_engine_run_id) !== '';
   const row = {
     dedupe_key: dedupeKey,
     master_owner_id: thread.master_owner_id || null,
@@ -450,12 +449,29 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
     temperature: mapped.universal_temperature === UNIVERSAL_TEMPERATURE_CODES.UNKNOWN
       ? null
       : mapped.universal_temperature,
-    aos: hasEngineRun ? num(thread.final_acquisition_score) : null,
+    // `final_acquisition_score` is the Podio-era 0-100 import, not this
+    // engine's AOS (Ronald's canonical aos_score is 656 -- a different scale
+    // entirely under the same name). The gate happens to hold it shut:
+    // `acquisition_engine_run_id` is not a column on inbox_threads_hydrated, so
+    // hasEngineRun is permanently false and this has always written null. Kept
+    // explicit rather than left to that accident.
+    aos: null,
     property_state: thread.property_state || null,
     property_type: thread.property_type || null,
     confidence: num(thread.confidence_score),
     estimated_value: num(thread.estimated_value),
-    asking_price: num(thread.cash_offer),
+    // NOT thread.cash_offer. That is `properties.cash_offer` arriving through
+    // inbox_threads_hydrated -- a Podio-era import of OUR offer, and the exact
+    // opposite of what this column means. Seeding the seller's ask from it
+    // would have put $26,110 on Ronald's opportunity while he was asking
+    // $150,000, and `effectiveAsk` in persist-seller-transition falls back to
+    // this column to band the deal. No production row is contaminated (0 of the
+    // 12 opportunities carrying an asking price match their property's legacy
+    // cash_offer), so this closes a latent path, not an active one.
+    //
+    // The real ask is written by the seller flow from a classified
+    // asking_price fact. Absent that, absent is the truthful answer.
+    asking_price: null,
     motivation_score: num(thread.motivation_score),
     automation_state: thread.not_interested || thread.opt_out ? 'cancelled' : (thread.automation_status || 'inactive'),
     next_action: thread.next_action || null,

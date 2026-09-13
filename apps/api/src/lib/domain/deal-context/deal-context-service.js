@@ -284,6 +284,41 @@ function hydrateDealContextRow(row) {
   }
 }
 
+/**
+ * Canonical economics for a page of deal contexts.
+ *
+ * The deal-context view carries the Podio-era `properties.cash_offer` family
+ * and nothing from `property_acquisition_scores`, so the /properties workspace
+ * had no way to show a current Decision Engine result even when one existed --
+ * which is how a legacy import column ended up presenting as the current
+ * recommended offer. One batched read by property_id fixes that; the page is
+ * capped well under the `in()` limit.
+ *
+ * A property with no row is NOT an error and NOT "economics unavailable": the
+ * engine is run on demand when the acquisition flow needs economics, so absence
+ * means it has not run yet.
+ */
+const ACQUISITION_DECISION_SELECT = [
+  'property_id', 'recommended_cash_offer', 'minimum_acceptable_offer', 'expected_assignment_fee',
+  'investor_ceiling_low', 'investor_ceiling_mid', 'investor_ceiling_high',
+  'valuation_low', 'valuation_mid', 'valuation_high', 'valuation_confidence',
+  'estimated_repairs', 'comp_count', 'best_strategy', 'decision_tier', 'confidence',
+  'aos_score', 'computed_at', 'evidence',
+].join(',')
+
+async function loadAcquisitionDecisions(supabase, propertyIds = []) {
+  const ids = [...new Set(propertyIds.filter(Boolean).map((id) => String(id)))]
+  if (!ids.length) return new Map()
+  const { data, error } = await supabase
+    .from('property_acquisition_scores')
+    .select(ACQUISITION_DECISION_SELECT)
+    .in('property_id', ids)
+  // A failed economics read must not blank the workspace. Callers see
+  // `not_run`, which is honest -- we could not prove a decision exists.
+  if (error) return new Map()
+  return new Map((Array.isArray(data) ? data : []).map((row) => [String(row.property_id), row]))
+}
+
 export async function listDealContexts(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const limit = int(params.limit, DEFAULT_LIMIT, MAX_LIMIT)
@@ -302,6 +337,11 @@ export async function listDealContexts(params = {}, deps = {}) {
 
   const rawRows = Array.isArray(data) ? data : []
   const rows = rawRows.map(hydrateDealContextRow)
+
+  const decisions = await loadAcquisitionDecisions(supabase, rows.map((row) => row.property_id))
+  for (const row of rows) {
+    row.acquisition_decision = decisions.get(String(row.property_id)) || null
+  }
 
   const total = Number.isFinite(Number(count)) ? Number(count) : rows.length
   const nextOffset = offset + rows.length

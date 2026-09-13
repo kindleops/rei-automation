@@ -361,7 +361,25 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
       })
     }
 
-    if (propertyId && !offersById.has(propertyId) && (asNumber(context.raw.cash_offer, 0) > 0 || asNumber(context.raw.estimated_value, 0) > 0)) {
+    // CANONICAL ECONOMICS. `property_acquisition_scores` is the current Decision
+    // Engine output table, written on demand when the acquisition flow reaches
+    // its economics-required state. The deal-context list now carries the row,
+    // so this workspace can show the real decision instead of inventing one.
+    const decision = (context.acquisition_decision || {}) as AnyRecord
+    const decisionOffer = asNumber(decision.recommended_cash_offer)
+    const hasCurrentDecision = decisionOffer !== null && decisionOffer > 0
+    // Four states, not two. `decision_engine_not_run` is ACTIONABLE -- run the
+    // engine -- and is the normal state for a property the flow has not reached
+    // yet. It is not "unavailable", and it is never a reason to reach for a
+    // legacy column.
+    const offerCalculation = ((decision.evidence as AnyRecord | null)?.offer_calculation || {}) as AnyRecord
+    const authorizedCeiling =
+      asNumber(offerCalculation.effective_authorized_ceiling) ??
+      asNumber(offerCalculation.valuation_based_ceiling)
+    const economicsState = hasCurrentDecision ? 'current' : 'decision_engine_not_run'
+    const economicsAction = hasCurrentDecision ? null : 'run_decision_engine'
+
+    if (propertyId && !offersById.has(propertyId) && (hasCurrentDecision || asNumber(context.raw.cash_offer, 0) > 0 || asNumber(context.raw.estimated_value, 0) > 0)) {
       offersById.set(propertyId, {
         offer_id: `offer:${propertyId}`,
         owner_id: ownerId,
@@ -384,22 +402,30 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
         // appears in the workspace, but with no offer rather than a fabricated
         // one. Legacy values remain visible under explicitly legacy names for
         // provenance, and can never be mistaken for current authority.
-        strategy: null,
-        recommended_offer: null,
+        strategy: hasCurrentDecision ? asString(decision.best_strategy) : null,
+        recommended_offer: hasCurrentDecision ? decisionOffer : null,
+        offer_floor: hasCurrentDecision ? asNumber(decision.minimum_acceptable_offer) : null,
+        expected_fee: hasCurrentDecision ? asNumber(decision.expected_assignment_fee) : null,
         seller_asking_price: asNumber(context.property.list_price),
         status: context.stage || context.status || 'draft',
-        confidence: null,
-        economics_status: 'unavailable',
-        economics_source: 'none',
-        requires_recompute: true,
+        confidence: hasCurrentDecision ? asNumber(decision.confidence) : null,
+        economics_state: economicsState,
+        economics_status: economicsState,
+        economics_source: hasCurrentDecision ? 'property_acquisition_scores' : 'none',
+        economics_computed_at: hasCurrentDecision ? asString(decision.computed_at) : null,
+        decision_tier: hasCurrentDecision ? asString(decision.decision_tier) : null,
+        can_run_decision_engine: true,
+        decision_engine_action: economicsAction,
+        requires_recompute: !hasCurrentDecision,
         legacy_cash_offer: asNumber(context.raw.cash_offer),
         legacy_acquisition_score: asNumber(context.raw.final_acquisition_score),
+        legacy_provenance: 'podio_import_not_current_authority',
         next_action: context.bucket === 'new_replies' ? 'Review response' : 'Review offer',
         updated_at: asString(context.raw.updated_at),
       })
     }
 
-    if (propertyId && !underwritingById.has(propertyId) && (asNumber(context.raw.estimated_value, 0) > 0 || asNumber(context.raw.cash_offer, 0) > 0)) {
+    if (propertyId && !underwritingById.has(propertyId) && (hasCurrentDecision || asNumber(context.raw.estimated_value, 0) > 0 || asNumber(context.raw.cash_offer, 0) > 0)) {
       underwritingById.set(propertyId, {
         underwriting_id: `uw:${propertyId}`,
         id: `uw:${propertyId}`,
@@ -413,12 +439,19 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
         // creative-terms offer identical to the cash offer by construction.
         // They now fail closed; the legacy value stays visible under a name
         // that cannot be mistaken for current authority.
-        mao: null,
-        cash_offer: null,
+        // MAO is the authorized ceiling, which is NOT investor_ceiling_mid: the
+        // engine publishes that as the buyer-behaviour leg and flags it
+        // non-authoritative when the buyer sample cannot support it.
+        mao: hasCurrentDecision ? authorizedCeiling : null,
+        investor_ceiling: hasCurrentDecision ? asNumber(decision.investor_ceiling_mid) : null,
+        cash_offer: hasCurrentDecision ? decisionOffer : null,
         creative_offer: null,
-        economics_status: 'unavailable',
-        economics_source: 'none',
-        requires_recompute: true,
+        economics_state: economicsState,
+        economics_status: economicsState,
+        economics_source: hasCurrentDecision ? 'property_acquisition_scores' : 'none',
+        can_run_decision_engine: true,
+        decision_engine_action: economicsAction,
+        requires_recompute: !hasCurrentDecision,
         legacy_cash_offer: asNumber(context.raw.cash_offer),
         novation_path: asString(context.buyerMatch.best_candidate ? 'Buyer match available' : 'Evaluate novation path'),
         multifamily_noi: asString(context.property.multifamily_noi),
@@ -426,8 +459,9 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
         // `final_acquisition_score` is a Podio-era import, not output of the
         // current model. Presenting it as `ai_confidence` claimed a provenance
         // it does not have.
-        ai_confidence: null,
+        ai_confidence: hasCurrentDecision ? asNumber(decision.confidence) : null,
         legacy_acquisition_score: asNumber(context.raw.final_acquisition_score),
+        legacy_provenance: 'podio_import_not_current_authority',
         risk_notes: asString(context.raw.suppression_status ? 'Suppressed contact' : context.threadState.needs_review ? 'Needs review' : 'No critical risk notes'),
       })
     }

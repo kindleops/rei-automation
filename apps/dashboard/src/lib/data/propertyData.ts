@@ -758,6 +758,7 @@ export interface PropertyIntelligenceContext {
   messages: PropertyMessageEvent[]
   queue: PropertyQueueContext
   offerPathway: PropertyOfferPathway
+  acquisitionDecision: PropertyAcquisitionDecision
 }
 
 export interface PropertyIntelligenceModel {
@@ -777,6 +778,38 @@ interface RelatedRows {
   queue: AnyRecord[]
   offers: AnyRecord[]
   contracts: AnyRecord[]
+  /** Canonical current Decision Engine output. Absent = engine not run. */
+  acquisitionDecisions: AnyRecord[]
+}
+
+/**
+ * What this property's economics actually are, and where they came from.
+ *
+ * `properties.cash_offer` is a Podio-era import -- the whole table was written
+ * on five distinct days -- and this page rendered it as "Cash Offer" with no
+ * provenance, so Ronald's screen read $26,110 while the current Decision Engine
+ * result for the same property was $62,300.
+ *
+ * The canonical answer lives in `property_acquisition_scores`, written on
+ * demand when the acquisition flow needs economics. No row does NOT mean
+ * "unavailable" -- it means the engine has not run, which is actionable.
+ */
+export interface PropertyAcquisitionDecision {
+  state: 'current' | 'decision_engine_not_run'
+  recommendedOffer: number | null
+  offerFloor: number | null
+  authorizedCeiling: number | null
+  investorCeiling: number | null
+  valuationMid: number | null
+  estimatedRepairs: number | null
+  expectedFee: number | null
+  strategy: string | null
+  decisionTier: string | null
+  confidence: number | null
+  compCount: number | null
+  computedAt: string | null
+  /** Shown only under its own name, never as the current recommended offer. */
+  legacyCashOffer: number | null
 }
 
 const moneyFormatter = new Intl.NumberFormat('en-US', {
@@ -1516,6 +1549,10 @@ const mockRelatedRows = (): RelatedRows => ({
   contracts: [
     { contract_id: 'ct-002', master_owner_id: 'mown-002', property_id: 'prop-002', offer_id: 'off-002', status: 'pending', updated_at: new Date(Date.now() - 1000 * 60 * 61).toISOString() },
   ],
+  // Deliberately empty: the mock exercises the decision-engine-not-run state,
+  // which is the normal state for a property the acquisition flow has not
+  // reached yet.
+  acquisitionDecisions: [],
 })
 
 const safeSelect = async (table: string, limit = 3000): Promise<AnyRecord[]> => {
@@ -1782,6 +1819,7 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
       queue: [],
       offers: [],
       contracts: [],
+      acquisitionDecisions: [],
     }
   }
 
@@ -1803,7 +1841,7 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
   const oIds = cleanIds(ownerIds)
   const pIds = cleanIds(propertyIds)
 
-  const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts] = await Promise.all([
+  const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts, acquisitionDecisions] = await Promise.all([
     fetchChunked(oIds, async chunk => await supabase.from('master_owners').select('*').in('master_owner_id', chunk).limit(1000)),
     fetchChunked(oIds, async chunk => await supabase.from('prospects').select('*').in('master_owner_id', chunk).limit(1500)),
     fetchChunked(pIds, async chunk => await supabase.from('phones').select('*').in('property_id', chunk).limit(2000)),
@@ -1812,6 +1850,7 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
     fetchChunked(pIds, async chunk => await supabase.from('send_queue').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(3000)),
     fetchChunked(pIds, async chunk => await supabase.from('property_cash_offer_snapshots').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
     fetchChunked(pIds, async chunk => await supabase.from('contracts').select('*').in('property_id', chunk).order('updated_at', { ascending: false }).limit(1000)),
+    fetchChunked(pIds, async chunk => await supabase.from('property_acquisition_scores').select('*').in('property_id', chunk).limit(1000)),
   ])
 
   return {
@@ -1823,12 +1862,57 @@ const fetchRelatedRowsForProperties = async (properties: PropertyRecord[]): Prom
     queue: take(queue.data),
     offers: take(offers.data),
     contracts: take(contracts.data),
+    acquisitionDecisions: take(acquisitionDecisions.data),
+  }
+}
+
+const buildAcquisitionDecision = (
+  property: PropertyRecord,
+  rows: RelatedRows,
+): PropertyAcquisitionDecision => {
+  const ids = [property.propertyId, property.id].filter(Boolean).map(String)
+  const row = safeArray(rows.acquisitionDecisions).find((candidate) =>
+    ids.includes(String(candidate.property_id)))
+  const legacyCashOffer = property.valuation.cashOffer ?? null
+
+  if (!row) {
+    return {
+      state: 'decision_engine_not_run',
+      recommendedOffer: null, offerFloor: null, authorizedCeiling: null, investorCeiling: null,
+      valuationMid: null, estimatedRepairs: null, expectedFee: null,
+      strategy: null, decisionTier: null, confidence: null, compCount: null, computedAt: null,
+      legacyCashOffer,
+    }
+  }
+
+  const evidence = (row.evidence ?? {}) as AnyRecord
+  const offerCalculation = (evidence.offer_calculation ?? {}) as AnyRecord
+  return {
+    state: 'current',
+    recommendedOffer: toNumber(row.recommended_cash_offer),
+    offerFloor: toNumber(row.minimum_acceptable_offer),
+    // NOT investor_ceiling_mid. The engine publishes that as the
+    // buyer-behaviour leg and flags it non-authoritative when the buyer sample
+    // cannot support it -- for Ronald, 113,800 against an authorized 79,100.
+    authorizedCeiling:
+      toNumber(offerCalculation.effective_authorized_ceiling) ??
+      toNumber(offerCalculation.valuation_based_ceiling),
+    investorCeiling: toNumber(row.investor_ceiling_mid),
+    valuationMid: toNumber(row.valuation_mid),
+    estimatedRepairs: toNumber(row.estimated_repairs),
+    expectedFee: toNumber(row.expected_assignment_fee),
+    strategy: toText(row.best_strategy),
+    decisionTier: toText(row.decision_tier),
+    confidence: toNumber(row.confidence),
+    compCount: toNumber(row.comp_count),
+    computedAt: toText(row.computed_at),
+    legacyCashOffer,
   }
 }
 
 const fetchRelatedRows = async (): Promise<RelatedRows> => {
   if (!shouldUseSupabase()) return mockRelatedRows()
-  const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts] = await Promise.all([
+  const [masterOwners, prospects, phones, emails, messages, queue, offers, contracts, acquisitionDecisions] = await Promise.all([
     safeSelect('master_owners'),
     safeSelect('prospects'),
     safeSelect('phones'),
@@ -1837,8 +1921,9 @@ const fetchRelatedRows = async (): Promise<RelatedRows> => {
     safeSelect('send_queue'),
     safeSelect('property_cash_offer_snapshots'),
     safeSelect('contracts'),
+    safeSelect('property_acquisition_scores'),
   ])
-  return { masterOwners, prospects, phones, emails, messages, queue, offers, contracts }
+  return { masterOwners, prospects, phones, emails, messages, queue, offers, contracts, acquisitionDecisions }
 }
 
 const propertyLinkValues = (property: PropertyRecord, contacts?: PropertyContactContext) => ({
@@ -2099,6 +2184,7 @@ export const fetchPropertyIntelligenceModel = async (
       messages,
       queue: buildQueue(property, relatedRows, contacts, messages),
       offerPathway: buildOfferPathway(property, relatedRows),
+      acquisitionDecision: buildAcquisitionDecision(property, relatedRows),
     }
     return acc
   }, {})

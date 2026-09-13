@@ -214,13 +214,23 @@ async function recoverAdeNeverRan(supabase, { limit, dryRun, deps }) {
         return;
       }
       try {
-        const { scoreProperty } = await import("@/lib/acquisition/acquisitionDecisionEngine.js");
-        const runner = deps?.scoreProperty || scoreProperty;
-        const ade = await runner(opp.primary_property_id, { supabase });
-        if (!ade?.ok) {
-          outcome.results.push({ opportunity_id: opp.id, ok: false, reason: ade?.error || "ade_failed" });
+        // Same authority as the manual button and the live seller flow, so a
+        // recovery pass over a backlog reuses decisions that are already
+        // current instead of re-running the engine over every row -- and the
+        // rows it does write carry the same input stamp everything else reads.
+        const { ensurePropertyAcquisitionDecision, DECISION_STATUS } = await import(
+          "@/lib/acquisition/decisionAuthority.js"
+        );
+        const ensured = await ensurePropertyAcquisitionDecision(opp.primary_property_id, {
+          sellerFacts: { asking_price: opp.asking_price ?? null },
+          reason: "gap_recovery",
+          deps: { supabase, ...(deps?.scoreProperty ? { scoreProperty: deps.scoreProperty } : {}) },
+        });
+        if (ensured.status === DECISION_STATUS.ENGINE_FAILED) {
+          outcome.results.push({ opportunity_id: opp.id, ok: false, reason: ensured.error || "ade_failed" });
           return;
         }
+        const ade = { ok: true, score: ensured.decision || null };
         const metadata = {
           ...(opp.metadata && typeof opp.metadata === "object" ? opp.metadata : {}),
           ade_snapshot: ade.score || null,

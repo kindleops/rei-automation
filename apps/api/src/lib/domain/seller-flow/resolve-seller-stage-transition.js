@@ -1186,15 +1186,26 @@ export function resolveSellerStageTransition({
 
   const prompt = STAGE_PROMPTS[afterCode] || STAGE_PROMPTS[LIFECYCLE_STAGE_CODES.OWNERSHIP_CONFIRMATION];
 
-  // ADE action: preliminary when price lands, full at S5, rerun on new
-  // material facts while negotiating.
+  // ADE action. This is the "economics are required now" signal, NOT a
+  // "run the engine now" instruction: the persistence layer routes it through
+  // ensurePropertyAcquisitionDecision, which reuses a current decision and only
+  // runs the engine when one is absent or its inputs moved.
+  //
+  // It used to fire only on the turn a price arrived, and at S5 only when no
+  // snapshot existed at all. So a deal that reached S3 with a price captured
+  // several turns earlier carried NO economics, and a stale S5 snapshot of any
+  // age counted as current. Economics are required from S3 onward, every turn,
+  // and the freshness check decides what that costs.
   let adeAction = ADE_ACTIONS.NONE;
   const priceJustCaptured = Boolean(normalizeAskingPriceFact(new_facts?.asking_price)?.value);
   const materialFactArrived = priceJustCaptured || intentKey === "condition_disclosed" || intentKey === "tenant_occupied";
-  if (afterIdx === 4) {
-    adeAction = ade_result ? (materialFactArrived ? ADE_ACTIONS.RERUN_MATERIAL_FACTS : ADE_ACTIONS.NONE) : ADE_ACTIONS.RUN_FULL;
-  } else if (priceJustCaptured || (afterIdx === 3 && facts.asking_price?.value > 0)) {
-    adeAction = ADE_ACTIONS.RUN_PRELIMINARY;
+  const economicsRequired = afterIdx >= 2;
+  if (economicsRequired) {
+    // RUN_FULL stays an S5 concept. A price or condition landing earlier is
+    // still preliminary underwriting, however material it is.
+    if (materialFactArrived && ade_result) adeAction = ADE_ACTIONS.RERUN_MATERIAL_FACTS;
+    else if (afterIdx >= 4) adeAction = ADE_ACTIONS.RUN_FULL;
+    else adeAction = ADE_ACTIONS.RUN_PRELIMINARY;
   }
 
   // Next action from the unresolved milestone; engine decisions refine S5/S6.

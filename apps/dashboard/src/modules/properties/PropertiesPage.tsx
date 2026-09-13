@@ -75,6 +75,24 @@ const emptyContext: PropertyIntelligenceContext = {
     latestOffer: null,
     activeContract: null,
   },
+  // Not-run is the correct empty state: `property_acquisition_scores` is
+  // written on demand when the acquisition flow needs economics.
+  acquisitionDecision: {
+    state: 'decision_engine_not_run',
+    recommendedOffer: null,
+    offerFloor: null,
+    authorizedCeiling: null,
+    investorCeiling: null,
+    valuationMid: null,
+    estimatedRepairs: null,
+    expectedFee: null,
+    strategy: null,
+    decisionTier: null,
+    confidence: null,
+    compCount: null,
+    computedAt: null,
+    legacyCashOffer: null,
+  },
 }
 
 const PAGE_SIZE = 50

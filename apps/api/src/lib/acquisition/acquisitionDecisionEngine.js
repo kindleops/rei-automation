@@ -11,6 +11,12 @@ import {
   normalizeZip,
 } from '@/lib/intel/normalize.js';
 import { classifyAssetLane } from './assetClassification.js';
+import {
+  COMPATIBILITY,
+  compareAssetClasses,
+  engineLaneFor,
+  resolveAssetClass,
+} from './assetTaxonomy.js';
 import { qualifyComps } from './transactionQualification.js';
 import { buildV3Decision } from './v3DecisionPipeline.js';
 import { loadV3CompCandidates } from './compCandidateLoader.js';
@@ -629,35 +635,52 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
   return 3958.7559 * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-function canonicalAssetType(row = {}) {
-  const explicit = first(
-    row.normalized_asset_class,
-    row.asset_class,
-    row.asset_type,
-    row.normalized_asset_subclass,
-    row.asset_subtype,
-    row.commercial_property_type,
-    row.property_type,
-  );
-  const normalized = normalizeAssetClass(explicit);
+/**
+ * Resolve this row's asset lane AND say where the answer came from.
+ *
+ * The diagnosis half is not decoration: `asset_type_mismatch` with no
+ * provenance is exactly what made the Riverdale defect (property 237838109)
+ * unreadable from outside -- a single-family subject rejecting single-family
+ * comps, with nothing in the output naming the field or the string responsible.
+ * See assetTaxonomy.js for the full defect.
+ */
+function resolveCanonicalAsset(row = {}) {
+  const resolution = resolveAssetClass(row);
   const blob = lower(
     [
-      explicit,
+      resolution.raw,
+      row.property_type,
       row.property_subtype,
       row.commercial_subtype,
       row.asset_subtype,
       row.normalized_asset_subclass,
-    ].join(' '),
+    ]
+      .filter((value) => value !== null && value !== undefined)
+      .join(' '),
   );
 
-  if (/storage|self storage|mini storage/.test(blob)) return 'storage';
-  if (/strip|shopping center|retail center/.test(blob)) return 'strip_mall';
-  if (/commercial|retail|office|industrial|warehouse|hotel|motel/.test(blob)) return 'commercial';
-  const units = num(first(row.units_count, row.units));
-  if (units != null && units > 1 && !['commercial', 'strip_mall', 'storage', 'land'].includes(normalized)) {
-    return 'multifamily';
+  // The engine keeps two commercial lanes that the canonical vocabulary folds
+  // together, because retail/storage underwriting reads them. Preserved exactly.
+  let lane = engineLaneFor(resolution.class);
+  if (/storage|self storage|mini storage/.test(blob)) lane = 'storage';
+  else if (/strip|shopping center|retail center/.test(blob)) lane = 'strip_mall';
+  else if (lane === 'other' && /commercial|retail|office|industrial|warehouse|hotel|motel/.test(blob)) {
+    lane = 'commercial';
   }
-  return normalized || 'other';
+
+  return {
+    lane,
+    canonical_class: resolution.class,
+    definite: resolution.definite,
+    source_field: resolution.source_field,
+    source_value:
+      resolution.raw === null || resolution.raw === undefined ? null : String(resolution.raw),
+    reason: resolution.reason,
+  };
+}
+
+function canonicalAssetType(row = {}) {
+  return resolveCanonicalAsset(row).lane;
 }
 
 function assetFamily(assetType) {
@@ -698,7 +721,8 @@ export function normalizePropertyFeatures(row = {}, options = {}) {
   const units = num(first(row.units_count, row.units));
   const repairs = num(first(row.estimated_repair_cost, row.estimated_repairs));
   const tags = textBlob(row);
-  const assetType = canonicalAssetType(row);
+  const assetResolution = resolveCanonicalAsset(row);
+  const assetType = assetResolution.lane;
 
   return {
     source,
@@ -720,6 +744,14 @@ export function normalizePropertyFeatures(row = {}, options = {}) {
     distance_miles: num(first(options.distance_miles, row.distance_miles)),
     asset_type: assetType,
     asset_family: assetFamily(assetType),
+    // Canonical classification + provenance travels with every subject and
+    // every comp, so a mismatch can name the field and the string that caused
+    // it instead of just asserting one.
+    asset_class: assetResolution.canonical_class,
+    asset_class_definite: assetResolution.definite,
+    asset_class_source_field: assetResolution.source_field,
+    asset_class_source_value: assetResolution.source_value,
+    asset_class_reason: assetResolution.reason,
     asset_subtype: clean(
       first(
         row.normalized_asset_subclass,
@@ -1164,6 +1196,35 @@ function isMultifamilyLane(property = {}) {
   return units != null && units > 1;
 }
 
+/**
+ * Diagnosis, deliberately separate from the gate outcome below.
+ *
+ * `assetCompatible` answers yes/no in the engine's lane vocabulary, which has
+ * lane-specific allowances (a strip centre does not comp a storage facility
+ * even though both are `commercial`). This reports WHY in the canonical
+ * vocabulary, including the unknown state the lane vocabulary cannot express:
+ * lane 'other' means both "an asset we do not model" and "nothing here named an
+ * asset", and telling those apart is what the Riverdale defect needed.
+ *
+ * It does not decide eligibility. Changing the gate's allowances would move
+ * money numbers on properties unrelated to the taxonomy defect.
+ */
+function assetCompatibilityVerdict(subject = {}, comp = {}) {
+  const verdict = compareAssetClasses(
+    { class: subject.asset_class, definite: subject.asset_class_definite },
+    { class: comp.asset_class, definite: comp.asset_class_definite },
+  );
+  return {
+    ...verdict,
+    subject_source_field: subject.asset_class_source_field ?? null,
+    subject_source_value: subject.asset_class_source_value ?? null,
+    comp_source_field: comp.asset_class_source_field ?? null,
+    comp_source_value: comp.asset_class_source_value ?? null,
+    subject_lane: subject.asset_type ?? null,
+    comp_lane: comp.asset_type ?? null,
+  };
+}
+
 function assetCompatible(subject, comp) {
   if (subject.asset_type === comp.asset_type) return true;
   if (isMultifamilyLane(subject) && isMultifamilyLane(comp)) return true;
@@ -1308,6 +1369,7 @@ export function evaluateCompEligibility(subject, comp, now = new Date(), options
     if (key && options.packagedKeys.has(key)) reasons.push('package_consideration_unresolved');
   }
   if (subject.property_id && comp.property_id === subject.property_id) reasons.push('same_property');
+  const assetVerdict = assetCompatibilityVerdict(subject, comp);
   if (!assetCompatible(subject, comp)) reasons.push('asset_type_mismatch');
   if (age !== null && age > limits.months) reasons.push('sale_too_old');
   if (distance !== null && distance > limits.radius) reasons.push('outside_radius');
@@ -1333,6 +1395,9 @@ export function evaluateCompEligibility(subject, comp, now = new Date(), options
     reasons,
     distance_miles: distance === null ? null : round(distance, 2),
     sale_age_months: age,
+    // Always present, eligible or not. A bare 'asset_type_mismatch' is exactly
+    // what made the Riverdale defect undiagnosable from the outside.
+    asset_compatibility: assetVerdict,
   };
 }
 
@@ -1429,6 +1494,7 @@ export function scoreComparable(subject, rawComp, options = {}) {
       eligible: false,
       comp,
       reasons: eligibility.reasons,
+      asset_compatibility: eligibility.asset_compatibility,
     };
   }
 
@@ -1511,6 +1577,7 @@ export function scoreComparable(subject, rawComp, options = {}) {
   return {
     eligible: true,
     comp,
+    asset_compatibility: eligibility.asset_compatibility,
     comp_score: round(finalScore, 2),
     comp_confidence: round(compConfidence, 2),
     data_completeness: round(completeness, 2),
@@ -3065,6 +3132,33 @@ function scoreRowFromDecision(propertyId, decision, now = new Date()) {
   };
 }
 
+/**
+ * Census of rejection reasons for one run (brief section 11).
+ *
+ * Reported per REASON, not per comp: a comp rejected for both a stale sale and
+ * a size mismatch is counted under both, because the question this answers is
+ * "which filter is costing me comps", not "how many comps died".
+ */
+function compRejectionBreakdown(rejected = []) {
+  const counts = {};
+  for (const comp of rejected) {
+    const reasons = Array.isArray(comp?.reasons) && comp.reasons.length ? comp.reasons : ['unspecified'];
+    for (const reason of reasons) counts[reason] = (counts[reason] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Census of canonical asset verdicts across every scored candidate. */
+function compAssetVerdictBreakdown(scored = []) {
+  const counts = {};
+  for (const comp of scored) {
+    const verdict = comp?.eligibility?.asset_compatibility?.verdict ?? comp?.asset_compatibility?.verdict;
+    if (!verdict) continue;
+    counts[verdict] = (counts[verdict] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function calculateAcquisitionDecision({
   subject: rawSubject,
   comps: rawComps = [],
@@ -3345,6 +3439,23 @@ export function calculateAcquisitionDecision({
       eligible_candidate_count: scored.filter((comp) => comp.eligible).length,
       selected_comp_count: selected.length,
       rejected_comp_count: rejected.length,
+      // Per-reason census of every rejection, so "no usable comps" is
+      // answerable from the persisted run instead of a bisect. Counts are by
+      // reason occurrence: one comp rejected for two reasons appears in both.
+      rejection_breakdown: compRejectionBreakdown(rejected),
+      // What the SUBJECT was classified as, and off which field. The Riverdale
+      // defect was a subject misclassification, invisible in any comp-side
+      // number.
+      subject_asset_resolution: {
+        canonical_class: subject.asset_class ?? null,
+        definite: subject.asset_class_definite ?? null,
+        lane: subject.asset_type ?? null,
+        family: subject.asset_family ?? null,
+        source_field: subject.asset_class_source_field ?? null,
+        source_value: subject.asset_class_source_value ?? null,
+        reason: subject.asset_class_reason ?? null,
+      },
+      asset_compatibility_breakdown: compAssetVerdictBreakdown(scored),
       message:
         compDataStatus === 'no_comps_found'
           ? 'No comps found; fallback valuation and confidence cap applied.'
@@ -3938,6 +4049,12 @@ export async function scoreProperty(propertyId, deps = {}) {
   const immutableSnapshotId = (deps.newSnapshotId ?? (() => crypto.randomUUID()))();
   if (row.evidence && typeof row.evidence === 'object') {
     row.evidence.immutable_snapshot_id = immutableSnapshotId;
+    // Freshness contract (lib/acquisition/decisionAuthority.js). The engine
+    // records the input stamp it was handed; it never computes one, so the
+    // check and the stamp can never drift apart. A run with no stamp -- a
+    // direct scoreProperty() call that bypassed the authority -- leaves the key
+    // absent, which the freshness evaluator reads as "not provably current".
+    if (deps.decisionInputStamp) row.evidence.decision_inputs = deps.decisionInputStamp;
   }
   const score = await persister(row, deps);
   const snapshotWriter = deps.persistImmutableScoreSnapshot ?? persistImmutableScoreSnapshot;

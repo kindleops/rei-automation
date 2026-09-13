@@ -4,6 +4,12 @@
  */
 import { supabase } from '../supabase/client.js'
 import {
+  CURRENT_ENGINE_VERSION,
+  DECISION_STATUS,
+  DEFAULT_MAX_AGE_DAYS,
+  ensurePropertyAcquisitionDecision,
+} from '../acquisition/decisionAuthority.js'
+import {
   normalizeAssetClass,
   normalizeMarket,
   normalizeState,
@@ -11,7 +17,6 @@ import {
 } from '../intel/normalize.js'
 import {
   loadComparableProperties,
-  scoreProperty,
   normalizePropertyFeatures,
   evaluateCompEligibility,
   scoreComparable,
@@ -1296,7 +1301,17 @@ function normalizeProperty(propertyRow, hydrated, location) {
     market: location.market,
     property_type: pick(propertyRow?.property_type, hydrated?.property_type),
     property_class: pick(propertyRow?.property_class, hydrated?.property_class),
-    normalized_asset_class: pick(propertyRow?.normalized_asset_class, propertyRow?.asset_class, hydrated?.property_class),
+    // `property_class` ('Residential') is a CLASS-level vocabulary, one
+    // semantic level above an asset TYPE, and it used to be the last fallback
+    // here. For 6710 Delta Dr both real columns are NULL, so the comp panel's
+    // subject asset class became the literal string 'Residential', normalized
+    // to 'other', and every Single Family comp came back "Asset type mismatch"
+    // against a Single Family subject -- while the Decision Engine, which reads
+    // the raw row, valued the same property off 8 of them. Leaving this null
+    // lets the canonical resolver fall through to `property_type`, which does
+    // name an asset. See lib/acquisition/assetTaxonomy.js.
+    normalized_asset_class: pick(propertyRow?.normalized_asset_class, propertyRow?.asset_class),
+    property_class_raw: pick(propertyRow?.property_class, hydrated?.property_class),
     units: num(pick(propertyRow?.units_count, hydrated?.units_count)),
     bedrooms: num(pick(propertyRow?.total_bedrooms, hydrated?.total_bedrooms)),
     bathrooms: num(pick(propertyRow?.total_baths, hydrated?.total_baths)),
@@ -1454,12 +1469,55 @@ function normalizePhone(phoneRow, hydrated, canonicalE164, ownerRow, compliance)
   return { status: 'missing' }
 }
 
-function normalizeAcquisitionDecision(row) {
+/**
+ * Four states, not two (brief section 6).
+ *
+ * `not_run` is the important one: `property_acquisition_scores` is written on
+ * demand when the acquisition flow reaches its economics-required state, so an
+ * absent row means "the engine has not run for this property", never
+ * "economics are unavailable". It is actionable, and the action is to run the
+ * canonical engine.
+ *
+ * Staleness here is the PARTIAL check -- age and engine version only. The
+ * fingerprint comparison needs the property's full material input row, which
+ * this dossier does not select, so the authoritative answer comes from
+ * ensurePropertyAcquisitionDecision. This never reports `current` on evidence
+ * it does not have.
+ */
+function normalizeAcquisitionDecision(row, now = new Date()) {
   if (!row) {
-    return { status: 'not_run', label: 'Full Decision Engine Not Run', can_run: true }
+    return {
+      status: 'not_run',
+      label: 'Full Decision Engine Not Run',
+      can_run: true,
+      decision_status: DECISION_STATUS.NOT_RUN,
+      actionable: 'run_decision_engine',
+    }
   }
+  const evidence = row.evidence && typeof row.evidence === 'object' ? row.evidence : {}
+  const computedAt = row.computed_at ? new Date(row.computed_at) : null
+  const ageDays = computedAt && Number.isFinite(computedAt.valueOf())
+    ? (now.valueOf() - computedAt.valueOf()) / 86_400_000
+    : null
+  const recordedEngine = evidence.decision_inputs?.engine_version || evidence.engine?.version || null
+  const staleReason = !evidence.decision_inputs?.fingerprint
+    ? 'fingerprint_absent_predates_freshness_contract'
+    : recordedEngine && recordedEngine !== CURRENT_ENGINE_VERSION
+      ? 'engine_version_changed'
+      : ageDays !== null && ageDays > DEFAULT_MAX_AGE_DAYS
+        ? 'decision_older_than_max_age'
+        : null
   return {
     status: 'available',
+    decision_status: staleReason ? DECISION_STATUS.STALE : DECISION_STATUS.CURRENT,
+    freshness: {
+      age_days: ageDays === null ? null : Math.round(ageDays * 100) / 100,
+      engine_version: recordedEngine,
+      stale_reason: staleReason,
+      fingerprint_checked: false,
+    },
+    actionable: staleReason ? 'rerun_decision_engine' : null,
+    can_run: true,
     ...row,
     acquisition_score: num(row.aos_score),
     heat_score: num(row.aos_score),
@@ -1878,13 +1936,31 @@ export async function runAcquisitionEngineWithProgress(propertyId, onProgress, o
   emit('building_offer_stack', 'done')
 
   emit('calculating_confidence', 'running')
-  const result = await scoreProperty(clean(propertyId))
+  // ONE calculation authority. The operator pressing "Run Decision Engine" and
+  // the acquisition flow reaching its economics-required state both arrive
+  // here; `force` is the only difference, because an operator asking for a
+  // rerun gets one even when the persisted decision is still current.
+  const ensured = await ensurePropertyAcquisitionDecision(clean(propertyId), {
+    force: true,
+    reason: 'manual_deal_intelligence_run',
+  })
+  const ok = ensured.status !== DECISION_STATUS.ENGINE_FAILED
+  const result = {
+    ok,
+    score: ensured.decision,
+    snapshot_id: ensured.snapshot_id,
+    immutable_snapshot_id: ensured.snapshot_id,
+    evidence: ensured.decision?.evidence ?? null,
+    decision_status: ensured.status,
+    freshness: ensured.freshness,
+    ...(ok ? {} : { error: ensured.error }),
+  }
   emit('calculating_confidence', 'done')
 
   emit('persisting_decision', 'running')
-  emit('persisting_decision', 'done', { ok: result?.ok === true })
+  emit('persisting_decision', 'done', { ok })
 
-  emit('decision_ready', 'done', { ok: result?.ok === true })
+  emit('decision_ready', 'done', { ok, decision_status: ensured.status })
   return result
 }
 

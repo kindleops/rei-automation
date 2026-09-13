@@ -151,6 +151,34 @@ export async function findExistingOpportunity(supabase, { ownerId, propertyId, t
   return null;
 }
 
+/**
+ * The ceiling this deal is AUTHORIZED to spend against, per the engine's own
+ * verdict on its own output.
+ *
+ * `investor_ceiling_mid` is the buyer-BEHAVIOUR leg. The engine publishes it
+ * alongside `buyer_ceiling_authoritative`, and when that flag is false the
+ * evidence says so in words -- Ronald's row (property 278477219) carries
+ * ceiling_basis "non_authoritative_buyer_behavior_may_only_reduce",
+ * buyer_ceiling_sample_size 0, behavior_based_ceiling 113800 against
+ * effective_authorized_ceiling 79100. It is the same leg that once carried a
+ * $19,032,220 package event into a $21,284,800 ceiling.
+ *
+ * buildNegotiationStatePatch already refuses it for the spend ceiling. The
+ * stage-3 band classification did not, so one file resolved one concept two
+ * ways: MAO 113,800 bands Ronald's $150,000 ask as WIDE_GAP (-> S4 condition),
+ * MAO 79,100 bands it VERY_WIDE_GAP (-> strategy ladder). Same seller, same
+ * decision row, different route depending on which line of code asked.
+ */
+function resolveAuthorizedCeiling(adeSnapshot = null) {
+  if (!adeSnapshot) return null;
+  const offerCalculation = adeSnapshot.evidence?.offer_calculation || {};
+  return (
+    num(offerCalculation.effective_authorized_ceiling) ??
+    num(offerCalculation.valuation_based_ceiling) ??
+    null
+  );
+}
+
 /** Maintain per-deal negotiation state from the transition (spec §7). */
 export function buildNegotiationStatePatch(previous = {}, { transition = {}, intent = null, adeSnapshot = null, now = new Date().toISOString() } = {}) {
   const state = { ...(previous || {}) };
@@ -177,10 +205,7 @@ export function buildNegotiationStatePatch(previous = {}, { transition = {}, int
     // is that same leg (it carried the contaminated $19,032,220 package event
     // into a $21,284,800 ceiling), so it is deliberately NOT a source here.
     state.authorized_offer_ceiling =
-      num(adeSnapshot.evidence?.offer_calculation?.effective_authorized_ceiling) ??
-      num(adeSnapshot.evidence?.offer_calculation?.valuation_based_ceiling) ??
-      state.authorized_offer_ceiling ??
-      null;
+      resolveAuthorizedCeiling(adeSnapshot) ?? state.authorized_offer_ceiling ?? null;
   }
 
   if ((transition.workflow_event_types || []).includes("SELLER_ACCEPTED_OFFER")) {
@@ -196,14 +221,44 @@ export function buildNegotiationStatePatch(previous = {}, { transition = {}, int
   return state;
 }
 
-async function runCanonicalAde(propertyId, deps = {}) {
-  const { scoreProperty } = await import("@/lib/acquisition/acquisitionDecisionEngine.js");
-  const runner = deps.scoreProperty || scoreProperty;
-  const result = await runner(propertyId, deps);
-  if (!result?.ok) {
-    return { ok: false, error: result?.error || "ade_failed" };
+/**
+ * Reach the canonical Decision Engine result for this property.
+ *
+ * Goes through `ensurePropertyAcquisitionDecision`, which is the SAME authority
+ * the manual Deal Intelligence button calls. It reads
+ * `property_acquisition_scores` -- not the per-opportunity `ade_snapshot` copy
+ * automation used to consult -- so a property scored from the dashboard is
+ * visible here, and one scored here is visible there.
+ *
+ * Absence of a row is not a failure and is not "economics unavailable": it
+ * means the engine has not run for this state, and the answer is to run it.
+ * Only a failed run is a hold.
+ *
+ * Reuse is decided by the input fingerprint, so an unchanged property costs
+ * zero engine runs however many turns the conversation takes, while a seller
+ * stating a new price or condition forces a rerun without anyone asking for one.
+ */
+async function runCanonicalAde(propertyId, deps = {}, { sellerFacts = {}, reason = null } = {}) {
+  const { ensurePropertyAcquisitionDecision, DECISION_STATUS } = await import(
+    "@/lib/acquisition/decisionAuthority.js"
+  );
+  const ensured = await ensurePropertyAcquisitionDecision(propertyId, {
+    sellerFacts,
+    reason,
+    deps,
+  });
+  if (ensured.status === DECISION_STATUS.ENGINE_FAILED) {
+    return { ok: false, error: ensured.error || "ade_failed", decision_status: ensured.status };
   }
-  return { ok: true, score: result.score || null, evidence: result.evidence || null };
+  return {
+    ok: true,
+    score: ensured.decision || null,
+    evidence: ensured.decision?.evidence || null,
+    decision_status: ensured.status,
+    reused: ensured.ran === false,
+    freshness_reason: ensured.freshness?.reason ?? null,
+    snapshot_id: ensured.snapshot_id ?? null,
+  };
 }
 
 /**
@@ -459,15 +514,28 @@ export async function persistSellerTransitionArtifacts({
       clean(propertyId || opportunity.primary_property_id)
     ) {
       try {
-        const ade = await runCanonicalAde(propertyId || opportunity.primary_property_id, {
-          ...deps,
-          supabase,
-        });
+        const opportunityMetadata =
+          opportunity.metadata && typeof opportunity.metadata === "object" ? opportunity.metadata : {};
+        const ade = await runCanonicalAde(
+          propertyId || opportunity.primary_property_id,
+          { ...deps, supabase },
+          {
+            sellerFacts: {
+              ...(opportunityMetadata.seller_facts || {}),
+              ...(transition.facts_patch || {}),
+            },
+            reason: transition.ade_action,
+          },
+        );
         if (ade.ok) {
           adeSnapshot = ade.score || null;
           summary.ade.ran = true;
+          summary.ade.reused = ade.reused === true;
+          summary.ade.decision_status = ade.decision_status;
+          summary.ade.freshness_reason = ade.freshness_reason;
         } else {
           summary.ade.error = ade.error;
+          summary.ade.decision_status = ade.decision_status || null;
         }
       } catch (ade_error) {
         summary.ade.error = ade_error?.message || "ade_failed";
@@ -564,8 +632,12 @@ export async function persistSellerTransitionArtifacts({
       effectiveAsk && adeSnapshot?.recommended_cash_offer != null
         ? evaluateAskingPrice(effectiveAsk, {
             recommended_cash_offer: adeSnapshot.recommended_cash_offer,
+            // Same authority as the spend ceiling above. Reading
+            // investor_ceiling_mid here contradicted the engine's own
+            // buyer_ceiling_authoritative=false and routed Ronald to S4 on a
+            // ceiling built from a zero-sample buyer set.
             max_allowable_offer:
-              adeSnapshot.max_allowable_offer ?? adeSnapshot.investor_ceiling_mid ?? null,
+              adeSnapshot.max_allowable_offer ?? resolveAuthorizedCeiling(adeSnapshot) ?? null,
           })
         : null;
     const economic_fit = !economics

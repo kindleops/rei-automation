@@ -72,7 +72,7 @@ export const PropertyDetailWorkspace = ({
     <main className="pi-workspace-grid">
       <section className="pi-workspace-left">
         <PropertyVisualIntelligence property={property} handlers={handlers} />
-        <AcquisitionScorePanel property={property} />
+        <AcquisitionScorePanel property={property} decision={context.acquisitionDecision} />
       </section>
       <section className="pi-workspace-center">
         <DealCommandStrip property={property} context={context} />

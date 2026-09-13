@@ -1873,6 +1873,27 @@
   line-height: 1.6;
 }
 
+/* Provenance labelling. The five score tiles below this label are Podio-era
+   imports, not current-model output, and the panel now says so. */
+.pi-score-panel__legacy-label {
+  display: block;
+  margin-top: 14px;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(210, 236, 255, 0.42);
+}
+
+.pi-score-panel__legacy-label + .pi-score-panel__metrics {
+  margin-top: 6px;
+}
+
+/* No Decision Engine row yet. Reads as an instruction, not as an error. */
+.pi-score-panel__offer--not-run strong {
+  color: rgba(255, 214, 140, 0.92);
+  font-size: 12px;
+}
+
 .pi-score-panel__metrics,
 .pi-score-panel__offer,
 .pi-workspace-valuation__grid,

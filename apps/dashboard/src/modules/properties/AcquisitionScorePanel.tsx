@@ -1,11 +1,20 @@
 import { Icon } from '../../shared/icons'
-import { formatMoney, formatPercent } from '../../lib/data/propertyData'
+import { formatMoney } from '../../lib/data/propertyData'
+import type { PropertyAcquisitionDecision } from '../../lib/data/propertyData'
 import type { PropertyRecord } from './property.types'
 
 interface AcquisitionScorePanelProps {
   property: PropertyRecord
+  decision?: PropertyAcquisitionDecision | null
 }
 
+/**
+ * These five are Podio-era import columns, not output of the current model.
+ * They stay visible -- they are the only scoring this page has for a property
+ * the Decision Engine has not run on -- but under a heading that says what they
+ * are, because "AI" and "Final" read as current-model provenance they do not
+ * have.
+ */
 const scoreRows = [
   ['Final', 'finalAcquisitionScore'],
   ['Deal', 'dealStrengthScore'],
@@ -31,7 +40,7 @@ const buildOpportunityNarrative = (property: PropertyRecord) => {
   return `${property.structure.propertyType ?? 'Property'} with ${fragments.join(', ')}. Prioritize clean contact linkage, validate repair exposure, then move to offer math.`
 }
 
-export const AcquisitionScorePanel = ({ property }: AcquisitionScorePanelProps) => {
+export const AcquisitionScorePanel = ({ property, decision = null }: AcquisitionScorePanelProps) => {
   const score = property.finalAcquisitionScore ?? property.dealStrengthScore ?? property.priorityScore
   const circumference = 314
   const progress = circumference - (Math.max(0, Math.min(100, score)) / 100) * circumference
@@ -56,6 +65,7 @@ export const AcquisitionScorePanel = ({ property }: AcquisitionScorePanelProps) 
         </div>
         <div>
           <p>{buildOpportunityNarrative(property)}</p>
+          <span className="pi-score-panel__legacy-label">Legacy import scores</span>
           <div className="pi-score-panel__metrics">
             {scoreRows.map(([label, key]) => (
               <div key={key}>
@@ -66,20 +76,54 @@ export const AcquisitionScorePanel = ({ property }: AcquisitionScorePanelProps) 
           </div>
         </div>
       </div>
-      <div className="pi-score-panel__offer">
-        <div>
-          <span>Cash Offer</span>
-          <strong>{formatMoney(property.valuation.cashOffer)}</strong>
+      {/*
+        This block used to read `Cash Offer  $26,110` for 5115 Michigan Ave --
+        `properties.cash_offer`, a Podio-era import, presented with no
+        provenance as the current offer, while the Decision Engine's current
+        result for the same property was $62,300.
+
+        The current answer comes from `property_acquisition_scores`. When there
+        is no row the honest state is "not run", which is ACTIONABLE -- the
+        engine is run on demand -- and never a reason to fall back to the
+        legacy number.
+      */}
+      {decision?.state === 'current' ? (
+        <div className="pi-score-panel__offer">
+          <div>
+            <span>Recommended Offer</span>
+            <strong>{formatMoney(decision.recommendedOffer)}</strong>
+          </div>
+          <div>
+            <span>Offer Floor</span>
+            <strong>{formatMoney(decision.offerFloor)}</strong>
+          </div>
+          <div>
+            <span>Authorized Ceiling</span>
+            <strong>{formatMoney(decision.authorizedCeiling)}</strong>
+          </div>
+          <div>
+            <span>Strategy</span>
+            <strong>{decision.strategy ?? 'N/A'}</strong>
+          </div>
         </div>
-        <div>
-          <span>Offer vs Loan</span>
-          <strong>{formatPercent(property.valuation.offerVsLoan)}</strong>
+      ) : (
+        <div className="pi-score-panel__offer pi-score-panel__offer--not-run">
+          <div>
+            <span>Recommended Offer</span>
+            <strong>Decision Engine not run</strong>
+          </div>
+          <div>
+            <span>Next step</span>
+            <strong>Run Decision Engine</strong>
+          </div>
+          {decision?.legacyCashOffer != null ? (
+            <div>
+              <span>Legacy import (not current)</span>
+              <strong>{formatMoney(decision.legacyCashOffer)}</strong>
+            </div>
+          ) : null}
         </div>
-        <div>
-          <span>Offer vs Sale</span>
-          <strong>{formatPercent(property.valuation.offerVsSalePrice)}</strong>
-        </div>
-      </div>
+      )}
     </section>
   )
 }
