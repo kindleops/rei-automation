@@ -240,7 +240,15 @@ export const SellerMapCard = ({
    */
   const [heroFailed, setHeroFailed] = useState(false)
   const streetViewUrl = viewModel.property.imageUrl
-  useEffect(() => { setHeroFailed(false) }, [streetViewUrl])
+  // Adjusting state during render (React's documented pattern, and the one
+  // use-street-view-availability already uses here) rather than in an effect: a new
+  // property's failure state is known immediately, and routing it through an effect
+  // would render one frame still showing the previous property's fallback.
+  const [trackedHeroUrl, setTrackedHeroUrl] = useState(streetViewUrl)
+  if (streetViewUrl !== trackedHeroUrl) {
+    setTrackedHeroUrl(streetViewUrl)
+    setHeroFailed(false)
+  }
 
   /**
    * When Street View reports no panorama — common on rural parcels, new builds and
@@ -269,7 +277,9 @@ export const SellerMapCard = ({
           alt={viewModel.property.address}
           loading="eager"
           decoding="async"
-          fetchPriority="high"
+          // No fetchPriority: React 18 does not recognise the camelCase prop and logs
+          // a DOM warning for it on every card. `loading="eager"` already opts the
+          // hero out of lazy loading, which is the part that mattered.
           onError={() => { if (!usingFallback) setHeroFailed(true) }}
         />
       ) : null}

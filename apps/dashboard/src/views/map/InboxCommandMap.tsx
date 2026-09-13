@@ -7111,9 +7111,10 @@ export function InboxCommandMap({
             'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.42, 13, 0.62, 17, 0.8],
             'icon-allow-overlap': true,
             'icon-ignore-placement': true,
-            // Sits above its own property pin rather than centred on it, so the pin
-            // underneath stays readable.
-            'icon-offset': [0, -26],
+            // Centred ON the property. The property's own pin is hidden while it is
+            // selected (see the knockout effect below), so the star REPLACES the house
+            // glyph rather than stacking on top of it.
+            'icon-offset': [0, 0],
           } as maplibregl.SymbolLayerSpecification['layout'],
           paint: {
             // The gold lives HERE, not in the canvas drawing: the icon is an SDF mask,
@@ -8364,6 +8365,70 @@ export function InboxCommandMap({
     safeSetGeoJsonSourceData(mapRef.current, SELECTED_STAR_SOURCE_ID, selectedStarGeojson)
   }, [selectedStarGeojson])
 
+  /**
+   * KNOCKOUT — the gold star REPLACES the selected property's pin.
+   *
+   * The star first shipped with an upward icon-offset, which left the house glyph and
+   * its halo sitting directly under it: two markers for one property, reading as a
+   * badge rather than as "this is your subject". The operator asked for the star in
+   * PLACE of the house.
+   *
+   * So the selected property's own marker is knocked out — icon and the decorative
+   * circle chrome — leaving exactly one mark at that coordinate. The layer's `type` is
+   * read at runtime rather than assumed, because these layers are a mix of symbol and
+   * circle and the opacity property differs between them.
+   *
+   * Knocked out by OPACITY rather than by a layer filter: a filter would also remove
+   * the feature from hit-testing, and the property must stay tappable so a second tap
+   * still resolves to it.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    if (mapContextLostRef.current || !isStyleSafe(map) || !map) return
+
+    const selectedId = text(selectedPropertyId)
+    const markerLayerIds = [
+      PROPERTY_TILES_LAYER_IDS.icon,
+      PROPERTY_TILES_LAYER_IDS.halo,
+      PROPERTY_TILES_LAYER_IDS.glass,
+      PROPERTY_TILES_LAYER_IDS.ring,
+      PROPERTY_TILES_LAYER_IDS.pulse,
+      SELLER_PINS_LAYER_IDS.icon,
+      SELLER_PINS_LAYER_IDS.core,
+      SELLER_PINS_LAYER_IDS.ring,
+      SELLER_PINS_LAYER_IDS.glow,
+      SELLER_PINS_LAYER_IDS.pulse,
+    ]
+
+    for (const layerId of markerLayerIds) {
+      const layer = map.getLayer(layerId)
+      if (!layer) continue
+      const opacityProps = layer.type === 'symbol'
+        ? ['icon-opacity']
+        : layer.type === 'circle'
+          ? ['circle-opacity', 'circle-stroke-opacity']
+          : []
+      for (const property of opacityProps) {
+        try {
+          map.setPaintProperty(
+            layerId,
+            property,
+            selectedId
+              ? ([
+                'case',
+                ['==', ['to-string', ['coalesce', ['get', 'property_id'], ['get', 'propertyId'], '']], selectedId],
+                0,
+                1,
+              ] as maplibregl.ExpressionSpecification)
+              : 1,
+          )
+        } catch {
+          /* A layer removed by a style swap mid-effect is not an error. */
+        }
+      }
+    }
+  }, [mapInstanceEpoch, selectedPropertyId, sellerPinLayers.sellerPins])
+
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -9606,16 +9671,12 @@ export function InboxCommandMap({
    * Returns true when it selected something, so the caller can tell "not found yet"
    * (data still loading) from "found and selected".
    */
-  const selectPropertyOnMapRef = useRef<((propertyId: string) => boolean) | null>(null)
-  selectPropertyOnMapRef.current = (propertyId: string): boolean => {
+  const selectPropertyOnMap = useCallback((propertyId: string): boolean => {
     const map = mapRef.current
     if (!map || !propertyId) return false
 
     const sellerPin = sellerPinsByPropertyIdRef.current.get(propertyId)
     const matchedThread = hydratedThreadsByPropertyIdRef.current.get(propertyId) ?? null
-    // `selectPropertyOnMapRef.current` is reassigned every render, so this closes
-    // over the current pin set; the interval below reads through the ref and therefore
-    // always calls the freshest version.
     const conversationPin = matchedThread
       ? allPins.find((pin) => pin.conversation_id === matchedThread.id)
       : allPins.find((pin) => pin.property_id === propertyId)
@@ -9670,7 +9731,8 @@ export function InboxCommandMap({
 
     if (matchedThread) onSelectThreadIdRef.current?.(matchedThread.id)
     return true
-  }
+    // allPins is the only reactive input; the rest are refs that always read current.
+  }, [allPins])
 
   /**
    * Arrival. Runs when the globally active property changes, and retries while the
@@ -9688,7 +9750,7 @@ export function InboxCommandMap({
       return
     }
     if (arrivedPropertyRef.current === propertyId) return
-    if (selectPropertyOnMapRef.current?.(propertyId)) {
+    if (selectPropertyOnMap(propertyId)) {
       arrivedPropertyRef.current = propertyId
       return
     }
@@ -9702,7 +9764,7 @@ export function InboxCommandMap({
         window.clearInterval(timer)
         return
       }
-      if (selectPropertyOnMapRef.current?.(propertyId)) {
+      if (selectPropertyOnMap(propertyId)) {
         arrivedPropertyRef.current = propertyId
         window.clearInterval(timer)
       }
@@ -9713,7 +9775,7 @@ export function InboxCommandMap({
     }
     // Seller pins arrive in two stages; re-running as they land is what lets a
     // first-pass miss resolve without waiting out the whole poll budget.
-  }, [activePropertyId, mapInstanceEpoch, allPins.length, sellerPins.length])
+  }, [activePropertyId, mapInstanceEpoch, selectPropertyOnMap, sellerPins.length])
 
   const openActivityTarget = (event: LiveActivityEvent, center: [number, number] | null) => {
     if (event.targetType === 'seller' && event.targetId) {
