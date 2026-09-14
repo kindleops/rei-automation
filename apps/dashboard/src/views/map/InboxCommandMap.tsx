@@ -3142,6 +3142,8 @@ const syncCommandPinSources = (
   ) as FeatureCollection<Point, PinFeatureProps>
   const wroteRaw = safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, threadGeojson)
   const wroteCluster = safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, threadGeojson)
+  // Same reason as the other overlay write: creation and knockout stay together.
+  applyCommandPinSubjectKnockout(map, getDensitySelection())
   if ((import.meta.env.DEV || isMapVerificationMode()) && (!wroteRaw || !wroteCluster)) {
     console.warn('[CommandMap] command pin sync failed', {
       wroteRaw,
@@ -8161,6 +8163,17 @@ export function InboxCommandMap({
      */
     safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, geojson)
     safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, geojson)
+    /**
+     * Re-assert the subject knockout on every overlay write.
+     *
+     * Applying it only from the selection effect left a race: that effect skips layers
+     * that do not exist yet, and the command-pin layers are built on style load, which
+     * can land after the selection. Two fresh certification runs differed by exactly
+     * this — the subject's own pin knocked out in one and drawn under the star in the
+     * other, at every zoom. Anchoring it to the data write means the filter is
+     * re-established whenever there is anything to filter.
+     */
+    applyCommandPinSubjectKnockout(map, getDensitySelection())
     safeSetGeoJsonSourceData(map, BUYER_PURCHASE_SOURCE_ID, buyerPurchasesGeojson)
     safeSetGeoJsonSourceData(map, BUYER_PROFILE_SOURCE_ID, buyerProfilesGeojson)
     safeSetGeoJsonSourceData(map, BUYER_TRAIL_SOURCE_ID, buyerTrailGeojson)
