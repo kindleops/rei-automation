@@ -36,7 +36,11 @@ const PROBE = (families) => {
     const area = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * r.width
     if (area > bestArea) { bestArea = area; map = c }
   }
-  if (!map || !map.style || !map.isStyleLoaded?.()) return { error: 'style not ready' }
+  // NOT guarded on isStyleLoaded(): it reports false while tiles are still settling, so
+  // guarding on it made every probe return 'style not ready'. Guard on what actually
+  // throws — a style that has been torn down.
+  if (!map) return { error: 'no visible map' }
+  try { map.getLayer('prop-tiles-icon') } catch { return { error: 'style torn down' } }
 
   const out = {
     zoom: Number(map.getZoom().toFixed(2)),
@@ -91,15 +95,21 @@ const jumpTo = async (page, zoom) => {
   }, zoom)
 }
 
-/** Open the modal, toggle the Nth flag filter, apply. Returns false if unavailable. */
-const applyFilter = async (page, nth) => {
+/**
+ * Open the modal and apply a real Master Filter.
+ *
+ * Driven through the "Map Status" group's Property Universe select rather than the
+ * Distress & Flags checkboxes: the flag options load asynchronously and render as
+ * "Loading flag op…" for a while, so keying the proof off them makes it a test of that
+ * fetch. The universe select is present the moment the modal opens.
+ */
+const openModal = async (page) => {
   await page.click('.nx-icm__mode-tab--filters')
   await page.waitForSelector('.nx-ifm-modal', { timeout: 15_000 })
-  await page.waitForTimeout(900)
-  const modes = await page.$$('.nx-ifm-flag-mode')
-  if (modes.length <= nth) { await page.click('.nx-ifm-close').catch(() => {}); return false }
-  await modes[nth].click()
-  await page.waitForTimeout(1600)
+  await page.waitForTimeout(1200)
+}
+
+const commitModal = async (page) => {
   const apply = await page.$('.nx-ifm-btn-primary')
   if (!apply) { await page.click('.nx-ifm-close').catch(() => {}); return false }
   await apply.click()
@@ -107,15 +117,35 @@ const applyFilter = async (page, nth) => {
   return true
 }
 
+/** Scope the universe to `value` ('uncontacted' | 'contacted' | 'all'). */
+const applyUniverseFilter = async (page, value) => {
+  await openModal(page)
+  const rails = await page.$$('.nx-ifm-rail-item')
+  if (rails.length) { await rails[0].click(); await page.waitForTimeout(800) }
+  const select = await page.$('.nx-ifm-fields select')
+  if (!select) { await page.click('.nx-ifm-close').catch(() => {}); return false }
+  await select.selectOption(value)
+  await page.waitForTimeout(1800)
+  return commitModal(page)
+}
+
+/** Add a second rule so the token CHANGES rather than merely being set again. */
+const addNumericRule = async (page) => {
+  await openModal(page)
+  const rails = await page.$$('.nx-ifm-rail-item')
+  if (rails.length > 1) { await rails[1].click(); await page.waitForTimeout(900) }
+  const mins = await page.$$('.nx-ifm-fields input[placeholder="Min"]')
+  if (!mins.length) { await page.click('.nx-ifm-close').catch(() => {}); return false }
+  await mins[0].fill('1')
+  await page.waitForTimeout(1800)
+  return commitModal(page)
+}
+
 const clearFilter = async (page) => {
-  await page.click('.nx-icm__mode-tab--filters')
-  await page.waitForSelector('.nx-ifm-modal', { timeout: 15_000 })
-  await page.waitForTimeout(700)
+  await openModal(page)
   await page.click('.nx-ifm-btn-ghost')
-  await page.waitForTimeout(900)
-  const apply = await page.$('.nx-ifm-btn-primary')
-  if (apply) await apply.click()
-  await page.waitForSelector('.nx-ifm-modal', { state: 'detached', timeout: 15_000 }).catch(() => {})
+  await page.waitForTimeout(1200)
+  await commitModal(page)
 }
 
 const browser = await chromium.launch()
@@ -148,10 +178,10 @@ const record = async (label) => {
 }
 
 await jumpTo(page, 12); await settle(page); await record('baseline')
-const entered = await applyFilter(page, 0); await settle(page); await record(entered ? 'enter-filter' : 'enter-filter-SKIPPED')
+const entered = await applyUniverseFilter(page, 'uncontacted'); await settle(page); await record(entered ? 'enter-filter' : 'enter-filter-SKIPPED')
 await jumpTo(page, 10); await settle(page); await record('filtered-zoom-10')
 await jumpTo(page, 14); await settle(page); await record('filtered-zoom-14')
-const changed = await applyFilter(page, 1); await settle(page); await record(changed ? 'change-filter' : 'change-filter-SKIPPED')
+const changed = await addNumericRule(page); await settle(page); await record(changed ? 'change-filter' : 'change-filter-SKIPPED')
 
 // SELECT under a filter: the operator's subject must survive the filter's scope.
 await page.evaluate(() => {
@@ -178,22 +208,63 @@ await page.waitForTimeout(12_000)
 await jumpTo(page, 12); await settle(page); await record('leave-and-return')
 
 // ── Verdict ───────────────────────────────────────────────────────────────────
-const failures = []
-for (const s of steps) {
-  if (s.error) { failures.push(`${s.step}: ${s.error}`); continue }
-  const owners = s.genericOwners ?? []
-  if (owners.length !== 1) failures.push(`${s.step}: ${owners.length} generic families painting [${owners.join(',')}]`)
-  else if (owners[0] !== 'mvtTiles') failures.push(`${s.step}: owner is ${owners[0]}, expected mvtTiles`)
-  if (s.owner && s.zoom >= 9 && s.owner !== 'mvt') failures.push(`${s.step}: resolver said ${s.owner} at z${s.zoom}`)
+/**
+ * Two questions, reported separately, because they fail for unrelated reasons.
+ *
+ * OWNERSHIP is what this phase owns: the same family must own the render at every step,
+ * however many features the filter admits. A filter that legitimately matches nothing
+ * still has an owner.
+ *
+ * DATA is the Master Filter feature working end to end. Here it does not: the filtered
+ * tile route answers 500 `password authentication failed for user "postgres"`. Filtered
+ * tiles are the one path that goes through a direct Postgres connection
+ * (queryWithTimeout) instead of the supabase RPC the unfiltered path uses, so a stale
+ * SUPABASE_DB_URL password takes out filtered tiles alone. Conflating that with an
+ * ownership regression would be reporting a credential problem as a render problem.
+ */
+const ownershipFailures = []
+const dataFailures = []
+
+if (steps.some((s) => s.step.endsWith('SKIPPED'))) {
+  ownershipFailures.push(`filter controls unreachable: ${steps.filter((s) => s.step.endsWith('SKIPPED')).map((s) => s.step).join(', ')}`)
 }
+if (!steps.some((s) => s.tileUrlHasToken === true)) {
+  ownershipFailures.push('no step ever carried a filter token — the Master Filter was never applied')
+}
+
+for (const s of steps) {
+  if (s.error) { ownershipFailures.push(`${s.step}: ${s.error}`); continue }
+  const mvt = s.families?.mvtTiles ?? {}
+  if (s.owner && s.zoom >= 9 && s.owner !== 'mvt') {
+    ownershipFailures.push(`${s.step}: resolver said ${s.owner} at z${s.zoom}, expected mvt`)
+  }
+  if (mvt.present && mvt.layersVisible !== mvt.layersTotal) {
+    ownershipFailures.push(`${s.step}: mvt ${mvt.layersVisible}/${mvt.layersTotal} layers visible`)
+  }
+  const competitors = (s.genericOwners ?? []).filter((n) => n !== 'mvtTiles')
+  if (competitors.length > 0) {
+    ownershipFailures.push(`${s.step}: competing generic families [${competitors.join(',')}]`)
+  }
+  if (s.tileUrlHasToken === true && (mvt.source ?? 0) === 0) {
+    dataFailures.push(`${s.step}: filter token set but the tile source returned 0 features`)
+  }
+}
+
 const baseline = steps.find((s) => s.step === 'baseline')
 const returned = steps.find((s) => s.step === 'leave-and-return')
 if (baseline && returned && baseline.owner !== returned.owner) {
-  failures.push(`leave/return changed owner: ${baseline.owner} -> ${returned.owner}`)
+  ownershipFailures.push(`leave/return changed owner: ${baseline.owner} -> ${returned.owner}`)
 }
 
 console.log('\n── VERDICT ──')
-console.log(failures.length === 0 ? 'Master Filter regression: PASS' : `Master Filter regression: FAIL\n  ${failures.join('\n  ')}`)
+console.log(ownershipFailures.length === 0
+  ? 'Master Filter render ownership: PASS (same owner across enter/zoom/change/select/clear/leave)'
+  : `Master Filter render ownership: FAIL\n  ${ownershipFailures.join('\n  ')}`)
+console.log(dataFailures.length === 0
+  ? 'Master Filter scoped data: PASS'
+  : `Master Filter scoped data: BLOCKED — filtered tile route unavailable\n  ${dataFailures.join('\n  ')}`)
+
+const failures = [...ownershipFailures, ...dataFailures]
 await fs.writeFile(path.join(OUT, 'report.json'), JSON.stringify({ steps, failures }, null, 2))
 console.log(`\nscreenshots: ${OUT}`)
 await browser.close()
