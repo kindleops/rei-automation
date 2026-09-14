@@ -715,6 +715,13 @@ type MapCardState = {
   feature: Record<string, unknown>
   containerSize: { width: number; height: number }
   hydrating?: boolean
+  /**
+   * How much of the card to show on arrival. SELECTION and PRESENTATION are separate
+   * facts: a property arriving from another app is canonically selected, but the map
+   * must stay the dominant surface until the operator asks for the record. Defaults to
+   * 'detail' so a deliberate tap is unchanged.
+   */
+  presentation?: 'peek' | 'detail'
 } | null
 
 const resolveActiveSellerMapCard = (
@@ -2851,7 +2858,12 @@ const MapEntityCard = ({
 
   if (card.kind === 'seller') {
     const pin = card.feature
-    const mode = card.intent === 'selected' ? 'focus' : 'peek'
+    // 'peek' presentation keeps a selected property at peek height — see
+    // MapCardState.presentation. Intent still says 'selected', so everything that
+    // reads the canonical selection is unaffected.
+    const mode = card.presentation === 'peek'
+      ? 'peek'
+      : card.intent === 'selected' ? 'focus' : 'peek'
     return (
       <div
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: card.intent === 'selected' ? 28 : 22 }}
@@ -9722,6 +9734,10 @@ export function InboxCommandMap({
       // property in another app, so re-asking them to confirm it would be a step
       // backwards. The card TREATMENT is identical either way.
       intent: 'selected',
+      // …but on a phone it ARRIVES at peek. Opening straight to detail cost the map
+      // 488px of an 844px viewport — measured, the map got 309px — and the operator
+      // came to Map to see the map. One tap promotes it.
+      presentation: isMobileRef.current ? 'peek' : 'detail',
       id: matchedThread ? matchedThread.id : propertyId,
       anchor: cardAnchor,
       coordinates,

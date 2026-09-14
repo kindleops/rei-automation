@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import { captureAppSession, resolveAppIdFromRoute, restoreAppSession } from './app-session-cache'
@@ -13,6 +13,7 @@ import { navigateToApp as navigateToRegistryApp } from '../../domain/app-registr
 import type { NexusApp } from '../../domain/app-registry/app-registry'
 import { MobileSettingsSheet } from './MobileSettingsSheet'
 import { requestNotificationsSurface } from './shell-surface-bridge'
+import { publishBottomSurface, releaseBottomSurface } from './mobile-bottom-layout'
 import {
   DOCKABLE_APPS,
   addPinApp,
@@ -85,6 +86,7 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
   const launcherOpen = launcherRoute !== null && launcherRoute === routePath
   const [settingsOpen, setSettingsOpen] = useState(false)
 
+  const glassRef = useRef<HTMLDivElement | null>(null)
   const trackRef = useRef<HTMLDivElement | null>(null)
   const dragYRef = useRef(0)
   const longPressRef = useRef<number | null>(null)
@@ -127,6 +129,41 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
     requestAnimationFrame(() => restoreAppSession(nextId))
     prevRouteRef.current = routePath
   }, [persistDockSettings, routePath])
+
+  /**
+   * Publish the dock's live height for the bottom-layout contract. It changes with the
+   * phase (16px shelf, ~217px docked, ~410px expanded), so anything reserving against
+   * "the dock" has to track the phase, not a constant.
+   */
+  useLayoutEffect(() => {
+    const measure = () => {
+      const node = glassRef.current
+      if (!node) return
+      /**
+       * Published from the dock's INTERACTIVE extent, not its paint.
+       *
+       * While collapsed the glass is a 16px shelf but the grab handle is a 44px target
+       * that reaches up to y=795 on an 844px screen. Publishing only the glass let the
+       * map attribution settle into that band, where the handle swallowed its taps —
+       * measured unreachable in every map state. Anything reserving against the dock
+       * needs to clear what the dock can be TOUCHED at.
+       */
+      const glassTop = node.getBoundingClientRect().top
+      const handleTop = node.querySelector('.nx-pinned-app-dock__handle')?.getBoundingClientRect().top
+      const top = Math.min(glassTop, Number.isFinite(handleTop) ? (handleTop as number) : glassTop)
+      publishBottomSurface('dock', Math.max(0, window.innerHeight - top))
+    }
+    measure()
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    if (observer && glassRef.current) observer.observe(glassRef.current)
+    window.addEventListener('resize', measure, { passive: true })
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [phase])
+
+  useEffect(() => () => releaseBottomSurface('dock'), [])
 
   const navigationEffects = useMemo(() => ({
     openNotifications: requestNotificationsSurface,
@@ -348,7 +385,7 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
       ) : null}
 
       <div className={cls('nx-pinned-app-dock', `is-${phase}`, draggingId && 'is-reordering')}>
-        <div className="nx-pinned-app-dock__glass nx-liquid-surface">
+        <div ref={glassRef} className="nx-pinned-app-dock__glass nx-liquid-surface">
           <span className="nx-pinned-app-dock__sheen" aria-hidden />
           <span className="nx-pinned-app-dock__rim" aria-hidden />
 

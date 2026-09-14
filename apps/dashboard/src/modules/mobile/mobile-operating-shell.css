@@ -1878,8 +1878,141 @@ html.is-mobile-layout {
     z-index: 142 !important;
     left: 8px !important;
     right: 8px !important;
-    bottom: calc(var(--nx-pinned-dock-collapsed, 14px) + var(--nx-mobile-safe-bottom) + 10px) !important;
+    /* Reserves against the BOTTOM-LAYOUT CONTRACT, not against the dock alone.
+       Reserving only against the dock is what put this rail underneath the seller
+       sheet: measured at 390x844, the rail sat 713-823 while the sheet occupied
+       356-844, so the rail's own Hide and Settings buttons were painted over by the
+       sheet body. --nx-bottom-floor is max(dock, sheet), so the rail clears whichever
+       is actually taller. */
+    /* floor + 52px, not +22: the MapLibre attribution control sits directly above the
+       floor and measures 44px tall, because the blanket mobile touch rule inflates its
+       toggle button. 52px clears that whole control, which is what stops the activity
+       row and the licence attribution from landing on each other. */
+    bottom: calc(var(--nx-bottom-floor, var(--nx-mobile-chrome-bottom, 22px)) + 52px) !important;
     pointer-events: auto;
+  }
+
+  /* MapLibre / CARTO attribution is a licence requirement, and it was being painted
+     over by the dock's 44px grab target at 795-839 — measured unreachable in every
+     map state. It reserves against the bottom-layout contract like everything else. */
+  .nx-icm.is-mobile-map .maplibregl-ctrl-bottom-right,
+  .nx-icm.is-mobile-map .maplibregl-ctrl-bottom-left {
+    bottom: calc(var(--nx-bottom-floor, var(--nx-mobile-chrome-bottom, 22px)) + 2px) !important;
+    z-index: 3;
+    /* The control's own box is 46px of mostly padding around a one-line link. Left at
+       that size it overlapped the activity peek row sitting 22px above it, so the two
+       collided even though both had cleared the floor. */
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .nx-icm.is-mobile-map .maplibregl-ctrl-attrib {
+    padding: 1px 6px !important;
+    font-size: 9px;
+    line-height: 1.4;
+    border-radius: 6px 0 0 0;
+  }
+
+  /* The bottom band is STACKED, not shared: floor -> attribution -> Live Activity.
+     Lifting both to `floor + 10px` independently just moved the collision — the
+     attribution ended up under the activity peek row instead of under the dock. */
+
+  /* A dominant bottom sheet (Full) owns the screen. Free-floating surfaces stand
+     down rather than get pushed past the top edge — measured, the activity rail went
+     to y=-30 with four of its controls off-screen. It returns when the sheet does. */
+  /* Expanded Live Activity is a PANEL, not a takeover.
+     The shared rule gives it min(78dvh, 640px), which on a 390x844 phone left the map
+     56px — the operator opened a list and lost the surface the list refers to. Half the
+     screen is enough to read the stream while still seeing where the events are, and
+     the panel reserves against the bottom-layout contract like every other surface. */
+  .nx-icm.is-mobile-map .nx-icm-activity.is-expanded {
+    height: auto !important;
+    max-height: 46dvh !important;
+    min-height: 0 !important;
+  }
+
+  /* ── Live Activity PEEK — one row, the mobile resting state ──────────────
+     `minimal` measured 117px of an 844px viewport to announce "0 in flow". The
+     peek is a line: dot, label, count, scope, chevron. The whole row is the
+     button that opens the stream, so there is no controls cluster to bury. */
+  .nx-icm.is-mobile-map .nx-icm-activity.is-peek,
+  .nx-icm-activity.is-peek.is-mobile {
+    min-height: 0 !important;
+    max-height: none !important;
+    height: auto !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    border-radius: 999px !important;
+    /* NOT !important: this selector is (0,5,0) and would otherwise outrank the
+       sheet-dominant rule that has to hide the rail entirely. Plain `block` already
+       beats the base `display: grid` at (0,1,0), so the flag bought nothing and cost
+       the ability to override it. */
+    display: block;
+  }
+
+  .nx-icm-activity__peek-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    /* 38px of paint, 44px of target — the row is the only control here, so it
+       carries the touch floor itself rather than borrowing the panel's. */
+    min-height: 38px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(233, 240, 255, 0.9);
+    font-size: 12px;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .nx-icm-activity__peek-row::after {
+    content: '';
+    position: absolute;
+    inset: -3px 0;
+  }
+
+  .nx-icm-activity__peek-row strong {
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 10.5px;
+    opacity: 0.9;
+  }
+
+  .nx-icm-activity__peek-count {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.86;
+  }
+
+  /* Scope is the first thing to go when the row runs out of room — the count is
+     the fact, the scope is the qualifier. */
+  .nx-icm-activity__peek-scope {
+    margin-left: auto;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nx-icm-activity__peek-chevron {
+    font-size: 11px;
+    opacity: 0.55;
+  }
+
+  .nx-icm-activity.is-peek.is-empty .nx-icm-activity__dot {
+    opacity: 0.35;
+  }
+
+  [data-nexus-theme='light'] .nx-icm-activity__peek-row {
+    color: rgba(15, 23, 42, 0.82);
   }
 
   .nx-icm.is-mobile-map .nx-icm-activity.is-minimal {
@@ -2761,4 +2894,22 @@ html.is-mobile-layout {
     top: auto !important;
     bottom: 0 !important;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   A DOMINANT BOTTOM SHEET OWNS THE SCREEN
+   ══════════════════════════════════════════════════════════════════════════
+   Set by mobile-bottom-layout when an open sheet passes 70% of the viewport.
+   Free-floating surfaces stand down rather than being pushed past the top edge —
+   measured, a 92dvh sheet drove the Live Activity rail to y=-30 with four of its
+   controls off-screen. They return the moment the sheet steps back down.
+
+   Written at the TOP LEVEL rather than nested inside `html.is-mobile-layout`:
+   a nested `&.nx-bottom-sheet-dominant` compiled without taking effect, and a
+   layout invariant should not depend on nesting subtleties to hold.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout.nx-bottom-sheet-dominant .nx-icm-activity,
+html.is-mobile-layout.nx-bottom-sheet-dominant .maplibregl-ctrl-bottom-right,
+html.is-mobile-layout.nx-bottom-sheet-dominant .maplibregl-ctrl-bottom-left {
+  display: none !important;
 }

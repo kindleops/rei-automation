@@ -35,7 +35,15 @@ export type CommandMapActivityType =
 export type CommandMapActivityPriority = 'critical' | 'hot' | 'normal' | 'info' | 'muted'
 
 export type CommandMapActivityTargetType = 'seller' | 'buyer' | 'sold_comp' | 'system'
-export type LiveActivityDisplayMode = 'minimal' | 'compact' | 'expanded' | 'docked' | 'hidden'
+/**
+ * `peek` is the mobile default: a single "● Live · N in flow" row, ~38px.
+ *
+ * `minimal` was already the smallest mode and still cost 117px measured on a 390x844
+ * Map — a glass panel with a header, a controls cluster and a ticker, permanently
+ * parked over the map. Live Activity earns a line at rest, not a panel; the operator
+ * taps to get the stream.
+ */
+export type LiveActivityDisplayMode = 'peek' | 'minimal' | 'compact' | 'expanded' | 'docked' | 'hidden'
 export type LiveActivitySpeed = 'paused' | 'slow' | 'normal' | 'fast'
 
 export type CommandMapActivityEvent = {

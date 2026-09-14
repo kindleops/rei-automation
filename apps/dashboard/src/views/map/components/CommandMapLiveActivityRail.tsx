@@ -65,7 +65,9 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
   const effectiveMode: LiveActivityDisplayMode = useMemo(() => {
     if (preferredMode === 'hidden') return 'hidden'
     if (conversationOpen || composerActive) return 'hidden'
-    if (sellerCardExpanded && isMobile) return 'minimal'
+    // A seller sheet open on a phone owns the bottom band; the rail reduces to its
+    // one-line peek above it rather than a 110px panel competing for the same space.
+    if (sellerCardExpanded && isMobile) return 'peek'
     if (sellerCardExpanded && preferredMode === 'expanded') return 'compact'
     /**
      * Zero-state collapse (mobile): a full Live Activity panel permanently occupied 117px
@@ -76,15 +78,21 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
      * expanded the rail.
      */
     if (isMobile && feed.tickerCount === 0 && feed.visibleCount === 0 && preferredMode !== 'expanded') {
-      return 'minimal'
+      return 'peek'
     }
     if (isMobile && preferredMode === 'docked') return 'expanded'
+    /**
+     * On a phone, `minimal` IS the peek. The operator has not asked for a panel until
+     * they open one, and the map is the surface they came for — measured, `minimal`
+     * took 117px of 844 to say "0 in flow".
+     */
+    if (isMobile && preferredMode === 'minimal') return 'peek'
     return preferredMode
   }, [composerActive, conversationOpen, isMobile, preferredMode, sellerCardExpanded, feed.tickerCount, feed.visibleCount])
 
   const timelineEvents = feed.visible
   const tickerQueue = feed.tickerQueue
-  const displayCount = effectiveMode === 'minimal' || effectiveMode === 'compact'
+  const displayCount = effectiveMode === 'peek' || effectiveMode === 'minimal' || effectiveMode === 'compact'
     ? feed.tickerCount
     : feed.visibleCount
 
@@ -143,6 +151,46 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
   }
 
   if (effectiveMode === 'hidden') return null
+
+  /**
+   * PEEK — one row, and the whole row is the control that opens the stream.
+   *
+   * Rendered before the full rail rather than as a variation inside it, because the
+   * full rail's header carries a controls cluster (Hide, Settings, channel tabs) that
+   * cannot fit on one line and whose buttons were measured being painted over by the
+   * seller sheet. Nothing here can be obscured, because there is nothing here but the
+   * row itself.
+   */
+  if (effectiveMode === 'peek') {
+    return (
+      <section
+        className={cls(
+          'nx-icm-activity',
+          'is-peek',
+          isMobile && 'is-mobile',
+          feed.tickerCount === 0 && feed.visibleCount === 0 && 'is-empty',
+        )}
+        aria-label="Live Activity"
+      >
+        <button
+          type="button"
+          className="nx-icm-activity__peek-row"
+          aria-label={`Live activity, ${displayCount} in flow. Open the event stream.`}
+          aria-expanded={false}
+          onClick={() => {
+            onSettingsChange({ visible: true, displayMode: 'expanded' })
+            onPerformanceChange({ liveActivityMode: 'expanded' })
+          }}
+        >
+          <span className="nx-icm-activity__dot" aria-hidden />
+          <strong>Live</strong>
+          <span className="nx-icm-activity__peek-count">{displayCount} in flow</span>
+          <span className="nx-icm-activity__peek-scope">{scopeLabel}</span>
+          <span className="nx-icm-activity__peek-chevron" aria-hidden>⌃</span>
+        </button>
+      </section>
+    )
+  }
 
   const railClassName = cls(
     'nx-icm-activity',

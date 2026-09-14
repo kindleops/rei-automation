@@ -31,10 +31,34 @@ import './seller-map-card.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
+/**
+ * PEEK / DETAIL / FULL.
+ *
+ * Peek is a fixed px value, not a dvh fraction: it holds a known amount of content —
+ * identity, address, state badges, two metrics — so its height is a property of that
+ * content rather than of the device. 38dvh was 321px on a 390x844 phone and the card
+ * then overran it to 420px anyway, which left the map 320px of 844.
+ *
+ * Detail and Full stay proportional because they scroll.
+ */
 const SELLER_SHEET_SNAP_HEIGHTS = {
-  collapsed: '38dvh',
-  half: '52dvh',
-  expanded: '65dvh',
+  /**
+   * 216px is MEASURED, not chosen: peek's content is a 32px state row, a 55px identity
+   * block, a 60px two-metric row, a 14px contact-state line and the 20px handle band —
+   * 213px. At 186px the property facts line was clipped mid-sentence, which is the
+   * failure a fixed peek height exists to avoid.
+   */
+  collapsed: '216px',
+  half: '56dvh',
+  /**
+   * Full stops BELOW the map toolbar rather than at 92dvh.
+   *
+   * At 92dvh the sheet's top landed at y=68 on an 844px screen, over the toolbar at
+   * 47-91 — so Filters and Controls were visible and unpressable, and the operator's
+   * way back out to the map was buried by the thing they wanted to leave. 104px is the
+   * global header plus the toolbar plus a hairline.
+   */
+  expanded: 'calc(100dvh - 104px)',
 } as const
 
 const SELLER_COMPOSER_SHEET_SNAP_HEIGHTS = {
@@ -43,8 +67,17 @@ const SELLER_COMPOSER_SHEET_SNAP_HEIGHTS = {
   expanded: '72dvh',
 } as const
 
+/**
+ * The DEFAULT detent for a card mode.
+ *
+ * `focus` maps to half — DETAIL — not to expanded. It mapped to expanded, and because
+ * a render-time sync re-applies this whenever cardMode changes, every promotion out of
+ * peek was rewritten to full: the middle detent was unreachable and the three-state
+ * sheet was really two. Full is reached by cycling the grab handle, which is a
+ * deliberate second action.
+ */
 const snapFromCardMode = (mode: SellerMapCardMode): BottomSheetSnap => (
-  mode === 'peek' ? 'collapsed' : 'expanded'
+  mode === 'peek' ? 'collapsed' : 'half'
 )
 
 const cardModeFromSnap = (snap: BottomSheetSnap, current: SellerMapCardMode): SellerMapCardMode => {
@@ -306,8 +339,20 @@ export const SellerMapCard = ({
     </header>
   )
 
+  /**
+   * Peek shows TWO metrics, Detail and Full show all of them.
+   *
+   * All four (estimated value, equity, repairs, loan balance) wrapped to two rows and
+   * pushed peek's content to 213px inside a 185px box — the property facts line was
+   * clipped mid-sentence. Peek is a glance: the two the operator actually triages on
+   * lead, and the rest are one tap away. The view model's own ordering decides which
+   * two, so this does not encode a second opinion about what matters.
+   */
   const metricsBlock = (variant: 'peek' | 'focus') => (
-    <SellerMapCardMetrics metrics={viewModel.peekMetrics} variant={variant} />
+    <SellerMapCardMetrics
+      metrics={variant === 'peek' ? viewModel.peekMetrics.slice(0, 2) : viewModel.peekMetrics}
+      variant={variant}
+    />
   )
 
   const signalsBlock = visibleSignals.length > 0 ? (
@@ -379,12 +424,16 @@ export const SellerMapCard = ({
     </div>
   )
 
+  /**
+   * PEEK answers "who and where, and how live is this?" in one glance, and nothing
+   * more. No hero: a 112px Street View image is the single largest thing in the card
+   * and it is what the operator opens the sheet FOR, not what they need while reading
+   * the map. Dropping it is most of the difference between a 420px peek and a 186px one.
+   */
   const peekBody = (
     <>
-      {imageBlock}
       <div className="smc-body smc-body--peek smc-body--peek-dense">
         {stickySummary}
-        {signalsBlock}
         <SellerMapCardOperationalState state={viewModel.operationalState} />
       </div>
       {/* Desktop only: the mobile sheet shell owns its own sticky footer. Embedding it
@@ -403,6 +452,9 @@ export const SellerMapCard = ({
         </div>
       </div>
       <div className="smc-body smc-body--focus smc-body--focus-dense smc-body--dossier-scroll">
+        {/* Signals moved here from peek: they are supporting evidence, and peek has
+            room for the headline only. */}
+        {signalsBlock}
         <SellerMapCardOperationalState state={viewModel.operationalState} />
         <SellerMapCardDossierSections viewModel={viewModel} loading={detailLoading && !viewModel.dossierReady} />
       </div>
@@ -503,8 +555,15 @@ export const SellerMapCard = ({
             <div className="smc-mobile-sheet__scroll">
               {isPeek ? peekBody : focusBody}
             </div>
-            {/* Single owner of the mobile action footer, sticky across peek/medium/full. */}
-            {actionFooter}
+            {/*
+              ACTIONS BELONG TO DETAIL, not to peek.
+              Peek answers "who, where, how live" at a glance — 186px of it — and a
+              sticky footer took 52px of that and then overlapped the identity block,
+              clipping the property facts line mid-sentence. Committing to an outreach
+              action is not something the operator does from a glance anyway: one tap
+              promotes to Detail, where the footer is the primary affordance.
+            */}
+            {!isPeek ? actionFooter : null}
           </>
         )
       ) : (
@@ -544,6 +603,12 @@ export const SellerMapCard = ({
             return
           }
           if (isFocus) {
+            // Step DOWN one detent rather than collapsing all the way: dismissing a
+            // full sheet should land on detail, and only a second dismiss on peek.
+            if (sheetSnap === 'expanded') {
+              setSheetSnap('half')
+              return
+            }
             setCardMode('peek')
             setSheetSnap('collapsed')
             return
@@ -558,8 +623,16 @@ export const SellerMapCard = ({
           onClick={(event) => {
             event.stopPropagation()
             if (isPeek && !isConversation) {
+              /**
+               * Peek promotes to DETAIL, not straight to full.
+               *
+               * It used to jump to `expanded`, which collapsed the three-detent sheet
+               * into two states and handed 92dvh to a card the operator had only
+               * glanced at. Detail is the answer to "tell me more"; full is the answer
+               * to "show me everything", and they are different questions.
+               */
               setCardMode('focus')
-              setSheetSnap('expanded')
+              setSheetSnap('half')
               onPeekToFocus?.()
             }
           }}

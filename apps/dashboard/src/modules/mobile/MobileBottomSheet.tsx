@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { publishBottomSurface, releaseBottomSurface } from './mobile-bottom-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -64,6 +65,37 @@ export const MobileBottomSheet = ({
     setSnap(order[(idx + 1) % order.length])
   }, [setSnap, snap])
 
+  /**
+   * Publish what this sheet occupies so the other bottom surfaces can reserve against
+   * it — see mobile-bottom-layout. Measured from the live element rather than parsed
+   * from the snap height, because the snaps are dvh and resolve differently on every
+   * device, and the sheet's own content can cap it below the snap.
+   */
+  const sheetRef = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (!open) {
+      releaseBottomSurface('sheet')
+      return
+    }
+    const measure = () => {
+      const node = sheetRef.current
+      if (node) publishBottomSurface('sheet', node.getBoundingClientRect().height)
+    }
+    measure()
+    // The snap transition animates, so the final height is not known on the frame the
+    // snap changes. Observing beats guessing at a timeout that matches the easing.
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    if (observer && sheetRef.current) observer.observe(sheetRef.current)
+    window.addEventListener('resize', measure, { passive: true })
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [open, snap])
+
+  // A sheet that unmounts without closing must still give its room back.
+  useEffect(() => () => releaseBottomSurface('sheet'), [])
+
   if (!open) return null
 
   return (
@@ -85,6 +117,7 @@ export const MobileBottomSheet = ({
         )
       ) : null}
       <aside
+        ref={sheetRef}
         className={cls(
           'nx-mobile-bottom-sheet',
           `is-${snap}`,

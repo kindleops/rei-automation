@@ -1227,6 +1227,42 @@
   cursor: grab;
 }
 
+/* Peek reserves a band for the grab handle.
+
+   The handle is absolutely positioned at top:7px because it used to float over a
+   200px Street View hero, which had nothing to collide with. Peek no longer carries
+   the hero, so the handle landed on the status badge row and the badge won the paint —
+   measured, "Resize sheet" was unreachable, which is the one affordance the three-state
+   sheet depends on. The band is reserved rather than the handle relocated, so the
+   collapsed-over-hero treatment above still applies wherever a hero IS present. */
+.smc-mobile-bottom-sheet.is-collapsed .smc-body--peek {
+  padding-top: 20px;
+}
+
+/* mobile-responsive.css §10 applies `[role="button"] { min-height: 44px !important }`
+   to every button-ish element under 768px. The sheet handle carries role="button", so
+   it was inflated from a 3px pill to a 44px box that reached down over the status badge
+   row — and the badge won the paint, leaving the drag affordance unpressable. The
+   blanket rule is right for ordinary controls and is left alone; this is a scoped
+   exception whose target is restored by the ::after below. */
+.smc-mobile-bottom-sheet .nx-mobile-bottom-sheet__handle {
+  min-height: 3px !important;
+  height: 3px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+}
+
+/* The target: 30px tall and wide across the sheet, sitting in the reserved band ABOVE
+   the content rather than reaching down into it. */
+.smc-mobile-bottom-sheet .nx-mobile-bottom-sheet__handle::after {
+  content: '';
+  position: absolute;
+  left: -110px;
+  right: -110px;
+  top: -13px;
+  bottom: -14px;
+}
+
 .smc-mobile-bottom-sheet .smc-image.is-mobile-hero {
   flex-shrink: 0;
   width: 100%;
@@ -1910,19 +1946,16 @@
   }
 }
 
-/* Extending the sheet to the viewport edge moved the dock inset into the footer,
-   which ate content height and clipped the metrics row. Give the scroll area that
-   height back so Peek still shows a complete metrics row.
+/* The PEEK height is owned by the snap contract (SELLER_SHEET_SNAP_HEIGHTS), not here.
 
-   48vh, not 42vh: the hero below is now the visual lead at ~200px, and at 42vh
-   that left under 190px for identity, metrics, signals and the action row
-   combined. The sheet still occupies under half the screen, so meaningful map
-   context remains above it — this stays a peek, not a detail view. */
-@media (max-width: 768px) {
-  .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet.is-collapsed {
-    max-height: calc(48vh + var(--nx-pinned-dock-collapsed, 14px)) !important;
-  }
-}
+   This block used to pin it at `48vh + dock !important` — 421px on a 390x844 phone —
+   which was written when Peek still led with a 200px Street View hero. Peek no longer
+   carries the hero (it is what the operator opens Detail FOR), so the cap was three
+   hundred pixels of reserved-but-unused sheet that the map could not have back, and
+   being !important it silently beat the snap height the component was setting.
+
+   One authority per dimension: the component sets the snap height, the stylesheet
+   styles it. */
 
 /* ══════════════════════════════════════════════════════════════════════════
    MAP PEEK — image-led hierarchy (mobile only)
