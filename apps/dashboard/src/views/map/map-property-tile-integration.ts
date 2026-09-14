@@ -253,8 +253,23 @@ export const ensurePropertyTileSourceAndLayers = (
     layout: {
       'icon-image': buildMarkerKeyIconImageExpr() as maplibregl.ExpressionSpecification,
       'icon-size': TILE_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
-      'icon-allow-overlap': true,
-      'icon-ignore-placement': true,
+      /**
+       * COLLISION ON. These were both `true`, which tells MapLibre never to suppress an
+       * icon for overlap — the direct cause of hundreds of house glyphs stacking at
+       * neighbourhood zoom. With collision restored, MapLibre drops icons that no
+       * longer fit, in the order given by `symbol-sort-key` (see map-marker-density):
+       * selected property first, then actively worked properties, then best score.
+       *
+       * Collision is the SAFETY NET, not the primary mechanism — the coupled density
+       * filter does the bulk of the thinning so that what survives is predictable
+       * across pans rather than dependent on placement order.
+       */
+      'icon-allow-overlap': false,
+      'icon-ignore-placement': false,
+      // A little breathing room, so two markers never touch at the point they stop
+      // colliding — that boundary is where a map reads as jittery.
+      'icon-padding': 2,
+      'symbol-sort-key': 50,
       visibility: 'none',
     },
     paint: {

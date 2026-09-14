@@ -102,6 +102,7 @@ import {
   ensurePropertyTileSourceAndLayers,
 } from './map-property-tile-integration'
 import { PROPERTY_TILES_LAYER_IDS, buildPropertyTileTransformRequest } from './map-property-tile-source'
+import { applyPropertyDensity } from './map-marker-density'
 import { MapPropertyDiagnosticsOverlay, type MapPropertyDiagnostics } from './components/MapPropertyDiagnosticsOverlay'
 import { isMapDiagnosticsDebugEnabled, isMapVerificationMode } from './map-property-diagnostics-debug'
 import {
@@ -7327,6 +7328,28 @@ export function InboxCommandMap({
 
       const mapInstance = map
       mapRef.current = mapInstance
+      /**
+       * DEV-ONLY map handle.
+       *
+       * Markers are painted to a WebGL canvas and have no DOM to inspect, so the
+       * density proof (scripts/proof/mobile/map-density-qa.mjs) cannot count what is
+       * actually rendered without reaching the map instance. Gated on import.meta.env.DEV
+       * so it is stripped from production builds rather than shipping a global handle
+       * to the map on ops.leadcommand.ai.
+       */
+      if (import.meta.env.DEV && typeof window !== 'undefined') {
+        /**
+         * A LIST, not a single handle. InboxCommandMap can be mounted more than once
+         * (the map workspace and a second, hidden render site), and a single global
+         * pointed at whichever initialised last — a hidden instance whose layers all
+         * read `visibility: none`. Measuring that one reported zero markers on a screen
+         * visibly full of them, which would have "proved" a density fix that never ran.
+         * The harness picks the instance whose canvas is actually on screen.
+         */
+        const w = window as unknown as { __nexusMap?: maplibregl.Map; __nexusMaps?: maplibregl.Map[] }
+        w.__nexusMaps = [...(w.__nexusMaps ?? []).filter((m) => m !== mapInstance), mapInstance]
+        w.__nexusMap = mapInstance
+      }
       setMapInstanceEpoch((epoch) => epoch + 1)
 
     if (import.meta.env.DEV || isMapVerificationMode() || isMapDiagnosticsDebugEnabled()) {
@@ -8336,6 +8359,11 @@ export function InboxCommandMap({
         try { map.remove() } catch { /* ignore errors during context-lost teardown */ }
       }
       mapRef.current = null
+      if (import.meta.env.DEV && typeof window !== 'undefined') {
+        const w = window as unknown as { __nexusMap?: maplibregl.Map; __nexusMaps?: maplibregl.Map[] }
+        w.__nexusMaps = (w.__nexusMaps ?? []).filter((m) => m.getContainer?.().isConnected)
+        w.__nexusMap = w.__nexusMaps[w.__nexusMaps.length - 1]
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapContainerKey])
@@ -8394,6 +8422,16 @@ export function InboxCommandMap({
    * the feature from hit-testing, and the property must stay tappable so a second tap
    * still resolves to it.
    */
+  /**
+   * Zoom-aware density. Re-applied when the selection changes because the selected
+   * property is admitted unconditionally and sorts first — see map-marker-density.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    if (mapContextLostRef.current || !isStyleSafe(map) || !map) return
+    applyPropertyDensity(map, text(selectedPropertyId))
+  }, [mapInstanceEpoch, selectedPropertyId, sellerPinLayers.sellerPins])
+
   useEffect(() => {
     const map = mapRef.current
     if (mapContextLostRef.current || !isStyleSafe(map) || !map) return

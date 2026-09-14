@@ -1984,6 +1984,16 @@ html.is-mobile-layout {
     min-height: 0 !important;
   }
 
+  /* The "no pins in view" toast is anchored at a hard `bottom: 56px`, which on a
+     390x844 phone lands exactly on the MapLibre attribution and made both licence
+     links unpressable. Like every other floating map surface it reserves against the
+     bottom-layout contract, above the attribution band the activity row also clears. */
+  .nx-icm.is-mobile-map .nx-icm__no-pins-toast {
+    bottom: calc(var(--nx-bottom-floor, var(--nx-mobile-chrome-bottom, 22px)) + 52px) !important;
+    left: 8px !important;
+    right: 8px !important;
+  }
+
   /* ── Live Activity PEEK — one row, the mobile resting state ──────────────
      `minimal` measured 117px of an 844px viewport to announce "0 in flow". The
      peek is a line: dot, label, count, scope, chevron. The whole row is the
