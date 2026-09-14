@@ -19,7 +19,20 @@
  */
 import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import path from 'node:path'
+
+/**
+ * Progress goes to a file as well as stdout. Node block-buffers stdout when it is not a
+ * TTY, so a run that takes twenty minutes shows nothing at all until it exits — which
+ * makes a hang and a slow pass look identical while you are waiting on it.
+ */
+const LOG = '/tmp/map-owner-proof.log'
+try { fsSync.writeFileSync(LOG, '') } catch { /* best effort */ }
+const say = (line) => {
+  console.log(line)
+  try { fsSync.appendFileSync(LOG, `${line}\n`) } catch { /* best effort */ }
+}
 
 const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i >= 0 ? process.argv[i + 1] : d }
 const BASE = arg('base', 'http://localhost:5174')
@@ -57,7 +70,8 @@ const PROBE = (families) => {
     const area = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * r.width
     if (area > bestArea) { bestArea = area; map = candidate }
   }
-  if (!map || !map.style || !map.isStyleLoaded?.()) return { error: 'style not ready' }
+  if (!map) return { error: 'no visible map' }
+  try { map.getLayer('prop-tiles-icon') } catch { return { error: 'style torn down' } }
 
   const owner = window.__nexusInventoryOwner
     ? { owner: window.__nexusInventoryOwner.owner, reason: window.__nexusInventoryOwner.reason, appliedLayers: window.__nexusInventoryOwner.appliedLayers }
@@ -158,7 +172,7 @@ for (let run = 1; run <= RUNS; run += 1) {
     await page.waitForFunction(() => {
       const maps = window.__nexusMaps ?? []
       const m = maps.find((c) => c.getContainer?.()?.isConnected)
-      if (!m || !m.style || !m.isStyleLoaded?.()) return false
+      if (!m) return false
       let count = -1
       try { count = m.querySourceFeatures('property-map-tiles', { sourceLayer: 'properties' }).length } catch { return false }
       const prev = window.__nexusTileSettle
@@ -173,7 +187,7 @@ for (let run = 1; run <= RUNS; run += 1) {
 
     const m = probe.families?.mvtTiles ?? {}
     const c = probe.families?.commandRaw ?? {}
-    console.log(
+    say(
       `run${run} z${String(zoom).padEnd(2)} owner=${String(probe.owner?.owner ?? '-').padEnd(10)} ` +
       `generic=[${(probe.genericOwners ?? []).join(',') || 'none'}] ` +
       `mvt(vis ${m.layersVisible ?? '-'}/${m.layersTotal ?? '-'} src ${String(m.source ?? '-').padStart(5)} adm ${String(m.admitted ?? '-').padStart(5)} rend ${String(m.rendered ?? '-').padStart(4)} uniq ${String(m.distinctRendered ?? '-').padStart(4)}) ` +
@@ -198,9 +212,9 @@ for (let r = 1; r < runs.length; r += 1) {
 }
 
 const multiOwner = runs.flat().filter((r) => (r.genericOwnerCount ?? 0) !== 1)
-console.log('\n── VERDICT ──')
-console.log(`exactly-one-generic-family: ${multiOwner.length === 0 ? 'PASS' : `FAIL (${multiOwner.map((r) => `z${r.requestedZoom}=${r.genericOwnerCount}`).join(' ')})`}`)
-console.log(`determinism across ${RUNS} fresh runs: ${diffs.length === 0 ? 'PASS' : `FAIL\n  ${diffs.join('\n  ')}`}`)
+say('\n── VERDICT ──')
+say(`exactly-one-generic-family: ${multiOwner.length === 0 ? 'PASS' : `FAIL (${multiOwner.map((r) => `z${r.requestedZoom}=${r.genericOwnerCount}`).join(' ')})`}`)
+say(`determinism across ${RUNS} fresh runs: ${diffs.length === 0 ? 'PASS' : `FAIL\n  ${diffs.join('\n  ')}`}`)
 
 await fs.writeFile(path.join(OUT, 'report.json'), JSON.stringify({ runs, diffs }, null, 2))
 console.log(`\nscreenshots: ${OUT}`)

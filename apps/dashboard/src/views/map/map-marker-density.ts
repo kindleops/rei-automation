@@ -47,31 +47,54 @@ import type maplibregl from 'maplibre-gl'
 export const PROPERTY_TILE_MIN_ZOOM = 9
 
 /**
- * A property the operator is actively working. These outrank score at every zoom, so
- * a live conversation never disappears because its legacy score is low.
+ * ── What the tile can and cannot tell us ──────────────────────────────────────
+ * An earlier revision admitted anything with `contact_status != 'uncontacted'` or a
+ * non-empty `activity_status`, described as "a property the operator is actively
+ * working". Measured against the live table, neither clause means that:
  *
- * Derived from the two state columns the tile actually carries. `uncontacted` is the
- * server's default for "no outreach yet", so anything else means something happened.
+ *   properties.contact_status holds exactly two values across all 169,802 rows —
+ *   'No Contact' (121,182) and NULL (48,620). It never indicates contact. So
+ *   `!= 'uncontacted'` was true for every non-null row, and the filter admitted 71% of
+ *   the universe under a claim that was false of all of it. In the Miami test viewport
+ *   that was 3,443 of 5,160 properties, every one of them labelled 'No Contact'.
+ *
+ *   properties.activity_status describes the PROPERTY ("Active for 12 months or
+ *   longer", "Inactive monthly for 2 months"), not outreach.
+ *
+ * The tile carries six fields and none of them identify operator work. That is fine,
+ * because operator work is not this family's job: live conversations are drawn by the
+ * command-pin overlay on top of this layer, and the selected property is admitted
+ * explicitly below. Generic inventory only has to answer "what is here", legibly.
+ *
+ * ── Two honest mechanisms instead of one false one ────────────────────────────
+ * SCORE, tuned to the distribution that actually exists. In the test viewport the
+ * legacy score is 0 for 88% of rows, p90 = 44, p99 = 77 and the maximum is 88 — so the
+ * previous metro floor of 92 could not admit a single property anywhere, and the whole
+ * ladder was calibrated against a range the data never reaches.
+ *
+ * DETERMINISTIC SAMPLING, for the 88% that have no score at all. Without it a score
+ * floor would blank those properties entirely below street zoom and then reveal all of
+ * them at once — a cliff, not progressive disclosure. The sample is taken from the last
+ * two digits of `property_id`, which is numeric for 169,795 of 169,802 rows: uniform
+ * enough, costs nothing, and — the point — is a pure function of the id, so the same
+ * properties survive every pan, every zoom and every reload. A random sample would make
+ * the map flicker on every frame.
  */
-const ACTIVE_STATE_EXPR: unknown[] = [
-  'any',
-  ['all',
-    ['has', 'contact_status'],
-    ['!=', ['coalesce', ['get', 'contact_status'], 'uncontacted'], 'uncontacted'],
-    ['!=', ['coalesce', ['get', 'contact_status'], ''], ''],
-  ],
-  ['all',
-    ['has', 'activity_status'],
-    ['!=', ['coalesce', ['get', 'activity_status'], ''], ''],
-  ],
+const SCORE_EXPR: unknown[] = ['coalesce', ['get', 'acquisition_score'], 0]
+
+/**
+ * A stable 0-99 bucket per property. `slice` takes the last two characters rather than
+ * the number modulo 100 because ids run up to 35 digits, which loses integer precision
+ * as a float — the bucket would stop being stable exactly where ids are longest.
+ */
+const BUCKET_EXPR: unknown[] = [
+  'coalesce',
+  ['to-number', ['slice', ['to-string', ['get', 'property_id']], -2], 0],
+  0,
 ]
 
 /**
- * Score floor by zoom band. Tuned against the live Miami dataset — see
- * scripts/proof/mobile/map-density-qa.mjs, which counts rendered icons and overlapping
- * pairs per band and is the reason these are the numbers they are.
- *
- * The bands are named for what the operator is looking at, not for zoom arithmetic:
+ * The ladder, by what the operator is looking at:
  *   metro         the shape of a market
  *   district      which neighbourhoods are worth a look
  *   neighborhood  individual streets
@@ -80,10 +103,20 @@ const ACTIVE_STATE_EXPR: unknown[] = [
 const SCORE_FLOOR_BY_ZOOM: unknown[] = [
   'step',
   ['zoom'],
-  92,      // z < 11   metro          — only the strongest signals
-  11, 78,  // z 11-13  district
-  13, 45,  // z 13-14.5 neighborhood
+  70,      // z < 11    metro         — roughly the top 1% of scored properties
+  11, 45,  // z 11-13   district      — roughly the top 10%
+  13, 20,  // z 13-14.5 neighborhood
   14.5, 0, // z >= 14.5 street        — everything
+]
+
+/** Share of the 0-99 bucket space admitted regardless of score, by the same bands. */
+const SAMPLE_QUOTA_BY_ZOOM: unknown[] = [
+  'step',
+  ['zoom'],
+  2,        // z < 11     ~2% of unscored inventory, enough to read the shape of a market
+  11, 8,    // z 11-13    ~8%
+  13, 30,   // z 13-14.5  ~30%
+  14.5, 100, // z >= 14.5 all of it
 ]
 
 /**
@@ -98,8 +131,8 @@ export const buildPropertyDensityFilter = (
 ): maplibregl.FilterSpecification => {
   const admit: unknown[] = [
     'any',
-    ACTIVE_STATE_EXPR,
-    ['>=', ['coalesce', ['get', 'acquisition_score'], 0], SCORE_FLOOR_BY_ZOOM],
+    ['>=', SCORE_EXPR, SCORE_FLOOR_BY_ZOOM],
+    ['<', BUCKET_EXPR, SAMPLE_QUOTA_BY_ZOOM],
   ]
   if (selectedPropertyId) {
     admit.push(['==', ['coalesce', ['get', 'property_id'], ''], selectedPropertyId])
@@ -126,9 +159,13 @@ export const buildPropertySortKeyExpr = (
   if (selectedPropertyId) {
     expr.push(['==', ['coalesce', ['get', 'property_id'], ''], selectedPropertyId], 0)
   }
-  expr.push(ACTIVE_STATE_EXPR, 1)
-  // 2..102, best score first.
-  expr.push(['-', 102, ['coalesce', ['get', 'acquisition_score'], 0]])
+  /**
+   * 1..102, best score first, with the stable bucket as a sub-unit tie-break. Ties are
+   * the common case here — 88% of properties score 0 — and without the tie-break
+   * MapLibre falls back to tile order, which differs between tiles covering the same
+   * ground at different zooms. That is visible as pins swapping on zoom.
+   */
+  expr.push(['+', ['-', 102, SCORE_EXPR], ['/', BUCKET_EXPR, 1000]])
   return expr as unknown as maplibregl.ExpressionSpecification
 }
 
