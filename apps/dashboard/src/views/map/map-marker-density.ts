@@ -149,10 +149,24 @@ export const PROPERTY_MARKER_LAYER_IDS = [
  * without icons and the map looks broken in a way that is hard to attribute. One call
  * site, one filter, all layers.
  */
+/**
+ * The selection the density system was last applied with.
+ *
+ * Held at module scope so LAYER CREATION can re-apply the filter without threading the
+ * selection through six call sites. `ensurePropertyTileSourceAndLayers` is invoked from
+ * six places and any of them can re-add the layers; a layer added after the density
+ * effect last ran carried NO filter, which is how a zoom band with a score floor of 78
+ * still rendered 26,415 symbols.
+ */
+let currentDensitySelection: string | null = null
+
+export const getDensitySelection = (): string | null => currentDensitySelection
+
 export const applyPropertyDensity = (
   map: maplibregl.Map,
   selectedPropertyId: string | null,
 ): void => {
+  currentDensitySelection = selectedPropertyId
   const filter = buildPropertyDensityFilter(selectedPropertyId)
   for (const layerId of PROPERTY_MARKER_LAYER_IDS) {
     if (!map.getLayer(layerId)) continue

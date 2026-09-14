@@ -3573,8 +3573,20 @@ const applySellerPinFieldPresentation = (
     return
   }
 
-  if (!sellerPinFieldActive) return
-
+  /**
+   * NOT the owner of generic inventory in this state — and deliberately left alone.
+   *
+   * map-property-source.ts states that zoom 9+ should show the MVT "complete property
+   * universe", and an earlier revision of this phase made that true by turning the tile
+   * layers on here. Measured, that produced a SECOND competing universe: tile visibility
+   * then flipped between zooms and between identical runs (6/6 at z11 in one pass, 0/6
+   * in the next) because this resolver and applyZoomBandVisibility both claim the same
+   * layers, and one pass rendered 26,415 symbols at z11.
+   *
+   * Reconciling the two resolvers into a single owner is real work and is not something
+   * to do by adding a third claimant. Until then the documented intent and the runtime
+   * behaviour disagree, which is recorded in the phase report rather than papered over.
+   */
   for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
     if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
   }

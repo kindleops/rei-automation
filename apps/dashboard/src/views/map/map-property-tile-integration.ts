@@ -7,6 +7,7 @@ import {
 } from './acquisition-radar-pin-renderer'
 import { buildMarkerKeyIconColorExpr, buildMarkerKeyIconImageExpr } from './canonical-map-asset-marker'
 import { getMapPinThemeTokens } from './map-pin-theme-tokens'
+import { applyPropertyDensity, getDensitySelection } from './map-marker-density'
 import { getMapThemeTokens } from './map-theme-tokens'
 import {
   PROPERTY_TILES_LAYER_IDS,
@@ -281,6 +282,17 @@ export const ensurePropertyTileSourceAndLayers = (
       ] as maplibregl.ExpressionSpecification,
     },
   })
+
+  /**
+   * Density is applied HERE, at creation, not only from the React effect.
+   *
+   * This function is called from six places and any of them can re-add the layer stack.
+   * A stack re-added after the density effect last ran carried no filter at all, which
+   * is how a zoom band with a score floor of 78 still rendered 26,415 symbols. Creating
+   * a marker layer and filtering it are one operation now, so an unfiltered property
+   * layer cannot exist.
+   */
+  applyPropertyDensity(map, getDensitySelection())
 }
 
 export const applyPropertyTileThemePaint = (
