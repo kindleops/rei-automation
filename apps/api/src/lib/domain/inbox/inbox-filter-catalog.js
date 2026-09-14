@@ -43,7 +43,13 @@ export const INBOX_FILTER_FIELDS = [
   { key: "city", group: "property", label: "City", type: "select", column: "city", optionsKey: "cities" },
   { key: "state", group: "property", label: "State", type: "select", column: "state", optionsKey: "states" },
   { key: "zip", group: "property", label: "ZIP", type: "text", column: "zip" },
-  { key: "county", group: "property", label: "County", type: "select", column: "property_county_name", optionsKey: "counties" },
+  // WITHDRAWN 2026-09-14 (INBOX-COMPOSER-LOCK-1). Both columns exist and both
+  // filters applied cleanly -- they just have nothing to match. Measured over all
+  // 8,887 inbox threads: property_county_name is NULL on 8,887 of 8,887, and
+  // past_due_amount is null-or-zero on 8,887 of 8,887. A dropdown that opens empty
+  // and a range that always returns 0 are indistinguishable from a broken filter, so
+  // they are not exposed. Re-add the entry (nothing else needs to change) once the
+  // county / delinquency backfill lands.
   { key: "market", group: "property", label: "Market", type: "select", column: "market", optionsKey: "markets" },
   { key: "marketRegion", group: "property", label: "Market Region", type: "select", column: "market_region", optionsKey: "market_regions" },
   { key: "propertyType", group: "property", label: "Property Type", type: "select", column: "property_type", optionsKey: "property_types" },
@@ -71,7 +77,6 @@ export const INBOX_FILTER_FIELDS = [
   { key: "mortgageBalanceMin", group: "financials", label: "Loan Balance", type: "numberRange", column: "total_loan_balance" },
   { key: "loanPaymentMin", group: "financials", label: "Loan Payment", type: "numberRange", column: "total_loan_payment" },
   { key: "taxAmtMin", group: "financials", label: "Tax Amount", type: "numberRange", column: "tax_amt" },
-  { key: "pastDueAmountMin", group: "financials", label: "Past Due Amount", type: "numberRange", column: "past_due_amount" },
   { key: "repairCostMin", group: "financials", label: "Estimated Repair Cost", type: "numberRange", column: "estimated_repair_cost" },
   { key: "aiScoreMin", group: "financials", label: "AI Score", type: "numberRange", column: "ai_score" },
   { key: "finalAcquisitionScoreMin", group: "financials", label: "Final Acquisition Score", type: "numberRange", column: "final_acquisition_score" },

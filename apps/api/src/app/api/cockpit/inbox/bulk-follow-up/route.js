@@ -130,8 +130,35 @@ export async function POST(request) {
       Array.from({ length: Math.min(SCHEDULE_CONCURRENCY, plan.recipients.length) }, worker),
     );
 
+    /**
+     * SELECTED = ELIGIBLE + INELIGIBLE, and ELIGIBLE = SCHEDULED + FAILED.
+     *
+     * The response used to report only `scheduled_count` and
+     * `failed_count: results.length - scheduled.length`, which folds two
+     * completely different outcomes into one number: a recipient the plan
+     * REFUSED (DNC, no SMS-capable sender, follow-up already pending) and a
+     * recipient we tried to schedule and could not (queue write, containment
+     * brake). That is exactly how "21 selected, 15 eligible, 12 scheduled"
+     * became unexplainable -- the six were never in the same category.
+     *
+     * Both identities are asserted below, and every discrepancy carries a
+     * reason the operator can open.
+     */
     const scheduled = results.filter((r) => r.ok)
     const failed = results.filter((r) => !r.ok && !r.skipped)
+    const ineligible = results.filter((r) => r.skipped)
+
+    const tally = (rows) => rows.reduce((acc, row) => {
+      const reason = row.reason || 'unspecified'
+      acc[reason] = (acc[reason] || 0) + 1
+      return acc
+    }, {})
+
+    const selectedCount = plan.recipients.length
+    const eligibleCount = plan.eligible_count
+    const reconciles =
+      selectedCount === eligibleCount + ineligible.length
+      && eligibleCount === scheduled.length + failed.length
 
     // TELL THE THREAD IT IS SCHEDULED.
     //
@@ -179,7 +206,19 @@ export async function POST(request) {
     return NextResponse.json({
       ok: scheduled.length > 0,
       label: plan.label,
+      // The four numbers an operator can add up, plus why each gap exists.
+      selected_count: selectedCount,
+      eligible_count: eligibleCount,
+      ineligible_count: ineligible.length,
       scheduled_count: scheduled.length,
+      failure_count: failed.length,
+      ineligible_reasons: tally(ineligible),
+      failure_reason_counts: tally(failed),
+      // If this is ever false the client must show the raw results rather than a
+      // summary: the arithmetic, not the label, is the contract.
+      reconciles,
+      // Retained for existing callers. It always meant "did not schedule", which
+      // is ineligible + failed -- now reported separately above.
       failed_count: results.length - scheduled.length,
       blocked_reason,
       failure_reasons: reasons,

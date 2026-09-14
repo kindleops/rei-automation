@@ -363,10 +363,28 @@ export const buildTemplateContextFromThread = (
     property_state: asString(cityStateZip[2], ''),
     property_zip: asString((thread?.marketId ?? '').split('-').slice(-1)[0], ''),
     market: asString(threadContext?.property?.market ?? thread?.marketId, ''),
-    agent_name: 'Operator',
-    company_name: 'Nexus',
+    /**
+     * THE AGENT ASSIGNED TO THIS SELLER, OR NOTHING.
+     *
+     * These were hardcoded to 'Operator' and 'Nexus'. Templates say "this is
+     * {{agent_name}}", so every template rendered through the composer signed
+     * itself "this is Operator" -- to a real seller, from a number that has a
+     * real assigned agent. The bulk follow-up path already got this right: it
+     * resolves master_owners.agent_persona and REFUSES the recipient when there
+     * is no assignment, because borrowing a name misrepresents who is texting.
+     * Resolving to '' here does the same thing: renderTemplate marks it missing,
+     * and TemplatePreview refuses to send until it is filled in.
+     */
+    agent_name: asString(
+      threadRecord.agent_persona
+      ?? threadRecord.agent_name
+      ?? threadRecord.assigned_agent_name,
+      '',
+    ),
+    company_name: asString(threadRecord.company_name ?? threadRecord.brand_name, ''),
     callback_number: asString(thread?.ourNumber ?? '', ''),
-    offer_price: '',
+    // Never a fabricated number. Present only when the engine has produced one.
+    offer_price: asString(threadRecord.offer_price ?? threadRecord.cash_offer, ''),
     ...manualValues,
   }
 }

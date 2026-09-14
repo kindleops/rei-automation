@@ -186,15 +186,15 @@ export const CANONICAL_INBOX_COUNT_KEYS = [
   // archived, but nothing ever counted the archived side of that predicate.
   "snoozed",
   "archived",
-  // "scheduled" is now a THREAD-STATE count like the two above.
+  // "scheduled" counts MESSAGES in send_queue, not threads.
   //
-  // It was deliberately excluded while scheduled follow-ups lived only in
-  // send_queue: seeding the key would have made buildEmptyCounts report a
-  // confident 0 whenever the send_queue count was unavailable, which is worse
-  // than admitting we do not know. That reasoning no longer applies -- the
-  // schedule path now stamps inbox_thread_state.next_scheduled_for, so the
-  // count is derived from the same rows every other bucket is derived from and
-  // a 0 here is a real 0.
+  // It briefly read inbox_thread_state.next_scheduled_for -- a single per-thread
+  // marker stamped by the bulk scheduler. That cannot express the operator
+  // contract, which is "schedule 20, watch 20 drain one at a time": two
+  // follow-ups on one thread are two scheduled messages and stamp one column,
+  // and a successful send has to decrement by exactly one. It is derived from
+  // send_queue (v_inbox_bucket_counts), the same ledger the Queue / Outbound
+  // Command Center reads -- there is no second scheduling store.
   "scheduled",
 ];
 

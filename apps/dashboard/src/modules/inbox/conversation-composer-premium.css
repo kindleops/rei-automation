@@ -691,3 +691,21 @@
 .nx-composer-input-area {
   display: none !important;
 }
+/* An unresolved template variable must not reach a seller. renderTemplate leaves
+   a missing variable visible as [[variable]]; the send actions refuse until it is
+   filled in, and this states which one. */
+.nx-template-preview__blocked {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 159, 10, 0.32);
+  border-radius: 10px;
+  background: rgba(255, 159, 10, 0.1);
+  color: #ff9f0a;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.nx-template-preview__actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

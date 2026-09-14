@@ -84,6 +84,7 @@ function createCanonicalInboxSupabase(seed = {}) {
   const countRows = seed.countRows ? [...seed.countRows] : null;
   const baseSupabase = makeLiveInboxThreadSupabase(threadRows, {
     countRows: countRows || [buildCountRow(threadRows)],
+    missingSources: seed.missingSources || [],
   });
 
   return {
@@ -853,8 +854,11 @@ test("visible thread rows floor stale zero count rows", async () => {
     waiting: 0,
     unlinked: 0,
   };
+  // PRIMARY PATH: the chip and the list share one predicate
+  // (v_inbox_bucket_counts over v_inbox_thread_state_buckets), so a stale zero
+  // row in the OLD independent count view cannot reach the operator at all --
+  // and nothing has to be "floored" after the fact.
   const supabase = createCanonicalInboxSupabase({ threadRows, countRows: [zeroCounts] });
-
   const result = await getLiveInbox({ filter: "new_replies", limit: 20 }, { supabase });
 
   assert.equal(result.threads.length, 2);
@@ -862,9 +866,24 @@ test("visible thread rows floor stale zero count rows", async () => {
   assert.equal(result.counts.needs_reply, 2);
   assert.equal(result.counts.active, 2);
   assert.equal(result.counts.all, 2);
-  assert.equal(result.countsDegraded, true);
-  assert.equal(result.countsApproximate, true);
-  assert.match(result.diagnostics?.countsSource || "", /visible_rows_floor/);
+  assert.equal(result.countsDegraded, false, "shared-predicate counts are not a degraded read");
+
+  // DEGRADED PATH: with the shared sources absent, the legacy count view is all
+  // that answers, it reports a stale zero, and the visible-rows floor is what
+  // stops the chip claiming 0 beside two visible threads. This is the guard the
+  // test was originally written for and it still has to hold.
+  const degradedSupabase = createCanonicalInboxSupabase({
+    threadRows,
+    countRows: [zeroCounts],
+    missingSources: ["v_inbox_bucket_counts", "v_inbox_thread_state_buckets"],
+  });
+  const degraded = await getLiveInbox({ filter: "new_replies", limit: 20 }, { supabase: degradedSupabase });
+
+  assert.equal(degraded.threads.length, 2);
+  assert.equal(degraded.counts.new_replies, 2);
+  assert.equal(degraded.countsDegraded, true);
+  assert.equal(degraded.countsApproximate, true);
+  assert.match(degraded.diagnostics?.countsSource || "", /visible_rows_floor/);
 });
 
 test("initial boot serves boot-fast inbox_thread_state rows without touching v_inbox_enriched", async () => {

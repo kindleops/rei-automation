@@ -93,6 +93,7 @@ import { InboxSidebar } from './components/InboxSidebar'
 import { InboxConversationTable, type ConversationTableSort } from './components/InboxConversationTable'
 import { ChatThread, buildAdaptiveSuggestions } from './components/ChatThread'
 import { Composer } from './components/Composer'
+import { useMobileKeyboardInset, isKeyboardInsetOpen } from '../mobile/useMobileKeyboardInset'
 import { ActiveProspectCard } from './components/ActiveProspectCard'
 import {
   deriveOwnerMatchFlags,
@@ -690,6 +691,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [data.unreadCount])
   const { user, loading: authLoading, signOut } = useAuth()
   const { isMobile } = useBreakpoint()
+  // Published by the composer's own subscription; read here so the Active
+  // Prospect card can collapse to an identity strip while the operator types.
+  const keyboardInset = useMobileKeyboardInset(isMobile)
+  const keyboardOpen = isMobile && isKeyboardInsetOpen(keyboardInset)
   const DEV = Boolean(import.meta.env.DEV)
   /**
    * N.1 — the one writable Deal Desk selection source (DD-018).
@@ -5041,6 +5046,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onSelectParticipant={handleParticipantSelect}
         onTryNextEligible={handleTryNextEligible}
         nextEligiblePreview={nextEligibleContact}
+        thread={selected as unknown as Record<string, unknown> | null}
+        compact={keyboardOpen}
       />
 
       <Composer

@@ -2976,3 +2976,124 @@ html.is-mobile-layout.nx-bottom-sheet-dominant .maplibregl-ctrl-bottom-right,
 html.is-mobile-layout.nx-bottom-sheet-dominant .maplibregl-ctrl-bottom-left {
   display: none !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   KEYBOARD STATE — INBOX-COMPOSER-LOCK-1
+   ══════════════════════════════════════════════════════════════════════════
+   iOS does not shrink the LAYOUT viewport when the keyboard opens, it shrinks
+   the VISUAL one. The shell is a full-height flex column (html { height:100lvh }),
+   so without a correction the composer stays at the bottom of a box that is now
+   partly behind the keyboard: the operator types into a field they cannot see,
+   with the app dock's reserved strip sitting under the keyboard as dead space.
+
+   `--nx-keyboard-inset` is published by useMobileKeyboardInset from
+   window.visualViewport -- never a hardcoded keyboard height, which is wrong on
+   every device, orientation, and whenever an autofill/suggestion bar appears.
+
+   Three moves, and only while `html.is-keyboard-open`:
+     1. the thread surface gives up exactly the covered height, so its LAST child
+        (the composer) lands directly on the keyboard's top edge;
+     2. the app dock leaves -- it is unreachable under the keyboard anyway, and
+        its reservation is the unexplained band under the composer;
+     3. the dock reservation token collapses to zero so nothing else keeps
+        reserving space for a dock that is not painted.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout.is-keyboard-open,
+/* Restated on BODY because pinned-app-dock.css re-declares both tokens there
+   (`body:has(.nx-pinned-app-dock.is-docked)`) to grow the clearance for an open
+   dock. A custom property is resolved on the element that DECLARES it, so an
+   :root/html override is shadowed for everything inside body -- which is exactly
+   what happened: the dock was hidden and the tokens on html read 0px, while
+   .nx-premium-inbox still computed `calc(88px + 0px + 6px)` and held a 94px
+   band open under the composer. Measured 390x844: composer bottom 414 against a
+   keyboard top of 508. */
+html.is-mobile-layout.is-keyboard-open body,
+html.is-mobile-layout.is-keyboard-open body:has(.nx-pinned-app-dock.is-docked),
+html.is-mobile-layout.is-keyboard-open body:has(.nx-pinned-app-dock.is-expanded) {
+  /* Nothing may reserve room for a dock that is not on screen. */
+  --nx-pinned-dock-collapsed: 0px;
+  --nx-mobile-chrome-bottom: 0px;
+}
+
+html.is-mobile-layout.is-keyboard-open .nx-pinned-app-dock,
+html.is-mobile-layout.is-keyboard-open .nx-pinned-app-dock__backdrop {
+  display: none !important;
+}
+
+/* Reduce the content box by the covered height. `padding-bottom` on a
+   `height:100%; overflow:hidden` flex column is what pulls the composer up;
+   `margin-bottom` would make the column overflow instead of shrink. */
+html.is-mobile-layout.is-keyboard-open
+  .nx-inbox-shell.is-mobile-inbox.m-thread-open
+  .nx-workspace-pane-surface--sms-thread {
+  box-sizing: border-box !important;
+  padding-bottom: var(--nx-keyboard-inset, 0px) !important;
+  /* The home-indicator inset is under the keyboard while it is up; adding it
+     here is what produced the extra band beneath the composer. */
+  --nx-mobile-safe-bottom: 0px;
+}
+
+/* The composer must not pad ITSELF by the inset. Doing that grows the last child
+   of a fixed-height column downward -- off-screen -- which is how the send row
+   ended up under the keyboard while a blank strip sat above it. */
+html.is-mobile-layout.is-keyboard-open .nx-inbox-shell.is-mobile-inbox .nx-composer {
+  padding-bottom: 6px !important;
+}
+
+/* Composing state: the conversation gets the room, the identity stays. */
+html.is-mobile-layout.is-keyboard-open .nx-active-prospect.is-compact {
+  flex: 0 0 auto;
+}
+
+.nx-active-prospect.is-compact .nx-active-prospect__strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 12px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(10, 14, 22, 0.55);
+}
+
+/* A hardcoded dark strip painted a black band across a light-mode thread. */
+[data-nexus-theme='light'] .nx-active-prospect.is-compact .nx-active-prospect__strip {
+  border-bottom-color: rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+[data-nexus-theme='light'] .nx-active-prospect.is-compact .nx-active-prospect__strip-name {
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.nx-active-prospect.is-compact .nx-active-prospect__strip-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.nx-active-prospect.is-compact .nx-active-prospect__strip-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.nx-active-prospect.is-compact .nx-active-prospect__ownership {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Ownership badge: a contact who is negotiating a sale is not "unverified" in
+   the same way a cold record is. Tone sits between inferred and confirmed. */
+.nx-active-prospect__ownership.is-behavioral {
+  color: #64d2ff;
+  background: rgba(100, 210, 255, 0.12);
+  border-color: rgba(100, 210, 255, 0.28);
+}

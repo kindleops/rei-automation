@@ -1,12 +1,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Icon } from '../../../shared/icons'
+import { Icon, type IconName } from '../../../shared/icons'
 import { formatPhone } from '../../../shared/formatters'
 import {
   deriveOwnerMatchFlags,
   formatParticipantRelationship,
+  hasSellerAuthorityEvidence,
   ownerMatchFlagTone,
-  ownershipStatusLabel,
-  ownershipStatusTone,
+  resolveOwnershipPresentation,
+  type OwnershipPresentation,
   type PropertyParticipant,
 } from '../utils/participantLabels'
 
@@ -21,38 +22,33 @@ type Props = {
   onSelectParticipant: (participant: PropertyParticipant) => void
   onTryNextEligible?: (participant: PropertyParticipant) => void
   nextEligiblePreview?: PropertyParticipant | null
+  /** Canonical thread facts, used only to tell "unverified" from "already negotiating". */
+  thread?: Record<string, unknown> | null
+  /**
+   * Collapses the card to an identity strip while the operator is typing, so the
+   * keyboard does not leave the conversation with a sliver of room. Nothing is
+   * lost -- the full card returns when the keyboard closes.
+   */
+  compact?: boolean
 }
 
-const OwnershipIndicator = ({ status }: { status?: string | null }) => {
-  const tone = ownershipStatusTone(status)
-  if (tone === 'confirmed') {
-    return (
-      <span className="nx-active-prospect__ownership is-confirmed" title="Ownership confirmed">
-        <Icon name="check" />
-        <span>Verified owner</span>
-      </span>
-    )
-  }
-  if (tone === 'inferred') {
-    return (
-      <span className="nx-active-prospect__ownership is-inferred" title="Property-associated response">
-        <Icon name="alert-circle" />
-        <span>{ownershipStatusLabel(status)}</span>
-      </span>
-    )
-  }
-  if (tone === 'denied') {
-    return (
-      <span className="nx-active-prospect__ownership is-denied" title="Ownership denied">
-        <Icon name="x" />
-        <span>Not owner</span>
-      </span>
-    )
-  }
+const OWNERSHIP_TONE_ICON = {
+  confirmed: 'check',
+  inferred: 'alert-circle',
+  denied: 'x',
+  behavioral: 'message',
+  neutral: 'user',
+} as const satisfies Record<OwnershipPresentation['tone'], IconName>
+
+const OwnershipIndicator = ({
+  status,
+  sellerAuthority = false,
+}: { status?: string | null; sellerAuthority?: boolean }) => {
+  const { tone, label, title } = resolveOwnershipPresentation(status, sellerAuthority)
   return (
-    <span className="nx-active-prospect__ownership is-neutral" title="Ownership unconfirmed">
-      <Icon name="user" />
-      <span>Unconfirmed</span>
+    <span className={`nx-active-prospect__ownership is-${tone}`} title={title}>
+      <Icon name={OWNERSHIP_TONE_ICON[tone]} />
+      <span>{label}</span>
     </span>
   )
 }
@@ -65,6 +61,8 @@ const ActiveProspectCardComponent = ({
   onSelectParticipant,
   onTryNextEligible,
   nextEligiblePreview = null,
+  thread = null,
+  compact = false,
 }: Props) => {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -100,6 +98,34 @@ const ActiveProspectCardComponent = ({
 
   const phone = String(selected?.canonical_e164 ?? '').trim()
 
+  /**
+   * COMPOSING STATE: an identity strip, not half the remaining viewport.
+   *
+   * With the keyboard up on a 375pt phone the conversation has roughly 260pt to
+   * work with, and the full Active Prospect card was taking most of it. Collapsed
+   * it keeps the one thing the operator needs while typing -- who am I talking
+   * to, and is ownership settled -- and the full card returns on blur. Rendered
+   * from the same `selected` participant, so no context is lost or refetched.
+   */
+  if (compact) {
+    return (
+      <section className="nx-active-prospect is-compact" ref={rootRef} aria-label="Active prospect">
+        <div className="nx-active-prospect__strip">
+          <span className="nx-active-prospect__strip-name">
+            {loading && !selected ? 'Loading…' : headlineName}
+          </span>
+          <OwnershipIndicator
+            status={selected?.ownership_status}
+            sellerAuthority={hasSellerAuthorityEvidence(thread, selected)}
+          />
+          {switcherList.length > 1 && (
+            <span className="nx-active-prospect__strip-count">{switcherList.length} linked</span>
+          )}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="nx-active-prospect" ref={rootRef} aria-label="Active prospect">
       <div className="nx-active-prospect__card is-selected">
@@ -125,7 +151,10 @@ const ActiveProspectCardComponent = ({
         </div>
 
         <div className="nx-active-prospect__meta-row">
-          <OwnershipIndicator status={selected?.ownership_status} />
+          <OwnershipIndicator
+            status={selected?.ownership_status}
+            sellerAuthority={hasSellerAuthorityEvidence(thread, selected)}
+          />
           {matchFlags.map((flag) => (
             <span
               key={flag.key}

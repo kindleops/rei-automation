@@ -70,6 +70,22 @@ test('getLiveCounts prefers pre-aggregated count view before authoritative scan'
   const counts = await getLiveCounts({}, { supabase })
   assert.equal(counts.all, 12)
   assert.equal(counts.priority, 2)
-  assert.equal(calls[0], 'v_inbox_thread_counts_live_v2')
+  /**
+   * The invariant is "a pre-aggregated view answers, and the counts endpoint
+   * never scans the thread table" -- not the name of one particular view.
+   *
+   * v_inbox_bucket_counts is now tried first (it counts the same flags the LIST
+   * filters on, which is what stops a chip disagreeing with its rows);
+   * v_inbox_thread_counts_live_v2 remains the fallback and is what answers here,
+   * because this stub returns no row for the newer view.
+   */
+  const PRE_AGGREGATED = ['v_inbox_bucket_counts', 'v_inbox_thread_counts_live_v2', 'v_inbox_zero_counts']
+  assert.ok(
+    PRE_AGGREGATED.includes(calls[0]),
+    `first read must be a pre-aggregated count view, got ${calls[0]}`,
+  )
+  assert.ok(calls.every((table) => PRE_AGGREGATED.includes(table)), `unexpected read: ${calls.join(', ')}`)
   assert.equal(calls.includes('inbox_thread_state'), false)
+  // The sub-second path exists so nothing pages the 9.8k-row thread table.
+  assert.equal(calls.includes('v_inbox_thread_state_buckets'), false)
 })

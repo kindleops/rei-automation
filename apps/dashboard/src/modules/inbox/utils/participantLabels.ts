@@ -140,7 +140,96 @@ export function ownershipStatusLabel(status: string | null | undefined): string 
     case 'confirmed': return 'Confirmed Owner'
     case 'inferred': return 'Property-Associated'
     case 'denied': return 'Denied'
-    default: return 'Unconfirmed'
+    // "Unconfirmed" alone read as a verdict about the PERSON. It is not: it means
+    // no ownership determination has been recorded for this contact yet.
+    default: return 'Ownership unverified'
+  }
+}
+
+/**
+ * SELLER AUTHORITY ESTABLISHED BY BEHAVIOUR.
+ *
+ * A seller who has been moved to Asking Price or beyond, or who has quoted a
+ * number, has operationally established that we are talking to the seller. The
+ * ownership badge showing "Unconfirmed" next to that conversation implies the
+ * acquisition flow still needs to ask "do you own it?" -- a question the seller
+ * has already answered by negotiating.
+ *
+ * This does NOT invent a determination. It reports the distinction the operator
+ * actually needs: "nobody has verified ownership, and nothing in this
+ * conversation suggests we are talking to the owner" versus "nobody has verified
+ * ownership on paper, but this person is negotiating a sale of the property".
+ *
+ * Explicit contradiction always wins: a denied status, a wrong-person or
+ * renter/tenant match flag means the badge stays neutral no matter what stage
+ * the thread reached.
+ */
+const SELLER_AUTHORITY_STAGES = new Set([
+  'asking_price', 'property_condition', 'offer', 'formal_contract',
+  'disposition', 'under_contract', 'prepared_to_close', 'closed',
+])
+
+const SELLER_AUTHORITY_INTENTS = new Set([
+  'asking_price_provided', 'potential_interest', 'price_negotiation',
+  'offer_accepted', 'condition_provided', 'appointment_request',
+])
+
+const OWNERSHIP_CONTRADICTION_FLAGS = new Set([
+  'wrong_person', 'likely_renter', 'tenant', 'property_manager',
+])
+
+export function hasSellerAuthorityEvidence(
+  thread: Record<string, unknown> | null | undefined,
+  participant: PropertyParticipant | null | undefined,
+): boolean {
+  if (!thread) return false
+
+  const contradicted =
+    String(participant?.ownership_status ?? '').trim() === 'denied'
+    || (participant?.owner_match_flags ?? []).some((flag) => OWNERSHIP_CONTRADICTION_FLAGS.has(String(flag)))
+    || OWNERSHIP_CONTRADICTION_FLAGS.has(String((thread as { disposition?: unknown }).disposition ?? ''))
+  if (contradicted) return false
+
+  const read = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = (thread as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase()
+    }
+    return ''
+  }
+
+  const stage = read('lifecycle_stage', 'lifecycleStage', 'universal_stage', 'universalStage', 'seller_stage', 'sellerStage', 'acquisition_stage')
+  if (SELLER_AUTHORITY_STAGES.has(stage)) return true
+
+  const intent = read('detected_intent', 'detectedIntent', 'primary_intent', 'reply_intent', 'last_intent')
+  return SELLER_AUTHORITY_INTENTS.has(intent)
+}
+
+export type OwnershipPresentation = {
+  tone: 'confirmed' | 'inferred' | 'denied' | 'behavioral' | 'neutral'
+  label: string
+  title: string
+}
+
+export function resolveOwnershipPresentation(
+  status: string | null | undefined,
+  sellerAuthority = false,
+): OwnershipPresentation {
+  const tone = ownershipStatusTone(status)
+  if (tone === 'confirmed') return { tone, label: 'Verified owner', title: 'Ownership confirmed' }
+  if (tone === 'inferred') return { tone, label: ownershipStatusLabel(status), title: 'Property-associated response' }
+  if (tone === 'denied') return { tone, label: 'Not owner', title: 'Ownership denied' }
+  if (sellerAuthority) {
+    return {
+      tone: 'behavioral',
+      label: 'Seller confirmed',
+      title: 'Ownership is not recorded on paper, but this contact is negotiating a sale of the property',
+    }
+  }
+  return {
+    tone: 'neutral',
+    label: 'Ownership unverified',
+    title: 'No ownership determination has been recorded for this contact',
   }
 }
 

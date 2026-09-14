@@ -6,10 +6,29 @@ import {
   resolveThreadFlagsFromClassification,
 } from "../../src/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import { getLiveInbox } from "../../src/lib/domain/inbox/live-inbox-service.js";
+import { resolveInboxBucketFlags } from "../../src/lib/domain/inbox/inbox-bucket-predicates.js";
 
 function makeSupabaseStub(rows = []) {
   const countForBucket = (bucket) =>
     rows.filter((row) => row.inbox_bucket === bucket).length;
+
+  // Production answers every category from v_inbox_thread_state_buckets (list)
+  // and v_inbox_bucket_counts (chips) so the two cannot diverge.
+  // resolveInboxBucketFlags is the JS twin of that view.
+  const flagRows = () => rows.map((row) => ({ ...row, ...resolveInboxBucketFlags(row) }));
+  const bucketCountRow = () => {
+    const flagged = flagRows();
+    const n = (flag) => flagged.filter((row) => row[flag] === true).length;
+    return {
+      priority: n("in_priority"), new_replies: n("in_new_replies"), needs_review: n("in_needs_review"),
+      follow_up: n("in_follow_up"), waiting: n("in_waiting"), cold: n("in_cold"), dead: n("in_dead"),
+      suppressed: n("in_suppressed"), archived: n("in_archived"), snoozed: n("in_snoozed"),
+      all_messages: n("in_all_messages"), all: n("in_all"), unlinked: n("in_unlinked"),
+      active: n("in_active"),
+      unread: flagged.filter((r) => r.in_all && r.is_read !== true).length,
+      scheduled: 0,
+    };
+  };
 
   return {
     from(table) {
@@ -55,14 +74,24 @@ function makeSupabaseStub(rows = []) {
             return resolve({ count, data: null, error: null });
           }
 
-          let data = table === "canonical_inbox_threads" || table === "v_inbox_threads_live_v2"
-            ? [...rows]
-            : table === "inbox_thread_state"
+          if (table === "v_inbox_bucket_counts") {
+            return resolve({ data: [bucketCountRow()], count: 1, error: null });
+          }
+
+          let data = table === "v_inbox_thread_state_buckets"
+            ? flagRows()
+            : table === "canonical_inbox_threads" || table === "v_inbox_threads_live_v2"
               ? [...rows]
-              : [];
+              : table === "inbox_thread_state"
+                ? [...rows]
+                : [];
 
           for (const filter of state.filters) {
             if (filter.type === "eq") {
+              if (typeof filter.val === "boolean") {
+                data = data.filter((row) => row[filter.col] === filter.val);
+                continue;
+              }
               data = data.filter((row) => String(row[filter.col] ?? "") === String(filter.val ?? ""));
             }
             if (filter.type === "is" && filter.val === null) {

@@ -45,6 +45,53 @@ import { normalizeLatestMessageDirection } from "./latest-message-presentation.j
 
 const PRIMARY_THREAD_SOURCE = "canonical_inbox_threads";
 const PRIMARY_COUNT_SOURCE = "v_inbox_thread_counts_live_v2";
+
+/**
+ * ONE PREDICATE PER CATEGORY, IN SQL.
+ *
+ * Every Inbox chip used to be counted by one predicate (canonical_inbox_counts,
+ * in SQL) and listed by another (threadMatchesInboxTab, in JS, over whatever page
+ * the SQL happened to return). They disagreed, and not subtly. Measured on
+ * production 2026-09-14:
+ *
+ *   New Replies  chip 136   list 17 of 100 fetched, has_more:false
+ *   Archived     chip  69   list 0        (canonical_inbox_threads is defined
+ *                                          `WHERE is_archived IS DISTINCT FROM
+ *                                          true`, so the archived tab could
+ *                                          never return a row from it)
+ *   Snoozed      chip   0   list 3        (no SQL case -> unfiltered)
+ *   Scheduled    chip   0   list 3        (no SQL case -> unfiltered)
+ *   filter=<anything unrecognised>        returned every thread
+ *
+ * v_inbox_thread_state_buckets carries one boolean per category, computed in SQL
+ * over inbox_thread_state, INCLUDING archived rows. v_inbox_bucket_counts counts
+ * those same booleans. List and count now read the same flag, so a chip cannot
+ * disagree with the rows under it, pages are not thrown away after the fact, and
+ * an unknown filter has no column to match and fails closed.
+ */
+const BUCKET_FLAG_SOURCE = "v_inbox_thread_state_buckets";
+const BUCKET_FLAG_COUNT_SOURCE = "v_inbox_bucket_counts";
+const BUCKET_FLAG_COLUMNS = {
+  priority: "in_priority",
+  new_replies: "in_new_replies",
+  needs_review: "in_needs_review",
+  follow_up: "in_follow_up",
+  waiting: "in_waiting",
+  cold: "in_cold",
+  dead: "in_dead",
+  suppressed: "in_suppressed",
+  archived: "in_archived",
+  snoozed: "in_snoozed",
+  scheduled: "in_scheduled",
+  all_messages: "in_all_messages",
+  unlinked: "in_unlinked",
+  // A lens over four buckets, not a bucket of its own.
+  active: "in_active",
+};
+
+export function resolveBucketFlagColumn(filter) {
+  return BUCKET_FLAG_COLUMNS[lower(clean(filter))] || null;
+}
 const LEGACY_THREAD_SOURCE = "v_inbox_threads_live_v2";
 const FALLBACK_THREAD_SOURCE = "v_inbox_enriched";
 const BOOT_FAST_THREAD_SOURCE = "inbox_thread_state";
@@ -2009,28 +2056,109 @@ function mapAuthoritativeInboxRow(row = {}) {
   };
 }
 
+/**
+ * MESSAGE-BODY SEARCH OVER THE CORPUS, NOT THE LAST MESSAGE.
+ *
+ * Every thread source carries exactly one message body -- latest_message_body --
+ * so searching matched only whatever the seller said MOST RECENTLY. Measured on
+ * production 2026-09-14: "fair price" (thread +18135909446's latest message)
+ * returned 1 thread; "dirt cheap", from that same seller's earlier reply "Let me
+ * guess, you are offering cash for dirt cheap?", returned 0. An operator
+ * searching a phrase they remember reading could not find the conversation.
+ *
+ * message_events is the full corpus (13.5k rows, GIN trgm index on message_body).
+ * This resolves the matching thread_keys so the caller can OR them into the
+ * thread query -- the corpus is never shipped to the browser, only the keys
+ * cross the boundary and only inside SQL.
+ */
+const CORPUS_SEARCH_KEY_CAP = 400;
+
+export async function resolveCorpusSearchThreadKeys(supabase, term, { cap = CORPUS_SEARCH_KEY_CAP } = {}) {
+  const needle = clean(term);
+  // Two characters would match most of the corpus and buy nothing; the thread
+  // columns already cover short tokens like a state code.
+  if (needle.length < 3) return [];
+  try {
+    const { data, error } = await supabase
+      .from("message_events")
+      .select("thread_key")
+      .not("thread_key", "is", null)
+      .ilike("message_body", `%${needle}%`)
+      .order("event_timestamp", { ascending: false })
+      .limit(cap * 4);
+    if (error) return [];
+    const keys = [];
+    const seen = new Set();
+    for (const row of data || []) {
+      const key = clean(row.thread_key);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+      if (keys.length >= cap) break;
+    }
+    return keys;
+  } catch {
+    // Search degrading to thread-column matching is recoverable; a 500 is not.
+    return [];
+  }
+}
+
+function appendCorpusKeysToSearchClause(clause, corpusKeys = []) {
+  if (!corpusKeys.length) return clause;
+  const list = corpusKeys.map((key) => `"${String(key).replace(/"/g, '\\"')}"`).join(",");
+  return `${clause},thread_key.in.(${list})`;
+}
+
 async function queryAuthoritativeInboxThreads(params = {}, {
   supabase = defaultSupabase,
   limit,
   filter,
   cursorKeyset,
   offset,
+  corpusKeys = [],
 } = {}) {
   const normalizedFilter = normalizeLiveFilter(filter);
   if (normalizedFilter === "all") return null;
 
+  /**
+   * FAIL CLOSED ON AN UNRECOGNISED FILTER.
+   *
+   * `filter=bogus_filter` used to fall through every switch's `default` -- in
+   * SQL (`return query`, unfiltered) and again in JS (`return true`) -- and came
+   * back with the entire thread universe. A typo in a saved view therefore
+   * looked like a working view over 9,709 threads. There is no flag column for a
+   * category that does not exist, so it now returns nothing and says why.
+   */
+  const flagColumn = resolveBucketFlagColumn(normalizedFilter);
+  if (!flagColumn) {
+    return {
+      data: [],
+      count: 0,
+      hasMore: false,
+      lastExaminedKeyset: null,
+      error: null,
+      unknownFilter: normalizedFilter,
+      authoritative: true,
+      sourceConfig: THREAD_SOURCE_CONFIGS[0],
+    };
+  }
+
   let query = supabase
-    .from("inbox_thread_state")
+    .from(BUCKET_FLAG_SOURCE)
     .select(AUTHORITATIVE_INBOX_THREAD_FIELDS)
     .not("thread_key", "is", null)
-    .neq("thread_key", "");
-
-  query = applyInboxThreadStateBucketFilter(query, normalizedFilter);
+    .neq("thread_key", "")
+    .eq(flagColumn, true);
 
   const q = clean(params.q).toLowerCase();
   if (q && typeof query.or === "function") {
     const qStr = `%${q}%`;
-    query = query.or(`thread_key.ilike.${qStr},seller_phone.ilike.${qStr},latest_message_body.ilike.${qStr}`);
+    // Same corpus reach as the enrichment path: a phrase the seller sent three
+    // messages ago has to find the thread, not just the latest body.
+    query = query.or(appendCorpusKeysToSearchClause(
+      `thread_key.ilike.${qStr},seller_phone.ilike.${qStr},latest_message_body.ilike.${qStr}`,
+      corpusKeys,
+    ));
   }
 
   if (typeof query.order === "function") {
@@ -2054,7 +2182,12 @@ async function queryAuthoritativeInboxThreads(params = {}, {
 
   let rawRows = data || [];
   if (q) {
+    const corpusMatched = new Set(corpusKeys.map((key) => clean(key)));
     rawRows = rawRows.filter((row) => {
+      // A corpus hit is a real hit: the phrase is in THIS conversation, just not
+      // in its most recent message. Re-applying the latest-body test here is
+      // what would undo the corpus search the SQL just performed.
+      if (corpusMatched.has(clean(row.thread_key))) return true;
       const haystack = [
         row.thread_key,
         row.seller_phone,
@@ -2072,6 +2205,10 @@ async function queryAuthoritativeInboxThreads(params = {}, {
     data: rows,
     count: rows.length,
     hasMore,
+    // This source applied the category predicate in SQL, so the caller must not
+    // re-filter (and must not fall through to a source that cannot express the
+    // category at all). An empty page here means the category is empty.
+    authoritative: true,
     /**
      * Keyset of the last row this source actually CONSUMED, so the caller can
      * advance even when its own post-filters drop every survivor off the end of
@@ -2252,6 +2389,11 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
   const isInitialBoot = selectMode === "initial_boot_safe" || timeoutMode === "initial_boot";
   const isFastBucket = timeoutMode === "manual_bucket_switch" || timeoutMode === "auto_refresh";
 
+  // Resolved once per request, for whichever source answers, and returned to the
+  // caller so its in-memory search net does not throw away the corpus matches
+  // the SQL just went and found.
+  const corpusSearchKeys = params.q ? await resolveCorpusSearchThreadKeys(supabase, params.q) : [];
+
   if (advancedActive) {
     const hydrated = await queryHydratedInboxThreads(
       { ...params, limit, offset, filter },
@@ -2261,6 +2403,7 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
       data: hydrated.data,
       count: hydrated.count,
       error: null,
+      corpusSearchKeys,
       sourceConfig: { name: HYDRATED_INBOX_SOURCE, key: "hydrated" },
     };
   }
@@ -2294,10 +2437,21 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     }
   }
 
-  // Bucket tabs use inbox_thread_state for fast tab switches; canonical_inbox_threads
-  // remains the enrichment fallback when the fast path is empty or unavailable.
-  const useAuthoritativeFastPath = true;
-  if (!advancedActive && isFastBucket && useAuthoritativeFastPath) {
+  /**
+   * CATEGORY FILTERS ARE ANSWERED BY THE FLAG SOURCE, ALWAYS.
+   *
+   * Two things were wrong here. The path was gated on `isFastBucket`, which is
+   * only true for timeoutMode=manual_bucket_switch|auto_refresh -- so the SAME
+   * bucket returned different rows depending on how the operator arrived at it
+   * (New Replies: 6 rows on a tab click, 17-of-100 on a refresh). And it fell
+   * through whenever the page came back EMPTY, handing the request to
+   * canonical_inbox_threads, which cannot express archived (it filters archived
+   * rows out by definition), snoozed or scheduled (it has neither column) -- so
+   * those tabs silently answered with an unfiltered thread list instead.
+   *
+   * An empty page from the flag source is an answer: the category is empty.
+   */
+  if (!advancedActive && normalizeLiveFilter(filter) !== "all") {
     let authoritativeResult = null;
     try {
       authoritativeResult = await queryAuthoritativeInboxThreads(params, {
@@ -2306,23 +2460,21 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
         filter,
         cursorKeyset,
         offset,
+        corpusKeys: corpusSearchKeys,
       });
     } catch (error) {
+      // Only a genuine source failure reaches the enrichment fallback below.
       console.warn("[INBOX_AUTHORITATIVE_QUERY_FAILED]", {
         filter: normalizeLiveFilter(filter),
         timeoutMode,
         message: error?.message || String(error),
       });
     }
-    if (authoritativeResult?.data?.length > 0) {
-      return authoritativeResult;
+    if (authoritativeResult?.unknownFilter) {
+      console.warn("[INBOX_UNKNOWN_FILTER_REFUSED]", { filter: authoritativeResult.unknownFilter });
+      return { ...authoritativeResult, corpusSearchKeys };
     }
-    if (authoritativeResult && normalizeLiveFilter(filter) !== "all") {
-      console.warn("[INBOX_AUTHORITATIVE_EMPTY_FALLBACK]", {
-        filter: normalizeLiveFilter(filter),
-        timeoutMode,
-      });
-    }
+    if (authoritativeResult) return { ...authoritativeResult, corpusSearchKeys };
   }
 
   const resolvedPreferredSource = advancedActive && shouldPreferEnrichedSource(advancedFilters)
@@ -2349,11 +2501,10 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
 
     if (params.q && typeof query.or === "function") {
       const qStr = `%${clean(params.q)}%`;
-      query = query.or(
-        sourceConfig.searchColumns
-          .map((column) => `${column}.ilike.${qStr}`)
-          .join(",")
-      );
+      query = query.or(appendCorpusKeysToSearchClause(
+        sourceConfig.searchColumns.map((column) => `${column}.ilike.${qStr}`).join(","),
+        corpusSearchKeys,
+      ));
     }
 
     if (advancedActive) {
@@ -2381,7 +2532,7 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
     }
 
     const result = await query;
-    if (!result.error) return { ...result, sourceConfig };
+    if (!result.error) return { ...result, sourceConfig, corpusSearchKeys };
     if (!isMissingSourceError(result.error)) throw result.error;
 
     lastError = result.error;
@@ -2569,10 +2720,64 @@ async function countInboxStateExtras(supabase) {
   }
 }
 
+async function readLegacyCountRow(supabase) {
+  try {
+    const { data, error } = await supabase.from(PRIMARY_COUNT_SOURCE).select("*").limit(1);
+    if (error) return null;
+    return Array.isArray(data) ? data[0] || null : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getLiveCountsWithMeta(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase;
   const disableCountFullScan = deps.disableCountFullScan === true;
   const nowMs = Date.now();
+
+  /**
+   * FIRST: the counts that share their predicate with the list.
+   *
+   * v_inbox_bucket_counts aggregates the exact boolean flags the list filters
+   * on, so every chip is the number of rows the operator will actually see when
+   * they click it. The older v_inbox_thread_counts_live_v2 path is kept below as
+   * a fallback only; it computed its own predicates independently, which is how
+   * the New Replies chip came to read 136 against a 17-row list, how Archived
+   * reported 69 against an empty one, and how three wrong-person threads were
+   * counted as new seller replies.
+   */
+  try {
+    const { data, error } = await supabase.from(BUCKET_FLAG_COUNT_SOURCE).select("*").limit(1);
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : null;
+    if (row && hasConcreteCountRow(row)) {
+      const counts = countFromRow(row);
+      /**
+       * The aggregate is authoritative for every key it reports and for nothing
+       * else. Keys it does not model -- renter_occupant, qualified, offers and
+       * the other pipeline tiles, which need joins to prospects/properties that
+       * inbox_thread_state does not carry -- are filled from the legacy count
+       * view so this change cannot silently zero a KPI it was never about.
+       */
+      const legacy = await readLegacyCountRow(supabase);
+      if (legacy) {
+        for (const key of CANONICAL_COUNT_KEYS) {
+          if (row[key] == null && legacy[key] != null) counts[key] = Number(legacy[key]);
+        }
+      }
+      console.log("[INBOX_COUNTS_UPDATED]", counts);
+      return {
+        counts,
+        source: `${BUCKET_FLAG_COUNT_SOURCE}:view`,
+        approximate: false,
+        degraded: false,
+      };
+    }
+  } catch (error) {
+    if (!isMissingSourceError(error)) {
+      console.warn("[INBOX_BUCKET_COUNTS_FALLBACK]", error?.message || error);
+    }
+  }
 
   // Fast path: pre-aggregated view (sub-second) before any full-table scan.
   for (const sourceConfig of getThreadSourceCandidates(deps.preferredThreadSource)) {
@@ -2710,6 +2915,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     // bucket tab; see the hasMore note further down.
     hasMore: sourceHasMore,
     lastExaminedKeyset,
+    // True when the category predicate was applied in SQL by the flag source.
+    authoritative: bucketQueryWasAuthoritative,
+    corpusSearchKeys,
   } = await queryThreadSource(params, {
     supabase,
     limit,
@@ -2745,8 +2953,20 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     };
   });
   const normalizedListFilter = normalizeLiveFilter(filter);
+  /**
+   * The JS predicate is now a NET, not the filter.
+   *
+   * waiting / new_replies / all_messages / cold used to be filtered only after
+   * the fact: the SQL predicate was far wider than the JS one, so a page of 100
+   * rows was cut to 17 and has_more was then computed from the survivors --
+   * which is why New Replies showed 17 rows against a chip reading 136 and Load
+   * More refused to advance. v_inbox_thread_state_buckets applies the SAME
+   * predicate in SQL, so when it answered, re-filtering can only throw away rows
+   * the category genuinely contains.
+   */
   const FACT_DERIVED_LIST_FILTERS = new Set(["waiting", "new_replies", "all_messages", "cold"]);
-  const trustBucketQuery = !FACT_DERIVED_LIST_FILTERS.has(normalizedListFilter);
+  const trustBucketQuery = bucketQueryWasAuthoritative === true
+    || !FACT_DERIVED_LIST_FILTERS.has(normalizedListFilter);
   // Archived threads leave every OPERATIONAL bucket. Archiving moved a lead
   // into Archived but never removed it from Priority/New Replies, which defeats
   // the point. Done here rather than in SQL deliberately: `row.is_archived !==
@@ -2774,11 +2994,15 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     const ts = new Date(until).getTime();
     return Number.isFinite(ts) && ts > postFilterNowMs;
   };
+  const corpusMatchedKeys = new Set((corpusSearchKeys || []).map((key) => clean(key)));
   const postFiltered = sortThreads(rows)
     .filter((row) => !HIDES_ARCHIVED || row.is_archived !== true)
     .filter((row) => !HIDES_SNOOZED || !isActivelySnoozed(row))
     .filter((row) => trustBucketQuery || threadMatchesFilter(row, filter))
-    .filter((row) => threadMatchesSearch(row, params.q));
+    // A corpus hit is a real hit -- the phrase is in this conversation, just not
+    // in its latest message. Without this the in-memory net would silently undo
+    // the message-body search the SQL just performed.
+    .filter((row) => corpusMatchedKeys.has(clean(row.thread_key)) || threadMatchesSearch(row, params.q));
 
   /**
    * `postFiltered.length > limit` alone can NEVER be true on the authoritative

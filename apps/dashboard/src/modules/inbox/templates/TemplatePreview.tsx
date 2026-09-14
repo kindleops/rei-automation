@@ -26,6 +26,22 @@ export const TemplatePreview = ({
     return <div className="nx-template-preview-empty">Select a template to preview.</div>
   }
 
+  /**
+   * AN UNRESOLVED VARIABLE MUST NOT REACH A SELLER.
+   *
+   * renderTemplate leaves a missing variable as `[[variable]]` so the operator
+   * can see it. Nothing stopped Send Now / Queue / Schedule from acting on that
+   * text, and the transport guard only knew the `{{ }}` form -- so "Hey
+   * [[seller_first_name]], ..." could go out verbatim. Insert/Replace stay
+   * enabled: putting the text in the composer so the operator can fix it is the
+   * point. It is SENDING it that is refused, with the missing variables named.
+   */
+  const unresolved = renderResult.missingVariables
+  const blocked = unresolved.length > 0
+  const blockedReason = blocked
+    ? `Fill in ${unresolved.join(', ')} before sending — the seller would receive the placeholder.`
+    : undefined
+
   return (
     <div className="nx-template-preview">
       <header>
@@ -48,6 +64,9 @@ export const TemplatePreview = ({
         values={variableValues}
         onChange={onVariableChange}
       />
+      {blocked && (
+        <div className="nx-template-preview__blocked" role="alert">{blockedReason}</div>
+      )}
       <div className="nx-template-preview__actions">
         <button 
           type="button" 
@@ -71,9 +90,12 @@ export const TemplatePreview = ({
         </button>
         <button 
           type="button" 
+          disabled={blocked}
+          title={blockedReason}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            if (blocked) return
             onSendNow(template)
           }}
         >
@@ -81,9 +103,12 @@ export const TemplatePreview = ({
         </button>
         <button 
           type="button" 
+          disabled={blocked}
+          title={blockedReason}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            if (blocked) return
             onQueue(template)
           }}
         >
@@ -91,9 +116,12 @@ export const TemplatePreview = ({
         </button>
         <button 
           type="button" 
+          disabled={blocked}
+          title={blockedReason}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            if (blocked) return
             onSchedule(template)
           }}
         >

@@ -602,12 +602,59 @@ export async function patchUniversalLeadState({
     patch: canonicalPatch,
   });
 
+  /**
+   * SUPPRESSION HAS TO REACH THE QUEUE, NOT JUST THE THREAD ROW.
+   *
+   * Operator Suppress / DNC wrote is_suppressed=true on inbox_thread_state and
+   * stopped there. Anything already parked in send_queue for that seller -- a
+   * bulk re-engagement scheduled for tomorrow morning, a pending follow-up --
+   * was untouched and would still have gone out. The thread said DNC while the
+   * queue said "sending at 9am", and the Scheduled count kept counting it.
+   *
+   * The cancellation machinery already exists and is already used by the INBOUND
+   * paths (a seller who opts out has their pending automation cancelled).
+   * COMPLIANCE_TERMINAL is the right policy: an operator marking DNC is the same
+   * instruction as a seller sending STOP, and it cancels every unsent outbound
+   * type rather than only the automated ones.
+   *
+   * Deliberately non-fatal: the suppression itself is already persisted and is
+   * the thing that matters. A cancellation failure is reported on the response
+   * so the operator can see it, and the queue guards remain a second line --
+   * but it must be ATTEMPTED, which is what was missing.
+   */
+  let suppression_cancellation = null;
+  if (rowPatch.is_suppressed === true && previous?.is_suppressed !== true) {
+    try {
+      const { cancelSupabasePendingOutbound, CANCELLATION_POLICIES } = await import(
+        '@/lib/domain/queue/cancel-supabase-pending-outbound.js'
+      );
+      suppression_cancellation = await cancelSupabasePendingOutbound(
+        {
+          thread_key: key,
+          to_phone_number: data?.canonical_e164 || data?.seller_phone || previous?.canonical_e164 || null,
+          property_id: data?.property_id || previous?.property_id || null,
+          policy: CANCELLATION_POLICIES.COMPLIANCE_TERMINAL,
+          reason: meta.reason || 'operator_suppressed',
+          suppression_reason: meta.reason || 'operator_suppressed',
+          cancelled_by: meta.operator_id || meta.updated_by || 'operator',
+        },
+        { supabase },
+      );
+    } catch (cancellationError) {
+      suppression_cancellation = {
+        ok: false,
+        error: cancellationError?.message || 'pending_outbound_cancellation_failed',
+      };
+    }
+  }
+
   return {
     ok: true,
     thread_key: key,
     row: data,
     stage_guards: stageGuards,
     suppression_guards: suppressionGuards,
+    suppression_cancellation,
     audit_event_ids: auditRows.map((row) => row.id),
     user_preferences: userPrefs,
     realtime_event: {

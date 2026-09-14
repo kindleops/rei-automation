@@ -1,4 +1,5 @@
 import { loadContextWithFallback as realLoadContextWithFallback } from "@/lib/domain/context/load-context-with-fallback.js";
+import { resolveInboxBucketFlags } from "@/lib/domain/inbox/inbox-bucket-predicates.js";
 
 /**
  * Chainable PostgREST-style supabase mock for critical tests.
@@ -296,7 +297,49 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
   const stateRows = options.stateRows || deriveInboxThreadStateRows(threadRows);
   const countRows = options.countRows || [buildInboxCountRowFromThreads(threadRows)];
 
+  /**
+   * v_inbox_thread_state_buckets / v_inbox_bucket_counts.
+   *
+   * Production evaluates every category predicate once, in SQL, so the chip and
+   * the list cannot disagree. The stub mirrors that with resolveInboxBucketFlags
+   * -- the JS twin of the view -- rather than re-deriving buckets a third way,
+   * which is exactly the divergence these tests exist to catch.
+   */
+  function bucketFlagRows() {
+    return stateRows.map((row) => ({ ...row, ...resolveInboxBucketFlags(row) }));
+  }
+
+  function bucketCountRow() {
+    const rows = bucketFlagRows();
+    const n = (flag) => rows.filter((row) => row[flag] === true).length;
+    return {
+      priority: n("in_priority"),
+      new_replies: n("in_new_replies"),
+      needs_review: n("in_needs_review"),
+      follow_up: n("in_follow_up"),
+      waiting: n("in_waiting"),
+      cold: n("in_cold"),
+      dead: n("in_dead"),
+      suppressed: n("in_suppressed"),
+      archived: n("in_archived"),
+      snoozed: n("in_snoozed"),
+      all_messages: n("in_all_messages"),
+      all: n("in_all"),
+      unlinked: n("in_unlinked"),
+      active: n("in_active"),
+      unread: rows.filter((row) => row.in_all && row.is_read !== true).length,
+      scheduled: 0,
+    };
+  }
+
+  // Lets a test assert the DEGRADED path: what the Inbox does when the
+  // shared-predicate sources are absent (a view not yet created in an
+  // environment) and only the older independent count view can answer.
+  const missingSources = new Set(options.missingSources || []);
+
   function rowsForTable(table) {
+    if (table === "v_inbox_thread_state_buckets") return bucketFlagRows();
+    if (table === "v_inbox_bucket_counts") return [bucketCountRow()];
     if (table === "inbox_thread_state") return [...stateRows];
     if (table === "canonical_inbox_threads" || table === "v_inbox_threads_live_v2" || table === "inbox_threads_view") {
       return [...threadRows];
@@ -397,6 +440,15 @@ export function makeLiveInboxThreadSupabase(threadRows = [], options = {}) {
           return Promise.resolve().then(() => {
             if (queryState.updatePatch) {
               return { data: [], error: null };
+            }
+
+            // PostgREST reports a missing relation as {error}, never a throw.
+            if (missingSources.has(queryState.table)) {
+              return {
+                data: null,
+                count: null,
+                error: { code: "42P01", message: `Could not find the table 'public.${queryState.table}' in the schema cache` },
+              };
             }
 
             let data = rowsForTable(queryState.table);

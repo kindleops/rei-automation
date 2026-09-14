@@ -14,7 +14,7 @@ import {
 import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
-import { useMobileKeyboardInset } from '../../mobile/useMobileKeyboardInset'
+import { useMobileKeyboardInset, isKeyboardInsetOpen } from '../../mobile/useMobileKeyboardInset'
 
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -109,10 +109,17 @@ export const Composer = ({
 }: ComposerProps) => {
   const { isMobile } = useBreakpoint()
   const keyboardInset = useMobileKeyboardInset(isMobile)
+
   const [localDraft, setLocalDraft] = useState(draftText)
   const [micState, setMicState] = useState<MicState>('idle')
   const [voiceUnsupported, setVoiceUnsupported] = useState(false)
   const [quickActionsOpen, setQuickActionsOpen] = useState(false)
+  // Second-press confirmation for Suppress / DNC. Disarms whenever the menu
+  // closes, so an armed button can never survive to a later, unrelated tap.
+  const [suppressArmed, setSuppressArmed] = useState(false)
+  useEffect(() => {
+    if (!quickActionsOpen) setSuppressArmed(false)
+  }, [quickActionsOpen])
   const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
   const [voiceLevel, setVoiceLevel] = useState(0)
   const [transcription, setTranscription] = useState('')
@@ -614,12 +621,32 @@ export const Composer = ({
                 <Icon name="check" /><span>Mark Reviewed</span>
               </button>
               {!disabled && (
+                /**
+                 * DNC IS NOT A ONE-TAP ACTION.
+                 *
+                 * It fired immediately on a single press, inside a menu, on a
+                 * phone. A mis-tap permanently marked a seller do-not-contact,
+                 * stopped every future touch and cancelled their pending sends.
+                 * The second press is the confirmation: it names the consequence
+                 * and it is the only thing that mutates. Anything else -- closing
+                 * the menu, pressing another action -- disarms it.
+                 */
                 <button
                   type="button"
-                  className="nx-qap-action-btn is-danger"
-                  onClick={() => { onQuickAction?.('suppress'); setQuickActionsOpen(false) }}
+                  className={cls('nx-qap-action-btn is-danger', suppressArmed && 'is-armed')}
+                  onClick={() => {
+                    if (!suppressArmed) { setSuppressArmed(true); return }
+                    setSuppressArmed(false)
+                    onQuickAction?.('suppress')
+                    setQuickActionsOpen(false)
+                  }}
                 >
-                  <Icon name="slash" /><span>Suppress / DNC</span>
+                  <Icon name="slash" />
+                  <span>
+                    {suppressArmed
+                      ? 'Confirm — stop all outreach'
+                      : 'Suppress / DNC'}
+                  </span>
                 </button>
               )}
             </div>
@@ -632,8 +659,17 @@ export const Composer = ({
 
   return (
     <div
-      className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft', isMobile && keyboardInset > 0 && 'is-keyboard-open')}
-      style={isMobile && keyboardInset > 0 ? { paddingBottom: `${keyboardInset}px` } : undefined}
+      className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft', isMobile && isKeyboardInsetOpen(keyboardInset) && 'is-keyboard-open')}
+      /**
+       * NO inline paddingBottom.
+       *
+       * It used to pad the composer by the keyboard overlap, which does not lift
+       * anything: the composer is the last child of a `height:100%; overflow:hidden`
+       * flex column, so padding grows it DOWNWARD, off-screen. The send row ended
+       * up under the keyboard with a blank band above it. The overlap is now
+       * reserved by the thread surface (mobile-operating-shell.css, `.is-keyboard-open`),
+       * which shrinks the column so its last child lands on the keyboard's edge.
+       */
     >
       {polishPreview && (
         <div className="nx-polish-preview" role="region" aria-label="Operator polish preview">

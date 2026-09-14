@@ -22,7 +22,19 @@ import { classifyNetworkFailurePhase } from "@/lib/domain/messaging/transport-fa
 
 // Pre-send content guard patterns.
 const BLANK_GREETING_RE = /^(Hello|Hi|Hey|Hola|Ola|Marhaba)\s*,|(Hello\s*,|Hey\s*,|Hi\s*,|Hola\s*,|Ola\s*,|Marhaba\s*,)/i;
-const UNRESOLVED_PLACEHOLDER_RE = /\{\{[^}]+\}\}/;
+/**
+ * Both placeholder shapes, because the renderer REWRITES one into the other.
+ *
+ * Templates are authored with {{variable}}. When a variable cannot be resolved,
+ * the dashboard's renderTemplate substitutes `[[variable]]` -- a deliberately
+ * visible marker. This guard only knew the {{ }} form, so the one shape that
+ * actually reaches the wire unresolved was the one it could not see: a template
+ * inserted with a missing seller name rendered "Hey [[seller_first_name]]," and
+ * passed straight through. Matching both closes that, and the guard stays where
+ * it belongs -- immediately before the provider call, after every other path has
+ * had its say.
+ */
+const UNRESOLVED_PLACEHOLDER_RE = /\{\{[^}]+\}\}|\[\[[^\]]+\]\]/;
 
 // ══════════════════════════════════════════════════════════════════════════
 // CONFIG & ENV VALIDATION
