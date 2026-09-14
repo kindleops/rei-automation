@@ -1060,12 +1060,27 @@ export interface QueueActionResult {
   [key: string]: unknown
 }
 
+/**
+ * QUEUE ACTIONS MUST SAY THEY MEAN IT.
+ *
+ * runQueueAction reads `const dryRun = asBoolean(payload.dry_run, true)` -- it
+ * defaults to a DRY RUN. None of these callers ever said otherwise, so every
+ * queue action an operator pressed came back `ok: true` having changed nothing.
+ * Verified against production 2026-09-14: cancelling a scheduled follow-up
+ * returned {"ok":true,"action":"cancel","dry_run":true} and the message was
+ * still scheduled, still counted, and would still have sent.
+ *
+ * The server-side default is a reasonable posture for a raw API. The defect was
+ * that the one caller who unambiguously means it never opted in. The server's
+ * own gates (outbound_sms_enabled, queue_runner_enabled, paused_review,
+ * incident_quarantine) still apply and still refuse out loud.
+ */
 // POST /api/cockpit/queue/approve
 // Moves a queue item from approval → queued for processor pickup.
 export function approveQueueItem(queueId: string): Promise<BackendResult<QueueActionResult>> {
   return callBackend<QueueActionResult>('/api/cockpit/queue/approve', {
     method: 'POST',
-    body: JSON.stringify({ queue_id: queueId }),
+    body: JSON.stringify({ queue_id: queueId, dry_run: false }),
   })
 }
 
@@ -1074,7 +1089,7 @@ export function approveQueueItem(queueId: string): Promise<BackendResult<QueueAc
 export function cancelQueueItem(queueId: string): Promise<BackendResult<QueueActionResult>> {
   return callBackend<QueueActionResult>('/api/cockpit/queue/cancel', {
     method: 'POST',
-    body: JSON.stringify({ queue_id: queueId }),
+    body: JSON.stringify({ queue_id: queueId, dry_run: false }),
   })
 }
 
@@ -1083,7 +1098,7 @@ export function cancelQueueItem(queueId: string): Promise<BackendResult<QueueAct
 export function retryQueueItem(queueId: string): Promise<BackendResult<QueueActionResult>> {
   return callBackend<QueueActionResult>('/api/cockpit/queue/retry', {
     method: 'POST',
-    body: JSON.stringify({ queue_id: queueId }),
+    body: JSON.stringify({ queue_id: queueId, dry_run: false }),
   })
 }
 
@@ -1092,7 +1107,7 @@ export function retryQueueItem(queueId: string): Promise<BackendResult<QueueActi
 export function holdQueueItem(queueId: string): Promise<BackendResult<QueueActionResult>> {
   return callBackend<QueueActionResult>('/api/cockpit/queue/hold', {
     method: 'POST',
-    body: JSON.stringify({ queue_id: queueId }),
+    body: JSON.stringify({ queue_id: queueId, dry_run: false }),
   })
 }
 
@@ -1101,7 +1116,7 @@ export function holdQueueItem(queueId: string): Promise<BackendResult<QueueActio
 export function rescheduleQueueItem(queueId: string, newTime: string): Promise<BackendResult<QueueActionResult>> {
   return callBackend<QueueActionResult>('/api/cockpit/queue/reschedule', {
     method: 'POST',
-    body: JSON.stringify({ queue_id: queueId, scheduled_for: newTime }),
+    body: JSON.stringify({ queue_id: queueId, scheduled_for: newTime, dry_run: false }),
   })
 }
 

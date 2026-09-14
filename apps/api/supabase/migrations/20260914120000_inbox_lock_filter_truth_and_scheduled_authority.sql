@@ -464,11 +464,29 @@ COMMENT ON VIEW public.v_inbox_zero_counts IS
 -- NOTE: `SELECT s.*` is expanded at creation time, so a new inbox_thread_state
 -- column needs this view recreated before it appears.
 CREATE OR REPLACE VIEW public.v_inbox_thread_state_buckets AS
-WITH f AS (
+WITH pending_send AS (
+  -- Resolved ONCE. Written as an EXISTS the planner inlined it 13 times (509ms);
+  -- as a joined set it is one index-only scan against
+  -- idx_send_queue_pending_thread (253ms).
+  SELECT DISTINCT q.thread_key
+  FROM public.send_queue q
+  WHERE q.thread_key IS NOT NULL
+    AND lower(q.queue_status) = ANY (ARRAY['scheduled','queued','pending','approved','ready','processing','sending'])
+), f AS (
   SELECT s.*,
     COALESCE(s.is_archived, false) AS f_archived,
     (s.snoozed_until IS NOT NULL AND s.snoozed_until > now()) AS f_snoozed,
-    (s.next_scheduled_for IS NOT NULL AND s.next_scheduled_for > now()) AS f_pending_schedule,
+    -- A thread is "scheduled" when it has a pending SEND, not when a marker
+    -- column happens to have been stamped. next_scheduled_for is written by the
+    -- BULK follow-up path and by nothing else, so whether a thread showed as
+    -- Scheduled -- and whether it left the operator's actionable buckets --
+    -- depended on WHICH button scheduled it. Verified 2026-09-14: scheduling
+    -- +12063359131 through schedule-reply created send_queue row e504d1fa...
+    -- while inbox_thread_state.next_scheduled_for stayed at a stale 2026-09-11
+    -- timestamp. Same status set as v_inbox_bucket_counts.scheduled and
+    -- list-scheduled-followups.js, so thread-grained and message-grained views
+    -- agree about which conversations have work parked.
+    (ps.thread_key IS NOT NULL) AS f_pending_schedule,
     lower(COALESCE(s.disposition, '')) AS f_disposition,
     lower(COALESCE(s.latest_direction, '')) AS f_direction,
     lower(COALESCE(s.latest_delivery_status, '')) AS f_delivery,
@@ -489,6 +507,7 @@ WITH f AS (
         ELSE 'cold'
       END)) AS f_bucket
   FROM public.inbox_thread_state s
+  LEFT JOIN pending_send ps ON ps.thread_key = s.thread_key
 ), g AS (
   SELECT f.*,
     (COALESCE(f.is_suppressed, false) OR f.f_bucket = 'suppressed') AS f_suppressed_contact,
@@ -592,3 +611,9 @@ COMMENT ON VIEW public.v_inbox_bucket_counts IS
 CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
 CREATE INDEX IF NOT EXISTS idx_message_events_body_trgm
   ON public.message_events USING gin (message_body extensions.gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_send_queue_pending_thread
+  ON public.send_queue (thread_key)
+  WHERE lower(queue_status) = ANY (ARRAY['scheduled','queued','pending','approved','ready','processing','sending']);
+COMMENT ON INDEX public.idx_send_queue_pending_thread IS
+  'Backs v_inbox_thread_state_buckets.f_pending_schedule and v_inbox_bucket_counts.scheduled -- "does this thread have a send still expected to go out". Partial, because the pending set is a few rows against 18k of history.';
