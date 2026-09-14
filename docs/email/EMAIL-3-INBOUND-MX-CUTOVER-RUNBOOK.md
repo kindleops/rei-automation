@@ -90,6 +90,32 @@ A dedicated `reply.` subdomain has its own MX and touches nothing else.
 
 ---
 
+## Step 0 — Prove operator visibility (added by EMAIL-4 §0)
+
+This runs **before** step 1, and it is a gate, not a checklist item. Production
+MX stays off until every box here is ticked, because the whole point of the
+ordering in this runbook is that a seller reply never arrives somewhere nobody
+is watching.
+
+☐ `notification_events` exists in the target database and is writable.
+☐ A synthetic unmatched inbound payload produces a `notification_events` row with
+  `event_type = 'inbox_unmatched_reply'` and
+  `deduplication_key = 'inbound_email:unmatched:<event_key>'`.
+☐ Re-delivering that **same** payload produces **no second row** — confirm by
+  count, not by absence of an error.
+☐ The notification scan (`runNotificationIntelligenceScan`) is scheduled in the
+  target environment and its results include an `inbound_email` scanner entry.
+  A backstop nobody runs is not a backstop.
+☐ An operator has confirmed they can see and action these notifications in the
+  surface they actually watch.
+
+If the scan is not scheduled in this environment, **say so and stop.** Inline
+emission alone is not sufficient: the emitter swallows its errors by design, so
+a dropped alert is silent, and silence is the exact failure this gate exists to
+prevent.
+
+---
+
 ## Step 1 — Configure inbound parsing in Brevo
 
 In the Brevo console, under inbound parsing, create the webhook.
@@ -233,10 +259,12 @@ seller's message.
 | **No malware scanning.** No scanner exists in this repository | Every attachment is stored with `scan_status = 'unscanned'` and `quarantine_reason = 'no_malware_scanning_configured'`. Nothing is called clean, because nothing has been checked | A later phase |
 | **No attachment byte storage.** `storage_status` never leaves `pending` | Attachment metadata and digests are recorded; the bytes are not retained, and Brevo's URLs expire | A later phase |
 | **No inbound signature is possible.** Brevo provides none | Authentication rests on URL secrecy plus alias unguessability. Documented rather than overstated | Provider limitation |
-| **No operator UI for the unmatched queue.** Rows land with `resolution_status` of `unmatched` or `ambiguous` and nothing surfaces them | Replies that cannot be attributed are stored correctly and are invisible until someone queries the table | EMAIL-8 owns Lead Command |
+| **No operator UI for the unmatched queue.** Rows land with `resolution_status` of `unmatched` or `ambiguous` | Attention is now raised into `notification_events` (EMAIL-4 §0), so nothing sits unnoticed. What is still missing is a dedicated *screen* for working the queue | EMAIL-8 owns Lead Command |
 
-That last one matters for scheduling: an unmatched reply is safely *stored* the
-day this cutover completes, but it is not *seen* until there is somewhere to see
-it. Until then, someone should be querying `email_inbound_events` where
-`resolution_status in ('unmatched', 'ambiguous')` on a regular cadence. There is
-a partial index on exactly that predicate, so the query is cheap.
+That last one no longer blocks the cutover. An unmatched reply now raises a
+`notification_events` row through the same attention system the SMS path uses
+(`inbox_unmatched_reply`, `inbox_multi_property_match`), both inline at
+ingestion and again from a sweep that catches what the inline emit dropped. An
+operator sees it in the notification surface they already watch; what EMAIL-8
+adds later is a purpose-built screen, not the visibility itself.
+

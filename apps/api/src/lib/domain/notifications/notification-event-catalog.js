@@ -694,6 +694,57 @@ export const EVENT_CATALOG = Object.freeze({
     titleTemplate: 'Not a lead — {{thread_key}}',
   },
 
+  // ── Inbound delivery faults (5) ─────────────────────────────────────────
+  //
+  // These are the replies that ARRIVED and cannot proceed on their own. They
+  // are deliberately in the `inbox` domain rather than a channel-specific one:
+  // a seller reply that nobody can file is the same operational problem whether
+  // it came by SMS or by email, and an `email_*` domain would be the start of a
+  // second attention vocabulary.
+  //
+  // Each is a REAL SELLER waiting for an answer nobody knows is owed. A row
+  // sitting unnoticed in a database is the failure these exist to prevent, so
+  // none of them is `neutral` and none defaults to `dismiss` alone.
+  inbox_unmatched_reply: {
+    domain: 'inbox',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['inspect_thread', 'acknowledge'],
+    // No thread_key: not knowing which thread it belongs to is the whole point.
+    titleTemplate: 'Reply could not be matched to a conversation — {{from_email}}',
+  },
+  inbox_ambiguous_reply: {
+    domain: 'inbox',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['inspect_thread', 'acknowledge'],
+    titleTemplate: 'Reply matches {{candidate_count}} conversations — {{from_email}}',
+  },
+  inbox_inbound_quarantined: {
+    domain: 'inbox',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['inspect_queue', 'acknowledge'],
+    titleTemplate: 'Inbound message quarantined — {{reason}}',
+  },
+  inbox_inbound_processing_failed: {
+    // Critical, because this is the shape a SILENT LOSS takes: the provider was
+    // told to retry and something is stopping the receipt from becoming a
+    // message. If it is wrong, it stops retrying, and the reply is gone.
+    domain: 'inbox',
+    defaultSeverity: 'critical',
+    soundCategory: 'alert',
+    defaultActions: ['inspect_queue', 'retry_queue_item'],
+    titleTemplate: 'Inbound processing failed — {{reason}}',
+  },
+  inbox_attachment_quarantined: {
+    domain: 'inbox',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['inspect_thread', 'acknowledge'],
+    titleTemplate: 'Seller attachment needs review — {{filename}}',
+  },
+
   // ── Acquisition (19) ────────────────────────────────────────────────────
   acquisition_score_threshold_met: {
     domain: 'acquisition',

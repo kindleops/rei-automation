@@ -49,6 +49,7 @@ import {
 } from "@/lib/domain/email/inbound/resolve-inbound-thread.js";
 import { INBOUND_MESSAGE_CLASS } from "@/lib/domain/email/inbound/inbound-message-classification.js";
 import { asObject } from "@/lib/hostile-input.js";
+import { emitInboundAttention } from "@/lib/domain/email/inbound/inbound-attention.js";
 
 const logger = child({ module: "domain.email.inbound_ingest" });
 
@@ -106,6 +107,42 @@ export function buildInboundEventKey(raw_normalized) {
  * @param {object} deps              store collaborators, all injectable
  */
 export async function ingestInboundEmail(raw_input, deps = {}) {
+  const outcome_result = await runInboundIngestion(raw_input, deps);
+
+  // ── ATTENTION, RAISED FROM ONE PLACE ─────────────────────────────────────
+  //
+  // Wrapping the whole ingestion rather than calling the emitter at each of the
+  // seven return sites is deliberate: it makes the invariant STRUCTURAL. A
+  // future return path cannot forget to raise attention, because there is
+  // nowhere for it to forget -- every outcome leaves through here.
+  //
+  // Failure here is swallowed on purpose. A notification problem must never
+  // turn a stored seller reply into a 503 that asks Brevo to send it again:
+  // that trades a missing alert, which the sweep recovers, for a duplicated
+  // seller message, which nothing recovers.
+  const raise = deps.emitInboundAttention || emitInboundAttention;
+  let attention = { emitted: false, reason: "not_attempted" };
+  try {
+    attention = await raise(
+      {
+        outcome: outcome_result,
+        event_key: outcome_result.event_key,
+        inbound_event_id: outcome_result.inbound_event_id,
+        inbound_message_id: outcome_result.inbound_message_id,
+        from_email: asObject(asObject(raw_input).normalized).from?.email,
+        conversation: outcome_result.conversation || null,
+        candidate_count: outcome_result.candidate_count ?? null,
+      },
+      deps
+    );
+  } catch (error) {
+    logger.error("inbound_email.attention_failed", { reason: clean(error?.message) });
+  }
+
+  return { ...outcome_result, attention };
+}
+
+async function runInboundIngestion(raw_input, deps = {}) {
   const input = asObject(raw_input);
   const trust_class = clean(input.trust_class) || TRUST_CLASS.UNAUTHENTICATED;
   const normalized = input.normalized || {};

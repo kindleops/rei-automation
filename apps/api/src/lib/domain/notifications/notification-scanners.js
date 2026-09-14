@@ -18,6 +18,7 @@ import {
   THRESHOLDS as PROACTIVE_THRESHOLDS,
 } from '@/lib/domain/ops/proactive-notifications.js'
 import {
+import { scanInboundEmailAttention } from '@/lib/domain/email/inbound/inbound-attention-scan.js'
   buildDedupKey,
   buildGroupingKey,
   THRESHOLDS,
@@ -774,6 +775,11 @@ export async function runNotificationIntelligenceScan(opts = {}) {
     ['senders', scanSenderHealthNotifications],
     ['markets', scanMarketNotifications],
     ['platform', scanPlatformHealthNotifications],
+    // Inbound seller replies that arrived and cannot proceed. This one is a
+    // BACKSTOP rather than a discovery scan: the ingest path already emits
+    // inline, and this catches what that emit dropped -- a swallowed error, a
+    // container that died between the write and the emit, a deploy in between.
+    ['inbound_email', scanInboundEmailAttention],
   ]
 
   for (const [name, fn] of scanners) {
