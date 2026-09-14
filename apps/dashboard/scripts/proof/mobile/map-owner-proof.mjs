@@ -95,17 +95,38 @@ const PROBE = (families) => {
       } catch { rendered = -1 }
     }
 
-    // SOURCE: everything that arrived, before any filter.
+    /**
+     * SOURCE: properties present in the tile data IN VIEW, before any filter.
+     * ADMITTED: how many of those the density filter lets through.
+     *
+     * Both are counted IN THE VIEWPORT, by projecting each feature and discarding
+     * anything off-canvas. A bare querySourceFeatures count is not a per-zoom figure at
+     * all: it reports MapLibre's whole tile cache, including parent tiles retained from
+     * previous zooms, so it depends on where the camera has been rather than where it
+     * is. That produced a run reporting an identical 4,808 at z13, z14, z15 and z16
+     * while a second run at the same cameras reported 3,240 / 1,711 / 418 / 110 — a
+     * difference entirely in the measurement, not in the render.
+     */
+    const inView = (feats) => {
+      const w = map.getCanvas().clientWidth
+      const h = map.getCanvas().clientHeight
+      let n = 0
+      for (const f of feats) {
+        const c = f.geometry?.coordinates
+        if (!Array.isArray(c) || c.length < 2) continue
+        const p = map.project(c)
+        if (p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h) n += 1
+      }
+      return n
+    }
     let source = null
-    // ADMITTED: what the density filter lets through. The gap between this and
-    // `rendered` is collision; the gap between `source` and this is the filter.
     let admitted = null
     try {
       const opts = def.sourceLayer ? { sourceLayer: def.sourceLayer } : {}
-      source = map.querySourceFeatures(def.source, opts).length
+      source = inView(map.querySourceFeatures(def.source, opts))
       const filter = map.getLayer(def.icon) ? map.getFilter(def.icon) : null
       admitted = filter
-        ? map.querySourceFeatures(def.source, { ...opts, filter }).length
+        ? inView(map.querySourceFeatures(def.source, { ...opts, filter }))
         : source
     } catch { /* source absent in this state */ }
 
@@ -146,17 +167,54 @@ for (let run = 1; run <= RUNS; run += 1) {
 
   const rows = []
   for (const zoom of ZOOMS) {
-    await page.evaluate(({ center, z }) => {
+    /**
+     * Move the camera, and make sure it stayed moved.
+     *
+     * `map.stop()` first: arrival flies the map to the selected property, and a jumpTo
+     * issued while that easing is still in flight is simply overridden by it. That cost
+     * a whole certification run — the z9 row was measured at z13 because the first jump
+     * of the run never took, and every later zoom was fine because nothing was animating
+     * by then. Retried rather than asserted once, since the fly-out has no fixed length.
+     */
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const landed = await page.evaluate(({ center, z }) => {
+        const maps = window.__nexusMaps ?? []
+        let best = null; let bestArea = 0
+        for (const m of maps) {
+          const el = m.getContainer?.(); if (!el || !el.isConnected) continue
+          const r = el.getBoundingClientRect()
+          const area = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * r.width
+          if (area > bestArea) { bestArea = area; best = m }
+        }
+        if (!best) return false
+        best.stop()
+        best.jumpTo({ center, zoom: z })
+        return Math.abs(best.getZoom() - z) < 0.01
+      }, { center: CENTER, z: zoom })
+      if (landed) break
+      await page.waitForTimeout(1500)
+    }
+
+    /**
+     * FIRST: wait for the camera to actually BE at the requested zoom.
+     *
+     * Without this the run is not measuring what it says it is. The arrival flow leaves
+     * the map at roughly z13 on the selected property, so a first jumpTo(9) that had not
+     * taken effect yet left the tile count already stable at z13 — the settle below
+     * passed instantly and the z9 row was recorded from a z13 camera. One certification
+     * run reported z9 source 15,319 and the next 3,227 for that reason, and the
+     * determinism check compared the two and passed, because it only compared owner and
+     * layer counts.
+     */
+    await page.waitForFunction((z) => {
       const maps = window.__nexusMaps ?? []
-      let best = null; let bestArea = 0
-      for (const m of maps) {
-        const el = m.getContainer?.(); if (!el || !el.isConnected) continue
-        const r = el.getBoundingClientRect()
-        const area = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * r.width
-        if (area > bestArea) { bestArea = area; best = m }
-      }
-      best?.jumpTo({ center, zoom: z })
-    }, { center: CENTER, z: zoom })
+      const m = maps.find((c) => c.getContainer?.()?.isConnected)
+      return Boolean(m) && Math.abs(m.getZoom() - z) < 0.01
+    }, zoom, { timeout: 30_000 }).catch(() => {})
+
+    // Stability is measured fresh per zoom; a counter carried over from the previous
+    // camera would satisfy the stable-count test before any new tile had arrived.
+    await page.evaluate(() => { delete window.__nexusTileSettle; delete window.__nexusPlacementSettle })
 
     await page.waitForFunction(() => {
       const maps = window.__nexusMaps ?? []
@@ -177,9 +235,32 @@ for (let run = 1; run <= RUNS; run += 1) {
       try { count = m.querySourceFeatures('property-map-tiles', { sourceLayer: 'properties' }).length } catch { return false }
       const prev = window.__nexusTileSettle
       window.__nexusTileSettle = { count, stable: prev && prev.count === count ? prev.stable + 1 : 0 }
-      return window.__nexusTileSettle.stable >= 3
+      /**
+       * Stable AND non-empty. A cache still holding only retained parent tiles is
+       * perfectly stable, so stability alone would happily certify a view whose own
+       * tiles never arrived.
+       */
+      return count > 0 && window.__nexusTileSettle.stable >= 3
     }, null, { timeout: 60_000, polling: 1200 }).catch(() => {})
-    await page.waitForTimeout(2500)
+    /**
+     * Finally, wait for the PLACEMENT to settle, not just the data.
+     *
+     * Symbol collision runs asynchronously after tiles land, so queryRenderedFeatures
+     * can report a mid-placement snapshot. Two runs with identical source and identical
+     * admitted counts reported 2 and 6 rendered at z16 for exactly this reason — the
+     * render agreed, the moment of sampling did not.
+     */
+    await page.waitForFunction(() => {
+      const maps = window.__nexusMaps ?? []
+      const m = maps.find((c) => c.getContainer?.()?.isConnected)
+      if (!m || !m.getLayer('prop-tiles-icon')) return false
+      let n = -1
+      try { n = m.queryRenderedFeatures(undefined, { layers: ['prop-tiles-icon'] }).length } catch { return false }
+      const prev = window.__nexusPlacementSettle
+      window.__nexusPlacementSettle = { n, stable: prev && prev.n === n ? prev.stable + 1 : 0 }
+      return window.__nexusPlacementSettle.stable >= 3
+    }, null, { timeout: 30_000, polling: 700 }).catch(() => {})
+    await page.waitForTimeout(1500)
 
     const probe = await page.evaluate(PROBE, FAMILIES).catch((error) => ({ error: String(error?.message ?? error) }))
     rows.push({ requestedZoom: zoom, ...probe })
@@ -205,9 +286,24 @@ for (let r = 1; r < runs.length; r += 1) {
     const a = runs[0][i]; const b = runs[r][i]
     if (!a || !b) continue
     const am = a.families?.mvtTiles ?? {}; const bm = b.families?.mvtTiles ?? {}
+    // The camera has to have been in the same place, or nothing below compares anything.
+    if (a.zoom !== b.zoom) diffs.push(`z${a.requestedZoom}: sampled at different cameras, ${a.zoom} vs ${b.zoom}`)
     if (a.owner?.owner !== b.owner?.owner) diffs.push(`z${a.requestedZoom}: owner ${a.owner?.owner} vs ${b.owner?.owner}`)
     if (am.layersVisible !== bm.layersVisible) diffs.push(`z${a.requestedZoom}: mvt layersVisible ${am.layersVisible} vs ${bm.layersVisible}`)
     if ((a.genericOwners ?? []).join(',') !== (b.genericOwners ?? []).join(',')) diffs.push(`z${a.requestedZoom}: generic owners [${a.genericOwners}] vs [${b.genericOwners}]`)
+    // source and admitted are pure functions of the tile payload and the filter, so they
+    // must match EXACTLY — that is the determinism claim this phase actually makes.
+    if (am.source !== bm.source) diffs.push(`z${a.requestedZoom}: source ${am.source} vs ${bm.source}`)
+    if (am.admitted !== bm.admitted) diffs.push(`z${a.requestedZoom}: admitted ${am.admitted} vs ${bm.admitted}`)
+    /**
+     * `rendered` is allowed a small tolerance and nothing more. It is the output of
+     * symbol collision, which depends on the order tiles were placed in, so ±2 between
+     * runs is placement noise rather than a different decision. A larger gap means the
+     * filter or the owner moved, which the checks above would not always catch.
+     */
+    if (Math.abs((am.rendered ?? 0) - (bm.rendered ?? 0)) > 2) {
+      diffs.push(`z${a.requestedZoom}: rendered ${am.rendered} vs ${bm.rendered}`)
+    }
   }
 }
 

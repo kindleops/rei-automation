@@ -99,25 +99,36 @@ const BUCKET_EXPR: unknown[] = [
  *   district      which neighbourhoods are worth a look
  *   neighborhood  individual streets
  *   street        every property, because that is the point of being this close
+ *
+ * ── Why these are JS functions and not `['step', ['zoom'], ...]` ──────────────
+ * They were step expressions, evaluated inside the layer FILTER. MapLibre does not
+ * evaluate a zoom expression in a filter against the live camera — it resolves it per
+ * tile, at the tile's own zoom, when the tile is loaded. So which properties a filter
+ * admitted depended on which tiles happened to be in the cache and when they arrived.
+ *
+ * Measured across two fresh runs at identical cameras, with identical source counts:
+ * z13 admitted 42 in one run and 153 in the other, z14 13 against 49, z11 403 against
+ * 874. The render was genuinely different between runs, not just the measurement — the
+ * exact flicker this phase exists to eliminate, introduced by the fix for it.
+ *
+ * Resolving the zoom in JS and emitting LITERAL numbers removes the ambiguity: the
+ * filter has no zoom term, so it means one thing. The cost is that it has to be
+ * re-applied when the zoom band changes, which applyPropertyDensity now does.
  */
-const SCORE_FLOOR_BY_ZOOM: unknown[] = [
-  'step',
-  ['zoom'],
-  70,      // z < 11    metro         — roughly the top 1% of scored properties
-  11, 45,  // z 11-13   district      — roughly the top 10%
-  13, 20,  // z 13-14.5 neighborhood
-  14.5, 0, // z >= 14.5 street        — everything
-]
+export const scoreFloorForZoom = (zoom: number): number => {
+  if (zoom < 11) return 70    // metro       — roughly the top 1% of scored properties
+  if (zoom < 13) return 45    // district    — roughly the top 10%
+  if (zoom < 14.5) return 20  // neighborhood
+  return 0                    // street      — everything
+}
 
 /** Share of the 0-99 bucket space admitted regardless of score, by the same bands. */
-const SAMPLE_QUOTA_BY_ZOOM: unknown[] = [
-  'step',
-  ['zoom'],
-  2,        // z < 11     ~2% of unscored inventory, enough to read the shape of a market
-  11, 8,    // z 11-13    ~8%
-  13, 30,   // z 13-14.5  ~30%
-  14.5, 100, // z >= 14.5 all of it
-]
+export const sampleQuotaForZoom = (zoom: number): number => {
+  if (zoom < 11) return 2     // ~2% of unscored inventory, enough to read a market
+  if (zoom < 13) return 8
+  if (zoom < 14.5) return 30
+  return 100                  // all of it
+}
 
 /**
  * The one filter, applied identically to every marker layer.
@@ -128,11 +139,12 @@ const SAMPLE_QUOTA_BY_ZOOM: unknown[] = [
  */
 export const buildPropertyDensityFilter = (
   selectedPropertyId: string | null,
+  zoom: number,
 ): maplibregl.FilterSpecification => {
   const admit: unknown[] = [
     'any',
-    ['>=', SCORE_EXPR, SCORE_FLOOR_BY_ZOOM],
-    ['<', BUCKET_EXPR, SAMPLE_QUOTA_BY_ZOOM],
+    ['>=', SCORE_EXPR, scoreFloorForZoom(zoom)],
+    ['<', BUCKET_EXPR, sampleQuotaForZoom(zoom)],
   ]
   if (selectedPropertyId) {
     admit.push(['==', ['coalesce', ['get', 'property_id'], ''], selectedPropertyId])
@@ -205,12 +217,25 @@ let currentDensitySelection: string | null = null
 
 export const getDensitySelection = (): string | null => currentDensitySelection
 
+/**
+ * The zoom band the filter currently expresses, so a caller can tell whether a camera
+ * move actually needs new filters — this runs on every move.
+ */
+let currentDensityBand: string | null = null
+
+export const densityBandForZoom = (zoom: number): string =>
+  `${scoreFloorForZoom(zoom)}:${sampleQuotaForZoom(zoom)}`
+
+export const getDensityBand = (): string | null => currentDensityBand
+
 export const applyPropertyDensity = (
   map: maplibregl.Map,
   selectedPropertyId: string | null,
 ): void => {
   currentDensitySelection = selectedPropertyId
-  const filter = buildPropertyDensityFilter(selectedPropertyId)
+  const zoom = map.getZoom()
+  currentDensityBand = densityBandForZoom(zoom)
+  const filter = buildPropertyDensityFilter(selectedPropertyId, zoom)
 
   /**
    * The SUBJECT KNOCKOUT: the selected property is drawn as a gold star that replaces

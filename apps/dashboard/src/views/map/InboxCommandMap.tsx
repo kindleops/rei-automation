@@ -106,7 +106,13 @@ import {
   SELLER_PINS_LAYER_IDS,
   applyGenericInventoryOwner,
 } from './map-generic-inventory-owner'
-import { applyCommandPinSubjectKnockout, applyPropertyDensity, getDensitySelection } from './map-marker-density'
+import {
+  applyCommandPinSubjectKnockout,
+  applyPropertyDensity,
+  densityBandForZoom,
+  getDensityBand,
+  getDensitySelection,
+} from './map-marker-density'
 import { MapPropertyDiagnosticsOverlay, type MapPropertyDiagnostics } from './components/MapPropertyDiagnosticsOverlay'
 import { isMapDiagnosticsDebugEnabled, isMapVerificationMode } from './map-property-diagnostics-debug'
 import {
@@ -8397,6 +8403,16 @@ export function InboxCommandMap({
         propertyFieldEnabled: sellerPinLayers.sellerPins,
         masterFilterActive,
       })
+
+      /**
+       * The density filter carries LITERAL thresholds rather than a zoom expression —
+       * see map-marker-density for why — so crossing a band boundary has to re-apply it.
+       * Compared by band rather than by zoom: this runs on every move, and re-setting six
+       * filters on every frame of a pan would cost far more than the comparison.
+       */
+      if (getDensityBand() !== densityBandForZoom(zoom)) {
+        applyPropertyDensity(map, getDensitySelection())
+      }
 
       /**
        * The legacy bounded stack is never the owner, so its filters only need
