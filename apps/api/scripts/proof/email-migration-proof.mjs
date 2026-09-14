@@ -601,5 +601,166 @@ check(
   "deleting a receipt would let its callback be re-ingested as new"
 );
 
+// ── EMAIL-4: the seller assertion ledger ───────────────────────────────────
+//
+// The claim under test is the one the reconnaissance made: nothing in this
+// repository could hold a seller's price HISTORY, because the nearest existing
+// table is UNIQUE on (enrollment_id, fact_key) and therefore overwrites. So the
+// proof below is mostly about what survives.
+
+const ASSERTION_LEDGER = path.join(MIGRATIONS, "20260914120000_seller_assertion_ledger.sql");
+const ledger_first = runFile("emailproof", ASSERTION_LEDGER);
+check("EMAIL-4: the assertion ledger migration applies", ledger_first.status === 0, ledger_first.stderr?.trim());
+check("EMAIL-4: the assertion ledger migration is idempotent", runFile("emailproof", ASSERTION_LEDGER).status === 0);
+
+for (const table of ["seller_assertions", "seller_intelligence_runs", "seller_intelligence_reviews"]) {
+  check(
+    `EMAIL-4: ${table} exists`,
+    query("emailproof", `select to_regclass('public.${table}') is not null`) === "t"
+  );
+  check(
+    `EMAIL-4: ${table} has row level security enabled`,
+    query("emailproof", `select relrowsecurity from pg_class where relname = '${table}'`) === "t"
+  );
+}
+
+// ── history survives ───────────────────────────────────────────────────────
+const OPP = "22222222-2222-4222-8222-222222222222";
+const assertPrice = (amount, evidence, current) => psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, source_event_key, master_owner_id, property_id, assertion_type,
+      fact_family, basis, confidence, value, raw_value, evidence_text,
+      extractor, extractor_version, reconciliation_outcome, is_current, asserted_at)
+   values ('email', 'brevo_in:p-${amount}', 'own-ledger', 'prop-ledger', 'seller_price_expectation',
+      'temporal', 'explicit', 0.95, '{"currency":"USD","amount":${amount}}'::jsonb, '${amount}', '${evidence}',
+      'test', 'v1', 'accept', ${current}, now());`]);
+
+check("EMAIL-4: a price assertion can be recorded", assertPrice(225000, "225k", "false").status === 0);
+check("EMAIL-4: a second, different price is ALSO recorded", assertPrice(205000, "205k", "false").status === 0);
+check("EMAIL-4: a third price is recorded too", assertPrice(190000, "190k", "true").status === 0);
+
+check(
+  "EMAIL-4: all three statements survive -- history is not destroyed",
+  query("emailproof",
+    "select count(*) from public.seller_assertions where master_owner_id = 'own-ledger'") === "3"
+);
+check(
+  "EMAIL-4: exactly ONE of them is current",
+  query("emailproof",
+    "select count(*) from public.seller_assertions where master_owner_id = 'own-ledger' and is_current") === "1"
+);
+
+const second_current = assertPrice(180000, "180k", "true");
+check(
+  "EMAIL-4: two CURRENT prices for one conversation are impossible",
+  second_current.status !== 0,
+  "the structural half of the reconciliation policy is missing"
+);
+
+// ── only an accepted assertion may be current ──────────────────────────────
+const soft_current = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, master_owner_id, property_id, assertion_type, fact_family, basis,
+      confidence, evidence_text, extractor, extractor_version, reconciliation_outcome, is_current, asserted_at)
+   values ('email', 'own-soft', 'prop-soft', 'seller_motivation', 'interpretive', 'inferred',
+      0.8, 'sick of the tenants', 'test', 'v1', 'soft', true, now());`]);
+check(
+  "EMAIL-4: a SOFT reading cannot be marked current",
+  soft_current.status !== 0,
+  "a non-canonical reading could be mistaken for canonical truth"
+);
+
+// ── the shape guards ───────────────────────────────────────────────────────
+const bad_basis = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, master_owner_id, assertion_type, fact_family, basis, confidence,
+      evidence_text, extractor, extractor_version, asserted_at)
+   values ('email', 'own-x', 'occupancy_status', 'mutable_state', 'certain', 0.9, 'vacant', 't', 'v1', now());`]);
+check("EMAIL-4: an invented basis is refused by CHECK", bad_basis.status !== 0);
+
+const bad_channel = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, master_owner_id, assertion_type, fact_family, basis, confidence,
+      evidence_text, extractor, extractor_version, asserted_at)
+   values ('carrier_pigeon', 'own-x', 'occupancy_status', 'mutable_state', 'explicit', 0.9, 'v', 't', 'v1', now());`]);
+check("EMAIL-4: an unknown channel is refused by CHECK", bad_channel.status !== 0);
+
+const assertion_anchorless = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, property_id, assertion_type, fact_family, basis, confidence,
+      evidence_text, extractor, extractor_version, asserted_at)
+   values ('email', 'prop-only', 'occupancy_status', 'mutable_state', 'explicit', 0.9, 'v', 't', 'v1', now());`]);
+check("EMAIL-4: an assertion with no conversation anchor is refused", assertion_anchorless.status !== 0);
+
+const bad_confidence = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, master_owner_id, assertion_type, fact_family, basis, confidence,
+      evidence_text, extractor, extractor_version, asserted_at)
+   values ('email', 'own-x', 'occupancy_status', 'mutable_state', 'explicit', 1.5, 'v', 't', 'v1', now());`]);
+check("EMAIL-4: a confidence outside 0..1 is refused", bad_confidence.status !== 0);
+
+// ── reprocessing is safe, and a new extractor is not a duplicate ───────────
+const reprocess_same = assertPrice(225000, "225k", "false");
+check(
+  "EMAIL-4: re-extracting the SAME communication does not duplicate an assertion",
+  reprocess_same.status !== 0
+);
+
+const reprocess_new_version = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_assertions
+     (source_channel, source_event_key, master_owner_id, property_id, assertion_type, fact_family,
+      basis, confidence, value, evidence_text, extractor, extractor_version, reconciliation_outcome, asserted_at)
+   values ('email', 'brevo_in:p-225000', 'own-ledger', 'prop-ledger', 'seller_price_expectation', 'temporal',
+      'explicit', 0.95, '{"currency":"USD","amount":225000}'::jsonb, '225k', 'test', 'v2', 'accept', now());`]);
+check(
+  "EMAIL-4: reprocessing with a NEWER extractor produces a new row, not a swallowed duplicate",
+  reprocess_new_version.status === 0,
+  reprocess_new_version.stderr?.trim()
+);
+
+// ── processing state ───────────────────────────────────────────────────────
+const run_insert = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_intelligence_runs (idempotency_key, source_channel, status)
+   values ('run-1', 'email', 'pending');`]);
+check("EMAIL-4: an intelligence run can be recorded", run_insert.status === 0, run_insert.stderr?.trim());
+
+const duplicate_run = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_intelligence_runs (idempotency_key, source_channel, status)
+   values ('run-1', 'email', 'pending');`]);
+check(
+  "EMAIL-4: two workers cannot both claim one communication",
+  duplicate_run.status !== 0,
+  "idempotency is a read-then-write rather than an index"
+);
+
+const failed_without_reason = psql(["-d", "emailproof", "-c",
+  `insert into public.seller_intelligence_runs (idempotency_key, source_channel, status)
+   values ('run-2', 'email', 'failed');`]);
+check(
+  "EMAIL-4: a FAILED run must say why",
+  failed_without_reason.status !== 0,
+  "a failure with no reason is the silent drop this table exists to prevent"
+);
+
+// ── review ─────────────────────────────────────────────────────────────────
+const assertion_id = query("emailproof",
+  "select id from public.seller_assertions where master_owner_id = 'own-ledger' limit 1");
+check("EMAIL-4: an assertion id is readable for review linkage", /^[0-9a-f-]{36}$/.test(assertion_id));
+
+const review_insert = (status) => psql(["-d", "emailproof", "-c",
+  `insert into public.seller_intelligence_reviews (assertion_id, review_reason, severity, status)
+   values ('${assertion_id}', 'ownership_dispute', 'legal', '${status}');`]);
+
+check("EMAIL-4: a review can be opened against an assertion", review_insert("open").status === 0);
+check(
+  "EMAIL-4: a second OPEN review for the same assertion is refused",
+  review_insert("open").status !== 0,
+  "a reprocess would pile duplicates in front of the same operator"
+);
+check(
+  "EMAIL-4: a RESOLVED review must carry a resolution",
+  review_insert("resolved").status !== 0
+);
+
 console.log(failures.length ? `\nFAILED (${failures.length})` : "\nPASS");
 process.exit(failures.length ? 1 : 0);
