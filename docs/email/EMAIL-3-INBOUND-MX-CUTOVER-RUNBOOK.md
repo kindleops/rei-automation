@@ -114,6 +114,18 @@ emission alone is not sufficient: the emitter swallows its errors by design, so
 a dropped alert is silent, and silence is the exact failure this gate exists to
 prevent.
 
+### What this gate does NOT require
+
+EMAIL-4's seller-intelligence pipeline is **not** a precondition for MX. It is
+pure, it holds no state, and nothing in the inbound path calls it yet. A seller
+reply that arrives before any intelligence runs is still received, stored,
+resolved, made readable and — if it needs a human — surfaced. That is the whole
+set of properties this cutover depends on.
+
+Stated explicitly because the opposite assumption is tempting and would be
+wrong in the expensive direction: waiting for intelligence before enabling MX
+keeps replies bouncing for no safety gain.
+
 ---
 
 ## Step 1 — Configure inbound parsing in Brevo
