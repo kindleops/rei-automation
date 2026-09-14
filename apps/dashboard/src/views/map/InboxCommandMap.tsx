@@ -8350,7 +8350,7 @@ export function InboxCommandMap({
      */
     applyGenericInventoryOwner(map, {
       zoom: viewportZoom,
-      propertyFieldEnabled: sellerPinLayersRef.current.sellerPins || Boolean(appliedMapFilterToken),
+      propertyFieldEnabled: sellerPinLayersRef.current.sellerPins,
       masterFilterActive: Boolean(appliedMapFilterToken),
     })
   }, [appliedMapFilterToken, baseStyleLoading, viewportZoom])
@@ -8363,7 +8363,6 @@ export function InboxCommandMap({
     const applyZoomBandVisibility = () => {
       const zoom = map.getZoom()
       const masterFilterActive = Boolean(appliedMapFilterTokenRef.current)
-      const showPropertyField = sellerPinLayers.sellerPins || masterFilterActive
 
       /**
        * This effect used to compute its own answer for the tile, aggregate and
@@ -8374,7 +8373,7 @@ export function InboxCommandMap({
        */
       const decision = applyGenericInventoryOwner(map, {
         zoom,
-        propertyFieldEnabled: showPropertyField,
+        propertyFieldEnabled: sellerPinLayers.sellerPins,
         masterFilterActive,
       })
 

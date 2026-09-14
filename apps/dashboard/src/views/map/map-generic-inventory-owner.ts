@@ -139,13 +139,24 @@ export const resolveGenericInventoryOwner = (
   const { zoom, propertyFieldEnabled, masterFilterActive } = inputs
   const visibility: Record<string, 'visible' | 'none'> = {}
 
+  /**
+   * Applying a Master Filter IS a request to see matching properties, so it turns the
+   * field on regardless of the toggle. This rule lives here rather than at the call
+   * sites because the call sites had already drifted: the zoom-band effect passed
+   * `sellerPins || masterFilterActive` while applyMapFilterToken passed `sellerPins`
+   * alone, so filtering with the field switched off showed nothing in one path and
+   * everything in the other. Deriving an owner's input two different ways is the same
+   * class of bug as having two owners.
+   */
+  const fieldOn = propertyFieldEnabled || masterFilterActive
+
   // Legacy bounded paths are off in every state. They are kept installable for styles
   // that still declare them, never drawn, and written explicitly so no other resolver's
   // leftover `visible` can survive a state change.
   assign(visibility, LEGACY_UNIVERSE_LAYER_IDS, 'none')
   assign(visibility, LEGACY_SELLER_FIELD_LAYER_IDS, 'none')
 
-  if (!propertyFieldEnabled) {
+  if (!fieldOn) {
     assign(visibility, MVT_LAYER_IDS, 'none')
     assign(visibility, AGGREGATE_LAYER_IDS, 'none')
     return { owner: 'none', reason: 'property field toggled off', visibility }

@@ -87,6 +87,21 @@ describe('generic inventory owner', () => {
     }
   })
 
+  /**
+   * Applying a Master Filter is a request to see matching properties. The call sites had
+   * drifted on this — the zoom-band effect ORed the token into the toggle and
+   * applyMapFilterToken did not — so filtering with the field off showed nothing in one
+   * path and everything in the other. The rule lives in the resolver now; this pins it.
+   */
+  it('treats applying a Master Filter as switching the property field on', () => {
+    for (const zoom of ZOOM_SWEEP) {
+      const withToggleOff = resolveGenericInventoryOwner({ zoom, propertyFieldEnabled: false, masterFilterActive: true })
+      const withToggleOn = resolveGenericInventoryOwner({ zoom, propertyFieldEnabled: true, masterFilterActive: true })
+      expect(withToggleOff.owner, `z${zoom}`).not.toBe('none')
+      expect(withToggleOff.visibility, `z${zoom}`).toEqual(withToggleOn.visibility)
+    }
+  })
+
   it('keeps the superseded bounded-GeoJSON stacks dark in every state', () => {
     for (const zoom of ZOOM_SWEEP) {
       for (const masterFilterActive of [false, true]) {
