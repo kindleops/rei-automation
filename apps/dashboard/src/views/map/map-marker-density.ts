@@ -169,9 +169,12 @@ export const buildPropertySortKeyExpr = (
   return expr as unknown as maplibregl.ExpressionSpecification
 }
 
-/** Every layer that renders a property marker. They share one filter, always. */
-export const PROPERTY_MARKER_LAYER_IDS = [
-  'prop-tiles-hit',
+/**
+ * The layers that PAINT a property marker. They share one filter, always: if a future
+ * change filters one of them differently, rings appear without icons and the map looks
+ * broken in a way that is hard to attribute.
+ */
+export const PROPERTY_MARKER_VISUAL_LAYER_IDS = [
   'prop-tiles-halo',
   'prop-tiles-glass',
   'prop-tiles-ring',
@@ -180,12 +183,15 @@ export const PROPERTY_MARKER_LAYER_IDS = [
 ] as const
 
 /**
- * Apply the density system to a live map.
- *
- * Coupled on purpose: if a future change filters one layer differently, rings appear
- * without icons and the map looks broken in a way that is hard to attribute. One call
- * site, one filter, all layers.
+ * The invisible tap target. It gets the density filter WITHOUT the subject exclusion,
+ * so the selected property stays touchable underneath its gold star.
  */
+export const PROPERTY_MARKER_HIT_LAYER_ID = 'prop-tiles-hit'
+
+export const PROPERTY_MARKER_LAYER_IDS = [
+  PROPERTY_MARKER_HIT_LAYER_ID,
+  ...PROPERTY_MARKER_VISUAL_LAYER_IDS,
+] as const
 /**
  * The selection the density system was last applied with.
  *
@@ -205,10 +211,33 @@ export const applyPropertyDensity = (
 ): void => {
   currentDensitySelection = selectedPropertyId
   const filter = buildPropertyDensityFilter(selectedPropertyId)
+
+  /**
+   * The SUBJECT KNOCKOUT: the selected property is drawn as a gold star that replaces
+   * its house glyph, so the tile family must not also draw it.
+   *
+   * This is a filter rather than an opacity override because opacity cannot do it. The
+   * tile icon's painted opacity is `['max', 0.96, ...]` — a floor applied by the theme
+   * pass — so any knockout multiplied into it still resolves to 0.96. The previous
+   * opacity-based knockout was silently defeated by that floor and the star had been
+   * stacking on top of the pin it was meant to replace.
+   *
+   * The hit layer is deliberately excluded from the exclusion: filtering a marker out of
+   * the tap target as well would make the operator's own subject the one thing on the map
+   * they cannot tap.
+   */
+  const visualFilter = selectedPropertyId
+    ? ([
+      'all',
+      filter,
+      ['!=', ['to-string', ['coalesce', ['get', 'property_id'], '']], selectedPropertyId],
+    ] as unknown as maplibregl.FilterSpecification)
+    : filter
+
   for (const layerId of PROPERTY_MARKER_LAYER_IDS) {
     if (!map.getLayer(layerId)) continue
     try {
-      map.setFilter(layerId, filter)
+      map.setFilter(layerId, layerId === PROPERTY_MARKER_HIT_LAYER_ID ? filter : visualFilter)
     } catch {
       /* A layer removed by a style swap mid-apply is not an error. */
     }
@@ -219,6 +248,54 @@ export const applyPropertyDensity = (
       map.setLayoutProperty('prop-tiles-icon', 'symbol-sort-key', buildPropertySortKeyExpr(selectedPropertyId))
     } catch {
       /* ignore */
+    }
+  }
+}
+
+/**
+ * The conversation-overlay half of the subject knockout.
+ *
+ * `command-pin-core-raw` is deliberately absent: it already paints at circle-opacity 0,
+ * so it is invisible but still hit-testable, and leaving it unfiltered keeps the subject
+ * tappable once its visible pin is gone. Clustered layers are absent too — a cluster is
+ * an aggregate, and hiding one because a member is selected would hide the rest.
+ */
+export const COMMAND_PIN_SUBJECT_LAYER_IDS = [
+  'command-pin-icon-raw',
+  'command-pin-glow-raw',
+  'command-pin-pulse-raw',
+  'command-pin-unread-ring-raw',
+  'command-pin-offer-ring-raw',
+  'command-pin-contract-ring-raw',
+  'command-pin-warning-badge-raw',
+] as const
+
+/**
+ * Exclude the subject from the conversation overlay, so the gold star is the only thing
+ * drawn at that point.
+ *
+ * Lives here, next to the tile half, and re-applied from LAYER CREATION as well as from
+ * the selection effect. Setting it only from the effect was not enough: these layers are
+ * rebuilt by addMapLayers on every style load, which silently dropped the filter and put
+ * the pin back underneath the star.
+ */
+export const applyCommandPinSubjectKnockout = (
+  map: maplibregl.Map,
+  selectedPropertyId: string | null,
+): void => {
+  const exclusion = selectedPropertyId
+    ? ([
+      '!=',
+      ['to-string', ['coalesce', ['get', 'property_id'], ['get', 'propertyId'], '']],
+      selectedPropertyId,
+    ] as unknown as maplibregl.FilterSpecification)
+    : null
+  for (const layerId of COMMAND_PIN_SUBJECT_LAYER_IDS) {
+    if (!map.getLayer(layerId)) continue
+    try {
+      map.setFilter(layerId, exclusion)
+    } catch {
+      /* A layer removed by a style swap mid-apply is not an error. */
     }
   }
 }

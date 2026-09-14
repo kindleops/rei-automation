@@ -106,7 +106,7 @@ import {
   SELLER_PINS_LAYER_IDS,
   applyGenericInventoryOwner,
 } from './map-generic-inventory-owner'
-import { applyPropertyDensity } from './map-marker-density'
+import { applyCommandPinSubjectKnockout, applyPropertyDensity, getDensitySelection } from './map-marker-density'
 import { MapPropertyDiagnosticsOverlay, type MapPropertyDiagnostics } from './components/MapPropertyDiagnosticsOverlay'
 import { isMapDiagnosticsDebugEnabled, isMapVerificationMode } from './map-property-diagnostics-debug'
 import {
@@ -4646,6 +4646,16 @@ export function InboxCommandMap({
     [activeThemeDefinition, mapStyleMode],
   )
 
+  /**
+   * WHICH property is the operator's subject.
+   *
+   * Deliberately NOT falling back to `selectedMapCard.id`: a seller card's id is a
+   * composite locator —
+   * `ct:prospect:<id>|property:232714379|owner:<id>|phone:<e164>` — so using it here
+   * would set the subject to a string that matches no `property_id` and silently
+   * disable every knockout that keys off it. `selectedStarGeojson` has that fallback and
+   * it is wrong there for the same reason.
+   */
   const selectedPropertyId = useMemo(() => (
     text((selectedHydratedThread as any)?.propertyId)
       || text((selectedHydratedThread as any)?.property_id)
@@ -4690,7 +4700,13 @@ export function InboxCommandMap({
       features: [{
         type: 'Feature',
         geometry: { type: 'Point', coordinates: coords },
-        properties: { property_id: selectedPropertyId ?? card?.id ?? '' },
+        /**
+         * No `card.id` fallback: a seller card's id is a composite locator
+         * (`ct:prospect:<id>|property:232714379|owner:<id>|phone:<e164>`), so using it
+         * here would stamp the star with a property_id that matches nothing — and this
+         * property is what the knockout proof reads to identify the subject.
+         */
+        properties: { property_id: selectedPropertyId ?? '' },
       }],
     }
   }, [allPins, focusPin, selectedMapCard, selectedPropertyId])
@@ -6236,6 +6252,13 @@ export function InboxCommandMap({
 
       addPointLayers('raw', RAW_SOURCE_ID)
       addPointLayers('clustered', CLUSTER_SOURCE_ID, ['!', ['has', 'point_count']])
+      /**
+       * Creation and subject knockout, atomically — the same reason
+       * ensurePropertyTileSourceAndLayers re-applies the density filter at its end. This
+       * runs on every style load, so a layer rebuilt here would otherwise come back
+       * without the exclusion and put the subject's pin back under its gold star.
+       */
+      applyCommandPinSubjectKnockout(map, getDensitySelection())
 
       if (!map.getLayer(BUYER_HEATMAP_LAYER_ID)) {
         const heatmapStops = activeThemeRef.current.heatmapStops
@@ -8170,56 +8193,41 @@ export function InboxCommandMap({
    * property is admitted unconditionally and sorts first — see map-marker-density.
    */
   useEffect(() => {
+    if (import.meta.env.DEV && typeof window !== 'undefined') {
+      // Dev-only: the proof harnesses need to distinguish "the subject is null" from
+      // "the subject is set but the filter did not follow", which is otherwise a guess.
+      ;(window as unknown as Record<string, unknown>).__nexusSubject = {
+        selectedPropertyId,
+        cardKind: selectedMapCard?.kind ?? null,
+        cardId: selectedMapCard?.id ?? null,
+        mapContextLost: mapContextLostRef.current,
+        styleSafe: isStyleSafe(mapRef.current),
+      }
+    }
     const map = mapRef.current
     if (mapContextLostRef.current || !isStyleSafe(map) || !map) return
     applyPropertyDensity(map, text(selectedPropertyId))
-  }, [mapInstanceEpoch, selectedPropertyId, sellerPinLayers.sellerPins])
+  }, [mapInstanceEpoch, selectedPropertyId, selectedMapCard, sellerPinLayers.sellerPins])
 
+  /**
+   * THE SUBJECT KNOCKOUT, command-pin half.
+   *
+   * The selected property is drawn as a gold star that REPLACES its house glyph, so the
+   * conversation overlay must not draw a pin at the same point. It did: the knockout this
+   * replaces wrote `icon-opacity` on the tile and seller families and never touched the
+   * command pins at all — and the opacity it wrote could not have worked anyway, because
+   * the theme pass floors tile icon opacity at `['max', 0.96, ...]`. Measured with the
+   * star painted on property 232714379, seven command-pin layers were still drawing that
+   * same property underneath it.
+   *
+   * A filter, not opacity: nothing else writes these layers' filters, and a filter cannot
+   * be defeated by a floor. The tile half lives in applyPropertyDensity, which owns those
+   * layers' filters.
+   */
   useEffect(() => {
     const map = mapRef.current
     if (mapContextLostRef.current || !isStyleSafe(map) || !map) return
-
-    const selectedId = text(selectedPropertyId)
-    const markerLayerIds = [
-      PROPERTY_TILES_LAYER_IDS.icon,
-      PROPERTY_TILES_LAYER_IDS.halo,
-      PROPERTY_TILES_LAYER_IDS.glass,
-      PROPERTY_TILES_LAYER_IDS.ring,
-      PROPERTY_TILES_LAYER_IDS.pulse,
-      SELLER_PINS_LAYER_IDS.icon,
-      SELLER_PINS_LAYER_IDS.core,
-      SELLER_PINS_LAYER_IDS.ring,
-      SELLER_PINS_LAYER_IDS.glow,
-      SELLER_PINS_LAYER_IDS.pulse,
-    ]
-
-    for (const layerId of markerLayerIds) {
-      const layer = map.getLayer(layerId)
-      if (!layer) continue
-      const opacityProps = layer.type === 'symbol'
-        ? ['icon-opacity']
-        : layer.type === 'circle'
-          ? ['circle-opacity', 'circle-stroke-opacity']
-          : []
-      for (const property of opacityProps) {
-        try {
-          map.setPaintProperty(
-            layerId,
-            property,
-            selectedId
-              ? ([
-                'case',
-                ['==', ['to-string', ['coalesce', ['get', 'property_id'], ['get', 'propertyId'], '']], selectedId],
-                0,
-                1,
-              ] as maplibregl.ExpressionSpecification)
-              : 1,
-          )
-        } catch {
-          /* A layer removed by a style swap mid-effect is not an error. */
-        }
-      }
-    }
+    applyCommandPinSubjectKnockout(map, text(selectedPropertyId))
   }, [mapInstanceEpoch, selectedPropertyId, sellerPinLayers.sellerPins])
 
   useEffect(() => {
