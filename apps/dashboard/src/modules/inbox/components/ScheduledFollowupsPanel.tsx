@@ -32,6 +32,9 @@ const shortZone = (tz: string | null): string => {
  */
 export function ScheduledFollowupsPanel({ threadKey, onOpenThread, onCancelSchedule, onReschedule }: Props) {
   const [items, setItems] = useState<ScheduledFollowupItem[]>([])
+  // The POPULATION of pending sends. `items` is one page of it -- reporting
+  // items.length as "N scheduled" is the badge-from-the-loaded-page defect.
+  const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,11 +45,14 @@ export function ScheduledFollowupsPanel({ threadKey, onOpenThread, onCancelSched
     if (!result.ok) {
       setError(result.message || result.error || 'Could not load scheduled follow-ups')
       setItems([])
+      setTotal(null)
     } else if (!result.data?.ok) {
       setError('Could not load scheduled follow-ups')
       setItems([])
+      setTotal(null)
     } else {
       setItems(result.data.items ?? [])
+      setTotal(result.data.total ?? result.data.count ?? null)
     }
     setLoading(false)
   }, [threadKey])
@@ -76,8 +82,12 @@ export function ScheduledFollowupsPanel({ threadKey, onOpenThread, onCancelSched
   return (
     <div className="nx-scheduled-panel">
       <div className="nx-scheduled-panel__head">
-        <span>{items.length} scheduled</span>
-        <span className="nx-scheduled-panel__note">Queued — not yet sent</span>
+        <span>{total ?? items.length} scheduled</span>
+        <span className="nx-scheduled-panel__note">
+          {total != null && total > items.length
+            ? `Showing ${items.length} — queued, not yet sent`
+            : 'Queued — not yet sent'}
+        </span>
       </div>
       <ul className="nx-scheduled-list">
         {items.map((item) => (

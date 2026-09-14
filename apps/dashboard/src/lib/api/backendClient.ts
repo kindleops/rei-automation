@@ -968,8 +968,19 @@ export type ScheduledFollowupItem = {
   local_send_label: string | null
   message_preview: string
   to_phone_number: string | null
+  from_phone_number: string | null
   seller_name: string | null
   property_address: string | null
+  property_id: string | null
+  template_id: string | null
+  stage: string | null
+  channel: string | null
+  /** True once the send time has passed and the message still has not gone out. */
+  is_due: boolean
+  retry_count: number
+  max_retries: number | null
+  next_retry_at: string | null
+  last_failure_reason: string | null
   created_at: string | null
 }
 
@@ -977,7 +988,15 @@ export type ScheduledFollowupItem = {
 // Read-only list of follow-ups parked in send_queue. Sends nothing.
 export function listScheduledFollowups(
   params: { limit?: number; threadKey?: string } = {},
-): Promise<BackendResult<{ ok: boolean; items: ScheduledFollowupItem[]; count: number }>> {
+): Promise<BackendResult<{
+  ok: boolean
+  items: ScheduledFollowupItem[]
+  /** The POPULATION of pending sends, not the page. `returned` is the page. */
+  count: number
+  total: number | null
+  returned: number
+  has_more: boolean
+}>> {
   const qs = new URLSearchParams()
   if (params.limit) qs.set('limit', String(params.limit))
   if (params.threadKey) qs.set('thread_key', params.threadKey)
