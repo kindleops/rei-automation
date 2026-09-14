@@ -33,7 +33,7 @@ const OUT = path.resolve(process.cwd(), '.screenshots/map-layout', LABEL, `${WID
 /** The layers that own vertical space, in paint order top to bottom. */
 const LAYERS = {
   globalHeader: '.nx-mobile-command-dock',
-  mapControls: '.nx-icm-toolbar, .nx-icm-controls-row, .nx-icm__controls, .nx-icm-header',
+  mapControls: '.nx-icm__toolbar',
   liveActivity: '.nx-icm-activity',
   propertySheet: '.smc-shell',
   dock: '.nx-pinned-app-dock__glass',

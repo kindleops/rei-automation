@@ -1864,6 +1864,59 @@ html.is-mobile-layout {
     color: inherit !important;
   }
 
+  /* ── ONE COMPACT MAP CONTROL ROW ─────────────────────────────────────────
+     The row carried three desktop-scale pills — LIVE MAP · n, FILTERS, CONTROLS —
+     at 44px tall with ~20px display type, spanning the full width directly under
+     the global header. Two full-bleed chrome bands stacked to 91px of an 844px
+     viewport before the map drew a single pixel, and the type competed with the
+     map's own labels.
+
+     Same three affordances, one compact row: a status chip and two chips at
+     chip scale. Nothing is hidden — hiding a control to tidy a screenshot just
+     moves the problem somewhere the operator cannot find it. */
+  .nx-icm.is-mobile-map .nx-icm__header {
+    gap: 6px !important;
+  }
+
+  .nx-icm.is-mobile-map .nx-icm__header-actions {
+    gap: 6px !important;
+  }
+
+  .nx-icm.is-mobile-map .nx-icm__header-badge,
+  .nx-icm.is-mobile-map .nx-icm__mode-tab {
+    /* 32px of paint. The 44px touch floor is met by the ::after below rather than
+       by the pill, which is what kept the row from costing 44px of map. */
+    min-height: 32px !important;
+    height: 32px !important;
+    padding: 0 11px !important;
+    border-radius: 999px !important;
+    font-size: 11px !important;
+    letter-spacing: 0.06em !important;
+    line-height: 1 !important;
+    position: relative;
+  }
+
+  .nx-icm.is-mobile-map .nx-icm__mode-tab::after,
+  .nx-icm.is-mobile-map .nx-icm__header-badge::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -6px;
+    bottom: -6px;
+  }
+
+  .nx-icm.is-mobile-map .nx-icm__header-badge span,
+  .nx-icm.is-mobile-map .nx-icm__mode-tab {
+    font-size: 11px !important;
+    text-transform: uppercase;
+  }
+
+  .nx-icm.is-mobile-map .nx-icm__header-badge strong {
+    font-size: 12px !important;
+    margin-left: 5px;
+  }
+
   .nx-icm.is-mobile-map .nx-icm__controls-popover {
     max-height: calc(100dvh - var(--nx-mobile-chrome-top) - 72px) !important;
     width: calc(100vw - 20px) !important;

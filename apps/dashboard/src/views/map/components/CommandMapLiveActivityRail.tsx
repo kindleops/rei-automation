@@ -65,9 +65,15 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
   const effectiveMode: LiveActivityDisplayMode = useMemo(() => {
     if (preferredMode === 'hidden') return 'hidden'
     if (conversationOpen || composerActive) return 'hidden'
-    // A seller sheet open on a phone owns the bottom band; the rail reduces to its
-    // one-line peek above it rather than a 110px panel competing for the same space.
-    if (sellerCardExpanded && isMobile) return 'peek'
+    /**
+     * A SELECTED PROPERTY HIDES LIVE ACTIVITY ENTIRELY on a phone.
+     *
+     * Not reduced to a peek — gone. Once the operator has picked a property they are
+     * working that property, and a rail announcing unrelated events is competing for
+     * attention it has not earned. It reappears the moment the selection is cleared,
+     * so nothing is lost; the two states simply do not overlap.
+     */
+    if (isMobile && (sellerCardExpanded || sellerCardPeek)) return 'hidden'
     if (sellerCardExpanded && preferredMode === 'expanded') return 'compact'
     /**
      * Zero-state collapse (mobile): a full Live Activity panel permanently occupied 117px
@@ -88,7 +94,7 @@ export const CommandMapLiveActivityRail = memo(function CommandMapLiveActivityRa
      */
     if (isMobile && preferredMode === 'minimal') return 'peek'
     return preferredMode
-  }, [composerActive, conversationOpen, isMobile, preferredMode, sellerCardExpanded, feed.tickerCount, feed.visibleCount])
+  }, [composerActive, conversationOpen, isMobile, preferredMode, sellerCardExpanded, sellerCardPeek, feed.tickerCount, feed.visibleCount])
 
   const timelineEvents = feed.visible
   const tickerQueue = feed.tickerQueue

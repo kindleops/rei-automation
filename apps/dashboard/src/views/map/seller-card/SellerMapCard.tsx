@@ -379,7 +379,34 @@ export const SellerMapCard = ({
     }
   }
 
-  const actionFooter = (
+  /**
+   * SUPPRESSED CONTACTS GET A STATEMENT, NOT A DEAD BUTTON.
+   *
+   * When outreach was blocked the primary action rendered its own block reason as its
+   * LABEL — a greyed button reading "Opted Out" — and the same words appeared again
+   * directly above it as the operational-state line. So the card showed the operator a
+   * contradictory pair: a contact marked NOT CONTACTED, and what looked like a broken
+   * send button rather than a policy.
+   *
+   * Opting out is a compliance fact about the contact, not a temporarily unavailable
+   * control. It is stated once, plainly, and the outreach CTA is not rendered at all —
+   * there is nothing to press, so nothing can look like it failed.
+   */
+  const outreachBlockReason = viewModel.messagingBlocked || !viewModel.actionBar.primary.enabled
+    ? (viewModel.actionBar.primary.disabledReason || viewModel.operationalState || null)
+    : null
+
+  const actionFooter = outreachBlockReason ? (
+    <footer className="smc-actions smc-actions--sticky smc-actions--blocked" onClick={stopPeekExpand}>
+      <p className="smc-blocked" role="status">
+        <span className="smc-blocked__icon" aria-hidden>⊘</span>
+        <span className="smc-blocked__copy">
+          <strong>{outreachBlockReason}</strong>
+          <em>Outreach is suppressed for this contact.</em>
+        </span>
+      </p>
+    </footer>
+  ) : (
     <footer className="smc-actions smc-actions--sticky" onClick={stopPeekExpand}>
       <button
         type="button"
@@ -434,7 +461,11 @@ export const SellerMapCard = ({
     <>
       <div className="smc-body smc-body--peek smc-body--peek-dense">
         {stickySummary}
-        <SellerMapCardOperationalState state={viewModel.operationalState} />
+        {/* Suppressed the duplicate: when the operational state IS the block reason,
+            the footer already states it, and the card said "Opted Out" twice. */}
+        {outreachBlockReason ? null : (
+          <SellerMapCardOperationalState state={viewModel.operationalState} />
+        )}
       </div>
       {/* Desktop only: the mobile sheet shell owns its own sticky footer. Embedding it
           here as well is what rendered Send Ownership Check / Message twice in the
@@ -455,7 +486,9 @@ export const SellerMapCard = ({
         {/* Signals moved here from peek: they are supporting evidence, and peek has
             room for the headline only. */}
         {signalsBlock}
-        <SellerMapCardOperationalState state={viewModel.operationalState} />
+        {outreachBlockReason ? null : (
+          <SellerMapCardOperationalState state={viewModel.operationalState} />
+        )}
         <SellerMapCardDossierSections viewModel={viewModel} loading={detailLoading && !viewModel.dossierReady} />
       </div>
       {/* Desktop only — see peekBody. */}

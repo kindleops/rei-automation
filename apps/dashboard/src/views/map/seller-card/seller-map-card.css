@@ -2152,3 +2152,87 @@ html.is-mobile-layout .smc-shell {
     transition: none;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SUPPRESSED OUTREACH — a stated fact, not a disabled control
+   ══════════════════════════════════════════════════════════════════════════
+   Reads as a compliance notice: a rule band, a prohibition glyph, the reason in
+   full weight and one line of plain consequence. Deliberately NOT button-shaped,
+   because there is nothing here to press and a greyed pill invites the operator
+   to keep tapping it. Amber rather than red — the contact is out of reach, which
+   is a boundary, not an error.
+   ══════════════════════════════════════════════════════════════════════════ */
+.smc-actions--blocked {
+  display: block;
+}
+
+.smc-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 176, 46, 0.24);
+  border-left-width: 3px;
+  border-left-color: rgba(245, 176, 46, 0.75);
+  background: rgba(245, 176, 46, 0.07);
+}
+
+.smc-blocked__icon {
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1.2;
+  color: rgba(245, 176, 46, 0.95);
+}
+
+.smc-blocked__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.smc-blocked__copy strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: rgba(250, 226, 182, 0.96);
+}
+
+.smc-blocked__copy em {
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(233, 240, 255, 0.56);
+}
+
+[data-nexus-theme="light"] .smc-blocked {
+  border-color: rgba(180, 116, 10, 0.28);
+  border-left-color: rgba(180, 116, 10, 0.8);
+  background: rgba(245, 176, 46, 0.12);
+}
+
+[data-nexus-theme="light"] .smc-blocked__copy strong { color: rgba(96, 60, 4, 0.96); }
+[data-nexus-theme="light"] .smc-blocked__copy em { color: rgba(15, 23, 42, 0.6); }
+
+/* ── KPI baseline ─────────────────────────────────────────────────────────
+   "Estimated Value" wraps to two lines while "Equity %", "Repairs" and "Loan
+   Balance" fit on one, so the four values sat on two different baselines and the
+   row read as misaligned rather than as a set. The label band is reserved for two
+   lines in every cell and the values align to the bottom, so the numbers — which
+   are what the operator compares — share a line. */
+.smc-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.smc-metric > span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.1em;
+  line-height: 1.05;
+}
