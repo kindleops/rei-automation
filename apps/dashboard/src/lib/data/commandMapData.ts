@@ -395,9 +395,20 @@ const COMMAND_MAP_THREAD_STATE_SELECT = [
   'conversation_status',
   'temperature',
   'inbox_bucket',
-  'inbox_category',
-  'suppression_status',
+  /**
+   * `inbox_category` and `suppression_status` used to be requested here. Neither column
+   * exists on `inbox_thread_state` — they belong to COMMAND_MAP_SELLER_PIN_FEED_SELECT's
+   * relation — and PostgREST rejects the WHOLE request when one selected column is
+   * unknown, so this read returned 400 every time and the map card's thread state was
+   * permanently null. It read as an intermittent failure only because the error is
+   * swallowed by withDetailQueryTimeout and the query fires only on the detail path.
+   *
+   * Nothing is lost by dropping them: mapThreadStateRow already falls back to
+   * `inbox_bucket` for the category, and `suppression_status` never arrived to begin
+   * with. `is_suppressed` and `suppressed_at` are the real suppression columns here.
+   */
   'is_suppressed',
+  'suppressed_at',
   'latest_message_body',
   'latest_message_at',
   'latest_direction',
