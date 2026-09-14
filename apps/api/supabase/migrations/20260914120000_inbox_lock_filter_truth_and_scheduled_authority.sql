@@ -389,39 +389,80 @@ CREATE OR REPLACE VIEW public.inbox_command_center_v AS
     latest_delivery_status
    FROM inbox_threads_hydrated h;
 
--- ── 3. Filter-options allowlist: add the columns that already exist ──────────
+-- ── 3. Filter allowlist, DERIVED FROM THE CATALOG ───────────────────────────
+-- Three separate things must line up for an exposed filter to do anything:
+--   1. this allowlist must let the options RPC read its column
+--   2. buildInboxFilterConditions must emit a condition for its key
+--   3. inbox_filter_apply_conditions must understand the op that produces
+-- All three were maintained by hand and had drifted. Measured 2026-09-14:
+--   14 selects opened EMPTY                (allowlist missing the column)
+--   {"pool":"No"}        -> 8,887 of 8,887 (no condition emitted)
+--   {"storiesMin":3}     -> 8,887 of 8,887 (column rejected, then the service
+--                                           fell back to an UNFILTERED count)
+-- A filter that silently matches everything is worse than a missing one: it
+-- answers a question the operator did not ask.
+--
+-- Every entry below is a `column` referenced by INBOX_FILTER_FIELDS (or by one
+-- of the multi-column searches / flag filters), and all 119 were verified to
+-- exist on inbox_hydrated_scoped. When a field is added to the catalog, add its
+-- column here in the same change --
+-- tests/critical/inbox-filter-catalog-backing.test.mjs fails if they drift.
 CREATE OR REPLACE FUNCTION public.inbox_filter_allowed_column(p_column text)
  RETURNS boolean
  LANGUAGE sql
  IMMUTABLE
 AS $function$
   SELECT p_column = ANY (ARRAY[
-    'thread_key','market','city','state','zip','property_type','property_class','owner_type_guess',
-    'stage','status','ui_intent','latest_direction','best_language','building_condition','priority_bucket',
-    'est_household_income','net_asset_value','occupation_group','gender','marital_status','education_model',
-    'occupation','owner_priority_tier','phone_carrier','property_county_name','market_region','units_count',
-    'total_bedrooms','total_baths','building_square_feet','year_built','effective_year_built','estimated_value',
-    'equity_percent','equity_amount','total_loan_balance','total_loan_amt','total_loan_payment','tax_amt',
-    'past_due_amount','estimated_repair_cost','ai_score','final_acquisition_score','deal_strength_score',
-    'priority_score','ownership_years','prospect_age','buying_power','contactability_score',
-    'financial_pressure_score','urgency_score','owner_priority_score','portfolio_total_value',
-    'portfolio_total_equity','portfolio_total_loan_balance','portfolio_total_units','property_count',
-    'message_count','inbound_count','outbound_count','pending_queue_count','cash_offer','assd_total_value',
-    'calculated_total_value','sale_price','lot_square_feet','lot_acreage','latest_message_at','last_inbound_at',
-    'last_outbound_at','sale_date','follow_up_at','owner_display_name','best_phone','seller_phone',
-    'property_address_full','event_property_address','is_read','is_starred','is_pinned','is_archived',
-    'is_suppressed','property_tax_delinquent','property_active_lien','is_corporate_owner','out_of_state_owner',
-    'likely_owner','likely_renting','sms_eligible','email_eligible','prospect_best_email','property_flags_text',
-    'property_flags_json','person_flags_text','person_flags_json','inbox_category',
-    -- INBOX-COMPOSER-LOCK-1: each of these is already a column on
-    -- inbox_hydrated_scoped and each was already an exposed dropdown in the
-    -- Advanced Filters sheet. Omitting them from the allowlist is what made
-    -- those dropdowns open empty.
-    'latest_delivery_status','automation_status','best_contact_window',
-    'building_quality','rehab_level','construction_type','style','basement','garage',
-    'air_conditioning','heating_type','roof_type','pool','zoning','flood_zone'
+    'active_lien_count','ai_score','air_conditioning','assd_total_value','automation_status','basement',
+    'best_contact_window','best_language','best_phone','building_condition','building_quality',
+    'building_square_feet','buying_power','calculated_total_value','cash_offer','city','construction_type',
+    'contactability_score','deal_strength_score','education_model','effective_year_built','email_eligible',
+    'equity_amount','equity_percent','est_household_income','estimated_repair_cost','estimated_value',
+    'event_property_address','final_acquisition_score','financial_pressure_score','flood_zone','follow_up_at',
+    'garage','gender','heating_type','inbound_count','inbox_category','is_archived','is_corporate_owner',
+    'is_pinned','is_read','is_starred','is_suppressed','last_inbound_at','last_outbound_at',
+    'latest_delivery_status','latest_direction','latest_message_at','latest_message_body','likely_owner',
+    'likely_renting','lot_acreage','lot_square_feet','marital_status','market','market_region','message_count',
+    'net_asset_value','occupation','occupation_group','out_of_state_owner','outbound_count','owner_display_name',
+    'owner_priority_score','owner_priority_tier','owner_type_guess','ownership_years','past_due_amount',
+    'pending_queue_count','person_flags_json','person_flags_text','phone_carrier','pool','portfolio_total_equity',
+    'portfolio_total_loan_balance','portfolio_total_units','portfolio_total_value','primary_owner_address',
+    'priority_bucket','priority_score','property_active_lien','property_address_full','property_class',
+    'property_count','property_county_name','property_flags_json','property_flags_text','property_tax_delinquent',
+    'property_type','prospect_age','prospect_best_email','prospect_contact_score','prospect_full_name',
+    'prospect_phone_score','rehab_level','roof_type','sale_date','sale_price','seller_phone','sms_eligible',
+    'stage','state','status','stories','style','tax_amt','tax_delinquent_count','thread_key','total_baths',
+    'total_bedrooms','total_loan_amt','total_loan_balance','total_loan_payment','ui_intent','units_count',
+    'urgency_score','year_built','zip','zoning'
   ]);
 $function$;
+
+-- An UNKNOWN op is skipped by inbox_filter_apply_conditions' loop, which means
+-- it constrains nothing -- the same silent-everything shape. `in` is now emitted
+-- for a multi-select, so it has to be understood rather than dropped.
+DO $do$
+DECLARE d text; before int; needle text; insertion text;
+BEGIN
+  d := pg_get_functiondef('public.inbox_filter_apply_conditions(jsonb)'::regprocedure);
+  IF position('IF op = ''in'' THEN' in d) > 0 THEN RETURN; END IF;
+  before := length(d);
+  needle := '    IF op = ' || quote_literal('or_ilike') || ' THEN';
+  insertion :=
+      '    IF op = ' || quote_literal('in') || ' THEN' || chr(10)
+    || '      IF NOT public.inbox_filter_allowed_column(col) THEN' || chr(10)
+    || '        RAISE EXCEPTION ' || quote_literal('inbox_filter_invalid_column:%') || ', col;' || chr(10)
+    || '      END IF;' || chr(10)
+    || '      vals := ARRAY(SELECT jsonb_array_elements_text(cond->' || quote_literal('value') || '));' || chr(10)
+    || '      IF array_length(vals, 1) IS NOT NULL THEN' || chr(10)
+    || '        clause := clause || format(' || quote_literal(' AND %I = ANY (%L::text[])') || ', col, vals);' || chr(10)
+    || '      END IF;' || chr(10)
+    || '      CONTINUE;' || chr(10)
+    || '    END IF;' || chr(10) || chr(10)
+    || needle;
+  d := replace(d, needle, insertion);
+  IF length(d) = before THEN RAISE EXCEPTION 'in-op substitution did not apply'; END IF;
+  EXECUTE d;
+END $do$;
 
 -- ── 4. Scheduled = canonical pending send_queue rows ─────────────────────────
 -- Mirrors list-scheduled-followups.js exactly: a message still expected to send.

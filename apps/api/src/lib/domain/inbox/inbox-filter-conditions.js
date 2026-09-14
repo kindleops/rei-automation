@@ -315,6 +315,63 @@ export function buildInboxFilterConditions(rawFilters = {}, { excludeFieldKeys =
     pushFlagFilter(conditions, { columns: ["person_flags_text", "person_flags_json"] }, filters.personFlags);
   }
 
+  /**
+   * EVERY CATALOG SELECT APPLIES, INCLUDING THE ONES NOBODY WIRED BY HAND.
+   *
+   * The list above is hand-written, one line per filter, and fifteen exposed
+   * dropdowns had simply never been added to it: pool, zoning, floodZone,
+   * garage, basement, style, constructionType, heatingType, roofType,
+   * buildingQuality, rehabLevel, airConditioning, contactWindow,
+   * automationStatus, deliveryStatus. They opened, they had options, the
+   * operator picked a value, and the query came back with EVERY thread --
+   * measured 2026-09-14: {"pool":"No"} -> 8,887 of 8,887, {"deliveryStatus":
+   * "failed"} -> 8,887 of 8,887.
+   *
+   * That is worse than a missing filter: it silently answers a question the
+   * operator did not ask. This closes the whole class rather than adding fifteen
+   * more lines, because the next filter added to the catalog would have
+   * reproduced it exactly.
+   *
+   * Runs LAST and skips any column an explicit rule above already constrained,
+   * so every hand-written special case (aliases, derived values, multi-column
+   * searches) keeps winning.
+   */
+  const alreadyConstrained = new Set(
+    conditions.map((condition) => condition.column).filter(Boolean),
+  );
+  for (const field of INBOX_FILTER_FIELDS) {
+    const column = field.column;
+    if (!column || alreadyConstrained.has(column) || excludedCols.has(column)) continue;
+    const value = filters[field.key];
+    if (!isActive(value)) continue;
+
+    if (field.type === "select" || field.type === "multiselect") {
+      if (Array.isArray(value) && value.length > 1) conditions.push({ op: "in", column, value });
+      else conditions.push({ op: "eq", column, value: Array.isArray(value) ? value[0] : value });
+    } else if (field.type === "numberRange" || field.type === "dateRange") {
+      // The catalog encodes the bound in the key, as every hand-written rule
+      // above does: ...Min is a floor, ...Max / ...To is a ceiling.
+      if (/Min$|From$/.test(field.key)) conditions.push({ op: "gte", column, value });
+      else if (/Max$|To$/.test(field.key)) conditions.push({ op: "lte", column, value });
+      else continue;
+    } else if (field.type === "text") {
+      conditions.push({ op: "ilike", column, value });
+    } else if (field.type === "tri" && field.matchValue !== undefined) {
+      // A tri over a VALUE column ("Wrong Number" over ui_intent) asserts
+      // equality when true. There is deliberately no negative branch: the
+      // condition vocabulary has no `neq`, and emitting an op the applier does
+      // not understand would silently match everything -- which is the defect
+      // this whole pass exists to close. `false` therefore does nothing rather
+      // than lying, and the operator has the Detected Intent select for the
+      // inverse.
+      if (value === true || value === "yes") conditions.push({ op: "eq", column, value: field.matchValue });
+      else continue;
+    } else {
+      continue;
+    }
+    alreadyConstrained.add(column);
+  }
+
   return conditions;
 }
 

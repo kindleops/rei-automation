@@ -291,6 +291,23 @@ export async function countHydratedInboxFilters(filters = {}, deps = {}) {
   const { data, error } = await supabase.rpc("inbox_filter_match_count", { p_conditions: conditions });
   if (!error) return Number(data ?? 0);
 
+  /**
+   * A REJECTED COLUMN MUST NOT DEGRADE INTO "EVERYTHING".
+   *
+   * inbox_filter_match_count raises inbox_filter_invalid_column when a filter
+   * names a column the allowlist does not carry. That is a wiring error, not a
+   * transient failure -- and falling through to the PostgREST path below, whose
+   * hand-written applier does not know the column either, answered with the
+   * UNFILTERED count. The operator picked a value and got every thread back.
+   * Measured 2026-09-14: {"storiesMin":3} -> 8,887 of 8,887.
+   *
+   * Surfaced instead, so it shows up as a broken filter rather than a filter
+   * that quietly agrees with everything.
+   */
+  if (String(error?.message || "").includes("inbox_filter_invalid_column")) {
+    throw new Error(`inbox_filter_unbacked_column: ${error.message}`);
+  }
+
   let q = supabase.from(HYDRATED_INBOX_SOURCE).select("thread_key", { count: "exact", head: true });
   q = applyHydratedInboxFilters(q, filters);
   const fallback = await q;

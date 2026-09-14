@@ -151,7 +151,10 @@ export const INBOX_FILTER_FIELDS = [
 
   // Email
   { key: "hasEmail", group: "email", label: "Has Email", type: "tri", column: "prospect_best_email", derived: "notEmpty" },
-  { key: "emailScoreMin", group: "email", label: "Email Score", type: "numberRange", column: "prospect_email_score" },
+  // WITHDRAWN 2026-09-14 (INBOX-COMPOSER-LOCK-1): prospect_email_score does not
+  // exist on inbox_command_center_v or inbox_hydrated_scoped -- there is no such
+  // column anywhere in the filter chain, so this could only ever have been a
+  // control that did nothing. Re-add it with the column.
 ];
 
 const FIELD_BY_KEY = Object.fromEntries(INBOX_FILTER_FIELDS.map((f) => [f.key, f]));
