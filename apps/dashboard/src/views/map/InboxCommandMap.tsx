@@ -91,17 +91,21 @@ import {
   getMapPropertyFetchMode,
   getMapZoomBand,
   shouldUseAggregateSource,
-  shouldUsePropertySource,
   shouldUseVectorTileSource,
   MAP_ZOOM_BANDS,
 } from './map-property-source'
 import {
-  ALL_PROPERTY_TILE_LAYER_IDS,
   applyPropertyTileEnrichmentStates,
   applyPropertyTileThemePaint,
   ensurePropertyTileSourceAndLayers,
 } from './map-property-tile-integration'
 import { PROPERTY_TILES_LAYER_IDS, buildPropertyTileTransformRequest } from './map-property-tile-source'
+import {
+  MARKET_AGGREGATE_LAYER_IDS,
+  PROPERTY_UNIVERSE_LAYER_IDS,
+  SELLER_PINS_LAYER_IDS,
+  applyGenericInventoryOwner,
+} from './map-generic-inventory-owner'
 import { applyPropertyDensity } from './map-marker-density'
 import { MapPropertyDiagnosticsOverlay, type MapPropertyDiagnostics } from './components/MapPropertyDiagnosticsOverlay'
 import { isMapDiagnosticsDebugEnabled, isMapVerificationMode } from './map-property-diagnostics-debug'
@@ -236,28 +240,13 @@ const SELLER_PINS_ICON_SOURCE_ID = 'seller-pins-icon-source'
 
 // SOURCE A — national/market aggregate clusters (canonical totals)
 const MARKET_AGGREGATE_SOURCE_ID = 'map-market-aggregates'
-const MARKET_AGGREGATE_LAYER_IDS = {
-  halo: 'map-agg-cluster-halo',
-  core: 'map-agg-cluster-core',
-  ring: 'map-agg-cluster-ring',
-  icon: 'map-agg-cluster-icon',
-  count: 'map-agg-cluster-count',
-} as const
+/**
+ * Generic-inventory layer identity now lives with the resolver that owns it, so the
+ * list of layers a decision covers cannot drift from the decision itself.
+ */
 
 // SOURCE B — property-level vector source (canonical properties table)
 const PROPERTY_UNIVERSE_SOURCE_ID = 'inbox-property-universe'
-const PROPERTY_UNIVERSE_LAYER_IDS = {
-  clusterRing:  'prop-univ-cluster-ring',
-  clusterCore:  'prop-univ-cluster-core',
-  clusterIcon:  'prop-univ-cluster-icon',
-  clusterCount: 'prop-univ-cluster-count',
-  markerHit:    'prop-univ-marker-hit',
-  markerGlow:   'prop-univ-marker-glow',
-  markerGlass:  'prop-univ-marker-glass',
-  markerRing:   'prop-univ-marker-ring',
-  markerPulse:  'prop-univ-marker-pulse',
-  markers:      'prop-univ-markers',
-} as const
 
 const PROPERTY_UNIVERSE_CLUSTER_MAX_ZOOM = ACQUISITION_RADAR_ZOOM.clusterMaxZoom
 const SELLER_PINS_CLUSTER_MAX_ZOOM = 8
@@ -308,17 +297,6 @@ const SOLD_COMPS_CLUSTER_LAYER_IDS = {
 } as const
 const ALL_SOLD_COMPS_LAYER_IDS = [...Object.values(SOLD_COMPS_LAYER_IDS), ...Object.values(SOLD_COMPS_CLUSTER_LAYER_IDS)]
 
-const SELLER_PINS_LAYER_IDS = {
-  hit: 'seller-pins-hit',
-  glow: 'seller-pins-glow',
-  pulse: 'seller-pins-pulse',
-  ring: 'seller-pins-ring',
-  core: 'seller-pins-core',
-  icon: 'seller-pins-icon',
-  clusterGlow: 'seller-pins-cluster-glow',
-  clusterCore: 'seller-pins-cluster-core',
-  clusterCount: 'seller-pins-cluster-count',
-} as const
 
 const SELLER_PIN_HOVER_LAYER_IDS = [
   SELLER_PINS_LAYER_IDS.hit,
@@ -3121,183 +3099,53 @@ const toFallbackSellerPin = (pin: CommandMapPin): CommandMapSellerPin => ({
   seller_phone: text((pin as any).seller_phone || pin.phone) || null,
 })
 
-const sellerPinToCommandMapPin = (pin: CommandMapSellerPin): CommandMapPin => {
-  const propertyId = text(pin.property_id)
-  const sellerState = text(pin.seller_state) || 'not_contacted'
-  const address = resolveSellerPinAddress(pin)
-  const displayName = resolveSellerPinDisplayName(pin)
-  const lastActivityAt = text(pin.latest_message_at) || new Date(0).toISOString()
-  const latestDirection = text(pin.latest_direction)
-  return {
-    id: propertyId,
-    conversation_id: text(pin.thread_key) || propertyId,
-    property_id: propertyId,
-    master_owner_id: text(pin.master_owner_id) || '',
-    seller_name: displayName,
-    address,
-    city: text(pin.property_address_city) || '',
-    state: text(pin.property_address_state) || '',
-    zip: text(pin.property_address_zip) || '',
-    lat: Number(pin.lat ?? pin.latitude ?? 0),
-    lng: Number(pin.lng ?? pin.longitude ?? 0),
-    market: text(pin.market) || text(pin.filter_market) || '',
-    property_type: text(pin.property_type) || text(pin.asset_class) || '—',
-    beds: pin.total_bedrooms ?? null,
-    baths: pin.total_baths ?? null,
-    sqft: pin.building_square_feet ?? null,
-    units: pin.units_count ?? null,
-    estimated_value: pin.estimated_value ?? null,
-    equity_percent: pin.equity_percent ?? null,
-    repair_estimate: pin.estimated_repair_cost ?? null,
-    streetview_image: text(pin.streetview_image) || null,
-    last_message: text(pin.last_inbound_text) || text(pin.last_outbound_text) || '',
-    last_message_direction: latestDirection === 'inbound'
-      ? 'inbound'
-      : latestDirection === 'outbound'
-        ? 'outbound'
-        : 'unknown',
-    last_activity_at: lastActivityAt,
-    unread: false,
-    conversation_stage: text(pin.lifecycle_stage) || 'prospect',
-    conversation_status: 'open',
-    lifecycle_stage: text(pin.lifecycle_stage) || 'prospect',
-    operational_status: text(pin.operational_status) || sellerState,
-    disposition: 'unknown',
-    contactability_status: text(pin.contactability_status) || 'unknown',
-    is_archived: false,
-    snoozed_until: null,
-    stage_short_label: sellerState === 'not_contacted' ? 'NC' : 'SL',
-    inbox_bucket: text(pin.inbox_category) || (sellerState === 'not_contacted' ? 'not_contacted' : 'new_replies'),
-    lead_temperature: text(pin.lead_temperature) || 'cold',
-    priority_score: Number(pin.priority_score ?? pin.final_acquisition_score ?? 0) || 0,
-    automation_status: 'none',
-    suppression_status: sellerState === 'blocked' ? 'suppressed' : 'clear',
-    next_action: '',
-    offer_status: 'none',
-    contract_status: 'none',
-    next_follow_up_at: text(pin.follow_up_due_at) || null,
-    review_reason: null,
-    confidence: 0,
-    last_inbound_at: text(pin.last_inbound_at) || null,
-    last_outbound_at: text(pin.last_outbound_at) || null,
-    last_reply_at: null,
-    queue_status: null,
-    delivery_status: text(pin.delivery_status) || null,
-    map_image: text(pin.map_image) || null,
-    satellite_image: text(pin.satellite_image) || null,
-    property_address_full: address,
-    property_address_city: text(pin.property_address_city) || null,
-    property_address_state: text(pin.property_address_state) || null,
-    property_address_zip: text(pin.property_address_zip) || null,
-    owner_name: text(pin.owner_name) || null,
-    owner_display_name: text(pin.owner_display_name) || null,
-    owner_full_name: text(pin.owner_full_name) || null,
-    owner_type: text(pin.owner_type) || null,
-    is_corporate_owner: null,
-    corporate_owner: null,
-    owner_occupied: null,
-    out_of_state_owner: pin.out_of_state_owner ?? null,
-    absentee_owner: pin.absentee_owner ?? null,
-    ownership_years: pin.ownership_years ?? null,
-    last_sale_date: text(pin.last_sale_date) || null,
-    sale_date: null,
-    sale_price: null,
-    last_sale_price: null,
-    latest_message_body: text(pin.last_inbound_text) || text(pin.last_outbound_text) || null,
-    last_outreach_message: text(pin.last_outbound_text) || null,
-    reply_status: null,
-    seller_stage: text(pin.seller_status) || null,
-    seller_state: sellerState,
-    execution_state: text(pin.execution_state) || 'none',
-    pipeline_stage: null,
-    contact_status: sellerState,
-    sms_eligible: null,
-    language: null,
-    phone: text(pin.seller_phone) || text(pin.canonical_e164) || null,
-    motivation_score: pin.motivation_score ?? null,
-    final_acquisition_score: pin.final_acquisition_score ?? null,
-    seller_persona: null,
-    ai_seller_persona: null,
-    market_status_label: null,
-    mls_market_status: null,
-    market_sub_status_label: null,
-    building_condition: text(pin.building_condition) || null,
-    building_quality: null,
-    construction_type: text(pin.construction_type) || null,
-    year_built: pin.year_built ?? null,
-    effective_year_built: pin.effective_year_built ?? null,
-    total_bedrooms: pin.total_bedrooms ?? null,
-    total_baths: pin.total_baths ?? null,
-    building_square_feet: pin.building_square_feet ?? null,
-    units_count: pin.units_count ?? null,
-    lot_square_feet: pin.lot_square_feet ?? null,
-    lot_acreage: pin.lot_acreage ?? null,
-    estimated_repair_cost: pin.estimated_repair_cost ?? null,
-    equity_amount: pin.equity_amount ?? null,
-    tax_delinquent: pin.tax_delinquent ?? null,
-    active_lien: pin.active_lien ?? null,
-    property_flags_json: pin.property_flags_json ?? null,
-    property_flags_text: text(pin.property_flags_text) || null,
-    activity_mode: 'threads',
-    activity_state: 'new_replies',
-    activity_label: sellerState === 'not_contacted' ? 'Not Contacted' : 'Seller Lead',
-  }
-}
+/**
+ * The command-pin family is the OPERATIONAL OVERLAY: one pin per conversation the
+ * operator has. It is not, and must not be, the generic property universe.
+ *
+ * Two paths used to inject generic inventory into it — this one, which appended every
+ * uncovered seller lead to the thread-pin array, and syncCommandPinSourcesWithSellerFallback,
+ * which wrote the same merge straight into the command-pin sources whenever the
+ * seller-pins icon layer was missing. That layer is never created in this configuration,
+ * so the fallback ran every time and `command-pins-raw` quietly became the map's de-facto
+ * property renderer: 2,000 features at z11-z13, with the MVT tiles switched off by a
+ * different resolver entirely.
+ *
+ * Generic inventory is the MVT tiles' job at z>=9 and the aggregates' job below that —
+ * see map-generic-inventory-owner.ts. Command pins now carry threads only, which is what
+ * makes the two families non-competing rather than merely differently-tuned.
+ */
+const buildCommandMapPins = (threadPins: CommandMapPin[]): CommandMapPin[] => threadPins
 
-const buildCommandMapPinsWithSellerLeads = (
-  threadPins: CommandMapPin[],
-  sellerLeads: CommandMapSellerPin[],
-  sellerPinsEnabled: boolean,
-): CommandMapPin[] => {
-  if (!sellerPinsEnabled || sellerLeads.length === 0) return threadPins
-  const covered = new Set(threadPins.map((pin) => text(pin.property_id)).filter(Boolean))
-  const extras = sellerLeads
-    .filter((pin) => {
-      const propertyId = text(pin.property_id)
-      return propertyId && !covered.has(propertyId)
-    })
-    .map(sellerPinToCommandMapPin)
-  return extras.length > 0 ? [...threadPins, ...extras] : threadPins
-}
-
-const syncCommandPinSourcesWithSellerFallback = (
+/**
+ * Write the OPERATIONAL OVERLAY into the command-pin sources: threads, and nothing else.
+ *
+ * This was `syncCommandPinSourcesWithSellerFallback`, which merged the seller-lead
+ * universe in whenever the seller-pins icon layer was absent — see buildCommandMapPins
+ * for why that made command-pins-raw the map's accidental property renderer. The write
+ * itself is still needed; only the merge is gone.
+ */
+const syncCommandPinSources = (
   map: maplibregl.Map,
-  sellerGeojson: FeatureCollection<Point, Record<string, unknown>>,
   threadPins: CommandMapPin[],
   options: {
-    sellerPinsEnabled: boolean
     selectedConversationId: string | null
     activeKpiFilter: MapKpiFilterKey | null
     styleMode: MapStyleMode
   },
 ): void => {
-  if (!options.sellerPinsEnabled || sellerGeojson.features.length === 0) return
-  if (isSellerPinIconLayerReady(map)) return
   const threadGeojson = featureCollectionForPins(
     threadPins,
     options.selectedConversationId,
     options.activeKpiFilter,
     options.styleMode,
-  )
-  const covered = new Set(
-    threadPins.map((pin) => text(pin.property_id)).filter(Boolean),
-  )
-  const sellerFeatures = sellerGeojson.features.filter((feature) => {
-    const propertyId = text((feature.properties as Record<string, unknown> | undefined)?.property_id)
-    return propertyId && !covered.has(propertyId)
-  })
-  const mergedGeojson = {
-    type: 'FeatureCollection',
-    features: [...threadGeojson.features, ...sellerFeatures],
-  } as FeatureCollection<Point, PinFeatureProps>
-  const wroteRaw = safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, mergedGeojson)
-  const wroteCluster = safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, mergedGeojson)
+  ) as FeatureCollection<Point, PinFeatureProps>
+  const wroteRaw = safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, threadGeojson)
+  const wroteCluster = safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, threadGeojson)
   if ((import.meta.env.DEV || isMapVerificationMode()) && (!wroteRaw || !wroteCluster)) {
-    console.warn('[CommandMap] seller pin fallback sync failed', {
+    console.warn('[CommandMap] command pin sync failed', {
       wroteRaw,
       wroteCluster,
-      mergedFeatures: mergedGeojson.features.length,
-      sellerFeatures: sellerFeatures.length,
       threadFeatures: threadGeojson.features.length,
     })
   }
@@ -3384,31 +3232,6 @@ function safeSetGeoJsonSourceData(
     return false
   }
 }
-
-const SELLER_PIN_ASSET_LAYER_IDS = [
-  SELLER_PINS_LAYER_IDS.hit,
-  SELLER_PINS_LAYER_IDS.icon,
-  SELLER_PINS_LAYER_IDS.ring,
-  SELLER_PINS_LAYER_IDS.clusterGlow,
-  SELLER_PINS_LAYER_IDS.clusterCore,
-  SELLER_PINS_LAYER_IDS.clusterCount,
-] as const
-
-const SELLER_PIN_ORB_LAYER_IDS = [
-  SELLER_PINS_LAYER_IDS.core,
-  SELLER_PINS_LAYER_IDS.glow,
-  SELLER_PINS_LAYER_IDS.pulse,
-] as const
-
-const shouldPresentSellerPinGeojsonField = (
-  sellerPinsEnabled: boolean,
-  zoom: number,
-  geojsonFeatureCount = 0,
-): boolean => (
-  sellerPinsEnabled
-  && shouldUseVectorTileSource(zoom)
-  && geojsonFeatureCount > 0
-)
 
 const isSellerPinIconLayerReady = (map: maplibregl.Map | null | undefined): boolean => {
   if (!map) return false
@@ -3520,107 +3343,34 @@ const applySellerPinFieldPresentation = (
   },
 ): void => {
   const { sellerPinsEnabled, viewportZoom, geojson, masterFilterActive = false } = options
-  const geojsonFeatureCount = geojson?.features?.length ?? 0
   ensureSellerPinIconLayer(map, geojson)
   if (geojson) {
     safeSetGeoJsonSourceData(map, SELLER_PINS_SOURCE_ID, geojson)
     safeSetGeoJsonSourceData(map, SELLER_PINS_ICON_SOURCE_ID, geojson)
   }
-  const sellerPinFieldActive = (
-    shouldPresentSellerPinGeojsonField(sellerPinsEnabled, viewportZoom, geojsonFeatureCount)
-    && isSellerPinIconLayerReady(map)
-    && !masterFilterActive
-  )
-  const showMarkers = sellerPinFieldActive
-    && shouldUsePropertySource(viewportZoom)
-    && !shouldUseAggregateSource(viewportZoom)
-  const vis = (on: boolean) => on ? 'visible' : 'none'
 
   loadPropertyIcons(map)
 
-  for (const layerId of SELLER_PIN_ASSET_LAYER_IDS) {
-    if (!map.getLayer(layerId)) continue
-    map.setLayoutProperty(layerId, 'visibility', vis(showMarkers))
-    if (layerId === SELLER_PINS_LAYER_IDS.icon) {
-      map.setLayoutProperty(layerId, 'icon-image', PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification)
-      map.setPaintProperty(
-        layerId,
-        'icon-color',
-        ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
-      )
-    }
-  }
-  for (const layerId of SELLER_PIN_ORB_LAYER_IDS) {
-    if (map.getLayer(layerId)) {
-      map.setLayoutProperty(layerId, 'visibility', 'none')
-    }
-  }
-
-  if (sellerPinFieldActive) {
-    for (const layerId of RAW_LAYER_IDS) {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-    }
-    for (const layerId of CLUSTER_POINT_LAYER_IDS) {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-    }
-    for (const layerId of CLUSTER_LAYER_IDS) {
-      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-    }
-  }
-
-  if (masterFilterActive) {
-    applyMasterFilterMapLayerOverride(map, true)
-    return
-  }
-
   /**
-   * NOT the owner of generic inventory in this state — and deliberately left alone.
-   *
-   * map-property-source.ts states that zoom 9+ should show the MVT "complete property
-   * universe", and an earlier revision of this phase made that true by turning the tile
-   * layers on here. Measured, that produced a SECOND competing universe: tile visibility
-   * then flipped between zooms and between identical runs (6/6 at z11 in one pass, 0/6
-   * in the next) because this resolver and applyZoomBandVisibility both claim the same
-   * layers, and one pass rendered 26,415 symbols at z11.
-   *
-   * Reconciling the two resolvers into a single owner is real work and is not something
-   * to do by adding a third claimant. Until then the documented intent and the runtime
-   * behaviour disagree, which is recorded in the phase report rather than papered over.
+   * Paint configuration only. The seller-pin field no longer decides whether it — or
+   * anything else — is drawn; it asks the one owner, which answers for every generic
+   * family at once. Keeping the icon expressions here is safe because they are applied
+   * to a layer the owner may have switched off, and cost nothing if so.
    */
-  for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-  }
-  for (const layerId of Object.values(PROPERTY_UNIVERSE_LAYER_IDS)) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-  }
-}
-
-/** Master Filters must show scoped MVT property-universe tiles, not seller/thread pin overlays. */
-const applyMasterFilterMapLayerOverride = (
-  map: maplibregl.Map,
-  active: boolean,
-): void => {
-  if (!active) return
-  const zoom = map.getZoom()
-  const showTiles = shouldUseVectorTileSource(zoom)
-  const vis = (on: boolean) => on ? 'visible' : 'none'
-
-  for (const layerId of ALL_PROPERTY_TILE_LAYER_IDS) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', vis(showTiles))
-  }
-  for (const layerId of SELLER_PIN_ASSET_LAYER_IDS) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-  }
-  for (const layerId of SELLER_PIN_ORB_LAYER_IDS) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-  }
-  for (const layerId of [...RAW_LAYER_IDS, ...CLUSTER_POINT_LAYER_IDS, ...CLUSTER_LAYER_IDS]) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
-  }
-  for (const layerId of Object.values(PROPERTY_UNIVERSE_LAYER_IDS)) {
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none')
+  if (map.getLayer(SELLER_PINS_LAYER_IDS.icon)) {
+    map.setLayoutProperty(SELLER_PINS_LAYER_IDS.icon, 'icon-image', PIN_ICON_IMAGE_BY_SLUG_EXPR as maplibregl.ExpressionSpecification)
+    map.setPaintProperty(
+      SELLER_PINS_LAYER_IDS.icon,
+      'icon-color',
+      ['coalesce', ['get', 'icon_color'], PIN_ICON_COLOR_COALESCED_EXPR] as unknown as maplibregl.ExpressionSpecification,
+    )
   }
 
+  applyGenericInventoryOwner(map, {
+    zoom: viewportZoom,
+    propertyFieldEnabled: sellerPinsEnabled,
+    masterFilterActive,
+  })
 }
 
 // Only query layers that actually exist in the current style, and always
@@ -4731,16 +4481,9 @@ export function InboxCommandMap({
   const activeSellerCardHydrationKey = activeSellerMapCard
     ? `${activeSellerMapCard.kind}|${activeSellerMapCard.intent}|${activeSellerMapCard.id}`
     : null
-  const sellerLeadsForCommandPins = useMemo(() => {
-    if (!sellerPinLayers.sellerPins) return []
-    if (sellerPins.length > 0) return sellerPins
-    return sellerPinsGeojson.features
-      .map((feature) => sanitizeSellerPinRecord((feature.properties ?? {}) as Partial<CommandMapSellerPin>))
-      .filter((pin) => text(pin.property_id))
-  }, [sellerPinLayers.sellerPins, sellerPins, sellerPinsGeojson])
   const commandMapPins = useMemo(
-    () => buildCommandMapPinsWithSellerLeads(visiblePins, sellerLeadsForCommandPins, sellerPinLayers.sellerPins),
-    [sellerLeadsForCommandPins, sellerPinLayers.sellerPins, visiblePins],
+    () => buildCommandMapPins(visiblePins),
+    [visiblePins],
   )
   const geojson = useMemo(
     () => featureCollectionForPins(
@@ -8388,29 +8131,17 @@ export function InboxCommandMap({
       safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, EMPTY_GEOJSON)
       return
     }
-    const sellerFallbackActive = sellerPinLayers.sellerPins
-      && sellerPinsGeojson.features.length > 0
-      && !isSellerPinIconLayerReady(map)
-    if (sellerFallbackActive) {
-      syncCommandPinSourcesWithSellerFallback(
-        map,
-        sellerPinsGeojson,
-        visiblePinsRef.current,
-        {
-          sellerPinsEnabled: sellerPinLayers.sellerPins,
-          selectedConversationId: selectedThreadRef.current?.id ?? null,
-          activeKpiFilter: activeKpiFilterRef.current,
-          styleMode: mapStyleModeRef.current,
-        },
-      )
-    } else {
-      safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, geojson)
-      safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, geojson)
-    }
+    /**
+     * `geojson` is the thread overlay and nothing else now, so there is one write and no
+     * branch. The branch this replaces chose between "threads" and "threads plus the
+     * seller universe" based on whether a sprite layer happened to exist yet.
+     */
+    safeSetGeoJsonSourceData(map, RAW_SOURCE_ID, geojson)
+    safeSetGeoJsonSourceData(map, CLUSTER_SOURCE_ID, geojson)
     safeSetGeoJsonSourceData(map, BUYER_PURCHASE_SOURCE_ID, buyerPurchasesGeojson)
     safeSetGeoJsonSourceData(map, BUYER_PROFILE_SOURCE_ID, buyerProfilesGeojson)
     safeSetGeoJsonSourceData(map, BUYER_TRAIL_SOURCE_ID, buyerTrailGeojson)
-  }, [appliedMapFilterToken, buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson, sellerPinLayers.sellerPins, sellerPinsGeojson])
+  }, [appliedMapFilterToken, buyerProfilesGeojson, buyerPurchasesGeojson, buyerTrailGeojson, geojson])
 
   useEffect(() => {
     if (mapContextLostRef.current || !isStyleSafe(mapRef.current)) return
@@ -8611,9 +8342,17 @@ export function InboxCommandMap({
       ? PROPERTY_UNIVERSE_LAYER_IDS.clusterRing
       : undefined
     ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, appliedMapFilterToken)
-    if (appliedMapFilterToken) {
-      applyMasterFilterMapLayerOverride(map, true)
-    }
+    /**
+     * A Master Filter re-points the tile URL at a scoped token. It does not change who
+     * owns the render, so this re-asks the owner rather than applying a special-case
+     * override — the behaviour the "filter over the canonical universe, not a separate
+     * architecture" contract requires.
+     */
+    applyGenericInventoryOwner(map, {
+      zoom: viewportZoom,
+      propertyFieldEnabled: sellerPinLayersRef.current.sellerPins || Boolean(appliedMapFilterToken),
+      masterFilterActive: Boolean(appliedMapFilterToken),
+    })
   }, [appliedMapFilterToken, baseStyleLoading, viewportZoom])
 
   // ── Zoom-band layer visibility (no blank ranges) ──────────────────────────
@@ -8625,54 +8364,27 @@ export function InboxCommandMap({
       const zoom = map.getZoom()
       const masterFilterActive = Boolean(appliedMapFilterTokenRef.current)
       const showPropertyField = sellerPinLayers.sellerPins || masterFilterActive
-      const showAggregates = showPropertyField && shouldUseAggregateSource(zoom)
+
       /**
-       * "Is a seller renderer currently drawing individual properties?" — the signal the
-       * property-universe stack yields to.
-       *
-       * This previously required isSellerPinIconLayerReady(map), i.e. the existence of the
-       * seller-pins icon layer. That layer is not created in this configuration, so the
-       * predicate measured false in every diagnostic run, the tile renderer never yielded,
-       * and every property was drawn twice — the prop-tiles-glass plate (rgba(6,10,20,0.82))
-       * sitting under the seller house glyph.
-       *
-       * Ownership does not depend on which sprite layer exists. It depends on whether the
-       * seller field is presenting: enabled, at property zoom, with seller features loaded.
-       * The masterFilterActive exception is unchanged.
+       * This effect used to compute its own answer for the tile, aggregate and
+       * property-universe families — with a `sellerPinFieldActive` expression that was
+       * subtly different from the one in applySellerPinFieldPresentation. Both wrote the
+       * same layers, so the render depended on which effect ran last. It now asks the
+       * owner, exactly as every other caller does.
        */
-      const sellerPinFieldActive = (
-        shouldPresentSellerPinGeojsonField(showPropertyField, zoom, sellerPinsGeojsonRef.current.features.length)
-        && !masterFilterActive
-      )
-      const showTiles = showPropertyField && shouldUseVectorTileSource(zoom) && (!sellerPinFieldActive || masterFilterActive)
-      const showPropertyLevel = showPropertyField && shouldUsePropertySource(zoom) && !sellerPinFieldActive
-      const showPropertyClusters = showPropertyLevel && zoom < ACQUISITION_RADAR_ZOOM.streetMin
-      const showPropertyMarkers = showPropertyLevel && (
-        zoom >= ACQUISITION_RADAR_ZOOM.streetMin
-        || zoom >= (isMobile ? 11.5 : 11.5)
-      )
-      const vis = (v: boolean) => v ? 'visible' : 'none'
+      const decision = applyGenericInventoryOwner(map, {
+        zoom,
+        propertyFieldEnabled: showPropertyField,
+        masterFilterActive,
+      })
 
-      for (const lid of Object.values(MARKET_AGGREGATE_LAYER_IDS)) {
-        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showAggregates))
-      }
-
-      if (masterFilterActive) {
-        applyMasterFilterMapLayerOverride(map, true)
-      } else {
-        for (const lid of ALL_PROPERTY_TILE_LAYER_IDS) {
-          if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showTiles))
-        }
-      }
-
-      for (const lid of [
-        PROPERTY_UNIVERSE_LAYER_IDS.clusterRing,
-        PROPERTY_UNIVERSE_LAYER_IDS.clusterCore,
-        PROPERTY_UNIVERSE_LAYER_IDS.clusterIcon,
-        PROPERTY_UNIVERSE_LAYER_IDS.clusterCount,
-      ]) {
-        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showPropertyClusters))
-      }
+      /**
+       * The legacy bounded stack is never the owner, so its filters only need
+       * maintaining when something else has made it visible — which nothing does. Kept
+       * as a guarded branch rather than deleted because the filter expressions below are
+       * still the correct ones should that stack ever be revived.
+       */
+      const showPropertyMarkers = decision.visibility[PROPERTY_UNIVERSE_LAYER_IDS.markers] === 'visible'
       const markerLayerIds = [
         PROPERTY_UNIVERSE_LAYER_IDS.markerHit,
         PROPERTY_UNIVERSE_LAYER_IDS.markerGlow,
@@ -8681,9 +8393,6 @@ export function InboxCommandMap({
         PROPERTY_UNIVERSE_LAYER_IDS.markerPulse,
         PROPERTY_UNIVERSE_LAYER_IDS.markers,
       ]
-      for (const lid of markerLayerIds) {
-        if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', vis(showPropertyMarkers))
-      }
 
       if (showPropertyMarkers) {
         const pinVisibilityFilter = buildIndividualPinVisibilityFilter(selectedPropertyId) as maplibregl.FilterSpecification
@@ -9563,17 +9272,11 @@ export function InboxCommandMap({
         masterFilterActive: Boolean(appliedMapFilterToken),
       })
       if (!appliedMapFilterToken) {
-        syncCommandPinSourcesWithSellerFallback(
-          map,
-          nextSellerPinsGeojson,
-          visiblePinsRef.current,
-          {
-            sellerPinsEnabled: sellerPinLayers.sellerPins,
-            selectedConversationId: selectedThreadRef.current?.id ?? null,
-            activeKpiFilter: activeKpiFilterRef.current,
-            styleMode: mapStyleModeRef.current,
-          },
-        )
+        syncCommandPinSources(map, visiblePinsRef.current, {
+          selectedConversationId: selectedThreadRef.current?.id ?? null,
+          activeKpiFilter: activeKpiFilterRef.current,
+          styleMode: mapStyleModeRef.current,
+        })
       }
     }
   }, [appliedMapFilterToken, mapMode, mapStyleMode, pinPipeline.mapped, selectedPropertyId, sellerPinLayers, sellerPinsRaw])
