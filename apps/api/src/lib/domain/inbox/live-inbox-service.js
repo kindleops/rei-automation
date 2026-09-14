@@ -1591,155 +1591,20 @@ function bucketNotIn(...buckets) {
 }
 
 /**
- * A thread with a PENDING scheduled send is not awaiting operator attention.
+ * REMOVED 2026-09-14 (INBOX-COMPOSER-LOCK-1): applyInboxThreadStateBucketFilter
+ * and fetchAuthoritativeThreadKeysForFilter.
  *
- * The operator's whole workflow is "act on it, watch the number drop". Before
- * this, scheduling a follow-up left the thread sitting in Priority exactly as
- * it was, so the count never moved and there was no way to tell handled threads
- * from untouched ones. MEASURED 2026-09-11: 16 follow-ups scheduled, all 16
- * threads still reading inbox_bucket='priority'.
+ * They were a SECOND copy of the category rules -- written in PostgREST filter
+ * strings, already drifted from both the count view and the JS predicate, and no
+ * longer called by anything after the list moved to v_inbox_thread_state_buckets.
+ * Leaving a stale set of bucket definitions next to the new single source is the
+ * precise failure this pass exists to end, so they are gone rather than
+ * commented out. The live predicates are:
  *
- * Expressed as a time bound rather than a bucket rewrite, so it unwinds itself:
- * once the send fires the timestamp is in the past and the thread returns to
- * whatever bucket it genuinely belongs in. NULL-safe, because
- * next_scheduled_for is null on almost every thread and `is.null` must be
- * treated as "nothing pending", not as a failed comparison.
+ *   SQL   v_inbox_thread_state_buckets          (list + count, deployed authority)
+ *   JS    inbox-bucket-predicates.js            (resolveInboxBucketFlags, the mirror)
+ *   degraded  applyQueryFilter(), below         (only when the flag source throws)
  */
-const NO_PENDING_SCHEDULE = () =>
-  `next_scheduled_for.is.null,next_scheduled_for.lte.${new Date().toISOString()}`;
-
-function applyInboxThreadStateBucketFilter(query, normalized) {
-  switch (normalized) {
-    case "priority":
-      query = query.eq("inbox_bucket", "priority");
-      // A scheduled follow-up means this one is handled; it should not keep
-      // occupying the operator's attention queue.
-      if (typeof query.or === "function") query = query.or(NO_PENDING_SCHEDULE());
-      break;
-    case "new_replies":
-      if (typeof query.or === "function") {
-        query = query.or(
-          "inbox_bucket.eq.new_replies,"
-          + `and(latest_direction.eq.inbound,${bucketNotIn("dead", "suppressed")})`,
-        );
-      } else {
-        query = query.eq("inbox_bucket", "new_replies");
-      }
-      break;
-    case "needs_review":
-      query = query.eq("inbox_bucket", "needs_review");
-      break;
-    case "follow_up":
-      query = query.eq("inbox_bucket", "follow_up");
-      break;
-    case "cold":
-      if (typeof query.or === "function") {
-        query = query.or(
-          "inbox_bucket.eq.cold,"
-          + "automation_lane.eq.cold_reactivation,"
-          // latest_message_direction DOES NOT EXIST on inbox_thread_state
-          // (information_schema, 2026-09-10). PostgREST fails the WHOLE query on
-          // one unknown column, so the Cold tab was not merely under-filtered -
-          // it was hard-erroring. The real column is latest_direction.
-          + `and(latest_direction.eq.outbound,last_outbound_at.lt.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
-        );
-      } else {
-        query = query.eq("inbox_bucket", "cold");
-      }
-      break;
-    case "dead":
-      query = query.eq("inbox_bucket", "dead");
-      break;
-    case "suppressed":
-      query = query.eq("inbox_bucket", "suppressed");
-      break;
-    case "waiting":
-      if (typeof query.or === "function") {
-        query = query.or(
-          "inbox_bucket.eq.waiting,"
-          + `and(latest_direction.eq.outbound,${bucketNotIn("dead", "suppressed")},`
-          + `last_outbound_at.gte.${new Date(Date.now() - WAITING_REPLY_WINDOW_MS).toISOString()})`,
-        );
-      } else {
-        query = query.eq("inbox_bucket", "waiting");
-      }
-      break;
-    case "active":
-      if (typeof query.in === "function") {
-        query = query.in("inbox_bucket", ["priority", "new_replies", "needs_review", "follow_up"]);
-      }
-      break;
-    case "unlinked":
-      if (typeof query.is === "function") query = query.is("property_id", null);
-      break;
-    case "snoozed":
-      // Authoritative source (inbox_thread_state) genuinely has the column.
-      // An expired snoozed_until is simply a past timestamp, so this bound lets
-      // a thread age out on its own -- no sweeper, nothing to get stuck.
-      if (typeof query.gt === "function") query = query.gt("snoozed_until", new Date().toISOString());
-      return query;
-    case "scheduled":
-      // There was NO case for this at all, so the Scheduled tab fell through to
-      // `default` and went out unfiltered.
-      if (typeof query.gt === "function") {
-        query = query.gt("next_scheduled_for", new Date().toISOString());
-      }
-      return query;
-    case "archived":
-      // The AUTHORITATIVE (fast-bucket) path. Without this the switch hit
-      // `default: break` and the query went out unfiltered, so the archived tab
-      // showed every thread. The sibling applyQueryFilter covers the fallback
-      // source; both need the case.
-      if (typeof query.eq === "function") query = query.eq("is_archived", true);
-      return query;
-    case "all_messages":
-      break;
-    default:
-      break;
-  }
-  return query;
-}
-
-async function fetchAuthoritativeThreadKeysForFilter(supabase, filter) {
-  const normalized = normalizeLiveFilter(filter);
-  if (normalized === "all") return null;
-
-  let query = supabase
-    .from("inbox_thread_state")
-    // snoozed_until rides along so active snoozes can be dropped below.
-    .select("thread_key,snoozed_until")
-    .not("thread_key", "is", null)
-    .neq("thread_key", "");
-
-  query = applyInboxThreadStateBucketFilter(query, normalized);
-
-  const { data, error } = await query;
-  if (error) throw error;
-
-  // Actively snoozed threads are withheld from every ACTIONABLE key list.
-  // This has to happen here, not only in the in-memory post-filter: the
-  // fallback sources (canonical_inbox_threads, v_inbox_threads_live_v2) do not
-  // carry snoozed_until, so a snoozed row reaching them arrives with the field
-  // undefined, reads as "not snoozed", and would sit in Priority/New Replies
-  // for the whole snooze. Filtered in JS rather than as a second .or() on the
-  // shared query builder: stacking OR groups is easy to get subtly wrong, and
-  // an absent/NULL snoozed_until must KEEP the row -- a naive comparison drops
-  // every never-snoozed thread, which is nearly all of them.
-  const SNOOZE_EXEMPT_FILTERS = new Set(["snoozed", "all", "all_messages", "archived"]);
-  const dropsSnoozed = !SNOOZE_EXEMPT_FILTERS.has(normalized);
-  const keyNowMs = Date.now();
-  const visibleRows = (data || []).filter((row) => {
-    if (!dropsSnoozed) return true;
-    const until = row?.snoozed_until;
-    if (!until) return true;
-    const ts = new Date(until).getTime();
-    return !(Number.isFinite(ts) && ts > keyNowMs);
-  });
-
-  const explicitKeys = [...new Set(visibleRows.map((row) => clean(row.thread_key)).filter(Boolean))];
-  const derivedNullKeys = await fetchDerivedNullBucketThreadKeysForTab(supabase, normalized);
-  return [...new Set([...explicitKeys, ...derivedNullKeys])];
-}
 
 async function fetchInboxBucketsByThreadKeys(supabase, threadKeys = []) {
   const uniqueKeys = [...new Set(threadKeys.map((key) => clean(key)).filter(Boolean))];
@@ -1862,9 +1727,9 @@ function applyQueryFilter(query, filter, sourceConfig = THREAD_SOURCE_CONFIGS[0]
       // FALLBACK sources (canonical_inbox_threads, v_inbox_threads_live_v2),
       // and neither carries snoozed_until -- PostgREST fails the WHOLE query on
       // one unknown column, so a .gt("snoozed_until", ...) here would 500 the
-      // Snoozed view outright. Snooze is resolved authoritatively instead:
-      // fetchAuthoritativeThreadKeysForFilter reads inbox_thread_state (which
-      // does have the column) and constrains these sources by thread_key.
+      // Snoozed view outright. Snooze is resolved by v_inbox_thread_state_buckets
+      // (in_snoozed), which reads inbox_thread_state and does have the column;
+      // this branch is only reached if that source is unavailable.
       return query;
     case "archived":
       // Without this case the switch fell through to `default: return query`,
