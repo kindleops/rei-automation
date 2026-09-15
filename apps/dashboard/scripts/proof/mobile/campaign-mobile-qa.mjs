@@ -156,6 +156,11 @@ const auditExplicitContainment = async (secret) => {
       inside,
       outsideProperties: outside.size,
       contained: outside.size === 0,
+      // A widened campaign that is QUARANTINED is a known, contained state:
+      // auto-queue is off and the queue-plan guard refuses it outright. A
+      // widened campaign that is still live is not, and must fail the gate.
+      quarantined: c.quarantined === true,
+      quarantineReason: c.quarantine_reason ?? null,
       sampleOutside: [...outside].slice(0, 4),
     })
   }
@@ -474,11 +479,17 @@ const run = async () => {
   const containment = await auditExplicitContainment(secret)
   console.log('\n== §2 EXPLICIT TARGET CONTAINMENT ==')
   for (const a of containment) {
-    const verdict = a.contained ? 'CONTAINED' : `WIDENED by ${a.outsideProperties} unselected properties`
+    const verdict = a.contained
+      ? 'CONTAINED'
+      : a.quarantined
+        ? `WIDENED by ${a.outsideProperties} unselected properties — QUARANTINED (${a.quarantineReason})`
+        : `WIDENED by ${a.outsideProperties} unselected properties — NOT QUARANTINED`
     console.log(`  ${a.name}: ${a.selected} selected -> ${a.builtRows} rows (${a.inside} inside) — ${verdict}`)
     if (!a.contained) console.log(`    sample unselected property ids: ${a.sampleOutside.join(', ')}`)
   }
-  const widened = containment.filter((a) => !a.contained)
+  // Only an UNQUARANTINED widened campaign fails the gate.
+  const widened = containment.filter((a) => !a.contained && !a.quarantined)
+  const quarantinedWidened = containment.filter((a) => !a.contained && a.quarantined)
 
   const browser = await chromium.launch()
   const reports = []
@@ -499,8 +510,14 @@ const run = async () => {
   for (const r of reports) console.log(`  ${r.cell.padEnd(12)} failures=${r.findings.length} streetview=${r.streetViewRequests}`)
   console.log(failures.length === 0 ? '\nALL VIEWPORT CHECKS PASSED' : `\n${failures.length} VIEWPORT CHECK(S) FAILED`)
   if (widened.length > 0) {
-    console.log(`\nDATA HAZARD: ${widened.length} explicit campaign(s) contain unselected properties:`)
+    console.log(`\nBLOCKER: ${widened.length} LIVE explicit campaign(s) contain unselected properties:`)
     for (const a of widened) console.log(`  ${a.name}: ${a.outsideProperties} unselected properties among ${a.builtRows} target rows`)
+  }
+  if (quarantinedWidened.length > 0) {
+    console.log(`\nKnown and contained — ${quarantinedWidened.length} quarantined campaign(s) with historical widening:`)
+    for (const a of quarantinedWidened) {
+      console.log(`  ${a.name}: ${a.outsideProperties} unselected of ${a.builtRows} rows, auto-queue off, queue-plan refuses it`)
+    }
   }
   await fs.writeFile(path.join(OUT_ROOT, 'explicit-containment.json'), JSON.stringify(containment, null, 2))
   process.exitCode = failures.length === 0 && widened.length === 0 ? 0 : 1
