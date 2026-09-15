@@ -822,7 +822,9 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     propertyId: readString(thread, 'propertyId', 'property_id'),
     latitude: readNumber(thread, 'latitude', 'lat'),
     longitude: readNumber(thread, 'longitude', 'lng', 'lon'),
-    streetviewImage: readString(thread, 'streetviewImage', 'streetview_image'),
+    // streetviewImage is deliberately NOT returned. No Inbox card reads it any
+    // more, and leaving it here invites the next person to wire an <img> back
+    // into a list that is now zero-request.
   }
 }
 
