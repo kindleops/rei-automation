@@ -588,3 +588,13 @@
   border-color: color-mix(in srgb, var(--k-hold) 36%, transparent);
   color: color-mix(in srgb, var(--k-hold) 86%, var(--k-ink));
 }
+
+/* §4 — a quarantined campaign must not read as operable. */
+.cmk__row-state.is-blocked { color: var(--k-warn); }
+.cmk__row-blocked {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--k-warn) 82%, var(--k-ink));
+}

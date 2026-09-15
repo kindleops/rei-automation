@@ -30,9 +30,10 @@ import type { CampaignListFilter } from '../campaign-health'
  * three stacked cards.
  */
 
-export type Tone = 'running' | 'scheduled' | 'paused' | 'test' | 'built' | 'previewed' | 'failed' | 'draft' | 'done'
+export type Tone = 'blocked' | 'running' | 'scheduled' | 'paused' | 'test' | 'built' | 'previewed' | 'failed' | 'draft' | 'done'
 
 export const TONE_LABEL: Record<Tone, string> = {
+  blocked: 'BLOCKED',
   running: 'RUNNING',
   scheduled: 'SCHEDULED',
   paused: 'PAUSED',
@@ -59,6 +60,17 @@ export const TONE_LABEL: Record<Tone, string> = {
  */
 export function toneOf(c: CampaignSummary): Tone {
   const s = String(c.status ?? '').toLowerCase()
+  /**
+   * BLOCKED outranks everything, including test mode.
+   *
+   * Test mode is a SAFE state — "no SMS will transmit". A quarantined campaign
+   * is an UNSAFE one: campaign df0671fa holds 984 target rows for a
+   * 186-property explicit selection, 878 of them outside it. The launch path
+   * happens to refuse it today for an incidental reason ("no ready recipients
+   * in target snapshot"), which tells the operator nothing, so the badge has
+   * to carry the real reason.
+   */
+  if (c.quarantined) return 'blocked'
   if (c.operator_state === 'test_mode') return 'test'
   if (s === 'active' || s === 'activating' || s === 'live_limited') return 'running'
   if (s === 'scheduled' || s === 'queued') return 'scheduled'
@@ -490,7 +502,9 @@ export function CampaignCommandMobile({
             : campaigns.map((c) => {
                 const tone = toneOf(c)
                 const flag = attentionOf(c)
-                const dormant = tone === 'draft'
+                // A blocked campaign uses the quiet row: it must not present
+                // itself alongside running work as though it were operable.
+                const dormant = tone === 'draft' || tone === 'blocked'
                 if (dormant) {
                   return (
                     <button key={c.id} type="button" role="listitem" className="cmk__row is-dormant" onClick={() => onSelect(c)}>
@@ -499,6 +513,11 @@ export function CampaignCommandMobile({
                         {TONE_LABEL[tone]} · {targetingPhrase(c)}
                         {targetModePhrase(c) ? ` · ${targetModePhrase(c)}` : ''}
                       </span>
+                      {tone === 'blocked' && (
+                        <span className="cmk__row-blocked">
+                          Target integrity check failed — outreach disabled until targeting is rebuilt
+                        </span>
+                      )}
                     </button>
                   )
                 }

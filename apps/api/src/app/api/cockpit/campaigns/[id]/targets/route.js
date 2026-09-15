@@ -47,6 +47,17 @@ export async function GET(request, { params }) {
 
   const ascending = orderDir
   query = query.order(orderBy, { ascending, nullsFirst: false })
+  /**
+   * STABLE TIEBREAKER — required, not cosmetic.
+   *
+   * `priority_score` (the default sort) is not unique, and Postgres gives no
+   * ordering guarantee among equal keys across separate LIMIT/OFFSET queries.
+   * Paging this endpoint therefore returned some rows twice and skipped others:
+   * an audit of campaign df0671fa read all 984 rows but found only 812 distinct
+   * property ids where 984 exist. Any per-page consumer — the Targets tab, or a
+   * containment audit — silently gets a wrong answer.
+   */
+  query = query.order('id', { ascending: true })
 
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1

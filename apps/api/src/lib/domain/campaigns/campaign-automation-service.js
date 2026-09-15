@@ -5148,8 +5148,9 @@ export async function previewCampaignTargets(input = {}, deps = {}) {
   }, diagnostics, effectiveOptions.include_diagnostics)
 }
 
+const EXECUTION_PROOF_PROOF_ROW_LIMIT = 50
+
 async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) {
-  const campaignStatus = campaign?.status || 'draft'
   const [{ data: activeRows, error: activeError }, { data: proofRows, error: proofError }] = await Promise.all([
     supabase
       .from('send_queue')
@@ -5162,10 +5163,22 @@ async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) 
       .eq('campaign_id', campaignId)
       .filter('metadata->>launch_mode', 'eq', 'proof_hydration_no_send')
       .order('created_at', { ascending: false })
-      .limit(50),
+      .limit(EXECUTION_PROOF_PROOF_ROW_LIMIT),
   ])
   if (activeError) throw activeError
   if (proofError) throw proofError
+  return reduceCampaignExecutionProof(campaign, activeRows || [], proofRows || [])
+}
+
+/**
+ * The pure reduction, extracted so the LIST can batch its reads instead of
+ * issuing two send_queue queries per campaign in a serial loop — 80 sequential
+ * round trips for 40 campaigns, which was the dominant cost of a ~7s response.
+ * Half of them could never return anything: there are 0 active-status queue
+ * rows book-wide.
+ */
+function reduceCampaignExecutionProof(campaign = {}, activeRows = [], proofRows = []) {
+  const campaignStatus = campaign?.status || 'draft'
 
   let proofNoSendRows = 0
   let liveSendRows = 0
@@ -5375,6 +5388,13 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
      */
     has_target_definition: Object.keys(metadataObject(campaign.metadata?.target_filters)).length > 0,
     ...resolveCampaignTargetMode(campaign.metadata),
+    /**
+     * Persisted quarantine, read straight from metadata so the LIST costs no
+     * extra queries. Runtime enforcement is the queue-plan guard; this is what
+     * lets a row say BLOCKED instead of looking ready.
+     */
+    quarantined: metadataObject(campaign.metadata?.quarantine).active === true,
+    quarantine_reason: clean(metadataObject(campaign.metadata?.quarantine).reason) || null,
     ready_targets: ready,
     planned_targets: planned,
     scheduled_targets: liveScheduled,
@@ -5411,13 +5431,96 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
   }
 }
 
+/**
+ * Execution proof for MANY campaigns, in a bounded number of queries.
+ *
+ * Two batched, paged reads replace 2N serial ones. Paged explicitly because
+ * PostgREST silently caps a response at its own max-rows — the same trap that
+ * made campaign target counts report exactly 1000 of 2,578 rows — so a single
+ * unpaged `in(...)` read would quietly under-report proof rows on a large book.
+ *
+ * Per-campaign semantics are preserved exactly: rows are grouped by campaign
+ * and each group is truncated to the newest EXECUTION_PROOF_PROOF_ROW_LIMIT,
+ * which is what the per-campaign query's own `.limit()` did.
+ */
 async function fetchExecutionProofByCampaign(supabase, campaigns = []) {
   const proofByCampaign = new Map()
   const campaignIds = (campaigns || []).map((campaign) => campaign.id).filter(Boolean)
   if (!campaignIds.length) return proofByCampaign
 
+  const PAGE = 1000
+  /**
+   * PROJECT THE THREE SCALARS, NOT THE BLOB.
+   *
+   * The reducer reads exactly three things out of `metadata` — launch_mode,
+   * no_send and proof_no_send — and everything else it needs is a plain
+   * column. Selecting the whole jsonb shipped 4.9 MB across 1,766 proof rows
+   * (avg 2.8 KB each) through PostgREST and back through JSON.parse on every
+   * campaign list request, which was ~5s of a ~5.5s response while the SQL
+   * itself measured 233ms. The cost was never the database.
+   *
+   * The projected fields are rebuilt into a `metadata` shape so the reducer
+   * stays untouched and the per-campaign path keeps using the same logic.
+   */
+  const SELECT = [
+    'id', 'campaign_id', 'queue_status', 'sms_eligible', 'routing_allowed', 'scheduled_for', 'created_at',
+    'launch_mode:metadata->>launch_mode',
+    'no_send:metadata->>no_send',
+    'proof_no_send:metadata->>proof_no_send',
+  ].join(',')
+
+  const rehydrate = (row) => ({
+    ...row,
+    metadata: {
+      launch_mode: row.launch_mode ?? null,
+      no_send: row.no_send ?? null,
+      proof_no_send: row.proof_no_send ?? null,
+    },
+  })
+
+  const readAll = async (build) => {
+    const rows = []
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await build(supabase.from('send_queue').select(SELECT))
+        .in('campaign_id', campaignIds)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(offset, offset + PAGE - 1)
+      if (error) throw error
+      const page = data || []
+      rows.push(...page.map(rehydrate))
+      if (page.length < PAGE) break
+    }
+    return rows
+  }
+
+  const [activeRows, proofRows] = await Promise.all([
+    readAll((q) => q.in('queue_status', ACTIVE_QUEUE_STATUSES)),
+    readAll((q) => q.filter('metadata->>launch_mode', 'eq', 'proof_hydration_no_send')),
+  ])
+
+  const activeByCampaign = new Map()
+  for (const row of activeRows) {
+    if (!activeByCampaign.has(row.campaign_id)) activeByCampaign.set(row.campaign_id, [])
+    activeByCampaign.get(row.campaign_id).push(row)
+  }
+  const proofsByCampaign = new Map()
+  for (const row of proofRows) {
+    const bucket = proofsByCampaign.get(row.campaign_id)
+    if (!bucket) {
+      proofsByCampaign.set(row.campaign_id, [row])
+      continue
+    }
+    // Already ordered newest-first, so keeping the first N reproduces the
+    // per-campaign `.limit()`.
+    if (bucket.length < EXECUTION_PROOF_PROOF_ROW_LIMIT) bucket.push(row)
+  }
+
   for (const campaign of campaigns) {
-    proofByCampaign.set(campaign.id, await fetchCampaignExecutionProof(supabase, campaign.id, campaign))
+    proofByCampaign.set(
+      campaign.id,
+      reduceCampaignExecutionProof(campaign, activeByCampaign.get(campaign.id) || [], proofsByCampaign.get(campaign.id) || []),
+    )
   }
   return proofByCampaign
 }
@@ -5433,11 +5536,25 @@ const CAMPAIGN_LIST_CAP = 200
 
 export async function listCampaigns(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const { data: campaigns, error } = await supabase
+  /**
+   * Phase timings, reported on the response.
+   *
+   * Measuring this from the outside is unreliable — the dev server recompiles
+   * between requests, which swamped the signal at the 5-10s scale this surface
+   * operates at. The breakdown names which phase actually costs, so an
+   * optimisation can be aimed rather than guessed at.
+   */
+  const timings = {}
+  const phase = async (name, fn) => {
+    const started = Date.now()
+    try { return await fn() } finally { timings[name] = Date.now() - started }
+  }
+
+  const { data: campaigns, error } = await phase('campaigns_select', () => supabase
     .from('campaigns')
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(CAMPAIGN_LIST_CAP)
+    .limit(CAMPAIGN_LIST_CAP))
   if (error) throw error
   const ids = (campaigns || []).map((campaign) => campaign.id)
   let windows = []
@@ -5445,14 +5562,19 @@ export async function listCampaigns(deps = {}) {
   let proofByCampaign = new Map()
   if (ids.length) {
     const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
-    countMap = await fetchCampaignTargetStatusCounts(ids, deps)
-    proofByCampaign = await fetchExecutionProofByCampaign(supabase, campaigns || [])
-    const windowRes = await supabase
-      .from('campaign_send_windows')
-      .select('*')
-      .in('campaign_id', ids)
-      .order('window_start_utc', { ascending: true })
-      .limit(1000)
+    // Independent reads, so they run concurrently rather than in sequence.
+    const [counts, proofs, windowRes] = await Promise.all([
+      phase('target_counts', () => fetchCampaignTargetStatusCounts(ids, deps)),
+      phase('execution_proof', () => fetchExecutionProofByCampaign(supabase, campaigns || [])),
+      phase('send_windows', () => supabase
+        .from('campaign_send_windows')
+        .select('*')
+        .in('campaign_id', ids)
+        .order('window_start_utc', { ascending: true })
+        .limit(1000)),
+    ])
+    countMap = counts
+    proofByCampaign = proofs
     if (!windowRes.error) windows = windowRes.data || []
   }
   const { deriveOperatorState, operatorStateLabel, operatorModeLabel } = await import('@/lib/domain/campaigns/campaign-operator-state.js')
@@ -5508,6 +5630,7 @@ export async function listCampaigns(deps = {}) {
     ok: true,
     campaigns: summaries,
     list_cap: CAMPAIGN_LIST_CAP,
+    timings_ms: timings,
     /** True when the response is a prefix of the corpus, not the corpus. */
     truncated: (campaigns || []).length >= CAMPAIGN_LIST_CAP,
     kpis: {
@@ -5567,6 +5690,24 @@ export async function getCampaign(campaignId, deps = {}) {
   const summary = mapCampaignSummary(campaign, [], windows || [], countMap.get(campaignId) || null, executionProof)
   summary.recipient_metrics = recipientMetrics.ok ? recipientMetrics : null
   summary.launch_readiness = launchReadiness.ok ? launchReadiness.launch_readiness : 'unknown'
+  /**
+   * §4 — the operator-facing reason.
+   *
+   * Enforcement lives in createCampaignQueuePlan, but the launch path can
+   * refuse first for an incidental reason: the quarantined campaign is blocked
+   * as "No ready recipients in target snapshot" because all 984 of its rows
+   * are `blocked`, which tells the operator nothing about WHY the campaign is
+   * unsafe. Computed here (two exact count queries for one campaign) so the
+   * detail surface can state the integrity failure plainly.
+   */
+  summary.target_integrity = await checkExplicitTargetContainment(campaign, deps)
+    .catch((error) => ({
+      applies: null,
+      contained: null,
+      // Never report "fine" because the check itself failed.
+      error: 'target_integrity_check_failed',
+      message: error?.message || String(error),
+    }))
   summary.launch_blockers = launchReadiness.blockers || []
   summary.launch_blocker_codes = launchReadiness.blocker_codes || []
 
@@ -6602,6 +6743,123 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
   }
 }
 
+/**
+ * TARGET INTEGRITY — an explicit selection is a PINNED SET.
+ *
+ * A campaign built from explicitly selected identities may only ever reach the
+ * identities that were selected. Not a superset, not "the valid subset plus
+ * whatever else resolved".
+ *
+ * This guard exists because the builder fix alone is not enough. Before
+ * 2026-09-14 an unresolved target filter meant "no narrowing", so a build
+ * targeted every reachable row; the builder now refuses on dropped filters,
+ * but campaigns CONTAMINATED BY THAT BUG ALREADY EXIST and their rows are
+ * still sitting in campaign_targets. Campaign df0671fa holds 984 target rows
+ * for a 186-property selection, only 106 of them inside it.
+ *
+ * So containment is enforced HERE, at the pre-queue authority every execution
+ * path funnels through, rather than at the point of building. A fixed builder
+ * protects future campaigns; this protects outbound.
+ *
+ * Deliberately all-or-nothing: enqueuing the contained subset and dropping the
+ * rest would turn a detectable integrity failure into a silent partial send,
+ * and would leave the operator believing the campaign is fine.
+ */
+/** Selected property ids from a campaign's persisted target definition. */
+export function explicitSelectedPropertyIds(campaign = {}) {
+  const filters = metadataObject(campaign.metadata?.target_filters)
+  const selected = new Set()
+  for (const value of Object.values(filters)) {
+    if (!Array.isArray(value)) continue
+    for (const clause of value) {
+      if (clean(clause?.field_key) !== 'properties.property_id') continue
+      const raw = clause?.value
+      const list = Array.isArray(raw) ? raw : [raw]
+      for (const entry of list) {
+        const id = clean(entry)
+        if (id) selected.add(id)
+      }
+    }
+  }
+  return selected
+}
+
+/**
+ * TARGET INTEGRITY — an explicit selection is a PINNED SET.
+ *
+ * A campaign built from explicitly selected identities may only ever reach
+ * those identities. Not a superset, and not "the contained subset plus
+ * whatever else resolved".
+ *
+ * Checked against the campaign's ENTIRE target set, not the rows that happen
+ * to be queueable right now. That distinction is the whole guard: every one of
+ * the 984 contaminated rows on campaign df0671fa carries
+ * `target_status = 'blocked'`, so a check over ready candidates alone inspects
+ * nothing and reports "contained" for a campaign holding 878 unselected
+ * properties. Readiness is transient; a widened target set is a property of
+ * the campaign.
+ *
+ * Counted in the database rather than fetched, so it stays exact and cheap on
+ * a large campaign — and so it cannot repeat the mistake of paginating rows
+ * into application code to count them.
+ *
+ * Deliberately all-or-nothing: enqueuing the contained subset would turn a
+ * detectable integrity failure into a silent partial send and leave the
+ * operator believing the campaign is sound.
+ */
+export async function checkExplicitTargetContainment(campaign = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const mode = resolveCampaignTargetMode(campaign.metadata)
+  if (mode.target_mode !== 'explicit' && mode.target_mode !== 'explicit_filtered') {
+    return { applies: false, contained: true }
+  }
+
+  const selected = [...explicitSelectedPropertyIds(campaign)]
+  const countTargets = async (build) => {
+    const query = build(
+      supabase.from('campaign_targets').select('id', { count: 'exact', head: true }).eq('campaign_id', campaign.id),
+    )
+    const { count, error } = await query
+    if (error) throw error
+    return count ?? 0
+  }
+
+  const total = await countTargets((q) => q)
+
+  // An explicit definition with no resolvable ids has nothing to contain
+  // against, so nothing may be enqueued.
+  if (selected.length === 0) {
+    return {
+      applies: true,
+      contained: total === 0,
+      reason: total === 0 ? null : 'explicit_selection_empty',
+      selected_property_count: 0,
+      candidate_target_count: total,
+      inside_selection_count: 0,
+      outside_selection_count: total,
+    }
+  }
+
+  // Chunked so a large pinned list cannot overflow one PostgREST `in` list.
+  const CHUNK = 150
+  let inside = 0
+  for (let i = 0; i < selected.length; i += CHUNK) {
+    const chunk = selected.slice(i, i + CHUNK)
+    inside += await countTargets((q) => q.in('property_id', chunk))
+  }
+
+  const outside = Math.max(0, total - inside)
+  return {
+    applies: true,
+    contained: outside === 0,
+    reason: outside === 0 ? null : 'targets_outside_explicit_selection',
+    selected_property_count: selected.length,
+    candidate_target_count: total,
+    inside_selection_count: inside,
+    outside_selection_count: outside,
+  }
+}
+
 export function resolveCampaignQueueWriteMode(input = {}, campaign = null) {
   const dryRun = input.dry_run === true || input.dryRun === true
   const createRows = input.create_send_queue_rows === false || input.createSendQueueRows === false ? false : true
@@ -6676,6 +6934,44 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   if (targetError) throw targetError
 
   const readyTargets = targets || []
+
+  /**
+   * Containment is checked BEFORE the execution lock, before any run row and
+   * before any write, so a violation costs nothing and leaves no trace beyond
+   * the refusal itself.
+   */
+  const containment = await checkExplicitTargetContainment(campaign, deps)
+  if (containment.applies && !containment.contained) {
+    await recordCampaignEvent({
+      campaign_id: campaignId,
+      event_type: 'campaign.queue_plan_refused_target_integrity',
+      severity: 'error',
+      title: 'Queue plan refused: targets outside the explicit selection',
+      description: `${containment.outside_selection_count} candidate target(s) fall outside the `
+        + `${containment.selected_property_count} explicitly selected propert(ies). No queue rows created.`,
+      metadata: containment,
+    }, deps).catch(() => { /* refusal must not depend on the audit write */ })
+
+    return {
+      ok: false,
+      status: 409,
+      error: 'TARGET_INTEGRITY_VIOLATION',
+      message: 'Refusing to queue: this campaign targets explicitly selected properties, and '
+        + `${containment.outside_selection_count} of ${containment.candidate_target_count} candidate targets are `
+        + 'outside that selection. Rebuild targeting from the stored definition before launching.',
+      campaign_id: campaignId,
+      blockers: ['target_integrity_violation'],
+      exact_blockers: ['target_integrity_violation'],
+      target_integrity: containment,
+      // Explicit zeroes: nothing was planned, created, or enqueued.
+      planned_target_count: 0,
+      targets_created: 0,
+      send_queue_rows_created: 0,
+      queue_rows_created: 0,
+      inserted_queue_rows: [],
+    }
+  }
+
   const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
   const hydrateNoSend = writeMode.hydrateNoSend
   const isLiveSendWrite = writeMode.isLiveSendWrite
@@ -7273,6 +7569,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       owner: executionLock.owner,
     },
     duplicate_protection: duplicateProtection,
+    /**
+     * Reported on SUCCESS as well as refusal, so "the containment guard ran
+     * and found nothing outside the selection" is a positive fact rather than
+     * something inferred from the absence of an error.
+     */
+    target_integrity: containment,
     total_ready_targets: readyTargets.length,
     planned_target_count: scheduledItems.length,
     targets_created: launchSummary.targets_created,

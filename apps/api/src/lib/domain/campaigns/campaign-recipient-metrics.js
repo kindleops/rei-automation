@@ -165,6 +165,40 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
 }
 
 /**
+ * Grouped counts from the database. Returns null when the function is absent,
+ * so the caller can fall back rather than report zero.
+ */
+async function fetchTargetStatusCountsViaRpc(supabase, campaignIds) {
+  // A client without `.rpc` (or an environment without the function) must fall
+  // back to the row scan, not fail — the counts matter more than the shortcut.
+  if (typeof supabase?.rpc !== 'function') return null
+  const { data, error } = await supabase.rpc('campaign_target_status_counts', { p_campaign_ids: campaignIds })
+  if (error) {
+    // Missing function / no permission: fall back to the row scan. Any other
+    // error is a real failure and must not be mistaken for "no targets".
+    const message = String(error.message || '').toLowerCase()
+    const missing = error.code === 'PGRST202' || message.includes('does not exist') || message.includes('not find')
+    if (missing) return null
+    throw error
+  }
+  if (!Array.isArray(data)) return null
+
+  const byCampaign = new Map()
+  for (const row of data) {
+    const id = row.campaign_id
+    if (!byCampaign.has(id)) byCampaign.set(id, { statuses: {}, blocked: {}, total: 0 })
+    const bucket = byCampaign.get(id)
+    const n = Number(row.row_count || 0)
+    bucket.total += n
+    const status = clean(row.target_status) || 'unknown'
+    bucket.statuses[status] = (bucket.statuses[status] || 0) + n
+    const reason = clean(row.block_reason)
+    if (reason) bucket.blocked[reason] = (bucket.blocked[reason] || 0) + n
+  }
+  return byCampaign
+}
+
+/**
  * One page of the target scan. PostgREST enforces its own `db-max-rows`
  * server side, so a `.limit()` above it is silently ignored — the reason this
  * function has to page rather than ask for everything at once.
@@ -190,6 +224,21 @@ const TARGET_SCAN_PAGE = 1000
 export async function fetchCampaignTargetStatusCounts(campaignIds = [], deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   if (!campaignIds.length) return new Map()
+
+  /**
+   * Aggregate in the DATABASE first.
+   *
+   * The scan below is exact but pages every matching row into this process to
+   * group it — 2,578 rows on 2026-09-15 — and that was a dominant cost in the
+   * Campaign Command list response. `campaign_target_status_counts` does the
+   * GROUP BY in Postgres and returns 46 rows for the same answer.
+   *
+   * The row scan is kept as a fallback, not deleted: an environment without
+   * the function must still get CORRECT counts rather than none, and this is
+   * the surface where a silently-wrong count did real damage.
+   */
+  const viaRpc = await fetchTargetStatusCountsViaRpc(supabase, campaignIds)
+  if (viaRpc) return viaRpc
 
   const byCampaign = new Map()
   const MAX_PAGES = 500

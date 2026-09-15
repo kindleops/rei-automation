@@ -51,6 +51,67 @@ const rowsFor = (spec) => {
   return out;
 };
 
+/**
+ * The database-side aggregate. Returns grouped rows, which is what makes the
+ * list fast without going back to sampling: 46 grouped rows replaced 2,575 raw
+ * ones, and the totals must agree exactly.
+ */
+function fakeSupabaseWithRpc(groups) {
+  return {
+    rpc: async (name, args) => {
+      if (name !== 'campaign_target_status_counts') return { data: null, error: { message: 'unknown function' } }
+      const wanted = new Set(args.p_campaign_ids)
+      return { data: groups.filter((g) => wanted.has(g.campaign_id)), error: null }
+    },
+    from() { throw new Error('the RPC path must not fall back to a row scan') },
+  }
+}
+
+test('prefers the database aggregate and reports it exactly', async () => {
+  const counts = await fetchCampaignTargetStatusCounts(['a', 'b'], {
+    supabase: fakeSupabaseWithRpc([
+      { campaign_id: 'a', target_status: 'ready', block_reason: null, row_count: 1500 },
+      { campaign_id: 'a', target_status: 'blocked', block_reason: 'missing_identity_linkage', row_count: 78 },
+      { campaign_id: 'b', target_status: 'ready', block_reason: null, row_count: 1000 },
+    ]),
+  })
+  assert.equal(counts.get('a').total, 1578)
+  assert.equal(counts.get('b').total, 1000)
+  assert.deepEqual(counts.get('a').statuses, { ready: 1500, blocked: 78 })
+  assert.deepEqual(counts.get('a').blocked, { missing_identity_linkage: 78 })
+  // 2,578 rows in one grouped answer — the point of the aggregate.
+  const grand = [...counts.values()].reduce((n, b) => n + b.total, 0)
+  assert.equal(grand, 2578)
+})
+
+test('falls back to an exact row scan when the aggregate is unavailable', async () => {
+  // A client with no `.rpc` stands in for an environment without the function.
+  const rows = rowsFor([['a', 1578], ['b', 1000]])
+  const client = fakeSupabase({ rows, maxRows: 1000 })
+  const counts = await fetchCampaignTargetStatusCounts(['a', 'b'], { supabase: client })
+  assert.equal(counts.get('a').total, 1578, 'the fallback must stay exact, not sampled')
+  assert.equal(counts.get('b').total, 1000)
+  assert.ok(client.calls.length > 1, 'the fallback still has to page')
+})
+
+test('a failing aggregate never reports zero targets', async () => {
+  const broken = {
+    rpc: async () => ({ data: null, error: { code: '42501', message: 'permission denied for function' } }),
+    from() { throw new Error('unreachable') },
+  }
+  // PostgREST errors are plain objects, not Error instances, so the rejection
+  // value is asserted directly rather than by message pattern.
+  await assert.rejects(
+    () => fetchCampaignTargetStatusCounts(['a'], { supabase: broken }),
+    (thrown) => {
+      assert.equal(thrown.code, '42501')
+      assert.match(String(thrown.message), /permission denied/)
+      return true
+    },
+    'a real aggregate failure must surface, not silently become an empty count',
+  )
+})
+
 test('counts every target row even when the corpus exceeds one server page', async () => {
   // 2,578 rows across two campaigns — the production shape that produced 1000.
   const rows = rowsFor([['a', 1578], ['b', 1000]]);

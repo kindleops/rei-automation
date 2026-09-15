@@ -57,6 +57,9 @@ export interface CampaignSummary {
   total_targets: number
   /** True when metadata.target_filters is non-empty — a definition exists even if no build has resolved it. */
   has_target_definition?: boolean
+  /** True when the campaign is quarantined for a target-integrity violation. §4 */
+  quarantined?: boolean
+  quarantine_reason?: string | null
   /** Explicit = a pinned id list; dynamic = a query re-resolved at build time. §3 */
   target_mode?: 'explicit' | 'explicit_filtered' | 'dynamic' | 'none'
   /** How many identities the operator pinned. Null for a dynamic cohort. */
