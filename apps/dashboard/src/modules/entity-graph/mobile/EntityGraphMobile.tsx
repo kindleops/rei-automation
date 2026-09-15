@@ -1011,6 +1011,7 @@ export function EntityGraphMobile({
         open={campaignOpen}
         scope={scope}
         filters={filters}
+        fieldFilters={fieldFilters}
         query={debouncedQuery}
         cohortTotal={lensTotalForCampaign}
         selected={selectedResults}

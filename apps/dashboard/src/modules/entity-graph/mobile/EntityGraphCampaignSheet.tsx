@@ -5,6 +5,11 @@ import * as backendClient from '../../../lib/api/backendClient'
 import type { EntityGraphFilters, EntitySearchResult } from '../../../domain/entity-graph/entity-graph.types'
 import { cohortToCampaignFilters, describeCampaignFilters, unmappedCohortFilters } from './entity-graph-cohort'
 import type { EntityScope } from './entity-graph-mobile-format'
+import type {
+  EntityGraphFieldFilter,
+  EntityGraphFilterCatalog,
+} from '../../../domain/entity-graph/entity-graph-field-filters'
+import { fetchEntityGraphFilterCatalog } from '../../../domain/entity-graph/entity-graph-field-filters'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -42,6 +47,7 @@ type Props = {
   open: boolean
   scope: EntityScope
   filters: EntityGraphFilters
+  fieldFilters: EntityGraphFieldFilter[]
   query: string
   cohortTotal: number | null
   selected: EntitySearchResult[]
@@ -53,12 +59,17 @@ export function EntityGraphCampaignSheet({
   open,
   scope,
   filters,
+  fieldFilters,
   query,
   cohortTotal,
   selected,
   onClose,
   onDone,
 }: Props) {
+  // The catalog decides which field filters the campaign pipeline can resolve.
+  // Without it we report every field filter as not-carrying rather than
+  // assuming it will -- an assumed filter is how a cohort silently widens.
+  const [catalog, setCatalog] = useState<EntityGraphFilterCatalog | null>(null)
   const [mode, setMode] = useState<HandoffMode>(selected.length > 0 ? 'selection' : 'cohort')
   const [target, setTarget] = useState<'new' | string>('new')
   const [name, setName] = useState('')
@@ -83,14 +94,30 @@ export function EntityGraphCampaignSheet({
     if (!open) return
     const controller = new AbortController()
     void loadDraftCampaigns(controller.signal).then(setDrafts).catch(() => setDrafts([]))
+    void fetchEntityGraphFilterCatalog(scope, controller.signal)
+      .then(setCatalog)
+      .catch(() => setCatalog(null))
     return () => controller.abort()
-  }, [open])
+  }, [open, scope])
 
-  const campaignFilters = cohortToCampaignFilters({ scope, filters, mode, selected })
+  const campaignFilters = cohortToCampaignFilters({ scope, filters, fieldFilters, catalog, mode, selected })
   const described = describeCampaignFilters(campaignFilters)
-  const unmapped = mode === 'cohort' ? unmappedCohortFilters(filters) : []
+  const unmapped = mode === 'cohort' ? unmappedCohortFilters(filters, fieldFilters, catalog) : []
   const targetCount = mode === 'selection' ? selected.length : cohortTotal
   const unsupported = mode === 'cohort' && campaignFilters.length === 0 && !query
+  /**
+   * When a filter does not carry, the number on this screen is NOT the number
+   * Campaigns will resolve. Saying "Create draft · 11" beside a filter set that
+   * resolves to 8,283 is the same lie in the other direction as the handoff
+   * that showed 0 targets for five selected properties -- so the count is
+   * withheld rather than restated.
+   */
+  const countIsExact = mode === 'selection' || unmapped.length === 0
+  const countLabel = targetCount === null
+    ? '—'
+    : countIsExact
+      ? targetCount.toLocaleString()
+      : `wider than ${targetCount.toLocaleString()}`
 
   const submit = async () => {
     setSubmitting(true)
@@ -165,6 +192,7 @@ export function EntityGraphCampaignSheet({
               </span>
               <span className="egc-mode__count">
                 {cohortTotal === null ? '—' : cohortTotal.toLocaleString()} records
+                {unmapped.length > 0 ? ' shown · campaign resolves more' : ''}
               </span>
               <span className="egc-mode__note">
                 Hands over the filter set. Campaigns re-resolves it at build time, so
@@ -285,8 +313,8 @@ export function EntityGraphCampaignSheet({
             {submitting
               ? 'Saving…'
               : target === 'new'
-                ? `Create draft · ${targetCount === null ? '—' : targetCount.toLocaleString()}`
-                : `Apply to draft · ${targetCount === null ? '—' : targetCount.toLocaleString()}`}
+                ? `Create draft · ${countLabel}`
+                : `Apply to draft · ${countLabel}`}
           </button>
         </div>
       </div>
