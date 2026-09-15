@@ -2,7 +2,14 @@ import { asString } from '../../lib/data/shared'
 import type { ThreadMessage, ThreadIntelligenceRecord } from '../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 
-const GOOGLE_MAPS_API_KEY = (import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY
+/**
+ * Config is the only source. Both URL builders below used to fall back to a
+ * literal key, so they produced a working billed URL with no environment at
+ * all. They now return null, and every caller already treats null as "no
+ * imagery".
+ */
+const GOOGLE_MAPS_API_KEY =
+  ((import.meta.env as Record<string, string | undefined>).VITE_GOOGLE_MAPS_API_KEY || '').trim()
 
 export interface NormalizedPropertySnapshot {
   // Property Identity
@@ -116,7 +123,10 @@ export const buildStreetViewUrl = (
   lat?: number | null,
   lng?: number | null,
 ): string | null => {
-  const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
+  const apiKey = GOOGLE_MAPS_API_KEY
+  // Fail closed: no key configured means no Maps URL, not a request with a
+  // checked-in credential.
+  if (!apiKey) return null
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
   const location = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
   if (!location) return null
@@ -129,7 +139,10 @@ export const buildAerialViewUrl = (
   lat?: number | null,
   lng?: number | null,
 ): string | null => {
-  const apiKey = GOOGLE_MAPS_API_KEY || 'AIzaSyAhOk7KZkduU4qywmrlq5ZqSOtgktHYiFk'
+  const apiKey = GOOGLE_MAPS_API_KEY
+  // Fail closed: no key configured means no Maps URL, not a request with a
+  // checked-in credential.
+  if (!apiKey) return null
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.001 && Math.abs(Number(lng)) > 0.001
   const center = hasCoords ? `${lat},${lng}` : (address ? encodeURIComponent(address) : null)
   if (!center) return null

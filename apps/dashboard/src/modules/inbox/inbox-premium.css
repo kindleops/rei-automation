@@ -26002,3 +26002,101 @@ no clipping */
 
 .nx-row25__footer .nx-card-state { min-width: 0; flex: 1 1 auto; }
 .nx-row25__footer .nx-card-stage { flex: 0 0 auto; margin-inline-start: auto; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LIGHT-MODE SECONDARY TEXT CONTRAST — INBOX-FINAL-HARDEN-2 §2
+   ══════════════════════════════════════════════════════════════════════════
+   The light-mode card is NOT the dark-surface/light-text mismatch I reported
+   in the previous phase. Measured against the real painted background
+   (.nx-sidebar-rebuilt, rgb(255,255,255)) at 390x844:
+
+     seller name   21.0:1      chips        17.9:1
+     preview       17.0:1      tile value   17.9:1
+     address        7.6:1      tile equity   7.2:1
+     stage badge    6.7:1      tile type     6.7:1
+     message state  5.3:1
+
+   Two were genuinely thin, and only these two are touched:
+
+     timestamp      3.0:1  ->  the row time inherits --nx-ib-text-3, which is
+                              tuned for a dark surface
+     tile market    3.5:1  ->  slate at 62% alpha on pale glass
+
+   Both are small secondary metadata rather than body text, but the timestamp
+   is something an operator reads on every row, so it gets real contrast.
+   Dark mode is deliberately untouched.
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-nexus-theme='light'] .nx-premium-inbox .nx-row25__time,
+[data-nexus-theme='light'] .nx-premium-inbox .nx-thread-card-rebuilt__time {
+  color: rgba(51, 65, 85, 0.94);
+}
+
+[data-nexus-theme='light'] .nx-pst__market {
+  color: rgba(30, 41, 59, 0.82);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DEFERRED PROPERTY IMAGERY POSTER — INBOX-FINAL-HARDEN-2 §3
+   ══════════════════════════════════════════════════════════════════════════
+   Deal Intelligence mounts by default in the desktop Inbox workspace, so its
+   Street View + aerial embeds were instantiating on Inbox boot: 17 maps
+   requests including maps/api/js, streetview.js, imagery_viewer.js, two
+   SingleImageSearch POSTs and GeoPhotoService.GetMetadata.
+
+   The imagery is not removed — it is deferred behind this poster, which is a
+   PropertySignalTile and therefore costs nothing. One click loads the real
+   embeds; choosing the Street or Aerial tab does the same, because that IS the
+   operator asking.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-prop-media-panel.is-poster,
+.nx-property-hero-cinematic__poster {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--nx-hairline, rgba(148, 163, 184, 0.18));
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  appearance: none;
+}
+
+.nx-prop-media-panel.is-poster:hover,
+.nx-property-hero-cinematic__poster:hover {
+  border-color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.42);
+}
+
+.nx-prop-media-panel.is-poster .nx-pst,
+.nx-property-hero-cinematic__poster .nx-pst {
+  flex: 1 1 auto;
+  min-height: 96px;
+}
+
+.nx-prop-media-poster__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.94);
+  background: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.08);
+  border-top: 1px solid rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.16);
+}
+
+.nx-prop-media-poster__cta svg { width: 12px; height: 12px; }
+
+[data-nexus-theme='light'] .nx-prop-media-poster__cta {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.07);
+  border-top-color: rgba(37, 99, 235, 0.18);
+}
