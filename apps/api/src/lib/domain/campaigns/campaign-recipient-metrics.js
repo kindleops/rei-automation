@@ -165,6 +165,36 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
 }
 
 /**
+ * Per-campaign send_queue status counts — provider truth for sent, delivered
+ * and failed. Returns null when the aggregate is unavailable, so the caller
+ * falls back to the (weaker) target-status derivation rather than reporting
+ * zero sends for a campaign that has sent.
+ */
+export async function fetchCampaignSendStateCounts(campaignIds = [], deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  if (!campaignIds.length) return new Map()
+  if (typeof supabase?.rpc !== 'function') return null
+  const { data, error } = await supabase.rpc('campaign_send_state_counts', { p_campaign_ids: campaignIds })
+  if (error) {
+    const message = String(error.message || '').toLowerCase()
+    const missing = error.code === 'PGRST202' || message.includes('does not exist') || message.includes('not find')
+    if (missing) return null
+    throw error
+  }
+  if (!Array.isArray(data)) return null
+
+  const byCampaign = new Map()
+  for (const row of data) {
+    const id = row.campaign_id
+    if (!byCampaign.has(id)) byCampaign.set(id, {})
+    const bucket = byCampaign.get(id)
+    const status = clean(row.queue_status) || 'unknown'
+    bucket[status] = (bucket[status] || 0) + Number(row.row_count || 0)
+  }
+  return byCampaign
+}
+
+/**
  * Grouped counts from the database. Returns null when the function is absent,
  * so the caller can fall back rather than report zero.
  */

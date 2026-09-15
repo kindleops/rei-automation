@@ -5338,7 +5338,33 @@ export function resolveCampaignTargetMode(metadata = {}) {
   return { target_mode: 'dynamic', explicit_target_count: null }
 }
 
-function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null, executionProof = null) {
+/**
+ * Sent / delivered / failed from PROVIDER TRUTH.
+ *
+ * These used to be derived from campaign_targets statuses, which are
+ * build-time readiness values that never become sent or delivered — so
+ * "Miami - Test Campaign" reported 0 sent / 0 delivered / 0 failed while
+ * send_queue held 3 sent, 351 delivered and 30 failed. Under-reporting is
+ * still a count lie, and the mobile detail showed "No sends yet" for a
+ * campaign that had delivered 351 messages.
+ *
+ * `sent` is a dispatched SUPERSET of `delivered`: a delivered message was
+ * necessarily sent, so it counts in both. Delivery is only ever claimed from a
+ * provider-confirmed `delivered` row — never inferred from a queued or sent
+ * one.
+ */
+function resolveSendStateCounts(sendBucket = null) {
+  if (!sendBucket) return null
+  const n = (key) => Number(sendBucket[key] || 0)
+  const delivered = n('delivered')
+  return {
+    delivered,
+    sent: n('sent') + delivered,
+    failed: n('failed') + n('failed_transport'),
+  }
+}
+
+function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null, executionProof = null, sendBucket = null) {
   const status = clean(campaign.status || 'draft')
   const counts = countBucket?.statuses ? { ...countBucket.statuses } : {}
   const blockedByReason = countBucket?.blocked ? { ...countBucket.blocked } : {}
@@ -5352,14 +5378,20 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
   const ready = Number(counts.ready || 0)
   const planned = Number(counts.planned || 0)
   const queued = Number(counts.queued || 0)
-  const sent = Number(counts.sent || 0) + Number(counts.delivered || 0)
-  const delivered = Number(counts.delivered || 0)
-  const failedTarget = Number(counts.failed || 0)
+  // send_queue is authoritative where available; the target-status derivation
+  // remains only as a fallback for an environment without the aggregate.
+  const sendState = resolveSendStateCounts(sendBucket)
+  const sent = sendState ? sendState.sent : Number(counts.sent || 0) + Number(counts.delivered || 0)
+  const delivered = sendState ? sendState.delivered : Number(counts.delivered || 0)
+  const failedTarget = sendState ? sendState.failed : Number(counts.failed || 0)
   const proof = executionProof || {}
   const liveQueued = Number(proof.queued_rows ?? queued)
   const liveScheduled = Number(proof.scheduled_queue_rows ?? 0)
   const scopedFailed = Number(proof.failed_execution_rows ?? failedTarget)
-  const failed = scopedFailed
+  // `failed` is provider truth where available; `scopedFailed` stays the
+  // execution-scoped figure the proof reports, which answers a different
+  // question and must not be conflated with it.
+  const failed = sendState ? sendState.failed : scopedFailed
   const nextWindow = windows
     .filter((window) => ['planned', 'open'].includes(clean(window.status)))
     .sort((left, right) => new Date(left.window_start_utc).getTime() - new Date(right.window_start_utc).getTime())[0] || null
@@ -5560,11 +5592,14 @@ export async function listCampaigns(deps = {}) {
   let windows = []
   let countMap = new Map()
   let proofByCampaign = new Map()
+  let sendStateMap = null
   if (ids.length) {
-    const { fetchCampaignTargetStatusCounts } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+    const { fetchCampaignTargetStatusCounts, fetchCampaignSendStateCounts } =
+      await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
     // Independent reads, so they run concurrently rather than in sequence.
-    const [counts, proofs, windowRes] = await Promise.all([
+    const [counts, sendStates, proofs, windowRes] = await Promise.all([
       phase('target_counts', () => fetchCampaignTargetStatusCounts(ids, deps)),
+      phase('send_state_counts', () => fetchCampaignSendStateCounts(ids, deps)),
       phase('execution_proof', () => fetchExecutionProofByCampaign(supabase, campaigns || [])),
       phase('send_windows', () => supabase
         .from('campaign_send_windows')
@@ -5574,6 +5609,7 @@ export async function listCampaigns(deps = {}) {
         .limit(1000)),
     ])
     countMap = counts
+    sendStateMap = sendStates
     proofByCampaign = proofs
     if (!windowRes.error) windows = windowRes.data || []
   }
@@ -5589,6 +5625,7 @@ export async function listCampaigns(deps = {}) {
       windows.filter((window) => window.campaign_id === campaign.id),
       countMap.get(campaign.id) || null,
       executionProof,
+      sendStateMap ? (sendStateMap.get(campaign.id) || {}) : null,
     )
     const operatorState = deriveOperatorState(campaign, executionProof || {}, {})
     summary.operator_state = operatorState
