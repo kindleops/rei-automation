@@ -25954,15 +25954,6 @@ no clipping */
    stripe is not worth destabilising the selection and bucket-accent styling
    that shares the property. */
 
-/* Open-conversation header signal tile — replaces .nx-conv-mobile-streetview */
-.nx-conv-mobile-signal {
-  width: 100%;
-  height: 92px;
-  border-radius: 12px;
-  overflow: hidden;
-  margin-block: 6px;
-}
-
 /* ── Light mode ─────────────────────────────────────────────────────────── */
 [data-nexus-theme='light'] .nx-card-state { color: rgba(51, 65, 85, 0.72); }
 [data-nexus-theme='light'] .nx-card-state.is-inbound-new { color: #0b6fb8; }

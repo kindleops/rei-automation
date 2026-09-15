@@ -7,8 +7,6 @@ import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../s
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
 import { buildPropertyExternalLinks } from '../../../domain/inbox/inbox-normalization'
-import { PropertySignalTile } from './PropertySignalTile'
-import { buildPropertySignalTileModel } from '../inbox-card-signals'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import type { PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
@@ -646,28 +644,23 @@ export const ChatThread = ({
   const zillowUrl = readString(thread, 'zillow_url', 'zillowUrl') || externalLinks.zillow
 
   /**
-   * NO STREET VIEW IN THE OPEN-THREAD HEADER.
+   * NO STREET VIEW IN THE OPEN-THREAD HEADER, AND NO TILE EITHER.
    *
    * This mounted a Street View Static <img> every time a thread was opened, on
-   * top of the one each list card already fired. The header's job is to say
-   * WHO and WHAT PROPERTY, and a 4:3 photo of a facade answers neither better
-   * than the asset class, value and equity do.
+   * top of the one each list card already fired. That image is gone.
    *
-   * `externalLinks.streetView` is a maps.google.com LINK, not an image request,
-   * so the operator can still jump to Street View deliberately. Street View
-   * imagery itself stays in Property / Deal / Comp Intelligence and Map.
+   * It is NOT replaced by a Property Signal Tile. The header already carries a
+   * property intelligence strip (.nx-conv-property-strip: market, asset class,
+   * equity, flags, status), so a tile beside it said everything twice —
+   * measured on Bertha A Daniels, the header read "SFR · 75% EQ · MIAMI, FL"
+   * in the tile and "Miami, FL · SFR · 75% · High Equity · Suppressed" in the
+   * strip. Strip everything the strip already states and the tile has nothing
+   * left but a glyph, which is decoration, not information.
+   *
+   * `externalLinks.streetView` is a maps.google.com LINK, not an image
+   * request, so the operator can still jump to Street View deliberately.
+   * Street View imagery stays in Property / Deal / Comp Intelligence and Map.
    */
-  const threadRowForTile = thread as unknown as Record<string, unknown>
-  const headerTileModel = buildPropertySignalTileModel({
-    propertyType: readString(thread, 'property_type', 'propertyType', 'normalized_asset_class'),
-    unitCount: readNumber(thread, 'units_count', 'unitsCount', 'number_of_units', 'numberOfUnits', 'unitCount'),
-    estimatedValue: readNumber(thread, 'estimated_value', 'estimatedValue'),
-    equityPercent: readNumber(thread, 'equity_percent', 'equityPercent'),
-    market: readString(thread, 'market', 'displayMarket'),
-    city: readString(thread, 'property_address_city', 'propertyAddressCity', 'city'),
-    state: readString(thread, 'property_address_state', 'propertyAddressState', 'state'),
-  })
-  void threadRowForTile
 
   const renderHeaderActions = (withLabels = false, includeZillow = false) => (
     <>
@@ -758,9 +751,7 @@ export const ChatThread = ({
                 {renderHeaderActions(true, true)}
               </MobileHeaderActionsMenu>
             </div>
-            <div className="nx-conv-mobile-signal">
-              <PropertySignalTile model={headerTileModel} size="header" />
-            </div>
+
             <div className="nx-conv-mobile-identity">
               <h2 className="nx-conv-seller-name nx-conv-seller-name--mobile">{prospectName}</h2>
               {propertyAddress ? (
