@@ -86,7 +86,14 @@ export function PipelineMobileCommandBar({
           className={cls('plm-icon-btn', searchOpen && 'is-on')}
           aria-label="Search pipeline"
           aria-expanded={searchOpen}
-          onClick={() => setSearchOpen((v) => !v)}
+          /* Collapsing the box CLEARS the query. Leaving it applied with the
+             input hidden left the operator looking at a narrowed board with no
+             visible cause — the same class of lie as showing a scope count as
+             a search result. */
+          onClick={() => setSearchOpen((v) => {
+            if (v && query) onQueryChange('')
+            return !v
+          })}
         >
           <Icon name="search" />
         </button>

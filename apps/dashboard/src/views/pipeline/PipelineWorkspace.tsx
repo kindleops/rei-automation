@@ -97,6 +97,11 @@ export function PipelineWorkspace({
     moveStatus,
     moveTemperature,
     refresh,
+    query,
+    setQuery,
+    searchActive,
+    searchPending,
+    appliedQuery,
   } = usePipelineOpportunities({ enabled: true })
 
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(() => {
@@ -329,6 +334,11 @@ export function PipelineWorkspace({
       metrics={metrics}
       globalTotal={globalTotal}
       scopedTotal={scopedTotal}
+      query={query}
+      onQueryChange={setQuery}
+      searchActive={searchActive}
+      searchPending={searchPending}
+      appliedQuery={appliedQuery}
       scope={scope}
       onScopeChange={setScope}
       savedViews={savedViews}

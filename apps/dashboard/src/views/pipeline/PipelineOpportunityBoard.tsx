@@ -68,6 +68,9 @@ const MOBILE_SCOPE_LABELS: Record<string, string> = {
   closed: 'Closed',
 }
 
+/** Names the searched set, so "Searched every Dead opportunity" reads truthfully. */
+const scopeLabelFor = (scope: string) => MOBILE_SCOPE_LABELS[scope] ?? scope.replace(/_/g, ' ')
+
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 const COLLAPSED_LANES_KEY = 'pipeline_collapsed_lanes_v1'
@@ -112,6 +115,12 @@ interface PipelineOpportunityBoardProps {
   metrics: PipelineMetrics | null
   globalTotal?: number
   scopedTotal?: number
+  /** Server-backed search state, owned by usePipelineOpportunities. */
+  query?: string
+  onQueryChange?: (value: string) => void
+  searchActive?: boolean
+  searchPending?: boolean
+  appliedQuery?: string
   scope?: PipelineScope
   onScopeChange?: (scope: PipelineScope) => void
   savedViews?: PipelineSavedView[]
@@ -156,6 +165,11 @@ export function PipelineOpportunityBoard({
   metrics,
   globalTotal = 0,
   scopedTotal = 0,
+  query = '',
+  onQueryChange,
+  searchActive = false,
+  searchPending = false,
+  appliedQuery = '',
   scope = 'active',
   onScopeChange,
   savedViews = [],
@@ -193,7 +207,6 @@ export function PipelineOpportunityBoard({
   onMoveTemperature,
   onApplySavedView,
 }: PipelineOpportunityBoardProps) {
-  const [query, setQuery] = useState('')
   const [hotOnly, setHotOnly] = useState(false)
   const [followUpOnly, setFollowUpOnly] = useState(false)
   // Mobile board filter/sort state. One object so the quick-filter chips and the
@@ -363,23 +376,28 @@ export function PipelineOpportunityBoard({
    */
   const loadedShortOfScope = scopedTotal > 0 && opportunities.length > 0 && opportunities.length < scopedTotal
 
+  /**
+   * NO CLIENT-SIDE QUERY FILTER — §1.
+   *
+   * The rows in `allCards` are already the server's answer to scope AND query.
+   * Re-filtering them here would DROP real matches, because the server also
+   * searches fields the card does not carry: `latest_message_preview`,
+   * `primary_thread_key` (the phone), `primary_property_id` and the
+   * opportunity id. A phone-number search returned rows the old client filter
+   * then deleted. Same reasoning as the certified Inbox search.
+   *
+   * The remaining predicates are operator refinements over the returned set,
+   * not a second search authority.
+   */
   const scopedCards = useMemo(() => {
-    const q = query.trim().toLowerCase()
     return allCards
       .filter((c) => {
         if (hideSuppressedEffective && c.suppressed) return false
         if (hotOnly && resolveTemperature(c.opp) !== 'hot') return false
         if (followUpOnly && !c.followUpDue) return false
-        if (!q) return true
-        return [
-          c.opp.seller_display_name,
-          c.opp.property_address_full,
-          c.opp.market,
-          c.opp.latest_intent,
-          c.opp.next_action,
-        ].some((s) => String(s ?? '').toLowerCase().includes(q))
+        return true
       })
-  }, [allCards, query, hideSuppressedEffective, hotOnly, followUpOnly])
+  }, [allCards, hideSuppressedEffective, hotOnly, followUpOnly])
 
   /**
    * The mobile universe. Everything downstream — stage counts, the rendered
@@ -448,10 +466,65 @@ export function PipelineOpportunityBoard({
 
   const panelOpportunity = selectedOpportunity ?? selectedCard?.opp ?? null
 
+  /**
+   * The first stage the operator lands on must be one that has leads in it.
+   *
+   * This used to fall back to `displayStageModels[0]` — S1 — whatever its
+   * count. The Suppressed scope holds 156 opportunities in S2 and S10 and none
+   * in S1, so arriving there showed an EMPTY list under a header reading 156.
+   * Dead (348) and Closed (476) landed the same way. The counts were right and
+   * the board was still useless, which is the same defect the stage-refocus
+   * effect below was written for — it just never covered arrival.
+   */
+  const firstPopulatedStageId = useCallback(() => {
+    const populated = displayStageModels.find((s) => s.count > 0)
+    return (populated ?? displayStageModels[0])?.def.id ?? ''
+  }, [displayStageModels])
+
+  /**
+   * Keep landing on a populated stage until the operator picks one themselves.
+   *
+   * A single arrival effect is not enough: on the first render the rows have
+   * not arrived, every stage count is 0, and "the first populated stage" is
+   * just S1. Once the data lands the active stage is a VALID id, so a
+   * fire-once-on-invalid-id effect never runs again — which is how Suppressed
+   * (156 rows, none in S1) showed an empty list under a header reading 156,
+   * and Dead (348) and Closed (476) did the same.
+   *
+   * Re-evaluating on every count change fixes that, and the manual-choice
+   * latch is what stops it from fighting the operator: a deliberate tap on a
+   * zero-count stage must stick, including through a realtime refresh.
+   */
+  const stageChosenByOperator = useRef(false)
+  const chooseStage = useCallback((id: string) => {
+    stageChosenByOperator.current = true
+    setActiveStageId(id)
+  }, [])
+
   useEffect(() => {
-    if (displayStageModels.some((s) => s.def.id === activeStageId)) return
-    setActiveStageId(displayStageModels[0]?.def.id ?? '')
-  }, [activeStageId, displayStageModels])
+    if (displayStageModels.length === 0) return
+    const active = displayStageModels.find((s) => s.def.id === activeStageId)
+    if (!active) {
+      setActiveStageId(firstPopulatedStageId())
+      return
+    }
+    if (stageChosenByOperator.current) return
+    if (active.count > 0) return
+    const populated = firstPopulatedStageId()
+    if (populated && populated !== activeStageId) setActiveStageId(populated)
+  }, [activeStageId, displayStageModels, firstPopulatedStageId])
+
+  /**
+   * Changing scope is a fresh arrival: it releases the latch so the operator
+   * is landed somewhere useful in the new scope rather than kept on a stage
+   * that is empty there.
+   */
+  const lastScopeRef = useRef(scope)
+  useEffect(() => {
+    if (lastScopeRef.current === scope) return
+    lastScopeRef.current = scope
+    stageChosenByOperator.current = false
+  }, [scope])
 
   /**
    * Land the operator somewhere with leads in it.
@@ -464,8 +537,14 @@ export function PipelineOpportunityBoard({
    *
    * Only fires on a genuinely empty active stage, so a deliberate tap on a
    * zero-count stage is never overridden.
+   *
+   * A SEARCH is the same failure mode and now shares the mechanism: q=Frauli
+   * returned its one real match into a stage the operator was not looking at,
+   * so the board read "1 match" above an empty list. Keyed on the APPLIED
+   * query (the one the current rows answer), not the keystroke, so the stage
+   * moves once per settled search rather than mid-typing.
    */
-  const filterSignature = `${activeFilterCount(mobileFilters)}:${JSON.stringify(mobileFilters)}`
+  const filterSignature = `${activeFilterCount(mobileFilters)}:${JSON.stringify(mobileFilters)}:q=${appliedQuery}`
   const lastFilterSignature = useRef(filterSignature)
   useEffect(() => {
     if (!isMobile) return
@@ -752,7 +831,7 @@ export function PipelineOpportunityBoard({
           }))}
           onScopeChange={(id) => onScopeChange?.(id as typeof scope)}
           query={query}
-          onQueryChange={setQuery}
+          onQueryChange={onQueryChange ?? (() => {})}
           refreshing={refreshing}
         />
 
@@ -800,14 +879,36 @@ export function PipelineOpportunityBoard({
             count: st.count,
           }))}
           activeId={activeStageId}
-          onSelect={setActiveStageId}
+          onSelect={chooseStage}
         />
 
         <div className="plm-list">
+          {/* §3 — a search states its own result count, never the scope's. */}
+          {searchActive ? (
+            <div className="plm-searchstate" role="status" aria-live="polite">
+              {searchPending ? (
+                <strong>Searching…</strong>
+              ) : (
+                <strong>
+                  {scopedTotal} {scopedTotal === 1 ? 'match' : 'matches'} for “{query.trim()}”
+                </strong>
+              )}
+              <span>
+                Searched the whole {scopeLabelFor(scope).toLowerCase()} scope on the server — not just the loaded page.
+              </span>
+            </div>
+          ) : null}
           {loadedShortOfScope ? (
             <div className="plm-truncated" role="status">
-              <strong>Showing {opportunities.length} of {scopedTotal}</strong>
-              <span>This scope is larger than one load, so the counts below describe the {opportunities.length} loaded. Narrow the scope to see exact numbers.</span>
+              <strong>
+                Showing {opportunities.length} of {scopedTotal}
+                {searchActive ? ' matches' : ''}
+              </strong>
+              <span>
+                {searchActive
+                  ? `More than one page of opportunities match. The counts below describe the ${opportunities.length} loaded — narrow the search to see them all.`
+                  : `This scope is larger than one load, so the counts below describe the ${opportunities.length} loaded. Narrow the scope to see exact numbers.`}
+              </span>
             </div>
           ) : null}
           {loading && opportunities.length === 0 ? (
@@ -819,14 +920,27 @@ export function PipelineOpportunityBoard({
             // Compact on purpose: an empty stage must not push the spine off
             // screen, because the spine is how you leave the empty stage.
             <div className="plm-empty" role="status">
-              <strong>No leads in {activeStage?.def.label ?? 'this stage'}</strong>
-              {activeFilterCount(mobileFilters) > 0 ? (
-                <button type="button" className="plm-empty__clear"
-                  onClick={() => setMobileFilters(EMPTY_FILTERS)}>
-                  Clear filters
-                </button>
+              {/* During a search the scope is not the thing to widen — naming
+                  the query is what tells the operator why the list is empty. */}
+              {searchActive ? (
+                <>
+                  <strong>No {scopeLabelFor(scope)} opportunity matches “{appliedQuery}”</strong>
+                  <button type="button" className="plm-empty__clear" onClick={() => onQueryChange?.('')}>
+                    Clear search
+                  </button>
+                </>
               ) : (
-                <span>Pick another stage above or widen the scope.</span>
+                <>
+                  <strong>No leads in {activeStage?.def.label ?? 'this stage'}</strong>
+                  {activeFilterCount(mobileFilters) > 0 ? (
+                    <button type="button" className="plm-empty__clear"
+                      onClick={() => setMobileFilters(EMPTY_FILTERS)}>
+                      Clear filters
+                    </button>
+                  ) : (
+                    <span>Pick another stage above or widen the scope.</span>
+                  )}
+                </>
               )}
             </div>
           ) : null}
@@ -927,7 +1041,7 @@ export function PipelineOpportunityBoard({
         </div>
         <div className="plv-stage-chips plv-stage-chips--sm">
           {displayStageModels.map((s) => (
-            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.count === 0 && 'is-empty', s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
+            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.count === 0 && 'is-empty', s.def.id === activeStageId && 'is-active')} onClick={() => chooseStage(s.def.id)}>
               {s.def.label} <span className="plv-stage-chip__count">{s.count}</span>
             </button>
           ))}
@@ -964,7 +1078,7 @@ export function PipelineOpportunityBoard({
         </div>
         <div className="plv-stage-chips plv-stage-chips--md">
           {displayStageModels.map((s) => (
-            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.count === 0 && 'is-empty', s.def.id === activeStageId && 'is-active')} onClick={() => setActiveStageId(s.def.id)}>
+            <button key={s.def.id} type="button" className={cls('plv-stage-chip', `is-${s.def.tone}`, s.count === 0 && 'is-empty', s.def.id === activeStageId && 'is-active')} onClick={() => chooseStage(s.def.id)}>
               {s.def.label} <span className="plv-stage-chip__count">{s.count}</span>
             </button>
           ))}
@@ -1013,7 +1127,7 @@ export function PipelineOpportunityBoard({
               type="search"
               className="plv-filters__input"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => onQueryChange?.(e.target.value)}
               placeholder="Seller, address, intent, action…"
             />
           </div>

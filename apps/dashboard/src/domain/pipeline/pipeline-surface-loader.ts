@@ -132,9 +132,13 @@ export async function loadPipelineBoardSurface(
   globalMetrics: PipelineMetrics
   views: PipelineSavedView[]
 }>> {
+  // The scoped metrics carry the query so the stage counts describe the MATCHES
+  // during a search, not the scope the search ran inside — /pipeline/counts runs
+  // the same applyFilters as the list, so one param is the whole mechanism.
+  // The global total deliberately does not: it is the book-wide number beside it.
   const [listRes, metricsRes, globalRes, viewsRes] = await Promise.all([
     loadPipelineOpportunitiesSurface(params),
-    loadPipelineMetricsSurface({ scope: params.scope }),
+    loadPipelineMetricsSurface({ scope: params.scope, q: params.q }),
     loadPipelineMetricsSurface({ scope: 'all' }),
     loadPipelineSavedViewsSurface(),
   ])

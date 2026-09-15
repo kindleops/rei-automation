@@ -1193,3 +1193,26 @@
 }
 [data-nexus-theme='light'] .plm-truncated strong { color: #1e293b; }
 [data-nexus-theme='light'] .plm-truncated span { color: rgba(30, 41, 59, 0.82); }
+
+/* §3 — a search reports its own result count. Distinct from .plm-truncated so
+   "3 matches" is never mistaken for a scope total. */
+.plm-searchstate {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 12px 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(56, 189, 248, 0.30);
+  background: rgba(56, 189, 248, 0.10);
+}
+
+.plm-searchstate strong { font-size: 12.5px; font-weight: 700; color: #bae6fd; }
+.plm-searchstate span { font-size: 11px; line-height: 1.35; color: rgba(226, 234, 248, 0.72); }
+
+[data-nexus-theme='light'] .plm-searchstate {
+  border-color: rgba(2, 132, 199, 0.28);
+  background: rgba(2, 132, 199, 0.08);
+}
+[data-nexus-theme='light'] .plm-searchstate strong { color: #075985; }
+[data-nexus-theme='light'] .plm-searchstate span { color: rgba(30, 41, 59, 0.82); }

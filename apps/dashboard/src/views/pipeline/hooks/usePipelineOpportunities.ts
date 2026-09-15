@@ -6,6 +6,7 @@ import {
   transitionPipelineTemperature,
 } from '../../../domain/pipeline/pipeline-opportunity-api'
 import { loadPipelineBoardSurface } from '../../../domain/pipeline/pipeline-surface-loader'
+import { buildPipelineQueryParams } from '../../../domain/pipeline/pipeline-query-params'
 import { subscribeToTableChanges } from '../../../lib/data/realtime'
 import type { OpsSurfaceErrorType } from '../../../domain/ops/ops-surface-result'
 import { patchLeadStateFromView } from '../../../domain/lead-state/persistUniversalLeadState'
@@ -53,16 +54,35 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
   const [errorType, setErrorType] = useState<OpsSurfaceErrorType | null>(null)
   const [retryable, setRetryable] = useState(true)
   const [total, setTotal] = useState(0)
+  /**
+   * SEARCH IS SERVER-SIDE — §1.
+   *
+   * The box used to narrow only the hydrated board. Scope `all` is 768
+   * opportunities against a 500-row response cap, so any match in the
+   * remaining 268 was unreachable: "Frauli" existed in the pipeline and the UI
+   * could not find it. The debounced value is the one that reaches the server,
+   * so a refetch happens per settled query rather than per keystroke.
+   */
+  const [query, setQueryState] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const initialLoadDone = useRef(false)
   const requestSeq = useRef(0)
 
-  const scopeParams = useMemo(() => {
-    const params: Record<string, string> = { scope: viewState.scope }
-    const hasFilters = viewState.filters.clauses.length > 0
-    if (hasFilters) params.filter_json = JSON.stringify(viewState.filters)
-    if (viewState.sorts.length > 0) params.sorts = JSON.stringify(viewState.sorts)
-    return params
-  }, [viewState.scope, viewState.filters, viewState.sorts])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  /**
+   * The server evaluates scope AND query together, so the two compose instead
+   * of "load the first 500, then filter in the browser". Clearing the query
+   * drops `q` and leaves `scope` untouched, which is what makes clearing a
+   * search return the operator to the scope they were in rather than Active.
+   */
+  const scopeParams = useMemo(
+    () => buildPipelineQueryParams(viewState, debouncedQuery),
+    [viewState, debouncedQuery],
+  )
 
   const setGroupBy = useCallback((mode: PipelineGroupByMode) => {
     setViewState((prev) => {
@@ -367,6 +387,13 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     errorType,
     retryable,
     total,
+    query,
+    setQuery: setQueryState,
+    /** True once the settled query has reached the server, not on first keypress. */
+    searchActive: debouncedQuery.length > 0,
+    /** The query the CURRENT rows answer — distinct from `query`, which is per keystroke. */
+    appliedQuery: debouncedQuery,
+    searchPending: query.trim() !== debouncedQuery,
     refresh,
     moveStage,
     moveStatus,

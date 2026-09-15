@@ -37,6 +37,15 @@ import {
 const TABLE = 'acquisition_opportunities';
 const HISTORY_TABLE = 'acquisition_opportunity_history';
 const THREAD_STATE_TABLE = 'deal_thread_state';
+/**
+ * City/state/ZIP are deliberately absent from the search clause: they are
+ * hydrated from `properties` AFTER this query (opportunity-property-hydration),
+ * so they are not columns here and cannot be filtered without a second query.
+ * They are already reachable because `property_address_full` carries them in
+ * its text — verified q=92335 -> 4 rows, q="Tx 77033" -> 6 rows.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
@@ -137,13 +146,19 @@ function applyFilters(query, params = {}) {
   const search = clean(params.q ?? params.search);
   if (search) {
     const like = `%${search}%`;
-    next = next.or([
+    const clauses = [
       `seller_display_name.ilike.${like}`,
       `property_address_full.ilike.${like}`,
       `latest_message_preview.ilike.${like}`,
       `market.ilike.${like}`,
+      // The phone. E.164 on the row, so a bare-digit query still substring-matches.
       `primary_thread_key.ilike.${like}`,
-    ].join(','));
+      `primary_property_id.ilike.${like}`,
+    ];
+    // `id` is a uuid, which PostgREST cannot ilike, and a partial uuid is not a
+    // meaningful operator query — so an opportunity id matches only whole.
+    if (UUID_PATTERN.test(search)) clauses.push(`id.eq.${search}`);
+    next = next.or(clauses.join(','));
   }
 
   const scope = clean(params.scope).toLowerCase();
