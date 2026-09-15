@@ -6,6 +6,7 @@ import {
   transitionPipelineTemperature,
 } from '../../../domain/pipeline/pipeline-opportunity-api'
 import { loadPipelineBoardSurface } from '../../../domain/pipeline/pipeline-surface-loader'
+import { subscribeToTableChanges } from '../../../lib/data/realtime'
 import type { OpsSurfaceErrorType } from '../../../domain/ops/ops-surface-result'
 import { patchLeadStateFromView } from '../../../domain/lead-state/persistUniversalLeadState'
 import { normalizeLifecycleStage } from '../../../domain/lead-state/universal-lead-state-registry'
@@ -218,6 +219,43 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
   }, [enabled, scopeParams, viewState.scope])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  /**
+   * LIVE UPDATES — §26.
+   *
+   * The board refreshed on mount and on an explicit operator action, and
+   * nothing else. So a seller replying, a backend classification advancing a
+   * stage, or a suppression landing while Pipeline was open left the card,
+   * the lane and the rail counts stale until a manual reload.
+   *
+   * Subscribed to the tables the opportunity row is actually derived from,
+   * through the SAME `subscribeToTableChanges` helper the Inbox uses — no
+   * second realtime system:
+   *
+   *   acquisition_opportunities  stage / status / next_action / automation
+   *   inbox_thread_state         the projection an operator move writes first
+   *   message_events             a new inbound, which changes disposition
+   *
+   * Coalesced behind a short timer because one inbound writes several of these
+   * rows in quick succession, and a refresh per row would stampede the counts
+   * endpoint (which takes ~11s on this dataset).
+   */
+  const refreshRef = useRef(refresh)
+  refreshRef.current = refresh
+  useEffect(() => {
+    if (!enabled) return undefined
+    let timer: number | null = null
+    const coalesced = () => {
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => { timer = null; void refreshRef.current() }, 1200)
+    }
+    const subs = ['acquisition_opportunities', 'inbox_thread_state', 'message_events']
+      .map((table) => subscribeToTableChanges(table, coalesced))
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+      subs.forEach((sub) => sub.unsubscribe())
+    }
+  }, [enabled])
 
   const patchOpportunity = useCallback((id: string, row: PipelineOpportunity) => {
     setOpportunities((rows) => rows.map((r) => (r.id === id ? row : r)))
