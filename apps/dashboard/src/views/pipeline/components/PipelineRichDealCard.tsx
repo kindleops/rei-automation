@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import type { PipelineOpportunity } from '../../../domain/pipeline/pipeline-opportunity.types'
 import {
   displayAos,
@@ -11,28 +10,9 @@ import {
   stageLabel,
 } from '../../../domain/pipeline/pipeline-display-helpers'
 import { resolveReplyAttentionState } from '../../../domain/pipeline/pipeline-field-resolver'
-import { InboxStreetViewThumb } from '../../../modules/inbox/components/InboxStreetViewThumb'
 import { formatRelativeTime } from '../../../shared/formatters'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
-
-function readMetaNumber(meta: Record<string, unknown>, keys: string[]): number | null {
-  for (const key of keys) {
-    const n = Number(meta[key])
-    if (Number.isFinite(n) && Math.abs(n) > 0.0001) return n
-  }
-  return null
-}
-
-function resolvePropertyMedia(opp: PipelineOpportunity) {
-  const meta = (opp.metadata ?? {}) as Record<string, unknown>
-  return {
-    address: opp.property_address_full,
-    lat: readMetaNumber(meta, ['property_latitude', 'latitude', 'lat']),
-    lng: readMetaNumber(meta, ['property_longitude', 'longitude', 'lng']),
-    cachedImage: String(meta.streetview_image ?? meta.streetviewImage ?? '').trim() || null,
-  }
-}
 
 function equityPctLabel(opp: PipelineOpportunity): string | null {
   const value = opp.estimated_value
@@ -70,16 +50,13 @@ export function PipelineRichDealCard({
   onDragEnd,
   onReplyAction,
 }: PipelineRichDealCardProps) {
-  const media = useMemo(() => resolvePropertyMedia(opp), [opp])
   const engineRunId = opp.acquisition_engine_run_id
   const temp = resolveTemperature(opp)
   const attention = resolveReplyAttentionState(opp)
   const due = isFollowUpDue(opp)
   const equityPct = equityPctLabel(opp)
-  const showMedia = tier !== '25'
   const showKpis = tier === '75' || tier === '100'
   const showPreview = tier !== '25'
-  const thumbSize = tier === '100' ? 'row' : 'header'
 
   const kpis = [
     { label: 'Value', value: displayCurrency(opp.estimated_value, { engineRunId }), tone: 'blue' },
@@ -109,20 +86,6 @@ export function PipelineRichDealCard({
       onDragEnd={mutableView ? onDragEnd : undefined}
     >
       <div className={cls('plv-card__accent', temp !== 'unknown' ? `is-${temp}` : 'is-stage')} />
-
-      {showMedia && (
-        <div className="plv-rich-card__media">
-          <InboxStreetViewThumb
-            address={media.address}
-            lat={media.lat}
-            lng={media.lng}
-            cachedImageUrl={media.cachedImage}
-            size={thumbSize}
-            className="plv-rich-card__streetview"
-          />
-          <span className="plv-rich-card__maps-attr" aria-hidden>Google</span>
-        </div>
-      )}
 
       <div className="plv-rich-card__body">
         <div className="plv-rich-card__eyebrow">

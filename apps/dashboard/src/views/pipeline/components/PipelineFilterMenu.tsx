@@ -11,10 +11,21 @@ interface PipelineFilterMenuProps {
   onGroupByChange: (mode: PipelineGroupByMode) => void
   hotOnly: boolean
   followUpOnly: boolean
-  showSuppressed: boolean
+  /**
+   * Opt-in SUBTRACTION of suppressed/dead rows from the loaded scope.
+   *
+   * Previously expressed as `showSuppressed` defaulting to false, which made
+   * hiding the silent default: the scope predicate selected 156 suppressed
+   * opportunities and the board then removed all 156 while the header went on
+   * reporting the canonical count. Stated as a subtraction, the neutral state
+   * is "nothing removed" and an engaged filter is visible in the pill count.
+   */
+  hideSuppressed: boolean
+  /** Hidden when the scope IS the suppressed/dead set — subtracting there empties it. */
+  suppressionFilterAvailable?: boolean
   onHotOnly: (value: boolean) => void
   onFollowUpOnly: (value: boolean) => void
-  onShowSuppressed: (value: boolean) => void
+  onHideSuppressed: (value: boolean) => void
   layout?: 'mobile' | 'desktop'
 }
 
@@ -22,7 +33,7 @@ function activeFilterCount(props: PipelineFilterMenuProps): number {
   let n = 0
   if (props.hotOnly) n++
   if (props.followUpOnly) n++
-  if (props.showSuppressed) n++
+  if (props.hideSuppressed && props.suppressionFilterAvailable !== false) n++
   return n
 }
 
@@ -32,10 +43,11 @@ export function PipelineFilterMenu(props: PipelineFilterMenuProps) {
     onGroupByChange,
     hotOnly,
     followUpOnly,
-    showSuppressed,
+    hideSuppressed,
+    suppressionFilterAvailable = true,
     onHotOnly,
     onFollowUpOnly,
-    onShowSuppressed,
+    onHideSuppressed,
     layout = 'mobile',
   } = props
 
@@ -55,9 +67,9 @@ export function PipelineFilterMenu(props: PipelineFilterMenuProps) {
     const parts = [groupLabel]
     if (hotOnly) parts.push('Hot')
     if (followUpOnly) parts.push('Due')
-    if (showSuppressed) parts.push('Suppressed')
+    if (hideSuppressed && suppressionFilterAvailable) parts.push('No suppressed')
     return parts.join(' · ')
-  }, [groupLabel, hotOnly, followUpOnly, showSuppressed])
+  }, [groupLabel, hotOnly, followUpOnly, hideSuppressed, suppressionFilterAvailable])
 
   const close = useCallback(() => setOpen(false), [])
 
@@ -173,13 +185,15 @@ export function PipelineFilterMenu(props: PipelineFilterMenuProps) {
               >
                 Follow-up due
               </button>
-              <button
-                type="button"
-                className={cls('occ-mpill', showSuppressed && 'is-active')}
-                onClick={() => onShowSuppressed(!showSuppressed)}
-              >
-                Show suppressed
-              </button>
+              {suppressionFilterAvailable && (
+                <button
+                  type="button"
+                  className={cls('occ-mpill', hideSuppressed && 'is-active')}
+                  onClick={() => onHideSuppressed(!hideSuppressed)}
+                >
+                  Hide suppressed
+                </button>
+              )}
             </div>
           </section>
         </div>

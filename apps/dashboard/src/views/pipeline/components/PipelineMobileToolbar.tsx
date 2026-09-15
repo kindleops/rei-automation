@@ -8,10 +8,11 @@ interface PipelineMobileToolbarProps {
   onGroupByChange: (mode: PipelineGroupByMode) => void
   hotOnly: boolean
   followUpOnly: boolean
-  showSuppressed: boolean
+  hideSuppressed: boolean
+  suppressionFilterAvailable?: boolean
   onHotOnly: (value: boolean) => void
   onFollowUpOnly: (value: boolean) => void
-  onShowSuppressed: (value: boolean) => void
+  onHideSuppressed: (value: boolean) => void
   resultCount: number
 }
 
@@ -22,10 +23,11 @@ export function PipelineMobileToolbar({
   onGroupByChange,
   hotOnly,
   followUpOnly,
-  showSuppressed,
+  hideSuppressed,
+  suppressionFilterAvailable = true,
   onHotOnly,
   onFollowUpOnly,
-  onShowSuppressed,
+  onHideSuppressed,
   resultCount,
 }: PipelineMobileToolbarProps) {
   return (
@@ -59,10 +61,11 @@ export function PipelineMobileToolbar({
           onGroupByChange={onGroupByChange}
           hotOnly={hotOnly}
           followUpOnly={followUpOnly}
-          showSuppressed={showSuppressed}
+          hideSuppressed={hideSuppressed}
+          suppressionFilterAvailable={suppressionFilterAvailable}
           onHotOnly={onHotOnly}
           onFollowUpOnly={onFollowUpOnly}
-          onShowSuppressed={onShowSuppressed}
+          onHideSuppressed={onHideSuppressed}
         />
       </div>
 

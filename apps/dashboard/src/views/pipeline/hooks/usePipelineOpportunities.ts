@@ -166,6 +166,12 @@ export function usePipelineOpportunities({ enabled = true }: UsePipelineOpportun
     let settled = false
     try {
       const surface = await loadPipelineBoardSurface({
+        // 500 is the server's MAX_LIMIT (opportunity-service.js), so asking for
+        // more returns the same page. Five of six scopes fit inside it and
+        // load whole, which is what lets their counts be exact. `all` is 768
+        // and genuinely cannot, so the board compares the loaded count against
+        // the canonical scope total and says "Showing 500 of 768" rather than
+        // presenting a prefix as the scope.
         limit: 500,
         hydrate_follow_up: false,
         ...scopeParams,

@@ -201,7 +201,7 @@ export function PipelineOpportunityBoard({
   const [mobileFilters, setMobileFilters] = useState<PipelineMobileFilters>(EMPTY_FILTERS)
   const [mobileSort, setMobileSort] = useState<PipelineMobileSortId>('recent')
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
-  const [showSuppressed, setShowSuppressed] = useState(false)
+  const [hideSuppressed, setHideSuppressed] = useState(false)
   const [activeStageId, setActiveStageId] = useState('')
   const [dragCardId, setDragCardId] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
@@ -243,13 +243,32 @@ export function PipelineOpportunityBoard({
    * Whether that property has an opportunity at all. `null` = no property was
    * requested, so there is nothing to answer.
    */
+  /**
+   * §14 is about ARRIVAL, so the claim is only made in the arrival state.
+   *
+   * My first version searched the currently-loaded `opportunities` and said
+   * "no opportunity exists" whenever it found none — which made the banner lie
+   * as soon as the operator changed scope. Switching to Suppressed showed
+   * "No acquisition opportunity exists for property 225438557" about David
+   * Larson, whose opportunity is real and active; it simply is not suppressed.
+   *
+   * Once the operator narrows the board themselves, an absent row means "not in
+   * this scope", which is their own doing and needs no announcement.
+   */
+  const scopeTouchedRef = useRef(false)
+  const arrivalScopeRef = useRef<string | null>(null)
+  if (arrivalScopeRef.current === null) arrivalScopeRef.current = String(viewState?.scope ?? '')
+  if (arrivalScopeRef.current !== String(viewState?.scope ?? '')) scopeTouchedRef.current = true
+
   const incomingPropertyMatch = useMemo(() => {
     if (!incomingPropertyId) return null
     const match = opportunities.find(
       (o) => String((o as unknown as Record<string, unknown>).primary_property_id ?? '') === incomingPropertyId,
     )
+    if (!match && scopeTouchedRef.current) return null
     return { propertyId: incomingPropertyId, opportunity: match ?? null }
-  }, [incomingPropertyId, opportunities])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingPropertyId, opportunities, viewState?.scope])
 
   /**
    * When the requested property DOES have an opportunity, move to its stage so
@@ -313,11 +332,42 @@ export function PipelineOpportunityBoard({
   /**
    * Scope + query, before the mobile filter/sort funnel. Desktop stops here.
    */
+  /**
+   * SCOPE IS THE MEMBERSHIP AUTHORITY — §31.9.
+   *
+   * `suppressed`, `dead` and `closed` scopes select exactly the rows this
+   * refinement removes, so applying it there subtracts the whole scope. The
+   * header kept reporting the canonical count from /pipeline/counts while the
+   * list rendered a different set. Measured on 2026-09-15:
+   *
+   *   scope            header   rendered
+   *   suppressed          156          0
+   *   dead                348          0
+   *   closed              476          1
+   *   needs_attention     292        263   (29 dropped silently)
+   *   all                 768        181
+   *
+   * Three scopes were unreachable and two lied. The refinement is now off by
+   * default and unavailable where it would empty the scope, so rows === count
+   * unless the operator engages a filter that says so.
+   */
+  const suppressionFilterAvailable = scope !== 'suppressed' && scope !== 'dead' && scope !== 'closed'
+  const hideSuppressedEffective = hideSuppressed && suppressionFilterAvailable
+
+  /**
+   * Every count on the mobile board describes the rows the board holds, which
+   * is only truthful while the board holds the entire scope. If the scope ever
+   * outgrows the fetch limit the operator must be told, not shown a prefix
+   * that looks complete. Compared against the canonical scope total from
+   * /pipeline/counts, never against another page of rows.
+   */
+  const loadedShortOfScope = scopedTotal > 0 && opportunities.length > 0 && opportunities.length < scopedTotal
+
   const scopedCards = useMemo(() => {
     const q = query.trim().toLowerCase()
     return allCards
       .filter((c) => {
-        if (!showSuppressed && c.suppressed) return false
+        if (hideSuppressedEffective && c.suppressed) return false
         if (hotOnly && resolveTemperature(c.opp) !== 'hot') return false
         if (followUpOnly && !c.followUpDue) return false
         if (!q) return true
@@ -329,7 +379,7 @@ export function PipelineOpportunityBoard({
           c.opp.next_action,
         ].some((s) => String(s ?? '').toLowerCase().includes(q))
       })
-  }, [allCards, query, showSuppressed, hotOnly, followUpOnly])
+  }, [allCards, query, hideSuppressedEffective, hotOnly, followUpOnly])
 
   /**
    * The mobile universe. Everything downstream — stage counts, the rendered
@@ -754,6 +804,12 @@ export function PipelineOpportunityBoard({
         />
 
         <div className="plm-list">
+          {loadedShortOfScope ? (
+            <div className="plm-truncated" role="status">
+              <strong>Showing {opportunities.length} of {scopedTotal}</strong>
+              <span>This scope is larger than one load, so the counts below describe the {opportunities.length} loaded. Narrow the scope to see exact numbers.</span>
+            </div>
+          ) : null}
           {loading && opportunities.length === 0 ? (
             <div className="plm-skeleton" aria-hidden="true">
               <span /><span /><span /><span /><span /><span />
@@ -968,10 +1024,11 @@ export function PipelineOpportunityBoard({
               onGroupByChange={onGroupByChange}
               hotOnly={hotOnly}
               followUpOnly={followUpOnly}
-              showSuppressed={showSuppressed}
+              hideSuppressed={hideSuppressed}
+              suppressionFilterAvailable={suppressionFilterAvailable}
               onHotOnly={setHotOnly}
               onFollowUpOnly={setFollowUpOnly}
-              onShowSuppressed={setShowSuppressed}
+              onHideSuppressed={setHideSuppressed}
             />
             {onSortsChange && sorts && (
               <PipelineSortBuilder sorts={sorts} onChange={onSortsChange} />

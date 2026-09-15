@@ -1169,3 +1169,27 @@
 }
 [data-nexus-theme='light'] .plm-nocontext strong { color: #92400e; }
 [data-nexus-theme='light'] .plm-nocontext span { color: rgba(30, 41, 59, 0.86); }
+
+/* §21 — the scope is larger than one load, so the counts on screen describe
+   the loaded rows. Neutral rather than alarming: nothing is wrong, the
+   operator simply must not read a prefix as the whole scope. */
+.plm-truncated {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 12px 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.30);
+  background: rgba(148, 163, 184, 0.10);
+}
+
+.plm-truncated strong { font-size: 12.5px; font-weight: 700; color: #e2eaf8; }
+.plm-truncated span { font-size: 11px; line-height: 1.35; color: rgba(226, 234, 248, 0.72); }
+
+[data-nexus-theme='light'] .plm-truncated {
+  border-color: rgba(100, 116, 139, 0.28);
+  background: rgba(100, 116, 139, 0.08);
+}
+[data-nexus-theme='light'] .plm-truncated strong { color: #1e293b; }
+[data-nexus-theme='light'] .plm-truncated span { color: rgba(30, 41, 59, 0.82); }
