@@ -1,11 +1,20 @@
+import { useEffect, useState } from 'react'
 import type { EntityGraphFilters as Filters, EntityGraphTab } from '../../domain/entity-graph/entity-graph.types'
 import { EMPTY_ENTITY_GRAPH_FILTERS } from '../../domain/entity-graph/entity-graph.types'
+import type {
+  EntityGraphFieldFilter,
+  EntityGraphFilterCatalog,
+} from '../../domain/entity-graph/entity-graph-field-filters'
+import { fetchEntityGraphFilterCatalog } from '../../domain/entity-graph/entity-graph-field-filters'
+import { EntityGraphFieldFilterBuilder } from './EntityGraphFieldFilterBuilder'
 
 type Props = {
   open: boolean
   tab: EntityGraphTab
   filters: Filters
+  fieldFilters: EntityGraphFieldFilter[]
   onChange: (filters: Filters) => void
+  onFieldFiltersChange: (filters: EntityGraphFieldFilter[]) => void
   onClose: () => void
   onApply: () => void
   onClear: () => void
@@ -32,7 +41,39 @@ function Field({
   )
 }
 
-export function EntityGraphFiltersPanel({ open, tab, filters, onChange, onClose, onApply, onClear }: Props) {
+export function EntityGraphFiltersPanel({
+  open,
+  tab,
+  filters,
+  fieldFilters,
+  onChange,
+  onFieldFiltersChange,
+  onClose,
+  onApply,
+  onClear,
+}: Props) {
+  const [catalog, setCatalog] = useState<EntityGraphFilterCatalog | null>(null)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const controller = new AbortController()
+    setCatalogLoading(true)
+    setCatalogError(null)
+    fetchEntityGraphFilterCatalog(tab, controller.signal)
+      .then((next) => setCatalog(next))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setCatalog(null)
+        setCatalogError(error instanceof Error ? error.message : 'filter_catalog_unavailable')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCatalogLoading(false)
+      })
+    return () => controller.abort()
+  }, [open, tab])
+
   if (!open) return null
 
   const patch = (key: keyof Filters, value: string | boolean) => {
@@ -52,7 +93,21 @@ export function EntityGraphFiltersPanel({ open, tab, filters, onChange, onClose,
 
         <div className="eg-filters-drawer__body">
           <div className="eg-filters-section">
-            <h4>Global</h4>
+            <EntityGraphFieldFilterBuilder
+              catalog={catalog}
+              loading={catalogLoading}
+              error={catalogError}
+              filters={fieldFilters}
+              onChange={onFieldFiltersChange}
+            />
+          </div>
+
+          <div className="eg-filters-section">
+            {/* Shortcuts, not a second catalog: each of these spans more than one
+                column on purpose (Market matches market OR market_region, ZIP
+                matches both zip columns), which a single catalog field cannot
+                express. Everything else lives in the field builder above. */}
+            <h4>Quick filters</h4>
             <div className="eg-filters-grid">
               <Field label="Market" value={filters.market} onChange={(v) => patch('market', v)} placeholder="Los Angeles, CA" />
               <Field label="City" value={filters.city} onChange={(v) => patch('city', v)} />
@@ -127,7 +182,16 @@ export function EntityGraphFiltersPanel({ open, tab, filters, onChange, onClose,
         </div>
 
         <footer className="eg-filters-drawer__footer">
-          <button type="button" className="eg-glass-btn" onClick={() => onChange({ ...EMPTY_ENTITY_GRAPH_FILTERS })}>Reset</button>
+          <button
+            type="button"
+            className="eg-glass-btn"
+            onClick={() => {
+              onChange({ ...EMPTY_ENTITY_GRAPH_FILTERS })
+              onFieldFiltersChange([])
+            }}
+          >
+            Reset
+          </button>
           <button type="button" className="eg-glass-btn" onClick={onClear}>Clear all</button>
           <button type="button" className="eg-glass-btn is-primary" onClick={onApply}>Apply filters</button>
         </footer>

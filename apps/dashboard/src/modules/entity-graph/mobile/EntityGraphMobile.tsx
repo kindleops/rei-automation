@@ -17,7 +17,9 @@ import type {
   UniversalEntityContext,
 } from '../../../domain/entity-graph/entity-graph.types'
 import { EMPTY_ENTITY_GRAPH_FILTERS } from '../../../domain/entity-graph/entity-graph.types'
-import { filtersToApiParams } from '../../../domain/entity-graph/entity-graph-workspace-state'
+import { fieldFiltersToApiParams, filtersToApiParams } from '../../../domain/entity-graph/entity-graph-workspace-state'
+import type { EntityGraphFieldFilter } from '../../../domain/entity-graph/entity-graph-field-filters'
+import { completeFieldFilters } from '../../../domain/entity-graph/entity-graph-field-filters'
 import {
   selectedEntityFromResult,
   selectedEntityToContext,
@@ -127,6 +129,7 @@ export function EntityGraphMobile({
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [filters, setFilters] = useState<EntityGraphFilters>({ ...EMPTY_ENTITY_GRAPH_FILTERS })
+  const [fieldFilters, setFieldFilters] = useState<EntityGraphFieldFilter[]>([])
   const [filtersOpen, setFiltersOpen] = useState(false)
 
   /**
@@ -196,7 +199,9 @@ export function EntityGraphMobile({
    */
   const [handledContextId, setHandledContextId] = useState<string | null>(null)
 
-  const activeFilterCount = countActiveFilters(filters, scope)
+  // The catalog filters count toward the chip badge too, or an operator with
+  // four field filters is told there are none.
+  const activeFilterCount = countActiveFilters(filters, scope) + completeFieldFilters(fieldFilters).length
 
   // Contacts browse one subtype at a time, so the header must report the
   // subtype's universe. The chip's combined 287,089 next to a list of 121,434
@@ -238,7 +243,7 @@ export function EntityGraphMobile({
   // tapping a scope chip. No query means browsing this tab, which is never
   // cross-type.
   const crossTypeSearch = Boolean(debouncedQuery) && !searchScopeLocked
-  const querySignature = `${scope}|${sortKey}|${debouncedQuery}|${contactSubtype}|${crossTypeSearch}|${JSON.stringify(filters)}`
+  const querySignature = `${scope}|${sortKey}|${debouncedQuery}|${contactSubtype}|${crossTypeSearch}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
 
   // Adjusting state during render rather than in an effect: this is the
   // documented way to reset state when an input changes, and it avoids both the
@@ -267,7 +272,7 @@ export function EntityGraphMobile({
   // Keyed on scope + filters only. The text query is not a lens dimension: the
   // search endpoint has no facet support, so folding it in would silently show
   // composition for a cohort the operator is not looking at.
-  const lensSignature = `${scope}|${contactSubtype}|${JSON.stringify(filters)}`
+  const lensSignature = `${scope}|${contactSubtype}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
   const lensIsCurrent = lensState.signature === lensSignature
   const lens = lensIsCurrent ? lensState.fast : null
   const deepLens = lensIsCurrent ? lensState.deep : null
@@ -282,6 +287,7 @@ export function EntityGraphMobile({
       tab: tabForScope(scope),
       subtype: scope === 'contact_methods' ? contactSubtype : undefined,
       ...filtersToApiParams(filters),
+      ...fieldFiltersToApiParams(fieldFilters),
     }
 
     void fetchEntityGraphLens(params, controller.signal)
@@ -333,6 +339,7 @@ export function EntityGraphMobile({
         // not need the extra round trips, so it stays opt-in.
         ...(scope === 'properties' ? { include_links: '1' } : {}),
         ...filtersToApiParams(filters),
+        ...fieldFiltersToApiParams(fieldFilters),
       },
       controller.signal,
     )
@@ -884,7 +891,10 @@ export function EntityGraphMobile({
                 <button
                   type="button"
                   className="egm-btn"
-                  onClick={() => setFilters({ ...EMPTY_ENTITY_GRAPH_FILTERS })}
+                  onClick={() => {
+                    setFilters({ ...EMPTY_ENTITY_GRAPH_FILTERS })
+                    setFieldFilters([])
+                  }}
                 >
                   Reset filters
                 </button>
@@ -977,11 +987,13 @@ export function EntityGraphMobile({
         open={filtersOpen}
         scope={scope}
         filters={filters}
+        fieldFilters={fieldFilters}
         appliedTotal={total}
         scopeTotal={scopeTotal}
         onClose={() => setFiltersOpen(false)}
-        onApply={(next) => {
+        onApply={(next, nextFieldFilters) => {
           setFilters(next)
+          setFieldFilters(nextFieldFilters)
           setFiltersOpen(false)
         }}
       />

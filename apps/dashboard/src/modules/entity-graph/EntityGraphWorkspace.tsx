@@ -14,6 +14,7 @@ import type {
 } from '../../domain/entity-graph/entity-graph.types'
 import { EMPTY_ENTITY_GRAPH_FILTERS } from '../../domain/entity-graph/entity-graph.types'
 import {
+  fieldFiltersToApiParams,
   filtersToApiParams,
   readEntityGraphWorkspaceState,
   replaceEntityGraphWorkspaceQuery,
@@ -32,6 +33,12 @@ import {
 } from '../../domain/entity-graph/selected-entity'
 import { EntityGraphCardsView } from './EntityGraphCardsView'
 import { EntityGraphFiltersPanel } from './EntityGraphFilters'
+import type {
+  EntityGraphFieldFilter,
+  UnsupportedFieldFilter,
+} from '../../domain/entity-graph/entity-graph-field-filters'
+import { EntityGraphFilterError } from '../../domain/entity-graph/entity-graph-api'
+import { completeFieldFilters } from '../../domain/entity-graph/entity-graph-field-filters'
 import { EntityGraphHeader } from './EntityGraphHeader'
 import { EntityGraphInspector } from './EntityGraphInspector'
 import { EntityGraphRelationshipGraph } from './EntityGraphRelationshipGraph'
@@ -119,6 +126,11 @@ function EntityGraphDesktopWorkspace({
   const [debouncedQuery, setDebouncedQuery] = useState(initialWorkspace.query)
   const [filters, setFilters] = useState<EntityGraphFilters>(initialWorkspace.filters)
   const [draftFilters, setDraftFilters] = useState<EntityGraphFilters>(initialWorkspace.filters)
+  const [fieldFilters, setFieldFilters] = useState<EntityGraphFieldFilter[]>(initialWorkspace.fieldFilters ?? [])
+  const [draftFieldFilters, setDraftFieldFilters] = useState<EntityGraphFieldFilter[]>(
+    initialWorkspace.fieldFilters ?? [],
+  )
+  const [filterError, setFilterError] = useState<UnsupportedFieldFilter[] | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [sortBy, setSortBy] = useState(initialWorkspace.sortBy)
   const [ascending, setAscending] = useState(initialWorkspace.ascending)
@@ -133,7 +145,9 @@ function EntityGraphDesktopWorkspace({
   const [pagination, setPagination] = useState({
     cursor: 0,
     pageSize: 25,
-    total: 0,
+    // null = the exact count could not be computed. The page still renders;
+    // the number is reported as unavailable rather than invented as 0.
+    total: 0 as number | null,
     hasMore: false,
     nextCursor: null as number | null,
     previousCursor: null as number | null,
@@ -155,7 +169,10 @@ function EntityGraphDesktopWorkspace({
 
   const pageSize = layoutMode === 'command' ? 40 : layoutMode === 'peek' ? 12 : 25
   const hasSelection = Boolean(selectedEntity.type && selectedEntity.id)
-  const activeFilterCount = countActiveFilters(filters)
+  // The chip count has to include the catalog filters, or an operator with
+  // five field filters and no quick filters is told "0 filters" over a
+  // narrowed list.
+  const activeFilterCount = countActiveFilters(filters) + completeFieldFilters(fieldFilters).length
   const actionContext = useMemo(
     () => selectedEntityToContext(selectedEntity, selectedResult),
     [selectedEntity, selectedResult],
@@ -185,15 +202,16 @@ function EntityGraphDesktopWorkspace({
       sortBy,
       ascending,
       filters,
+      fieldFilters,
       inspectorOpen,
       graphFocusOnly,
       scrollTop: scrollTop ?? listPanelRef.current?.scrollTop ?? pendingScrollRestoreRef.current,
     })
-  }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, filters, graphFocusOnly, inspectorOpen, sortBy, visualMode])
+  }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, fieldFilters, filters, graphFocusOnly, inspectorOpen, sortBy, visualMode])
 
   useEffect(() => {
     syncWorkspaceToUrl()
-  }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, filters, graphFocusOnly, inspectorOpen, sortBy, syncWorkspaceToUrl, visualMode])
+  }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, fieldFilters, filters, graphFocusOnly, inspectorOpen, sortBy, syncWorkspaceToUrl, visualMode])
 
   useEffect(() => {
     const handlePopState = () => {
@@ -208,6 +226,8 @@ function EntityGraphDesktopWorkspace({
       setAscending(restored.ascending)
       setFilters(restored.filters)
       setDraftFilters(restored.filters)
+      setFieldFilters(restored.fieldFilters ?? [])
+      setDraftFieldFilters(restored.fieldFilters ?? [])
       setInspectorOpen(restored.inspectorOpen)
       setGraphFocusOnly(restored.graphFocusOnly)
       pendingScrollRestoreRef.current = restored.scrollTop
@@ -226,7 +246,7 @@ function EntityGraphDesktopWorkspace({
     }
   }, [results, listLoading])
 
-  const querySignature = `${activeTab}|${debouncedQuery}|${contactSubtype}|${JSON.stringify(filters)}|${sortBy}|${ascending}`
+  const querySignature = `${activeTab}|${debouncedQuery}|${contactSubtype}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}|${sortBy}|${ascending}`
   const listQueryKey = `${querySignature}|${cursor}|${pageSize}`
 
   useEffect(() => {
@@ -269,21 +289,27 @@ function EntityGraphDesktopWorkspace({
         sort_by: sortBy || undefined,
         ascending: ascending ? '1' : '0',
         ...filtersToApiParams(filters),
+        ...fieldFiltersToApiParams(fieldFilters),
       },
       controller.signal,
     )
       .then((response) => {
         if (controller.signal.aborted || generation !== listRequestGenerationRef.current) return
         if (listQueryKeyRef.current !== queryKey) return
+        setFilterError(null)
         setResults(response.results)
         setPagination({
           ...response.pagination,
           previousCursor: response.pagination.previousCursor ?? null,
         })
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (controller.signal.aborted || generation !== listRequestGenerationRef.current) return
         if (listQueryKeyRef.current !== queryKey) return
+        // A rejected filter must be named. An empty table that silently ignored
+        // a filter and an empty table that means "no matches" are the same
+        // picture, and only one of them is a cohort worth acting on.
+        setFilterError(error instanceof EntityGraphFilterError ? error.unsupportedFilters : null)
         setResults([])
         setPagination((current) => ({ ...current, total: 0, hasMore: false, nextCursor: null }))
       })
@@ -294,7 +320,7 @@ function EntityGraphDesktopWorkspace({
       })
 
     return () => controller.abort()
-  }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, filters, listQueryKey, pageSize, sortBy])
+  }, [activeTab, ascending, contactSubtype, cursor, debouncedQuery, fieldFilters, filters, listQueryKey, pageSize, sortBy])
 
   const dossierQueryKey = `${listQueryKey}|${selectedEntity.type ?? ''}|${selectedEntity.id ?? ''}`
   useEffect(() => {
@@ -414,7 +440,7 @@ function EntityGraphDesktopWorkspace({
 
   const renderPagination = () => (
     <div className="eg-pagination">
-      <span>{pagination.total.toLocaleString()} results</span>
+      <span>{pagination.total === null ? 'count unavailable' : `${pagination.total.toLocaleString()} results`}</span>
       <span>Page {Math.floor(cursor / pageSize) + 1}</span>
       <div className="eg-pagination__controls">
         <button type="button" disabled={cursor <= 0 || listLoading} onClick={() => setCursor((c) => Math.max(c - pageSize, 0))}>
@@ -445,6 +471,7 @@ function EntityGraphDesktopWorkspace({
         onVisualModeChange={setVisualMode}
         onOpenFilters={() => {
           setDraftFilters(filters)
+          setDraftFieldFilters(fieldFilters)
           setFiltersOpen(true)
         }}
       />
@@ -453,15 +480,22 @@ function EntityGraphDesktopWorkspace({
         open={filtersOpen}
         tab={activeTab}
         filters={draftFilters}
+        fieldFilters={draftFieldFilters}
         onChange={setDraftFilters}
+        onFieldFiltersChange={setDraftFieldFilters}
         onClose={() => setFiltersOpen(false)}
         onApply={() => {
           setFilters(draftFilters)
+          setFieldFilters(draftFieldFilters)
+          setCursor(0)
           setFiltersOpen(false)
         }}
         onClear={() => {
           setDraftFilters({ ...EMPTY_ENTITY_GRAPH_FILTERS })
           setFilters({ ...EMPTY_ENTITY_GRAPH_FILTERS })
+          setDraftFieldFilters([])
+          setFieldFilters([])
+          setCursor(0)
           setFiltersOpen(false)
         }}
       />
@@ -491,9 +525,24 @@ function EntityGraphDesktopWorkspace({
             >
               {listLoading && <ResultSkeleton count={layoutMode === 'peek' ? 4 : 8} />}
               {!listLoading && results.length === 0 && (
-                <div className="eg-empty">
-                  <strong>No records found</strong>
-                  <span>{debouncedQuery || activeFilterCount > 0 ? 'Try adjusting search or filters.' : 'This entity type has no live records yet.'}</span>
+                <div className={`eg-empty${filterError ? ' is-filter-error' : ''}`}>
+                  {filterError ? (
+                    <>
+                      <strong>These filters could not be applied</strong>
+                      <span>
+                        Nothing was queried, so no cohort is shown. Remove or change:
+                        {' '}
+                        {filterError
+                          .map((entry) => `${entry.field_key ?? 'filter'} (${entry.reason})`)
+                          .join(', ')}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>No records found</strong>
+                      <span>{debouncedQuery || activeFilterCount > 0 ? 'Try adjusting search or filters.' : 'This entity type has no live records yet.'}</span>
+                    </>
+                  )}
                 </div>
               )}
               {!listLoading && results.length > 0 && effectiveVisualMode === 'table' && (

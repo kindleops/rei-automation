@@ -28,6 +28,21 @@ import {
   readCampaignFieldValuesFromCandidate,
 } from '@/lib/domain/campaigns/campaign-field-catalog.js'
 import {
+  applySupabaseFilter,
+  applySupabaseFilters,
+  applySupabaseFilterToColumn,
+  coerceScalarArray,
+  EMPTY_FILTER_OPERATORS,
+  filterColumn,
+  filterScalarValues,
+  hasMeaningfulFilterValue,
+  isSafeIdentifier,
+  normalizeFilterArrayInput,
+  normalizePreviewFilterValue,
+  normalizePreviewOperator,
+  numberOrNull,
+} from '@/lib/domain/campaigns/campaign-field-filter-compiler.js'
+import {
   activateCampaign,
   CAMPAIGN_STATES,
   isLiveCampaignStatus,
@@ -105,10 +120,6 @@ const PREVIEW_CANONICAL_MARKET_COLUMNS = Object.freeze(['market', 'canonical_mar
 const PREVIEW_MARKET_DIAGNOSTIC_FALLBACK_COLUMNS = Object.freeze(['selected_textgrid_market'])
 const PREVIEW_SOURCE_COLUMN_DENYLIST = new Set(['mob'])
 
-function numberOrNull(value) {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
 
 function optionalInt(value) {
   const parsed = asPositiveInteger(value, null)
@@ -456,7 +467,6 @@ function candidateMatchesFilters(candidate = {}, filters = {}) {
   }
 }
 
-const EMPTY_FILTER_OPERATORS = new Set(['is_empty', 'is_not_empty'])
 const SENDER_COVERAGE_FIELDS = new Set([
   'sender_coverage.routing_allowed',
   'sender_coverage.routing_tier',
@@ -515,51 +525,9 @@ function previewSourcePlan(rawSource) {
   }
 }
 
-function normalizePreviewOperator(operator, field) {
-  const raw = clean(operator || field?.operators?.[0]?.key || 'eq')
-  const mapped = {
-    in: 'is_any_of',
-    not_in: 'is_not_any_of',
-  }[raw] || raw
-  const allowed = new Set((field?.operators || []).map((entry) => entry.key))
-  if (allowed.has(mapped)) return mapped
-  if (['eq', 'is_any_of', 'is_not_any_of', 'contains_any'].includes(mapped)) return mapped
-  return allowed.has('eq') ? 'eq' : clean(field?.operators?.[0]?.key || mapped || 'eq')
-}
 
-function normalizeFilterArrayInput(value) {
-  if (Array.isArray(value)) return value.flatMap(coerceScalarArray)
-  if (value && typeof value === 'object') return coerceScalarArray(value)
-  const text = clean(value)
-  if (!text) return []
-  if (text.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(text)
-      return Array.isArray(parsed) ? parsed.flatMap(coerceScalarArray) : [parsed]
-    } catch {
-      return [value]
-    }
-  }
-  return [value]
-}
 
-function normalizePreviewFilterValue(value, operator) {
-  if (['is_any_of', 'is_not_any_of', 'contains_any'].includes(operator)) {
-    return normalizeFilterArrayInput(value)
-  }
-  if (operator === 'between') {
-    return coerceScalarArray(value).slice(0, 2)
-  }
-  return value
-}
 
-function hasMeaningfulFilterValue(value, operator) {
-  if (EMPTY_FILTER_OPERATORS.has(operator)) return true
-  if (Array.isArray(value)) return value.some((item) => hasMeaningfulFilterValue(item, operator))
-  if (value && typeof value === 'object') return Object.keys(value).length > 0
-  if (typeof value === 'boolean') return true
-  return clean(value) !== ''
-}
 
 function hasCatalogFilterGroups(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -674,15 +642,6 @@ function normalizeCatalogPreviewFilters(input = {}, campaign = null) {
   }
 }
 
-function coerceScalarArray(value) {
-  if (Array.isArray(value)) return value.flatMap(coerceScalarArray)
-  if (value && typeof value === 'object') {
-    const resolved = value.value ?? value.label ?? value.key ?? value.name
-    return resolved === undefined ? [] : coerceScalarArray(resolved)
-  }
-  if (value === null || value === undefined) return []
-  return [value]
-}
 
 function parseCatalogListValue(value) {
   if (Array.isArray(value)) return value
@@ -2081,92 +2040,11 @@ function errorMessage(error) {
   return String(error)
 }
 
-function isSafeIdentifier(value) {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(clean(value))
-}
 
-function filterScalarValues(filter = {}) {
-  return ['is_any_of', 'is_not_any_of', 'contains_any'].includes(filter.operator)
-    ? normalizeFilterArrayInput(filter.value)
-    : coerceScalarArray(filter.value)
-}
 
-function filterColumn(filter = {}) {
-  const field = filter.fieldDefinition || getCampaignFieldDefinition(filter.field_key)
-  const column = field?.source_column || filter.source_column || filter.field || filter.field_key?.split('.').pop()
-  return isSafeIdentifier(column) ? column : null
-}
 
-function applySupabaseFilterToColumn(query, filter = {}, columnOverride = null) {
-  const field = filter.fieldDefinition || getCampaignFieldDefinition(filter.field_key)
-  const column = columnOverride || filterColumn(filter)
-  if (!column || !field) return query
-  const operator = normalizePreviewOperator(filter.operator || 'eq', field)
-  const values = filterScalarValues({ ...filter, operator })
-  const first = values[0]
 
-  if (operator === 'is_empty') return query.is(column, null)
-  if (operator === 'is_not_empty') return query.not(column, 'is', null)
 
-  if (field.type === 'boolean' || operator === 'is_true' || operator === 'is_false') {
-    if (operator === 'is_true') return query.eq(column, true)
-    if (operator === 'is_false') return query.eq(column, false)
-    if (first !== undefined) return query.eq(column, asBoolean(first, false))
-    return query
-  }
-
-  if (field.type === 'number') {
-    if (operator === 'gte') {
-      const min = numberOrNull(first)
-      return min === null ? query : query.gte(column, min)
-    }
-    if (operator === 'lte') {
-      const max = numberOrNull(first)
-      return max === null ? query : query.lte(column, max)
-    }
-    if (operator === 'between') {
-      const min = numberOrNull(values[0])
-      const max = numberOrNull(values[1])
-      if (min !== null) query = query.gte(column, min)
-      if (max !== null) query = query.lte(column, max)
-      return query
-    }
-    if (operator === 'is_any_of' && values.length) {
-      const numbers = values.map(numberOrNull).filter((value) => value !== null)
-      return numbers.length ? query.in(column, numbers) : query
-    }
-    const exact = numberOrNull(first)
-    return exact === null ? query : query.eq(column, exact)
-  }
-
-  if (['on_or_after', 'on_or_before', 'between'].includes(operator)) {
-    if (operator === 'on_or_after') return clean(first) ? query.gte(column, clean(first)) : query
-    if (operator === 'on_or_before') return clean(first) ? query.lte(column, clean(first)) : query
-    if (clean(values[0])) query = query.gte(column, clean(values[0]))
-    if (clean(values[1])) query = query.lte(column, clean(values[1]))
-    return query
-  }
-
-  if (operator === 'contains' || operator === 'contains_any') {
-    const terms = values.map(clean).filter(Boolean)
-    if (!terms.length) return query
-    if (terms.length === 1) return query.ilike(column, `%${terms[0]}%`)
-    return query.or(terms.map((term) => `${column}.ilike.%${term.replace(/[,%]/g, '')}%`).join(','))
-  }
-
-  if (operator === 'is_not_any_of' && values.length) return query.not(column, 'in', `(${values.map(clean).join(',')})`)
-  if (operator === 'is_any_of' && values.length) return query.in(column, values.map(clean).filter(Boolean))
-  if (clean(first)) return query.eq(column, clean(first))
-  return query
-}
-
-function applySupabaseFilter(query, filter = {}) {
-  return applySupabaseFilterToColumn(query, filter)
-}
-
-function applySupabaseFilters(query, filters = []) {
-  return filters.reduce((current, filter) => applySupabaseFilter(current, filter), query)
-}
 
 function chunk(values = [], size = FULL_REACH_ID_CHUNK_SIZE) {
   const chunks = []

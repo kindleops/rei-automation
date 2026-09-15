@@ -1,5 +1,7 @@
 import type { EntityGraphFilters, EntityGraphTab, EntityGraphVisualMode } from './entity-graph.types'
 import { EMPTY_ENTITY_GRAPH_FILTERS } from './entity-graph.types'
+import type { EntityGraphFieldFilter } from './entity-graph-field-filters'
+import { fieldFiltersToApiParam, parseFieldFiltersParam } from './entity-graph-field-filters'
 import type { UniversalEntityType } from './entity-graph.types'
 
 export type EntityGraphWorkspaceState = {
@@ -12,6 +14,8 @@ export type EntityGraphWorkspaceState = {
   ascending: boolean
   scrollTop: number
   filters: EntityGraphFilters
+  /** Catalog-backed column filters. Shares its payload shape with campaign targeting. */
+  fieldFilters: EntityGraphFieldFilter[]
   inspectorOpen: boolean
   graphFocusOnly: boolean
 }
@@ -26,6 +30,7 @@ export const DEFAULT_ENTITY_GRAPH_WORKSPACE_STATE: EntityGraphWorkspaceState = {
   ascending: true,
   scrollTop: 0,
   filters: { ...EMPTY_ENTITY_GRAPH_FILTERS },
+  fieldFilters: [],
   inspectorOpen: false,
   graphFocusOnly: false,
 }
@@ -87,6 +92,18 @@ function writeFilters(params: URLSearchParams, filters: EntityGraphFilters): voi
   }
 }
 
+/**
+ * Field filters live in the URL so a cohort is a shareable link -- the same
+ * reason the campaign handoff can carry them verbatim.
+ */
+const FIELD_FILTERS_PARAM = 'eg_ff'
+
+function writeFieldFilters(params: URLSearchParams, fieldFilters: EntityGraphFieldFilter[]): void {
+  const serialized = fieldFiltersToApiParam(fieldFilters)
+  if (serialized) params.set(FIELD_FILTERS_PARAM, serialized)
+  else params.delete(FIELD_FILTERS_PARAM)
+}
+
 const SESSION_KEY = 'nexus:entity-graph:workspace'
 
 export function readEntityGraphWorkspaceState(search?: string): EntityGraphWorkspaceState {
@@ -106,6 +123,7 @@ export function readEntityGraphWorkspaceState(search?: string): EntityGraphWorks
     ascending: params.get('eg_asc') !== '0',
     scrollTop: Number(params.get('eg_scroll') ?? 0) || 0,
     filters: readFilters(params),
+    fieldFilters: parseFieldFiltersParam(params.get(FIELD_FILTERS_PARAM)),
     inspectorOpen: params.get('eg_inspector') === '1',
     graphFocusOnly: params.get('eg_graph_focus') === '1',
   }
@@ -144,6 +162,7 @@ export function writeEntityGraphWorkspaceState(
   params.set('eg_asc', state.ascending ? '1' : '0')
   params.set('eg_scroll', String(Math.max(0, Math.round(state.scrollTop))))
   writeFilters(params, state.filters)
+  writeFieldFilters(params, state.fieldFilters ?? [])
   if (state.inspectorOpen) params.set('eg_inspector', '1')
   else params.delete('eg_inspector')
   if (state.graphFocusOnly) params.set('eg_graph_focus', '1')
@@ -162,6 +181,17 @@ export function writeEntityGraphWorkspaceState(
 export function replaceEntityGraphWorkspaceQuery(state: Partial<EntityGraphWorkspaceState>): void {
   const current = readEntityGraphWorkspaceState()
   writeEntityGraphWorkspaceState({ ...current, ...state }, { replace: true })
+}
+
+/**
+ * The catalog filters ride as ONE param the backend parses as JSON, the same
+ * payload the campaign builder accepts. Anything it cannot execute comes back
+ * as a 422 naming the field -- it is never dropped into an unfiltered page.
+ */
+export function fieldFiltersToApiParams(
+  fieldFilters: EntityGraphFieldFilter[] | undefined,
+): Record<string, string | undefined> {
+  return { field_filters: fieldFiltersToApiParam(fieldFilters ?? []) }
 }
 
 export function filtersToApiParams(filters: EntityGraphFilters): Record<string, string | undefined> {

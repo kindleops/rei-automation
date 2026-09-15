@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { MobileSheet } from '../../mobile/MobileSheet'
 import type { EntityGraphFilters } from '../../../domain/entity-graph/entity-graph.types'
@@ -9,6 +9,15 @@ import {
   type EntityScope,
   type FilterKey,
 } from './entity-graph-mobile-format'
+import type {
+  EntityGraphFieldFilter,
+  EntityGraphFilterCatalog,
+} from '../../../domain/entity-graph/entity-graph-field-filters'
+import {
+  completeFieldFilters,
+  fetchEntityGraphFilterCatalog,
+} from '../../../domain/entity-graph/entity-graph-field-filters'
+import { EntityGraphFieldFilterBuilder } from '../EntityGraphFieldFilterBuilder'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -70,8 +79,9 @@ type Props = {
   /** Count for the *applied* filters, so the header can say what is live now. */
   appliedTotal: number | null
   scopeTotal: number | null
+  fieldFilters: EntityGraphFieldFilter[]
   onClose: () => void
-  onApply: (filters: EntityGraphFilters) => void
+  onApply: (filters: EntityGraphFilters, fieldFilters: EntityGraphFieldFilter[]) => void
 }
 
 /**
@@ -83,20 +93,51 @@ export function EntityGraphMobileFilterSheet({
   open,
   scope,
   filters,
+  fieldFilters,
   appliedTotal,
   scopeTotal,
   onClose,
   onApply,
 }: Props) {
   const [draft, setDraft] = useState<EntityGraphFilters>(filters)
+  const [fieldDraft, setFieldDraft] = useState<EntityGraphFieldFilter[]>(fieldFilters)
   const [wasOpen, setWasOpen] = useState(open)
+  const [catalog, setCatalog] = useState<EntityGraphFilterCatalog | null>(null)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+
+  /**
+   * The mobile sheet gets the SAME catalog as the desktop drawer -- it offered
+   * 9 inputs where the catalog has 101 fields, which is the "too few filter
+   * fields" defect on the surface an operator actually carries.
+   */
+  useEffect(() => {
+    if (!open) return undefined
+    const controller = new AbortController()
+    setCatalogLoading(true)
+    setCatalogError(null)
+    fetchEntityGraphFilterCatalog(scope, controller.signal)
+      .then((next) => setCatalog(next))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setCatalog(null)
+        setCatalogError(error instanceof Error ? error.message : 'filter_catalog_unavailable')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCatalogLoading(false)
+      })
+    return () => controller.abort()
+  }, [open, scope])
 
   // Re-seed the draft on the closed → open transition. Done during render
   // rather than in an effect so the sheet's first paint already shows the
   // committed filters instead of a stale draft for one frame.
   if (open !== wasOpen) {
     setWasOpen(open)
-    if (open) setDraft(filters)
+    if (open) {
+      setDraft(filters)
+      setFieldDraft(fieldFilters)
+    }
   }
 
   const patch = (key: FilterKey, value: string | boolean) => {
@@ -104,6 +145,8 @@ export function EntityGraphMobileFilterSheet({
   }
 
   const chips = activeFilterEntries(draft, scope)
+  const completeFieldDraft = completeFieldFilters(fieldDraft)
+  const totalDraftFilters = chips.length + completeFieldDraft.length
 
   return (
     <MobileSheet
@@ -128,6 +171,16 @@ export function EntityGraphMobileFilterSheet({
               stops the operator reading it as a live preview of their edits. */}
           <p>Count updates when you apply. Only filters the browse adapter can execute are offered.</p>
         </div>
+
+        <section className="egm-filters__section">
+          <EntityGraphFieldFilterBuilder
+            catalog={catalog}
+            loading={catalogLoading}
+            error={catalogError}
+            filters={fieldDraft}
+            onChange={setFieldDraft}
+          />
+        </section>
 
         {chips.length > 0 ? (
           <div className="egm-filters__chips">
@@ -250,12 +303,21 @@ export function EntityGraphMobileFilterSheet({
           <button
             type="button"
             className="egm-btn is-ghost"
-            onClick={() => setDraft({ ...EMPTY_ENTITY_GRAPH_FILTERS })}
+            onClick={() => {
+              setDraft({ ...EMPTY_ENTITY_GRAPH_FILTERS })
+              setFieldDraft([])
+            }}
           >
             Reset
           </button>
-          <button type="button" className="egm-btn is-primary" onClick={() => onApply(draft)}>
-            {chips.length > 0 ? `Apply ${chips.length} filter${chips.length === 1 ? '' : 's'}` : 'Apply'}
+          <button
+            type="button"
+            className="egm-btn is-primary"
+            onClick={() => onApply(draft, completeFieldDraft)}
+          >
+            {totalDraftFilters > 0
+              ? `Apply ${totalDraftFilters} filter${totalDraftFilters === 1 ? '' : 's'}`
+              : 'Apply'}
           </button>
         </div>
       </div>

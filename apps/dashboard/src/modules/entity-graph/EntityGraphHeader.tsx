@@ -7,7 +7,8 @@ type Props = {
   visualMode: EntityGraphVisualMode
   query: string
   tabCounts: EntityGraphTabCounts | null
-  resultCount: number
+  /** null = the exact count is unavailable (it timed out); the rows are still real. */
+  resultCount: number | null
   activeFilterCount: number
   onTabChange: (tab: EntityGraphTab) => void
   onQueryChange: (query: string) => void
@@ -15,7 +16,7 @@ type Props = {
   onOpenFilters: () => void
 }
 
-function formatCount(value?: number): string {
+function formatCount(value?: number | null): string {
   if (value === undefined || value === null) return '…'
   return value.toLocaleString()
 }

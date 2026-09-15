@@ -107,7 +107,8 @@ export type EntitySearchResult = {
 export type EntityGraphPagination = {
   cursor: number
   pageSize: number
-  total: number
+  /** null = the exact count could not be computed in time. Never a guess, never 0. */
+  total: number | null
   hasMore: boolean
   nextCursor: number | null
   previousCursor?: number | null

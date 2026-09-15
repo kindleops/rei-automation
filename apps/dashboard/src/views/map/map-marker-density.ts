@@ -94,6 +94,26 @@ const BUCKET_EXPR: unknown[] = [
 ]
 
 /**
+ * A much finer stable key, 0-999999, used ONLY to break ties in collision order.
+ *
+ * The 0-99 bucket above is the right granularity for sampling but the wrong one for
+ * ordering: with hundreds of properties in view and 88% of them scoring 0, the sort key
+ * had about a hundred distinct values and everything else tied. MapLibre breaks ties by
+ * tile order, which depends on the order tiles arrived, so which pins survived collision
+ * changed between runs — measured at z12 as 73 markers in one run and 63 in the next
+ * from an identical admitted set of 540.
+ *
+ * Six digits gives roughly a 10^6 space, so ties are rare enough not to matter at any
+ * realistic pin count, and the order is still a pure function of the id: the same pins
+ * survive the same way on every pan, zoom and reload.
+ */
+const TIEBREAK_EXPR: unknown[] = [
+  'coalesce',
+  ['to-number', ['slice', ['to-string', ['get', 'property_id']], -6], 0],
+  0,
+]
+
+/**
  * The ladder, by what the operator is looking at:
  *   metro         the shape of a market
  *   district      which neighbourhoods are worth a look
@@ -172,12 +192,12 @@ export const buildPropertySortKeyExpr = (
     expr.push(['==', ['coalesce', ['get', 'property_id'], ''], selectedPropertyId], 0)
   }
   /**
-   * 1..102, best score first, with the stable bucket as a sub-unit tie-break. Ties are
-   * the common case here — 88% of properties score 0 — and without the tie-break
-   * MapLibre falls back to tile order, which differs between tiles covering the same
-   * ground at different zooms. That is visible as pins swapping on zoom.
+   * 1..102, best score first, with a fine stable sub-unit tie-break. Ties are the common
+   * case here — 88% of properties score 0 — and MapLibre breaks them by tile order,
+   * which depends on the order tiles arrived. That is visible as pins swapping between
+   * identical views.
    */
-  expr.push(['+', ['-', 102, SCORE_EXPR], ['/', BUCKET_EXPR, 1000]])
+  expr.push(['+', ['-', 102, SCORE_EXPR], ['/', TIEBREAK_EXPR, 1_000_000]])
   return expr as unknown as maplibregl.ExpressionSpecification
 }
 

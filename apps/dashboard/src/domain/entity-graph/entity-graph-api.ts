@@ -1,5 +1,6 @@
 import * as backendClient from '../../lib/api/backendClient'
 import type { EntityGraphDossier, EntityGraphListResponse, EntityGraphTabCounts } from './entity-graph.types'
+import type { UnsupportedFieldFilter } from './entity-graph-field-filters'
 
 const dossierCache = new Map<string, { fetchedAt: number; data: EntityGraphDossier }>()
 const DOSSIER_TTL_MS = 60_000
@@ -51,6 +52,32 @@ function normalizeListResponse(body: EntityGraphListResponse | null | undefined)
   }
 }
 
+/**
+ * A filter the backend cannot execute is a named error, not an empty list.
+ *
+ * The browse endpoint answers 422 `unsupported_entity_graph_filters` with the
+ * offending field keys rather than quietly running the query without them. The
+ * operator has to see WHICH filter failed -- an unexplained empty table and a
+ * table that silently ignored a filter look identical, and one of them is a
+ * cohort they might act on.
+ */
+export class EntityGraphFilterError extends Error {
+  unsupportedFilters: UnsupportedFieldFilter[]
+
+  constructor(message: string, unsupportedFilters: UnsupportedFieldFilter[]) {
+    super(message)
+    this.name = 'EntityGraphFilterError'
+    this.unsupportedFilters = unsupportedFilters
+  }
+}
+
+function unsupportedFiltersFromUpstream(upstream: unknown): UnsupportedFieldFilter[] {
+  if (!upstream || typeof upstream !== 'object') return []
+  const list = (upstream as { unsupported_filters?: unknown }).unsupported_filters
+  if (!Array.isArray(list)) return []
+  return list.filter((entry): entry is UnsupportedFieldFilter => Boolean(entry) && typeof entry === 'object')
+}
+
 export async function browseEntityGraph(
   params: Record<string, string | number | undefined>,
   signal?: AbortSignal,
@@ -61,6 +88,10 @@ export async function browseEntityGraph(
     { signal },
   )
   if (!res.ok) {
+    const unsupported = unsupportedFiltersFromUpstream(res.upstream)
+    if (unsupported.length) {
+      throw new EntityGraphFilterError('unsupported_entity_graph_filters', unsupported)
+    }
     throw new Error(res.message || res.error || 'entity_graph_browse_failed')
   }
   return normalizeListResponse(res.data)

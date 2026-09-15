@@ -255,18 +255,33 @@ export const ensurePropertyTileSourceAndLayers = (
       'icon-image': buildMarkerKeyIconImageExpr() as maplibregl.ExpressionSpecification,
       'icon-size': TILE_ICON_SCALE_EXPR as maplibregl.ExpressionSpecification,
       /**
-       * COLLISION ON. These were both `true`, which tells MapLibre never to suppress an
-       * icon for overlap — the direct cause of hundreds of house glyphs stacking at
-       * neighbourhood zoom. With collision restored, MapLibre drops icons that no
-       * longer fit, in the order given by `symbol-sort-key` (see map-marker-density):
-       * selected property first, then actively worked properties, then best score.
+       * COLLISION WHERE IT IS NEEDED, AND ONLY THERE.
        *
-       * Collision is the SAFETY NET, not the primary mechanism — the coupled density
-       * filter does the bulk of the thinning so that what survives is predictable
-       * across pans rather than dependent on placement order.
+       * Both of these were `true`, which tells MapLibre never to suppress an icon for
+       * overlap — the direct cause of hundreds of house glyphs stacking at neighbourhood
+       * zoom. Collision was then switched on everywhere, which traded that for the
+       * opposite failure: at street zoom, 2 of 15 admitted properties painted.
+       *
+       * Collision is also the source of the render's last non-determinism. MapLibre
+       * resolves it per tile batch, so which icons win depends on the order tiles
+       * arrived. Measured across repeated fresh runs with byte-identical source and
+       * admitted counts, z15 painted anywhere between 2 and 36 of the same 81 admitted
+       * properties — bimodal rather than noisy, one stable outcome per process.
+       *
+       * So collision is scoped to the zooms that actually have a density problem. From
+       * z14.5 up, the score floor is 0 and the sample quota is 100 — everything in view
+       * is admitted precisely because there is little in view — and suppressing any of it
+       * is both wrong for the operator and the only thing making the render unstable.
+       * Above that boundary placement is unconditional, so it is complete AND
+       * deterministic. Below it, the coupled density filter has already done the bulk of
+       * the thinning and collision is the safety net it was meant to be.
+       *
+       * Zoom expressions are legitimate in a LAYOUT property — MapLibre evaluates these
+       * against the live camera. That is not true of filters, which is why the density
+       * thresholds resolve in JS instead; see map-marker-density.
        */
-      'icon-allow-overlap': false,
-      'icon-ignore-placement': false,
+      'icon-allow-overlap': ['step', ['zoom'], false, 14.5, true] as unknown as boolean,
+      'icon-ignore-placement': ['step', ['zoom'], false, 14.5, true] as unknown as boolean,
       // A little breathing room, so two markers never touch at the point they stop
       // colliding — that boundary is where a map reads as jittery.
       'icon-padding': 2,

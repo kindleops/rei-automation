@@ -25,6 +25,23 @@ export async function GET(request) {
     const data = await browseEntityGraph(params)
     return NextResponse.json({ ok: true, ...data }, { status: 200, headers })
   } catch (error) {
+    /**
+     * A filter this tab cannot execute is a 422 naming the filter, never a
+     * quiet unfiltered page. `results: []` and `total: 0` so a client that
+     * ignores `ok` still cannot render the whole table as a cohort.
+     */
+    if (error?.code === 'unsupported_entity_graph_filters') {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.code,
+          unsupported_filters: error.unsupported_filters || [],
+          results: [],
+          total: 0,
+        },
+        { status: 422, headers },
+      )
+    }
     return NextResponse.json(
       { ok: false, error: error?.message || 'entity_graph_browse_failed' },
       { status: 500, headers },

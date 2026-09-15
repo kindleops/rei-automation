@@ -18,6 +18,10 @@ import {
   relationshipLabel,
   resolveEntityGraphMarket,
 } from './entity-graph-normalize.js'
+import {
+  applyEntityGraphFieldFilters,
+  resolveEntityGraphFieldFiltersOrThrow,
+} from './entity-graph-field-filters.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -658,15 +662,68 @@ function emailToResult(row, score = 100) {
   })
 }
 
-function paginatedResponse(results, total, cursor, pageSize) {
-  const nextCursor = cursor + pageSize < total ? cursor + pageSize : null
+/**
+ * THE PAGE MUST NOT WAIT ON THE COUNT.
+ *
+ * PostgREST's `count: 'exact'` rides along with the row query, so one request
+ * pays for both -- and on 169,802 properties an unindexed predicate makes the
+ * count a sequential scan while the page itself is an index scan that stops at
+ * 25 rows. Measured 2026-09-14, `year_built between 1900 and 1950`:
+ *
+ *   page of 25 (index scan, ordered)      2.5 ms
+ *   exact count (seq scan)              4,490 ms
+ *   both in one request           statement timeout -> 500, no rows at all
+ *
+ * So the operator lost the whole result set to pay for a number. Split in two
+ * and run them together: the page lands immediately and the count is allowed
+ * to fail on its own.
+ *
+ * A count that fails comes back as `total: null` -- NOT 0, and not an
+ * estimate. Zero is a lie an operator would act on; null says "not counted".
+ * `hasMore` then falls back to whether the page came back full, which is the
+ * one thing the page itself proves.
+ */
+async function fetchPageWithCount(supabase, {
+  table,
+  select,
+  buildQuery,
+  orderCol,
+  ascending,
+  cursor,
+  pageSize,
+}) {
+  const pageQuery = buildQuery(supabase.from(table).select(select))
+    .order(orderCol, { ascending, nullsFirst: false })
+    .range(cursor, cursor + pageSize - 1)
+  const countQuery = buildQuery(supabase.from(table).select(select, { count: 'exact', head: true }))
+
+  const [page, counted] = await Promise.all([pageQuery, countQuery])
+  if (page.error) throw page.error
+
+  const rows = page.data || []
+  return {
+    rows,
+    // counted.error is swallowed on purpose: the count is a nicety, the rows
+    // are the answer. Losing the rows to a slow count is the defect.
+    total: counted.error ? null : (counted.count ?? null),
+    pageWasFull: rows.length >= pageSize,
+  }
+}
+
+function paginatedResponse(results, total, cursor, pageSize, { pageWasFull = null } = {}) {
+  // total === null means the count could not be computed. Paging then follows
+  // the page itself rather than a number nobody has.
+  const hasMore = total === null
+    ? (pageWasFull ?? results.length >= pageSize)
+    : cursor + pageSize < total
+  const nextCursor = hasMore ? cursor + pageSize : null
   return {
     results,
     pagination: {
       cursor,
       pageSize,
       total,
-      hasMore: nextCursor !== null,
+      hasMore,
       nextCursor,
       previousCursor: cursor > 0 ? Math.max(cursor - pageSize, 0) : null,
     },
@@ -921,43 +978,46 @@ async function getCanonicalMarketAggregates(supabase) {
   return merged
 }
 
-async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
+async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
   const orderCol = BROWSE_SORT_COLUMNS.properties.columns.includes(sortBy) ? sortBy : 'property_address_full'
-  let query = supabase
-    .from('properties')
-    .select(PROPERTY_SUMMARY_SELECT, { count: 'exact' })
-  query = applyPropertyFilters(query, filters)
-  const { data, error, count } = await query
-    .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1)
-  if (error) throw error
-  return paginatedResponse((data || []).map((row) => propertyToResult(row)), count || 0, cursor, pageSize)
+  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+    table: 'properties',
+    select: PROPERTY_SUMMARY_SELECT,
+    buildQuery: (query) => applyEntityGraphFieldFilters(applyPropertyFilters(query, filters), fieldFilters),
+    orderCol,
+    ascending,
+    cursor,
+    pageSize,
+  })
+  return paginatedResponse(rows.map((row) => propertyToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
-async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
+async function browseOwners(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
   const orderCol = BROWSE_SORT_COLUMNS.master_owners.columns.includes(sortBy) ? sortBy : 'display_name'
-  let query = supabase
-    .from('master_owners')
-    .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
-  query = applyOwnerFilters(query, filters)
-  const { data, error, count } = await query
-    .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1)
-  if (error) throw error
-  return paginatedResponse((data || []).map((row) => ownerToResult(row)), count || 0, cursor, pageSize)
+  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+    table: 'master_owners',
+    select: OWNER_SUMMARY_SELECT,
+    buildQuery: (query) => applyEntityGraphFieldFilters(applyOwnerFilters(query, filters), fieldFilters),
+    orderCol,
+    ascending,
+    cursor,
+    pageSize,
+  })
+  return paginatedResponse(rows.map((row) => ownerToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
-async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, filters = {} }) {
+async function browseProspects(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
   const orderCol = BROWSE_SORT_COLUMNS.people.columns.includes(sortBy) ? sortBy : 'full_name'
-  let query = supabase
-    .from('prospects')
-    .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' })
-  query = applyProspectFilters(query, filters)
-  const { data, error, count } = await query
-    .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1)
-  if (error) throw error
-  return paginatedResponse((data || []).map((row) => prospectToResult(row)), count || 0, cursor, pageSize)
+  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+    table: 'prospects',
+    select: PROSPECT_SUMMARY_SELECT,
+    buildQuery: (query) => applyEntityGraphFieldFilters(applyProspectFilters(query, filters), fieldFilters),
+    orderCol,
+    ascending,
+    cursor,
+    pageSize,
+  })
+  return paginatedResponse(rows.map((row) => prospectToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
 async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascending }) {
@@ -986,7 +1046,7 @@ async function browseOrganizations(supabase, { cursor, pageSize, sortBy, ascendi
   return paginatedResponse(results, count || 0, cursor, pageSize)
 }
 
-async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascending, subtype, filters = {} }) {
+async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascending, subtype, filters = {}, fieldFilters = [] }) {
   const contactSubtype = lower(subtype || 'phone')
   if (contactSubtype === 'email') {
     const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
@@ -999,15 +1059,16 @@ async function browseContactMethods(supabase, { cursor, pageSize, sortBy, ascend
     return paginatedResponse((data || []).map((row) => emailToResult(row)), count || 0, cursor, pageSize)
   }
   const orderCol = sortBy === 'contact_score_final' ? 'contact_score_final' : 'sort_rank'
-  let query = supabase
-    .from('phones')
-    .select(PHONE_SUMMARY_SELECT, { count: 'exact' })
-  query = applyPhoneFilters(query, filters)
-  const { data, error, count } = await query
-    .order(orderCol, { ascending, nullsFirst: false })
-    .range(cursor, cursor + pageSize - 1)
-  if (error) throw error
-  return paginatedResponse((data || []).map((row) => phoneToResult(row)), count || 0, cursor, pageSize)
+  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+    table: 'phones',
+    select: PHONE_SUMMARY_SELECT,
+    buildQuery: (query) => applyEntityGraphFieldFilters(applyPhoneFilters(query, filters), fieldFilters),
+    orderCol,
+    ascending,
+    cursor,
+    pageSize,
+  })
+  return paginatedResponse(rows.map((row) => phoneToResult(row)), total, cursor, pageSize, { pageWasFull })
 }
 
 async function fetchMarketAggregateRows(supabase) {
@@ -1202,7 +1263,13 @@ export async function browseEntityGraph(params = {}, deps = {}) {
   const sortBy = clean(params.sort_by || params.sortBy) || BROWSE_SORT_COLUMNS[tab]?.default || 'id'
   const ascending = ['1', 'true', 'yes'].includes(lower(params.ascending))
   const filters = parseBrowseFilters(params)
-  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters }
+  /**
+   * Catalog-backed filters resolve BEFORE any query runs and throw on anything
+   * this tab cannot execute. A filter the backend drops is not a narrower
+   * cohort -- it is the entire table wearing a cohort's label.
+   */
+  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow(tab, params)
+  const browseArgs = { cursor, pageSize, sortBy, ascending, subtype: params.subtype, filters, fieldFilters }
 
   switch (tab) {
     case 'properties':
