@@ -304,6 +304,7 @@ const runCell = async (browser, width, theme, canonical) => {
   const scenarios = {}
   const maps = []
   const consoleErrors = []
+  const failedRequests = []
 
   const newPage = async () => {
     const page = await context.newPage()
@@ -312,6 +313,9 @@ const runCell = async (browser, width, theme, canonical) => {
     page.on('request', (r) => {
       const u = r.url()
       if (u.includes('maps.googleapis.com') || u.includes('streetview')) maps.push(u.slice(0, 120))
+    })
+    page.on('response', (r) => {
+      if (r.status() >= 400) failedRequests.push(`${r.status()} ${r.url().replace(BASE, '').slice(0, 140)}`)
     })
     return page
   }
@@ -387,7 +391,16 @@ const runCell = async (browser, width, theme, canonical) => {
       check('search:matches-are-relevant', hit.rowNames.every((n) => /entity graph/i.test(n)), hit.rowNames)
 
       await page.fill(sel, 'zzzz-no-such-campaign')
-      await page.waitForTimeout(1400)
+      // The list renders skeletons whenever `loading && campaigns.length === 0`,
+      // and a zero-match search satisfies the second half — so a background
+      // refetch paints skeletons over what should be the empty state. Waiting
+      // for them to clear is the difference between measuring the empty state
+      // and measuring a refetch.
+      await page.waitForFunction(
+        () => document.querySelectorAll('.cmk__row.is-skeleton').length === 0,
+        undefined, { timeout: 30_000 },
+      ).catch(() => {})
+      await page.waitForTimeout(1200)
       const zero = await page.evaluate(PROBE)
       await page.screenshot({ path: path.join(out, 'search-zero.png') })
       check('search:zero-is-stated', zero.rowCount === 0 && !!zero.emptyState,
@@ -444,6 +457,7 @@ const runCell = async (browser, width, theme, canonical) => {
     cell: `${width}-${theme}`, width, theme, findings,
     streetViewRequests: maps.length,
     consoleErrors: [...new Set(consoleErrors)].slice(0, 8),
+    failedRequests: [...new Set(failedRequests)].slice(0, 8),
     canonical, scenarios,
   }
   await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(report, null, 2))

@@ -107,6 +107,37 @@ export function rollupCampaigns(all: CampaignSummary[]) {
   return { running, runningTest, scheduled, attention, replies, readyLive, readyTerminal }
 }
 
+/**
+ * EXPLICIT TARGETS vs DYNAMIC COHORT — §3.
+ *
+ * The operator must never confuse the two, because they promise different
+ * things: a pinned selection can only ever contain the ids that were picked,
+ * while a dynamic cohort is re-resolved at build time and can pick up records
+ * added later. Nothing in the mobile UI said which a campaign had.
+ *
+ * The selected count is shown alongside, because it is the number the operator
+ * chose — and it is not the same number as the built target count.
+ * campaign_targets is contact-grained, so five selected properties resolve to
+ * two rows here and 186 resolve to 984. Showing only the built count is how a
+ * widened cohort hides.
+ */
+export function targetModePhrase(c: CampaignSummary): string | null {
+  switch (c.target_mode) {
+    case 'explicit':
+      return c.explicit_target_count != null
+        ? `Explicit · ${nf(c.explicit_target_count)} selected`
+        : 'Explicit targets'
+    case 'explicit_filtered':
+      return c.explicit_target_count != null
+        ? `Explicit ${nf(c.explicit_target_count)} + filters`
+        : 'Explicit targets + filters'
+    case 'dynamic':
+      return 'Dynamic cohort'
+    default:
+      return null
+  }
+}
+
 export function targetingPhrase(c: CampaignSummary): string {
   if (c.total_targets > 0) return `${nf(c.total_targets)} target${c.total_targets === 1 ? '' : 's'}`
   if (c.has_target_definition) return 'targeting set · not built'
@@ -211,6 +242,18 @@ export function CampaignCommandMobile({
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [inv, setInv] = useState<CampaignMarketInventoryResponse | null>(null)
+  /**
+   * Inventory is a separate, optional feed — and right now an ABSENT one:
+   * `/api/cockpit/campaigns/market-inventory` has no route, so the request
+   * falls through to `campaigns/[id]` and is correctly rejected as a non-UUID
+   * campaign id (400 invalid_campaign_id on every load).
+   *
+   * That left two dead affordances: an INVENTORY button reading "— ready of —
+   * sellers" that expanded to nothing, and a MARKETS strip showing a permanent
+   * ghost row. Tracking the outcome lets them be withheld rather than rendered
+   * as things the operator could interact with.
+   */
+  const [invState, setInvState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
   const [sendMode, setSendMode] = useState<string | null>(null)
   const [autoMode, setAutoMode] = useState<string | null>(null)
   const [ladderOpen, setLadderOpen] = useState(false)
@@ -221,8 +264,14 @@ export function CampaignCommandMobile({
   useEffect(() => {
     let dead = false
     void getCampaignMarketInventory(10).then((res) => {
-      if (!dead && res.ok && res.data?.ok) setInv(res.data)
-    })
+      if (dead) return
+      if (res.ok && res.data?.ok) {
+        setInv(res.data)
+        setInvState('ready')
+      } else {
+        setInvState('unavailable')
+      }
+    }).catch(() => { if (!dead) setInvState('unavailable') })
     void getQueueControlSettings().then((res) => {
       if (dead || !res.ok) return
       const d = (res.data?.diagnostics ?? {}) as Record<string, unknown>
@@ -332,19 +381,22 @@ export function CampaignCommandMobile({
             })}
           </div>
 
-          <button
-            type="button"
-            className="cmk__ladder"
-            onClick={() => setLadderOpen((v) => !v)}
-            aria-expanded={ladderOpen}
-          >
-            <span className="cmk__ladder-key">INVENTORY</span>
-            <span className="cmk__ladder-main">
-              <strong>{inv ? nf(inv.inventory.ready) : '—'}</strong> ready
-              <em>of {inv ? nf(inv.inventory.universe_properties) : '—'} sellers</em>
-            </span>
-            <Icon name={ladderOpen ? 'chevron-up' : 'chevron-down'} size={13} />
-          </button>
+          {invState !== 'unavailable' && (
+            <button
+              type="button"
+              className="cmk__ladder"
+              onClick={() => setLadderOpen((v) => !v)}
+              aria-expanded={ladderOpen}
+              disabled={invState === 'loading'}
+            >
+              <span className="cmk__ladder-key">INVENTORY</span>
+              <span className="cmk__ladder-main">
+                <strong>{inv ? nf(inv.inventory.ready) : '—'}</strong> ready
+                <em>of {inv ? nf(inv.inventory.universe_properties) : '—'} sellers</em>
+              </span>
+              <Icon name={ladderOpen ? 'chevron-up' : 'chevron-down'} size={13} />
+            </button>
+          )}
 
           {ladderOpen && inv && (
             <div className="cmk__rungs">
@@ -369,6 +421,7 @@ export function CampaignCommandMobile({
             </div>
           )}
 
+          {invState !== 'unavailable' && (
           <div className="cmk__markets">
             <div className="cmk__markets-head">
               <span>MARKETS</span>
@@ -390,6 +443,7 @@ export function CampaignCommandMobile({
               {!inv && <div className="cmk__market is-ghost" aria-hidden="true" />}
             </div>
           </div>
+          )}
         </section>
 
         {searchOpen && (
@@ -443,6 +497,7 @@ export function CampaignCommandMobile({
                       <span className="cmk__row-name">{c.campaign_name || 'Untitled campaign'}</span>
                       <span className="cmk__row-quiet">
                         {TONE_LABEL[tone]} · {targetingPhrase(c)}
+                        {targetModePhrase(c) ? ` · ${targetModePhrase(c)}` : ''}
                       </span>
                     </button>
                   )
@@ -462,6 +517,9 @@ export function CampaignCommandMobile({
                         {c.market_label || 'No market set'}
                       </span>
                       <em>· {nf(c.total_targets)} targets</em>
+                      {targetModePhrase(c) && (
+                        <span className={`cmk__row-mode is-${c.target_mode}`}>{targetModePhrase(c)}</span>
+                      )}
                       {c.auto_send_enabled && <span className="cmk__row-auto">AUTO</span>}
                     </span>
 

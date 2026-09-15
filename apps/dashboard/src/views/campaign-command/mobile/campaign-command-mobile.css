@@ -564,3 +564,27 @@
   line-height: 1.35;
   color: var(--k-ink-2);
 }
+
+/* §3 — the targeting promise, which must never be mistaken for the other one.
+   Explicit is a pinned set; dynamic re-resolves and can grow. */
+.cmk__row-mode {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--k-rule);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--k-ink-3);
+  white-space: nowrap;
+}
+.cmk__row-mode.is-explicit,
+.cmk__row-mode.is-explicit_filtered {
+  border-color: color-mix(in srgb, var(--k-live) 40%, transparent);
+  color: color-mix(in srgb, var(--k-live) 86%, var(--k-ink));
+}
+.cmk__row-mode.is-dynamic {
+  border-color: color-mix(in srgb, var(--k-hold) 36%, transparent);
+  color: color-mix(in srgb, var(--k-hold) 86%, var(--k-ink));
+}

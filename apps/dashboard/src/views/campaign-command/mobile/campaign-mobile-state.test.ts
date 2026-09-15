@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TONE_LABEL, rollupCampaigns, targetingPhrase, toneOf } from './CampaignCommandMobile'
+import { TONE_LABEL, rollupCampaigns, targetModePhrase, targetingPhrase, toneOf } from './CampaignCommandMobile'
 import type { CampaignSummary } from '../campaigns.types'
 
 /**
@@ -136,5 +136,44 @@ describe('the KPI strip counts what it says it counts', () => {
   it('says zero honestly for an empty book', () => {
     const roll = rollupCampaigns([])
     expect(roll).toMatchObject({ running: 0, runningTest: 0, readyLive: 0, readyTerminal: 0 })
+  })
+})
+
+describe('explicit and dynamic targeting are never confused', () => {
+  /**
+   * The two real handoffs on 2026-09-15: "Entity Graph · 5 properties" pinned
+   * five ids, and "Tax Delinquent - Poor and Unsound" saved three dimension
+   * filters. They promise different things and must read differently.
+   */
+  it('names a pinned selection and how many were pinned', () => {
+    expect(targetModePhrase(campaign({ target_mode: 'explicit', explicit_target_count: 5 })))
+      .toBe('Explicit · 5 selected')
+  })
+
+  it('names a dynamic cohort without implying a fixed size', () => {
+    const phrase = targetModePhrase(campaign({ target_mode: 'dynamic', explicit_target_count: null }))
+    expect(phrase).toBe('Dynamic cohort')
+    expect(phrase).not.toMatch(/\d/)
+  })
+
+  it('does not pass a mixed definition off as purely explicit', () => {
+    expect(targetModePhrase(campaign({ target_mode: 'explicit_filtered', explicit_target_count: 3 })))
+      .toBe('Explicit 3 + filters')
+  })
+
+  it('says nothing when there is no targeting to describe', () => {
+    expect(targetModePhrase(campaign({ target_mode: 'none' }))).toBeNull()
+    expect(targetModePhrase(campaign())).toBeNull()
+  })
+
+  /**
+   * The selected count is NOT the built count. campaign_targets is
+   * contact-grained: 5 selected resolved to 2 rows, 186 selected to 984. A row
+   * that showed only the built number is how a widened cohort hid.
+   */
+  it('keeps the selected count distinct from the built target count', () => {
+    const c = campaign({ target_mode: 'explicit', explicit_target_count: 186, total_targets: 984 })
+    expect(targetModePhrase(c)).toBe('Explicit · 186 selected')
+    expect(targetingPhrase(c)).toBe('984 targets')
   })
 })

@@ -155,6 +155,8 @@ function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>
       total_targets: Number(row.total_targets ?? 0),
       // Distinguishes "no targeting configured" from "targeting set, not built".
       has_target_definition: Boolean(row.has_target_definition),
+      target_mode: (row.target_mode as CampaignSummary['target_mode']) ?? 'none',
+      explicit_target_count: row.explicit_target_count == null ? null : Number(row.explicit_target_count),
       ready_targets: Number(row.ready_targets ?? 0),
       planned_targets: Number(row.planned_targets ?? 0),
       scheduled_targets: Number(row.scheduled_queue_rows ?? row.scheduled_targets ?? 0),

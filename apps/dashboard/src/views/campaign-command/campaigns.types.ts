@@ -57,6 +57,10 @@ export interface CampaignSummary {
   total_targets: number
   /** True when metadata.target_filters is non-empty — a definition exists even if no build has resolved it. */
   has_target_definition?: boolean
+  /** Explicit = a pinned id list; dynamic = a query re-resolved at build time. §3 */
+  target_mode?: 'explicit' | 'explicit_filtered' | 'dynamic' | 'none'
+  /** How many identities the operator pinned. Null for a dynamic cohort. */
+  explicit_target_count?: number | null
   ready_targets: number
   planned_targets?: number
   scheduled_targets: number
