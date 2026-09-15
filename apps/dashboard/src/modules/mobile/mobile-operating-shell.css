@@ -1711,7 +1711,11 @@ html.is-mobile-layout {
     overflow-y: scroll !important;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
-    padding-bottom: calc(var(--nx-mobile-safe-bottom, 0px) + 8px) !important;
+    /* Breathing room only. The bottom-chrome reservation lives with the content
+       that has to clear it (.msc-safe-bottom), so it travels with the mobile
+       Deal Intelligence body into the fullscreen host too. */
+    padding-bottom: 8px !important;
+    scroll-padding-bottom: calc(var(--nx-mobile-chrome-bottom, 68px) + 12px);
   }
 
   .nx-inbox-shell.is-mobile-inbox.m-intel-open .nx-intelligence-panel.is-layout-compact .nx-intel-header.is-compact-only {

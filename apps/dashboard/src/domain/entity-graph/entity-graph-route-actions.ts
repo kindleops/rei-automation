@@ -88,7 +88,25 @@ export function routeEntityGraphAction(
       options.onOpenCompIntelligence()
       return true
     }
-    pushRoutePath('/comp-intelligence')
+    /**
+     * CARRY THE SUBJECT. Both ways.
+     *
+     * This was `pushRoutePath('/comp-intelligence')` with no syncContext() and
+     * no property id -- unlike the map action three lines up, which syncs.
+     * CompIntelligenceWorkspace resolves its subject from ?property_id, then a
+     * `thread` prop, then dealContext, and returns null if all three are
+     * absent -- so launching it from a selected property landed on
+     * "No Subject Selected" while a subject demonstrably existed.
+     *
+     * syncContext() publishes the universal snapshot (which Comp Intelligence
+     * now also reads) and the query parameter survives a reload or a shared
+     * link, which the in-memory snapshot cannot.
+     */
+    syncContext()
+    const propertyId = context.propertyId || (context.entityType === 'property' ? context.entityId : null)
+    pushRoutePath(propertyId
+      ? `/comp-intelligence?property_id=${encodeURIComponent(propertyId)}`
+      : '/comp-intelligence')
     return true
   }
 
@@ -97,6 +115,8 @@ export function routeEntityGraphAction(
       options.onOpenBuyerMatch()
       return true
     }
+    // Same subject-carrying contract as Comp Intelligence above.
+    syncContext()
     pushRoutePath('/buyer-match')
     return true
   }

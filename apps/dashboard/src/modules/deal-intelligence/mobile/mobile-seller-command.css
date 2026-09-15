@@ -716,7 +716,26 @@
 @media (prefers-reduced-motion: reduce) { .msc-skeleton span { animation: none; } }
 
 /* Bottom chrome must not sit on top of content. */
-.msc-safe-bottom { height: calc(64px + env(safe-area-inset-bottom, 0px)); flex: none; }
+/* CLEAR THE BOTTOM DOCK.
+ *
+ * This was a hand-picked `64px + env(safe-area-inset-bottom)`. It happened to
+ * clear the dock in a desktop browser, where the home-indicator inset is 0 and
+ * the collapsed dock paints 20px, and it did not track the dock at all: when
+ * --nx-pinned-dock-height became the reservation (62px + inset + 6px gutter),
+ * 64 + 34 = 98px on a notched phone sat UNDER a 102px chrome band, so the last
+ * Activity row and the final action were behind the dock.
+ *
+ * Measured 390x844, every section expanded: scrollHeight 3004, clientHeight 820,
+ * dock occupying y 824-844.
+ *
+ * --nx-mobile-chrome-bottom is the shared contract (dock height + safe-area
+ * inset + gutter) and is zeroed under html.is-keyboard-open, so this collapses
+ * on its own when the dock hides. Sole reservation for this body -- the host
+ * scroller keeps only 8px of breathing room, so the two cannot stack. */
+.msc-safe-bottom {
+  height: calc(var(--nx-mobile-chrome-bottom, 68px) + 12px);
+  flex: none;
+}
 
 /* 375px — the tightest supported width. */
 @media (max-width: 380px) {
@@ -735,4 +754,12 @@
   .msc-header { margin: 0 -20px; padding-left: 20px; padding-right: 20px; }
   .msc-header__name { font-size: 24px; }
   .msc-snapshot__value { font-size: 33px; }
+}
+
+/* Property visual. Sits between the decision snapshot and the first section —
+   the operator's first question about a house is what it looks like. */
+.msc-visual {
+  margin: 0 12px 10px;
+  border-radius: 14px;
+  overflow: hidden;
 }

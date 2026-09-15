@@ -2107,14 +2107,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [locatorRouteKey, setActiveContext])
 
   const resolveDealIntelThreadId = useCallback((): string | null => {
-    const active = selectedRef.current
-    if (active?.id) return active.id
-
-    // ARRIVING FROM ANOTHER APP. The dock records WHICH deal to open before it
-    // navigates, because this component remounts with no selection. Without
-    // that identity the fallback below returns whatever happens to sit first in
-    // the list - i.e. Deal Intelligence opened somebody else's deal.
+    /**
+     * AN EXPLICIT REQUEST OUTRANKS WHATEVER IS ALREADY SELECTED.
+     *
+     * This began `if (active?.id) return active.id`, so when the Inbox already
+     * had a thread selected the pending identity was never consulted at all.
+     * Measured 2026-09-14: /deal-intelligence?property_id=278442634
+     * (3016 Bellefontaine Ave, Kansas City) opened on Bertha A Daniels,
+     * 1115 Nw 64th St, Miami — the thread that happened to be selected.
+     *
+     * The ambient selection is now the fallback, not the winner: an operator who
+     * names a subject gets that subject.
+     */
     const pending = peekPendingInboxDealIntelligenceIdentity()
+    const active = selectedRef.current
+    if (!pending && active?.id) return active.id
+
     if (pending) {
       const norm = (value: unknown) => {
         const text = String(value ?? '').trim()
@@ -2139,6 +2147,23 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       }
       const match = threads.find(matches) ?? filtered.find(matches) ?? null
       if (match?.id) return match.id
+
+      /**
+       * NO CONVERSATION FOR THE REQUESTED SUBJECT IS NOT AN INVITATION TO SHOW
+       * A DIFFERENT ONE.
+       *
+       * Most properties have no inbox thread — 278442634 has none — and the
+       * fallback below returns whatever sits first in the loaded list. That is
+       * how an explicit request for a Kansas City property produced a Miami
+       * seller's deal, which reads as "this is that property's data" and is
+       * wrong in the most expensive possible way.
+       *
+       * Returning null keeps the requested identity in session storage for the
+       * panel to seed from, and the panel shows its own no-opportunity state
+       * instead of somebody else's conversation.
+       */
+      if (active?.id) return active.id
+      return null
     }
 
     const fallback = filtered[0] ?? threads[0] ?? null

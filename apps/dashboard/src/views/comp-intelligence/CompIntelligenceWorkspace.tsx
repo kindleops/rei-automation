@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCompIntelligence } from '../../domain/comp-intelligence/useCompIntelligence'
+import {
+  getUniversalEntityContextSnapshot,
+  subscribeUniversalEntityContext,
+} from '../../domain/entity-graph/universal-entity-context-store'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
@@ -67,6 +71,25 @@ export function CompIntelligenceWorkspace({
     ? new URLSearchParams(window.location.search).get('property_id')
     : null
 
+  /**
+   * THE GLOBAL SUBJECT IS A SOURCE OF TRUTH HERE TOO.
+   *
+   * The subject was resolved from ?property_id, then a `thread` prop, then
+   * dealContext -- and nothing else. Every other intelligence surface (Inbox,
+   * Pipeline, Entity Graph) reads the universal entity context; this one did
+   * not, so arriving from a surface that had only published the snapshot showed
+   * "No Subject Selected" while a subject demonstrably existed.
+   *
+   * Subscribed rather than read once: the operator can switch subject in
+   * another pane while this one is mounted, and a stale A after B became active
+   * is the cached-context bug §24 exists to catch.
+   */
+  const [globalContext, setGlobalContext] = useState(() => getUniversalEntityContextSnapshot())
+  useEffect(() => subscribeUniversalEntityContext(setGlobalContext), [])
+  const contextPropertyId = globalContext?.propertyId
+    || (globalContext?.entityType === 'property' ? globalContext?.entityId : null)
+    || null
+
   const effectiveDealContext = useMemo(() => {
     if (urlPropertyId) {
       return {
@@ -76,8 +99,15 @@ export function CompIntelligenceWorkspace({
       } as DealContext
     }
     if (dealContext?.propertyId || dealContext?.property_id) return dealContext
+    if (contextPropertyId) {
+      return {
+        ...(dealContext ?? {}),
+        propertyId: contextPropertyId,
+        property_id: contextPropertyId,
+      } as DealContext
+    }
     return dealContext ?? null
-  }, [dealContext, urlPropertyId])
+  }, [dealContext, urlPropertyId, contextPropertyId])
 
   const effectiveThread = useMemo(() => {
     if (urlPropertyId) {
@@ -90,14 +120,21 @@ export function CompIntelligenceWorkspace({
       } as unknown as InboxWorkflowThread
     }
     if (thread) return thread
-    const propertyId = effectiveDealContext?.propertyId || effectiveDealContext?.property_id
+    const propertyId = effectiveDealContext?.propertyId
+      || effectiveDealContext?.property_id
+      || contextPropertyId
     if (!propertyId) return null
     return {
       thread_key: `proof-${propertyId}`,
       property_id: propertyId,
-      subject: effectiveDealContext?.propertyAddress || effectiveDealContext?.property_address_full || 'Subject property',
+      // UniversalEntityContext carries ids, not labels. The address arrives with
+      // the comp payload; until then the card shows the id-anchored placeholder
+      // rather than inventing a street name.
+      subject: effectiveDealContext?.propertyAddress
+        || effectiveDealContext?.property_address_full
+        || 'Subject property',
     } as unknown as InboxWorkflowThread
-  }, [thread, urlPropertyId, effectiveDealContext, dealContext])
+  }, [thread, urlPropertyId, effectiveDealContext, dealContext, contextPropertyId])
 
   const {
     propertyId,
