@@ -5827,6 +5827,63 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
     }, campaign)
     options.target_limit = targetLimit
 
+    /**
+     * A DROPPED FILTER MUST NOT BUILD THE WHOLE UNIVERSE.
+     *
+     * previewOptionsFromInput resolves the campaign's saved target_filters
+     * against the field catalog and reports anything it could not resolve in
+     * `catalog_filters.dropped`. The preview path surfaces that honestly. This
+     * WRITE path did not look at it: a filter the catalog rejected simply left
+     * the option set empty, and an empty option set means "no narrowing", so
+     * the builder targeted every reachable row.
+     *
+     * Reproduced 2026-09-14 on the operator's own draft. "Entity Graph · 5
+     * properties" carried five real property_ids, and properties.property_id
+     * was not yet a declared catalog field:
+     *
+     *   preview  -> dropped_filters: [{field_key: "properties.property_id",
+     *                                  reason: "unknown_campaign_field"}]
+     *   build    -> 61,500 campaign_targets rows for a 5-property selection
+     *
+     * (That campaign has been restored to 0 rows and no send_queue row was ever
+     * created -- the builder's own no_send_queue_rows_created contract held.)
+     *
+     * The read-side rule is that an unsupported filter fails closed. A builder
+     * that writes targets has strictly more reason to obey it: refusing costs
+     * the operator one error message, and not refusing silently points a
+     * campaign at the entire corpus.
+     */
+    const droppedFilters = options.catalog_filters?.dropped || []
+    if (droppedFilters.length > 0) {
+      const detailLines = droppedFilters
+        .map((filter) => `${filter.field_key || filter.fieldKey} (${filter.reason || 'unsupported'})`)
+      await finishCampaignRun(run.id, {
+        status: 'failed',
+        total_scanned: 0,
+        targets_clean: 0,
+        ready_to_queue: 0,
+        blocked_counts: {},
+        metadata: { unresolved_target_filters: droppedFilters },
+      }, deps)
+      await recordCampaignEvent({
+        campaign_id: campaignId,
+        run_id: run.id,
+        event_type: 'campaign.targets_build_refused',
+        payload: { reason: 'unresolved_target_filters', dropped_filters: droppedFilters },
+      }, deps)
+      return {
+        ok: false,
+        status: 422,
+        error: 'unresolved_target_filters',
+        message: `Refusing to build targets: ${detailLines.join(', ')}. `
+          + 'Building with an unresolved filter would target every reachable record.',
+        campaign_id: campaignId,
+        dropped_filters: droppedFilters,
+        built_count: 0,
+        no_send_queue_rows_created: true,
+      }
+    }
+
     const graph = await summarizeCampaignGraph({
       supabase,
       options,

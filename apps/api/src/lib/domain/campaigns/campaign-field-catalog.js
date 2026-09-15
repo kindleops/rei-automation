@@ -307,6 +307,34 @@ const JSON_OPERATORS = [
 const FIELD_GROUPS = [
   {
     domain: 'properties',
+    /**
+     * IDENTITY. The keys that pin EXACT records rather than describe a cohort.
+     *
+     * `properties.property_id` was already in PREVIEW_SUPPORTED_FIELD_KEYS but
+     * was declared in no FIELD_GROUP, so the catalog did not know it and the
+     * resolver rejected it as `unknown_campaign_field`. That is what broke the
+     * Entity Graph handoff: an explicit selection hands over exactly this key,
+     * the pipeline honourably dropped it (`dropped_filters`, with the reason)
+     * and then matched nothing.
+     *
+     * Reproduced on the operator's own campaign, 2026-09-14 --
+     * "Entity Graph · 5 properties" (4ce9fbaa) carried five real property_ids in
+     * metadata.target_filters and had 0 rows in campaign_targets:
+     *   unsupportedFilters: [{field_key: "properties.property_id",
+     *                         unsupported_reason: "unknown_campaign_field"}]
+     *
+     * Kept in its own category so an ID never shows up beside "Market" in the
+     * operator-facing filter builder -- it is the anchor for a pinned list, not
+     * a targeting dimension someone browses.
+     */
+    category: 'Identity & IDs',
+    columns: [
+      'property_id',
+      'master_owner_id',
+    ],
+  },
+  {
+    domain: 'properties',
     category: 'Location & Market',
     // Canonical address geography only. The legacy property_state / property_zip /
     // property_county_name columns are deliberately excluded from the operator-facing
@@ -725,6 +753,9 @@ const ENUM_COLUMNS = new Set([
 
 const PREVIEW_SUPPORTED_FIELD_KEYS = new Set([
   'properties.property_id',
+  // Entity Graph hands over owner ids when the operator selected owners,
+  // people or entities rather than properties.
+  'properties.master_owner_id',
   'properties.property_county_name',
   'properties.property_state',
   'properties.property_zip',
