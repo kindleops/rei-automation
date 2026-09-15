@@ -604,19 +604,24 @@ const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }:
 })
 PropertyFlagBadges.displayName = 'PropertyFlagBadges'
 
-const matchesSearch = (thread: InboxWorkflowThread, query: string) => {
-  const search = query.trim().toLowerCase()
-  if (!search) return true
-  const values = [
-    resolveThreadPrimaryName(thread),
-    resolveThreadAddressLine(thread),
-    resolveThreadMarketBadge(thread),
-    readString(thread, 'latest_message_body', 'latestMessageBody', 'lastMessageBody', 'preview'),
-    readString(thread, 'best_phone', 'canonical_e164', 'phone'),
-    readString(thread, 'propertyType', 'property_type'),
-  ]
-  return values.some((value) => value.toLowerCase().includes(search))
-}
+/**
+ * THE SERVER OWNS SEARCH. THIS LIST MUST NOT RE-NARROW IT.
+ *
+ * matchesSearch used to filter the loaded rows against the query, which is
+ * what made Inbox search page-bound: the server now returns the corpus matches
+ * for `q`, and re-testing them here would throw away every match the client
+ * cannot see.
+ *
+ * That is not hypothetical. The certified corpus search matches MESSAGE BODIES
+ * through a trigram index over message_events, and the row the client holds
+ * carries only `latest_message_body` -- a hit on any earlier message in the
+ * thread would be dropped on arrival. `q=cash` returns David Larson on a body
+ * match; the preview only happens to contain the word.
+ *
+ * Kept as a named no-op rather than deleted so the next person looking for
+ * "where does the inbox filter search" finds this note instead of re-adding it.
+ */
+export const matchesSearch = (_thread: InboxWorkflowThread, _query: string) => true
 
 const resolveBucketFromThreadState = (thread: InboxWorkflowThread): CanonicalBucket | null => {
   const raw = readString(

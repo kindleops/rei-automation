@@ -1083,6 +1083,62 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     advanced: serverAdvancedPayload,
   }), [searchQuery, serverAdvancedPayload, stageFilter, viewFilter])
 
+  /**
+   * THE SEARCH BOX HAS TO ASK THE SERVER.
+   *
+   * Every piece of the corpus search path was already wired -- `filters.query`
+   * flows through refreshInbox to fetchLiveInbox as `q`, and
+   * /api/cockpit/inbox/live answers it correctly (verified 2026-09-15:
+   * `q=Salazar` returns 3 matching threads, `q=Madrigal` 3 more). The one
+   * missing link was the trigger: typing called setSearchQuery and nothing
+   * else, so the only thing that narrowed was InboxSidebar's client-side
+   * matchesSearch over the rows already in memory.
+   *
+   * The result was a search that could only find what was already on screen:
+   * `q=Salazar` showed 0 of the 3 real matches because none were in the loaded
+   * page. Any other action that happened to refresh (a view switch, applying a
+   * filter) DID carry the query along, which is why it looked like it worked
+   * some of the time.
+   *
+   * Debounced so a five-character name is one request, not five. Keyed on the
+   * debounced value alone: the view / stage / advanced-filter handlers already
+   * refresh with the current query, and re-firing here would double every one
+   * of those round trips.
+   */
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
+
+  const searchRefreshSignatureRef = useRef<string | null>(null)
+  useEffect(() => {
+    const signature = debouncedSearchQuery.trim()
+    // Skip the first run: the initial list load is already in flight, and an
+    // empty query here would re-request the same page.
+    if (searchRefreshSignatureRef.current === null) {
+      searchRefreshSignatureRef.current = signature
+      return
+    }
+    if (searchRefreshSignatureRef.current === signature) return
+    searchRefreshSignatureRef.current = signature
+    setSidebarListScrollOffset(0)
+    void refreshInbox({
+      filters: {
+        view: viewFilter,
+        stage: stageFilter,
+        query: debouncedSearchQuery,
+        advanced: serverAdvancedPayload,
+      },
+      cursor: null,
+      limit: 30,
+      _force: true,
+      // Clearing the box is a return to the active category, not a new search.
+      _refreshReason: signature ? 'inbox_search_query' : 'inbox_search_cleared',
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchQuery])
+
   const activeAdvancedFilterCount = useMemo(
     () => countActiveAdvancedFilters(advancedFilters),
     [advancedFilters],

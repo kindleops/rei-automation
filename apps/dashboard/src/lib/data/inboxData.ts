@@ -2293,8 +2293,26 @@ export const getInboxRowsForView = async (
     throw new Error(`Live inbox source unavailable for view "${view}"`)
   }
 
-  // Use the already normalized threads from the live fetch, avoiding a duplicate normalization pass
-  const normalizedRows = live.threads
+  /**
+   * ONE CONVERSATION, ONE ROW.
+   *
+   * The direct-Supabase path runs dedupeThreadsByKey, which keys on
+   * conversationThreadId. The live path did not, and the same conversation can
+   * arrive twice: a thread exists under both a bare-digit and an E.164
+   * thread_key that resolve to ONE conversation_thread_id.
+   *
+   * Measured 2026-09-15 on /inbox/live?q=Salazar — 10 rows, 10 unique
+   * thread_keys, 9 unique conversation_thread_ids:
+   *   thread_key 8478679735   bucket cold   ct:property:24560207|owner:mo_8c8d...
+   *   thread_key +18478679735 bucket dead   ct:property:24560207|owner:mo_8c8d...
+   * The card renders data-thread-id from conversation_thread_id, so the
+   * operator saw the same Hector And Patricia Salazar conversation twice.
+   *
+   * Not search-specific — the buckets simply kept the two halves apart (cold vs
+   * dead) while a corpus search surfaces both in one page. Same helper as the
+   * direct path, so the two cannot disagree about what one conversation is.
+   */
+  const normalizedRows = dedupeThreadsByKey(live.threads as InboxThread[]) as typeof live.threads
   const rawRows = live.rawRows ?? safeArray(live.threads as unknown as AnyRecord[])
   commitDashboardThreads(normalizedRows as unknown as AnyRecord[], {
     view,
@@ -3360,7 +3378,9 @@ export interface ThreadHydrationResult {
 const getCanonicalThreadKey = (thread: Pick<InboxThread, 'threadKey' | 'id' | 'conversationThreadId' | 'conversation_thread_id'>): string =>
   asString(thread.conversationThreadId || thread.conversation_thread_id, '') || asString(thread.id, '') || asString(thread.threadKey, '')
 
-const dedupeThreadsByKey = (threads: InboxThread[]): InboxThread[] => {
+/** Exported for inbox-search-contract.test.ts — the live and direct paths must
+ *  agree about what counts as one conversation. */
+export const dedupeThreadsByKey = (threads: InboxThread[]): InboxThread[] => {
   const byKey = new Map<string, InboxThread>()
   for (const thread of threads) {
     const key = getCanonicalThreadKey(thread)
