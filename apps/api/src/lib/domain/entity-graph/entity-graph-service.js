@@ -1857,8 +1857,24 @@ async function countMarketZipMetrics(supabase, entityType, entityId) {
   }
 }
 
+/**
+ * THE ANCHOR ROW IS FETCHED WHOLE.
+ *
+ * These three anchor fetches used the same projected SELECT as the list
+ * (PROPERTY_SUMMARY_SELECT and friends), so the record inspector -- which is
+ * built to route EVERY populated column into a section and shows anything
+ * unclaimed under "Other fields" -- was fed 28 columns of a 343-column table.
+ * Measured 2026-09-14 on 300 S 3rd St, Minneapolis: the inspector reported
+ * Overview 15, Ownership 1, Property Intelligence 3, Distress 2, Provenance 1,
+ * Other 3. Twenty-five fields, of roughly 160 populated on that row. The
+ * enrichment was in the database and unreachable from the UI.
+ *
+ * `*` is safe here in a way it is not in the list: this is ONE row, fetched by
+ * primary key, and the projection was never what made the dossier fast. The
+ * neighborhood queries around it stay projected.
+ */
 async function loadOwnerNeighborhood(supabase, masterOwnerId) {
-  const { data: owner } = await supabase.from('master_owners').select(OWNER_SUMMARY_SELECT).eq('master_owner_id', masterOwnerId).maybeSingle()
+  const { data: owner } = await supabase.from('master_owners').select('*').eq('master_owner_id', masterOwnerId).maybeSingle()
   if (!owner) return null
 
   const propertyIds = parseJsonArray(owner.joined_property_ids_json)
@@ -1924,7 +1940,7 @@ async function loadOwnerNeighborhood(supabase, masterOwnerId) {
 }
 
 async function loadPropertyNeighborhood(supabase, propertyId) {
-  const { data: property } = await supabase.from('properties').select(PROPERTY_SUMMARY_SELECT).eq('property_id', propertyId).maybeSingle()
+  const { data: property } = await supabase.from('properties').select('*').eq('property_id', propertyId).maybeSingle()
   if (!property) return null
 
   const masterOwnerId = property.master_owner_id
@@ -1996,7 +2012,7 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
 }
 
 async function loadProspectNeighborhood(supabase, prospectId) {
-  const { data: prospect } = await supabase.from('prospects').select(PROSPECT_SUMMARY_SELECT).eq('prospect_id', prospectId).maybeSingle()
+  const { data: prospect } = await supabase.from('prospects').select('*').eq('prospect_id', prospectId).maybeSingle()
   if (!prospect) return null
 
   const propertyIds = parseJsonArray(prospect.linked_property_ids_json)
