@@ -4630,3 +4630,41 @@ body.nx-di25-engine-active .nx-copilot-orb--floating {
     padding: 8px 12px 10px;
   }
 }
+/* Deferred property imagery — INBOX-FINAL-HARDEN-2 §3.
+   The Maps JS API and the panorama used to initialise on mount because this
+   pane is part of the default desktop Inbox workspace. They now wait for this
+   poster to be clicked (or for the operator to pick a Street/Aerial tab). */
+.nx-di25-media__poster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 120px;
+  padding: 14px;
+  border: 1px dashed var(--civ4-border, rgba(148, 163, 184, 0.3));
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+
+.nx-di25-media__poster:hover {
+  border-color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.5);
+}
+
+.nx-di25-media__poster-cta {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.94);
+}
+
+.nx-di25-media__poster-note {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+[data-nexus-theme='light'] .nx-di25-media__poster-cta { color: #1d4ed8; }

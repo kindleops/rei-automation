@@ -32,7 +32,7 @@ import {
   AOS_SCORE_MAX,
   BASELINE_SCORE_MAX,
 } from '../../domain/deal-intelligence/deal-intelligence-format'
-import { DealIntelligenceMedia, type MediaTab } from './DealIntelligenceMedia'
+import { DealIntelligenceMedia } from './DealIntelligenceMedia'
 import {
   DealIntelligenceCommandRow,
   DealIntelligenceTemperatureBadge,
@@ -1557,7 +1557,13 @@ const DealIntelligenceDesktopPanel = ({
   // job. Behaviour here is unchanged; it just gets there faster.
   const loading = !detailReady && !error
 
-  const [mediaTab, setMediaTab] = useState<MediaTab>('street')
+  /**
+   * Property imagery loads on intent. This pane mounts by default in the
+   * desktop Inbox workspace, so leaving it on meant every Inbox boot pulled
+   * the Maps JS API and built a panorama. Reset per subject: consent for one
+   * property is not consent for the next.
+   */
+  const [mediaActivated, setMediaActivated] = useState(false)
   const [showAllComps, setShowAllComps] = useState(false)
   const [addrCopied, setAddrCopied] = useState(false)
   const [engineElapsedMs, setEngineElapsedMs] = useState(0)
@@ -1565,6 +1571,8 @@ const DealIntelligenceDesktopPanel = ({
   const showDi = (_section: DealIntelligenceSection) => true
 
   const address = dossier?.property?.full_address || fallbackAddress || null
+  // A new subject must re-ask before loading imagery.
+  useEffect(() => { setMediaActivated(false) }, [address])
   const links = useMemo(() => buildPropertyExternalLinks(address), [address])
   const snap = dossier?.property_snapshot
   const baseline = dossier?.baseline_scores
@@ -1733,21 +1741,16 @@ const DealIntelligenceDesktopPanel = ({
       {showDi('overview') ? (
       <>
       <section className="nx-di25-media-block" aria-label="Property imagery">
-        <div className="nx-di25-media__tabs" role="tablist" aria-label="Imagery mode">
-          <button type="button" role="tab" aria-selected={mediaTab === 'street'} className={cls('nx-di25-media__tab', mediaTab === 'street' && 'is-active')} onClick={() => setMediaTab('street')}>
-            Street View
-          </button>
-          <button type="button" role="tab" aria-selected={mediaTab === 'aerial'} className={cls('nx-di25-media__tab', mediaTab === 'aerial' && 'is-active')} onClick={() => setMediaTab('aerial')}>
-            Aerial
-          </button>
-        </div>
+        {/* Street View is gone from this surface by operator decision, so the
+            Street/Aerial tab pair went with it — one imagery surface needs no
+            tabs. Aerial still loads only when asked. */}
         <DealIntelligenceMedia
-          activeTab={mediaTab}
           address={address}
           lat={property?.latitude}
           lng={property?.longitude}
-          streetStoredUrl={property?.street_view_url}
           aerialStoredUrl={property?.satellite_url}
+          activated={mediaActivated}
+          onActivate={() => setMediaActivated(true)}
         />
       </section>
 

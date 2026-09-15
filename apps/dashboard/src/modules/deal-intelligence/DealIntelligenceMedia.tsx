@@ -1,48 +1,45 @@
+/**
+ * NO STREET VIEW HERE.
+ *
+ * The operator's call: Street View cards are out of this surface. The previous
+ * pass tried to defer them behind a click-to-load poster instead, and worse,
+ * that poster showed property data (type / value / equity / market) inside a
+ * card labelled STREET VIEW -- information in an imagery card, which reads as a
+ * mistake because it is one.
+ *
+ * So the Street View pane, its interactive panorama, its embed builder and its
+ * static fallback are gone rather than deferred. Aerial is what remains, and it
+ * still loads only on intent (see `activated`).
+ */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { buildAerialViewUrl, buildStreetViewUrl } from '../../domain/inbox/inbox-normalization'
+import { buildAerialViewUrl } from '../../domain/inbox/inbox-normalization'
 import { getCommandMapThemeStyle } from '../../views/map/commandMapThemes'
-import { getGoogleMapsApiKey } from '../../lib/maps/loadGoogleMaps'
-import { InteractiveStreetViewPanorama } from './InteractiveStreetViewPanorama'
 
-export type MediaTab = 'street' | 'aerial'
-export type StreetMode = 'interactive' | 'embed' | 'static' | 'unavailable' | 'loading'
-export type AerialMode = 'interactive' | 'static' | 'unavailable' | 'loading'
+export type AerialMode = 'idle' | 'interactive' | 'static' | 'unavailable' | 'loading'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-export function buildInteractiveStreetViewUrl({
-  address,
-  lat,
-  lng,
-}: {
-  address?: string | null
-  lat?: number | null
-  lng?: number | null
-}) {
-  const apiKey = getGoogleMapsApiKey()
-  if (!apiKey) return null
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
-  const location = hasCoords ? `${lat},${lng}` : address
-  if (!location) return null
-  const params = new URLSearchParams({
-    key: apiKey,
-    location,
-    heading: '210',
-    pitch: '2',
-    fov: '85',
-  })
-  return `https://www.google.com/maps/embed/v1/streetview?${params.toString()}`
-}
-
 interface DealIntelligenceMediaProps {
-  activeTab: MediaTab
   address?: string | null
   lat?: number | null
   lng?: number | null
-  streetStoredUrl?: string | null
   aerialStoredUrl?: string | null
+  /**
+   * Whether the operator has actually asked for property imagery.
+   *
+   * Deal Intelligence mounts by default in the desktop Inbox workspace, and
+   * this component's effects flipped straight to `interactive` on mount, which
+   * called loadGoogleMaps() and instantiated a panorama for a pane nobody had
+   * looked at. Measured on a desktop Inbox boot before this gate: 17 maps
+   * requests (maps/api/js, streetview.js, imagery_viewer.js, two
+   * SingleImageSearch POSTs, GeoPhotoService.GetMetadata).
+   *
+   * Street View is NOT removed. It waits.
+   */
+  activated?: boolean
+  onActivate?: () => void
 }
 
 const AerialMap = ({
@@ -104,54 +101,29 @@ const AerialMap = ({
 }
 
 export const DealIntelligenceMedia = ({
-  activeTab,
   address,
   lat,
   lng,
-  streetStoredUrl,
   aerialStoredUrl,
+  activated = false,
+  onActivate,
 }: DealIntelligenceMediaProps) => {
-  const [streetMode, setStreetMode] = useState<StreetMode>('loading')
   const [aerialMode, setAerialMode] = useState<AerialMode>('loading')
-  const [streetStaticFailed, setStreetStaticFailed] = useState(false)
   const [aerialStaticFailed, setAerialStaticFailed] = useState(false)
 
-  const streetEmbedUrl = useMemo(
-    () => buildInteractiveStreetViewUrl({ address, lat, lng }),
-    [address, lat, lng],
-  )
-  const staticStreetUrl = useMemo(
-    () => buildStreetViewUrl(address ?? null, lat, lng),
-    [address, lat, lng],
-  )
   const staticAerialUrl = useMemo(
     () => buildAerialViewUrl(address ?? null, lat, lng),
     [address, lat, lng],
   )
-  const resolvedStreetImage = streetStoredUrl || staticStreetUrl
 
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001
-  const canUseInteractiveStreet = Boolean(getGoogleMapsApiKey() && (hasCoords || address?.trim()))
-
-  useEffect(() => {
-    setStreetStaticFailed(false)
-    if (canUseInteractiveStreet) {
-      setStreetMode('interactive')
-      return
-    }
-    if (streetEmbedUrl) {
-      setStreetMode('embed')
-      return
-    }
-    if ((streetStoredUrl || staticStreetUrl) && !streetStaticFailed) {
-      setStreetMode('static')
-      return
-    }
-    setStreetMode('unavailable')
-  }, [canUseInteractiveStreet, streetEmbedUrl, streetStaticFailed, streetStoredUrl, staticStreetUrl])
 
   useEffect(() => {
     setAerialStaticFailed(false)
+    if (!activated) {
+      setAerialMode('idle')
+      return
+    }
     if (hasCoords) {
       setAerialMode('interactive')
       return
@@ -161,64 +133,22 @@ export const DealIntelligenceMedia = ({
       return
     }
     setAerialMode('unavailable')
-  }, [aerialStoredUrl, aerialStaticFailed, hasCoords, staticAerialUrl])
+  }, [activated, aerialStoredUrl, aerialStaticFailed, hasCoords, staticAerialUrl])
 
-  const handlePanoramaFailure = () => {
-    if (streetEmbedUrl) {
-      setStreetMode('embed')
-      return
-    }
-    if ((streetStoredUrl || staticStreetUrl) && !streetStaticFailed) {
-      setStreetMode('static')
-      return
-    }
-    setStreetMode('unavailable')
-  }
-
-  const renderStreetPane = () => {
-    if (streetMode === 'loading') return <div className="nx-di25-media__state">Loading Street View…</div>
-    if (streetMode === 'interactive') {
-      return (
-        <InteractiveStreetViewPanorama
-          address={address}
-          lat={lat}
-          lng={lng}
-          visible
-          onFailure={handlePanoramaFailure}
-        />
-      )
-    }
-    if (streetMode === 'embed' && streetEmbedUrl) {
-      return (
-        <iframe
-          title="Interactive Street View"
-          src={streetEmbedUrl}
-          className="nx-di25-media__iframe"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-          allowFullScreen
-        />
-      )
-    }
-    if (streetMode === 'static' && resolvedStreetImage) {
-      return (
-        <img
-          src={resolvedStreetImage}
-          alt="Street View"
-          className="nx-di25-media__img"
-          loading="eager"
-          decoding="async"
-          onError={() => {
-            setStreetStaticFailed(true)
-            setStreetMode('unavailable')
-          }}
-        />
-      )
-    }
-    return <div className="nx-di25-media__state">Street View unavailable</div>
-  }
+  const renderActivationPoster = (label: string) => (
+    <button
+      type="button"
+      className="nx-di25-media__poster"
+      onClick={() => onActivate?.()}
+      title={`${label} — loads Google Maps imagery`}
+    >
+      <span className="nx-di25-media__poster-cta">{label}</span>
+      <span className="nx-di25-media__poster-note">Loads Google Maps imagery on demand</span>
+    </button>
+  )
 
   const renderAerialPane = () => {
+    if (aerialMode === 'idle') return renderActivationPoster('Load aerial view')
     if (aerialMode === 'loading') return <div className="nx-di25-media__state">Loading aerial…</div>
     if (aerialMode === 'interactive' && hasCoords) {
       return <AerialMap lat={Number(lat)} lng={Number(lng)} visible />
@@ -239,7 +169,7 @@ export const DealIntelligenceMedia = ({
   return (
     <div className="nx-di25-media__surface">
       <div className="nx-di25-media__pane">
-        {activeTab === 'street' ? renderStreetPane() : renderAerialPane()}
+        {renderAerialPane()}
       </div>
     </div>
   )
