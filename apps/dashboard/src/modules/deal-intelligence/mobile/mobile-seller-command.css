@@ -756,10 +756,3 @@
   .msc-snapshot__value { font-size: 33px; }
 }
 
-/* Property visual. Sits between the decision snapshot and the first section —
-   the operator's first question about a house is what it looks like. */
-.msc-visual {
-  margin: 0 12px 10px;
-  border-radius: 14px;
-  overflow: hidden;
-}

@@ -1,6 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { EntityGraphPropertyVisual } from '../../entity-graph/mobile/EntityGraphPropertyVisual'
 import type { IconName } from '../../../shared/icons'
 import { useDealIntelligenceDossier } from '../../../domain/deal-intelligence/useDealIntelligenceDossier'
 import type {
@@ -32,12 +31,6 @@ import {
   type IdentityRole,
 } from './mobile-seller-format'
 import './mobile-seller-command.css'
-
-/** A usable coordinate or nothing — the visual geocodes the address otherwise. */
-const coord = (value: unknown): number | null => {
-  const n = Number(value)
-  return Number.isFinite(n) && Math.abs(n) > 0.0001 ? n : null
-}
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -599,22 +592,12 @@ export function MobileSellerCommandCenter({
         {engineError ? <p className="msc-error">{humanize(engineError)}</p> : null}
       </div>
 
-      {/* 3b — WHAT THE HOUSE LOOKS LIKE.
-          The mobile Deal Intelligence rendered no property visual at all, while
-          the Street View resolution it needs already existed two modules over
-          (InteractiveStreetViewPanorama, wrapped by EntityGraphPropertyVisual
-          with a static-image tier, a stated-reason tier, and a per-URL result
-          cache). Reused rather than reimplemented, so there is one Street View
-          path in the app and one place a Maps quota change has to be handled. */}
-      {fullAddress ? (
-        <div className="msc-visual">
-          <EntityGraphPropertyVisual
-            address={fullAddress}
-            lat={coord(property?.latitude)}
-            lng={coord(property?.longitude)}
-          />
-        </div>
-      ) : null}
+      {/* Street View removed from Deal Intelligence by operator decision.
+          A previous pass mounted EntityGraphPropertyVisual here (Street View
+          panorama with a static-image tier); it is gone, along with the
+          maps/api/streetview request it made on every mobile Deal Intelligence
+          open. The decision snapshot above and the Contact section below are
+          what this surface is for. */}
 
       {/* 4 — CONTACT & CONVERSATION */}
       <Section
