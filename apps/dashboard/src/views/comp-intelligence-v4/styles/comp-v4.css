@@ -1205,3 +1205,50 @@
   width: 120px;
   min-height: 110px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   NARROW VIEWPORTS — ENTITY-GRAPH-INTELLIGENCE-LOCK-1
+   ══════════════════════════════════════════════════════════════════════════
+   The Evidence segment group does not wrap and does not scroll, so on a phone
+   it overflowed a wrapping flex row and was CLIPPED by the first ancestor with
+   overflow-x: hidden (.nx-workspace-surface). Not scrolled away -- cut off.
+
+   Measured 2026-09-14 at 375x844, /comp-intelligence?property_id=278477219:
+     .civ4-control "Evidence"   16 -> 651   (viewport 375)
+     .civ4-controls             clientWidth 371, scrollWidth 651
+   Everything past x=371 -- most of the qualification states the whole surface
+   is about -- could not be seen or tapped.
+
+   Scrolled rather than wrapped: a segmented control that wraps mid-group reads
+   as two separate controls, and the group is a single choice. The scroll is on
+   the group itself so the surrounding layout is unchanged, and each button
+   keeps its 44px touch height.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 520px) {
+  .civ4-controls {
+    gap: 12px;
+    padding-inline: 12px;
+  }
+
+  .civ4-control {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .civ4-segment {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .civ4-segment::-webkit-scrollbar {
+    display: none;
+  }
+
+  .civ4-segment__btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
