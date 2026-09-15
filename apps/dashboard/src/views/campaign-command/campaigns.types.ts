@@ -55,6 +55,8 @@ export interface CampaignSummary {
   mode?: 'live' | 'test'
   mode_label?: string
   total_targets: number
+  /** True when metadata.target_filters is non-empty — a definition exists even if no build has resolved it. */
+  has_target_definition?: boolean
   ready_targets: number
   planned_targets?: number
   scheduled_targets: number
@@ -326,6 +328,10 @@ export type CampaignLoadErrorType =
 export interface CampaignModel {
   campaigns: CampaignSummary[]
   kpis: CampaignKpis
+  /** Server ceiling on one list response; the route's `limit` param is not read. */
+  listCap?: number
+  /** True when `campaigns` is a prefix of the corpus — client-side search would be partial. */
+  truncated?: boolean
   ok?: boolean
   errorType?: CampaignLoadErrorType
   errorMessage?: string

@@ -25,7 +25,16 @@
   --k-pad:     16px;
 
   position: absolute;
-  inset: 0;
+  /* Clear the global top dock.
+     It is `position: fixed; z-index: 150` and its `__inner` takes pointer
+     events, so a surface anchored at y=0 puts its own header underneath it.
+     Measured at 390px: the dock occupied y 0-57 while .cmk__bar sat at y 0-44,
+     and every hit test at the centre of the search/filter and New campaign
+     buttons returned a dock element — both controls were simply unreachable,
+     as was the brand. --nx-mobile-chrome-top is the shared contract the other
+     mobile surfaces (Entity Graph, Inbox, shell primitives) already honour;
+     Campaign Command was the one that did not. */
+  inset: var(--nx-mobile-chrome-top, 57px) 0 0 0;
   display: flex;
   flex-direction: column;
   background: var(--nx-bg, #000);
@@ -414,6 +423,11 @@
 .cmk__row-state.is-paused    { color: var(--k-hold); }
 .cmk__row-state.is-test      { color: #bf5af2; }
 .cmk__row-state.is-scheduled { color: var(--k-ink-2); }
+/* Lifecycle states that used to render as DRAFT. `built` reads as progress,
+   `failed` must not be quieter than a draft. */
+.cmk__row-state.is-built     { color: var(--k-live); }
+.cmk__row-state.is-previewed { color: var(--k-ink-2); }
+.cmk__row-state.is-failed    { color: var(--k-warn); }
 
 /* Geography — a campaign is an operation somewhere, so say where. */
 .cmk__row-geo {
@@ -537,4 +551,16 @@
 
 @media (prefers-reduced-motion: reduce) {
   .cmk__pulse, .cmk__row.is-skeleton { animation: none; }
+}
+
+/* Search covers the loaded page; this says so when that page is a prefix. */
+.cmk__find-note {
+  margin: 0 var(--k-pad) 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--k-rule);
+  background: var(--k-panel);
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--k-ink-2);
 }

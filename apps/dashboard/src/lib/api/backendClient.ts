@@ -1519,6 +1519,10 @@ export interface CampaignListResponse {
   ok: boolean
   campaigns: CampaignApiSummary[]
   kpis?: Record<string, number>
+  /** Server ceiling on one response; the route does not read a `limit` param. */
+  list_cap?: number
+  /** True when `campaigns` is a prefix of the corpus rather than the corpus. */
+  truncated?: boolean
 }
 
 export interface CampaignCreateResponse {

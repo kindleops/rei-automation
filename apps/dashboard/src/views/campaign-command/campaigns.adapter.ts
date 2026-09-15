@@ -153,6 +153,8 @@ function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>
       market_label: (row.market_label as string | null) ?? deriveCampaignMarketLabel(row.metadata),
       status: row.status as CampaignSummary['status'],
       total_targets: Number(row.total_targets ?? 0),
+      // Distinguishes "no targeting configured" from "targeting set, not built".
+      has_target_definition: Boolean(row.has_target_definition),
       ready_targets: Number(row.ready_targets ?? 0),
       planned_targets: Number(row.planned_targets ?? 0),
       scheduled_targets: Number(row.scheduled_queue_rows ?? row.scheduled_targets ?? 0),
@@ -329,14 +331,29 @@ async function fetchCampaignsCanonicalFallback(): Promise<CampaignSummary[]> {
   })
 }
 
-export const fetchCampaignsSurface = async (): Promise<OpsSurfaceResult<CampaignSummary[]>> => {
+/**
+ * Carries the list ceiling alongside the rows. The campaigns route ignores
+ * `limit` and always returns one capped page, so whether that page IS the
+ * corpus is a fact the UI needs — mobile search filters the loaded set, and
+ * that is only complete while nothing was cut off.
+ */
+export type CampaignsSurface = OpsSurfaceResult<CampaignSummary[]> & {
+  listCap?: number
+  truncated?: boolean
+}
+
+export const fetchCampaignsSurface = async (): Promise<CampaignsSurface> => {
   const backend = await listCampaignsBackend()
   // Only trust a successful backend list. Empty arrays are valid true-zero results.
   if (backend.ok && Array.isArray(backend.data?.campaigns)) {
     const campaigns = backend.data.campaigns.map((row) =>
       mapCampaignSummaryRow(row as CampaignApiSummary & Record<string, unknown>),
     )
-    return opsSuccess(campaigns, 'backend_api')
+    return {
+      ...opsSuccess(campaigns, 'backend_api'),
+      listCap: backend.data.list_cap,
+      truncated: backend.data.truncated === true,
+    }
   }
 
   const backendFail = backend.ok ? null : backend
@@ -1130,6 +1147,8 @@ export const loadCampaigns = async (): Promise<CampaignModel> => {
   const model: CampaignModel = {
     campaigns: surface.data,
     kpis: buildKpis(surface.data),
+    listCap: surface.listCap,
+    truncated: surface.truncated,
     ok: surface.ok,
     errorType: surface.errorType as CampaignModel['errorType'],
     errorMessage: surface.errorMessage,

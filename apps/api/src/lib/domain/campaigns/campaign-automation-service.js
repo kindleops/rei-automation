@@ -5314,6 +5314,17 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     market_cap: campaign.market_cap,
     per_sender_cap: campaign.per_sender_cap,
     total_targets: totalFromBucket ?? targets.length,
+    /**
+     * Whether a TARGET DEFINITION exists, independent of whether a build has
+     * resolved it into rows.
+     *
+     * Without this the list could only see `total_targets: 0` and had to guess,
+     * so the mobile row said "no targeting" for every unbuilt campaign — including
+     * "Entity Graph · 5 properties", which carried five explicit property ids the
+     * whole time. Those are materially different states to an operator: one needs
+     * targeting configured, the other needs a build.
+     */
+    has_target_definition: Object.keys(metadataObject(campaign.metadata?.target_filters)).length > 0,
     ready_targets: ready,
     planned_targets: planned,
     scheduled_targets: liveScheduled,
@@ -5361,13 +5372,22 @@ async function fetchExecutionProofByCampaign(supabase, campaigns = []) {
   return proofByCampaign
 }
 
+/**
+ * Hard ceiling on one campaign list response. The route's `limit` param is not
+ * read — every caller gets the same page — so this is the ONLY bound, and the
+ * mobile surface searches over whatever it received. At 40 campaigns that is
+ * the whole corpus; past this cap it silently would not be, so the response
+ * reports whether it hit the ceiling instead of leaving callers to guess.
+ */
+const CAMPAIGN_LIST_CAP = 200
+
 export async function listCampaigns(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const { data: campaigns, error } = await supabase
     .from('campaigns')
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(200)
+    .limit(CAMPAIGN_LIST_CAP)
   if (error) throw error
   const ids = (campaigns || []).map((campaign) => campaign.id)
   let windows = []
@@ -5437,6 +5457,9 @@ export async function listCampaigns(deps = {}) {
   return {
     ok: true,
     campaigns: summaries,
+    list_cap: CAMPAIGN_LIST_CAP,
+    /** True when the response is a prefix of the corpus, not the corpus. */
+    truncated: (campaigns || []).length >= CAMPAIGN_LIST_CAP,
     kpis: {
       activeCampaigns,
       totalTargets: summaries.reduce((sum, campaign) => sum + campaign.total_targets, 0),

@@ -30,17 +30,33 @@ import type { CampaignListFilter } from '../campaign-health'
  * three stacked cards.
  */
 
-type Tone = 'running' | 'scheduled' | 'paused' | 'test' | 'draft' | 'done'
+type Tone = 'running' | 'scheduled' | 'paused' | 'test' | 'built' | 'previewed' | 'failed' | 'draft' | 'done'
 
 const TONE_LABEL: Record<Tone, string> = {
   running: 'RUNNING',
   scheduled: 'SCHEDULED',
   paused: 'PAUSED',
   test: 'TEST',
+  built: 'BUILT',
+  previewed: 'PREVIEWED',
+  failed: 'FAILED',
   draft: 'DRAFT',
   done: 'COMPLETE',
 }
 
+/**
+ * The row badge, from the canonical lifecycle status.
+ *
+ * `built`, `previewed` and `failed` used to fall through the bottom of this
+ * function and render as DRAFT. That is a materially different claim: a built
+ * campaign HAS resolved its targets, and "Entity Graph · 5 properties" — status
+ * `built`, 2 resolved targets — announced itself as DRAFT, i.e. as though no
+ * work had happened at all. `failed` reading as DRAFT is worse: it hides a
+ * failure behind the most benign state there is.
+ *
+ * Test mode still wins over everything, because "no SMS will transmit" is the
+ * most important thing about a campaign that has it.
+ */
 function toneOf(c: CampaignSummary): Tone {
   const s = String(c.status ?? '').toLowerCase()
   if (c.operator_state === 'test_mode') return 'test'
@@ -48,10 +64,28 @@ function toneOf(c: CampaignSummary): Tone {
   if (s === 'scheduled' || s === 'queued') return 'scheduled'
   if (s === 'paused') return 'paused'
   if (s === 'completed' || s === 'archived') return 'done'
+  if (s === 'failed') return 'failed'
+  if (s === 'built') return 'built'
+  if (s === 'previewed' || s === 'ready') return 'previewed'
   return 'draft'
 }
 
 const nf = (n: number | null | undefined) => Number(n ?? 0).toLocaleString()
+
+/**
+ * Three materially different states, which the row used to collapse into one.
+ *
+ * `total_targets === 0` was read as "no targeting", but 20 of the 23
+ * zero-target campaigns on 2026-09-15 carried a real target definition —
+ * including "Entity Graph · 5 properties" with five explicit property ids. An
+ * operator told "no targeting" reconfigures targeting they already have; what
+ * they actually need is a build.
+ */
+function targetingPhrase(c: CampaignSummary): string {
+  if (c.total_targets > 0) return `${nf(c.total_targets)} target${c.total_targets === 1 ? '' : 's'}`
+  if (c.has_target_definition) return 'targeting set · not built'
+  return 'no targeting configured'
+}
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -176,23 +210,57 @@ export function CampaignCommandMobile({
 
   const all = model?.campaigns ?? []
 
+  /**
+   * Book-wide rollup.
+   *
+   * `running` counts CANONICAL status, not tone. toneOf() returns 'test'
+   * before it ever checks `active`, which is right for a row badge — test mode
+   * is the more important fact about that campaign — but it made the posture
+   * line read "0 RUNNING" while /campaigns reported activeCampaigns: 3. The
+   * three were active AND in test mode. Counting status and reporting the test
+   * split separately says both true things instead of hiding one.
+   */
   const roll = useMemo(() => {
-    let running = 0, scheduled = 0, readyActive = 0, attention = 0, replies = 0
+    let running = 0, runningTest = 0, scheduled = 0, attention = 0, replies = 0
+    let readyLive = 0, readyTerminal = 0
     for (const c of all) {
-      const tone = toneOf(c)
-      if (tone === 'running') { running += 1; readyActive += c.ready_targets }
-      if (tone === 'scheduled') scheduled += 1
+      const status = String(c.status ?? '').toLowerCase()
+      const isActive = status === 'active' || status === 'activating' || status === 'live_limited'
+      const isScheduled = status === 'scheduled' || status === 'queued'
+      const isTerminal = status === 'archived' || status === 'completed'
+      if (isActive) {
+        running += 1
+        if (c.operator_state === 'test_mode') runningTest += 1
+      }
+      if (isScheduled) scheduled += 1
       if (attentionOf(c)) attention += 1
       replies += c.reply_count ?? 0
+      // Readiness itself stays canonical per campaign (`ready_targets`); only
+      // the AGGREGATION is scoped here. /campaigns.kpis.readyTargets sums the
+      // whole book, which on 2026-09-15 was 540 — including 64 ready targets
+      // sitting inside 23 ARCHIVED campaigns. Those are not work the operator
+      // can do, so counting them under "READY" overstates what is actionable.
+      if (isTerminal) readyTerminal += c.ready_targets
+      else readyLive += c.ready_targets
     }
-    return { running, scheduled, readyActive, attention, replies }
+    return { running, runningTest, scheduled, attention, replies, readyLive, readyTerminal }
   }, [all])
 
   const k = model?.kpis
   const filterActive = statusFilter !== 'all' || search.trim().length > 0
 
+  /**
+   * READY counts the canonical `ready_targets` of every non-terminal campaign.
+   *
+   * The old value added `ready_targets` only where tone was 'running', and
+   * toneOf() returns 'test' before it checks 'active' — so under the
+   * canary-only posture nothing qualified and the strip read "READY·ACTIVE 0"
+   * while the very first row showed 303 ready. Measured 2026-09-15:
+   * active 453 + paused 20 + draft 3 = 476 actionable, against a book-wide
+   * canonical 540 that also counts 64 inside archived campaigns.
+   */
   const kpis: Array<{ label: string; value: string; tone?: 'live' | 'warn' | 'good' }> = [
-    { label: 'READY·ACTIVE', value: compact(roll.readyActive), tone: roll.readyActive > 0 ? 'live' : undefined },
+    { label: 'READY', value: compact(roll.readyLive), tone: roll.readyLive > 0 ? 'live' : undefined },
     { label: 'SENT TODAY', value: compact(k?.sentToday ?? 0) },
     { label: 'QUEUED', value: compact(k?.scheduledQueueRows ?? 0) },
     { label: 'REPLIES', value: compact(roll.replies) },
@@ -231,7 +299,10 @@ export function CampaignCommandMobile({
           {sendingLabel(sendMode)}
         </span>
         <span className="cmk__posture-sep" aria-hidden="true">·</span>
-        <span>{roll.running} RUNNING</span>
+        <span>
+          {roll.running} RUNNING
+          {roll.runningTest > 0 ? ` (${roll.runningTest} TEST)` : ''}
+        </span>
         <span className="cmk__posture-sep" aria-hidden="true">·</span>
         <span>{roll.scheduled} SCHEDULED</span>
         {automationLabel(autoMode) && (
@@ -321,6 +392,16 @@ export function CampaignCommandMobile({
 
         {searchOpen && (
           <div className="cmk__find">
+            {/* Search filters the loaded page, which is the whole corpus only
+                while the server did not cut it off. 40 campaigns today against
+                a 200 ceiling; if that ever flips, say so rather than quietly
+                searching a prefix. */}
+            {model?.truncated && (
+              <div className="cmk__find-note" role="status">
+                Showing the {nf(all.length)} most recent of more than {nf(model.listCap ?? all.length)} campaigns —
+                search covers only these.
+              </div>
+            )}
             <div className="cmk__find-field">
               <Icon name="search" size={14} />
               <input
@@ -359,7 +440,7 @@ export function CampaignCommandMobile({
                     <button key={c.id} type="button" role="listitem" className="cmk__row is-dormant" onClick={() => onSelect(c)}>
                       <span className="cmk__row-name">{c.campaign_name || 'Untitled campaign'}</span>
                       <span className="cmk__row-quiet">
-                        DRAFT · {c.total_targets === 0 ? 'no targeting' : `${nf(c.total_targets)} targets`}
+                        {TONE_LABEL[tone]} · {targetingPhrase(c)}
                       </span>
                     </button>
                   )
