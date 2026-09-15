@@ -5276,6 +5276,55 @@ async function cancelPendingCampaignQueueRows(supabase, campaignId) {
   return data?.length || 0
 }
 
+/**
+ * EXPLICIT TARGETS vs DYNAMIC COHORT — §3.
+ *
+ * These are different promises and must never be confused. An explicit
+ * selection is a PINNED SET: the ids the operator picked, and no others, ever.
+ * A dynamic cohort is a saved query that Campaigns re-resolves at build time,
+ * so records added later can join it.
+ *
+ * Read from the same `metadata.target_filters` the build uses, so the badge
+ * cannot drift from the thing that actually targets. Identity keys
+ * (`properties.property_id`, `properties.master_owner_id`) are the anchor for a
+ * pinned list — see the "Identity & IDs" category in campaign-field-catalog.js,
+ * which exists precisely because an id is not a browsable targeting dimension.
+ */
+const EXPLICIT_IDENTITY_FIELDS = new Set([
+  'properties.property_id',
+  'properties.master_owner_id',
+])
+
+export function resolveCampaignTargetMode(metadata = {}) {
+  const filters = metadataObject(metadata?.target_filters)
+  const clauses = []
+  for (const value of Object.values(filters)) {
+    if (Array.isArray(value)) clauses.push(...value)
+  }
+  if (clauses.length === 0) return { target_mode: 'none', explicit_target_count: null }
+
+  let explicitCount = 0
+  let sawExplicit = false
+  for (const clause of clauses) {
+    const key = clean(clause?.field_key)
+    if (!EXPLICIT_IDENTITY_FIELDS.has(key)) continue
+    sawExplicit = true
+    const value = clause?.value
+    explicitCount += Array.isArray(value) ? value.length : (value === undefined || value === null ? 0 : 1)
+  }
+
+  // A pinned list plus browsable dimensions is neither promise cleanly, so it
+  // is reported as its own thing rather than mislabelled as one of them.
+  if (sawExplicit) {
+    const onlyExplicit = clauses.every((c) => EXPLICIT_IDENTITY_FIELDS.has(clean(c?.field_key)))
+    return {
+      target_mode: onlyExplicit ? 'explicit' : 'explicit_filtered',
+      explicit_target_count: explicitCount,
+    }
+  }
+  return { target_mode: 'dynamic', explicit_target_count: null }
+}
+
 function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBucket = null, executionProof = null) {
   const status = clean(campaign.status || 'draft')
   const counts = countBucket?.statuses ? { ...countBucket.statuses } : {}
@@ -5325,6 +5374,7 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
      * targeting configured, the other needs a build.
      */
     has_target_definition: Object.keys(metadataObject(campaign.metadata?.target_filters)).length > 0,
+    ...resolveCampaignTargetMode(campaign.metadata),
     ready_targets: ready,
     planned_targets: planned,
     scheduled_targets: liveScheduled,

@@ -164,27 +164,72 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
   return fallback ?? null
 }
 
+/**
+ * One page of the target scan. PostgREST enforces its own `db-max-rows`
+ * server side, so a `.limit()` above it is silently ignored — the reason this
+ * function has to page rather than ask for everything at once.
+ */
+const TARGET_SCAN_PAGE = 1000
+
+/**
+ * Per-campaign target status/blocked-reason counts.
+ *
+ * These numbers ARE the campaign list's target counts, so a truncated scan is
+ * a lie on every card. The previous single query asked for `.limit(100000)`
+ * and looked safe, but PostgREST capped the response at its own max-rows and
+ * returned 1000 of the 2,578 existing rows with no error and no signal —
+ * so the list reported exactly 1000 targets across all campaigns
+ * (kpis.totalTargets: 1000) while 1,578 were invisible, and individual
+ * campaigns were undercounted at the cut: "Entity Graph · 5 properties" has
+ * two rows in campaign_targets and the list said one.
+ *
+ * Paging until a short page arrives is what makes the count exact. Bounded so
+ * a runaway cursor cannot spin: the ceiling is far above any real corpus and
+ * exhausting it is reported rather than silently accepted.
+ */
 export async function fetchCampaignTargetStatusCounts(campaignIds = [], deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   if (!campaignIds.length) return new Map()
-  const { data, error } = await supabase
-    .from('campaign_targets')
-    .select('campaign_id,target_status,block_reason')
-    .in('campaign_id', campaignIds)
-    .limit(100000)
-  if (error) throw error
 
   const byCampaign = new Map()
-  for (const row of data || []) {
-    const id = row.campaign_id
-    if (!byCampaign.has(id)) {
-      byCampaign.set(id, { statuses: {}, blocked: {}, total: 0 })
+  const MAX_PAGES = 500
+  let offset = 0
+  let pages = 0
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from('campaign_targets')
+      .select('campaign_id,target_status,block_reason')
+      .in('campaign_id', campaignIds)
+      // A stable order is required, or paging can repeat and skip rows.
+      .order('campaign_id', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + TARGET_SCAN_PAGE - 1)
+    if (error) throw error
+
+    const rows = data || []
+    for (const row of rows) {
+      const id = row.campaign_id
+      if (!byCampaign.has(id)) {
+        byCampaign.set(id, { statuses: {}, blocked: {}, total: 0 })
+      }
+      const bucket = byCampaign.get(id)
+      bucket.total += 1
+      const status = clean(row.target_status) || 'unknown'
+      bucket.statuses[status] = (bucket.statuses[status] || 0) + 1
+      if (row.block_reason) bucket.blocked[row.block_reason] = (bucket.blocked[row.block_reason] || 0) + 1
     }
-    const bucket = byCampaign.get(id)
-    bucket.total += 1
-    const status = clean(row.target_status) || 'unknown'
-    bucket.statuses[status] = (bucket.statuses[status] || 0) + 1
-    if (row.block_reason) bucket.blocked[row.block_reason] = (bucket.blocked[row.block_reason] || 0) + 1
+
+    pages += 1
+    if (rows.length < TARGET_SCAN_PAGE) break
+    offset += rows.length
+    if (pages >= MAX_PAGES) {
+      console.warn('campaign_target_counts.scan_ceiling_reached', {
+        campaigns: campaignIds.length, scanned: offset, pages,
+      })
+      break
+    }
   }
+
   return byCampaign
 }

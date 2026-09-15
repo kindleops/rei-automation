@@ -30,9 +30,9 @@ import type { CampaignListFilter } from '../campaign-health'
  * three stacked cards.
  */
 
-type Tone = 'running' | 'scheduled' | 'paused' | 'test' | 'built' | 'previewed' | 'failed' | 'draft' | 'done'
+export type Tone = 'running' | 'scheduled' | 'paused' | 'test' | 'built' | 'previewed' | 'failed' | 'draft' | 'done'
 
-const TONE_LABEL: Record<Tone, string> = {
+export const TONE_LABEL: Record<Tone, string> = {
   running: 'RUNNING',
   scheduled: 'SCHEDULED',
   paused: 'PAUSED',
@@ -57,7 +57,7 @@ const TONE_LABEL: Record<Tone, string> = {
  * Test mode still wins over everything, because "no SMS will transmit" is the
  * most important thing about a campaign that has it.
  */
-function toneOf(c: CampaignSummary): Tone {
+export function toneOf(c: CampaignSummary): Tone {
   const s = String(c.status ?? '').toLowerCase()
   if (c.operator_state === 'test_mode') return 'test'
   if (s === 'active' || s === 'activating' || s === 'live_limited') return 'running'
@@ -81,7 +81,33 @@ const nf = (n: number | null | undefined) => Number(n ?? 0).toLocaleString()
  * operator told "no targeting" reconfigures targeting they already have; what
  * they actually need is a build.
  */
-function targetingPhrase(c: CampaignSummary): string {
+/**
+ * Book-wide rollup, extracted so the numbers on the strip are testable without
+ * rendering. See the READY comment below for why terminal campaigns are split
+ * out rather than summed in.
+ */
+export function rollupCampaigns(all: CampaignSummary[]) {
+  let running = 0, runningTest = 0, scheduled = 0, attention = 0, replies = 0
+  let readyLive = 0, readyTerminal = 0
+  for (const c of all) {
+    const status = String(c.status ?? '').toLowerCase()
+    const isActive = status === 'active' || status === 'activating' || status === 'live_limited'
+    const isScheduled = status === 'scheduled' || status === 'queued'
+    const isTerminal = status === 'archived' || status === 'completed'
+    if (isActive) {
+      running += 1
+      if (c.operator_state === 'test_mode') runningTest += 1
+    }
+    if (isScheduled) scheduled += 1
+    if (attentionOf(c)) attention += 1
+    replies += c.reply_count ?? 0
+    if (isTerminal) readyTerminal += c.ready_targets
+    else readyLive += c.ready_targets
+  }
+  return { running, runningTest, scheduled, attention, replies, readyLive, readyTerminal }
+}
+
+export function targetingPhrase(c: CampaignSummary): string {
   if (c.total_targets > 0) return `${nf(c.total_targets)} target${c.total_targets === 1 ? '' : 's'}`
   if (c.has_target_definition) return 'targeting set · not built'
   return 'no targeting configured'
@@ -220,31 +246,7 @@ export function CampaignCommandMobile({
    * three were active AND in test mode. Counting status and reporting the test
    * split separately says both true things instead of hiding one.
    */
-  const roll = useMemo(() => {
-    let running = 0, runningTest = 0, scheduled = 0, attention = 0, replies = 0
-    let readyLive = 0, readyTerminal = 0
-    for (const c of all) {
-      const status = String(c.status ?? '').toLowerCase()
-      const isActive = status === 'active' || status === 'activating' || status === 'live_limited'
-      const isScheduled = status === 'scheduled' || status === 'queued'
-      const isTerminal = status === 'archived' || status === 'completed'
-      if (isActive) {
-        running += 1
-        if (c.operator_state === 'test_mode') runningTest += 1
-      }
-      if (isScheduled) scheduled += 1
-      if (attentionOf(c)) attention += 1
-      replies += c.reply_count ?? 0
-      // Readiness itself stays canonical per campaign (`ready_targets`); only
-      // the AGGREGATION is scoped here. /campaigns.kpis.readyTargets sums the
-      // whole book, which on 2026-09-15 was 540 — including 64 ready targets
-      // sitting inside 23 ARCHIVED campaigns. Those are not work the operator
-      // can do, so counting them under "READY" overstates what is actionable.
-      if (isTerminal) readyTerminal += c.ready_targets
-      else readyLive += c.ready_targets
-    }
-    return { running, runningTest, scheduled, attention, replies, readyLive, readyTerminal }
-  }, [all])
+  const roll = useMemo(() => rollupCampaigns(all), [all])
 
   const k = model?.kpis
   const filterActive = statusFilter !== 'all' || search.trim().length > 0
