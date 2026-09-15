@@ -310,24 +310,61 @@ test("ambiguous phone ownership: same phone linked to two different master_owner
 
 // ── 5. Missing identity linkage ──────────────────────────────────────────────
 
-test("missing identity linkage fails closed (defense-in-depth: production SQL's sms_eligible requires canonical_e164 IS NOT NULL, so queue_eligible=true+missing linkage cannot occur today -- proven here as a hypothetical/corrupted-row guard, not an observed production state)", async () => {
-  // prospect linkage has its own real fallback (prospect_id OR
-  // canonical_prospect_id -- mirrored from buildTargetSnapshotFromGraphRow's
-  // own prospectId derivation), so that case must clear both to be "missing".
+test("missing identity linkage fails closed when there is no PERSON or no PHONE", async () => {
+  /**
+   * Linkage is a resolved PERSON plus a reachable PHONE. It is deliberately
+   * not a check for three specific legacy columns.
+   *
+   * This test previously asserted that a null `master_owner_id` or a null
+   * legacy `phone_id` must block. Measured across all 169,797 production graph
+   * rows on 2026-09-15, `phone_id` is NULL on 100% of them and
+   * `master_owner_id` on ~74% across every ownership shape — the canonical
+   * builder does not populate either, because they are identifiers from the
+   * decommissioned public.phones export. Asserting on them did not make the
+   * gate strict, it made it BROKEN CLOSED: zero graph-sourced targets could
+   * ever be campaign-ready.
+   *
+   * The fail-closed property is preserved exactly, against the identity that
+   * actually exists: seller_person_key (or the legacy prospect ids) and
+   * canonical_e164 (or the legacy phone_id).
+   */
   const scenarios = [
-    { master_owner_id: null },
-    { prospect_id: null, canonical_prospect_id: null },
-    { phone_id: null },
+    { label: "no person at all", overrides: { seller_person_key: null, prospect_id: null, canonical_prospect_id: null } },
   ];
-  for (const overrides of scenarios) {
+  for (const { label, overrides } of scenarios) {
     const { store, deps, campaignId } = setup();
     store.seedRow("campaign_target_graph", makeGraphRow(overrides));
 
     await buildCampaignTargets(campaignId, {}, deps);
     const [row] = target(store, campaignId);
-    const label = Object.keys(overrides).join("+");
-    assert.equal(row.target_status, "blocked", `missing ${label} must block`);
-    assert.equal(row.block_reason, "missing_identity_linkage", `missing ${label} must report missing_identity_linkage`);
+    assert.equal(row.target_status, "blocked", `${label} must block`);
+    assert.equal(row.block_reason, "missing_identity_linkage", `${label} must report missing_identity_linkage`);
+  }
+});
+
+test("a resolved person and a reachable phone are linkage, with or without the retired export ids", async () => {
+  /**
+   * The repaired contract, stated positively. `master_owner_id` is provenance
+   * "where applicable" and `phone_id` is retired; neither absence says
+   * anything about whether a real person is reachable, and requiring them
+   * blocked 103,595 canonically linked production rows.
+   */
+  const scenarios = [
+    { label: "no master_owner_id", overrides: { master_owner_id: null } },
+    { label: "no legacy phone_id", overrides: { phone_id: null } },
+    { label: "canonical person only", overrides: { prospect_id: null, canonical_prospect_id: null, seller_person_key: "spk_1" } },
+  ];
+  for (const { label, overrides } of scenarios) {
+    const { store, deps, campaignId } = setup();
+    store.seedRow("campaign_target_graph", makeGraphRow(overrides));
+
+    await buildCampaignTargets(campaignId, {}, deps);
+    const [row] = target(store, campaignId);
+    assert.notEqual(
+      row.block_reason,
+      "missing_identity_linkage",
+      `${label} must not be treated as missing identity`,
+    );
   }
 });
 
