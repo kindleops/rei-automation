@@ -368,6 +368,47 @@ export function tabForScope(scope: EntityScope): EntityGraphTab {
   return scope as EntityGraphTab
 }
 
+/**
+ * GLOBAL SEARCH IS CROSS-TYPE. THE ROWS HAVE TO KNOW THEIR OWN TYPE.
+ *
+ * Every row renderer took the AMBIENT scope, so a mixed-type result set would
+ * have rendered an owner as if it were a property -- wrong rail, wrong value,
+ * wrong pills. That is why the search was scoped to the active tab, and why the
+ * box promising "Address, owner, person, phone, email, entity…" could only ever
+ * answer with whichever one tab the operator happened to be standing in.
+ * Measured 2026-09-14: q="Bertha" on Properties returned 8 results, all
+ * properties named "Bertha St" -- and none of the 17 owners actually named
+ * Bertha. q="9012812981" (a real phone in the corpus) returned 0.
+ *
+ * Mapping a result's own entityType back to a scope lets one list hold all of
+ * them and lets each row render as what it is.
+ */
+const ENTITY_TYPE_TO_SCOPE: Record<string, EntityScope> = {
+  property: 'properties',
+  master_owner: 'master_owners',
+  owner: 'master_owners',
+  prospect: 'people',
+  person: 'people',
+  organization: 'organizations',
+  sub_owner: 'organizations',
+  entity: 'organizations',
+  phone: 'contact_methods',
+  email: 'contact_methods',
+  contact_method: 'contact_methods',
+}
+
+/** The scope a result should be RENDERED as, regardless of the active tab. */
+export function scopeForResult(result: { entityType?: string | null }, fallback: EntityScope): EntityScope {
+  const key = String(result?.entityType ?? '').trim().toLowerCase()
+  return ENTITY_TYPE_TO_SCOPE[key] ?? fallback
+}
+
+/** Types that are geography dimensions rather than entity records. */
+export function isGeographyResult(result: { entityType?: string | null }): boolean {
+  const key = String(result?.entityType ?? '').trim().toLowerCase()
+  return key === 'market' || key === 'zip'
+}
+
 /* ── Filter vocabulary (shared by the sheet and the toolbar badge) ──────── */
 
 export type FilterKey = keyof EntityGraphFilters

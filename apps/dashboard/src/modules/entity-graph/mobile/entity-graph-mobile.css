@@ -2929,3 +2929,25 @@
 }
 
 .egl-cohortsaved button::after { content: ''; position: absolute; inset: -8px; }
+
+/* Cross-type search rows carry their own type, so a mixed result list
+   (property + owner + person + phone) stays legible. Browse lists never show
+   this — there every row is already the tab's type. */
+.egr-typepill {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+[data-nexus-theme='light'] .egr-typepill {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.05);
+}

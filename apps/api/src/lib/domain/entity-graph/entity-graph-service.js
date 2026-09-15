@@ -135,11 +135,12 @@ async function searchProperties(supabase, query, limit) {
   }
 
   if (results.length < limit && q) {
-    const like = `%${q}%`
-    const { data } = await supabase
-      .from('properties')
-      .select(PROPERTY_SUMMARY_SELECT)
-      .or(`property_address_full.ilike.${like},property_id.ilike.${like},property_export_id.ilike.${like}`)
+    // Routed, not ORed. `property_id.ilike` and `property_export_id.ilike` are
+    // not trigram-indexable, so ORing them with the address probe returned the
+    // whole query to a sequential scan over 169,802 rows -- the cross-type
+    // search spent 5-8s here while the tab-scoped one answered in 0.4s.
+    const { data } = await propertySearchPredicate(q)
+      .apply(supabase.from('properties').select(PROPERTY_SUMMARY_SELECT))
       .limit(limit)
     for (const row of data || []) {
       const exact = lower(row.property_id) === lower(q)
@@ -203,12 +204,13 @@ async function searchOwners(supabase, query, limit) {
     }
   }
 
+  // Routed, not ORed — see propertySearchPredicate.
   const like = `%${q}%`
-  const { data } = await supabase
-    .from('master_owners')
-    .select(OWNER_SUMMARY_SELECT)
-    .or(`display_name.ilike.${like},master_owner_id.ilike.${like}`)
-    .limit(limit)
+  let ownerQuery = supabase.from('master_owners').select(OWNER_SUMMARY_SELECT)
+  ownerQuery = looksLikeEntityId(q)
+    ? ownerQuery.eq('master_owner_id', q)
+    : ownerQuery.ilike('display_name', like)
+  const { data } = await ownerQuery.limit(limit)
   for (const row of data || []) {
     results.push(buildSearchResult({
       entityType: 'master_owner',
@@ -232,12 +234,14 @@ async function searchProspects(supabase, query, limit) {
   const q = normalizeSearchQuery(query)
   if (!q) return results
 
+  // Routed, not ORed — see propertySearchPredicate. full_name already contains
+  // the first name, so one trigram-indexable probe covers the name case.
   const like = `%${q}%`
-  const { data } = await supabase
-    .from('prospects')
-    .select(PROSPECT_SUMMARY_SELECT)
-    .or(`full_name.ilike.${like},prospect_id.ilike.${like},canonical_prospect_id.ilike.${like},first_name.ilike.${like}`)
-    .limit(limit)
+  let prospectQuery = supabase.from('prospects').select(PROSPECT_SUMMARY_SELECT)
+  prospectQuery = looksLikeEntityId(q)
+    ? prospectQuery.or(`prospect_id.eq.${q},canonical_prospect_id.eq.${q}`)
+    : prospectQuery.ilike('full_name', like)
+  const { data } = await prospectQuery.limit(limit)
   for (const row of data || []) {
     results.push(buildSearchResult({
       entityType: 'prospect',
@@ -721,7 +725,27 @@ function applyPropertyFilters(query, filters) {
 function applyOwnerFilters(query, filters) {
   if (filters.ownerType) query = query.ilike('owner_type_guess', `%${filters.ownerType}%`)
   if (filters.priorityTier) query = query.ilike('priority_tier', `%${filters.priorityTier}%`)
-  if (filters.market) query = query.ilike('primary_market', `%${filters.market}%`)
+  /**
+   * master_owners HAS NO `primary_market` COLUMN.
+   *
+   * PostgREST fails the WHOLE query on one unknown column, so this did not
+   * mis-filter the Owners tab -- it broke it outright. Measured 2026-09-14:
+   *   GET /entity-graph/browse?tab=master_owners&market=Minneapolis
+   *   -> {"ok":false,"error":"column master_owners.primary_market does not exist"}
+   * The tab worked until an operator touched the market filter, and then
+   * returned nothing at all.
+   *
+   * The real columns are `markets_text` and `routing_market`, both filled on
+   * 19,905 of 20,000 sampled owners and both carrying the canonical
+   * "Chicago, IL" market label. markets_text is the owner's market list
+   * (an owner can hold property in several), routing_market is where outreach
+   * would be routed -- matching either is what an operator means by "owners in
+   * this market".
+   */
+  if (filters.market) {
+    const like = `%${filters.market}%`
+    query = query.or(`markets_text.ilike.${like},routing_market.ilike.${like}`)
+  }
   if (filters.coverageMin !== null) query = query.gte('contactability_score', filters.coverageMin)
   return query
 }
@@ -1247,6 +1271,78 @@ export async function getEntityGraphCounts(deps = {}) {
   }
 }
 
+/**
+ * ROUTE THE TERM TO THE COLUMN THAT CAN ANSWER IT.
+ *
+ * The properties search ORed six leading-wildcard ILIKEs -- address, city,
+ * state, zip, export id, id -- and asked PostgREST for count=exact. Postgres
+ * cannot use a trigram index for an OR unless every branch is indexable, so the
+ * whole thing degraded to a parallel sequential scan over 169,802 rows, twice
+ * (once for the rows, once for the count). Measured 2026-09-14: every ordinary
+ * term -- "10419 Quebec", "Minneapolis", "55438" -- exceeded the statement
+ * timeout and the search box returned {"ok":false,"error":"canceling statement
+ * due to statement timeout"}.
+ *
+ * A term is one KIND of thing. A 5-digit string is a zip, two letters are a
+ * state, a long digit run is an id or a phone; anything else is address text.
+ * Narrowing to the matching column turns the scan into a bitmap index scan:
+ *
+ *   6-way OR   + seq scan  3,499 ms
+ *   address    + trigram       2.4 ms      (1,475x)
+ *
+ * Deliberately NOT exhaustive-OR'd "just in case": a search that answers in
+ * 2ms and occasionally needs a more specific term beats one that times out.
+ */
+function propertySearchPredicate(query) {
+  const q = normalizeSearchQuery(query)
+  const digits = q.replace(/[^0-9]/g, '')
+  const hasLetters = /[a-z]/i.test(q)
+
+  // A bare 5-digit token is a ZIP, not an address fragment.
+  if (!hasLetters && digits.length === 5) {
+    return { kind: 'zip', apply: (qb) => qb.or(`property_address_zip.eq.${digits},property_zip.eq.${digits}`) }
+  }
+  // A long digit run is an id (property_id is numeric text in this corpus).
+  if (!hasLetters && digits.length >= 6) {
+    return { kind: 'id', apply: (qb) => qb.eq('property_id', digits) }
+  }
+  // Two letters on their own is a state code. `eq` on the stored casing, not
+  // ILIKE: a btree index answers equality and cannot answer a case-insensitive
+  // match, which is why "MN" alone still took 4.4s after the other terms came
+  // down to 0.25s. Both casings are probed so the operator can type either.
+  if (/^[a-z]{2}$/i.test(q)) {
+    return {
+      kind: 'state',
+      apply: (qb) => qb.or(`property_address_state.eq.${q.toUpperCase()},property_address_state.eq.${q.toLowerCase()}`),
+    }
+  }
+  // An explicit id shape.
+  if (/^prop[_-]/i.test(q) || /^[a-f0-9-]{20,}$/i.test(q)) {
+    return { kind: 'id', apply: (qb) => qb.eq('property_id', q) }
+  }
+  // Everything else is address text. `property_address_full` already contains
+  // the city and state, so one trigram probe covers "Quebec Ave S",
+  // "Minneapolis" and "Quebec Ave S, Minneapolis, Mn" alike.
+  const like = `%${normalizeAddressSearch(q)}%`
+  return { kind: 'address', apply: (qb) => qb.ilike('property_address_full', like) }
+}
+
+/**
+ * Same routing idea as propertySearchPredicate, for the name-keyed universes.
+ *
+ * `display_name.ilike.%q%,master_owner_id.ilike.%q%` looks harmless but the
+ * second branch is not trigram-indexable, so the OR dragged the whole query
+ * back to a sequential scan over 102,252 owners / 149,801 people. Measured
+ * 2026-09-14 for q="Bertha": owners 2.17s, people 2.89s, against 0.40s for the
+ * already-routed properties search.
+ *
+ * An id is a distinct shape in this corpus (`mo_...`, `pros_...`, or a long hex
+ * run), so it never needs to be ORed with a name probe.
+ */
+function looksLikeEntityId(q) {
+  return /^(mo|pros|sub|org)[_-]/i.test(q) || /^[a-f0-9-]{16,}$/i.test(q)
+}
+
 export async function searchEntityGraph(params = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const query = normalizeSearchQuery(params.q || params.query)
@@ -1261,20 +1357,19 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'properties') {
     const q = query
-    const like = `%${q}%`
-    const addressLike = `%${normalizeAddressSearch(q)}%`
-    let dbQuery = supabase
-      .from('properties')
-      .select(PROPERTY_SUMMARY_SELECT, { count: 'exact' })
-      .or([
-        `property_id.eq.${q}`,
-        `property_export_id.ilike.${like}`,
-        `property_address_full.ilike.${like}`,
-        `property_address_full.ilike.${addressLike}`,
-        `property_address_city.ilike.${like}`,
-        `property_address_state.ilike.${like}`,
-        `property_address_zip.ilike.${like}`,
-      ].join(','))
+    const predicate = propertySearchPredicate(q)
+    /**
+     * count: 'exact', kept.
+     *
+     * The exact count was NOT the problem -- the six-way OR was. Over the
+     * narrowed, index-backed predicate a full count of the matched set runs in
+     * 1.9ms, so the header can state the real number instead of a planner
+     * estimate. ('planned' reported 17 matches for a term with 2, which is the
+     * same class of lie as a chip that disagrees with its list.)
+     */
+    let dbQuery = predicate.apply(
+      supabase.from('properties').select(PROPERTY_SUMMARY_SELECT, { count: 'exact' }),
+    )
       .order('final_acquisition_score', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
     const { data, error, count } = await dbQuery
@@ -1288,10 +1383,13 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'master_owners') {
     const like = `%${query}%`
-    const { data, error, count } = await supabase
+    let ownerQuery = supabase
       .from('master_owners')
       .select(OWNER_SUMMARY_SELECT, { count: 'exact' })
-      .or(`display_name.ilike.${like},master_owner_id.ilike.${like}`)
+    ownerQuery = looksLikeEntityId(query)
+      ? ownerQuery.eq('master_owner_id', query)
+      : ownerQuery.ilike('display_name', like)
+    const { data, error, count } = await ownerQuery
       .order('priority_score', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
     if (error) throw error
@@ -1301,10 +1399,15 @@ export async function searchEntityGraph(params = {}, deps = {}) {
 
   if (tab === 'people') {
     const like = `%${query}%`
-    const { data, error, count } = await supabase
+    let peopleQuery = supabase
       .from('prospects')
       .select(PROSPECT_SUMMARY_SELECT, { count: 'exact' })
-      .or(`full_name.ilike.${like},prospect_id.ilike.${like},canonical_prospect_id.ilike.${like},first_name.ilike.${like}`)
+    // full_name already contains the first name, so the name probe is one
+    // trigram-indexable column rather than a four-way OR.
+    peopleQuery = looksLikeEntityId(query)
+      ? peopleQuery.or(`prospect_id.eq.${query},canonical_prospect_id.eq.${query}`)
+      : peopleQuery.ilike('full_name', like)
+    const { data, error, count } = await peopleQuery
       .order('contact_score_final', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
     if (error) throw error
@@ -1338,6 +1441,14 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     return paginatedResponse(page, filtered.length, cursor, pageSize)
   }
 
+  /**
+   * The five types §5 asks a global search to resolve: Property, Owner, Person,
+   * Entity, Contact. Markets and ZIPs are deliberately NOT here -- they are
+   * filter dimensions, not records you can open, and their bucket aggregates
+   * over the property table: 3.67s of the 8.5s a cross-type search was taking,
+   * to return rows the row renderer would then have to special-case.
+   * browse?tab=markets still serves them for the geography lens.
+   */
   const perTypeLimit = Math.max(pageSize, 15)
   const buckets = await Promise.all([
     searchPhones(supabase, query, perTypeLimit),
@@ -1346,7 +1457,6 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     searchOwners(supabase, query, perTypeLimit),
     searchProspects(supabase, query, perTypeLimit),
     searchOrganizations(supabase, query, perTypeLimit),
-    searchMarketsAndZips(supabase, query, perTypeLimit),
   ])
   const merged = dedupeResults(sortResults(buckets.flat(), query))
   const page = merged.slice(cursor, cursor + pageSize)
@@ -1483,12 +1593,37 @@ function buildGraphNodesEdges(anchor, neighborhood) {
     pushNode(ownerNodeId, 'master_owner', neighborhood.owner.display_name || neighborhood.owner.master_owner_id)
   }
 
+  /**
+   * OWNERSHIP IS AN EDGE, NOT JUST A NODE.
+   *
+   * The owner was pushed as a node and then never connected to the property it
+   * owns. Measured 2026-09-14:
+   *
+   *   10419 Quebec Ave S      4 nodes, 2 edges — both "Located In" (market, zip).
+   *                           The owner node floated with no edge at all, and the
+   *                           renderer drops edges whose endpoints it cannot find,
+   *                           so the Graph tab showed a property and two geography
+   *                           pills and nothing else.
+   *   3016 Bellefontaine Ave  21 nodes, 36 edges, and ZERO of them labelled "Owns" —
+   *                           the owner reached its people and phones but not one of
+   *                           the 11 properties it owns.
+   *
+   * Property <-> Master Owner is the relationship the whole surface exists to
+   * show. It is asserted here for a property anchor, and the portfolio siblings
+   * hang off the OWNER rather than off the anchor property, because that is what
+   * the relationship actually is: the owner owns them, the anchor property does
+   * not.
+   */
+  if (ownerNodeId && anchor.type === 'property') {
+    pushEdge(ownerNodeId, anchor.id, 'Owns')
+  }
+
   for (const property of neighborhood.properties.slice(0, GRAPH_NODE_CAP)) {
     const id = `property:${property.property_id}`
     pushNode(id, 'property', propertyGraphLabel(property))
     if (anchor.type === 'master_owner') pushEdge(anchor.id, id, 'Owns')
-    else if (anchor.type === 'property') pushEdge(anchor.id, id, 'Portfolio')
     else if (ownerNodeId) pushEdge(ownerNodeId, id, 'Owns')
+    else if (anchor.type === 'property') pushEdge(anchor.id, id, 'Portfolio')
     else pushEdge(anchor.id, id, 'Linked To')
 
     const market = resolveEntityGraphMarket({

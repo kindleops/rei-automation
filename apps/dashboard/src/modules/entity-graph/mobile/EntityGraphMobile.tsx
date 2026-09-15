@@ -140,6 +140,21 @@ export function EntityGraphMobile({
   const [counts, setCounts] = useState<EntityGraphTabCounts | null>(null)
 
   const [viewMode, setViewMode] = useState<ViewMode>('cards')
+  /**
+   * GLOBAL SEARCH MEANS THE WHOLE CORPUS, NOT THE ACTIVE TAB.
+   *
+   * The search box advertises "Address, owner, person, phone, email, entity…"
+   * and was wired to `tab: tabForScope(scope)` -- so it could only ever answer
+   * with whichever tab the operator was standing in. Measured 2026-09-14:
+   * q="Bertha" from Properties returned 8 streets named Bertha and none of the
+   * 17 OWNERS named Bertha; q="9012812981", a real phone in the corpus,
+   * returned 0 from every tab.
+   *
+   * While a query is active the request goes cross-type and each row renders as
+   * its own type. Tapping a scope chip narrows back to that one type, which is
+   * the in-tab search that used to be the only behaviour.
+   */
+  const [searchScopeLocked, setSearchScopeLocked] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<Record<string, string[]>>({})
 
@@ -219,7 +234,11 @@ export function EntityGraphMobile({
   }, [])
 
   /* ── Query identity + derived list view ────────────────────────────────── */
-  const querySignature = `${scope}|${sortKey}|${debouncedQuery}|${contactSubtype}|${JSON.stringify(filters)}`
+  // A query goes cross-type unless the operator has narrowed to one type by
+  // tapping a scope chip. No query means browsing this tab, which is never
+  // cross-type.
+  const crossTypeSearch = Boolean(debouncedQuery) && !searchScopeLocked
+  const querySignature = `${scope}|${sortKey}|${debouncedQuery}|${contactSubtype}|${crossTypeSearch}|${JSON.stringify(filters)}`
 
   // Adjusting state during render rather than in an effect: this is the
   // documented way to reset state when an input changes, and it avoids both the
@@ -303,7 +322,7 @@ export function EntityGraphMobile({
     const sort = sortOptions.find((s) => s.key === sortKey) ?? sortOptions[0]
     void fetchEntityGraphList(
       {
-        tab: tabForScope(scope),
+        tab: crossTypeSearch ? 'all' : tabForScope(scope),
         q: debouncedQuery || undefined,
         cursor,
         page_size: PAGE_SIZE,
@@ -658,7 +677,12 @@ export function EntityGraphMobile({
           <span className="egm-search__icon"><Icon name="search" /></span>
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              // A fresh query searches everything again. Without this, one tap
+              // on a type chip would silently narrow every later search too.
+              setSearchScopeLocked(false)
+            }}
             placeholder={SEARCH_PLACEHOLDER}
             aria-label="Search the entity universe"
             type="search"
@@ -667,22 +691,44 @@ export function EntityGraphMobile({
             spellCheck={false}
           />
           {query ? (
-            <button type="button" className="egm-search__clear egm-hit" onClick={() => setQuery('')} aria-label="Clear search">×</button>
+            <button type="button" className="egm-search__clear egm-hit" onClick={() => { setQuery(''); setSearchScopeLocked(false) }} aria-label="Clear search">×</button>
           ) : null}
         </div>
 
         <div className="egm-scopes" role="tablist" aria-label="Entity scope">
+          {/* While a query is active this chip is what "search everything" looks
+              like, and it is selected by default so the search box does what it
+              says. Without a query there is nothing to search across, so it is
+              not offered. */}
+          {debouncedQuery ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={crossTypeSearch}
+              className={cls('egm-scope', 'egm-hit', crossTypeSearch && 'is-active')}
+              onClick={() => {
+                setSearchScopeLocked(false)
+                exitSelection()
+              }}
+            >
+              <span>All types</span>
+            </button>
+          ) : null}
           {MOBILE_SCOPES.map((entry) => {
             const count = counts?.[entry.countKey as keyof EntityGraphTabCounts] as number | undefined
+            const active = debouncedQuery ? (!crossTypeSearch && scope === entry.key) : scope === entry.key
             return (
               <button
                 key={entry.key}
                 type="button"
                 role="tab"
-                aria-selected={scope === entry.key}
-                className={cls('egm-scope', 'egm-hit', scope === entry.key && 'is-active')}
+                aria-selected={active}
+                className={cls('egm-scope', 'egm-hit', active && 'is-active')}
                 onClick={() => {
                   setScope(entry.key)
+                  // Tapping a type while searching narrows to that type — the
+                  // in-tab search that used to be the only behaviour.
+                  setSearchScopeLocked(true)
                   exitSelection()
                 }}
               >

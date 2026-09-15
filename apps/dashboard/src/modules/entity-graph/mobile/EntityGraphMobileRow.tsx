@@ -9,6 +9,7 @@ import {
   resolveIdentity,
   resolveMarket,
   resolveTags,
+  scopeForResult,
   type EntityScope,
 } from './entity-graph-mobile-format'
 
@@ -33,6 +34,15 @@ function scoreTier(score?: number | null): 'hot' | 'warm' | 'cool' | 'none' {
 
 const SIGNAL_TAGS = /tax delinquent|foreclos|vacant|tired landlord|lien|divorce|probate/i
 
+/** Shown only on a cross-type search row, so a mixed list stays legible. */
+const TYPE_LABEL: Record<EntityScope, string> = {
+  properties: 'Property',
+  master_owners: 'Owner',
+  people: 'Person',
+  organizations: 'Entity',
+  contact_methods: 'Contact',
+}
+
 type Props = {
   scope: EntityScope
   result: EntitySearchResult
@@ -50,7 +60,7 @@ type Props = {
  * operator actually triages on — address, money, who owns it, can we reach them.
  */
 export function EntityGraphMobileRow({
-  scope,
+  scope: ambientScope,
   result,
   selectionMode,
   selected,
@@ -59,6 +69,17 @@ export function EntityGraphMobileRow({
   onToggleSelect,
   onEnterSelection,
 }: Props) {
+  /**
+   * A row renders as WHAT IT IS, not as the tab it is sitting in.
+   *
+   * Global search returns a mixed set -- a property, the owner behind it, the
+   * person on the ladder, the phone that reaches them. Rendering all of those
+   * with the ambient scope put an owner's portfolio value in the property-value
+   * slot and a phone in the address slot. The ambient scope stays as the
+   * fallback for a browse list, where every row genuinely is that type.
+   */
+  const scope = scopeForResult(result, ambientScope)
+  const isCrossType = scope !== ambientScope
   const d = result.details ?? {}
   const identity = resolveIdentity(scope, result)
   const market = resolveMarket(result)
@@ -142,6 +163,7 @@ export function EntityGraphMobileRow({
       <span className="egm-row__body">
         <span className="egm-row__l1">
           <span className="egm-row__title">{identity.primary}</span>
+          {isCrossType ? <span className="egr-typepill">{TYPE_LABEL[scope]}</span> : null}
           <RowValue scope={scope} result={result} />
         </span>
 
