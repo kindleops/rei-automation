@@ -25626,3 +25626,388 @@ no clipping */
     background: rgba(255, 255, 255, 0.03);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PROPERTY SIGNAL TILE — INBOX-CARD-PREMIUM-1
+   ══════════════════════════════════════════════════════════════════════════
+   Replaces .nx-inbox-sv-thumb, which mounted a Street View Static <img> per
+   row. Same footprint on purpose (rail is 54px tall, 4/3) so no card layout
+   changes to accommodate it.
+
+   Everything is static: two gradients, one repeating-linear-gradient for the
+   parcel linework, one inline SVG glyph. No animation, no timers, no remote
+   fetch — this renders hundreds of times per session.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-pst {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  display: flex;
+  align-items: flex-end;
+  isolation: isolate;
+  background:
+    radial-gradient(130% 100% at 8% -10%, rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.20), transparent 58%),
+    linear-gradient(158deg, #0f1726 0%, #0a1020 52%, #070b14 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.42);
+}
+
+/* Faint parcel / blueprint ruling. A single repeating gradient pair rather
+   than an SVG pattern so it costs nothing to rasterise per row. */
+.nx-pst__linework {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.075) 0 1px, transparent 1px 14px),
+    repeating-linear-gradient(0deg, rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.055) 0 1px, transparent 1px 14px);
+  mask-image: linear-gradient(120deg, rgba(0, 0, 0, 0.95), transparent 72%);
+  -webkit-mask-image: linear-gradient(120deg, rgba(0, 0, 0, 0.95), transparent 72%);
+}
+
+.nx-pst__glyph {
+  position: absolute;
+  z-index: 0;
+  inset-inline-end: -6%;
+  inset-block-start: -8%;
+  width: 62%;
+  max-width: 78px;
+  aspect-ratio: 1;
+  color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.30);
+  pointer-events: none;
+}
+
+.nx-pst__glyph-svg { width: 100%; height: 100%; display: block; }
+
+.nx-pst__stack {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 7px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.nx-pst__type,
+.nx-pst__value,
+.nx-pst__equity,
+.nx-pst__market {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.12;
+}
+
+.nx-pst__type {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.94);
+}
+
+.nx-pst__value {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f2f6ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-pst__equity {
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: rgba(233, 240, 255, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-pst__market {
+  font-size: 7.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: rgba(214, 226, 248, 0.52);
+}
+
+/* Footprints mirror the thumb they replace, so the card grid is untouched. */
+.nx-pst.is-size-rail { width: 100%; height: 54px; max-height: 54px; aspect-ratio: 4 / 3; }
+.nx-pst.is-size-row { width: 100%; height: 100%; }
+.nx-pst.is-size-header { width: 100%; height: 100%; }
+
+/* Denser type where the tile is small. */
+.nx-pst.is-size-rail .nx-pst__stack { padding: 5px 6px; gap: 0; }
+.nx-pst.is-size-rail .nx-pst__value { font-size: 12px; }
+.nx-pst.is-size-rail .nx-pst__market { font-size: 7px; }
+
+/* Richer treatment for the open-conversation header. */
+.nx-pst.is-size-header .nx-pst__type { font-size: 9.5px; }
+.nx-pst.is-size-header .nx-pst__value { font-size: 17px; }
+.nx-pst.is-size-header .nx-pst__equity { font-size: 10.5px; }
+.nx-pst.is-size-header .nx-pst__market { font-size: 8.5px; }
+
+/* Nothing to report: keep the surface, drop the glyph emphasis. */
+.nx-pst.is-empty .nx-pst__glyph { opacity: 0.55; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-pst, .nx-pst__linework { transition: none; animation: none; }
+}
+
+/* ── Light mode: pale cool glass, not muddy grey ────────────────────────── */
+[data-nexus-theme='light'] .nx-pst {
+  background:
+    radial-gradient(130% 100% at 8% -10%, rgba(37, 99, 235, 0.13), transparent 60%),
+    linear-gradient(158deg, #f7faff 0%, #eef3fc 55%, #e6edf9 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -18px 26px rgba(15, 23, 42, 0.06);
+}
+
+[data-nexus-theme='light'] .nx-pst__linework {
+  opacity: 0.6;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(37, 99, 235, 0.10) 0 1px, transparent 1px 14px),
+    repeating-linear-gradient(0deg, rgba(37, 99, 235, 0.075) 0 1px, transparent 1px 14px);
+}
+
+[data-nexus-theme='light'] .nx-pst__glyph { color: rgba(37, 99, 235, 0.26); }
+[data-nexus-theme='light'] .nx-pst__type { color: #1d4ed8; }
+[data-nexus-theme='light'] .nx-pst__value { color: #0f172a; }
+[data-nexus-theme='light'] .nx-pst__equity { color: rgba(30, 41, 59, 0.78); }
+[data-nexus-theme='light'] .nx-pst__market { color: rgba(51, 65, 85, 0.62); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CARD STATE ROW · CHIP ROW · STAGE BADGE — INBOX-CARD-PREMIUM-1
+   ══════════════════════════════════════════════════════════════════════════
+   Replaces the icon-only delivery marker (an arrow or an X, with no words) and
+   the four raw badges that printed direction + status + stage + bucket as
+   unstyled text.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-card-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(214, 226, 248, 0.62);
+}
+
+.nx-card-state__arrow { font-size: 11px; line-height: 1; opacity: 0.9; }
+
+.nx-card-state__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-card-state__sep { opacity: 0.4; }
+.nx-card-state.is-muted { min-height: 13px; }
+
+/* Only the states an operator must act on carry colour. Delivered and Sent
+   stay neutral — they are the normal case and colouring them would make every
+   card shout. */
+.nx-card-state.is-inbound-new { color: #63d7ff; }
+.nx-card-state.is-failed { color: #ff6b5e; }
+.nx-card-state.is-suppressed { color: #ffb454; }
+.nx-card-state.is-scheduled,
+.nx-card-state.is-queued { color: rgba(147, 197, 253, 0.85); }
+
+.nx-card-footrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.nx-card-footrow__signals {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nx-card-chip {
+  flex: 0 0 auto;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: rgba(222, 232, 248, 0.78);
+  background: rgba(148, 163, 184, 0.13);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.nx-card-chip.is-type {
+  color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.92);
+  background: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.10);
+  border-color: rgba(var(--nexus-accent-rgb, 99, 215, 255), 0.22);
+}
+
+/* Stage badge. Compact, tabular, and banded rather than rainbow: cool for
+   discovery, warmer through negotiation, strongest for execution. */
+.nx-card-stage {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid transparent;
+}
+
+.nx-card-stage.is-band-early {
+  color: #9fd8ff;
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(99, 179, 255, 0.30);
+}
+
+.nx-card-stage.is-band-mid {
+  color: #ffd79a;
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(251, 191, 36, 0.30);
+}
+
+.nx-card-stage.is-band-execution {
+  color: #b6f0c8;
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(52, 211, 153, 0.34);
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.10);
+}
+
+/* Message preview: exactly two lines, and it must not slide under the date or
+   the stage badge on a narrow card. */
+.nx-thread-card-rebuilt__preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.nx-row25__preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Long seller names and addresses truncate rather than pushing the timestamp
+   off the card. */
+.nx-thread-card-rebuilt__name,
+.nx-thread-card-rebuilt__address,
+.nx-row25__name,
+.nx-row25__addr {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-thread-card-rebuilt__time,
+.nx-row25__time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* UNREAD EMPHASIS IS ALREADY MORE THAN THE DOT -- verified, not assumed.
+   Measured on an unread vs a read rail row:
+     dot            present / absent
+     name weight    800 / 700
+     name colour    #fff / #f8fbff
+     preview        #fff / rgba(236,244,255,.94)
+   inbox-elite-ui.css owns those and they land, so §10's "do not rely only on a
+   tiny dot" is satisfied without adding anything here.
+
+   An accent rail was tried and removed: box-shadow on these rows is contended
+   by several rules across four stylesheets, the declaration computed to a
+   transparent zero-offset shadow, and escalating specificity for a decorative
+   stripe is not worth destabilising the selection and bucket-accent styling
+   that shares the property. */
+
+/* Open-conversation header signal tile — replaces .nx-conv-mobile-streetview */
+.nx-conv-mobile-signal {
+  width: 100%;
+  height: 92px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-block: 6px;
+}
+
+/* ── Light mode ─────────────────────────────────────────────────────────── */
+[data-nexus-theme='light'] .nx-card-state { color: rgba(51, 65, 85, 0.72); }
+[data-nexus-theme='light'] .nx-card-state.is-inbound-new { color: #0b6fb8; }
+[data-nexus-theme='light'] .nx-card-state.is-failed { color: #c0392b; }
+[data-nexus-theme='light'] .nx-card-state.is-suppressed { color: #b45309; }
+[data-nexus-theme='light'] .nx-card-state.is-scheduled,
+[data-nexus-theme='light'] .nx-card-state.is-queued { color: #1d4ed8; }
+
+[data-nexus-theme='light'] .nx-card-chip {
+  color: rgba(30, 41, 59, 0.82);
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.10);
+}
+
+[data-nexus-theme='light'] .nx-card-chip.is-type {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.20);
+}
+
+[data-nexus-theme='light'] .nx-card-stage.is-band-early {
+  color: #1d4ed8; background: rgba(37, 99, 235, 0.10); border-color: rgba(37, 99, 235, 0.26);
+}
+[data-nexus-theme='light'] .nx-card-stage.is-band-mid {
+  color: #92400e; background: rgba(245, 158, 11, 0.13); border-color: rgba(217, 119, 6, 0.30);
+}
+[data-nexus-theme='light'] .nx-card-stage.is-band-execution {
+  color: #065f46; background: rgba(16, 185, 129, 0.13); border-color: rgba(5, 150, 105, 0.32);
+  box-shadow: none;
+}
+
+
+/* §7 wants the stage in the LOWER-RIGHT corner of the card. The rail row's
+   footer is a plain flex row, so the badge sat mid-card (measured: badge right
+   edge 269 against a card right edge of 367). Pushing it to the end of the
+   conversation zone puts it under the timestamp, which is the corner an
+   operator scans for "where is this deal". */
+.nx-row25__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.nx-row25__footer .nx-card-state { min-width: 0; flex: 1 1 auto; }
+.nx-row25__footer .nx-card-stage { flex: 0 0 auto; margin-inline-start: auto; }

@@ -19,7 +19,14 @@ import {
 import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox/classifyInboxBucket'
 import { isInboxDebugEnabled } from '../inbox.adapter'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
-import { InboxStreetViewThumb } from './InboxStreetViewThumb'
+import { PropertySignalTile } from './PropertySignalTile'
+import {
+  buildPropertySignalTileModel,
+  formatCardDateTime,
+  prioritizeCardSignals,
+  resolveInboxMessageState,
+  resolveInboxStageBadge,
+} from '../inbox-card-signals'
 import { VirtualizedInboxList } from './VirtualizedInboxList'
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -713,6 +720,28 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     || (readBoolean(thread, 'suppressed', 'isSuppressed') ? 'Suppressed' : decision.unread ? 'Needs Response' : null)
 
   const deliveryReceipt = resolveDeliveryReceipt(thread, latestDirection)
+
+  /**
+   * Card-grade derivations. These read the canonical fields and are allowed to
+   * answer "nothing" -- a missing stage shows no badge, a missing value shows
+   * no value line.
+   */
+  const threadRow = thread as unknown as Record<string, unknown>
+  const stageBadge = resolveInboxStageBadge(threadRow)
+  const messageState = resolveInboxMessageState(threadRow, latestDirection, { unread: decision.unread })
+  const dateTimeLabel = formatCardDateTime(timestamp)
+  const tileModel = buildPropertySignalTileModel({
+    propertyTypeLabel,
+    propertyType,
+    unitCount,
+    estimatedValue,
+    equityPercent,
+    market,
+    city: readString(thread, 'property_address_city', 'propertyAddressCity', 'city'),
+    state: readString(thread, 'property_address_state', 'propertyAddressState', 'state'),
+  })
+  const cardSignals = prioritizeCardSignals(propertyFlags, 2)
+
   const marketLine = market && market !== 'Unknown Market' ? market : '—'
   const metaParts: string[] = []
   if (propertyTypeLabel) metaParts.push(propertyTypeLabel)
@@ -780,6 +809,11 @@ const getThreadVars = (thread: InboxWorkflowThread, decision: ConversationDecisi
     contactMatchFlags,
     rowDisplayFlags,
     deliveryReceipt,
+    stageBadge,
+    messageState,
+    dateTimeLabel,
+    tileModel,
+    cardSignals,
     deliveryStatus: deliveryReceipt?.type === 'inbound'
       ? null
       : (deliveryReceipt?.type ?? null),
@@ -812,9 +846,6 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
     sellerPhone,
     latestMessageBody,
     latestDirection,
-    statusLabel,
-    stageLabel,
-    bucketLabel,
     cashOffer,
     estimatedValue,
     equityAmount,
@@ -829,21 +860,16 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
     isHot,
     stageNum,
     intelTags,
-    deliveryStatus,
     visualCategory,
     propertyId,
-    latitude,
-    longitude,
-    streetviewImage,
+    stageBadge,
+    messageState,
+    dateTimeLabel,
+    tileModel,
+    cardSignals,
   } = getThreadVars(thread, decision)
   const isInbound = latestDirection === 'inbound'
   const isOutbound = latestDirection === 'outbound'
-  const badges = [
-    renderBadge(latestDirection || 'unknown', 'direction'),
-    renderBadge(statusLabel, 'status'),
-    renderBadge(stageLabel, 'stage'),
-    renderBadge(bucketLabel, 'bucket'),
-  ]
   const tagSummary = [...propertyTags, ...sellerTags].slice(0, 3)
 
   return (
@@ -867,12 +893,7 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
       }}
     >
       <div className="nx-thread-card-rebuilt__media" aria-hidden>
-        <InboxStreetViewThumb
-          address={address}
-          lat={latitude}
-          lng={longitude}
-          cachedImageUrl={streetviewImage}
-        />
+        <PropertySignalTile model={tileModel} size="row" />
         <div className="nx-thread-card-rebuilt__media-veil" />
         <div className="nx-thread-card-rebuilt__media-actions">
           <HoverActions selectedForBulk={selectedForBulk} onToggleBulk={onToggleBulk} threadId={thread.id} />
@@ -885,7 +906,7 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
             <span className="nx-thread-card-rebuilt__address">{address}</span>
           </div>
           <div className="nx-thread-card-rebuilt__right">
-            <time className="nx-thread-card-rebuilt__time">{timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel}</time>
+            <time className="nx-thread-card-rebuilt__time" dateTime={timestamp.fullLabel}>{dateTimeLabel}</time>
             {decision.unread && <span className="nx-thread-card-rebuilt__unread-dot" />}
             {isHot && <span className="nx-thread-card-rebuilt__hot-icon">🔥</span>}
           </div>
@@ -903,7 +924,31 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
             repeats here and the header copy is hidden at mobile widths. Desktop
             keeps the header placement; this element is display:none there. */}
         <span className="nx-thread-card-rebuilt__address nx-thread-card-rebuilt__address--below">{address}</span>
-        <div className="nx-thread-card-rebuilt__metadata nx-thread-card-rebuilt__signals">{badges}</div>
+        {messageState && (
+          <div className={cls('nx-card-state', `is-${messageState.tone}`)}>
+            <span className="nx-card-state__arrow" aria-hidden="true">{messageState.arrow}</span>
+            <span className="nx-card-state__label">{messageState.label}</span>
+          </div>
+        )}
+        {/* Bottom row: at most two signals on the left, canonical stage on the
+            right. Property type lives in the tile, status has its own chip, so
+            neither is repeated here. */}
+        <div className="nx-card-footrow">
+          <div className="nx-card-footrow__signals">
+            {cardSignals.map((signal) => (
+              <span key={signal} className="nx-card-chip">{signal}</span>
+            ))}
+          </div>
+          {stageBadge ? (
+            <span
+              className={cls('nx-card-stage', `is-band-${stageBadge.band}`)}
+              title={stageBadge.label}
+              aria-label={stageBadge.label}
+            >
+              {stageBadge.short}
+            </span>
+          ) : null}
+        </div>
         {/* Underwriting detail: valuable on desktop, but on a phone it is four
             more lines of small grey text between one conversation and the next.
             Mobile collapses these to the thread detail — see is-detail-meta. */}
@@ -930,14 +975,8 @@ const ConversationRow = memo(({ thread, selected, decision, onSelect, selectedFo
           </div>
         )}
 
-        {/* Delivery Status Icon */}
-        {deliveryStatus && (
-          <div className={cls('nx-thread-card-rebuilt__delivery-status', `is-${deliveryStatus}`)}>
-            {deliveryStatus === 'delivered' ? <Icon name="check-double" style={{ width: 14, height: 14 }} /> : 
-             deliveryStatus === 'failed' ? <Icon name="close" style={{ width: 14, height: 14 }} /> : 
-             <Icon name="check" style={{ width: 14, height: 14 }} />}
-          </div>
-        )}
+        {/* The icon-only delivery marker is gone: nx-card-state above says the
+            same thing in words, and an arrow-or-X alone was unreadable. */}
       </div>
     </div>
   )
@@ -1030,17 +1069,17 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   const {
     name, address, contextLine, latestMessageBody, latestDirection,
     estimatedValue, equityAmount, equityPercent,
-    finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition,
-    rowDisplayFlags, propertyId, latitude, longitude, streetviewImage,
+    finalAcquisitionScore, timestamp, buildingCondition,
+    rowDisplayFlags, propertyId, stageBadge, messageState, dateTimeLabel, tileModel,
   } = vars
 
-  const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
   const bucketAccentClass = resolveStatusChipClass(thread).replace('is-', 'is-bucket-')
   const valueDisplay = formatCompactMoney(estimatedValue)
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
   const conditionDisplay = buildingCondition || '—'
   const showMetadata = contextLine && contextLine !== '—'
+  const cardSignalChips = prioritizeCardSignals(rowDisplayFlags, 3)
   const flagMaxVisible = 3
   const flagDensity = inboxMode === 'full100' ? 'rich' : 'compact'
 
@@ -1063,13 +1102,7 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
       <div className="nx-row25__zone nx-row25__zone--media" aria-hidden>
-        <InboxStreetViewThumb
-          address={address}
-          lat={latitude}
-          lng={longitude}
-          cachedImageUrl={streetviewImage}
-          size="rail"
-        />
+        <PropertySignalTile model={tileModel} size="rail" />
         <div className="nx-row25__media-veil" />
       </div>
       <div className="nx-row25__zone nx-row25__zone--conversation">
@@ -1078,27 +1111,39 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
             {decision.unread && <span className="nx-row25__unread-dot" aria-hidden="true" />}
             <span className="nx-row25__name">{name}</span>
           </span>
-          <time className="nx-row25__time">{ageLabel}</time>
+          <time className="nx-row25__time" dateTime={timestamp.fullLabel}>{dateTimeLabel}</time>
         </div>
         <span className="nx-row25__addr">{address}</span>
         <span className="nx-row25__preview">{latestMessageBody}</span>
         <div className="nx-row25__footer">
-          {deliveryReceipt ? (
-            <span className={cls('nx-row25__receipt', `is-${deliveryReceipt.type}`)} aria-label={deliveryReceipt.label}>
-              <Icon name={deliveryReceipt.icon} />
-              <span className="nx-row25__receipt-label">{deliveryReceipt.label}</span>
+          {messageState ? (
+            <span className={cls('nx-card-state', `is-${messageState.tone}`)} aria-label={messageState.label}>
+              <span className="nx-card-state__arrow" aria-hidden="true">{messageState.arrow}</span>
+              <span className="nx-card-state__label">{messageState.label}</span>
             </span>
           ) : (
-            <span className="nx-row25__receipt is-muted" aria-hidden="true" />
+            <span className="nx-card-state is-muted" aria-hidden="true" />
           )}
+          {stageBadge ? (
+            <span
+              className={cls('nx-card-stage', `is-band-${stageBadge.band}`)}
+              title={stageBadge.label}
+              aria-label={stageBadge.label}
+            >
+              {stageBadge.short}
+            </span>
+          ) : null}
         </div>
         {showMetadata && (
           <div className="nx-row25__context">
             <span className="nx-row25__context-line">{contextLine}</span>
           </div>
         )}
-        {showPropertyFlags && rowDisplayFlags.length > 0 && (
-          <PropertyFlagBadges flags={rowDisplayFlags} maxVisible={flagMaxVisible} density={flagDensity} />
+        {/* The tile already states the asset class, so the chip row carries
+            SIGNALS only, ordered by actionability (preforeclosure and tax
+            delinquency ahead of "long term owner"). */}
+        {showPropertyFlags && cardSignalChips.length > 0 && (
+          <PropertyFlagBadges flags={cardSignalChips} maxVisible={flagMaxVisible} density={flagDensity} />
         )}
       </div>
 
@@ -1140,13 +1185,12 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
 }) => {
   const vars = getThreadVars(thread, decision)
   const {
-    name, address, market, propertyTypeLabel, unitCount, stageDisplay,
+    name, address, market, propertyTypeLabel, unitCount,
     latestMessageBody, latestDirection, estimatedValue, equityAmount, equityPercent,
-    finalAcquisitionScore, timestamp, deliveryReceipt, buildingCondition, propertyFlags,
-    propertyId, latitude, longitude, streetviewImage,
+    finalAcquisitionScore, timestamp, buildingCondition, propertyFlags,
+    propertyId, stageBadge, messageState, dateTimeLabel, tileModel,
   } = vars
 
-  const ageLabel = timestamp.dayLabel === 'Today' ? timestamp.timeLabel : timestamp.dayLabel
   const bucketAccentClass = resolveStatusChipClass(thread).replace('is-', 'is-bucket-')
   const valueDisplay = formatCompactMoney(estimatedValue)
   const scoreDisplay = finalAcquisitionScore != null ? String(Math.round(finalAcquisitionScore)) : '—'
@@ -1174,13 +1218,7 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
       <div className="nx-cc-row__col nx-cc-row__col--media" aria-hidden>
-        <InboxStreetViewThumb
-          address={address}
-          lat={latitude}
-          lng={longitude}
-          cachedImageUrl={streetviewImage}
-          size="row"
-        />
+        <PropertySignalTile model={tileModel} size="row" />
         <div className="nx-cc-row__media-veil" />
       </div>
       <div className="nx-cc-row__col nx-cc-row__col--seller">
@@ -1194,15 +1232,15 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
       <div className="nx-cc-row__col nx-cc-row__col--conversation">
         <span className="nx-cc-row__preview">{latestMessageBody}</span>
         <div className="nx-cc-row__receipt-row">
-          {deliveryReceipt ? (
-            <span className={cls('nx-cc-row__receipt', `is-${deliveryReceipt.type}`)}>
-              <Icon name={deliveryReceipt.icon} />
-              <span>{deliveryReceipt.label}</span>
-              <span className="nx-cc-row__receipt-sep">·</span>
-              <time>{ageLabel}</time>
+          {messageState ? (
+            <span className={cls('nx-card-state', `is-${messageState.tone}`)}>
+              <span className="nx-card-state__arrow" aria-hidden="true">{messageState.arrow}</span>
+              <span className="nx-card-state__label">{messageState.label}</span>
+              <span className="nx-card-state__sep">·</span>
+              <time dateTime={timestamp.fullLabel}>{dateTimeLabel}</time>
             </span>
           ) : (
-            <time className="nx-cc-row__receipt-time">{ageLabel}</time>
+            <time className="nx-cc-row__receipt-time" dateTime={timestamp.fullLabel}>{dateTimeLabel}</time>
           )}
         </div>
       </div>
@@ -1211,7 +1249,9 @@ const CommandCenterRow = memo(({ thread, selected, decision, onSelect }: {
         <span className="nx-cc-row__meta-line">{marketDisplay}</span>
         <span className="nx-cc-row__meta-line">{typeDisplay}</span>
         {unitsDisplay && <span className="nx-cc-row__meta-line">{unitsDisplay}</span>}
-        {stageDisplay && <span className="nx-cc-row__meta-line is-stage">{stageDisplay}</span>}
+        {stageBadge && (
+          <span className="nx-cc-row__meta-line is-stage" title={stageBadge.label}>{stageBadge.label}</span>
+        )}
       </div>
 
       <div className="nx-cc-row__col nx-cc-row__col--flags">

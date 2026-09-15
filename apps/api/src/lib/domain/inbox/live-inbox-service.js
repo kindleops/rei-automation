@@ -1299,6 +1299,65 @@ async function hydrateMissingLatestMessageEventIds(rows = [], supabase = default
   });
 }
 
+/**
+ * THE CARD'S STAGE BADGE NEEDS THE CANONICAL ACQUISITION STAGE.
+ *
+ * `inbox_threads_hydrated` projects only `stage`, which is the LEGACY mixed
+ * column: measured on 2026-09-14 it holds `waiting` (4,247), `ownership_check`
+ * (903), `new_reply` (653), `interested`, `not_interested`, `needs_response` --
+ * statuses and buckets, not acquisition stages. So `acquisition_stage` fell
+ * through to it and the client saw a legacy value where a stage belongs.
+ *
+ * The canonical stage is `inbox_thread_state.seller_stage` (with
+ * `lifecycle_stage` as its mirror), carrying the ten UNIVERSAL_STAGE_CODES.
+ * Real distribution over 9,778 threads:
+ *
+ *   offer_interest          4,736     asking_price          14
+ *   ownership_confirmation  1,077     offer                  5
+ *   closed                    132     property_condition     3
+ *   (no lifecycle stage)    3,811     formal_contract        1
+ *
+ * 3,811 threads legitimately have NO stage, and they must stay that way --
+ * defaulting them to S1 would claim an ownership check that never happened.
+ *
+ * Deliberately a batched read rather than a change to the view: the view is
+ * 193 columns of certified Inbox contract, and this needs two more fields off a
+ * table it already LEFT JOINs. One indexed `in(thread_key)` over the visible
+ * page is cheaper than the risk of retyping 8,870 characters of definition.
+ */
+async function hydrateCanonicalAcquisitionStage(rows = [], supabase = defaultSupabase) {
+  if (!Array.isArray(rows) || rows.length === 0 || !supabase?.from) return rows;
+
+  const threadKeys = [...new Set(
+    rows
+      .map((row) => clean(row.thread_key || row.canonical_thread_key))
+      .filter(Boolean)
+  )];
+  if (!threadKeys.length) return rows;
+
+  const { data, error } = await supabase
+    .from("inbox_thread_state")
+    .select("thread_key, seller_stage, lifecycle_stage")
+    .in("thread_key", threadKeys);
+
+  // A failed lookup leaves the rows alone. The card omits the badge rather than
+  // showing the legacy value, which is the correct degraded state.
+  if (error || !Array.isArray(data)) return rows;
+
+  const byKey = new Map();
+  for (const entry of data) {
+    const key = clean(entry?.thread_key);
+    if (!key) continue;
+    byKey.set(key, clean(entry.seller_stage) || clean(entry.lifecycle_stage) || null);
+  }
+
+  return rows.map((row) => {
+    const key = clean(row.thread_key || row.canonical_thread_key);
+    const stage = key ? byKey.get(key) : null;
+    return stage ? { ...row, seller_stage: stage } : row;
+  });
+}
+
 async function hydrateVisibleThreadDelivery(rows = [], supabase = defaultSupabase) {
   if (!Array.isArray(rows) || rows.length === 0 || !supabase?.from) return rows;
 
@@ -2967,6 +3026,9 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
         finalRows = await hydrateMissingLatestMessageEventIds(finalRows, supabase);
       }
     }
+    // Before normalizeThreadRow, which resolves acquisition_stage and prefers
+    // row.seller_stage over the legacy column.
+    finalRows = await hydrateCanonicalAcquisitionStage(finalRows, supabase);
     finalRows = finalRows.map((row) => normalizeThreadRow(row, {
       ...params,
       skip_keyword_analysis: fastListMode || bool(params.skip_keyword_analysis),

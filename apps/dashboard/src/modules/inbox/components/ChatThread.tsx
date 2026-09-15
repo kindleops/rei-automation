@@ -6,7 +6,9 @@ import { Icon } from '../../../shared/icons'
 import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
-import { buildPropertyExternalLinks, buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
+import { buildPropertyExternalLinks } from '../../../domain/inbox/inbox-normalization'
+import { PropertySignalTile } from './PropertySignalTile'
+import { buildPropertySignalTileModel } from '../inbox-card-signals'
 import { getThreadMatchedKeywords, resolveThreadAddressLine, resolveThreadMarketBadge, resolveThreadOwnerName, resolveThreadPrimaryName } from '../inbox-ui-helpers'
 import type { PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
@@ -642,11 +644,30 @@ export const ChatThread = ({
 
   const externalLinks = buildPropertyExternalLinks(propertyAddress || null)
   const zillowUrl = readString(thread, 'zillow_url', 'zillowUrl') || externalLinks.zillow
-  const streetLat = readNumber(thread, 'latitude', 'lat')
-  const streetLng = readNumber(thread, 'longitude', 'lng')
-  const streetViewThumbUrl = readString(thread, 'streetview_image', 'streetviewImage')
-    || buildStreetViewUrl(propertyAddress || null, streetLat, streetLng)
-  const streetViewLink = externalLinks.streetView || streetViewThumbUrl
+
+  /**
+   * NO STREET VIEW IN THE OPEN-THREAD HEADER.
+   *
+   * This mounted a Street View Static <img> every time a thread was opened, on
+   * top of the one each list card already fired. The header's job is to say
+   * WHO and WHAT PROPERTY, and a 4:3 photo of a facade answers neither better
+   * than the asset class, value and equity do.
+   *
+   * `externalLinks.streetView` is a maps.google.com LINK, not an image request,
+   * so the operator can still jump to Street View deliberately. Street View
+   * imagery itself stays in Property / Deal / Comp Intelligence and Map.
+   */
+  const threadRowForTile = thread as unknown as Record<string, unknown>
+  const headerTileModel = buildPropertySignalTileModel({
+    propertyType: readString(thread, 'property_type', 'propertyType', 'normalized_asset_class'),
+    unitCount: readNumber(thread, 'units_count', 'unitsCount', 'number_of_units', 'numberOfUnits', 'unitCount'),
+    estimatedValue: readNumber(thread, 'estimated_value', 'estimatedValue'),
+    equityPercent: readNumber(thread, 'equity_percent', 'equityPercent'),
+    market: readString(thread, 'market', 'displayMarket'),
+    city: readString(thread, 'property_address_city', 'propertyAddressCity', 'city'),
+    state: readString(thread, 'property_address_state', 'propertyAddressState', 'state'),
+  })
+  void threadRowForTile
 
   const renderHeaderActions = (withLabels = false, includeZillow = false) => (
     <>
@@ -737,17 +758,9 @@ export const ChatThread = ({
                 {renderHeaderActions(true, true)}
               </MobileHeaderActionsMenu>
             </div>
-            {streetViewThumbUrl ? (
-              <a
-                className="nx-conv-mobile-streetview"
-                href={streetViewLink || streetViewThumbUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Open street view"
-              >
-                <img src={streetViewThumbUrl} alt="" loading="lazy" decoding="async" />
-              </a>
-            ) : null}
+            <div className="nx-conv-mobile-signal">
+              <PropertySignalTile model={headerTileModel} size="header" />
+            </div>
             <div className="nx-conv-mobile-identity">
               <h2 className="nx-conv-seller-name nx-conv-seller-name--mobile">{prospectName}</h2>
               {propertyAddress ? (

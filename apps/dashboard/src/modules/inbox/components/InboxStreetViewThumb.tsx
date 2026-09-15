@@ -1,3 +1,15 @@
+/**
+ * NO LONGER USED BY THE INBOX.
+ *
+ * The Inbox replaced this with PropertySignalTile (zero network requests) --
+ * a 25-row page was firing up to 25 billed Street View Static requests on load
+ * and again on every category switch, filter and search.
+ *
+ * It stays because Pipeline still mounts it (PipelineRichDealCard,
+ * PipelineMobileOpportunityDetail), where the operator is looking at one deal
+ * rather than scanning a list. Despite living under modules/inbox/, this is
+ * Pipeline's component now; do not reintroduce it into an Inbox list.
+ */
 import { memo, useMemo, useState } from 'react'
 import { buildStreetViewUrl } from '../../../domain/inbox/inbox-normalization'
 import { getCachedStreetViewStatus, rememberStreetViewResult } from '../utils/streetViewImageCache'
