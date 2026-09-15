@@ -5177,7 +5177,7 @@ async function fetchCampaignExecutionProof(supabase, campaignId, campaign = {}) 
  * Half of them could never return anything: there are 0 active-status queue
  * rows book-wide.
  */
-function reduceCampaignExecutionProof(campaign = {}, activeRows = [], proofRows = []) {
+export function reduceCampaignExecutionProof(campaign = {}, activeRows = [], proofRows = []) {
   const campaignStatus = campaign?.status || 'draft'
 
   let proofNoSendRows = 0
@@ -5188,14 +5188,30 @@ function reduceCampaignExecutionProof(campaign = {}, activeRows = [], proofRows 
   let scheduledQueueRows = 0
   let nextScheduledProofRow = null
   let nextScheduledLiveRow = null
+  let scheduledRowsAll = 0
+  let scheduledProofRows = 0
 
   for (const row of activeRows || []) {
     const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
     const noSend = asBoolean(metadata.no_send ?? metadata.proof_no_send, false)
     const proofHydration = clean(metadata.launch_mode) === 'proof_hydration_no_send' || noSend
     const status = clean(row.queue_status).toLowerCase()
+    /**
+     * Every scheduled row, live or proof.
+     *
+     * `scheduledQueueRows` below deliberately counts only LIVE-executable
+     * work, which is the right number for "what will transmit". But the Inbox
+     * Scheduled predicate counts any scheduled queue row, so the two surfaces
+     * described the same durable rows differently: a 3-row no-send batch read
+     * as Scheduled 3 in Inbox and 0 in Campaign Command, while the campaign's
+     * own next_send_at showed the first of those three. Counting the total
+     * separately is what lets the campaign reconcile with the queue AND still
+     * say that none of it will transmit.
+     */
+    if (status === 'scheduled') scheduledRowsAll += 1
     if (proofHydration) {
       proofNoSendRows += 1
+      if (status === 'scheduled') scheduledProofRows += 1
       if (row.scheduled_for && (!nextScheduledProofRow || row.scheduled_for < nextScheduledProofRow)) {
         nextScheduledProofRow = row.scheduled_for
       }
@@ -5261,7 +5277,12 @@ function reduceCampaignExecutionProof(campaign = {}, activeRows = [], proofRows 
     live_send_rows: liveSendRows,
     proof_no_send_rows: proofNoSendRows,
     queued_rows: queuedRows,
+    /** Live-executable scheduled work — what will actually transmit. */
     scheduled_queue_rows: scheduledQueueRows,
+    /** Scheduled proof rows, which are durable but will never transmit. */
+    scheduled_proof_rows: scheduledProofRows,
+    /** Every scheduled queue row. Reconciles with send_queue and Inbox Scheduled. */
+    scheduled_rows_all: scheduledRowsAll,
     sms_eligible: smsEligible,
     routing_allowed: routingAllowed,
     transmission_enabled: transmissionEnabled,
@@ -5387,6 +5408,11 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
   const proof = executionProof || {}
   const liveQueued = Number(proof.queued_rows ?? queued)
   const liveScheduled = Number(proof.scheduled_queue_rows ?? 0)
+  // Total scheduled work in the canonical queue, which is the figure that has
+  // to agree with send_queue and Inbox Scheduled. Falls back to the live count
+  // when the proof does not report a total.
+  const allScheduled = Number(proof.scheduled_rows_all ?? liveScheduled)
+  const proofScheduled = Number(proof.scheduled_proof_rows ?? 0)
   const scopedFailed = Number(proof.failed_execution_rows ?? failedTarget)
   // `failed` is provider truth where available; `scopedFailed` stays the
   // execution-scoped figure the proof reports, which answers a different
@@ -5429,8 +5455,12 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     quarantine_reason: clean(metadataObject(campaign.metadata?.quarantine).reason) || null,
     ready_targets: ready,
     planned_targets: planned,
-    scheduled_targets: liveScheduled,
+    // `scheduled_targets` is the reconciliation-facing number: all scheduled
+    // queue rows, matching send_queue and Inbox Scheduled.
+    scheduled_targets: allScheduled,
     scheduled_queue_rows: liveScheduled,
+    scheduled_proof_rows: proofScheduled,
+    scheduled_rows_all: allScheduled,
     queued_targets: liveQueued,
     canonical_queued_count: liveQueued + liveScheduled,
     sent_count: sent,

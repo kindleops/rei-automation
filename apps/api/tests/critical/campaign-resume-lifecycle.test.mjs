@@ -43,6 +43,12 @@ function makeChain(table, selectedColumns, terminalResult) {
     limit() {
       return chain;
     },
+    // The campaign target-count scan pages with `.range()` when the
+    // database-side aggregate is unavailable, as it is against this fake.
+    // Returning the terminal result yields a short page, so the scan
+    // terminates after one iteration.
+    range: async () => terminalResult,
+    rpc: undefined,
     maybeSingle: async () => terminalResult,
     single: async () => terminalResult,
     head: true,
