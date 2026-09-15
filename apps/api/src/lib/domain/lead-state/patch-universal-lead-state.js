@@ -17,6 +17,9 @@ import {
   PROJECTION_GUARDS,
 } from '@/lib/domain/lead-state/project-acquisition-stage.js';
 import { isCanonicalThreadKey } from '@/lib/cockpit/cockpit-service.js';
+// The canonical opportunity's own transition rule, applied to manual moves
+// before the projection is written so the two stores cannot be split.
+import { validateStageTransition } from '@/lib/domain/opportunity/universal-pipeline-registry.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -413,6 +416,43 @@ export async function patchUniversalLeadState({
     delete canonicalPatch.lead_temperature;
     stageGuards.push('manual_temperature_lock_blocked_temperature_write');
   }
+  /**
+   * A MANUAL MOVE IS VALIDATED BEFORE THE PROJECTION IS WRITTEN.
+   *
+   * Manual writes deliberately skip the monotonic fence below — an operator
+   * correcting a misclassification has to be able to move a lead backwards.
+   * But the CANONICAL opportunity applies its own rule
+   * (validateStageTransition: a backward or stage-skipping move requires a
+   * stated reason), and that rule was being consulted only after the
+   * projection had already been written.
+   *
+   * So a reasonless S3 -> S2 left the two stores disagreeing: the canonical
+   * opportunity correctly refused and stayed at asking_price while the
+   * projection had already moved to offer_interest. The operator's action
+   * half-applied, and the mirror ended up pointing backwards past the thing it
+   * mirrors.
+   *
+   * Validated up front instead, so the whole patch fails closed and the two
+   * stores can never be split by a refused move. An explicit correction still
+   * works — it just has to say why, which is the point of the requirement.
+   */
+  if (
+    'lifecycle_stage' in canonicalPatch
+    && changeSource === STATE_SOURCE_CODES.MANUAL
+    && canonicalAcquisitionStage
+    && canonicalPatch.lifecycle_stage !== canonicalAcquisitionStage
+  ) {
+    const canonicalCheck = validateStageTransition({
+      fromStage: canonicalAcquisitionStage,
+      toStage: canonicalPatch.lifecycle_stage,
+      opportunityStatus: null,
+      reason: clean(meta.reason) || '',
+    });
+    if (!canonicalCheck.ok) {
+      delete canonicalPatch.lifecycle_stage;
+      stageGuards.push(canonicalCheck.error || 'canonical_stage_transition_refused');
+    }
+  }
   if ('lifecycle_stage' in canonicalPatch && changeSource !== STATE_SOURCE_CODES.MANUAL) {
     if (previous?.manual_stage_lock === true) {
       delete canonicalPatch.lifecycle_stage;
@@ -648,10 +688,107 @@ export async function patchUniversalLeadState({
     }
   }
 
+  /**
+   * A MANUAL STAGE MOVE MUST REACH THE CANONICAL OPPORTUNITY.
+   *
+   * `inbox_thread_state.lifecycle_stage` is the PROJECTION -- the fence above
+   * says so in as many words: it mirrors the canonical acquisition stage and
+   * "may trail it, never lead it". But an operator moving a stage from Pipeline
+   * or Deal Intelligence wrote only the projection, and nothing propagated it
+   * back, so the mirror led the canonical indefinitely.
+   *
+   * Measured 2026-09-15 on the +15551112222 fixture. Moved S2 -> S3 through the
+   * Pipeline sheet's own confirm dialog ("Change Stage Only"):
+   *
+   *   inbox_thread_state.lifecycle_stage   asking_price    (S3)  written
+   *   inbox_thread_state.seller_stage      asking_price    (S3)  written
+   *   acquisition_opportunities.…_stage    offer_interest  (S2)  UNTOUCHED
+   *   opportunity updated_at               2026-06-21            unchanged
+   *
+   * The Pipeline reads opportunities, so the card never moved, the rail counts
+   * never changed, and the sheet only showed S3 because the control holds an
+   * optimistic value until reload. The operator's move looked like it worked
+   * and had not.
+   *
+   * Routed through `transitionOpportunityStage`, which is the canonical writer:
+   * it runs validateStageTransition (so a regression is refused here exactly as
+   * it is for the projection), stamps stage_entered_at, appends
+   * acquisition_opportunity_history and emits opportunity_stage_changed. No
+   * second stage authority is introduced.
+   *
+   * Non-fatal and reported, like the suppression cancellation above: the
+   * projection write is already persisted, and an operator needs to see when
+   * the canonical row refused to follow rather than have it swallowed.
+   */
+  let opportunity_stage_sync = null;
+  const manualStageWritten = typeof rowPatch.lifecycle_stage === 'string'
+    && rowPatch.lifecycle_stage.length > 0
+    && changeSource === STATE_SOURCE_CODES.MANUAL
+    && rowPatch.lifecycle_stage !== previous?.lifecycle_stage;
+  if (manualStageWritten) {
+    try {
+      const bare = String(key || '').replace(/^\+1/, '');
+      const candidates = [...new Set([key, bare].filter(Boolean))];
+      const { data: oppRows } = await supabase
+        .from('acquisition_opportunities')
+        .select('id, acquisition_stage')
+        .in('primary_thread_key', candidates)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      const opp = Array.isArray(oppRows) ? oppRows[0] : oppRows;
+      if (!opp?.id) {
+        opportunity_stage_sync = { ok: false, reason: 'no_linked_opportunity' };
+      } else if (opp.acquisition_stage === rowPatch.lifecycle_stage) {
+        opportunity_stage_sync = { ok: true, reason: 'already_aligned', opportunity_id: opp.id };
+      } else {
+        const { transitionOpportunityStage } = await import(
+          '@/lib/domain/opportunity/opportunity-service.js'
+        );
+        const result = await transitionOpportunityStage(
+          opp.id,
+          {
+            to_stage: rowPatch.lifecycle_stage,
+            /**
+             * The operator's OWN reason, never a manufactured one.
+             *
+             * validateStageTransition refuses a backward or stage-skipping move
+             * unless a reason is supplied. Defaulting this to
+             * 'operator_manual_stage_move' satisfied that guard on every call,
+             * which turned a deliberate justification requirement into a
+             * rubber stamp -- I watched S4 -> S2 sail through because of it.
+             *
+             * Empty means the validator decides: a forward single step is
+             * allowed, a regression or a skip is refused and reported back as
+             * `opportunity_stage_sync.reason` for the operator to see. An
+             * explicit correction still works -- it just has to say why.
+             */
+            reason: clean(meta.reason) || '',
+            actor: meta.operator_id || meta.updated_by || 'operator',
+            source: 'operator',
+          },
+          { supabase },
+        );
+        opportunity_stage_sync = {
+          ok: result?.ok === true,
+          opportunity_id: opp.id,
+          from: opp.acquisition_stage,
+          to: rowPatch.lifecycle_stage,
+          ...(result?.ok === true ? {} : { reason: result?.reason || result?.error || 'transition_refused' }),
+        };
+      }
+    } catch (syncError) {
+      opportunity_stage_sync = {
+        ok: false,
+        reason: syncError?.message || 'opportunity_stage_sync_failed',
+      };
+    }
+  }
+
   return {
     ok: true,
     thread_key: key,
     row: data,
+    opportunity_stage_sync,
     stage_guards: stageGuards,
     suppression_guards: suppressionGuards,
     suppression_cancellation,

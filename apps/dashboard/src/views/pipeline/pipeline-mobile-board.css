@@ -165,7 +165,36 @@
 
 /* ── rows ────────────────────────────────────────────────────────────────── */
 
-.plm-list { display: flex; flex-direction: column; }
+/* ══════════════════════════════════════════════════════════════════════════
+   THE LIST IS THE SCROLLER — PIPELINE-MOBILE-LOCK-1 §25
+   ══════════════════════════════════════════════════════════════════════════
+   `.plm-list` had no overflow of its own, so the rows grew the studio column
+   past its box — and `.plv--mobile-studio` is `overflow: hidden`, which CLIPS
+   rather than scrolls. The overflow was unreachable by touch: programmatic
+   scrollIntoView still worked, which is why it was easy to miss.
+
+   Measured 2026-09-15 at 390x844, Attention scope (6 rows):
+     .plm-list                 scrollHeight 653  clientHeight 653  overflow visible
+     .plv--mobile-studio       scrollHeight 942  clientHeight 786  overflow HIDDEN
+     last row bottom 896 against a dock top of 824 — 72px behind the dock,
+     with no scroll container able to bring it up.
+
+   The list scrolls and reserves the bottom chrome, so the header and the stage
+   rail stay put (the rail is how you leave a stage — it must not scroll away)
+   and the final row clears the dock. Same --nx-mobile-chrome-bottom contract
+   the Deal Intelligence body uses, so it collapses when the dock hides.
+   ══════════════════════════════════════════════════════════════════════════ */
+.plm-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(var(--nx-mobile-chrome-bottom, 68px) + 12px);
+  scroll-padding-bottom: calc(var(--nx-mobile-chrome-bottom, 68px) + 12px);
+}
 
 .plm-row {
   display: flex; align-items: stretch;
