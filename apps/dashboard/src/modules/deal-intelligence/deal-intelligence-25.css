@@ -4634,15 +4634,18 @@ body.nx-di25-engine-active .nx-copilot-orb--floating {
    The Maps JS API and the panorama used to initialise on mount because this
    pane is part of the default desktop Inbox workspace. They now wait for this
    poster to be clicked (or for the operator to pick a Street/Aerial tab). */
+/* A slim bar, not a 300px void. With the Street View pane gone the media block
+   held one poster, and a full-height placeholder for imagery nobody has asked
+   for is worse than no block at all. */
 .nx-di25-media__poster {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 8px;
   width: 100%;
-  min-height: 120px;
-  padding: 14px;
+  min-height: 0;
+  padding: 9px 12px;
   border: 1px dashed var(--civ4-border, rgba(148, 163, 184, 0.3));
   border-radius: 10px;
   background: transparent;
@@ -4664,7 +4667,30 @@ body.nx-di25-engine-active .nx-copilot-orb--floating {
 
 .nx-di25-media__poster-note {
   font-size: 10px;
-  opacity: 0.6;
+  opacity: 0.55;
+}
+
+/* The media surface is sized for a panorama (height: min(44vw,300px);
+   min-height: 240px). With only a poster inside, that is 300px of void — so
+   the surface and its pane shrink to the poster, and the mobile override at
+   the bottom of this file has to be overridden too or it reimposes 260px. */
+.nx-di25-media-block:has(.nx-di25-media__poster) .nx-di25-media__surface,
+.nx-inbox-shell.is-mobile-inbox.m-intel-open
+  .nx-di25-media-block:has(.nx-di25-media__poster) .nx-di25-media__surface {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: auto;
+}
+
+/* The pane is `position: absolute; inset: 0`, which is right for a panorama
+   filling a fixed-height surface and wrong for a poster: it contributes no
+   height, so the surface collapsed to 0 and the poster floated over the
+   Subject Property card below it. Static while the poster is showing. */
+.nx-di25-media-block:has(.nx-di25-media__poster) .nx-di25-media__pane {
+  position: static;
+  inset: auto;
+  height: auto;
+  min-height: 0;
 }
 
 [data-nexus-theme='light'] .nx-di25-media__poster-cta { color: #1d4ed8; }
