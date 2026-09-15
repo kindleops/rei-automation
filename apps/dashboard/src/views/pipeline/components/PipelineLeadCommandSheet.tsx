@@ -159,11 +159,44 @@ export function PipelineLeadCommandSheet({
     return bits.length ? bits.join(' · ') : null
   }, [suppressed, convo, opp, snap, property])
 
+  /**
+   * THE OPPORTUNITY IS THE STAGE AUTHORITY ON THIS SURFACE.
+   *
+   * This read `canonical_lifecycle_stage` / `canonical_operational_status`,
+   * which are NOT fields on a /pipeline/opportunities row (88 keys, neither
+   * present). Both branches resolved to undefined, and the chips run through
+   * normalizeLifecycleStage / normalizeOperationalStatus, which COERCE an
+   * empty value to `ownership_confirmation` and `not_contacted`.
+   *
+   * So the sheet confidently printed "S1 Ownership Check · Not Contacted" for
+   * a seller three stages further along. Measured 2026-09-15 on Ronald & Shane
+   * Tice, 5115 Michigan Ave, opened from the S4 lane:
+   *
+   *   acquisition_opportunities.acquisition_stage   property_condition  (S4)
+   *   inbox_thread_state.seller_stage              property_condition  (S4)
+   *   inbox_thread_state.lifecycle_stage           property_condition  (S4)
+   *   sheet displayed                              S1 Ownership Check
+   *
+   * Every authority said S4. The display invented S1 out of an undefined.
+   *
+   * `acquisition_stage` leads because that is what the lane, the rail count and
+   * the row all key on — a sheet that disagrees with the lane it was opened
+   * from is worse than no sheet.
+   */
+  const oppRec = opp as unknown as Rec
   const leadState = threadKey ? {
     threadKey,
-    lifecycle_stage: text((opp as unknown as Rec)?.canonical_lifecycle_stage as string) ?? text(convo?.lifecycle_stage as string),
-    operational_status: text((opp as unknown as Rec)?.canonical_operational_status as string) ?? text(convo?.operational_status as string),
-    lead_temperature: text((opp as unknown as Rec)?.canonical_lead_temperature as string) ?? text(convo?.lead_temperature as string),
+    lifecycle_stage:
+      text(oppRec?.acquisition_stage as string)
+      ?? text(oppRec?.canonical_lifecycle_stage as string)
+      ?? text(convo?.lifecycle_stage as string),
+    operational_status:
+      text(oppRec?.canonical_operational_status as string)
+      ?? text(convo?.operational_status as string),
+    lead_temperature:
+      text(oppRec?.temperature as string)
+      ?? text(oppRec?.canonical_lead_temperature as string)
+      ?? text(convo?.lead_temperature as string),
   } : null
 
   useEffect(() => {

@@ -1062,3 +1062,110 @@
     animation: none !important;
   }
 }
+/* ══════════════════════════════════════════════════════════════════════════
+   ROW STATE · PREVIEW · NEXT ACTION · AUTOMATION — PIPELINE-MOBILE-LOCK-1
+   ══════════════════════════════════════════════════════════════════════════
+   §7 asks the card to answer "what is happening with this seller right now".
+   The row carried who / where / how stale / next_action only — and next_action
+   is NULL on 130 of 264 active opportunities, so half the pipeline said
+   nothing. These four lines are all reads of the canonical opportunity row.
+   ══════════════════════════════════════════════════════════════════════════ */
+.plm-row__state {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.plm-chip {
+  flex: 0 0 auto;
+  padding: 1.5px 6px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  color: rgba(222, 232, 248, 0.82);
+  background: rgba(148, 163, 184, 0.14);
+}
+
+/* Only the states that change what the operator does carry colour. */
+.plm-chip.is-suppressed {
+  color: #ffb4a8;
+  background: rgba(255, 69, 58, 0.16);
+  border-color: rgba(255, 107, 94, 0.42);
+  font-weight: 750;
+}
+.plm-chip.is-attention { color: #9fd8ff; background: rgba(59, 130, 246, 0.16); border-color: rgba(99, 179, 255, 0.30); }
+.plm-chip.is-waiting { color: #ffd79a; background: rgba(245, 158, 11, 0.14); border-color: rgba(251, 191, 36, 0.28); }
+.plm-chip.is-cold { color: rgba(203, 213, 225, 0.86); background: rgba(100, 116, 139, 0.18); }
+.plm-chip.is-dead { color: rgba(203, 213, 225, 0.68); background: rgba(100, 116, 139, 0.14); }
+.plm-chip.is-offer { color: #b6f0c8; background: rgba(16, 185, 129, 0.15); border-color: rgba(52, 211, 153, 0.30); }
+
+/* What the seller actually said — one line, never a paragraph. */
+.plm-row__preview {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: rgba(226, 234, 248, 0.80);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.plm-row__due { opacity: 0.72; font-variant-numeric: tabular-nums; }
+
+/* A derived next action is a read of state, not a recommendation — marked so
+   it cannot be mistaken for something the backend scheduled. */
+.plm-row__next.is-derived { font-style: italic; }
+
+.plm-row__auto {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(203, 213, 225, 0.62);
+}
+.plm-row__auto.is-active { color: #7ee2a8; }
+.plm-row__auto.is-cancelled { color: rgba(255, 180, 168, 0.78); }
+.plm-row__auto.is-paused { color: rgba(255, 215, 154, 0.82); }
+
+/* ── Light mode ─────────────────────────────────────────────────────────── */
+[data-nexus-theme='light'] .plm-chip { color: rgba(30, 41, 59, 0.84); background: rgba(15, 23, 42, 0.06); }
+[data-nexus-theme='light'] .plm-chip.is-suppressed { color: #b3261e; background: rgba(220, 38, 38, 0.10); border-color: rgba(220, 38, 38, 0.32); }
+[data-nexus-theme='light'] .plm-chip.is-attention { color: #1d4ed8; background: rgba(37, 99, 235, 0.09); border-color: rgba(37, 99, 235, 0.24); }
+[data-nexus-theme='light'] .plm-chip.is-waiting { color: #92400e; background: rgba(245, 158, 11, 0.13); border-color: rgba(217, 119, 6, 0.28); }
+[data-nexus-theme='light'] .plm-chip.is-cold,
+[data-nexus-theme='light'] .plm-chip.is-dead { color: rgba(51, 65, 85, 0.82); background: rgba(100, 116, 139, 0.10); }
+[data-nexus-theme='light'] .plm-chip.is-offer { color: #065f46; background: rgba(16, 185, 129, 0.12); border-color: rgba(5, 150, 105, 0.30); }
+[data-nexus-theme='light'] .plm-row__preview { color: rgba(30, 41, 59, 0.86); }
+[data-nexus-theme='light'] .plm-row__auto { color: rgba(51, 65, 85, 0.70); }
+[data-nexus-theme='light'] .plm-row__auto.is-cancelled { color: #b3261e; }
+
+/* §14 — the requested property has no opportunity. Stated plainly, above the
+   stage spine, so it cannot be mistaken for an empty stage. */
+.plm-nocontext {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 12px 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.32);
+  background: rgba(245, 158, 11, 0.10);
+}
+
+.plm-nocontext strong { font-size: 12.5px; font-weight: 700; color: #ffd79a; }
+.plm-nocontext span { font-size: 11px; line-height: 1.35; color: rgba(226, 234, 248, 0.78); }
+
+[data-nexus-theme='light'] .plm-nocontext {
+  border-color: rgba(217, 119, 6, 0.30);
+  background: rgba(245, 158, 11, 0.10);
+}
+[data-nexus-theme='light'] .plm-nocontext strong { color: #92400e; }
+[data-nexus-theme='light'] .plm-nocontext span { color: rgba(30, 41, 59, 0.86); }

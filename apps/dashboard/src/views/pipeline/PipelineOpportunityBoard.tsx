@@ -51,6 +51,8 @@ import { MobileWorkflowControls } from '../../modules/deal-intelligence/mobile/M
 import { PipelineLeadCommandSheet } from './components/PipelineLeadCommandSheet'
 import { PipelineMobileDetailSheet } from './components/PipelineMobileDetailSheet'
 import { PipelineMobileOpportunityDetail } from './components/PipelineMobileOpportunityDetail'
+import { readPropertyLocator } from '../../domain/locator/property-locator'
+import { getUniversalEntityContextSnapshot } from '../../domain/entity-graph/universal-entity-context-store'
 import '../../modules/inbox/queue-ops.css'
 import './pipeline-view.css'
 import './pipeline-mobile.css'
@@ -206,6 +208,65 @@ export function PipelineOpportunityBoard({
   const [showDetail, setShowDetail] = useState(true)
   const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [dockOpen, setDockOpen] = useState(false)
+
+  /**
+   * INCOMING PROPERTY CONTEXT — §14 / §16.
+   *
+   * Pipeline published context on every action but never CONSUMED it, so
+   * arriving with a property subject silently dropped it. Measured 2026-09-15:
+   * /pipeline?property_id=232714379 (Bertha A Daniels, a real Inbox thread with
+   * NO opportunity) rendered the ordinary list starting at an unrelated
+   * Indianapolis property and said nothing about the request.
+   *
+   * It never SUBSTITUTED a subject — nothing was selected — but silently
+   * clearing the context is the other half of what §14 forbids. The operator
+   * asked about one property and got a list about other ones.
+   *
+   * URL first (survives reload and sharing), then the sessionStorage property
+   * locator, which is what the app dock and every other surface publish
+   * through.
+   */
+  const incomingPropertyId = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const fromUrl = new URLSearchParams(window.location.search).get('property_id')
+      ?? new URLSearchParams(window.location.search).get('property')
+    const direct = String(fromUrl ?? '').trim()
+    if (direct) return direct
+    const locator = readPropertyLocator()
+    const fromLocator = String(locator?.propertyId ?? '').trim()
+    if (fromLocator) return fromLocator
+    const snapshot = getUniversalEntityContextSnapshot()
+    return String(snapshot?.propertyId ?? '').trim() || null
+  }, [])
+
+  /**
+   * Whether that property has an opportunity at all. `null` = no property was
+   * requested, so there is nothing to answer.
+   */
+  const incomingPropertyMatch = useMemo(() => {
+    if (!incomingPropertyId) return null
+    const match = opportunities.find(
+      (o) => String((o as unknown as Record<string, unknown>).primary_property_id ?? '') === incomingPropertyId,
+    )
+    return { propertyId: incomingPropertyId, opportunity: match ?? null }
+  }, [incomingPropertyId, opportunities])
+
+  /**
+   * When the requested property DOES have an opportunity, move to its stage so
+   * the operator lands on the subject they asked for rather than on whichever
+   * stage happened to be active. Once per property — re-running would fight
+   * the operator's own stage navigation.
+   */
+  const focusedPropertyRef = useRef<string | null>(null)
+  useEffect(() => {
+    const match = incomingPropertyMatch?.opportunity
+    if (!match) return
+    const propertyId = incomingPropertyMatch?.propertyId ?? null
+    if (!propertyId || focusedPropertyRef.current === propertyId) return
+    focusedPropertyRef.current = propertyId
+    const stage = String((match as unknown as Record<string, unknown>).acquisition_stage ?? '').trim()
+    if (stage) setActiveStageId(stage)
+  }, [incomingPropertyMatch])
   const [transitionError, setTransitionError] = useState<string | null>(null)
   const [stageConfirm, setStageConfirm] = useState<{
     cardId: string
@@ -665,6 +726,20 @@ export function PipelineOpportunityBoard({
           <div className="plm-error" role="alert">
             <strong>Couldn’t update that lead</strong>
             <span>{transitionError}</span>
+          </div>
+        ) : null}
+
+        {/* §14 — a property with no opportunity gets a straight answer, not a
+            list about other properties. Creation is NOT offered: the pipeline
+            API exposes GET and PATCH only, so a "Create Opportunity" button
+            here would be a dead control. */}
+        {incomingPropertyMatch && !incomingPropertyMatch.opportunity ? (
+          <div className="plm-nocontext" role="status">
+            <strong>No acquisition opportunity exists for this property.</strong>
+            <span>
+              Property {incomingPropertyMatch.propertyId} has no opportunity in the pipeline, so
+              nothing here is about it.
+            </span>
           </div>
         ) : null}
 
