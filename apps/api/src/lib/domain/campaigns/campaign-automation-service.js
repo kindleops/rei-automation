@@ -3301,6 +3301,11 @@ const CAMPAIGN_TARGET_GRAPH_SELECT = [
   'master_owner_id',
   'prospect_id',
   'canonical_prospect_id',
+  // Canonical person identity. The graph populates this
+  // (seller.property_owner_resolution_v1) while prospect_id/phone_id are
+  // retired provenance and always NULL, so omitting it from the projection is
+  // what left every graph-sourced target without a person.
+  'seller_person_key',
   'phone_id',
   'canonical_e164',
   'market',
@@ -4046,10 +4051,49 @@ function graphDistributionCounts(rows = []) {
 // (evaluatePreSendEligibility -> isIdentityEligibleForLiveOutbound) so the
 // two layers cannot silently drift apart.
 function resolveCampaignTargetReadiness(row = {}) {
-  const hasLinkage = Boolean(
-    clean(row.master_owner_id) && clean(row.prospect_id || row.canonical_prospect_id) &&
-    clean(row.phone_id) && clean(row.canonical_e164)
-  )
+  /**
+   * IDENTITY LINKAGE, READ FROM THE CANONICAL SCHEMA.
+   *
+   * This required `master_owner_id` AND `prospect_id` AND `phone_id` AND
+   * `canonical_e164` together. Three of those four are legacy identifiers from
+   * the retired `public.phones` export, and the canonical graph builder
+   * deliberately leaves them NULL — its own comment says
+   * "prospect_id / phone_id do not exist anywhere in the seller schema, so they
+   * stay NULL provenance rather than being manufactured from the stale
+   * public.phones export (which covers only 37.7% of the modern corpus)".
+   *
+   * Measured 2026-09-15 across all 169,797 graph rows:
+   *   prospect_id       0
+   *   phone_id          0
+   *   master_owner_id   41,532  (26% of Individual, 12.5% of Corporate — legacy, not entity-only)
+   *   seller_person_key 138,680
+   *   canonical_e164    136,127
+   *
+   * So the gate was not strict, it was BROKEN CLOSED: no graph-sourced target
+   * could ever be campaign-ready, which is exactly what production showed.
+   *
+   * Person identity is now `seller_person_key`
+   * (seller.property_owner_resolution_v1.individual_key, via
+   * COALESCE(sel_person_key, individual_key)), with the legacy prospect ids
+   * still accepted so older rows that do carry them keep working. The phone is
+   * `canonical_e164`, which the builder joins from seller.owner_phone ON THE
+   * SAME individual_key — so the number provably belongs to the resolved
+   * person rather than being the property's first available phone.
+   *
+   * `master_owner_id` is provenance "where applicable", not a gate: it is
+   * absent on three quarters of rows across every ownership shape, and its
+   * absence says nothing about whether a real person is reachable.
+   *
+   * Nothing else is relaxed. queue_eligible still carries sms_eligible /
+   * suppression / wrong_number / pending_prior_touch / active_queue_item /
+   * sender_covered, and identity_alignment, timezone and phone-ownership
+   * ambiguity are all still enforced below.
+   */
+  const personKey = clean(row.seller_person_key)
+    || clean(row.prospect_id)
+    || clean(row.canonical_prospect_id)
+  const phoneKey = clean(row.canonical_e164) || clean(row.phone_id)
+  const hasLinkage = Boolean(personKey && phoneKey)
   const hasTimezone = Boolean(clean(row.timezone))
   const ambiguousPhone = Boolean(row.ambiguous_phone_ownership)
   const eligibility = evaluatePreSendEligibility(
@@ -4061,6 +4105,15 @@ function resolveCampaignTargetReadiness(row = {}) {
     ? clean(row.queue_block_reason || 'graph_not_queue_eligible')
     : !hasLinkage
       ? 'missing_identity_linkage'
+      /**
+       * An entity-owned property whose person link the canonical source flags
+       * for review has no defensible contact, so it stays blocked however well
+       * the rest of the linkage resolves. seller.property_entity_contact_v1
+       * raises this via ENT_ROLE_UNCORROBORATED / ENT_NO_REGISTRY_LINK, and
+       * 19,346 queue-eligible entity contacts carry it.
+       */
+      : row.entity_contact_requires_review === true
+        ? 'entity_contact_requires_review'
       : !eligibility.eligible
         ? clean(eligibility.reason) || 'identity_not_verified'
         : !hasTimezone
@@ -4074,13 +4127,34 @@ function resolveCampaignTargetReadiness(row = {}) {
 
 function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options = {}) {
   const campaignId = campaign?.id || null
-  const prospectId = clean(row.prospect_id || row.canonical_prospect_id) || null
+  /**
+   * The person the target refers to, in canonical terms first.
+   *
+   * `prospect_id` is a retired identifier the graph no longer populates, so a
+   * target built today carried a NULL person and the downstream queue plan had
+   * nothing to identify the recipient by. `seller_person_key` is the canonical
+   * person (seller.property_owner_resolution_v1), and the legacy ids are kept
+   * as a fallback so rows that still have them are unchanged.
+   */
+  const prospectId = clean(row.prospect_id)
+    || clean(row.canonical_prospect_id)
+    || clean(row.seller_person_key)
+    || null
   const readiness = resolveCampaignTargetReadiness(row)
   return {
     campaign_id: campaignId,
     campaign_key: `ct:${campaignId || 'preview'}:${clean(row.graph_id) || crypto
       .createHash('sha1')
-      .update([row.master_owner_id, row.property_id, row.phone_id, row.canonical_e164, index].join('|'))
+      // phone_id is always NULL on the modern graph, so it contributes nothing
+      // to this hash; the canonical person key is what distinguishes two
+      // recipients on the same property.
+      .update([
+        row.master_owner_id,
+        row.property_id,
+        clean(row.seller_person_key) || row.phone_id,
+        row.canonical_e164,
+        index,
+      ].join('|'))
       .digest('hex')
       .slice(0, 24)}`,
     campaign_name: campaign?.name || null,
@@ -6097,6 +6171,21 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
     const { collapseGraphRowsToRecipients } = await import('@/lib/domain/campaigns/campaign-recipient-dedup.js')
     const touchNumber = asPositiveInteger(options.stage_touch ?? options.touch_number ?? campaign.metadata?.stage_touch, 1) || 1
     const eligibleRows = (graph.rows || []).filter((row) => row.queue_eligible)
+
+    /**
+     * Entity-contact review flags, in ONE set-based call for the whole
+     * candidate set. The graph does not project `requires_review`, and without
+     * it an entity contact the canonical source says needs review becomes
+     * campaign-ready.
+     */
+    const { fetchEntityContactReviewBlocks } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+    const entityReview = await fetchEntityContactReviewBlocks(
+      eligibleRows.map((row) => row.property_id),
+      deps,
+    )
+    for (const row of eligibleRows) {
+      row.entity_contact_requires_review = entityReview.blocked.has(clean(row.property_id))
+    }
     const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(eligibleRows, { touch_number: touchNumber })
     const rows = recipients
       .slice(0, targetLimit)

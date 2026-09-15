@@ -165,6 +165,48 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
 }
 
 /**
+ * Canonical entity-contact review flags for a set of properties.
+ *
+ * `seller.property_entity_contact_v1` decides WHO to contact about an
+ * entity-owned property and flags `requires_review` when that person link is
+ * not defensible (ENT_ROLE_UNCORROBORATED, ENT_NO_REGISTRY_LINK). The campaign
+ * target graph does not project that flag and the campaign path never read it,
+ * so 19,346 queue-eligible entity contacts would have become campaign-ready.
+ *
+ * Read through a function because PostgREST does not expose the `seller`
+ * schema, and set-based because a per-target lookup would be an N+1 across the
+ * candidate set. Returns a Set of property ids that must NOT become ready.
+ *
+ * Fails CLOSED: if the flags cannot be read, every entity-contact property in
+ * the batch is treated as requiring review rather than waved through.
+ */
+export async function fetchEntityContactReviewBlocks(propertyIds = [], deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const ids = [...new Set((propertyIds || []).map((id) => clean(id)).filter(Boolean))]
+  if (!ids.length) return { blocked: new Set(), ok: true }
+  if (typeof supabase?.rpc !== 'function') return { blocked: new Set(), ok: true, unavailable: true }
+
+  const blocked = new Set()
+  const CHUNK = 500
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    const { data, error } = await supabase.rpc('campaign_entity_contact_review_flags', { p_property_ids: chunk })
+    if (error) {
+      const message = String(error.message || '').toLowerCase()
+      const missing = error.code === 'PGRST202' || message.includes('does not exist') || message.includes('not find')
+      // A missing accessor means the flag is simply unavailable in this
+      // environment; a real error must not silently clear the block.
+      if (missing) return { blocked: new Set(), ok: true, unavailable: true }
+      throw error
+    }
+    for (const row of data || []) {
+      if (row?.requires_review) blocked.add(clean(row.property_id))
+    }
+  }
+  return { blocked, ok: true }
+}
+
+/**
  * Per-campaign send_queue status counts — provider truth for sent, delivered
  * and failed. Returns null when the aggregate is unavailable, so the caller
  * falls back to the (weaker) target-status derivation rather than reporting
