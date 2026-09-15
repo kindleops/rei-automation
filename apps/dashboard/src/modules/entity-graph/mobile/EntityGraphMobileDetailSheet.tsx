@@ -532,7 +532,19 @@ function DetailStats({
   const d = result.details ?? {}
   const scores = (dossier?.scores ?? {}) as Row
 
-  const stats: Array<{ label: string; value: string | null }> = scope === 'properties'
+  /**
+   * NAME THE SCORE'S AUTHOR.
+   *
+   * `properties.final_acquisition_score` is a screening number on the row;
+   * `property_acquisition_scores` is the Decision Engine's verdict, written on
+   * demand, and its absence means the engine has NOT RUN. Production, 2026-09-14:
+   * 104,217 properties show a screening score, 163 have an engine row. Labelling
+   * both "Score" told an operator that 104,054 heuristic numbers were the
+   * engine's answer. 300 S 3rd St reads 91 with no engine run; 5115 Michigan Ave
+   * reads 60 with tier CREATIVE_TERMS at 76% confidence.
+   */
+  const engine = (scores.decisionEngine ?? null) as Row | null
+  const stats: Array<{ label: string; value: string | null; note?: string }> = scope === 'properties'
     ? [
         { label: 'Value', value: compactCurrency(num(summary.estimated_value) ?? d.value) },
         {
@@ -542,11 +554,19 @@ function DetailStats({
             : (typeof d.equity === 'number' ? `${Math.round(d.equity)}%` : null),
         },
         {
-          label: 'Score',
+          label: 'Screening score',
           value: num(scores.acquisition) !== null
             ? String(Math.round(num(scores.acquisition) as number))
             : (typeof d.acquisitionScore === 'number' ? String(Math.round(d.acquisitionScore)) : null),
+          note: engine ? undefined : 'Decision Engine has not run',
         },
+        ...(engine
+          ? [{
+            label: 'Decision tier',
+            value: text(engine.decisionTier)?.replace(/_/g, ' ') ?? null,
+            note: num(engine.confidence) !== null ? `${Math.round(num(engine.confidence) as number)}% confidence` : undefined,
+          }]
+          : []),
       ]
     : scope === 'master_owners'
       ? [
@@ -578,6 +598,7 @@ function DetailStats({
         <div key={stat.label} className="egm-stat">
           <em>{stat.label}</em>
           <strong className={stat.value ? undefined : 'is-empty'}>{stat.value ?? '—'}</strong>
+          {stat.note ? <span className="egm-stat__note">{stat.note}</span> : null}
         </div>
       ))}
     </div>

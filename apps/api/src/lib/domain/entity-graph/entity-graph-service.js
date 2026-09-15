@@ -1960,6 +1960,34 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     fetchContactLadder(supabase, { masterOwnerId, propertyId, prospectId: activeProspect?.prospect_id }),
   ])
 
+  /**
+   * WHO SCORED THIS, AND DID ANYTHING ACTUALLY SCORE IT?
+   *
+   * `properties.final_acquisition_score` is a screening number carried on the
+   * row. `property_acquisition_scores` is the Decision Engine's output, written
+   * on demand -- its ABSENCE means the engine has not run for this property,
+   * not that the score is unavailable. Measured 2026-09-14 in production:
+   *
+   *   properties showing a final_acquisition_score   104,217
+   *   properties with a Decision Engine row                163
+   *
+   * So 104,054 properties presented a number the canonical engine never
+   * produced, under the label "acquisition". 300 S 3rd St, Minneapolis reads 91
+   * with zero engine rows; 5115 Michigan Ave reads 60 with one. Both looked
+   * identical to an operator.
+   *
+   * The screening number is still returned -- it is real and it is what the
+   * list sorts on -- but the engine's own verdict is returned beside it, and
+   * `null` when the engine has not run. Nothing is invented to fill the gap.
+   */
+  const { data: engineScoreRows } = await supabase
+    .from('property_acquisition_scores')
+    .select('aos_score, decision_tier, confidence, best_strategy, recommended_cash_offer, computed_at, created_at')
+    .eq('property_id', propertyId)
+    .order('computed_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+  const engineScore = Array.isArray(engineScoreRows) ? engineScoreRows[0] || null : null
+
   const portfolio = owner ? parseJsonArray(owner.joined_property_ids_json) : [propertyId]
   let portfolioProperties = [property]
   if (portfolio.length > 1) {
@@ -1998,6 +2026,18 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
       acquisition: property.final_acquisition_score,
       motivation: property.structured_motivation_score,
       equityPercent: property.equity_percent,
+      /** 'decision_engine' when the engine has run for this property, else 'screening'. */
+      acquisitionSource: engineScore ? 'decision_engine' : 'screening',
+      decisionEngine: engineScore
+        ? {
+          aosScore: engineScore.aos_score ?? null,
+          decisionTier: engineScore.decision_tier ?? null,
+          confidence: engineScore.confidence ?? null,
+          bestStrategy: engineScore.best_strategy ?? null,
+          recommendedCashOffer: engineScore.recommended_cash_offer ?? null,
+          computedAt: engineScore.computed_at ?? engineScore.created_at ?? null,
+        }
+        : null,
     },
     identity: {
       masterOwner: owner?.display_name || null,

@@ -2951,3 +2951,13 @@
   border-color: rgba(15, 23, 42, 0.14);
   background: rgba(15, 23, 42, 0.05);
 }
+
+/* Score authority: a screening number and the Decision Engine's verdict are
+   not the same claim, so the caveat rides with the number. */
+.egm-stat__note {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  line-height: 1.25;
+  opacity: 0.6;
+}
