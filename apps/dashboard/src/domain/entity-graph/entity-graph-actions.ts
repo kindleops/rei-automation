@@ -12,12 +12,33 @@ export function buildEntityGraphActions(context: UniversalEntityContext, dossier
   const actions: EntityGraphActionItem[] = []
 
   if (type === 'property') {
+    /**
+     * DEAL INTELLIGENCE IS THREAD-ANCHORED.
+     *
+     * The panel resolves its subject from a conversation; with none it can only
+     * say "Select a thread to view intelligence". Offering the action anyway
+     * navigated the operator to the Inbox and left them there with no
+     * explanation -- and most properties are in that state (213232962,
+     * 1537 N Laurel Ave, has 0 threads; 278477219 has 2, which is the only
+     * reason this looked like it worked).
+     *
+     * Kept visible and disabled with the reason, rather than hidden: hiding it
+     * would make the gap invisible, and synthesizing a thread to fill the panel
+     * would put data on screen that does not exist. "Create Conversation Draft"
+     * below is the way in.
+     */
+    const hasConversation = Boolean(context.threadKey) || dossierThreads > 0
     actions.push({ key: 'view_properties', label: 'Open Property Intelligence' })
-    actions.push({ key: 'open_deal_intelligence', label: 'Open Deal Intelligence' })
+    actions.push({
+      key: 'open_deal_intelligence',
+      label: 'Open Deal Intelligence',
+      disabled: !hasConversation,
+      hint: hasConversation ? undefined : 'No conversation yet — create a draft first',
+    })
     actions.push({ key: 'open_comp_intelligence', label: 'Open Comp Intelligence' })
     actions.push({ key: 'open_buyer_match', label: 'Open Buyer Match' })
     actions.push({ key: 'open_in_map', label: 'Open in Map' })
-    if (context.threadKey || dossierThreads > 0) actions.push({ key: 'open_thread', label: 'Open Conversation' })
+    if (hasConversation) actions.push({ key: 'open_thread', label: 'Open Conversation' })
     else actions.push({ key: 'create_manual_draft', label: 'Create Conversation Draft' })
     actions.push({ key: 'create_opportunity', label: 'Create/Open Opportunity', disabled: !context.propertyId, hint: context.propertyId ? undefined : 'Property required' })
     return actions

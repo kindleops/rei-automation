@@ -2179,9 +2179,33 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const handleOpenDealIntelligence = useCallback((threadId?: string | null) => {
     const resolvedThreadId = threadId || resolveDealIntelThreadId()
+    const pendingIdentity = peekPendingInboxDealIntelligenceIdentity()
+    /**
+     * A PROPERTY WITH NO CONVERSATION STILL HAS A DEAL.
+     *
+     * This returned early whenever the pending subject resolved to no thread,
+     * so tapping "Open Deal Intelligence" on such a property left the operator
+     * on the thread list with no explanation. Most properties are in that
+     * state -- 128,269 of 169,802 have no master owner at all, and the property
+     * I verified with (213232962, 1537 N Laurel Ave) has 0 threads against
+     * 278477219's 2, which is the only reason the latter appeared to work.
+     *
+     * The panel does not need a thread: the deal context hydrates from
+     * `active.propertyId` via getDealContextByProperty when the thread lookup
+     * finds nothing. So open it and let it resolve the property, rather than
+     * refusing. The early return was protecting against substituting somebody
+     * else's conversation -- that protection lives in resolveDealIntelThreadId,
+     * which returns null instead of filtered[0], and is unaffected.
+     */
+    const hasSubject = Boolean(resolvedThreadId) || Boolean(
+      pendingIdentity?.propertyId
+      || pendingIdentity?.prospectId
+      || pendingIdentity?.masterOwnerId
+      || pendingIdentity?.threadKey,
+    )
     if (resolvedThreadId) {
       selectThreadForDealIntel(resolvedThreadId)
-    } else if (peekPendingInboxDealIntelligence()) {
+    } else if (!hasSubject && peekPendingInboxDealIntelligence()) {
       return
     }
     if (isMobile && !isRouteFullscreen) {
@@ -2191,11 +2215,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           : cloneDefaultWorkspaceViews()
       ))
       setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
-      if (resolvedThreadId) {
+      if (hasSubject) {
         setMobileThreadOpen(true)
         setMobileIntelOpen(true)
         clearPendingInboxDealIntelligence()
-        clearPendingInboxDealIntelligenceIdentity()
+        // The identity is NOT cleared alongside the flag when there is no
+        // thread: it is the only thing that names the subject, and the panel
+        // reads it while hydrating the property.
+        if (resolvedThreadId) clearPendingInboxDealIntelligenceIdentity()
       }
       return
     }

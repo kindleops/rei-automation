@@ -45,6 +45,7 @@ import {
   compactCount,
   resolveIdentity,
   scopeNoun,
+  scopeForEntityType,
   tabForScope,
   type EntityScope,
 } from './entity-graph-mobile-format'
@@ -449,6 +450,21 @@ export function EntityGraphMobile({
   }, [graphKey, viewMode])
 
   /* ── Deep links from elsewhere in the app open the sheet ───────────────── */
+  /**
+   * A DEEP LINK MUST NOT DEPEND ON THE RECORD BEING ON SCREEN ALREADY.
+   *
+   * This only searched the 25 loaded rows, so arriving from another app landed
+   * on the unfiltered universe with the requested record nowhere in sight.
+   * Measured 2026-09-14: /entity-graph/property/278477219 (5115 Michigan Ave,
+   * Kansas City) rendered "Showing 25 of 169,802" starting at 300 S 3rd St and
+   * never opened the sheet -- the URL named the subject and the surface ignored
+   * it, which is the last leg of the cross-app chain.
+   *
+   * The loaded page is still checked first (free, and the common case when the
+   * operator taps a row). On a miss the record is resolved by id through the
+   * search endpoint, which routes a long digit run or a prefixed id straight at
+   * the id column, so this is one indexed lookup rather than a scan.
+   */
   const deepLinkId = universalContext?.entityType ? universalContext.entityId : null
   if (deepLinkId && handledContextId !== deepLinkId) {
     const match = results.find((row) => row.entityId === deepLinkId)
@@ -457,6 +473,28 @@ export function EntityGraphMobile({
       setOpenResult(match)
     }
   }
+
+  useEffect(() => {
+    if (!deepLinkId || handledContextId === deepLinkId) return undefined
+    if (results.some((row) => row.entityId === deepLinkId)) return undefined
+    const controller = new AbortController()
+    let cancelled = false
+    void fetchEntityGraphList(
+      { tab: tabForScope(scopeForEntityType(universalContext?.entityType) ?? scope), q: deepLinkId, page_size: 5 },
+      controller.signal,
+    )
+      .then((response) => {
+        if (cancelled) return
+        const exact = response.results.find((row) => row.entityId === deepLinkId)
+        // No exact id match is NOT an invitation to open the closest thing.
+        if (!exact) return
+        setHandledContextId(deepLinkId)
+        setOpenResult(exact)
+      })
+      .catch(() => { /* a failed lookup leaves the list as it was */ })
+    return () => { cancelled = true; controller.abort() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkId, handledContextId, results, scope, universalContext?.entityType])
 
   /* ── Selection ─────────────────────────────────────────────────────────── */
   const toggleSelect = useCallback((result: EntitySearchResult) => {

@@ -1,4 +1,5 @@
 import { pushRoutePath } from '../../app/router'
+import { setPropertyLocator } from '../locator/property-locator'
 import { openInboxDealIntelligence } from '../../modules/mobile/mobile-inbox-bridge'
 import type { EntityGraphAction, UniversalEntityContext } from './entity-graph.types'
 import { activeInboxFromUniversalContext } from './universal-entity-context'
@@ -31,6 +32,36 @@ export function routeEntityGraphAction(
   const syncContext = () => {
     setUniversalEntityContextSnapshot(context)
     window.dispatchEvent(new CustomEvent(UNIVERSAL_ENTITY_CONTEXT_EVENT, { detail: context }))
+    /**
+     * PUBLISH THE DURABLE LOCATOR TOO, NOT JUST THE IN-MEMORY SNAPSHOT.
+     *
+     * The universal snapshot is the cross-view selected-entity singleton and it
+     * does not survive a route change -- InboxPage clears it on any non-Entity
+     * Graph route and every dock tap unmounts the current view. The property
+     * locator exists for exactly this reason: sessionStorage-backed, published
+     * at SELECTION time, and it is what `navigateToApp` reads to focus a
+     * destination.
+     *
+     * Entity Graph wrote only the snapshot, so the locator stayed null and
+     * every dock hop out of an Entity Graph subject started from scratch.
+     * Measured 2026-09-14: with Deal Intelligence showing 5115 Michigan Ave,
+     * Kansas City, tapping Comp Intelligence in the app dock answered
+     * "No property selected" -- sessionStorage held no locator at all.
+     *
+     * setPropertyLocator ignores a payload with no identifiers, so an action on
+     * a market or ZIP cannot wipe a good property locator.
+     */
+    setPropertyLocator({
+      propertyId: context.propertyId
+        ?? (context.entityType === 'property' ? context.entityId ?? null : null),
+      threadKey: context.threadKey ?? null,
+      masterOwnerId: context.masterOwnerId
+        ?? (context.entityType === 'master_owner' ? context.entityId ?? null : null),
+      prospectId: context.prospectId
+        ?? (context.entityType === 'prospect' ? context.entityId ?? null : null),
+      opportunityId: context.opportunityId ?? null,
+      address: null,
+    })
   }
 
   if (action === 'open_thread' || action === 'open_conversation') {
@@ -61,7 +92,25 @@ export function routeEntityGraphAction(
       return true
     }
     syncContext()
-    openInboxDealIntelligence()
+    /**
+     * PASS THE IDENTITY. The bridge deliberately does not overwrite an
+     * established identity when called with nothing, so an argument-free call
+     * opened Deal Intelligence on whatever thread the Inbox was already
+     * holding. This is the same defect the /deal-intelligence route had --
+     * fixed there by reading the URL, but this in-app hop never set one, so it
+     * relied on the context snapshot the panel may not have read yet.
+     *
+     * Never substitute another opportunity just because one exists.
+     */
+    openInboxDealIntelligence({
+      threadKey: context.threadKey ?? undefined,
+      propertyId: context.propertyId
+        ?? (context.entityType === 'property' ? context.entityId ?? undefined : undefined),
+      prospectId: context.prospectId
+        ?? (context.entityType === 'prospect' ? context.entityId ?? undefined : undefined),
+      masterOwnerId: context.masterOwnerId
+        ?? (context.entityType === 'master_owner' ? context.entityId ?? undefined : undefined),
+    })
     return true
   }
 

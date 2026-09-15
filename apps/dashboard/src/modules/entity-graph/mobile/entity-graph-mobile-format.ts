@@ -397,6 +397,12 @@ const ENTITY_TYPE_TO_SCOPE: Record<string, EntityScope> = {
   contact_method: 'contact_methods',
 }
 
+/** The tab a deep-linked entity type belongs to, so a link can be resolved by id. */
+export function scopeForEntityType(entityType: string | null | undefined): EntityScope | null {
+  if (!entityType) return null
+  return ENTITY_TYPE_TO_SCOPE[entityType] ?? null
+}
+
 /** The scope a result should be RENDERED as, regardless of the active tab. */
 export function scopeForResult(result: { entityType?: string | null }, fallback: EntityScope): EntityScope {
   const key = String(result?.entityType ?? '').trim().toLowerCase()
