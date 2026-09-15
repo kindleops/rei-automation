@@ -45,9 +45,34 @@ export function buildEntityGraphActions(context: UniversalEntityContext, dossier
   }
 
   if (type === 'master_owner') {
+    /**
+     * OUTREACH FROM HERE OPENS AN EXISTING CONVERSATION -- IT CANNOT START ONE.
+     *
+     * `contact_owner` routes to /conversation and the Inbox resolves the
+     * subject from the published identity. With no conversation for that owner
+     * there is nothing to resolve, so the operator landed on the unfiltered
+     * thread list with no thread open, no composer, and no explanation.
+     *
+     * Measured 2026-09-14 on Donovan Meads (mo_8004f4111417dddbb60e9f60):
+     * 0 rows in inbox_thread_state, 3 eligible phones. The action navigated and
+     * did nothing. It did NOT open somebody else's thread -- nothing was
+     * selected -- but an affordance that silently does nothing is still a lie
+     * about what the surface can do.
+     *
+     * The way in for an owner with no conversation is their contact ladder: the
+     * sheet already lists every phone and email, and a phone or email record
+     * offers "Create Manual Draft", which reaches the same certified composer
+     * and the same canonical queue. No second messaging path is added here.
+     */
+    const hasConversation = Boolean(context.threadKey) || dossierThreads > 0
     actions.push({ key: 'open_portfolio', label: 'View Portfolio' })
-    actions.push({ key: 'contact_owner', label: 'Contact Best Eligible Person' })
-    if (context.threadKey || dossierThreads > 0) actions.push({ key: 'view_threads', label: 'Open Threads' })
+    actions.push({
+      key: 'contact_owner',
+      label: 'Contact Best Eligible Person',
+      disabled: !hasConversation,
+      hint: hasConversation ? undefined : 'No conversation yet — start from a contact method below',
+    })
+    if (hasConversation) actions.push({ key: 'view_threads', label: 'Open Threads' })
     actions.push({ key: 'open_in_map', label: 'Open Portfolio in Map' })
     return actions
   }
