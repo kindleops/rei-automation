@@ -32,7 +32,7 @@ import {
   AOS_SCORE_MAX,
   BASELINE_SCORE_MAX,
 } from '../../domain/deal-intelligence/deal-intelligence-format'
-import { DealIntelligenceMedia } from './DealIntelligenceMedia'
+import { DealIntelligenceMedia, type MediaTab } from './DealIntelligenceMedia'
 import {
   DealIntelligenceCommandRow,
   DealIntelligenceTemperatureBadge,
@@ -1573,6 +1573,15 @@ const DealIntelligenceDesktopPanel = ({
   const address = dossier?.property?.full_address || fallbackAddress || null
   // A new subject must re-ask before loading imagery.
   useEffect(() => { setMediaActivated(false) }, [address])
+  /**
+   * Street View is RESTORED on this surface: Deal Intelligence inspects ONE
+   * property, and the rule is about request fan-out, not the app name. The
+   * intent gate above stays, so this is one deliberate request for the property
+   * the operator opened rather than 17 on every Inbox boot.
+   */
+  const [mediaTab, setMediaTab] = useState<MediaTab>('street')
+  // Switching subject returns to the default pane as well as re-asking consent.
+  useEffect(() => { setMediaTab('street') }, [address])
   const links = useMemo(() => buildPropertyExternalLinks(address), [address])
   const snap = dossier?.property_snapshot
   const baseline = dossier?.baseline_scores
@@ -1741,13 +1750,21 @@ const DealIntelligenceDesktopPanel = ({
       {showDi('overview') ? (
       <>
       <section className="nx-di25-media-block" aria-label="Property imagery">
-        {/* Street View is gone from this surface by operator decision, so the
-            Street/Aerial tab pair went with it — one imagery surface needs no
-            tabs. Aerial still loads only when asked. */}
+        {/* Two imagery panes again, and only the selected one loads anything. */}
+        <div className="nx-di25-media__tabs" role="tablist" aria-label="Imagery mode">
+          <button type="button" role="tab" aria-selected={mediaTab === 'street'} className={cls('nx-di25-media__tab', mediaTab === 'street' && 'is-active')} onClick={() => setMediaTab('street')}>
+            Street View
+          </button>
+          <button type="button" role="tab" aria-selected={mediaTab === 'aerial'} className={cls('nx-di25-media__tab', mediaTab === 'aerial' && 'is-active')} onClick={() => setMediaTab('aerial')}>
+            Aerial
+          </button>
+        </div>
         <DealIntelligenceMedia
+          activeTab={mediaTab}
           address={address}
           lat={property?.latitude}
           lng={property?.longitude}
+          streetStoredUrl={property?.street_view_url}
           aerialStoredUrl={property?.satellite_url}
           activated={mediaActivated}
           onActivate={() => setMediaActivated(true)}

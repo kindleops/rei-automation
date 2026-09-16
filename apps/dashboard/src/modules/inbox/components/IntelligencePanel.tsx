@@ -9,6 +9,7 @@ import {
   normalizePropertySnapshot,
   buildPropertyExternalLinks,
   buildAerialViewUrl,
+  buildStreetViewUrl,
 } from '../../../domain/inbox/inbox-normalization'
 import type { NormalizedPropertySnapshot } from '../../../domain/inbox/inbox-normalization'
 import { Icon, type IconName } from '../../../shared/icons'
@@ -75,6 +76,41 @@ const fmtMoneyU = (v: unknown): string => { const n = Number(String(v ?? '').rep
 const fmtPctU = (v: unknown, round = true): string => { const n = Number(v); return n > 0 ? `${round ? Math.round(n) : n}%` : 'Unavailable' }
 const isUnavail = (s: string) => s === 'Unavailable'
 
+
+/**
+ * Street View embed for the SELECTED property. Restored with the Street panel.
+ *
+ * Config-only key on purpose: a8d16871 removed a hardcoded
+ * `AIza...` literal fallback from this file and that is NOT coming back — an
+ * empty key omits the embed rather than shipping a credential in source.
+ */
+const buildInteractiveStreetViewUrl = ({
+  address,
+  lat,
+  lng,
+}: {
+  address?: string | null
+  lat?: number | null
+  lng?: number | null
+}) => {
+  if (!GOOGLE_MAPS_API_KEY) return undefined
+
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001 && Math.abs(Number(lng)) > 0.0001
+  // A whitespace-only address is truthy, so the pre-removal version built a
+  // `location=+++` request that can never resolve.
+  const location = hasCoords ? `${lat},${lng}` : address?.trim()
+  if (!location) return undefined
+
+  const params = new URLSearchParams({
+    key: GOOGLE_MAPS_API_KEY,
+    location,
+    heading: '210',
+    pitch: '2',
+    fov: '85',
+  })
+
+  return `https://www.google.com/maps/embed/v1/streetview?${params.toString()}`
+}
 
 const buildInteractiveAerialViewUrl = ({
   address,
@@ -2433,6 +2469,11 @@ export const PropertyHeroCard = ({
     ? rawMarket
     : (snapshot.city && snapshot.state ? `${snapshot.city}, ${snapshot.state}` : (rawMarket || 'Unknown market'))
 
+  const streetViewUrl = snapshot.streetViewUrl || snapshot.streetviewImage || thread.streetview_image || buildStreetViewUrl(address)
+  const interactiveStreetViewUrl = useMemo(
+    () => buildInteractiveStreetViewUrl({ address, lat: propertyLat, lng: propertyLng }),
+    [address, propertyLat, propertyLng],
+  )
   const aerialUrl = snapshot.aerialViewUrl || thread.satellite_image || buildAerialViewUrl(address)
   const interactiveAerialViewUrl = useMemo(
     () => buildInteractiveAerialViewUrl({ address, lat: propertyLat, lng: propertyLng }),
@@ -2538,8 +2579,57 @@ export const PropertyHeroCard = ({
   )
 
 
+  /** Plain click-to-load. No property data inside an imagery card. */
+  const renderStreetPoster = (label: string) => (
+    <button
+      type="button"
+      className="nx-prop-media-panel is-poster"
+      onClick={() => setMediaActivated(true)}
+      title="Load Street View — loads Google Maps imagery"
+    >
+      <div className="nx-panel-label">{label}</div>
+      <span className="nx-prop-media-poster__cta">
+        <Icon name="map" />
+        Load Street View
+      </span>
+    </button>
+  )
+
+  /**
+   * Street View RESTORED on desktop Deal Intelligence. Same intent gate as
+   * aerial, so it is one request for the property the operator opened — not 17
+   * on every Inbox boot, which is what the removal was actually about.
+   */
+  const renderStreetPanel = (label: string) => (
+    !mediaActivated ? renderStreetPoster(label) : (
+    <div className="nx-prop-media-panel is-street">
+      <div className="nx-panel-label">{label}</div>
+      {interactiveStreetViewUrl ? (
+        <iframe
+          src={interactiveStreetViewUrl}
+          title={`Street View for ${address}`}
+          className="nx-property-panel__iframe"
+          loading="eager"
+          allowFullScreen
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      ) : streetViewUrl ? (
+        <img src={streetViewUrl as string | undefined} alt="Street View" />
+      ) : (
+        <div className="nx-panel-fallback"><Icon name="map" /><span>Unavailable</span></div>
+      )}
+    </div>
+    )
+  )
+
   const renderMediaWorkspace = () => (
-    <div className="nx-prop-media-workspace is-single">
+    <div className={cls(
+      'nx-prop-media-workspace',
+      'is-split',
+      // Medium panes stack the two imagery panels instead of halving them.
+      layoutMode === 'medium' && 'is-stacked',
+    )}>
+      {renderStreetPanel('STREET VIEW')}
       {renderAerialPanel('AERIAL VIEW')}
     </div>
   )

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { EntityGraphPropertyVisual } from '../../entity-graph/mobile/EntityGraphPropertyVisual'
 import { Icon } from '../../../shared/icons'
 import type { IconName } from '../../../shared/icons'
 import { useDealIntelligenceDossier } from '../../../domain/deal-intelligence/useDealIntelligenceDossier'
@@ -206,6 +207,12 @@ export interface MobileSellerSeed {
   loanBalance?: number | null
   repairCost?: number | null
   phone?: string | null
+}
+
+/** A usable coordinate or nothing — the visual geocodes the address otherwise. */
+const coord = (value: unknown): number | null => {
+  const n = Number(value)
+  return Number.isFinite(n) && Math.abs(n) > 0.0001 ? n : null
 }
 
 export interface MobileSellerCommandCenterProps {
@@ -592,12 +599,26 @@ export function MobileSellerCommandCenter({
         {engineError ? <p className="msc-error">{humanize(engineError)}</p> : null}
       </div>
 
-      {/* Street View removed from Deal Intelligence by operator decision.
-          A previous pass mounted EntityGraphPropertyVisual here (Street View
-          panorama with a static-image tier); it is gone, along with the
-          maps/api/streetview request it made on every mobile Deal Intelligence
-          open. The decision snapshot above and the Contact section below are
-          what this surface is for. */}
+      {/* 3b — WHAT THE HOUSE LOOKS LIKE.
+          Street View is RESTORED here. This is mobile Deal Intelligence: one
+          property, rendered only once the operator has opened the intel sheet
+          (`m-intel-open`), so the single maps/api/streetview request it makes
+          IS the operator's intent. That is the opposite of the Inbox and
+          Pipeline card surfaces, where one render meant hundreds of requests.
+
+          Reused rather than reimplemented: EntityGraphPropertyVisual already
+          wraps InteractiveStreetViewPanorama with a static-image tier, a
+          stated-reason tier and a per-URL result cache — so there is one Street
+          View path in the app and one place a Maps quota change is handled. */}
+      {fullAddress ? (
+        <div className="msc-visual">
+          <EntityGraphPropertyVisual
+            address={fullAddress}
+            lat={coord(property?.latitude)}
+            lng={coord(property?.longitude)}
+          />
+        </div>
+      ) : null}
 
       {/* 4 — CONTACT & CONVERSATION */}
       <Section
