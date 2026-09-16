@@ -279,7 +279,7 @@ function ExecStrip({ summary, timeSeries, loading, compact }: {
           series: sentSeries,
           color: 'rgba(72,138,236,0.88)',
           tone: '' as string,
-          trendCurrent: summary.sentCount,
+          trendCurrent: summary.sentCount ?? 0,
           trendPrev: summary.prevSentCount,
         },
         {
@@ -299,7 +299,7 @@ function ExecStrip({ summary, timeSeries, loading, compact }: {
           series: repliedSeries,
           color: 'rgba(34,211,238,0.88)',
           tone: 'cyan',
-          trendCurrent: summary.repliedCount,
+          trendCurrent: summary.repliedCount ?? 0,
           trendPrev: summary.prevRepliedCount,
         },
         {
@@ -309,7 +309,7 @@ function ExecStrip({ summary, timeSeries, loading, compact }: {
           series: positiveSeries,
           color: 'rgba(52,211,153,0.88)',
           tone: 'green',
-          trendCurrent: summary.positiveReplies,
+          trendCurrent: summary.positiveReplies ?? 0,
           trendPrev: summary.prevPositiveReplies,
         },
         {
@@ -318,7 +318,7 @@ function ExecStrip({ summary, timeSeries, loading, compact }: {
           sub: fmt.int(summary.optOutCount),
           series: [] as number[],
           color: 'rgba(251,191,36,0.85)',
-          tone: summary.optOutRate > 2 ? 'amber' : '',
+          tone: (summary.optOutRate ?? 0) > 2 ? 'amber' : '',
           trendCurrent: 0,
           trendPrev: 0,
         },
@@ -399,8 +399,11 @@ function ExecStrip({ summary, timeSeries, loading, compact }: {
         },
         {
           label: 'Buyer Demand',
-          value: summary.buyerDemandScore > 0 ? String(summary.buyerDemandScore) : '—',
-          sub: null,
+          // §17 — nothing measures buyer demand; the card says so.
+          value: summary.buyerDemandScore == null || summary.buyerDemandScore <= 0
+            ? '—'
+            : String(summary.buyerDemandScore),
+          sub: summary.buyerDemandScore == null ? 'not wired' : null,
           series: [] as number[],
           color: 'rgba(168,85,247,0.75)',
           tone: '',
@@ -1658,10 +1661,14 @@ function KpiRail({ summary, alerts, states, loading }: {
         ['Delivered',   fmt.pct(summary.deliveryRate),           ''],
         ['Replies',     fmt.int(summary.repliedCount),           'cyan'],
         ['Positive',    fmt.int(summary.positiveReplies),        'green'],
-        ['Opt-Out',     fmt.pct(summary.optOutRate),             summary.optOutRate > 2 ? 'amber' : ''],
+        ['Opt-Out',     fmt.pct(summary.optOutRate),             (summary.optOutRate ?? 0) > 2 ? 'amber' : ''],
         ['Spend',       fmt.usd(summary.spendPeriod),            ''],
         ['Cost/Reply',  fmt.usd(summary.costPerReply),           ''],
-        ['Auto Health', String(summary.automationHealthScore),   summary.automationHealthScore < 70 ? 'amber' : 'green'],
+        // §4 — an unreadable health score is '—', never "null", and carries
+        // no colour verdict because there is nothing to judge.
+        ['Auto Health',
+          summary.automationHealthScore == null ? '—' : String(summary.automationHealthScore),
+          summary.automationHealthScore == null ? '' : summary.automationHealthScore < 70 ? 'amber' : 'green'],
       ]
     : []
 

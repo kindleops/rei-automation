@@ -309,18 +309,51 @@ interface KpiCardDef {
 
 function buildKpiCards(summary: KpiSummary, sentSeries: number[], repliedSeries: number[], posSeries: number[]): KpiCardDef[] {
   return [
-    { label: 'Sent',          value: fmt.int(summary.sentCount),          sub: null,                          color: 'var(--wr-teal)',   tone: 'teal',  series: sentSeries,    trendCurrent: summary.sentCount,       trendPrev: summary.prevSentCount },
+    { label: 'Sent',          value: fmt.int(summary.sentCount),          sub: null,                          color: 'var(--wr-teal)',   tone: 'teal',  series: sentSeries,    trendCurrent: summary.sentCount ?? 0,       trendPrev: summary.prevSentCount },
     { label: 'Delivered',     value: fmt.int(summary.deliveredCount),      sub: fmt.pct(summary.deliveryRate), color: 'var(--wr-blue)',   tone: '',      series: sentSeries,    trendCurrent: 0, trendPrev: 0 },
-    { label: 'Replies',       value: fmt.int(summary.repliedCount),        sub: null,                          color: 'var(--wr-teal)',   tone: '',      series: repliedSeries, trendCurrent: summary.repliedCount,    trendPrev: summary.prevRepliedCount },
-    { label: 'Positive',      value: fmt.int(summary.positiveReplies),     sub: fmt.pct(summary.positiveRate), color: 'var(--wr-green)',  tone: 'green', series: posSeries,     trendCurrent: summary.positiveReplies, trendPrev: summary.prevPositiveReplies },
-    { label: 'Opt-Out Rate',  value: fmt.pct(summary.optOutRate),          sub: fmt.int(summary.optOutCount),  color: summary.optOutRate > 2 ? 'var(--wr-amber)' : 'var(--wr-muted)', tone: summary.optOutRate > 2 ? 'amber' : '', series: [], trendCurrent: 0, trendPrev: 0 },
+    { label: 'Replies',       value: fmt.int(summary.repliedCount),        sub: null,                          color: 'var(--wr-teal)',   tone: '',      series: repliedSeries, trendCurrent: summary.repliedCount ?? 0,    trendPrev: summary.prevRepliedCount },
+    { label: 'Positive',      value: fmt.int(summary.positiveReplies),     sub: fmt.pct(summary.positiveRate), color: 'var(--wr-green)',  tone: 'green', series: posSeries,     trendCurrent: summary.positiveReplies ?? 0, trendPrev: summary.prevPositiveReplies },
+    { label: 'Opt-Out Rate',  value: fmt.pct(summary.optOutRate),          sub: fmt.int(summary.optOutCount),  color: (summary.optOutRate ?? 0) > 2 ? 'var(--wr-amber)' : 'var(--wr-muted)', tone: (summary.optOutRate ?? 0) > 2 ? 'amber' : '', series: [], trendCurrent: 0, trendPrev: 0 },
     { label: 'Delivery Rate', value: fmt.pct(summary.deliveryRate),        sub: null,                          color: 'var(--wr-blue)',   tone: '',      series: [],            trendCurrent: 0, trendPrev: 0 },
     { label: 'Cost / Period', value: fmt.usd(summary.spendPeriod),         sub: null,                          color: 'var(--wr-muted)',  tone: '',      series: [],            trendCurrent: 0, trendPrev: 0 },
     { label: 'Cost / Reply',  value: fmt.usd(summary.costPerReply),        sub: null,                          color: 'var(--wr-amber)',  tone: '',      series: [],            trendCurrent: 0, trendPrev: 0 },
     { label: 'Cost / Pos.',   value: fmt.usd(summary.costPerPositive),     sub: null,                          color: 'var(--wr-amber)',  tone: '',      series: [],            trendCurrent: 0, trendPrev: 0 },
-    { label: 'Queue Health',  value: summary.queueHealth === 'good' ? 'Good' : summary.queueHealth === 'warning' ? 'Warn' : 'Crit', sub: null, color: summary.queueHealth === 'good' ? 'var(--wr-green)' : summary.queueHealth === 'warning' ? 'var(--wr-amber)' : 'var(--wr-red)', tone: summary.queueHealth === 'critical' ? 'red' : summary.queueHealth === 'warning' ? 'amber' : 'green', series: [], trendCurrent: 0, trendPrev: 0 },
-    { label: 'Auto Health',   value: String(summary.automationHealthScore), sub: '/100',                        color: 'var(--wr-teal)',   tone: '',      series: [],            trendCurrent: 0, trendPrev: 0 },
-    { label: 'Buyer Demand',  value: summary.buyerDemandScore > 0 ? String(summary.buyerDemandScore) : '—', sub: null, color: 'var(--wr-purple)', tone: '', series: [], trendCurrent: 0, trendPrev: 0 },
+    /**
+     * §4 — a health verdict with nothing to judge is NOT critical.
+     *
+     * This chain ended in 'Crit', so a null queueHealth (no queue rows in the
+     * window, or a failed read) rendered as a fabricated critical alarm —
+     * worse than a fabricated zero. Auto Health was String(score), which
+     * printed the literal "null".
+     */
+    {
+      label: 'Queue Health',
+      value: summary.queueHealth == null
+        ? '—'
+        : summary.queueHealth === 'good' ? 'Good' : summary.queueHealth === 'warning' ? 'Warn' : 'Crit',
+      sub: summary.queueHealth == null ? 'no data' : null,
+      color: summary.queueHealth == null
+        ? 'var(--wr-muted)'
+        : summary.queueHealth === 'good' ? 'var(--wr-green)' : summary.queueHealth === 'warning' ? 'var(--wr-amber)' : 'var(--wr-red)',
+      tone: summary.queueHealth == null ? '' : summary.queueHealth === 'critical' ? 'red' : summary.queueHealth === 'warning' ? 'amber' : 'green',
+      series: [], trendCurrent: 0, trendPrev: 0,
+    },
+    {
+      label: 'Auto Health',
+      value: summary.automationHealthScore == null ? '—' : String(summary.automationHealthScore),
+      sub: summary.automationHealthScore == null ? 'no data' : '/100',
+      color: 'var(--wr-teal)', tone: '', series: [], trendCurrent: 0, trendPrev: 0,
+    },
+    /**
+     * §17 — nothing measures buyer demand (buyer_source is not wired), so the
+     * card says so rather than showing a score of any kind.
+     */
+    {
+      label: 'Buyer Demand',
+      value: summary.buyerDemandScore == null || summary.buyerDemandScore <= 0 ? '—' : String(summary.buyerDemandScore),
+      sub: summary.buyerDemandScore == null ? 'not wired' : null,
+      color: 'var(--wr-purple)', tone: '', series: [], trendCurrent: 0, trendPrev: 0,
+    },
   ]
 }
 
@@ -1580,13 +1613,30 @@ function useMetricsData(filters: KpiFilters, layoutMode: ViewLayoutMode, paused 
   const [alerts,       setAlerts]       = useState<KpiAlert[]>([])
   const [loading,      setLoading]      = useState(true)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** True while an upstream surface has asked heavy panels to hold off. */
+  const [pausedState, setPausedState] = useState(false)
 
   // mode is passed as an argument so the callback stays stable (no dep re-creation).
   const load = useCallback(async (f: KpiFilters, mode: ViewLayoutMode) => {
     if (paused) {
        if (import.meta.env.DEV) console.log('[HeavyPanelLoadSkipped] MetricsWarRoom: paused')
+       /**
+        * §4/§43 — a deliberate pause must not masquerade as loading.
+        *
+        * This returned while leaving `loading` true, and the rail renders
+        * skeletons whenever `loading || !cards`. On the /analytics route the
+        * pause never lifts (it is the INBOX's messagesLoading, which does not
+        * settle when the Inbox is not the active surface), so Analytics showed
+        * eight skeleton cards indefinitely and never issued a single
+        * war-room request — measured 2026-09-16, still skeletons after 20s.
+        * The state is now explicit so the surface can say it is waiting on
+        * something rather than pretending to load.
+        */
+       setLoading(false)
+       setPausedState(true)
        return
     }
+    setPausedState(false)
     setLoading(true)
     try {
       if (mode === 'compact') {
@@ -1709,6 +1759,8 @@ function useMetricsData(filters: KpiFilters, layoutMode: ViewLayoutMode, paused 
     channelPerf, spend, funnel, dataQuality, buyerMetrics, offerMetrics,
     numberHealth, carrierPerf, alerts, loading,
     stateLbRows, marketLbRows, agentLbRows, templateLbRows,
+    // Surfaced so the rail can state a hold rather than showing skeletons.
+    paused: pausedState,
   }
 }
 
@@ -1721,11 +1773,14 @@ export function MetricsRail25({
   timeSeries,
   alerts,
   loading,
+  paused = false,
 }: {
   summary: KpiSummary | null
   timeSeries: TimeSeriesPoint[]
   alerts: KpiAlert[]
   loading: boolean
+  /** An upstream surface asked heavy panels to hold; say so, don't fake loading. */
+  paused?: boolean
 }) {
   const sentSeries = timeSeries.map(p => p.sent)
   const repliedSeries = timeSeries.map(p => p.replied)
@@ -1739,6 +1794,21 @@ export function MetricsRail25({
         <span className="wr-rail__title">KPI COMMAND</span>
       </div>
       <div className="wr-rail__scroll">
+        {/**
+          * §4/§43 — a failed metrics read is stated. Without this the loader's
+          * zero-filled fallback rendered "100 auto health · queue Good · 0%
+          * rates" over an outage, which is indistinguishable from a quiet day.
+          */}
+        {paused ? (
+          <div className="wr-alert wr-alert--warning" style={{ margin: '6px 8px 0', fontSize: 10 }} role="status">
+            <span className="wr-alert__msg">Metrics paused while another surface loads</span>
+          </div>
+        ) : null}
+        {summary?.unavailable ? (
+          <div className="wr-alert wr-alert--critical" style={{ margin: '6px 8px 0', fontSize: 10 }} role="status">
+            <span className="wr-alert__msg">Metrics unavailable — {summary.unavailable}</span>
+          </div>
+        ) : null}
         {alerts.slice(0, 1).map((a, i) => (
           <div key={i} className={cls('wr-alert', a.severity === 'critical' ? 'wr-alert--critical' : a.severity === 'warning' ? 'wr-alert--warning' : 'wr-alert--info')} style={{ margin: '6px 8px 0', fontSize: 10 }}>
             <span className="wr-alert__msg">{a.message.slice(0, 55)}{a.message.length > 55 && '…'}</span>
@@ -2117,6 +2187,7 @@ export function MetricsWarRoom({ layoutMode, paused = false }: MetricsWarRoomPro
           timeSeries={data.timeSeries}
           alerts={data.alerts}
           loading={data.loading}
+          paused={data.paused}
         />
       )}
 

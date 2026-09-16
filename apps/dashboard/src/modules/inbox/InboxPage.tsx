@@ -5478,7 +5478,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className={cls('nx-workspace-surface', 'nx-workspace-surface--metrics', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
-            <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={heavyLoadPaused} />
+            {/**
+              * The war room is the PRIMARY content of this view, so it must not
+              * be paused by the Inbox's own message loading. heavyLoadPaused
+              * exists to stop heavy side-panels competing with the thread list;
+              * when metrics IS the active surface there is nothing to yield to.
+              * On the /analytics route that pause never lifted, leaving the
+              * dashboard permanently blank.
+              */}
+            <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={false} />
           </WorkspaceSuspense>
         </section>
       )

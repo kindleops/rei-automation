@@ -120,16 +120,21 @@ export const getKpiDateRange = (filters: KpiFilters): KpiDateRange => {
 // ── Return types ──────────────────────────────────────────────────────────────
 
 export interface KpiSummary {
-  sentCount: number
-  deliveredCount: number
-  repliedCount: number
-  positiveReplies: number
-  optOutCount: number
-  failedCount: number
-  deliveryRate: number
-  replyRate: number
-  positiveRate: number
-  optOutRate: number
+  /**
+   * §4 — every measurable figure is nullable, because "could not be read" has
+   * to be expressible. When these were `number` the only way to represent a
+   * failure was 0, which renders identically to a genuinely quiet period.
+   */
+  sentCount: number | null
+  deliveredCount: number | null
+  repliedCount: number | null
+  positiveReplies: number | null
+  optOutCount: number | null
+  failedCount: number | null
+  deliveryRate: number | null
+  replyRate: number | null
+  positiveRate: number | null
+  optOutRate: number | null
   prevSentCount: number
   prevRepliedCount: number
   prevPositiveReplies: number
@@ -137,15 +142,22 @@ export interface KpiSummary {
   contractsSent: number
   underContract: number
   closedDeals: number
-  spendPeriod: number
+  spendPeriod: number | null
   costPerReply: number | null
   costPerPositive: number | null
   projectedMonthlyRevenue: number | null
   pipelineValue: number | null
-  automationHealthScore: number
-  buyerDemandScore: number
-  queueHealth: 'good' | 'warning' | 'critical'
-  dataQualityScore: number
+  /**
+   * §4 — null means NOT MEASURABLE, a number means measured. These were all
+   * `number`, so the loader's failure fallback could only express "0", and a
+   * failed read became "0% reply rate, 100 health, queue good".
+   */
+  automationHealthScore: number | null
+  buyerDemandScore: number | null
+  queueHealth: 'good' | 'warning' | 'critical' | null
+  dataQualityScore: number | null
+  /** Set when the metrics read FAILED. Never set for a genuinely quiet window. */
+  unavailable?: string | null
   periodLabel: string
   lastUpdated: string
   isLive: boolean
@@ -265,10 +277,10 @@ export interface ChannelPerformance {
 
 export interface SpendPerformance {
   periodLabel: string
-  smsSend: number
+  smsSend: number | null
   emailSend: number
   dataAcquisition: number
-  totalSpend: number
+  totalSpend: number | null
   costPerSent: number | null
   costPerDelivered: number | null
   costPerReply: number | null
@@ -533,12 +545,30 @@ export const loadKpiDashboardSummary = async (filters: KpiFilters): Promise<KpiS
     underContract: 0, closedDeals: 0, spendPeriod: 0,
     costPerReply: null, costPerPositive: null,
     projectedMonthlyRevenue: null, pipelineValue: null,
-    automationHealthScore: 100, buyerDemandScore: 0, queueHealth: 'good',
-    dataQualityScore: 0, periodLabel: filters.timeRange,
+    automationHealthScore: null, buyerDemandScore: null, queueHealth: null,
+    dataQualityScore: null, periodLabel: filters.timeRange,
     lastUpdated: new Date().toISOString(), isLive: false,
   }
   const p = await fetchWarRoom(filters)
-  if (!p?.kpis) return empty
+  /**
+   * §4/§43 — A FAILED READ IS NOT A QUIET PERIOD.
+   *
+   * This returned `empty` on failure, whose defaults were
+   * automationHealthScore 100, queueHealth 'good' and every rate 0. So an
+   * outage rendered as a healthy dashboard with no activity. The counts are
+   * nulled and the failure is named so the surface can say which metrics
+   * cannot be trusted.
+   */
+  if (!p?.kpis) {
+    return {
+      ...empty,
+      sentCount: null, deliveredCount: null, repliedCount: null,
+      positiveReplies: null, optOutCount: null, failedCount: null,
+      deliveryRate: null, replyRate: null, positiveRate: null, optOutRate: null,
+      spendPeriod: null,
+      unavailable: 'the metrics service could not be read',
+    }
+  }
   const k = p.kpis
   return {
     ...empty,
@@ -687,11 +717,20 @@ const REVENUE_ASSUMPTIONS = {
 export const loadSpendPerformance = async (filters: KpiFilters, preloadedSummary?: KpiSummary): Promise<SpendPerformance> => {
   const summary = preloadedSummary ?? await loadKpiDashboardSummary(filters)
   const spend = summary.spendPeriod
+  /**
+   * A derived cost needs BOTH a spend and a denominator. When either is
+   * unmeasurable the cost is null, not 0 — a "$0.00 cost per send" over an
+   * unreadable window is a fabricated efficiency claim.
+   */
+  const perUnit = (denominator: number | null) =>
+    spend != null && denominator != null && denominator > 0
+      ? Math.round((spend / denominator) * 10000) / 10000
+      : null
   return {
     periodLabel: filters.timeRange,
     smsSend: spend, emailSend: 0, dataAcquisition: 0, totalSpend: spend,
-    costPerSent: summary.sentCount > 0 ? Math.round((spend / summary.sentCount) * 10000) / 10000 : null,
-    costPerDelivered: summary.deliveredCount > 0 ? Math.round((spend / summary.deliveredCount) * 10000) / 10000 : null,
+    costPerSent: perUnit(summary.sentCount),
+    costPerDelivered: perUnit(summary.deliveredCount),
     costPerReply: summary.costPerReply,
     costPerPositive: summary.costPerPositive,
     costPerOffer: null,
