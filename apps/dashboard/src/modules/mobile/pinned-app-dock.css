@@ -14,6 +14,13 @@
      conversation, and the operator asked for the shelf rather than a permanent rail.
      The handle keeps a full 44px hit area regardless of the paint (see below). */
   --nx-pinned-dock-collapsed: 16px;
+  /* The collapsed handle's touch target (see .is-collapsed .__handle below) is
+     44px tall while the glass paints only 16px, so it reaches ~28px into the
+     dead space above the shelf. Any surface that wants to put its OWN
+     interactive control near the bottom edge has to clear this band, or the
+     handle silently wins the hit test. Published as a variable so that
+     clearance is not re-derived as a magic number per surface. */
+  --nx-pinned-dock-handle-band: 44px;
   --nx-pinned-dock-expanded: min(56vh, 460px);
 }
 

@@ -4,7 +4,6 @@ import { FullscreenAppShell } from '../shared/FullscreenAppShell'
 import { canonicalizeRoutePath } from '../domain/app-registry/app-registry'
 
 import type { AcquisitionWorkspaceModel } from '../domain/acquisition/acquisition.types'
-import type { BuyerModel } from '../domain/buyer/buyer.adapter'
 import type { QueueModel } from '../domain/queue/queue.types'
 
 /**
@@ -44,8 +43,22 @@ const DealIntelligenceInboxRoute = lazy(() =>
 const ConversationView = lazy(() =>
   import('../views/conversation/ConversationView').then((m) => ({ default: m.ConversationView })),
 )
-const BuyerMatchView = lazy(() =>
-  import('../views/buyer-match/BuyerMatchView').then((m) => ({ default: m.BuyerMatchView })),
+/**
+ * BUYER-MATCH-MOBILE-LOCK-1 §1/§2 — the production route serves the CANONICAL
+ * Buyer Match product.
+ *
+ * It previously served `BuyerMatchView` -> `BuyerIntelPage`, whose whole
+ * dataset was `referenceCommandCenterData`: hardcoded demo buyers and demo
+ * properties with synthetic `minutesAgo()` activity, ranked by a match score
+ * the page computed itself in a loop. No property subject existed.
+ *
+ * `BuyerMatchSubjectPage` scopes the real workspace to the operator's property.
+ * `BuyerMatchView`/`BuyerIntelPage` and `referenceCommandCenterData` are left in
+ * the tree because other reference surfaces import the dataset — they are just
+ * no longer the Buyer Match product.
+ */
+const BuyerMatchSubjectPage = lazy(() =>
+  import('../views/buyer-match/BuyerMatchSubjectPage').then((m) => ({ default: m.BuyerMatchSubjectPage })),
 )
 const QueueView = lazy(() =>
   import('../views/queue/QueueView').then((m) => ({ default: m.QueueView })),
@@ -68,7 +81,6 @@ const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/Workflow
 
 const loadAcquisitionWorkspace = () =>
   import('../domain/acquisition/acquisition.adapter').then((m) => m.loadAcquisitionWorkspace())
-const loadBuyer = () => import('../domain/buyer/buyer.adapter').then((m) => m.loadBuyer())
 const loadQueue = () => import('../views/queue/queue.adapter').then((m) => m.loadQueue())
 
 interface AppRoute<TData> {
@@ -138,11 +150,14 @@ const compIntelligenceRoute = defineRoute<null>({
   render: () => <InboxView initialWorkspaceView="comp_intelligence" routeMode="fullscreen" />,
 })
 
-const buyerMatchRoute = defineRoute<BuyerModel>({
+const buyerMatchRoute = defineRoute<null>({
   path: '/buyer-match',
   title: 'NEXUS | Buyer Match',
-  loader: loadBuyer,
-  render: (data) => wrapFullscreen(<BuyerMatchView data={data} />, 'buyer_match'),
+  // No loader: the subject comes from the property locator / URL, and the
+  // canonical candidates are queried for THAT property. The old `loadBuyer`
+  // loader hydrated the demo dataset on every visit.
+  loader: async () => null,
+  render: () => wrapFullscreen(<BuyerMatchSubjectPage />, 'buyer_match'),
 })
 
 const queueRoute = defineRoute<QueueModel>({

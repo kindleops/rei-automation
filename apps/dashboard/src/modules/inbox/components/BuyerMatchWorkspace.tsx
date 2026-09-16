@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
+import { selectBuyerCandidate, setBuyerDisposition } from '../../../views/buyer-match/buyer-match-actions'
 import type { DealContext } from '../../../lib/data/dealContext'
 import { resolveCoordinatesFromContext } from '../../../domain/comp-intelligence/coordinate-resolver'
 import {
@@ -2862,6 +2863,14 @@ export function BuyerMatchWorkspace({
   }, [property_id, paused, running, latestRun, candidates.length, runMatch])
 
   const updateCandidateStatus = useCallback(async (id: string | undefined, updates: Record<string, unknown>) => {
+    // Disposition updates go through the shared authority; anything else keeps
+    // the original generic write so no existing caller changes shape.
+    const disposition = updates.buyer_response_status
+    if (Object.keys(updates).length === 1 && (disposition === 'interested' || disposition === 'passed')) {
+      const res = await setBuyerDisposition(id, disposition)
+      if (res.ok) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, ...res.updates } : c))
+      return
+    }
     if (!id) return
     const supabase = getSupabaseClient()
     const { error } = await supabase.from('buyer_match_candidates').update(updates).eq('buyer_match_candidate_id', id)
@@ -2876,11 +2885,11 @@ export function BuyerMatchWorkspace({
     if (!error) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, package_sent_at, buyer_response_status: 'package_sent' } : c))
   }, [])
 
+  // §13 — the write itself now lives in buyer-match-actions so mobile shares it
+  // rather than keeping a second copy. Local merge behaviour is unchanged.
   const selectBuyer = useCallback(async (id: string | undefined) => {
-    if (!id) return
-    const supabase = getSupabaseClient()
-    const { error } = await supabase.from('buyer_match_candidates').update({ selected: true }).eq('buyer_match_candidate_id', id)
-    if (!error) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, selected: true } : c))
+    const res = await selectBuyerCandidate(id)
+    if (res.ok) setCandidates(prev => prev.map(c => c.buyer_match_candidate_id === id ? { ...c, ...res.updates } : c))
   }, [])
 
   const filteredCandidates = useMemo(() => {

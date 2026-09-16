@@ -1,0 +1,234 @@
+/* BUYER MATCH — mobile lens.
+   Sits between the global top chrome and the pinned bottom dock, like every
+   other certified mobile surface: absolute against the shared root, never
+   sized from a viewport unit (the installed PWA resolves 100dvh to the SHORT
+   layout viewport — see scripts/assert-mobile-fullscreen-contract.mjs). */
+.bmm {
+  position: absolute;
+  inset: var(--nx-mobile-chrome-top, 57px) 0 var(--nx-mobile-chrome-bottom, 22px) 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--nx-bg, #07101a);
+  color: var(--nx-text, #eaf7ff);
+}
+
+/* ── selected property, always on top (§6) */
+.bmm__subject {
+  flex-shrink: 0;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  background: var(--nx-panel, rgba(12, 22, 32, 0.92));
+}
+.bmm__subject-visual {
+  flex: 0 0 82px;
+  height: 62px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.bmm__subject-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bmm__subject-label {
+  font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 48%, transparent);
+}
+.bmm__subject-address {
+  font-size: 13.5px; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bmm__subject-meta {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 62%, transparent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.bmm__runbar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  font-size: 11.5px;
+}
+.bmm__count { font-weight: 600; }
+.bmm__cap {
+  padding: 1px 6px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #63f4dc) 40%, transparent);
+  color: var(--nx-accent, #63f4dc);
+  font-size: 10px;
+}
+
+.bmm__controls { flex-shrink: 0; padding: 0 12px 8px; display: flex; flex-direction: column; gap: 7px; }
+.bmm__search {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; border-radius: 10px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  background: var(--nx-card, rgba(16, 28, 40, 0.88));
+}
+.bmm__search input {
+  flex: 1; min-width: 0; border: none; background: none; outline: none;
+  color: inherit; font-size: 12.5px;
+}
+/* Horizontal scroll is scoped to the filter rail so the PAGE never overflows. */
+.bmm__filters { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.bmm__filters::-webkit-scrollbar { display: none; }
+.bmm__filter {
+  flex: 0 0 auto;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  background: transparent; color: inherit; font-size: 11px;
+}
+.bmm__filter.is-active {
+  border-color: color-mix(in srgb, var(--nx-accent, #63f4dc) 55%, transparent);
+  color: var(--nx-accent, #63f4dc);
+}
+
+/* ── ranked cards. No per-buyer imagery on purpose (§12). */
+.bmm__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.bmm__card {
+  display: flex; flex-direction: column; gap: 6px;
+  width: 100%; text-align: left;
+  padding: 10px 11px; border-radius: 12px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  background: var(--nx-card, rgba(16, 28, 40, 0.88));
+  color: inherit;
+}
+.bmm__card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.bmm__buyer { font-size: 13px; line-height: 1.3; min-width: 0; }
+.bmm__grade {
+  flex: 0 0 auto; padding: 2px 7px; border-radius: 999px;
+  font-size: 10px; white-space: nowrap;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+}
+.bmm__grade.is-strong { color: #77df9a; border-color: color-mix(in srgb, #77df9a 45%, transparent); }
+.bmm__grade.is-good   { color: #73a7ff; border-color: color-mix(in srgb, #73a7ff 45%, transparent); }
+.bmm__grade.is-fair   { color: #f4c75f; border-color: color-mix(in srgb, #f4c75f 45%, transparent); }
+.bmm__grade.is-unknown{ color: color-mix(in srgb, var(--nx-text, #eaf7ff) 55%, transparent); }
+
+.bmm__card-meta { display: flex; flex-wrap: wrap; gap: 5px; }
+.bmm__chip {
+  padding: 1px 6px; border-radius: 999px; font-size: 10px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 70%, transparent);
+}
+.bmm__chip.is-open { color: #f4c75f; border-color: color-mix(in srgb, #f4c75f 40%, transparent); }
+.bmm__chip.is-contacted { color: #77df9a; border-color: color-mix(in srgb, #77df9a 40%, transparent); }
+
+.bmm__reasons { margin: 0; padding-left: 14px; display: flex; flex-direction: column; gap: 2px; }
+.bmm__reasons li { font-size: 11.5px; line-height: 1.35; color: color-mix(in srgb, var(--nx-text, #eaf7ff) 78%, transparent); }
+.bmm__activity { font-size: 10.5px; color: color-mix(in srgb, var(--nx-text, #eaf7ff) 55%, transparent); }
+
+/* ── honest states (§16) */
+.bmm__state {
+  margin: 12px; padding: 18px 16px; border-radius: 12px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  background: var(--nx-card, rgba(16, 28, 40, 0.88));
+  font-size: 12px;
+}
+.bmm__state strong { font-size: 13px; }
+.bmm__state p { margin: 0; color: color-mix(in srgb, var(--nx-text, #eaf7ff) 68%, transparent); }
+.bmm__state.is-error { border-color: color-mix(in srgb, #ff453a 45%, transparent); }
+.bmm__state-note { font-size: 10.5px; font-style: italic; }
+.bmm__retry {
+  margin-top: 4px; padding: 6px 14px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #63f4dc) 50%, transparent);
+  background: transparent; color: var(--nx-accent, #63f4dc); font-size: 11.5px;
+}
+.bmm__muted { color: color-mix(in srgb, var(--nx-text, #eaf7ff) 55%, transparent); font-size: 11px; }
+
+/* ── buyer detail sheet */
+.bmm-sheet-root { position: fixed; inset: 0; z-index: 10060; display: flex; flex-direction: column; justify-content: flex-end; }
+.bmm-sheet__backdrop { position: absolute; inset: 0; border: none; background: rgba(4, 6, 12, 0.58); backdrop-filter: blur(6px); }
+.bmm-sheet {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  max-height: 86%;
+  border-radius: 18px 18px 0 0;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.28));
+  border-bottom: none;
+  background: var(--nx-panel, rgba(12, 22, 32, 0.96));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.bmm-sheet__head {
+  flex-shrink: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+}
+.bmm-sheet__head strong { display: block; font-size: 14px; }
+.bmm-sheet__sub { font-size: 11px; color: color-mix(in srgb, var(--nx-text, #eaf7ff) 65%, transparent); }
+.bmm-sheet__close { border: none; background: none; color: inherit; padding: 4px; }
+.bmm-sheet__body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 14px; }
+.bmm-sheet__body h4 {
+  margin: 0 0 5px; font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 50%, transparent);
+}
+.bmm-sheet__body p { margin: 0 0 3px; font-size: 12px; }
+.bmm__dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; }
+.bmm__dl dt { color: color-mix(in srgb, var(--nx-text, #eaf7ff) 55%, transparent); }
+.bmm__dl dd { margin: 0; }
+
+/* ── §13 disposition actions ───────────────────────────────────────────────
+   Pinned to the bottom of the sheet so they are reachable with a thumb without
+   scrolling the buyer detail. No "Send Package" control exists here on purpose
+   — see buyer-match-actions.ts. */
+.bmm-sheet__actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Clears the pinned dock's collapsed handle band. The dock's handle is a 44px
+     touch target reaching invisibly above its 16px shelf, and its own CSS
+     states nothing interactive may sit underneath it. "Select as buyer" was the
+     bottom-most control and landed inside that band, so it measured 44px tall
+     and looked fine while elementFromPoint at its centre returned the dock
+     handle — geometry passes, the tap does not. */
+  padding: 10px 12px calc(var(--nx-pinned-dock-handle-band, 44px) + env(safe-area-inset-bottom, 0px) + 8px);
+  border-top: 1px solid var(--nx-border, rgba(255, 255, 255, 0.1));
+  background: var(--nx-surface-2, rgba(20, 22, 28, 0.96));
+}
+
+.bmm-sheet__actions-row {
+  display: flex;
+  gap: 6px;
+}
+
+.bmm-sheet__actions-row > .bmm-act {
+  flex: 1 1 0;
+}
+
+.bmm-act {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--nx-border, rgba(255, 255, 255, 0.12));
+  background: var(--nx-surface-3, rgba(255, 255, 255, 0.05));
+  color: var(--nx-text, #e8ebf2);
+  font: 600 12.5px/1 var(--nx-font, inherit);
+  letter-spacing: 0.01em;
+}
+
+.bmm-act:disabled {
+  opacity: 0.5;
+}
+
+.bmm-act.is-interested {
+  border-color: rgba(64, 192, 128, 0.45);
+  color: #6fe0a8;
+}
+
+.bmm-act.is-passed {
+  border-color: rgba(230, 90, 90, 0.4);
+  color: #f09090;
+}
+
+.bmm-act.is-select {
+  border-color: rgba(80, 150, 245, 0.5);
+  color: #8fc0ff;
+}
+
+.bmm-sheet__error {
+  margin: 0;
+  font-size: 11.5px;
+  color: #f09090;
+}
