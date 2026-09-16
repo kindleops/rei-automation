@@ -1,3 +1,15 @@
+/**
+ * CALENDAR-MOBILE-LOCK-1 §8/§9/§14/§37 — one authority for "is this still work
+ * that requires action?"
+ *
+ * This module already owned the status vocabulary for overdue, and that
+ * vocabulary is the same question asked a different way. Keeping the two in
+ * one place is deliberate: a second list would drift, and then an item could
+ * be simultaneously "not overdue because it is cancelled" and "due soon".
+ * Which is exactly what happened — evaluateDueSoon() looked only at the
+ * timestamp, so a SUPPRESSED opportunity reported due_soon: true and
+ * completion_state: 'scheduled', reading to the operator as live work.
+ */
 const COMPLETED_STATUSES = new Set([
   'delivered', 'sent', 'sending', 'ready', 'completed', 'executed', 'closed',
   'clear_to_close', 'signed', 'received', 'cancelled', 'canceled', 'suppressed',
@@ -76,9 +88,64 @@ export function evaluateOverdue(event = {}) {
   return { overdue: false, risk_state: 'historical', reason: null };
 }
 
+/**
+ * Statuses that mean the underlying record is no longer actionable.
+ *
+ * `suppressed` and `dead` are acquisition-opportunity statuses: 156 and 348
+ * rows respectively as of 2026-09-16, 28 and 1 of them carrying a
+ * next_action_due. Those dates are real, but the work is not executable, so
+ * they must not be counted as work or presented as on-track.
+ *
+ * §13 — this is NOT a judgement about "Not Interested". Not Interested is a
+ * seller DISPOSITION and may legitimately carry future reactivation work;
+ * only the statuses below, which mean the record itself is closed or held,
+ * make an item non-actionable.
+ */
+const NON_ACTIONABLE_STATUSES = new Set([
+  'completed', 'cancelled', 'canceled', 'suppressed', 'dead', 'closed',
+  'executed', 'signed', 'delivered', 'sent', 'expired', 'archived',
+]);
+
+/** Event types that are records of something that already happened. */
+const HISTORICAL_TYPES = new Set([
+  'sms_sent', 'sms_delivered', 'sms_failed', 'inbound_reply', 'positive_intent',
+  'offer_created', 'offer_sent', 'contract_sent', 'fully_executed_contract',
+  'title_opened', 'buyer_packet_sent', 'underwriting_started',
+  'underwriting_completed', 'dnc_suppression', 'wrong_number',
+]);
+
+export function isActionableEvent(event = {}) {
+  const status = clean(event.status);
+  const type = clean(event.event_type || event.type);
+  const completionState = clean(event.completion_state);
+
+  if (completionState === 'completed' || completionState === 'cancelled') return false;
+  if (NON_ACTIONABLE_STATUSES.has(status)) return false;
+  if (HISTORICAL_TYPES.has(type)) return false;
+  return true;
+}
+
+/** Why an item is not actionable, for the UI to state plainly. */
+export function describeNonActionable(event = {}) {
+  const status = clean(event.status);
+  const type = clean(event.event_type || event.type);
+  if (isActionableEvent(event)) return null;
+  if (status === 'suppressed') return 'suppressed';
+  if (status === 'dead') return 'closed';
+  if (status === 'cancelled' || status === 'canceled') return 'cancelled';
+  if (status === 'completed') return 'completed';
+  if (HISTORICAL_TYPES.has(type)) return 'historical';
+  return status || 'not_actionable';
+}
+
+/**
+ * Due soon now requires the item to still BE work. A cancelled or suppressed
+ * row whose scheduled time happens to be near is not "due soon".
+ */
 export function evaluateDueSoon(event = {}, windowMs = 36 * 3600000) {
   const startTs = ts(event.start_timestamp || event.timestamp);
   if (!startTs) return false;
+  if (!isActionableEvent(event)) return false;
   const now = Date.now();
   return startTs >= now && startTs - now <= windowMs;
 }

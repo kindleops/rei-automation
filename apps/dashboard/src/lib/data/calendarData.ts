@@ -1,6 +1,7 @@
 import type { InboxWorkflowThread } from './inboxWorkflowData'
 import { fetchCalendarNexus } from '../calendar/calendar-api'
 import { dayRangeIso, monthRangeIso, weekRangeIso } from '../calendar/calendar-date-engine'
+import { resolveOperatorTimezone } from '../calendar/calendar-timezone'
 import type { CalendarLayerId } from '../calendar/calendar-layers'
 import { getSupabaseClient } from '../supabaseClient'
 import { asIso, asString, getFirst, mapErrorMessage, normalizeStatus, safeArray, type AnyRecord } from './shared'
@@ -197,6 +198,7 @@ async function loadFromNexus(filters: CalendarFilters): Promise<CalendarEvent[]>
     market: filters.market,
     layers: filters.layers,
     overdueOnly: filters.overdueOnly,
+    timezone: resolveOperatorTimezone(),
   })
   lastLoadMeta = {
     reconciliation: response.reconciliation,
@@ -370,6 +372,7 @@ export const loadTodayExecutionSummary = async (filters: CalendarFilters = {}): 
       propertyId: filters.propertyId,
       threadId: filters.threadId,
       layers: filters.layers,
+      timezone: resolveOperatorTimezone(),
     })
     return response.kpis
   } catch {

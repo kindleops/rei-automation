@@ -1,9 +1,9 @@
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { runQueueAction } from '@/lib/cockpit/cockpit-service.js';
 
-import { evaluateDueSoon, evaluateOverdue } from './calendar-overdue.js';
-import { hydrateResolverFromDatabase } from './calendar-entity-resolver.js';
-import { CALENDAR_LAYERS, layerMatchesEvent, resolveEventMeta } from './calendar-taxonomy.js';
+import { describeNonActionable, evaluateDueSoon, evaluateOverdue, isActionableEvent } from './calendar-overdue.js';
+import { hydrateResolverForEvents, hydrateResolverFromDatabase } from './calendar-entity-resolver.js';
+import { CALENDAR_LAYERS, describeLayerAvailability, layerMatchesEvent, resolveEventMeta } from './calendar-taxonomy.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -114,24 +114,75 @@ function finalizeEvent(partial, resolver) {
   merged.overdue = overdueEval.overdue;
   merged.risk_state = overdueEval.risk_state;
   merged.due_soon = evaluateDueSoon(merged);
-  merged.completion_state = overdueEval.risk_state === 'completed' ? 'completed' : partial.completion_state || 'open';
+
+  /**
+   * §14/§37 — actionability is decided from the RECORD's status, independently
+   * of whether its timestamp is in the future.
+   *
+   * evaluateOverdue() returns early with risk_state 'on_track' for anything
+   * scheduled ahead of now, before it looks at status at all. So a SUPPRESSED
+   * opportunity with a future next_action_due came back on_track, kept its
+   * builder's completion_state of 'scheduled', and reported due_soon: true —
+   * three separate signals telling the operator that held work was live.
+   * Measured 2026-09-16: two suppressed opportunities presented exactly that
+   * way, and 28 suppressed rows carry a due date.
+   */
+  merged.actionable = isActionableEvent(merged);
+  merged.non_actionable_reason = describeNonActionable(merged);
+
+  if (!merged.actionable) {
+    merged.due_soon = false;
+    merged.overdue = false;
+    if (merged.risk_state === 'on_track') {
+      merged.risk_state = merged.non_actionable_reason === 'historical' ? 'historical' : 'not_actionable';
+    }
+    merged.completion_state = overdueEval.risk_state === 'completed'
+      ? 'completed'
+      : merged.non_actionable_reason || 'not_actionable';
+  } else {
+    merged.completion_state = overdueEval.risk_state === 'completed' ? 'completed' : partial.completion_state || 'open';
+  }
 
   return merged;
 }
 
-async function safeSelect(client, table, columns, rangeColumn, startIso, endIso, limit = 2000) {
+/**
+ * §28/§30 — "this table does not exist" and "no rows in range" are different
+ * facts, and this function used to return `[]` for both.
+ *
+ * Six of the twelve sources are absent from this database entirely — offers,
+ * contracts, closings, title_routing_closing_engine, buyer_match and
+ * calendar_manual_events (verified 2026-09-16; consistent with the closing
+ * substrate never having been provisioned). Silently treating them as empty
+ * means the UI offers Offers / Contracts / Closings / Buyers / Appointments
+ * filters that can never match anything: dead buttons, which §28 forbids.
+ *
+ * Availability is now recorded per source so the surface can say which
+ * authorities exist rather than guessing from a row count.
+ */
+async function safeSelect(client, table, columns, rangeColumn, startIso, endIso, limit = 2000, availability = null) {
+  const mark = (state, reason) => {
+    if (availability) availability[table] = { state, reason: reason || null };
+  };
   try {
     let query = client.from(table).select(columns).limit(limit);
     if (rangeColumn && startIso) query = query.gte(rangeColumn, startIso);
     if (rangeColumn && endIso) query = query.lte(rangeColumn, endIso);
     const { data, error } = await query;
     if (error) {
-      console.warn(`[calendar-nexus] ${table} unavailable`, error.message);
+      const message = error.message || String(error);
+      // PostgREST says "Could not find the table ... in the schema cache".
+      const absent = /could not find the table|does not exist|schema cache/i.test(message);
+      mark(absent ? 'absent' : 'error', message);
+      console.warn(`[calendar-nexus] ${table} ${absent ? 'absent' : 'unavailable'}`, message);
       return [];
     }
+    mark('available');
     return data ?? [];
   } catch (error) {
-    console.warn(`[calendar-nexus] ${table} unavailable`, error);
+    const message = error?.message || String(error);
+    mark('error', message);
+    console.warn(`[calendar-nexus] ${table} unavailable`, message);
     return [];
   }
 }
@@ -647,23 +698,110 @@ function buildManualEvents(rows, startIso, endIso, seen, bucket) {
   }
 }
 
-function buildKpis(events) {
+/**
+ * The operator's calendar day, not the server's.
+ *
+ * §7 forbids raw UTC calendar dates in the UI. "Due Today" was computed with
+ * `new Date(e.start_timestamp).toDateString() === new Date().toDateString()`,
+ * which resolves in the SERVER's timezone — UTC on Cloudflare. For an operator
+ * in Phoenix (UTC-7) an item at 2026-09-17T00:20Z is 2026-09-16 17:20 local,
+ * i.e. TODAY, and it was being excluded. Measured 2026-09-16: exactly that row
+ * fell out of Due Today.
+ *
+ * The zone is supplied by the client (resolveOperatorTimezone()), so the
+ * server buckets on the same boundary the client renders. UTC is the fallback
+ * only when no zone is supplied, and is then the honest answer rather than a
+ * silent pretence of local time.
+ */
+function dayKeyInZone(iso, timeZone) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+  try {
+    // en-CA renders ISO-like YYYY-MM-DD, which is what we want to compare.
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timeZone || 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  } catch {
+    // An invalid IANA zone must not take the whole request down.
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+function buildKpis(events, timeZone) {
   const count = (predicate) => events.filter(predicate).length;
+
+  /**
+   * §8/§29 — every "work" KPI counts ACTIONABLE items only. These previously
+   * counted anything in the window, so a COMPLETED workflow task was reported
+   * under both "Due Today" and "Workflow Wakes", and suppressed opportunities
+   * counted as work. A count of things that need doing must not include things
+   * already done or held.
+   */
+  const actionable = (predicate) => (e) => e.actionable !== false && predicate(e);
+  const todayKey = dayKeyInZone(new Date().toISOString(), timeZone);
+
   return [
-    { id: 'due-today', label: 'Due Today', value: count((e) => {
-      const d = new Date(e.start_timestamp);
-      const t = new Date();
-      return d.toDateString() === t.toDateString();
-    }), tone: 'blue' },
+    {
+      id: 'due-today',
+      label: 'Due Today',
+      value: count(actionable((e) => dayKeyInZone(e.start_timestamp, timeZone) === todayKey)),
+      tone: 'blue',
+    },
     { id: 'overdue', label: 'Overdue', value: count((e) => e.overdue), tone: 'red' },
-    { id: 'seller-replies', label: 'Seller Replies', value: count((e) => ['inbound_reply', 'seller_reply_needs_action', 'positive_intent'].includes(e.event_type)), tone: 'cyan' },
-    { id: 'scheduled-sms', label: 'Scheduled Sends', value: count((e) => e.event_type === 'scheduled_sms'), tone: 'blue' },
-    { id: 'workflow-wakes', label: 'Workflow Wakes', value: count((e) => ['workflow_wake', 'workflow_task'].includes(e.event_type)), tone: 'violet' },
-    { id: 'offers-due', label: 'Offers Due', value: count((e) => ['offer_follow_up', 'offer_expiration'].includes(e.event_type)), tone: 'gold' },
-    { id: 'contracts-awaiting', label: 'Contracts Awaiting', value: count((e) => e.event_type === 'contract_signature_deadline'), tone: 'teal' },
-    { id: 'title-milestones', label: 'Title Milestones', value: count((e) => ['title_opened', 'title_milestone', 'clear_to_close'].includes(e.event_type)), tone: 'gold' },
-    { id: 'buyer-follow-ups', label: 'Buyer Follow-Ups', value: count((e) => e.event_type === 'buyer_follow_up'), tone: 'amber' },
-    { id: 'closings', label: 'Closings', value: count((e) => e.event_type === 'closing_scheduled'), tone: 'emerald' },
+    {
+      id: 'seller-replies',
+      label: 'Seller Replies',
+      // Replies are historical by nature — this is a "what happened" count and
+      // is deliberately NOT gated on actionability.
+      value: count((e) => ['inbound_reply', 'seller_reply_needs_action', 'positive_intent'].includes(e.event_type)),
+      tone: 'cyan',
+    },
+    {
+      id: 'scheduled-sms',
+      label: 'Scheduled Sends',
+      value: count(actionable((e) => e.event_type === 'scheduled_sms')),
+      tone: 'blue',
+    },
+    {
+      id: 'workflow-wakes',
+      label: 'Workflow Wakes',
+      value: count(actionable((e) => ['workflow_wake', 'workflow_task'].includes(e.event_type))),
+      tone: 'violet',
+    },
+    {
+      id: 'offers-due',
+      label: 'Offers Due',
+      value: count(actionable((e) => ['offer_follow_up', 'offer_expiration'].includes(e.event_type))),
+      tone: 'gold',
+    },
+    {
+      id: 'contracts-awaiting',
+      label: 'Contracts Awaiting',
+      value: count(actionable((e) => e.event_type === 'contract_signature_deadline')),
+      tone: 'teal',
+    },
+    {
+      id: 'title-milestones',
+      label: 'Title Milestones',
+      value: count((e) => ['title_opened', 'title_milestone', 'clear_to_close'].includes(e.event_type)),
+      tone: 'gold',
+    },
+    {
+      id: 'buyer-follow-ups',
+      label: 'Buyer Follow-Ups',
+      value: count(actionable((e) => e.event_type === 'buyer_follow_up')),
+      tone: 'amber',
+    },
+    {
+      id: 'closings',
+      label: 'Closings',
+      value: count(actionable((e) => e.event_type === 'closing_scheduled')),
+      tone: 'emerald',
+    },
   ];
 }
 
@@ -690,9 +828,12 @@ export async function fetchCalendarNexusEvents(input = {}, deps = {}) {
     workflow_definition_id: clean(input.workflow_definition_id) || null,
     layers: Array.isArray(input.layers) ? input.layers.map(clean).filter(Boolean) : null,
     overdue_only: Boolean(input.overdue_only || input.overdueOnly),
+    // §7 — the operator's IANA zone, so day boundaries match what they see.
+    timezone: clean(input.timezone || input.operator_timezone) || null,
   };
 
   const queryTimings = {};
+  const sourceAvailability = {};
   const timed = async (label, fn) => {
     const t0 = Date.now();
     const result = await fn();
@@ -714,18 +855,18 @@ export async function fetchCalendarNexusEvents(input = {}, deps = {}) {
     campaigns,
     manualEvents,
   ] = await Promise.all([
-    timed('send_queue', () => safeSelect(client, 'send_queue', '*', 'scheduled_for', startIso, endIso)),
-    timed('message_events', () => safeSelect(client, 'message_events', '*', 'created_at', startIso, endIso)),
-    timed('workflow_enrollments', () => safeSelect(client, 'workflow_enrollments', '*', 'next_execution_at', startIso, endIso)),
-    timed('workflow_scheduled_tasks', () => safeSelect(client, 'workflow_scheduled_tasks', '*', 'scheduled_for', startIso, endIso)),
-    timed('acquisition_opportunities', () => safeSelect(client, 'acquisition_opportunities', '*', 'next_action_due', startIso, endIso)),
-    timed('offers', () => safeSelect(client, 'offers', '*', 'created_at', startIso, endIso)),
-    timed('contracts', () => safeSelect(client, 'contracts', '*', 'created_at', startIso, endIso)),
-    timed('closings', () => safeSelect(client, 'closings', '*', 'closing_date', startIso, endIso)),
-    timed('title_routing', () => safeSelect(client, 'title_routing_closing_engine', '*', 'created_at', startIso, endIso)),
-    timed('buyer_match', () => safeSelect(client, 'buyer_match', '*', 'created_at', startIso, endIso)),
-    timed('campaigns', () => safeSelect(client, 'campaigns', '*', 'scheduled_for', startIso, endIso)),
-    timed('calendar_manual_events', () => safeSelect(client, 'calendar_manual_events', '*', 'start_at', startIso, endIso)),
+    timed('send_queue', () => safeSelect(client, 'send_queue', '*', 'scheduled_for', startIso, endIso, 2000, sourceAvailability)),
+    timed('message_events', () => safeSelect(client, 'message_events', '*', 'created_at', startIso, endIso, 2000, sourceAvailability)),
+    timed('workflow_enrollments', () => safeSelect(client, 'workflow_enrollments', '*', 'next_execution_at', startIso, endIso, 2000, sourceAvailability)),
+    timed('workflow_scheduled_tasks', () => safeSelect(client, 'workflow_scheduled_tasks', '*', 'scheduled_for', startIso, endIso, 2000, sourceAvailability)),
+    timed('acquisition_opportunities', () => safeSelect(client, 'acquisition_opportunities', '*', 'next_action_due', startIso, endIso, 2000, sourceAvailability)),
+    timed('offers', () => safeSelect(client, 'offers', '*', 'created_at', startIso, endIso, 2000, sourceAvailability)),
+    timed('contracts', () => safeSelect(client, 'contracts', '*', 'created_at', startIso, endIso, 2000, sourceAvailability)),
+    timed('closings', () => safeSelect(client, 'closings', '*', 'closing_date', startIso, endIso, 2000, sourceAvailability)),
+    timed('title_routing', () => safeSelect(client, 'title_routing_closing_engine', '*', 'created_at', startIso, endIso, 2000, sourceAvailability)),
+    timed('buyer_match', () => safeSelect(client, 'buyer_match', '*', 'created_at', startIso, endIso, 2000, sourceAvailability)),
+    timed('campaigns', () => safeSelect(client, 'campaigns', '*', 'scheduled_for', startIso, endIso, 2000, sourceAvailability)),
+    timed('calendar_manual_events', () => safeSelect(client, 'calendar_manual_events', '*', 'start_at', startIso, endIso, 2000, sourceAvailability)),
   ]);
 
   const resolver = await hydrateResolverFromDatabase(client, {
@@ -745,13 +886,22 @@ export async function fetchCalendarNexusEvents(input = {}, deps = {}) {
   buildCampaignEvents(campaigns, startIso, endIso, seen, raw);
   buildManualEvents(manualEvents, startIso, endIso, seen, raw);
 
+  /**
+   * §5 — enrich identity from the ids the events actually carry, before they
+   * are finalized. The first hydration only sees opportunity-linked
+   * identities; queue and message events reference owners and properties that
+   * are usually outside that set.
+   */
+  const identityHydration = await timed('identity_enrichment', () =>
+    hydrateResolverForEvents(client, resolver, raw));
+
   const events = raw
     .map((event) => finalizeEvent(event, resolver))
     .filter((event) => applyScope(event, filters))
     .sort((a, b) => new Date(a.start_timestamp).getTime() - new Date(b.start_timestamp).getTime());
 
   const reconciliation = resolver.report(events);
-  const kpis = buildKpis(events);
+  const kpis = buildKpis(events, filters.timezone);
   const sourceCounts = countBySource(events);
 
   return {
@@ -760,6 +910,28 @@ export async function fetchCalendarNexusEvents(input = {}, deps = {}) {
     kpis,
     reconciliation,
     source_counts: sourceCounts,
+    /**
+     * Which zone the day-boundary counts were computed in, and whether the
+     * client actually supplied one. Reported so a UTC fallback is visible
+     * rather than silently passing for local time (§7).
+     */
+    timezone: {
+      applied: filters.timezone || 'UTC',
+      supplied_by_client: Boolean(filters.timezone),
+    },
+    identity_hydration: identityHydration,
+    /**
+     * §28 — per-source and per-layer availability, so the UI can hide filters
+     * with no authority instead of offering buttons that can never match.
+     */
+    source_availability: sourceAvailability,
+    layer_availability: describeLayerAvailability(sourceAvailability),
+    // §8/§37 — how much of the window is still work, so the UI never has to
+    // count rendered rows to find out.
+    actionable_counts: {
+      actionable: events.filter((e) => e.actionable !== false).length,
+      not_actionable: events.filter((e) => e.actionable === false).length,
+    },
     layers: CALENDAR_LAYERS,
     performance: {
       total_ms: Date.now() - started,

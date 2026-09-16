@@ -15,6 +15,8 @@ function buildKey(parts) {
 }
 
 export function createEntityResolver() {
+  // Holder so report() can surface a hydration failure set after construction.
+  const resolverState = { hydrationError: null };
   const byThread = new Map();
   const byOwner = new Map();
   const byProperty = new Map();
@@ -44,6 +46,61 @@ export function createEntityResolver() {
       if (threadKey) byThread.set(threadKey, snapshot);
       if (ownerId) byOwner.set(ownerId, snapshot);
       if (propertyId) byProperty.set(propertyId, snapshot);
+    },
+
+    /**
+     * §5 — owner and property snapshots for events that are NOT sourced from
+     * an opportunity.
+     *
+     * Most calendar events come from send_queue and message_events, whose
+     * master_owner_id / property_id are usually absent from the opportunity
+     * set. The resolver had no snapshot for those ids, so 916 of 1,399
+     * owner-linked events and 1,057 of 1,399 property-linked events rendered
+     * "Unresolved event" / "Property pending resolution" — measured
+     * 2026-09-16 over a 60-day window.
+     *
+     * A richer opportunity snapshot always wins: these only fill gaps, and a
+     * field already known is never overwritten.
+     */
+    ingestOwner(row = {}) {
+      const ownerId = clean(row.master_owner_id);
+      if (!ownerId) return;
+      const existing = byOwner.get(ownerId);
+      const snapshot = {
+        opportunityId: existing?.opportunityId || null,
+        masterOwnerId: ownerId,
+        propertyId: existing?.propertyId || null,
+        threadKey: existing?.threadKey || null,
+        sellerName: existing?.sellerName || clean(row.display_name) || null,
+        propertyAddress: existing?.propertyAddress || null,
+        market: existing?.market || clean(row.routing_market) || null,
+        propertyType: existing?.propertyType || null,
+        stage: existing?.stage || null,
+        status: existing?.status || null,
+        temperature: existing?.temperature || null,
+      };
+      byOwner.set(ownerId, snapshot);
+    },
+
+    ingestProperty(row = {}) {
+      const propertyId = clean(row.property_id);
+      if (!propertyId) return;
+      const existing = byProperty.get(propertyId);
+      const address = clean(row.property_address_full) || clean(row.property_address) || null;
+      const snapshot = {
+        opportunityId: existing?.opportunityId || null,
+        masterOwnerId: existing?.masterOwnerId || clean(row.master_owner_id) || null,
+        propertyId,
+        threadKey: existing?.threadKey || null,
+        sellerName: existing?.sellerName || clean(row.owner_display_name) || clean(row.owner_name) || null,
+        propertyAddress: existing?.propertyAddress || address,
+        market: existing?.market || clean(row.market) || null,
+        propertyType: existing?.propertyType || clean(row.property_type) || null,
+        stage: existing?.stage || null,
+        status: existing?.status || null,
+        temperature: existing?.temperature || null,
+      };
+      byProperty.set(propertyId, snapshot);
     },
 
     ingestThread(thread = {}) {
@@ -141,6 +198,10 @@ export function createEntityResolver() {
       };
     },
 
+    setHydrationError(message) {
+      resolverState.hydrationError = message || null;
+    },
+
     report(events = []) {
       const totals = {
         total_events: events.length,
@@ -169,6 +230,11 @@ export function createEntityResolver() {
         seen.add(event.event_id);
       }
 
+      /**
+       * §30 — "nothing resolved" and "the resolver could not read" are
+       * different facts. Without this they were the same number.
+       */
+      totals.hydration_error = resolverState.hydrationError || null;
       return totals;
     },
   };
@@ -185,12 +251,133 @@ export async function hydrateResolverFromDatabase(client, opts = {}) {
     .limit(5000);
 
   if (startIso) oppQuery = oppQuery.or(`next_action_due.gte.${startIso},updated_at.gte.${startIso}`);
-  const { data: opportunities } = await oppQuery;
-  for (const row of opportunities ?? []) resolver.ingestOpportunity(row);
+  const { data: opportunities, error: oppError } = await oppQuery;
+
+  /**
+   * A failed read here is NOT "nothing to resolve".
+   *
+   * The error was previously discarded, so a broken query would silently
+   * label every calendar item "Unresolved event" — indistinguishable from
+   * genuinely unlinked work. Recorded so the caller can say which it is.
+   */
+  resolver.setHydrationError(oppError ? (oppError.message || 'opportunity_read_failed') : null);
+
+  const rows = opportunities ?? [];
+  for (const row of rows) resolver.ingestOpportunity(row);
+
+  /**
+   * §5/§22 — FILL THE DISPLAY FIELDS FROM CANONICAL AUTHORITY.
+   *
+   * acquisition_opportunities.seller_display_name, property_address_full and
+   * market are NULL on real rows — verified 2026-09-16 on the three
+   * opportunities the calendar was surfacing. The resolver ingested them
+   * correctly and simply had nothing to show, so Calendar rendered
+   * "Unresolved event · Property pending resolution · Market Unknown" for
+   * sellers whose name and address were one join away:
+   *
+   *   ce894ca6 -> Luis G Patino, 4404 W Mountain View Rd, Glendale AZ
+   *   e0262389 -> Arnulfo & Imelda Anguiano, 2016 N 54th Ln, Phoenix AZ
+   *   e35aa250 -> Rgma Real Estate Investment & Loans LLC, Indianapolis IN
+   *
+   * master_owners and properties are the canonical authorities the rest of the
+   * system already reads (the same join v_email_records uses). This enriches
+   * only what the opportunity row left blank — a present denormalized value
+   * always wins, so nothing already correct is overwritten.
+   */
+  const ownerIds = [...new Set(rows.map((r) => clean(r.master_owner_id)).filter(Boolean))];
+  const propertyIds = [...new Set(rows.map((r) => clean(r.primary_property_id)).filter(Boolean))];
+
+  const chunk = (list, size = 400) => {
+    const out = [];
+    for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+    return out;
+  };
+
+  const owners = new Map();
+  for (const ids of chunk(ownerIds)) {
+    const { data } = await client
+      .from('master_owners')
+      .select('master_owner_id, display_name, routing_market, best_language')
+      .in('master_owner_id', ids);
+    for (const row of data ?? []) owners.set(clean(row.master_owner_id), row);
+  }
+
+  const properties = new Map();
+  for (const ids of chunk(propertyIds)) {
+    const { data } = await client
+      .from('properties')
+      .select('property_id, property_address_full, property_address, market, property_type')
+      .in('property_id', ids);
+    for (const row of data ?? []) properties.set(clean(row.property_id), row);
+  }
+
+  if (owners.size || properties.size) {
+    for (const row of rows) {
+      const owner = owners.get(clean(row.master_owner_id));
+      const property = properties.get(clean(row.primary_property_id));
+      if (!owner && !property) continue;
+      resolver.ingestOpportunity({
+        ...row,
+        seller_display_name: clean(row.seller_display_name) || clean(owner?.display_name) || null,
+        property_address_full:
+          clean(row.property_address_full) ||
+          clean(property?.property_address_full) ||
+          clean(property?.property_address) ||
+          null,
+        market: clean(row.market) || clean(property?.market) || clean(owner?.routing_market) || null,
+        asset_class: clean(row.asset_class) || clean(property?.property_type) || null,
+      });
+    }
+  }
 
   if (Array.isArray(opts.threads)) {
     for (const thread of opts.threads) resolver.ingestThread(thread);
   }
 
   return resolver;
+}
+
+/**
+ * Second enrichment pass, keyed on the ids the EVENTS actually carry.
+ *
+ * hydrateResolverFromDatabase() runs before the event list exists, so it can
+ * only see opportunity-linked identities. Queue and message events reference
+ * owners and properties that are frequently not in that set. This fills those
+ * in from the canonical authorities, batched, after the raw events are built.
+ */
+export async function hydrateResolverForEvents(client, resolver, events = []) {
+  const ownerIds = [...new Set(events.map((e) => clean(e.master_owner_id)).filter(Boolean))];
+  const propertyIds = [...new Set(events.map((e) => clean(e.property_id)).filter(Boolean))];
+  if (!ownerIds.length && !propertyIds.length) return { owners: 0, properties: 0, errors: [] };
+
+  const chunk = (list, size = 400) => {
+    const out = [];
+    for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+    return out;
+  };
+
+  const errors = [];
+  let owners = 0;
+  let properties = 0;
+
+  for (const ids of chunk(ownerIds)) {
+    const { data, error } = await client
+      .from('master_owners')
+      .select('master_owner_id, display_name, routing_market')
+      .in('master_owner_id', ids);
+    // A failed lookup is recorded, never folded into "unresolved".
+    if (error) { errors.push(`master_owners: ${error.message}`); continue; }
+    for (const row of data ?? []) { resolver.ingestOwner(row); owners += 1; }
+  }
+
+  for (const ids of chunk(propertyIds)) {
+    const { data, error } = await client
+      .from('properties')
+      .select('property_id, master_owner_id, property_address_full, property_address, market, property_type, owner_display_name, owner_name')
+      .in('property_id', ids);
+    if (error) { errors.push(`properties: ${error.message}`); continue; }
+    for (const row of data ?? []) { resolver.ingestProperty(row); properties += 1; }
+  }
+
+  return { owners, properties, errors };
 }

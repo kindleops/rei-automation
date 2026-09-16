@@ -1,4 +1,5 @@
 import { callBackend } from '../api/backendClient'
+import { resolveOperatorTimezone } from './calendar-timezone'
 import type { CalendarEvent, ExecutionSummaryCard } from '../data/calendarData'
 
 export type CalendarNexusResponse = {
@@ -26,6 +27,12 @@ export type CalendarFetchParams = {
   market?: string | null
   layers?: string[]
   overdueOnly?: boolean
+  /**
+   * §7 — the operator's IANA timezone. The server buckets day boundaries in
+   * this zone; without it it falls back to UTC and says so, which for an
+   * operator in the Americas moves "today" by several hours.
+   */
+  timezone?: string
 }
 
 function unwrap<T>(result: Awaited<ReturnType<typeof callBackend>>): T {
@@ -43,6 +50,7 @@ export async function fetchCalendarNexus(params: CalendarFetchParams): Promise<C
   if (params.market) search.set('market', params.market)
   if (params.layers?.length) search.set('layers', params.layers.join(','))
   if (params.overdueOnly) search.set('overdue_only', 'true')
+  search.set('timezone', params.timezone || resolveOperatorTimezone())
 
   const res = unwrap<CalendarNexusResponse>(
     await callBackend(`/api/cockpit/calendar/events?${search.toString()}`),

@@ -72,3 +72,54 @@ export function layerMatchesEvent(layer, eventType) {
   const meta = resolveEventMeta(eventType);
   return meta.layer === layer;
 }
+
+/**
+ * Which source tables back each calendar layer.
+ *
+ * §28 — "Only expose categories with real data authorities. No dead filter
+ * buttons." A layer whose every source table is absent can never produce an
+ * item, so the surface must not offer it as a filter. Six of the twelve
+ * sources are absent in this database, which would otherwise mean five dead
+ * filters (Offers, Contracts, Closings, Buyers, Appointments).
+ */
+export const LAYER_SOURCE_TABLES = Object.freeze({
+  follow_ups: ['acquisition_opportunities', 'workflow_scheduled_tasks'],
+  seller_replies: ['message_events'],
+  sms: ['send_queue', 'message_events'],
+  // No scheduled-email authority exists (§18) — this layer is backed by
+  // nothing and must not be offered rather than fabricated for symmetry.
+  email: [],
+  workflow: ['workflow_enrollments', 'workflow_scheduled_tasks'],
+  offers: ['offers'],
+  contracts: ['contracts'],
+  title: ['title_routing_closing_engine'],
+  closings: ['closings'],
+  buyers: ['buyer_match'],
+  campaigns: ['campaigns'],
+  manual_events: ['calendar_manual_events'],
+  // Risk is derived from events already loaded, not its own table.
+  risks: ['send_queue', 'acquisition_opportunities'],
+});
+
+/**
+ * Reports each layer as available / unavailable given per-table availability.
+ * A layer with no source tables at all is unavailable — it has no authority.
+ */
+export function describeLayerAvailability(availability = {}) {
+  const out = {};
+  for (const layer of CALENDAR_LAYERS) {
+    const tables = LAYER_SOURCE_TABLES[layer] ?? [];
+    if (!tables.length) {
+      out[layer] = { available: false, reason: 'no_authority', tables: [] };
+      continue;
+    }
+    const states = tables.map((t) => availability[t]?.state ?? 'unknown');
+    const anyAvailable = states.includes('available');
+    out[layer] = {
+      available: anyAvailable,
+      reason: anyAvailable ? null : states.every((s) => s === 'absent') ? 'tables_absent' : 'source_error',
+      tables,
+    };
+  }
+  return out;
+}

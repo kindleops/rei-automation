@@ -27,6 +27,8 @@ export async function GET(request) {
       campaign_id: searchParams.get('campaign_id'),
       workflow_definition_id: searchParams.get('workflow_definition_id'),
       overdue_only: searchParams.get('overdue_only') === 'true',
+      // §7 — the operator's IANA timezone, used for day-boundary counts.
+      timezone: searchParams.get('timezone') || searchParams.get('operator_timezone'),
       layers: layers ? layers.split(',').map((v) => v.trim()).filter(Boolean) : null,
     });
 
