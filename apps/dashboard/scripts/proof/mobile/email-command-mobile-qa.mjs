@@ -43,12 +43,34 @@ const api = async (p) => {
   return { status: res.status, body }
 }
 
+/**
+ * §6 — two real subjects with different, non-overlapping email sets, plus one
+ * that has none. Verified in the database: A has 5 addresses at 600 Raintree
+ * Dr, B has 3 at 8002 W Weldon Ave, and an unknown property has 0.
+ */
+const SUBJECT_A = { id: '237787391', addressPart: 'Raintree' }
+const SUBJECT_B = { id: '24563665', addressPart: 'Weldon' }
+const SUBJECT_NONE = { id: '000-not-a-real-property', addressPart: null }
+
 // ── canonical truth, service-side
 const overview = await api('overview')
 const records = await api('records?limit=25')
 const threads = await api('threads?limit=25')
 const templates = await api('templates')
 const health = await api('brevo-health')
+
+const subjectTruth = async (id) => {
+  const r = await api(`records?limit=25&property_id=${encodeURIComponent(id)}`)
+  return {
+    status: r.status,
+    count: r.body?.count ?? null,
+    emails: (r.body?.records ?? []).map((x) => x.email),
+    address: r.body?.records?.[0]?.property_address ?? null,
+  }
+}
+const SUB_A = await subjectTruth(SUBJECT_A.id)
+const SUB_B = await subjectTruth(SUBJECT_B.id)
+const SUB_NONE = await subjectTruth(SUBJECT_NONE.id)
 
 const TRUTH = {
   total: overview.body?.total_emails ?? null,
@@ -70,6 +92,19 @@ console.log(`  records         http ${records.status}  count=${TRUTH.recordCount
 console.log(`  threads         http ${threads.status}  count=${TRUTH.threadCount}`)
 console.log(`  templates       http ${templates.status}  count=${TRUTH.templateCount}`)
 console.log(`  provider        connected=${TRUTH.providerConnected} send_enabled=${TRUTH.sendEnabled} missing=${JSON.stringify(TRUTH.providerMissing)}`)
+console.log(`  subject A       count=${SUB_A.count} addr=${SUB_A.address}`)
+console.log(`  subject B       count=${SUB_B.count} addr=${SUB_B.address}`)
+console.log(`  subject none    count=${SUB_NONE.count}`)
+
+// §6 — the subject scope must be real before the UI is judged against it.
+if (SUB_A.count !== null) {
+  if (!(SUB_A.count > 0 && SUB_B.count > 0))
+    findings.push({ cell: 'api', n: '§6 both test subjects must have email records', d: `A=${SUB_A.count} B=${SUB_B.count}` })
+  if (SUB_A.emails.some((e) => SUB_B.emails.includes(e)))
+    findings.push({ cell: 'api', n: '§6 test subjects must not share addresses', d: 'overlap found' })
+  if (SUB_NONE.count !== 0)
+    findings.push({ cell: 'api', n: '§6 an unknown subject must yield ZERO, not the corpus', d: `${SUB_NONE.count}` })
+}
 
 // §3 — no endpoint may 500
 const findings = []
@@ -293,6 +328,55 @@ async function runCell(width, theme) {
   })
   check('§21/§44 a body with unresolved {{variables}} cannot be sent',
     guarded.disabled === true, `send disabled=${guarded.disabled}`)
+
+  // ── §5/§6 subject scoping, A -> B -> unknown
+  const openSubject = async (id) => {
+    await page.goto(`${BASE}/email-command?property_id=${encodeURIComponent(id)}`, {
+      waitUntil: 'domcontentloaded', timeout: 120_000,
+    })
+    await page.waitForSelector('.ecc', { timeout: 60_000 })
+    await page.waitForTimeout(2200)
+    const btn = page.locator('.ecc__tab', { hasText: 'Records' }).first()
+    if (await btn.count()) { await btn.click(); await page.waitForTimeout(2600) }
+    return page.evaluate(() => ({
+      subjectPill: document.querySelector('.ecc__status-pill.is-subject')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+      sectionTitle: document.querySelector('.ecc__section-title')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+      rows: document.querySelectorAll('.ecc__table tbody tr').length,
+      emails: [...document.querySelectorAll('.ecc__table tbody tr td:nth-child(2)')].map((e) => e.textContent.trim()),
+      addresses: [...document.querySelectorAll('.ecc__table tbody tr')].map((r) => r.textContent).join(' '),
+      emptyLabels: [...document.querySelectorAll('.ecc__empty-label')].map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
+      errorPanels: document.querySelectorAll('.ecc__error-panel').length,
+      overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+    }))
+  }
+
+  if (SUB_A.count > 0 && SUB_B.count > 0) {
+    const a = await openSubject(SUBJECT_A.id)
+    check('§5 the subject is stated on screen', !!a.subjectPill, `pill="${a.subjectPill}"`)
+    check('§5 A shows exactly A\'s address count',
+      (a.sectionTitle || '').replace(/,/g, '').includes(String(SUB_A.count)),
+      `title="${a.sectionTitle}" canonical=${SUB_A.count}`)
+    check('§5 A shows A\'s property, not an unrelated one',
+      new RegExp(SUBJECT_A.addressPart, 'i').test(a.addresses), `looking for ${SUBJECT_A.addressPart}`)
+    check('§5 A is scoped, not the whole corpus', a.rows === SUB_A.count, `${a.rows} rows vs ${SUB_A.count}`)
+    check('no overflow with a subject applied', a.overflow === 0, `${a.overflow}px`)
+
+    const b = await openSubject(SUBJECT_B.id)
+    check('§6 B shows B\'s count, not A\'s',
+      (b.sectionTitle || '').replace(/,/g, '').includes(String(SUB_B.count)) && SUB_A.count !== SUB_B.count,
+      `title="${b.sectionTitle}" B=${SUB_B.count} A=${SUB_A.count}`)
+    check('§6 not one address leaks from A into B',
+      b.emails.every((e) => !a.emails.includes(e)),
+      `leaked=${b.emails.filter((e) => a.emails.includes(e)).join(', ') || 'none'}`)
+    check('§6 B shows B\'s property', new RegExp(SUBJECT_B.addressPart, 'i').test(b.addresses), SUBJECT_B.addressPart)
+
+    const none = await openSubject(SUBJECT_NONE.id)
+    check('§6 a subject with no addresses says so, and does NOT fall back to the corpus',
+      none.rows === 0 && none.errorPanels === 0 &&
+      none.emptyLabels.some((l) => /no email addresses are linked/i.test(l)),
+      `rows=${none.rows} errors=${none.errorPanels} empty="${none.emptyLabels.join(' | ')}"`)
+    await page.screenshot({ path: path.join(OUT, `${width}-${theme}-subject.png`) })
+  }
 
   // ── Campaigns: an absent authority must say so
   await openTab('Campaigns')

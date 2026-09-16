@@ -140,6 +140,68 @@ for (const bad of ['', '   ', 'not-an-email', 'a@b, c@d']) {
   check(`refuses recipient ${JSON.stringify(bad)}`, res.ok === false, `error=${res.error}`)
 }
 
+// ── §18/§17 inbound webhook idempotency
+console.log('\n§18 inbound idempotency')
+const WEBHOOK_EMAIL = 'inbound-proof@example.invalid'
+await db.from('email_events').delete().eq('to_email', WEBHOOK_EMAIL)
+await db.from('email_events').delete().eq('event_key', 'brevo:inbound-proof:delivered')
+await db.from('email_suppression').delete().eq('email_address', WEBHOOK_EMAIL)
+
+const providerEvent = {
+  event: 'delivered',
+  email: WEBHOOK_EMAIL,
+  'message-id': 'inbound-proof-msg-1',
+  id: 'inbound-proof-evt-1',
+  subject: 'inbound proof',
+  date: new Date().toISOString(),
+}
+
+const wh1 = (await svc.handleBrevoWebhookEvents([providerEvent])).results
+check('a provider event is accepted', wh1[0]?.ok === true, JSON.stringify(wh1[0] ?? {}).slice(0, 140))
+const afterFirst = await db.from('email_events').select('id', { count: 'exact', head: true }).eq('event_key', wh1[0].event_key)
+check('it writes exactly one ledger row', afterFirst.count === 1, `${afterFirst.count} row(s)`)
+
+/**
+ * §18 — REPLAY. Providers retry. The same event delivered twice must not
+ * become two messages. email_events.event_key is UNIQUE and the write is an
+ * upsert on it, so the second delivery updates rather than inserts.
+ */
+const wh2 = (await svc.handleBrevoWebhookEvents([providerEvent])).results
+const afterSecond = await db.from('email_events').select('id', { count: 'exact', head: true }).eq('event_key', wh1[0].event_key)
+check('replaying the SAME event creates no second row',
+  wh2[0]?.ok === true && afterSecond.count === 1, `ok=${wh2[0]?.ok} rows=${afterSecond.count}`)
+check('the replay derives the same event key, not a time-based one',
+  wh2[0]?.event_key === wh1[0]?.event_key, `${wh1[0]?.event_key} vs ${wh2[0]?.event_key}`)
+
+// A genuinely different event must still be recorded.
+const other = (await svc.handleBrevoWebhookEvents([{ ...providerEvent, event: 'opened', id: 'inbound-proof-evt-2' }])).results
+check('a different event is not swallowed by the dedupe',
+  other[0]?.ok === true && other[0]?.event_key !== wh1[0]?.event_key,
+  `${other[0]?.event_key}`)
+
+/**
+ * §13/§32 — a hard bounce must create suppression, which is what makes the
+ * send path refuse that address afterwards.
+ */
+const bounce = (await svc.handleBrevoWebhookEvents([{
+  event: 'hard_bounce', email: WEBHOOK_EMAIL, 'message-id': 'inbound-proof-msg-1',
+  id: 'inbound-proof-evt-3', reason: 'mailbox does not exist', date: new Date().toISOString(),
+}])).results
+check('a hard bounce is recorded', bounce[0]?.ok === true, JSON.stringify(bounce[0] ?? {}).slice(0, 120))
+const supAfterBounce = await svc.checkEmailSuppression(WEBHOOK_EMAIL)
+check('§13 a hard bounce suppresses the address',
+  supAfterBounce.suppressed === true, `suppressed=${supAfterBounce.suppressed} reason=${supAfterBounce.reason ?? ''}`)
+const blockedAfterBounce = await svc.sendManualEmail({
+  to: WEBHOOK_EMAIL, subject: 'must not send', body: '<p>x</p>', ...SENDER,
+})
+check('§13 sending to a bounced address is refused',
+  blockedAfterBounce.ok === false && blockedAfterBounce.error === 'email_suppressed',
+  `error=${blockedAfterBounce.error}`)
+
+await db.from('email_events').delete().eq('to_email', WEBHOOK_EMAIL)
+await db.from('email_suppression').delete().eq('email_address', WEBHOOK_EMAIL)
+await db.from('email_queue').delete().eq('to_email', WEBHOOK_EMAIL)
+
 // ── cleanup
 console.log('\ncleanup')
 await db.from('email_queue').delete().eq('to_email', TEST_TO)
