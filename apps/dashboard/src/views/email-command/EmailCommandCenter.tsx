@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { Icon } from '../../shared/icons'
+import {
+  LOADING,
+  describeEmptyReason,
+  fromLoad,
+  valueOr,
+  type LoadState,
+} from './email-load-state'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { useMobileKeyboardInset } from '../../modules/mobile/useMobileKeyboardInset'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
@@ -83,8 +90,25 @@ const KpiCard = ({
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 
-const OverviewTab = ({ overview }: { overview: EmailOverview | null }) => {
-  if (!overview) return <div className="ecc__loading">Loading overview…</div>
+const OverviewTab = ({ load }: { load: LoadState<EmailOverview> }) => {
+  if (load.status === 'loading') return <div className="ecc__loading">Loading overview…</div>
+  /**
+   * §28/§30 — a failed read must never render as a dashboard of zeros. This
+   * surface previously fell back to an all-zero overview, so an operator saw
+   * "0 emails, 0 eligible, 0 suppressed" over a 165,655-row corpus.
+   */
+  if (load.status === 'failed') {
+    return (
+      <div className="ecc__error-panel" role="status">
+        <div className="ecc__error-title">Couldn't load the email overview</div>
+        <div className="ecc__error-detail">{load.error}</div>
+        <div className="ecc__error-detail">
+          No counts are shown because none could be read — this is not a report of zero.
+        </div>
+      </div>
+    )
+  }
+  const overview = load.data
   return (
     <div className="ecc__overview">
       <div className="ecc__kpi-grid">
@@ -110,23 +134,37 @@ const OverviewTab = ({ overview }: { overview: EmailOverview | null }) => {
 
 // ── Records Tab ───────────────────────────────────────────────────────────────
 
-const RecordsTab = () => {
-  const [records, setRecords] = useState<EmailRecord[]>([])
+const RecordsTab = ({ health }: { health: BrevoHealth | null }) => {
+  const [load, setLoad] = useState<LoadState<{ records: EmailRecord[]; count: number }>>(LOADING)
   const [search, setSearch] = useState('')
   const [eligFilter, setEligFilter] = useState<string>('all')
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setLoading(true)
-    getEmailRecords({ search, eligibility: eligFilter as any })
-      .then(setRecords)
-      .finally(() => setLoading(false))
+    let active = true
+    setLoad(LOADING)
+    getEmailRecords({ search, eligibility: eligFilter as any }).then((r) => {
+      if (active) setLoad(fromLoad(r))
+    })
+    return () => { active = false }
   }, [search, eligFilter])
+
+  const records = valueOr(load, { records: [], count: 0 }).records
+  // §28 — the corpus count from the server, not records.length.
+  const total = valueOr(load, { records: [], count: 0 }).count
+  const loading = load.status === 'loading'
 
   return (
     <div className="ecc__records">
       <div className="ecc__section-header">
-        <span className="ecc__section-title">{records.length} records</span>
+        <span className="ecc__section-title">
+          {load.status === 'failed'
+            ? 'Records unavailable'
+            : loading
+              ? 'Loading records…'
+              : records.length < total
+                ? `Showing ${records.length.toLocaleString()} of ${total.toLocaleString()} records`
+                : `${total.toLocaleString()} records`}
+        </span>
         <div className="ecc__filter-row">
           <div className="ecc__search">
             <Icon name="search" size={12} />
@@ -151,6 +189,23 @@ const RecordsTab = () => {
       <div className="ecc__table-wrap">
         {loading ? (
           <div className="ecc__loading">Loading records…</div>
+        ) : load.status === 'failed' ? (
+          /* §30/§44 — a failed read says so. It is not an empty table. */
+          <div className="ecc__error-panel" role="status">
+            <div className="ecc__error-title">Couldn't load email records</div>
+            <div className="ecc__error-detail">{load.error}</div>
+          </div>
+        ) : records.length === 0 ? (
+          <div className="ecc__empty-panel">
+            <div className="ecc__empty-label">
+              {describeEmptyReason({
+                noun: 'records',
+                providerConnected: health?.connected ?? null,
+                providerMissing: health?.missing ?? null,
+                hasSubstrate: true,
+              })}
+            </div>
+          </div>
         ) : (
           <table className="ecc__table">
             <thead>
@@ -247,27 +302,51 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
   const { isMobile } = useBreakpoint()
   const keyboardInset = useMobileKeyboardInset(isMobile)
   const [folder, setFolder] = useState<InboxFolder>('all')
-  const [threads, setThreads] = useState<EmailThread[]>([])
+  const [load, setLoad] = useState<LoadState<{ threads: EmailThread[]; count: number; folder_counts?: Record<string, number> | null }>>(LOADING)
   const [activeThread, setActiveThread] = useState<EmailThreadDetail | null>(null)
+  const [threadError, setThreadError] = useState<string | null>(null)
   const [replyText, setReplyText] = useState('')
   const [loadingThread, setLoadingThread] = useState(false)
 
   useEffect(() => {
-    getEmailThreads({ folder }).then(setThreads)
+    let active = true
+    setLoad(LOADING)
+    getEmailThreads({ folder }).then((r) => { if (active) setLoad(fromLoad(r)) })
+    return () => { active = false }
   }, [folder])
+
+  const threads = valueOr(load, { threads: [], count: 0 }).threads
 
   const selectThread = useCallback(async (thread: EmailThread) => {
     setLoadingThread(true)
+    setThreadError(null)
     try {
       const detail = await getEmailThread(thread.id)
-      setActiveThread(detail)
+      if (!detail.ok) {
+        // A failed thread read is reported, not rendered as a blank thread.
+        setThreadError(detail.error)
+        setActiveThread(null)
+        return
+      }
+      if (!detail.data) {
+        setThreadError('That conversation no longer exists.')
+        setActiveThread(null)
+        return
+      }
+      setActiveThread(detail.data)
     } finally {
       setLoadingThread(false)
     }
   }, [])
 
-  const folderCounts = FOLDERS.reduce<Record<InboxFolder, number>>((acc, f) => {
-    acc[f.id] = f.id === 'all' ? threads.length : threads.filter((t) => t.folder === f.id).length
+  /**
+   * §28 — folder badges come from the server's own predicate. When the count
+   * cannot be read the badge is omitted rather than shown as 0, because "0" and
+   * "unknown" are different claims.
+   */
+  const serverCounts = valueOr(load, { threads: [], count: 0, folder_counts: null }).folder_counts ?? null
+  const folderCounts = FOLDERS.reduce<Record<InboxFolder, number | null>>((acc, f) => {
+    acc[f.id] = serverCounts ? (serverCounts[f.id] ?? 0) : null
     return acc
   }, {} as any)
 
@@ -284,7 +363,8 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
               onClick={() => setFolder(f.id)}
             >
               {f.label}
-              {folderCounts[f.id] > 0 && (
+              {/* null = not readable, so no badge at all rather than a "0" claim. */}
+              {folderCounts[f.id] !== null && (folderCounts[f.id] as number) > 0 && (
                 <span className="ecc__folder-count">{folderCounts[f.id]}</span>
               )}
             </button>
@@ -436,7 +516,9 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
             <div className="ecc__empty-icon">
               <Icon name="mail" size={20} />
             </div>
-            <div className="ecc__empty-label">Select a thread to view</div>
+            <div className="ecc__empty-label">
+              {threadError ?? 'Select a thread to view'}
+            </div>
           </div>
         </div>
       )}
@@ -501,6 +583,15 @@ const ComposerTab = ({ templates, health }: { templates: EmailTemplate[]; health
       setStatusMsg({ ok: false, text: 'To, Subject, and Body are required.' })
       return
     }
+    if (unresolvedVars.length > 0) {
+      setStatusMsg({
+        ok: false,
+        text: `Unresolved template ${unresolvedVars.length === 1 ? 'variable' : 'variables'}: ${unresolvedVars
+          .map((v) => `{{${v}}}`)
+          .join(', ')} — fill these in before sending.`,
+      })
+      return
+    }
     setSending(true)
     setStatusMsg(null)
     setLastSendResult(null)
@@ -520,6 +611,9 @@ const ComposerTab = ({ templates, health }: { templates: EmailTemplate[]; health
         setStatusMsg({ ok: false, text: 'No-send mode — Brevo live sending disabled.' })
       } else if (result.blocked) {
         setStatusMsg({ ok: false, text: `Blocked: ${result.error ?? 'suppression or eligibility check failed'}` })
+      } else if (result.duplicate || result.already_queued) {
+        // §18 — a repeat is a no-op, not a failure and not a second send.
+        setStatusMsg({ ok: false, text: 'Already queued — this exact message was submitted already.' })
       } else if (result.sent) {
         setStatusMsg({ ok: true, text: `Sent${result.message_id ? ` · ID ${result.message_id}` : ''}` })
       } else {
@@ -531,7 +625,20 @@ const ComposerTab = ({ templates, health }: { templates: EmailTemplate[]; health
   }
 
   const activeTpl = templates.find((t) => t.id === selectedTemplate)
-  const canSend = Boolean(to && subject && body && !saving && !sending)
+
+  /**
+   * §21/§44 — A MESSAGE WITH UNRESOLVED VARIABLES MUST NOT BE SENDABLE.
+   *
+   * Selecting a template inserts its body verbatim, and the merge-field
+   * buttons deliberately append `{{field}}` tokens, so both the subject and
+   * the body can carry placeholders at send time. Nothing stopped that: the
+   * send would have delivered a literal "{{first_name}}" to a seller. The
+   * tokens stay insertable — sending with them unresolved does not.
+   */
+  const unresolvedVars = [...new Set(
+    [...`${subject}\n${body}`.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map((m) => m[1]),
+  )]
+  const canSend = Boolean(to && subject && body && !saving && !sending && unresolvedVars.length === 0)
 
   return (
     <div className="ecc__composer">
@@ -700,17 +807,30 @@ const ComposerTab = ({ templates, health }: { templates: EmailTemplate[]; health
 
 // ── Campaigns Tab ─────────────────────────────────────────────────────────────
 
-const CampaignsTab = ({ campaigns }: { campaigns: EmailCampaignDraft[] }) => (
-  <div className="ecc__campaigns">
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-2)' }}>
-        Email campaigns are draft-only. Launch requires backend connection.
+/**
+ * §24/§27 — there is no email campaign authority in this system: no table,
+ * endpoint or service answers "which email campaigns exist". The adapter used
+ * to return `[]`, which rendered as an empty list plus a "New Draft" button —
+ * implying the feature worked and simply had no rows yet. It says what is
+ * actually true instead, and offers no control that cannot do anything.
+ */
+const CampaignsTab = ({ load }: { load: LoadState<EmailCampaignDraft[]> }) => {
+  if (load.status === 'loading') return <div className="ecc__loading">Loading campaigns…</div>
+  if (load.status === 'failed') {
+    return (
+      <div className="ecc__empty-panel">
+        <div className="ecc__empty-label">Email campaigns are not available</div>
+        <div className="ecc__error-detail">{load.error}</div>
+        <div className="ecc__error-detail">
+          SMS campaigns are managed in Campaign Command; email campaign attribution
+          does not exist yet, so nothing is listed here rather than showing an empty inbox-like list.
+        </div>
       </div>
-      <button className="ecc__btn is-primary">
-        <Icon name="send" size={12} />
-        New Draft
-      </button>
-    </div>
+    )
+  }
+  const campaigns = load.data
+  return (
+  <div className="ecc__campaigns">
 
     {campaigns.map((c) => (
       <div key={c.id} className="ecc__campaign-card">
@@ -759,7 +879,8 @@ const CampaignsTab = ({ campaigns }: { campaigns: EmailCampaignDraft[] }) => (
       </div>
     ))}
   </div>
-)
+  )
+}
 
 // ── Templates Tab ─────────────────────────────────────────────────────────────
 
@@ -1055,19 +1176,32 @@ export const EmailCommandCenter = ({
   paneWidth?: ViewWidthPercent
 }) => {
   const [activeTab, setActiveTab] = useState<EmailTab>('overview')
-  const [overview, setOverview] = useState<EmailOverview | null>(null)
-  const [health, setHealth] = useState<BrevoHealth | null>(null)
-  const [templates, setTemplates] = useState<EmailTemplate[]>([])
-  const [campaigns, setCampaigns] = useState<EmailCampaignDraft[]>([])
-  const [suppression, setSuppression] = useState<SuppressionEntry[]>([])
+  const [overviewLoad, setOverviewLoad] = useState<LoadState<EmailOverview>>(LOADING)
+  const [healthLoad, setHealthLoad] = useState<LoadState<BrevoHealth>>(LOADING)
+  const [templatesLoad, setTemplatesLoad] = useState<LoadState<EmailTemplate[]>>(LOADING)
+  const [campaignsLoad, setCampaignsLoad] = useState<LoadState<EmailCampaignDraft[]>>(LOADING)
+  const [suppressionLoad, setSuppressionLoad] = useState<LoadState<SuppressionEntry[]>>(LOADING)
 
   useEffect(() => {
-    getEmailOverview().then(setOverview)
-    getBrevoHealth().then(setHealth)
-    getEmailTemplates().then(setTemplates)
-    getEmailCampaigns().then(setCampaigns)
-    getSuppressionList().then(setSuppression)
+    let active = true
+    getEmailOverview().then((r) => { if (active) setOverviewLoad(fromLoad(r)) })
+    getBrevoHealth().then((r) => { if (active) setHealthLoad(fromLoad(r)) })
+    getEmailTemplates().then((r) => { if (active) setTemplatesLoad(fromLoad(r)) })
+    getEmailCampaigns().then((r) => { if (active) setCampaignsLoad(fromLoad(r)) })
+    getSuppressionList().then((r) => { if (active) setSuppressionLoad(fromLoad(r)) })
+    return () => { active = false }
   }, [])
+
+  /**
+   * Derived for the existing consumers. `null`/`[]` here means "not ready" —
+   * every place that could be mistaken for real data renders an explicit
+   * failure or empty reason instead (§30).
+   */
+  const overview = valueOr<EmailOverview | null>(
+    overviewLoad as LoadState<EmailOverview | null>, null)
+  const health = valueOr<BrevoHealth | null>(healthLoad as LoadState<BrevoHealth | null>, null)
+  const templates = valueOr(templatesLoad, [] as EmailTemplate[])
+  const suppression = valueOr(suppressionLoad, [] as SuppressionEntry[])
 
   const brevoStatusClass = overview
     ? overview.brevo_status === 'connected' ? 'is-connected'
@@ -1125,11 +1259,11 @@ export const EmailCommandCenter = ({
       </nav>
 
       <main className="ecc__body">
-        {activeTab === 'overview'     && <OverviewTab overview={overview} />}
+        {activeTab === 'overview'     && <OverviewTab load={overviewLoad} />}
         {activeTab === 'inbox'        && <InboxTab paneWidth={paneWidth} />}
-        {activeTab === 'records'      && <RecordsTab />}
+        {activeTab === 'records'      && <RecordsTab health={health} />}
         {activeTab === 'composer'     && <ComposerTab templates={templates} health={health} />}
-        {activeTab === 'campaigns'    && <CampaignsTab campaigns={campaigns} />}
+        {activeTab === 'campaigns'    && <CampaignsTab load={campaignsLoad} />}
         {activeTab === 'templates'    && <TemplatesTab templates={templates} />}
         {activeTab === 'suppression'  && <SuppressionTab entries={suppression} />}
         {activeTab === 'brevo-health' && <BrevoHealthTab health={health} />}

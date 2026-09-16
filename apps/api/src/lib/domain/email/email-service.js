@@ -182,21 +182,59 @@ function mapThreadRow(row = {}) {
   };
 }
 
+/**
+ * §10 — one status ladder, from durable timestamps only.
+ *
+ *   failed  >  delivered  >  sent  >  received  >  queued
+ *
+ * Deliberately NOT collapsed: queued is not sent, sent is not delivered, and
+ * delivered is not replied. Nothing here reads a success flag from the
+ * request that created the row.
+ */
+function deriveEventStatus(row = {}) {
+  if (row.failed_at) return "failed";
+  if (row.delivered_at) return "delivered";
+  if (lower(row.direction) === "inbound") return "received";
+  if (row.sent_at) return "sent";
+  return "queued";
+}
+
 function mapMessage(row = {}) {
   const status = lower(row.status);
+  /**
+   * §9 — direction is read, never inferred. This previously mapped anything
+   * that was not "inbound" to "outbound", so a row with a missing or
+   * unexpected direction was displayed with confidence as an outbound
+   * message. An unknown direction is reported as unknown.
+   */
+  const rawDirection = lower(row.direction);
+  const direction =
+    rawDirection === "inbound" || rawDirection === "outbound" || rawDirection === "system"
+      ? rawDirection
+      : "unknown";
   return {
     id: clean(row.id || row.message_id),
-    direction: lower(row.direction) === "inbound" ? "inbound" : "outbound",
+    direction,
     from_address: normalizeEmail(row.from_email || row.from_address),
     to_address: normalizeEmail(row.to_email || row.to_address || row.email_address),
     subject: clean(row.subject),
-    body_preview: messagePreview(row.body_preview || row.text_body || row.html_body),
+    body_preview: messagePreview(row.body_preview || row.email_body || row.text_body || row.html_body),
     body_html: clean(row.html_body || row.body_html) || null,
+    body_text: clean(row.email_body || row.text_body) || null,
     sent_at: clean(row.sent_at || row.created_at) || null,
+    delivered_at: clean(row.delivered_at) || null,
+    failed_at: clean(row.failed_at) || null,
     opened: Boolean(row.opened_at || status === "opened"),
     clicked: Boolean(row.clicked_at || status === "clicked"),
-    bounced: Boolean(row.bounced_at || status === "bounced" || status === "failed"),
-    status,
+    bounced: Boolean(row.bounced_at || row.failed_at || status === "bounced" || status === "failed"),
+    failure_reason: clean(row.error_message) || null,
+    provider_message_id: clean(row.provider_message_id) || null,
+    /**
+     * §10 — the status is derived from durable timestamps in the order the
+     * provider produces them, so "queued" can never be shown as "delivered".
+     */
+    status: status || deriveEventStatus(row),
+    event_type: lower(row.event_type) || null,
   };
 }
 
@@ -212,160 +250,258 @@ export function __resetEmailServiceDeps() {
   };
 }
 
+/**
+ * Email records, paged in the database.
+ *
+ * This used to select from v_email_records with `{ count: "exact" }` and an
+ * ORDER BY. Both force the whole 165,655-row read model to be built before
+ * anything is returned, because the view's per-row LATERAL lookups into
+ * prospects/properties sit BELOW the sort. Measured 2026-09-16: `LIMIT 3`
+ * took 13.4s and production answered /api/cockpit/email/records with
+ * "canceling statement due to statement timeout" — a 500 on the surface's
+ * primary read.
+ *
+ * get_email_records() chooses the page from the base table first and enriches
+ * only that page: 30ms for the same request. The count comes from
+ * get_email_records_count(), which applies the SAME predicate to the base
+ * table — a real count, not the length of what happened to load (§28).
+ */
 export async function getEmailRecords(filters = {}) {
   const db = getDb();
   const limit = asLimit(filters.limit, 100, 1000);
   const offset = asOffset(filters.offset);
 
-  let query = db
-    .from("v_email_records")
-    .select("*", { count: "exact" })
-    .order("email_rank", { ascending: true, nullsFirst: false })
-    .range(offset, offset + limit - 1);
+  const search = clean(filters.search || filters.q) || null;
+  const market = clean(filters.market) && lower(filters.market) !== "all" ? clean(filters.market) : null;
+  const confidence = clean(filters.confidence) && lower(filters.confidence) !== "all" ? lower(filters.confidence) : null;
 
-  const search = clean(filters.search || filters.q);
-  if (search) {
-    const like = `%${search.replace(/[,%()]/g, " ")}%`;
-    query = query.or(`email.ilike.${like},owner_name.ilike.${like},property_address.ilike.${like}`);
+  // `eligibility` is expressed through suppression, exactly as before:
+  // eligible == nothing suppressing the address.
+  let suppression = clean(filters.suppression) && lower(filters.suppression) !== "all" ? lower(filters.suppression) : null;
+  const eligibility = lower(filters.eligibility);
+  if (!suppression && eligibility && eligibility !== "all") {
+    suppression = eligibility === "eligible" ? "none" : null;
   }
 
-  if (clean(filters.market) && lower(filters.market) !== "all") {
-    query = query.eq("market", clean(filters.market));
-  }
+  const args = {
+    p_limit: limit,
+    p_offset: offset,
+    p_search: search,
+    p_market: market,
+    p_suppression: suppression,
+    p_confidence: confidence,
+  };
 
-  if (clean(filters.suppression) && lower(filters.suppression) !== "all") {
-    query = query.eq("suppression_status", lower(filters.suppression));
-  }
+  const [rowsRes, countRes] = await Promise.all([
+    db.rpc("get_email_records", args),
+    db.rpc("get_email_records_count", {
+      p_search: search,
+      p_market: market,
+      p_suppression: suppression,
+      p_confidence: confidence,
+    }),
+  ]);
 
-  if (clean(filters.confidence) && lower(filters.confidence) !== "all") {
-    query = query.eq("email_match_confidence", lower(filters.confidence));
-  }
-
-  if (clean(filters.eligibility) && lower(filters.eligibility) !== "all") {
-    query = lower(filters.eligibility) === "eligible"
-      ? query.eq("suppression_status", "none")
-      : query.not("suppression_status", "eq", "none");
-  }
-
-  const { data, error, count } = await query;
-  if (error) {
+  if (rowsRes.error) {
     return {
       ok: false,
       error: "email_records_query_failed",
-      message: clean(error?.message) || "email_records_query_failed",
+      message: clean(rowsRes.error?.message) || "email_records_query_failed",
       records: [],
     };
   }
 
-  const records = (data || []).map(mapRecord);
+  const records = (rowsRes.data || []).map(mapRecord);
+
+  // A failed count is reported, never silently replaced by the page length —
+  // that is how a filtered view starts claiming it holds the whole corpus.
+  if (countRes.error) {
+    return {
+      ok: false,
+      error: "email_records_count_failed",
+      message: clean(countRes.error?.message) || "email_records_count_failed",
+      records: [],
+    };
+  }
+
   return {
     ok: true,
     records,
-    count: count ?? records.length,
+    count: Number(countRes.data ?? 0),
     limit,
     offset,
   };
 }
 
+/**
+ * Headline email numbers, every one from a real predicate.
+ *
+ * Two defects lived here. It called getEmailRecords({ limit: 5000 }) and
+ * counted the returned array, so each total was a page length rather than a
+ * corpus count. And when that read failed it fell back to `[]` and still
+ * returned ok:true, so production served HTTP 200 with nine zeros over a
+ * 165,655-row corpus on 2026-09-16 — an operator would read "no email data".
+ *
+ * Counts now come from get_email_overview_counts() (one pass, same
+ * derivations as v_email_records, so headline and list cannot disagree), and
+ * a failed read is reported as a failure.
+ */
 export async function getEmailOverview() {
-  const [recordsResult, health] = await Promise.all([
-    getEmailRecords({ limit: 5000 }),
-    getBrevoHealth(),
-  ]);
-
   const db = getDb();
+  const health = await getBrevoHealth();
+
+  const brevoStatus = health.connected
+    ? "connected"
+    : health.missing?.length
+      ? "disconnected"
+      : "degraded";
+
+  const countsRes = await db.rpc("get_email_overview_counts");
+  if (countsRes.error) {
+    return {
+      ok: false,
+      error: "email_overview_counts_failed",
+      message: clean(countsRes.error?.message) || "email counts could not be read",
+      brevo_status: brevoStatus,
+      brevo_health: health,
+      last_updated: nowIso(),
+    };
+  }
+
+  const counts = Array.isArray(countsRes.data) ? countsRes.data[0] || {} : countsRes.data || {};
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayIso = today.toISOString();
 
-  const records = recordsResult.ok ? recordsResult.records : [];
-  const [{ data: eventRows = [] } = {}, { data: messageRows = [] } = {}] = await Promise.all([
-    db.from("email_events").select("event_type, email_address, created_at").gte("created_at", todayIso).limit(1000),
-    db.from("email_messages").select("direction, status, sent_at, created_at").gte("created_at", todayIso).limit(1000),
-  ]).catch(() => [{ data: [] }, { data: [] }]);
+  // Today's activity from the LIVE event ledger. The old version also read
+  // email_messages (which does not exist here) inside a `.catch(() => ...)`,
+  // so a missing table silently became "0 sent, 0 replies".
+  const eventsRes = await db
+    .from("email_events")
+    .select("event_type, direction, to_email, created_at, sent_at")
+    .gte("created_at", todayIso)
+    .limit(1000);
 
-  const suppressed = records.filter((row) => row.suppression_status !== "none").length;
-  const bounced = records.filter((row) => row.suppression_status === "bounced").length;
-  const unsubscribed = records.filter((row) => row.suppression_status === "unsubscribed").length;
-  const sentToday = (messageRows || []).filter((row) => lower(row.direction) === "outbound").length;
-  const repliesToday =
-    (messageRows || []).filter((row) => lower(row.direction) === "inbound").length ||
-    (eventRows || []).filter((row) => lower(row.event_type) === "replied").length;
+  if (eventsRes.error) {
+    return {
+      ok: false,
+      error: "email_overview_events_failed",
+      message: clean(eventsRes.error?.message) || "email events could not be read",
+      brevo_status: brevoStatus,
+      brevo_health: health,
+      last_updated: nowIso(),
+    };
+  }
+
+  const eventRows = eventsRes.data || [];
+  const sentToday = eventRows.filter((row) => lower(row.direction) === "outbound").length;
+  const repliesToday = eventRows.filter(
+    (row) => lower(row.direction) === "inbound" || lower(row.event_type) === "replied",
+  ).length;
+
+  const num = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
 
   return {
     ok: true,
-    total_emails: records.length,
-    email_eligible: records.filter((row) => row.eligibility === "eligible").length,
-    high_confidence: records.filter((row) => row.email_match_confidence === "high").length,
-    suppressed,
-    bounced,
-    unsubscribed,
+    total_emails: num(counts.total_emails),
+    email_eligible: num(counts.email_eligible),
+    high_confidence: num(counts.high_confidence),
+    suppressed: num(counts.suppressed),
+    bounced: num(counts.bounced),
+    unsubscribed: num(counts.unsubscribed),
     sent_today: sentToday,
     replies_today: repliesToday,
-    ready_for_campaign: records.filter(
-      (row) => row.eligibility === "eligible" && row.suppression_status === "none"
-    ).length,
-    brevo_status: health.connected ? "connected" : health.missing?.length ? "disconnected" : "degraded",
+    ready_for_campaign: num(counts.ready_for_campaign),
+    brevo_status: brevoStatus,
     brevo_health: health,
-    records_warning: recordsResult.ok ? null : recordsResult.message,
+    records_warning: null,
     last_updated: nowIso(),
   };
 }
 
+/**
+ * Email threads from the LIVE event ledger.
+ *
+ * This used to read `email_messages`, which does not exist in this database —
+ * production answered /api/cockpit/email/threads with
+ * "Could not find the table 'public.email_messages' in the schema cache"
+ * (HTTP 500). It also loaded `limit * 5` rows and then did folder filtering,
+ * search and counting IN JAVASCRIPT over whatever came back, so search saw
+ * only loaded rows and `count` was the length of that slice — §26 and §28.
+ *
+ * Threading is now one deterministic rule, in SQL: a thread is keyed by the
+ * COUNTERPARTY address (from_email inbound, to_email outbound). Subject is
+ * excluded from the key so "Re:"/"Fwd:" cannot fragment a conversation.
+ * Verified against a 3-message synthetic thread whose subject changed twice
+ * and whose direction flipped: one thread, correct order, then removed.
+ */
 export async function getEmailThreads(filters = {}) {
   const db = getDb();
   const limit = asLimit(filters.limit, 100, 500);
-  const folder = lower(filters.folder || "all");
+  const offset = asOffset(filters.offset);
+  const folder = clean(filters.folder) && lower(filters.folder) !== "all" ? lower(filters.folder) : null;
+  const search = clean(filters.search || filters.q) || null;
 
-  const { data, error } = await db
-    .from("email_messages")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(limit * 5);
+  const [rowsRes, countRes] = await Promise.all([
+    db.rpc("get_email_threads", {
+      p_limit: limit,
+      p_offset: offset,
+      p_search: search,
+      p_folder: folder,
+    }),
+    db.rpc("get_email_threads_count", { p_search: search, p_folder: folder }),
+  ]);
 
-  if (error) {
+  if (rowsRes.error) {
     return {
       ok: false,
       error: "email_threads_query_failed",
-      message: clean(error?.message) || "email_threads_query_failed",
+      message: clean(rowsRes.error?.message) || "email_threads_query_failed",
+      threads: [],
+    };
+  }
+  if (countRes.error) {
+    return {
+      ok: false,
+      error: "email_threads_count_failed",
+      message: clean(countRes.error?.message) || "email_threads_count_failed",
       threads: [],
     };
   }
 
-  const byThread = new Map();
-  for (const row of data || []) {
-    const key = clean(row.thread_id || row.id);
-    if (!key) continue;
-    const existing = byThread.get(key);
-    if (!existing) {
-      byThread.set(key, {
-        ...row,
-        message_count: 1,
-        folder: lower(row.direction) === "inbound" ? "new_replies" : lower(row.status) || "all",
-      });
-    } else {
-      existing.message_count += 1;
-    }
-  }
+  const threads = (rowsRes.data || []).map((row) =>
+    mapThreadRow({
+      thread_id: row.thread_id,
+      email_address: row.email_address,
+      subject: row.subject,
+      last_message_at: row.last_message_at,
+      body_preview: row.last_body,
+      message_count: row.message_count,
+      folder: row.folder,
+      // A thread whose newest message is inbound is awaiting a human.
+      unread: lower(row.last_direction) === "inbound",
+    }),
+  );
 
-  let threads = Array.from(byThread.values()).map(mapThreadRow);
-  if (folder && folder !== "all") threads = threads.filter((thread) => thread.folder === folder);
-
-  const search = lower(filters.search || filters.q);
-  if (search) {
-    threads = threads.filter((thread) => {
-      return (
-        lower(thread.email_address).includes(search) ||
-        lower(thread.subject).includes(search) ||
-        lower(thread.prospect_name).includes(search)
-      );
-    });
+  // §28 — folder badges are a corpus predicate, not a count of loaded rows.
+  const folderRes = await db.rpc("get_email_folder_counts", { p_search: search });
+  const folder_counts = {};
+  if (!folderRes.error) {
+    for (const row of folderRes.data || []) folder_counts[clean(row.folder)] = Number(row.thread_count ?? 0);
   }
 
   return {
     ok: true,
-    threads: threads.slice(0, limit),
-    count: threads.length,
+    threads,
+    count: Number(countRes.data ?? 0),
+    // null (not {}) when unreadable, so the UI shows no badge instead of "0".
+    folder_counts: folderRes.error ? null : folder_counts,
+    limit,
+    offset,
   };
 }
 
@@ -376,11 +512,9 @@ export async function getEmailThread(threadId) {
     return { ok: false, error: "missing_thread_id", messages: [] };
   }
 
-  const { data, error } = await db
-    .from("email_messages")
-    .select("*")
-    .eq("thread_id", normalizedThreadId)
-    .order("created_at", { ascending: true });
+  const { data, error } = await db.rpc("get_email_thread_messages", {
+    p_thread_id: normalizedThreadId,
+  });
 
   if (error) {
     return {
@@ -391,25 +525,39 @@ export async function getEmailThread(threadId) {
     };
   }
 
-  const messages = (data || []).map(mapMessage);
-  const latest = messages[messages.length - 1] || null;
+  const rows = data || [];
+  const messages = rows.map(mapMessage);
+
+  // An empty thread is EMPTY, not a thread with no messages rendered as a
+  // thread. The caller distinguishes "thread not found" from "read failed".
+  if (messages.length === 0) {
+    return { ok: true, thread: null, messages: [], reason: "thread_not_found" };
+  }
+
+  const last = rows[rows.length - 1];
+  const inboundCount = rows.filter((row) => lower(row.direction) === "inbound").length;
 
   return {
     ok: true,
-    thread: latest
-      ? {
-          ...mapThreadRow({
-            ...data[data.length - 1],
-            thread_id: normalizedThreadId,
-            message_count: messages.length,
-          }),
-          messages,
-          property_context: null,
-          prospect_context: null,
-          ai_summary: null,
-          sms_thread_id: null,
-        }
-      : null,
+    thread: {
+      ...mapThreadRow({
+        thread_id: normalizedThreadId,
+        email_address: normalizedThreadId,
+        subject: last.subject,
+        last_message_at: last.sent_at || last.created_at,
+        body_preview: last.email_body,
+        message_count: messages.length,
+        folder: lower(last.direction) === "inbound" ? "new_replies" : "sent",
+        unread: lower(last.direction) === "inbound",
+      }),
+      messages,
+      inbound_count: inboundCount,
+      outbound_count: messages.length - inboundCount,
+      property_context: null,
+      prospect_context: null,
+      ai_summary: null,
+      sms_thread_id: null,
+    },
     messages,
   };
 }
@@ -445,7 +593,50 @@ export async function saveEmailDraft(payload = {}) {
     updated_at: nowIso(),
   };
 
-  const { data, error } = await db.from("email_drafts").insert(draft).select("*").maybeSingle();
+  /**
+   * Drafts live in the PROVISIONED queue as queue_status='draft'.
+   *
+   * This wrote to `email_drafts`, which does not exist in this database, so
+   * saving a draft always failed. The provisioned public.email_queue is the
+   * one outbound store, so a draft is simply a queue row that dispatch does
+   * not pick up.
+   *
+   * §19 — A DRAFT MUST NEVER TRANSMIT. That is structural here, not a flag:
+   * the dispatcher selects on queue_status, 'draft' is not a dispatchable
+   * status, and nothing in this function calls the provider. Re-saving the
+   * same draft_key UPDATES the row rather than queueing a second copy, so
+   * autosave cannot accumulate sends.
+   */
+  const draftRow = {
+    queue_key: `draft:${draft.draft_key}`,
+    queue_status: "draft",
+    to_email: draft.to_email,
+    from_email: draft.from_email || null,
+    subject: draft.subject,
+    email_body: draft.html_body || draft.text_body || null,
+    template_id: draft.template_id,
+    prospect_id: draft.prospect_id,
+    property_id: draft.property_id,
+    master_owner_id: draft.master_owner_id,
+    metadata: {
+      ...(draft.metadata || {}),
+      draft_key: draft.draft_key,
+      direction: "outbound",
+      from_name: draft.from_name,
+      template_key: draft.template_key,
+      text_body: draft.text_body,
+      is_draft: true,
+    },
+    created_at: draft.created_at,
+    updated_at: draft.updated_at,
+  };
+
+  const { data, error } = await db
+    .from("email_queue")
+    .upsert(draftRow, { onConflict: "queue_key" })
+    .select("*")
+    .maybeSingle();
+
   if (error) {
     return {
       ok: false,
@@ -457,21 +648,41 @@ export async function saveEmailDraft(payload = {}) {
   return {
     ok: true,
     draft_id: clean(data?.id) || null,
-    draft: data || draft,
+    draft_key: draft.draft_key,
+    status: "draft",
+    sent: false,
+    draft: data || draftRow,
     message: "Draft saved",
   };
 }
 
+/**
+ * public.email_senders stores the address in `from_email`, not `sender_email`.
+ * A lookup by "sender_email" therefore fails with a phantom-column error, and
+ * because the caller swallows the error it would silently report "no sender
+ * configured" even once a sender row existed. The column name is mapped to
+ * the real schema, and a failed READ is distinguished from "not found" so a
+ * broken query can never masquerade as an absent sender.
+ */
+const SENDER_COLUMN_ALIASES = {
+  sender_email: "from_email",
+  email: "from_email",
+};
+
 async function lookupSenderByColumn(db, column, value) {
   if (!clean(value)) return null;
+  const realColumn = SENDER_COLUMN_ALIASES[column] || column;
   const { data, error } = await db
     .from("email_senders")
     .select("*")
-    .eq(column, value)
+    .eq(realColumn, value)
     .eq("is_active", true)
     .maybeSingle();
 
-  if (error) return null;
+  if (error) {
+    // Surfaced rather than folded into null, which would read as "no sender".
+    return { __lookup_failed: true, error };
+  }
   return data || null;
 }
 
@@ -512,6 +723,16 @@ async function resolveSenderIdentity(payload = {}) {
     } catch {
       sender = null;
     }
+  }
+
+  if (sender?.__lookup_failed) {
+    return { ok: false, reason: "sender_lookup_failed", error: sender.error };
+  }
+
+  // email_senders.from_email is the real column; expose it under the name the
+  // rest of this function already uses.
+  if (sender && !sender.sender_email && sender.from_email) {
+    sender = { ...sender, sender_email: sender.from_email };
   }
 
   if (sender?.sender_email) {
@@ -606,35 +827,148 @@ export async function checkEmailSuppression(email) {
   return { ok: true, suppressed: false, reason: "none", suppression: null };
 }
 
-async function insertEmailMessage(db, row) {
-  const { data, error } = await db.from("email_messages").insert(row).select("*").maybeSingle();
-  if (error) return { ok: false, error };
-  return { ok: true, message: data || row };
+/**
+ * The durable outbound record.
+ *
+ * This wrote to `email_messages`, which does not exist in this database, so
+ * every manual send failed with email_message_insert_failed. It now writes the
+ * PROVISIONED queue, public.email_queue, mapped to its real columns.
+ *
+ * Note what does NOT need a column: thread identity. A thread is keyed by the
+ * counterparty address (see get_email_threads), and that is `to_email` here,
+ * so the queue row already threads correctly without a thread_id column.
+ *
+ * §18 IDEMPOTENCY. email_queue.queue_key is UNIQUE. A repeated send therefore
+ * cannot create a second row — and because dispatch reads the queue, it cannot
+ * create a second provider send either. A duplicate is reported as
+ * `already_queued` rather than as an error, so a double-tap is a no-op instead
+ * of a second email.
+ */
+function buildEmailQueueKey({ recipient, subject, body, idempotencyKey }) {
+  if (clean(idempotencyKey)) return `manual:${clean(idempotencyKey)}`;
+  // With no explicit key, collapse repeats of the SAME content inside one
+  // minute (a double submit) while still allowing a deliberate resend later.
+  const bucket = Math.floor(Date.now() / 60000);
+  const digest = crypto
+    .createHash("sha256")
+    .update([lower(recipient), clean(subject), clean(body), bucket].join("|"))
+    .digest("hex")
+    .slice(0, 32);
+  return `manual:${digest}`;
 }
 
+async function insertEmailMessage(db, row) {
+  const queueRow = {
+    queue_key: row.queue_key,
+    queue_status: row.status,
+    to_email: row.to_email,
+    from_email: row.from_email,
+    subject: row.subject,
+    email_body: row.html_body || row.text_body || null,
+    template_id: row.template_id || null,
+    prospect_id: row.prospect_id || null,
+    property_id: row.property_id || null,
+    master_owner_id: row.master_owner_id || null,
+    scheduled_for: row.scheduled_for || null,
+    metadata: {
+      ...(row.metadata || {}),
+      thread_id: row.thread_id,
+      direction: row.direction,
+      from_name: row.from_name,
+      reply_to_email: row.reply_to_email,
+      template_key: row.template_key || null,
+      text_body: row.text_body || null,
+    },
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+
+  const { data, error } = await db.from("email_queue").insert(queueRow).select("*").maybeSingle();
+
+  if (error) {
+    // 23505 = unique violation on queue_key: this exact send is already queued.
+    const code = clean(error?.code);
+    if (code === "23505") {
+      const existing = await db
+        .from("email_queue")
+        .select("*")
+        .eq("queue_key", queueRow.queue_key)
+        .maybeSingle();
+      return { ok: true, message: existing.data || queueRow, already_queued: true };
+    }
+    return { ok: false, error };
+  }
+  return { ok: true, message: data || queueRow };
+}
+
+/** Patches the durable outbound row in the provisioned queue. */
 async function updateEmailMessage(db, id, patch) {
   if (!id) return { ok: false, error: "missing_message_id" };
-  const { error } = await db.from("email_messages").update(patch).eq("id", id);
+  const queuePatch = {};
+  if (patch.status !== undefined) queuePatch.queue_status = patch.status;
+  if (patch.provider_message_id !== undefined) queuePatch.provider_message_id = patch.provider_message_id;
+  if (patch.sent_at !== undefined) queuePatch.sent_at = patch.sent_at;
+  if (patch.delivered_at !== undefined) queuePatch.delivered_at = patch.delivered_at;
+  if (patch.failure_reason !== undefined) queuePatch.failed_reason = patch.failure_reason;
+  queuePatch.updated_at = nowIso();
+  const { error } = await db.from("email_queue").update(queuePatch).eq("id", id);
   return { ok: !error, error };
 }
 
-async function upsertEmailEvent(db, row) {
-  const { error } = await db.from("email_events").upsert(row, { onConflict: "event_key" });
-  if (!error) return { ok: true };
+/**
+ * The event ledger, written in the REAL public.email_events shape.
+ *
+ * The rows built by this module carry the Brevo-design columns
+ * (email_address, brevo_message_id, template_key, campaign_key, raw_payload,
+ * provider_event_id, message_id, event_at, updated_at). None of those exist on
+ * the provisioned table, whose columns are event_key, direction, event_type,
+ * to_email, from_email, subject, email_body, queue_id, metadata, created_at,
+ * sent_at, delivered_at, failed_at, error_message and the open/click counters.
+ * So every manual send failed with email_event_insert_failed.
+ *
+ * Unmapped fields are preserved inside `metadata` rather than dropped, so no
+ * provenance is lost. `event_key` is UNIQUE, which is what makes replaying the
+ * same provider event idempotent (§18).
+ */
+const EMAIL_EVENT_COLUMNS = new Set([
+  "event_key", "provider_message_id", "direction", "event_type", "to_email",
+  "from_email", "subject", "email_body", "queue_id", "metadata", "created_at",
+  "sent_at", "delivered_at", "failed_at", "error_message", "opened_at",
+  "open_count", "clicked_at", "click_count", "tracking_pixel_id",
+]);
 
-  const legacyRow = {
+function toEmailEventRow(row = {}) {
+  const mapped = {
     event_key: row.event_key,
-    brevo_message_id: row.brevo_message_id || row.provider_message_id || null,
-    email_address: row.email_address,
     event_type: row.event_type,
+    direction: row.direction || "outbound",
+    to_email: row.to_email || row.email_address || null,
+    from_email: row.from_email || null,
     subject: row.subject || null,
-    template_key: row.template_key || null,
-    campaign_key: row.campaign_key || null,
-    raw_payload: row.raw_payload || {},
+    email_body: row.email_body || row.html_body || row.text_body || null,
+    provider_message_id: row.provider_message_id || row.brevo_message_id || null,
+    queue_id: row.queue_id || row.message_id || null,
     created_at: row.created_at || nowIso(),
+    sent_at: row.sent_at || null,
+    delivered_at: row.delivered_at || null,
+    failed_at: row.failed_at || null,
+    error_message: row.error_message || row.failure_reason || null,
   };
-  const retry = await db.from("email_events").upsert(legacyRow, { onConflict: "event_key" });
-  return { ok: !retry.error, error: retry.error || error };
+
+  // Anything the real table has no column for is kept, not discarded.
+  const extras = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!EMAIL_EVENT_COLUMNS.has(key) && value !== undefined && value !== null) extras[key] = value;
+  }
+  mapped.metadata = { ...(maybeJson(row.metadata) || {}), ...extras };
+  return mapped;
+}
+
+async function upsertEmailEvent(db, row) {
+  const { error } = await db
+    .from("email_events")
+    .upsert(toEmailEventRow(row), { onConflict: "event_key" });
+  return { ok: !error, error };
 }
 
 async function upsertSuppression(db, normalizedEvent) {
@@ -682,11 +1016,17 @@ export async function sendManualEmail(payload = {}, options = {}) {
   if (!subject) return { ok: false, sent: false, error: "missing_subject" };
   if (!htmlBody && !textBody) return { ok: false, sent: false, error: "missing_body" };
 
-  const sender = await resolveSenderIdentity(payload);
-  if (!sender.ok) {
-    return { ok: false, sent: false, error: sender.reason || "sender_identity_missing" };
-  }
-
+  /**
+   * §13 — SUPPRESSION IS THE FIRST GATE.
+   *
+   * Sender identity used to be resolved first, so sending to a suppressed
+   * address reported `sender_identity_missing`. That is the wrong refusal: it
+   * hides the compliance reason behind a configuration one, and it means the
+   * suppression guard is only reached once a sender exists — configure a
+   * sender and you would discover the suppression only afterwards. Whether we
+   * may contact this person at all does not depend on which mailbox we would
+   * send from, so it is decided first and reported as itself.
+   */
   const suppression = await checkEmailSuppression(recipient.email);
   if (!suppression.ok) {
     return {
@@ -706,11 +1046,23 @@ export async function sendManualEmail(payload = {}, options = {}) {
     };
   }
 
+  const sender = await resolveSenderIdentity(payload);
+  if (!sender.ok) {
+    return { ok: false, sent: false, error: sender.reason || "sender_identity_missing" };
+  }
+
   const db = getDb();
   const threadId = clean(payload.thread_id) || `email:${recipient.email}`;
   const sendEnabled = bool(process.env.EMAIL_SEND_ENABLED);
   const dryRun = Boolean(options.dry_run || !sendEnabled);
+  const queueKey = buildEmailQueueKey({
+    recipient: recipient.email,
+    subject,
+    body: htmlBody || textBody || "",
+    idempotencyKey: payload.idempotency_key || payload.idempotencyKey,
+  });
   const messageRow = {
+    queue_key: queueKey,
     thread_id: threadId,
     direction: "outbound",
     status: dryRun ? "no_send" : "pending_send",
@@ -749,6 +1101,20 @@ export async function sendManualEmail(payload = {}, options = {}) {
   }
 
   const messageId = clean(inserted.message?.id);
+  // A duplicate submit is reported honestly and does NOT proceed to dispatch.
+  if (inserted.already_queued) {
+    return {
+      ok: true,
+      sent: false,
+      duplicate: true,
+      already_queued: true,
+      message_id: messageId,
+      thread_id: threadId,
+      queue_key: queueKey,
+      status: clean(inserted.message?.queue_status) || "queued",
+      reason: "already_queued",
+    };
+  }
   const requestedEvent = {
     event_key: eventKey("manual_email_requested", {
       messageId,
@@ -757,8 +1123,10 @@ export async function sendManualEmail(payload = {}, options = {}) {
       at: nowIso(),
     }),
     provider: "brevo",
-    message_id: messageId || null,
-    email_address: recipient.email,
+    direction: "outbound",
+    queue_id: messageId || null,
+    to_email: recipient.email,
+    from_email: sender.sender.email,
     event_type: dryRun ? "manual_send_no_send" : "manual_send_requested",
     subject,
     template_key: clean(payload.template_key) || null,
@@ -777,6 +1145,15 @@ export async function sendManualEmail(payload = {}, options = {}) {
       sent: false,
       error: "email_event_insert_failed",
       message: clean(eventInsert.error?.message) || "email_event_insert_failed",
+      // The queue row was already written. Leaving it at no_send/pending would
+      // strand a row that looks actionable, so it is marked failed with the
+      // reason rather than left to be picked up or counted as pending.
+      queue_row_marked_failed: (
+        await updateEmailMessage(db, messageId, {
+          status: "failed",
+          failure_reason: clean(eventInsert.error?.message) || "email_event_insert_failed",
+        })
+      ).ok,
       message_id: messageId || null,
     };
   }
@@ -964,9 +1341,22 @@ async function updateMessageForEvent(db, normalized) {
     patch.status = "sent";
   }
 
+  /**
+   * Provider callbacks reconcile against the provisioned queue by
+   * provider_message_id. Status names map onto the queue's own column; the
+   * timestamp columns the Brevo design assumed (opened_at/clicked_at/...) do
+   * not exist there, so those live on the event row in email_events, which is
+   * where the ledger belongs anyway.
+   */
+  const queuePatch = { updated_at: nowIso() };
+  if (patch.status !== undefined) queuePatch.queue_status = patch.status;
+  if (patch.sent_at !== undefined) queuePatch.sent_at = patch.sent_at;
+  if (patch.delivered_at !== undefined) queuePatch.delivered_at = patch.delivered_at;
+  if (patch.failure_reason !== undefined) queuePatch.failed_reason = patch.failure_reason;
+
   const { error } = await db
-    .from("email_messages")
-    .update(patch)
+    .from("email_queue")
+    .update(queuePatch)
     .eq("provider_message_id", providerMessageId);
 
   return { ok: !error, error };
@@ -1029,10 +1419,19 @@ export async function handleBrevoWebhookEvents(events = []) {
 
 export async function getEmailTemplates(filters = {}) {
   const db = getDb();
+  /**
+   * `email_templates` in production is the war-room/sms_templates shape:
+   * template_id, template_name, use_case, language, subject, template_body.
+   * There is NO template_key column, so ordering by it answered every request
+   * with `column email_templates.template_key does not exist` (HTTP 500).
+   * The unapplied Brevo migration would not have fixed it either: its CREATE
+   * TABLE is IF NOT EXISTS, so it is skipped for the table that already
+   * exists. The code reads the real shape instead.
+   */
   let query = db
     .from("email_templates")
     .select("*")
-    .order("template_key", { ascending: true })
+    .order("template_name", { ascending: true, nullsFirst: false })
     .limit(asLimit(filters.limit, 100, 500));
 
   if (filters.active !== false) query = query.eq("is_active", true);
@@ -1048,13 +1447,19 @@ export async function getEmailTemplates(filters = {}) {
   }
 
   const templates = (data || []).map((row) => ({
-    id: clean(row.id || row.template_key),
-    name: clean(row.name || row.stage_label || row.template_key),
+    id: clean(row.id || row.template_id || row.template_key),
+    name: clean(row.template_name || row.name || row.stage_label || row.template_id),
     category: lower(row.category || row.use_case || "first_touch"),
-    template_key: clean(row.template_key),
+    // Kept for callers that still read it; empty when the column is absent.
+    template_key: clean(row.template_key || row.template_id),
+    template_id: clean(row.template_id),
     subject: clean(row.subject),
-    body_preview: messagePreview(row.text_body || row.html_body),
-    body: clean(row.html_body || row.text_body),
+    // template_body is the real column; the others are legacy fallbacks.
+    body_preview: messagePreview(row.template_body || row.text_body || row.html_body),
+    body: clean(row.template_body || row.html_body || row.text_body),
+    language: clean(row.language) || null,
+    use_case: clean(row.use_case) || null,
+    stage_code: clean(row.stage_code) || null,
     merge_fields: Array.isArray(row.variables) ? row.variables : [],
     last_used: clean(row.last_used_at) || null,
     usage_count: Number(row.usage_count || 0),

@@ -1302,3 +1302,39 @@
   display: none !important;
 }
 
+
+/* ── Honest failure states ─────────────────────────────────────────────────
+   §30/§44: an error must be visibly different from an empty result. These
+   panels exist because the surface previously rendered a failed read as a
+   dashboard of zeros and an empty table. */
+.ecc__error-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(230, 90, 90, 0.34);
+  border-radius: 10px;
+  background: rgba(230, 90, 90, 0.07);
+}
+
+.ecc__error-title {
+  font: 600 13px/1.3 var(--nx-font, inherit);
+  color: #f09090;
+}
+
+.ecc__error-detail {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-2, rgba(232, 235, 242, 0.66));
+  overflow-wrap: anywhere;
+}
+
+/* Mobile: the panels sit inside a scrolling pane, so they must not force the
+   page wider than the viewport. */
+@media (max-width: 768px) {
+  .ecc__error-panel {
+    margin: 8px;
+    padding: 12px;
+  }
+}

@@ -13,7 +13,15 @@ export type EmailTab =
 export type EmailEligibility = 'eligible' | 'ineligible' | 'unknown'
 export type EmailVerifiedStatus = 'verified' | 'unverified' | 'risky' | 'invalid'
 export type BrevoContactStatus = 'active' | 'blacklisted' | 'unsubscribed' | 'blocked' | 'unknown'
-export type SuppressionReason = 'bounced' | 'unsubscribed' | 'complaint' | 'manual' | 'none'
+export type SuppressionReason = 'bounced' | 'unsubscribed' | 'complaint' | 'manual' | 'blocked' | 'none'
+
+/**
+ * Filter values accepted by the records query. 'suppressed' means "any active
+ * suppression, whatever the reason" — the query the suppression list actually
+ * needs, which was previously done by filtering one loaded page in JavaScript.
+ * 'blocked' is included because the server derives that bucket too.
+ */
+export type SuppressionFilter = SuppressionReason | 'suppressed' | 'all'
 export type InboxFolder = 'new_replies' | 'needs_review' | 'interested' | 'follow_up' | 'bounced' | 'suppressed' | 'unsubscribed' | 'all'
 export type EmailConfidence = 'high' | 'medium' | 'low' | 'unknown'
 
@@ -53,6 +61,12 @@ export interface EmailRecord {
   last_email_sent: string | null
   last_reply: string | null
   eligibility: EmailEligibility
+  /**
+   * Server-provided provenance: email_eligible, email_role, suppression_source
+   * and the REAL suppressed_at. Carried through so the UI never has to invent
+   * a value it was not given.
+   */
+  metadata: Record<string, unknown> | null
 }
 
 // ── Inbox / Threads ───────────────────────────────────────────────────────────
@@ -213,7 +227,7 @@ export interface RecordFilters {
   search: string
   eligibility: EmailEligibility | 'all'
   confidence: EmailConfidence | 'all'
-  suppression: SuppressionReason | 'all'
+  suppression: SuppressionFilter
   market: string | 'all'
 }
 

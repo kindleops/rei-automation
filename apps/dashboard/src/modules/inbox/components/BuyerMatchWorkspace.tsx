@@ -12,6 +12,7 @@ import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
 import { selectBuyerCandidate, setBuyerDisposition } from '../../../views/buyer-match/buyer-match-actions'
 import { readCandidatesEnvelope, type CandidatesEnvelope } from '../../../views/buyer-match/buyer-match-subject'
+import { decideAutoRun } from '../../../views/buyer-match/auto-run-policy'
 import type { DealContext } from '../../../lib/data/dealContext'
 import { resolveCoordinatesFromContext } from '../../../domain/comp-intelligence/coordinate-resolver'
 import {
@@ -2213,6 +2214,18 @@ export function BuyerMatchWorkspace({
   const [candidates, setCandidates]       = useState<BuyerMatchCandidate[]>([])
   const [purchases, setPurchases]         = useState<PurchaseEvent[]>([])
   const [latestRun, setLatestRun]         = useState<MatchRun | null>(null)
+  /**
+   * Has the run history actually been READ yet?
+   *
+   * `latestRun === null` means two different things — "no run exists" and "the
+   * runs query has not come back" — and the auto-run effect below treated both
+   * as "no run exists". Its 400ms timer therefore raced the query: locally the
+   * runs resolved first and nothing happened, but on production (2026-09-16)
+   * the query took longer and simply OPENING the page commissioned a fresh
+   * match run (5833ab4a) 63 minutes after the previous one, well inside the
+   * 6-hour staleness window. A read must never trigger a write.
+   */
+  const [runsLoaded, setRunsLoaded]       = useState(false)
   const [matchRuns, setMatchRuns]         = useState<MatchRun[]>([])
   const [selectedKey, setSelectedKey]     = useState<string | null>(null)
   const [gradeFilter, setGradeFilter]     = useState<GradeFilter>('all')
@@ -2268,6 +2281,7 @@ export function BuyerMatchWorkspace({
     if (!property_id) return
     if (paused) return
     let active = true
+    setRunsLoaded(false)
 
     const load = async () => {
       try {
@@ -2547,6 +2561,7 @@ export function BuyerMatchWorkspace({
         }))
         setMatchRuns(runsList)
         setLatestRun(runsList[0] ?? null)
+        setRunsLoaded(true)
         setDemandStats({ entity_count, match_count: runsList[0]?.candidate_count ?? 0 })
         if (rollup) setDemandRollup(rollup)
         if (comps.length > 0) setRealComps(comps)
@@ -2868,21 +2883,25 @@ export function BuyerMatchWorkspace({
   // Auto-run: load cached results on select; schedule match when missing or stale
   useEffect(() => {
     if (!property_id || paused || running) return
+    // Do not decide before the run history is known — see runsLoaded.
+    if (!runsLoaded) return
     if (autoRunRef.current === property_id) return
 
-    const staleMs = 6 * 60 * 60 * 1000
-    const isStale = latestRun
-      ? Date.now() - new Date(latestRun.created_at).getTime() > staleMs
-      : true
-    const needsRun = candidates.length === 0 && (isStale || !latestRun)
+    const decision = decideAutoRun({
+      runsLoaded,
+      latestRunCreatedAt: latestRun?.created_at ?? null,
+      candidateCount: candidates.length,
+      paused,
+      running,
+    })
 
-    if (needsRun) {
+    if (decision.run) {
       autoRunRef.current = property_id
       const timer = window.setTimeout(() => { void runMatch() }, 400)
       return () => window.clearTimeout(timer)
     }
     autoRunRef.current = property_id
-  }, [property_id, paused, running, latestRun, candidates.length, runMatch])
+  }, [property_id, paused, running, runsLoaded, latestRun, candidates.length, runMatch])
 
   const updateCandidateStatus = useCallback(async (id: string | undefined, updates: Record<string, unknown>) => {
     // Disposition updates go through the shared authority; anything else keeps
