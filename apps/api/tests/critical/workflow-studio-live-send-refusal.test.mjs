@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { updateDefinition, createDefinition } from '../../src/lib/domain/workflow-v2/definition-service.js';
 import { pauseEnrollment, resumeEnrollment, cancelEnrollment } from '../../src/lib/domain/workflow-v2/run-control.js';
+import { terminateEnrollment } from '../../src/lib/domain/workflow-v2/enrollment-service.js';
+import { runEnrollment } from '../../src/lib/domain/workflow-v2/workflow-runner.js';
 
 /**
  * WORKFLOW-STUDIO-MOBILE-LOCK-1 — arming Workflow Studio is refused, and
@@ -180,4 +182,84 @@ test('definition-level resume arms the definition, and says so by writing active
     !client.writes.some((w) => w.table === 'workflow_enrollments'),
     'it does not restart enrollments, whatever the button used to claim',
   );
+});
+
+// ───────────────────────────────────────── resume cannot bypass DNC (LOCK-1B)
+
+/**
+ * WORKFLOW-STUDIO-MOBILE-LOCK-1B §15 acceptance — Resume must not be a way
+ * around a suppression block.
+ *
+ * The guarantee is a chain, and each link is asserted separately because any one
+ * of them failing would restore the bypass:
+ *
+ *   1. a blocked guard TERMINATES the enrollment (status 'cancelled', reason
+ *      carried) — workflow-runner.js calls terminateEnrollment on a guard block
+ *   2. runEnrollment refuses anything outside ['active', 'waiting'], so a
+ *      cancelled enrollment can never be advanced again
+ *   3. definition-level Resume writes only workflow_definitions (asserted
+ *      above), so it cannot revive a cancelled enrollment
+ *
+ * Proven end-to-end against production in scripts/proof/workflow-runtime-proof.mjs:
+ * the run parked on a wait, the subject became DNC through the real signal
+ * (message_events.is_opt_out), the tick resumed, guard.suppression blocked, and
+ * nothing past the gate executed.
+ */
+test('a suppression block terminates the enrollment rather than parking it', async () => {
+  const writes = [];
+  const client = {
+    from() {
+      return {
+        update(patch) {
+          writes.push(patch);
+          return {
+            eq: () => ({
+              select: () => ({ single: () => Promise.resolve({ data: { id: 'enr-1', ...patch }, error: null }) }),
+            }),
+          };
+        },
+      };
+    },
+  };
+  const result = await terminateEnrollment('enr-1', 'guard_blocked:guard.suppression', { supabase: client });
+  assert.equal(result.ok, true);
+  assert.equal(writes[0].status, 'cancelled', 'a suppressed run must not stay runnable');
+  assert.equal(writes[0].waiting_reason, 'guard_blocked:guard.suppression', 'the reason is carried, not dropped');
+  assert.ok(writes[0].terminated_at, 'termination is timestamped');
+});
+
+test('a cancelled enrollment can never be advanced again', async () => {
+  for (const status of ['cancelled', 'completed', 'failed']) {
+    const client = {
+      from() {
+        return {
+          select() { return this; },
+          eq() { return this; },
+          maybeSingle: () => Promise.resolve({ data: { id: 'enr-1', status, workflow_definition_id: 'def-1' }, error: null }),
+          single: () => Promise.resolve({ data: { id: 'enr-1', status, workflow_definition_id: 'def-1' }, error: null }),
+        };
+      },
+    };
+    const result = await runEnrollment('enr-1', { supabase: client });
+    assert.equal(result.ok, false, status);
+    assert.equal(result.skipped, true, status);
+    assert.equal(result.reason, 'enrollment_not_runnable', `${status} must not be runnable`);
+  }
+});
+
+/** A paused run is skipped too, and for its own distinct reason. */
+test('a paused enrollment is skipped with its own reason', async () => {
+  const client = {
+    from() {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        maybeSingle: () => Promise.resolve({ data: { id: 'enr-1', status: 'paused', workflow_definition_id: 'def-1' }, error: null }),
+        single: () => Promise.resolve({ data: { id: 'enr-1', status: 'paused', workflow_definition_id: 'def-1' }, error: null }),
+      };
+    },
+  };
+  const result = await runEnrollment('enr-1', { supabase: client });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'enrollment_paused');
 });
