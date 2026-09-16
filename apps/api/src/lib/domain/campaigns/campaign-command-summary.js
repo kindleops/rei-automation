@@ -10,6 +10,7 @@ import {
   normalizeQueueProcessorMode,
 } from '@/lib/domain/queue/queue-control-safety.js'
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
+import { fetchAllCampaignTargets } from '@/lib/domain/campaigns/campaign-target-pagination.js'
 import {
   deriveOperatorState,
   deriveReadinessLabel,
@@ -184,12 +185,13 @@ async function aggregateTargetFunnel(supabase, campaignId) {
 }
 
 async function aggregateLanguageCoverage(supabase, campaignId) {
-  const { data, error } = await supabase
-    .from('campaign_targets')
-    .select('language,template_status,target_status')
-    .eq('campaign_id', campaignId)
-    .limit(50000)
-  if (error) throw error
+  // Paginated: `.limit(50000)` is clamped to max-rows (1000) with no error, so
+  // language coverage was computed from a 1000-row sample on larger campaigns.
+  const data = await fetchAllCampaignTargets(
+    supabase,
+    [campaignId],
+    'id,language,template_status,target_status',
+  )
 
   const byLang = new Map()
   for (const row of data || []) {

@@ -17,6 +17,7 @@ import {
 } from '@/lib/domain/queue/queue-control-safety.js'
 import { evaluateGlobalSendBrakeState } from '@/lib/domain/queue/queue-send-brake-state.js'
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
+import { fetchAllCampaignTargets } from '@/lib/domain/campaigns/campaign-target-pagination.js'
 
 async function launchCandidateFromTarget(target, campaign) {
   const { launchCandidateFromTarget: resolve } = await import('@/lib/domain/campaigns/campaign-automation-service.js')
@@ -120,16 +121,23 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     processorModeRaw,
     globalAutoEnqueue,
     outboundSms,
-    targetRowsRes,
+    // Paginated: `.limit(50000)` is clamped to max-rows (1000) with no error.
+    // Launch readiness counted ready/routable targets off that truncated set,
+    // so a campaign over 1000 targets reported a readiness verdict derived from
+    // a partial sample.
+    allTargetRows,
     senderRowsRes,
   ] = await Promise.all([
     loadSystemValue('queue_emergency_stop_at'),
     loadSystemValue('queue_processor_mode'),
     loadSystemValue('queue_auto_enqueue_enabled'),
     loadSystemValue('outbound_sms_enabled'),
-    supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).limit(50000),
+    fetchAllCampaignTargets(supabase, [campaignId], '*'),
     supabase.from('textgrid_numbers').select('id,market,status').eq('status', 'active').limit(500),
   ])
+  // Shaped like a PostgREST response so downstream `targetRowsRes.data` reads
+  // keep working unchanged.
+  const targetRowsRes = { data: allTargetRows, error: null }
 
   const brakeState = evaluateGlobalSendBrakeState({
     queue_emergency_stop_at: emergencyStop,

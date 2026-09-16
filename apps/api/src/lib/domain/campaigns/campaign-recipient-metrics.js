@@ -1,9 +1,48 @@
 /**
  * Recipient-grain metrics — separate from property-grain graph matches.
  * UI must never treat matched_property_count as sendable recipients.
+ *
+ * ── CANONICAL SEMANTICS: campaign_targets.status vs .target_status ──────────
+ *
+ * These are two different axes, both written at build time and easy to confuse.
+ * Observed value domains in production (2026-08-17, 2359 rows):
+ *
+ *   status         ready 2281 · blocked 73 · draft 5
+ *   target_status  planned 1619 · ready 612 · blocked 128
+ *
+ *   `status`        ELIGIBILITY, decided once when the target is built from the
+ *                   campaign target graph. "Was this row sendable in principle
+ *                   at build time." Written only by the insert at
+ *                   campaign-automation-service.js:5917. Never mutated after.
+ *
+ *   `target_status` DISPATCH LIFECYCLE. Where the row sits in the send funnel:
+ *                     ready   -> eligible, not yet hydrated into send_queue
+ *                     planned -> hydrated; a send_queue row was created for it
+ *                     blocked -> ineligible (block_reason explains why)
+ *                   Written at build (same value as `status`) and then advanced
+ *                   to 'planned' by the hydration step at :7069.
+ *
+ * `target_status` is the authoritative readiness signal for "can we send this
+ * now", because it is the axis the hydration selector filters on
+ * (`.eq('target_status','ready')`). `status` must NOT be used for readiness —
+ * it stays 'ready' forever even after a row has been dispatched, so counting it
+ * would report every historical target as sendable.
+ *
+ * Neither column ever carries sent/delivered/replied. Those live in send_queue;
+ * aggregateTargetFunnel's sent/delivered/replied buckets read statuses that this
+ * table does not produce and are therefore always zero.
+ *
+ * ── ORPHANS ─────────────────────────────────────────────────────────────────
+ * 'planned' is only meaningful while a live send_queue row exists. Nothing in
+ * the codebase moves target_status back out of 'planned', so when the queue row
+ * reaches a terminal state (cancelled/expired/failed) the target is stranded:
+ * invisible to the hydration selector (not 'ready') and with nothing left in the
+ * queue to send. See releaseOrphanedCampaignTargets in
+ * campaign-target-orphan-recovery.js.
  */
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { exactCount, fetchAllCampaignTargets } from './campaign-target-pagination.js'
 
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 
@@ -30,13 +69,11 @@ export async function computeCampaignRecipientMetrics(campaignId, deps = {}) {
     .select('id', { count: 'exact', head: true })
     .eq('campaign_id', campaignId)
 
-  const { data: statusRows } = await supabase
-    .from('campaign_targets')
-    .select('target_status')
-    .eq('campaign_id', campaignId)
+  // Paginated: an unbounded select is clamped to max-rows (1000) with no error.
+  const statusRows = await fetchAllCampaignTargets(supabase, [campaignId], 'id,target_status')
 
   const statusCounts = {}
-  for (const row of statusRows || []) {
+  for (const row of statusRows) {
     const key = clean(row.target_status) || 'unknown'
     statusCounts[key] = (statusCounts[key] || 0) + 1
   }
@@ -58,15 +95,13 @@ export async function computeCampaignRecipientMetrics(campaignId, deps = {}) {
 
   const matchedPropertyCount = await countGraphMatchesForCampaign(supabase, campaign, graphMatchCount)
 
-  const { data: queueRows } = await supabase
-    .from('send_queue')
-    .select('id,queue_status')
-    .eq('campaign_id', campaignId)
-
-  let canonicalQueued = 0
-  for (const row of queueRows || []) {
-    if (ACTIVE_QUEUE_STATUSES.includes(clean(row.queue_status).toLowerCase())) canonicalQueued += 1
-  }
+  // Counted server-side rather than fetched and tallied: this select had no
+  // limit at all, so it was clamped to max-rows (1000) and under-reported the
+  // live queue depth on any campaign with more than 1000 lifetime queue rows.
+  // `count: 'exact', head: true` is not subject to max-rows.
+  const canonicalQueued = await exactCount(supabase, 'send_queue', (q) =>
+    q.eq('campaign_id', campaignId).in('queue_status', ACTIVE_QUEUE_STATUSES),
+  )
 
   const readyRecipients = Number(statusCounts.ready || 0)
   const plannedRecipients = Number(statusCounts.planned || 0)
@@ -97,13 +132,14 @@ export async function computeCampaignRecipientMetrics(campaignId, deps = {}) {
 }
 
 async function computeDistinctCountsFallback(supabase, campaignId) {
-  const { data: targets } = await supabase
-    .from('campaign_targets')
-    .select('master_owner_id,prospect_id,phone_id,to_phone_number,suppression_status,routing_status,template_status,target_status,identity_status')
-    .eq('campaign_id', campaignId)
-    .limit(50000)
-
-  const rows = targets || []
+  // Paginated: `.limit(50000)` was clamped to max-rows (1000), so distinct
+  // owner/prospect/phone counts were undercounted on any campaign past 1000
+  // targets — and silently, since the clamp is not an error.
+  const rows = await fetchAllCampaignTargets(
+    supabase,
+    [campaignId],
+    'id,master_owner_id,prospect_id,phone_id,to_phone_number,suppression_status,routing_status,template_status,target_status,identity_status',
+  )
   const owners = new Set()
   const prospects = new Set()
   const phones = new Set()
@@ -167,15 +203,26 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
 export async function fetchCampaignTargetStatusCounts(campaignIds = [], deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   if (!campaignIds.length) return new Map()
-  const { data, error } = await supabase
-    .from('campaign_targets')
-    .select('campaign_id,target_status,block_reason')
-    .in('campaign_id', campaignIds)
-    .limit(100000)
-  if (error) throw error
+  /**
+   * Previously `.limit(100000)`, which PostgREST silently clamped to max-rows
+   * (1000). Because this is a single query spanning ALL campaigns, the cap was
+   * shared across them: with 2359 target rows the campaign list reported ~1000
+   * targets in total and attributed them to whichever campaigns happened to
+   * sort first. Miami showed "630 tgt / 10 ready" against a true 802 / 802.
+   */
+  const data = await fetchAllCampaignTargets(
+    supabase,
+    campaignIds,
+    'id,campaign_id,target_status,block_reason',
+  )
 
   const byCampaign = new Map()
-  for (const row of data || []) {
+  // Seed every requested campaign so one with zero targets reports 0 rather
+  // than being absent from the map (callers treat "missing" as "unknown").
+  for (const id of campaignIds) {
+    byCampaign.set(id, { statuses: {}, blocked: {}, total: 0 })
+  }
+  for (const row of data) {
     const id = row.campaign_id
     if (!byCampaign.has(id)) {
       byCampaign.set(id, { statuses: {}, blocked: {}, total: 0 })
