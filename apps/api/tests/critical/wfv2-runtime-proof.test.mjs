@@ -883,12 +883,23 @@ test("proof 12: ownership confirmation advances workflow stage", async () => {
     master_owners: [{ id: CTX.master_owner_id }],
   });
 
+  // The subject of this proof is the STAGE ADVANCE. Ownership now arrives as a
+  // CANONICAL classification rather than being read out of the message text —
+  // WORKFLOW-STUDIO-MOBILE-LOCK-1B §14 moved that authority to the classifier,
+  // because `'i own'` also matched "I own nothing here" and the ownership
+  // negation cases have their own canonical coverage.
+  supabase.rows.workflow_enrollments[0].context = {
+    ...supabase.rows.workflow_enrollments[0].context,
+    classification: { primary_intent: "ownership_confirmed", confidence: 0.94 },
+  };
   const extracted = extractConversationFacts({
     message: { id: "msg-001", body: "Yes, I own this property." },
     enrollment: supabase.rows.workflow_enrollments[0],
   });
   const ownershipFact = extracted.facts.find((f) => f.fact_key === "ownership_status");
   assert.equal(ownershipFact?.fact_value?.value, "owner_confirmed");
+  assert.equal(ownershipFact?.confidence, 0.94, "the classifier's confidence, not a regex constant");
+  assert.equal(ownershipFact?.provenance, "canonical_intent_mapping");
 
   const stageNode = {
     id: "node-stage-ownership",
@@ -916,15 +927,42 @@ test("proof 12: ownership confirmation advances workflow stage", async () => {
 // Proof 13 — asking price extracted
 // ─────────────────────────────────────────────
 
-test("proof 13: asking price is extracted from seller message", async () => {
-  const extracted = extractConversationFacts({
+/**
+ * WORKFLOW-STUDIO-MOBILE-LOCK-1B §14 restated this contract rather than removing
+ * it. Asking price still has to reach the workflow — that is the coverage worth
+ * keeping — but it now arrives from the canonical extractor instead of a regex
+ * over the seller's message.
+ *
+ * The old assertion read $275,000 straight out of message text with a
+ * hand-picked 0.85 confidence. That is the axis where Spanish "mil" has already
+ * been misread as a million once, and where the canonical engine carries scale
+ * and cue guards this function never had. Both halves are asserted here: the
+ * canonical value comes through, and the message text does not.
+ */
+test("proof 13: asking price reaches the workflow from canonical state, not from text", async () => {
+  const fromCanonical = extractConversationFacts({
+    message: { id: "msg-002", body: "I want $275,000 for the property." },
+    enrollment: {
+      id: ENROLL_ID,
+      context: { ...CTX, extracted_facts: { asking_price: { value: 275000, confidence: 0.85 } } },
+    },
+  });
+
+  const priceFact = fromCanonical.facts.find((f) => f.fact_key === "asking_price");
+  assert.equal(priceFact?.fact_value?.value, 275000);
+  assert.equal(priceFact?.confidence, 0.85, "the confidence the canonical extractor stated");
+  assert.equal(priceFact?.provenance, "enrollment_context");
+
+  const fromTextOnly = extractConversationFacts({
     message: { id: "msg-002", body: "I want $275,000 for the property." },
     enrollment: { id: ENROLL_ID, context: CTX },
   });
-
-  const priceFact = extracted.facts.find((f) => f.fact_key === "asking_price");
-  assert.equal(priceFact?.fact_value?.value, 275000);
-  assert.ok(priceFact.confidence >= 0.8);
+  assert.equal(
+    fromTextOnly.facts.find((f) => f.fact_key === "asking_price"),
+    undefined,
+    "a price must never be parsed out of the seller's message here",
+  );
+  assert.equal(fromTextOnly.reason, "no_canonical_classification_on_context");
 });
 
 // ─────────────────────────────────────────────
@@ -1227,10 +1265,20 @@ test("proof 13b: extracted asking price facts can be persisted", async () => {
     workflow_extracted_facts: [],
   });
 
+  // The subject of this proof is PERSISTENCE. The fact is sourced canonically so
+  // the test exercises the write path rather than the retired text parser.
+  supabase.rows.workflow_enrollments[0].context = {
+    ...supabase.rows.workflow_enrollments[0].context,
+    extracted_facts: { asking_price: { value: 310000, confidence: 0.85 } },
+  };
   const extracted = extractConversationFacts({
     message: { id: "msg-003", body: "Looking for $310,000 net." },
     enrollment: supabase.rows.workflow_enrollments[0],
   });
+  assert.equal(
+    extracted.facts.find((f) => f.fact_key === "asking_price")?.fact_value?.value,
+    310000,
+  );
 
   const saved = await persistExtractedFacts(
     supabase.rows.workflow_enrollments[0],
