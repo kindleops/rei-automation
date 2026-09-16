@@ -193,6 +193,7 @@ function buildQueueEvents(rows, startIso, endIso, seen, bucket) {
     const status = normalizeStatus(row.queue_status || row.status);
     const scheduledTs = asIso(row.scheduled_for || row.scheduled_at || row.send_at);
     const sentTs = asIso(row.sent_at);
+    const deliveredTs = asIso(row.delivered_at);
     const updatedTs = asIso(row.updated_at || row.created_at);
 
     if (scheduledTs && withinRange(scheduledTs, startIso, endIso) && ['scheduled', 'queued', 'pending', 'held', 'approval', 'retry'].includes(status)) {
@@ -235,6 +236,18 @@ function buildQueueEvents(rows, startIso, endIso, seen, bucket) {
 
     if (sentTs && withinRange(sentTs, startIso, endIso)) {
       const eventType = status === 'failed' ? 'sms_failed' : status === 'delivered' ? 'sms_delivered' : 'sms_sent';
+      /**
+       * §10 — a DELIVERED event belongs at the delivery moment.
+       *
+       * Both the sent and delivered events were timestamped with sent_at, so
+       * "SMS Delivered" sat on the calendar at the instant the message left
+       * instead of when the provider confirmed it. Measured 2026-09-16: 543 of
+       * 543 delivered events disagreed with send_queue.delivered_at, and a
+       * delivery that crosses local midnight landed on the wrong day. Falls
+       * back to sent_at when the provider never reported a delivery time.
+       */
+      const occurredTs = (eventType === 'sms_delivered' && deliveredTs) ? deliveredTs : sentTs;
+      if (!withinRange(occurredTs, startIso, endIso)) continue;
       pushEvent(bucket, seen, {
         event_id: buildEventId(['queue', queueId, eventType]),
         event_type: eventType,
@@ -243,7 +256,7 @@ function buildQueueEvents(rows, startIso, endIso, seen, bucket) {
         source_record_id: queueId,
         title: eventType === 'sms_failed' ? 'SMS Failed' : eventType === 'sms_delivered' ? 'SMS Delivered' : 'SMS Sent',
         description: clean(row.message_body || row.failed_reason) || 'Queue send event',
-        start_timestamp: sentTs,
+        start_timestamp: occurredTs,
         end_timestamp: null,
         all_day: false,
         timezone: clean(row.timezone) || 'UTC',

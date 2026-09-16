@@ -185,6 +185,96 @@ if (s1.length) {
     `${s1.length} S1 events checked against negotiation_state.next_action_due_at`)
 }
 
+// ── §33/§35 reconciliation with the source authorities
+console.log('')
+const pipelineEvents = events.filter((e) => e.event_type === 'pipeline_next_action' && e.opportunity_id)
+const queueEvents = events.filter((e) => e.source_table === 'send_queue' && e.source_record_id)
+
+if (pipelineEvents.length) {
+  const ids = [...new Set(pipelineEvents.map((e) => e.opportunity_id))].slice(0, 200)
+  const { data: opps } = await db
+    .from('acquisition_opportunities')
+    .select('id, next_action_due, opportunity_status')
+    .in('id', ids)
+  const byId = new Map((opps ?? []).map((o) => [o.id, o]))
+  const mismatched = pipelineEvents.filter((e) => {
+    const row = byId.get(e.opportunity_id)
+    if (!row?.next_action_due) return false
+    return new Date(row.next_action_due).getTime() !== new Date(e.start_timestamp).getTime()
+  })
+  check('§33 Pipeline next-action dates reconcile exactly with Calendar',
+    mismatched.length === 0,
+    `${mismatched.length} of ${pipelineEvents.length} disagree` +
+    (mismatched[0] ? ` e.g. opp ${mismatched[0].opportunity_id}: calendar=${mismatched[0].start_timestamp} pipeline=${byId.get(mismatched[0].opportunity_id)?.next_action_due}` : ''))
+
+  const statusMismatch = pipelineEvents.filter((e) => {
+    const row = byId.get(e.opportunity_id)
+    return row && String(row.opportunity_status) !== String(e.status)
+  })
+  check('§33 Calendar reports the opportunity status the pipeline holds',
+    statusMismatch.length === 0, `${statusMismatch.length} of ${pipelineEvents.length} disagree`)
+} else {
+  console.log('       no pipeline_next_action events in range to reconcile')
+}
+
+if (queueEvents.length) {
+  const ids = [...new Set(queueEvents.map((e) => e.source_record_id))]
+  const rows = []
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await db
+      .from('send_queue')
+      .select('id, scheduled_for, sent_at, delivered_at, queue_status')
+      .in('id', ids.slice(i, i + 200))
+    rows.push(...(data ?? []))
+  }
+  const byId = new Map(rows.map((r) => [String(r.id), r]))
+
+  /**
+   * Reconcile each event against the column that ACTUALLY defines its time.
+   *
+   * The first version of this check compared every send_queue-sourced event
+   * to `scheduled_for` and reported "200 of 667 disagree" — which was exactly
+   * the lookup slice, the tell that the comparison was wrong rather than the
+   * data. A sent event's time is sent_at, a delivered event's is delivered_at;
+   * only pending work is defined by scheduled_for.
+   */
+  const columnFor = (type) =>
+    type === 'sms_delivered' ? 'delivered_at'
+      : type === 'sms_sent' ? 'sent_at'
+        : 'scheduled_for'
+
+  const comparable = queueEvents.filter((e) => {
+    const row = byId.get(String(e.source_record_id))
+    return row && row[columnFor(e.event_type)]
+  })
+  const mismatched = comparable.filter((e) => {
+    const row = byId.get(String(e.source_record_id))
+    return new Date(row[columnFor(e.event_type)]).getTime() !== new Date(e.start_timestamp).getTime()
+  })
+
+  check('§35/§15 queue-sourced events reconcile with send_queue by row id and time',
+    mismatched.length === 0,
+    `${mismatched.length} of ${comparable.length} comparable disagree (of ${queueEvents.length} queue events)`)
+
+  const unresolved = queueEvents.filter((e) => !byId.has(String(e.source_record_id)))
+  check('§35 every queue-sourced event points at a real send_queue row',
+    unresolved.length === 0, `${unresolved.length} of ${queueEvents.length} unresolved`)
+
+  /**
+   * §15 is specifically about SCHEDULED communications. There are none to
+   * reconcile: send_queue holds 0 pending/scheduled rows because sends are
+   * off, so every queue event in range is historical. Stated rather than
+   * counted as a pass.
+   */
+  const scheduled = queueEvents.filter((e) => e.event_type === 'scheduled_sms')
+  console.log(`       scheduled_sms events to reconcile: ${scheduled.length} ` +
+    `(send_queue has no pending work, so this is vacuous — not evidence)`)
+  const types = [...new Set(queueEvents.map((e) => e.event_type))]
+  console.log(`       queue event types present: ${types.join(', ')}`)
+} else {
+  console.log('       no send_queue events in range to reconcile')
+}
+
 // ── §42 performance
 check('§42 the aggregate read is not a 10s+ wait',
   (res.performance?.total_ms ?? 0) < 8000, `${res.performance?.total_ms}ms across ${res.performance?.backend_queries} queries`)
