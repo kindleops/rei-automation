@@ -37,6 +37,7 @@ import {
 } from '@/lib/domain/workflow-v2/graph-mutations.js';
 import { SYSTEM_GRAPH_VERSION } from '@/lib/domain/workflow-v2/system-workflow-graphs.js';
 import { isSellerFacingNodeType } from '@/lib/domain/workflow-v2/seller-facing-nodes.js';
+import { describeTriggerBridge } from '@/lib/domain/workflow-v2/canonical-event-bridge.js';
 
 const OPERATIONAL_MODES = Object.freeze([
   'draft',
@@ -291,6 +292,55 @@ async function countRunsForWorkflow(workflowId, isLegacy, deps) {
   return count ?? 0;
 }
 
+/**
+ * §27 — the separate facts an operator needs, kept separate.
+ *
+ * "Published", "event bridge connected", "armed", "has ever fired" and "live
+ * sends disabled" are five different things. Collapsing them is what produced
+ * "Active Safe" for 14 workflows that could not run. None of these is a new
+ * status: workflow_definitions.status remains the lifecycle authority.
+ */
+function triggerBridgeFacts(workflow, bridgeByTrigger, canonicalActivity) {
+  if (workflow.is_legacy) {
+    return {
+      trigger_kind: null,
+      trigger_bridge_connected: false,
+      trigger_bridge_reason: 'legacy_workflow_read_only',
+      canonical_event_types: [],
+      canonical_event_count: null,
+      canonical_last_seen_at: null,
+    };
+  }
+
+  const bridge = bridgeByTrigger.get(clean(workflow.trigger_type))
+    ?? { trigger_kind: null, bridge_connected: false, reason: 'unrecognised_trigger_type', canonical_event_types: [] };
+
+  let count = null;
+  let lastSeen = null;
+  if (canonicalActivity?.available && bridge.canonical_event_types.length) {
+    count = 0;
+    for (const type of bridge.canonical_event_types) {
+      const observed = canonicalActivity.activity.get(type);
+      if (!observed) continue;
+      count += observed.event_count;
+      if (observed.last_seen_at && (!lastSeen || observed.last_seen_at > lastSeen)) {
+        lastSeen = observed.last_seen_at;
+      }
+    }
+  }
+
+  return {
+    trigger_kind: bridge.trigger_kind,
+    trigger_bridge_connected: bridge.bridge_connected,
+    trigger_bridge_reason: bridge.reason,
+    canonical_event_types: bridge.canonical_event_types,
+    // Occurrences of the CANONICAL events that feed this workflow. null means
+    // unmeasured; 0 means measured and never.
+    canonical_event_count: count,
+    canonical_last_seen_at: lastSeen,
+  };
+}
+
 function summarizeWorkflow(workflow, counts = {}) {
   const meta = workflow.metadata && typeof workflow.metadata === 'object' ? workflow.metadata : {};
   return {
@@ -311,6 +361,12 @@ function summarizeWorkflow(workflow, counts = {}) {
     trigger_event_count: 'trigger_event_count' in counts ? counts.trigger_event_count : null,
     trigger_last_seen_at: 'trigger_last_seen_at' in counts ? counts.trigger_last_seen_at : null,
     trigger_matchable: 'trigger_matchable' in counts ? counts.trigger_matchable : null,
+    trigger_kind: 'trigger_kind' in counts ? counts.trigger_kind : null,
+    trigger_bridge_connected: 'trigger_bridge_connected' in counts ? counts.trigger_bridge_connected : null,
+    trigger_bridge_reason: 'trigger_bridge_reason' in counts ? counts.trigger_bridge_reason : null,
+    canonical_event_types: 'canonical_event_types' in counts ? counts.canonical_event_types : [],
+    canonical_event_count: 'canonical_event_count' in counts ? counts.canonical_event_count : null,
+    canonical_last_seen_at: 'canonical_last_seen_at' in counts ? counts.canonical_last_seen_at : null,
     validation_state: counts.validation_state ?? workflow.validation_state ?? 'unknown',
     stage_code: meta.stage_code ?? meta.stage ?? null,
     touch_number: meta.touch_number ?? meta.touch ?? null,
@@ -424,6 +480,12 @@ export async function fetchWorkflowTriggerActivity(triggerTypes = [], deps = {})
 
   const { data, error } = await client.rpc('workflow_event_type_activity', { p_event_types: wanted });
   if (error) return { activity, available: false, error };
+  // NOTE: this reads workflow_events, Workflow V2's own inbox. It answers
+  // "has this event type reached the workflow engine", which before the bridge
+  // existed was always 0 for every `trigger.*`. The question an operator
+  // actually asks - "has the acquisition event that feeds this workflow ever
+  // occurred" - is one layer upstream, answered by
+  // fetchCanonicalTriggerActivity below.
 
   for (const row of data ?? []) {
     activity.set(clean(row.event_type), {
@@ -439,6 +501,39 @@ export async function fetchWorkflowTriggerActivity(triggerTypes = [], deps = {})
   return { activity, available: true };
 }
 
+/**
+ * Observed activity on the CANONICAL bus for a set of event types.
+ *
+ * §27. This is what makes "Event Bridge Connected" a measured claim rather than
+ * a hopeful label: the bridge can deliver a kind, and these are the real
+ * occurrences of the events that produce it.
+ *
+ * Unavailable yields `available: false` with an empty map - never a zero, which
+ * would read as "this trigger has never fired".
+ */
+export async function fetchCanonicalTriggerActivity(canonicalEventTypes = [], deps = {}) {
+  const wanted = [...new Set((canonicalEventTypes ?? []).map((t) => clean(t)).filter(Boolean))];
+  const activity = new Map();
+  if (!wanted.length) return { activity, available: true };
+
+  const client = db(deps);
+  if (typeof client?.rpc !== 'function') return { activity, available: false };
+
+  const { data, error } = await client.rpc('automation_event_type_activity', { p_event_types: wanted });
+  if (error) return { activity, available: false, error };
+
+  for (const row of data ?? []) {
+    activity.set(clean(row.event_type), {
+      event_count: Number(row.event_count ?? 0),
+      last_seen_at: row.last_seen_at ?? null,
+    });
+  }
+  for (const type of wanted) {
+    if (!activity.has(type)) activity.set(type, { event_count: 0, last_seen_at: null });
+  }
+  return { activity, available: true };
+}
+
 async function attachGraphCounts(workflows, deps) {
   const v2Ids = workflows.filter((w) => !w.is_legacy).map((w) => w.id);
   const legacyIds = workflows.filter((w) => w.is_legacy).map((w) => w.id);
@@ -447,7 +542,19 @@ async function attachGraphCounts(workflows, deps) {
   }
 
   const client = db(deps);
-  const [nodesRes, edgesRes, stepsRes, triggerActivity] = await Promise.all([
+  // §27. Every definition's stored trigger_type resolved to a kind, and the
+  // canonical event types that feed each kind. Pure functions — no query.
+  const bridgeByTrigger = new Map();
+  for (const w of workflows) {
+    const key = clean(w.trigger_type);
+    if (!key || bridgeByTrigger.has(key)) continue;
+    bridgeByTrigger.set(key, describeTriggerBridge(key));
+  }
+  const canonicalTypes = [
+    ...new Set([...bridgeByTrigger.values()].flatMap((b) => b.canonical_event_types)),
+  ];
+
+  const [nodesRes, edgesRes, stepsRes, triggerActivity, canonicalActivity] = await Promise.all([
     v2Ids.length
       ? client.from('workflow_nodes').select('workflow_definition_id, node_type').in('workflow_definition_id', v2Ids)
       : Promise.resolve({ data: [], error: null }),
@@ -462,6 +569,7 @@ async function attachGraphCounts(workflows, deps) {
       ? client.from('workflow_steps').select('workflow_id').in('workflow_id', legacyIds)
       : Promise.resolve({ data: [], error: null }),
     fetchWorkflowTriggerActivity(workflows.map((w) => w.trigger_type), deps),
+    fetchCanonicalTriggerActivity(canonicalTypes, deps),
   ]);
 
   // A failed count read must not become a zero. `send_node_count: 0` telling an
@@ -514,6 +622,7 @@ async function attachGraphCounts(workflows, deps) {
       // status='active'. A published workflow is therefore not selectable, which
       // is the single most load-bearing fact the list was not saying.
       trigger_matchable: w.is_legacy ? false : w.status === 'active',
+      ...triggerBridgeFacts(w, bridgeByTrigger, canonicalActivity),
     });
   });
 }

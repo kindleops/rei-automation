@@ -69,6 +69,24 @@ export interface Workflow {
   trigger_event_count?: number | null
   trigger_last_seen_at?: string | null
   trigger_matchable?: boolean | null
+  /**
+   * §27 (LOCK-1B) — the canonical event bridge, as five separate facts.
+   * "Published", "bridge connected", "armed", "has ever fired" and "live sends
+   * disabled" are different things; collapsing them is what produced
+   * "Active Safe" for 14 workflows that could not run.
+   *
+   * `trigger_kind` is the canonical vocabulary this workflow resolves to.
+   * `trigger_bridge_connected` means a real acquisition event type maps to that
+   * kind, so the bridge could deliver one. `canonical_event_count` is how many
+   * of those acquisition events have actually occurred (null = unmeasured or
+   * not applicable; `trigger_bridge_reason` says which).
+   */
+  trigger_kind?: string | null
+  trigger_bridge_connected?: boolean | null
+  trigger_bridge_reason?: string | null
+  canonical_event_types?: string[]
+  canonical_event_count?: number | null
+  canonical_last_seen_at?: string | null
   created_at?: string
   updated_at?: string
 }

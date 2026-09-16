@@ -2424,6 +2424,12 @@
   border-color: color-mix(in srgb, var(--wfs2-text-dim) 40%, transparent);
 }
 
+/* Operator-initiated by design, not a fault — informational, not a warning. */
+.wfs2-nav__row-activation.is-manual {
+  color: var(--wfs2-blue);
+  border-color: color-mix(in srgb, var(--wfs2-blue) 40%, transparent);
+}
+
 .wfs2-nav__row-activation.is-unknown {
   color: var(--wfs2-orange);
   border-color: color-mix(in srgb, var(--wfs2-orange) 50%, transparent);

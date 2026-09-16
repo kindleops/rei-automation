@@ -27,7 +27,7 @@ import type { Workflow } from '../workflow.types'
  * than defaulting to a reassuring answer.
  */
 
-export type ActivationTone = 'armed' | 'not-armed' | 'unsubscribed' | 'inert' | 'unknown'
+export type ActivationTone = 'armed' | 'not-armed' | 'unsubscribed' | 'inert' | 'unknown' | 'manual'
 
 export interface ActivationTruth {
   /** Short chip text for the row. */
@@ -66,39 +66,68 @@ export function describeActivation(workflow: Workflow): ActivationTruth {
     }
   }
 
-  const events = workflow.trigger_event_count
   const matchable = workflow.trigger_matchable
+  const bridged = workflow.trigger_bridge_connected
+  const kind = (workflow.trigger_kind ?? '').trim() || trigger
+  const canonicalCount = workflow.canonical_event_count
 
   // Unmeasured is its own answer. Do not let a failed read look like calm.
-  if (matchable == null || events == null) {
+  if (matchable == null || bridged == null) {
     return {
       label: 'unknown',
       tone: 'unknown',
-      detail: `Could not measure trigger activity for ${trigger}. Treat its state as unverified.`,
+      detail: `Could not resolve the event bridge for ${trigger}. Treat its state as unverified.`,
       canBeEntered: false,
     }
   }
 
-  // The status gate is the operator's nearest lever, so it leads — but the
-  // detail must still say that the trigger has never fired, otherwise flipping
-  // the status looks sufficient when it is not.
+  // No acquisition event maps to this trigger kind. That is not a fault: manual
+  // enrollment is operator-initiated by design. It is still a reason the
+  // workflow will never start by itself, so it has to be said.
+  if (!bridged && workflow.trigger_bridge_reason === 'no_canonical_event_maps_to_kind') {
+    return {
+      label: 'manual only',
+      tone: 'manual',
+      detail: `No acquisition event feeds ${kind}, so this workflow starts only when an operator enrolls a subject.`,
+      canBeEntered: matchable === true,
+    }
+  }
+
+  // The trigger vocabulary itself is unrecognised — nothing can ever deliver to
+  // it. This is a wiring gap, and naming the trigger is what makes it fixable.
+  if (!bridged) {
+    return {
+      label: 'no event source',
+      tone: 'unsubscribed',
+      detail: `${trigger} resolves to no acquisition event, so nothing can enter this workflow. It needs a canonical event mapped to it.`,
+      canBeEntered: false,
+    }
+  }
+
+  const volume = canonicalCount == null
+    ? `${kind} volume unmeasured`
+    : canonicalCount === 0
+      ? `no ${kind} event has occurred yet`
+      : `${canonicalCount} ${kind} event${canonicalCount === 1 ? '' : 's'} observed, last ${formatWhen(workflow.canonical_last_seen_at)}`
+
+  // Bridge connected but not armed: the common production state, and the one
+  // the surface used to call "Active Safe". The status gate is the operator's
+  // nearest lever, so it leads, with the real volume behind it so the decision
+  // is informed rather than blind.
   if (!matchable) {
-    const never = events === 0
     return {
       label: 'not armed',
       tone: 'not-armed',
-      detail: never
-        ? `Status is ${workflow.status}; the trigger matcher only selects status=active. ${trigger} has also never been emitted, so arming the status alone would not start it.`
-        : `Status is ${workflow.status}; the trigger matcher only selects status=active. ${trigger} last fired ${formatWhen(workflow.trigger_last_seen_at)}.`,
+      detail: `Event bridge connected — ${volume}. Status is ${workflow.status}, and the trigger matcher only selects status=active, so nothing enters this workflow yet.`,
       canBeEntered: false,
     }
   }
 
-  if (events === 0) {
+  if (canonicalCount === 0) {
     return {
-      label: 'never fired',
+      label: 'armed · idle',
       tone: 'unsubscribed',
-      detail: `Armed, but no ${trigger} event has ever been emitted, so nothing has entered this workflow.`,
+      detail: `Armed on ${kind}, but ${volume}, so nothing has entered this workflow.`,
       canBeEntered: true,
     }
   }
@@ -106,7 +135,7 @@ export function describeActivation(workflow: Workflow): ActivationTruth {
   return {
     label: 'armed',
     tone: 'armed',
-    detail: `Armed on ${trigger} — ${events} event${events === 1 ? '' : 's'} observed, last ${formatWhen(workflow.trigger_last_seen_at)}.`,
+    detail: `Armed on ${kind} — ${volume}.`,
     canBeEntered: true,
   }
 }

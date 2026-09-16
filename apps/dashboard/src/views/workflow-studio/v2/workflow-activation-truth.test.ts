@@ -18,14 +18,22 @@ const wf = (over: Partial<Workflow> = {}): Workflow => ({
  * active_safe, trigger.* subscribed, never emitted. This is the row that used
  * to read "active safe".
  */
-describe('a published workflow whose trigger never fires', () => {
+/**
+ * The production shape after LOCK-1B wired the bridge: the acquisition event
+ * that feeds this workflow occurs 1340 times, the bridge can deliver it, and
+ * the workflow is still `published` so nothing enters. All three facts have to
+ * survive into the copy.
+ */
+describe('a bridge-connected workflow that is not armed', () => {
   const production = wf({
     status: 'published',
     operational_mode: 'active_safe',
     trigger_type: 'trigger.inbound_message_received',
-    trigger_event_count: 0,
-    trigger_last_seen_at: null,
+    trigger_kind: 'inbound_reply',
     trigger_matchable: false,
+    trigger_bridge_connected: true,
+    canonical_event_count: 1340,
+    canonical_last_seen_at: '2026-09-12T19:34:13.903Z',
   })
 
   it('is not presented as active', () => {
@@ -35,10 +43,11 @@ describe('a published workflow whose trigger never fires', () => {
     expect(truth.tone).toBe('not-armed')
   })
 
-  it('says both why it cannot be entered and that arming is not enough', () => {
+  it('reports the bridge, the real volume, and why nothing enters', () => {
     const { detail } = describeActivation(production)
+    expect(detail).toMatch(/bridge connected/i)
+    expect(detail).toMatch(/1340 inbound_reply events observed/)
     expect(detail).toMatch(/status=active/)
-    expect(detail).toMatch(/never been emitted/)
   })
 
   it('never renders operational_mode as if it were the status', () => {
@@ -46,48 +55,103 @@ describe('a published workflow whose trigger never fires', () => {
   })
 })
 
-describe('the armed cases are distinguished from each other', () => {
-  it('armed with observed events reports the count and when', () => {
+describe('the bridge states are distinguished from each other', () => {
+  /** Manual enrollment is operator-initiated by design, not broken. */
+  it('a trigger no acquisition event feeds is reported as manual only', () => {
+    const truth = describeActivation(wf({
+      status: 'published',
+      trigger_type: 'trigger.manual_enrollment',
+      trigger_kind: 'manual_enrollment',
+      trigger_matchable: false,
+      trigger_bridge_connected: false,
+      trigger_bridge_reason: 'no_canonical_event_maps_to_kind',
+      canonical_event_count: null,
+    }))
+    expect(truth.tone).toBe('manual')
+    expect(truth.detail).toMatch(/operator enrolls/)
+  })
+
+  /** The real wiring gap: trigger.classification_completed. */
+  it('an unrecognised trigger is reported as having no event source', () => {
+    const truth = describeActivation(wf({
+      status: 'published',
+      trigger_type: 'trigger.classification_completed',
+      trigger_kind: null,
+      trigger_matchable: false,
+      trigger_bridge_connected: false,
+      trigger_bridge_reason: 'unrecognised_trigger_type',
+    }))
+    expect(truth.tone).toBe('unsubscribed')
+    expect(truth.label).toBe('no event source')
+    expect(truth.canBeEntered).toBe(false)
+    expect(truth.detail).toMatch(/needs a canonical event mapped/)
+  })
+
+  it('armed with real volume reports armed', () => {
     const truth = describeActivation(wf({
       status: 'active',
-      trigger_type: 'lead_entered_workflow',
-      trigger_event_count: 4,
-      trigger_last_seen_at: '2026-06-12T05:58:25.666Z',
+      trigger_type: 'test_runtime_proof',
+      trigger_kind: 'test_runtime_proof',
       trigger_matchable: true,
+      trigger_bridge_connected: true,
+      canonical_event_count: 2,
+      canonical_last_seen_at: '2026-09-16T04:24:00.000Z',
     }))
     expect(truth.tone).toBe('armed')
     expect(truth.canBeEntered).toBe(true)
-    expect(truth.detail).toMatch(/4 events observed/)
+    expect(truth.detail).toMatch(/2 test_runtime_proof events observed/)
   })
 
-  /** Armed is not the same as running. A subscriber with no traffic is idle. */
-  it('armed with zero observed events is reported as never fired, not as armed', () => {
+  /** Armed is not running. A subscriber with no traffic is idle, and says so. */
+  it('armed with zero volume is reported as idle, not as running', () => {
     const truth = describeActivation(wf({
       status: 'active',
-      trigger_type: 'trigger.offer_sent',
-      trigger_event_count: 0,
+      trigger_type: 'trigger.follow_up_due',
+      trigger_kind: 'follow_up_due',
       trigger_matchable: true,
+      trigger_bridge_connected: true,
+      canonical_event_count: 0,
     }))
     expect(truth.tone).toBe('unsubscribed')
-    expect(truth.label).toBe('never fired')
-    expect(truth.canBeEntered).toBe(true)
+    expect(truth.label).toBe('armed · idle')
+    expect(truth.detail).toMatch(/no follow_up_due event has occurred yet/)
   })
+})
 
+describe('counts are phrased correctly', () => {
   it('a single event is not pluralised', () => {
     const truth = describeActivation(wf({
-      status: 'active', trigger_type: 't', trigger_event_count: 1, trigger_matchable: true,
+      status: 'active',
+      trigger_type: 'stage_entered',
+      trigger_kind: 'stage_entered',
+      trigger_matchable: true,
+      trigger_bridge_connected: true,
+      canonical_event_count: 1,
     }))
-    expect(truth.detail).toMatch(/1 event observed/)
+    expect(truth.detail).toMatch(/1 stage_entered event observed/)
+  })
+
+  it('an unmeasured volume on a connected bridge is not reported as zero', () => {
+    const truth = describeActivation(wf({
+      status: 'active',
+      trigger_type: 'inbound_reply',
+      trigger_kind: 'inbound_reply',
+      trigger_matchable: true,
+      trigger_bridge_connected: true,
+      canonical_event_count: null,
+    }))
+    expect(truth.detail).toMatch(/volume unmeasured/)
+    expect(truth.detail).not.toMatch(/no inbound_reply event has occurred/)
   })
 })
 
 describe('absent truth is reported as absent', () => {
   /** A failed measurement must not render as calm. */
-  it('an unmeasured trigger count is unknown, not zero', () => {
+  it('an unresolvable bridge is unknown, not zero', () => {
     const truth = describeActivation(wf({
       trigger_type: 'trigger.offer_sent',
-      trigger_event_count: null,
       trigger_matchable: null,
+      trigger_bridge_connected: null,
     }))
     expect(truth.tone).toBe('unknown')
     expect(truth.canBeEntered).toBe(false)
@@ -103,7 +167,7 @@ describe('absent truth is reported as absent', () => {
   })
 
   it('a legacy workflow is read-only, never enterable', () => {
-    const truth = describeActivation(wf({ is_legacy: true, trigger_type: 'anything', trigger_matchable: true }))
+    const truth = describeActivation(wf({ is_legacy: true, trigger_type: 'anything', trigger_matchable: true, trigger_bridge_connected: true }))
     expect(truth.tone).toBe('inert')
     expect(truth.canBeEntered).toBe(false)
   })

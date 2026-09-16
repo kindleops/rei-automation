@@ -194,6 +194,44 @@ export function definitionTriggersForKind(kind) {
 }
 
 /**
+ * The CANONICAL event types that feed a given trigger kind.
+ *
+ * The inverse of CANONICAL_EVENT_TO_KIND, and the basis for the only honest
+ * answer to "has this workflow's trigger ever fired?". A published workflow
+ * subscribing `trigger.inbound_message_received` is fed by
+ * `inbound_message_received` (1340 occurrences); counting its own legacy name
+ * would report 0 forever.
+ */
+export function canonicalEventTypesForKind(kind) {
+  const target = clean(kind);
+  if (!target) return [];
+  return Object.entries(CANONICAL_EVENT_TO_KIND)
+    .filter(([, mapped]) => mapped === target)
+    .map(([eventType]) => eventType);
+}
+
+/**
+ * Can the bridge ever deliver anything to this stored trigger_type?
+ *
+ * Two separate ways to answer no, and they mean different things:
+ *   - the trigger_type resolves to no kind at all (unknown vocabulary)
+ *   - it resolves to a kind that no canonical event type maps to
+ * Both leave the workflow unreachable, but only the second is a wiring gap.
+ */
+export function describeTriggerBridge(triggerType) {
+  const raw = clean(triggerType);
+  const kind = triggerKindForDefinitionTrigger(raw);
+  if (!kind) {
+    return { trigger_kind: null, bridge_connected: false, reason: 'unrecognised_trigger_type', canonical_event_types: [] };
+  }
+  const canonicalTypes = canonicalEventTypesForKind(kind);
+  if (!canonicalTypes.length) {
+    return { trigger_kind: kind, bridge_connected: false, reason: 'no_canonical_event_maps_to_kind', canonical_event_types: [] };
+  }
+  return { trigger_kind: kind, bridge_connected: true, reason: null, canonical_event_types: canonicalTypes };
+}
+
+/**
  * Normalize a canonical `automation_events` row into the shape the workflow
  * event inbox expects, preserving the canonical event's own identity.
  *
@@ -237,6 +275,13 @@ export function canonicalEventToWorkflowEvent(automationEvent = {}) {
           ? `wf-bridge:${kind}:id:${canonicalId}`
           : null,
       context: {
+        // Producer payload FIRST, provenance second. The payload is producer
+        // data and must not be able to overwrite the audit trail — a payload
+        // carrying its own `canonical_event_id` would otherwise spoof which
+        // event a run came from, and idempotency and audit both read these.
+        ...(automationEvent.payload && typeof automationEvent.payload === 'object'
+          ? automationEvent.payload
+          : {}),
         canonical_event_id: canonicalId,
         canonical_event_type: eventType,
         canonical_dedupe_key: canonicalDedupe,
@@ -247,9 +292,6 @@ export function canonicalEventToWorkflowEvent(automationEvent = {}) {
         property_id: clean(automationEvent.property_id) || null,
         prospect_id: clean(automationEvent.prospect_id) || null,
         master_owner_id: clean(automationEvent.master_owner_id) || null,
-        ...(automationEvent.payload && typeof automationEvent.payload === 'object'
-          ? automationEvent.payload
-          : {}),
       },
     },
   };
