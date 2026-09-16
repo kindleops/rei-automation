@@ -464,6 +464,21 @@ async function attachGraphCounts(workflows, deps) {
     fetchWorkflowTriggerActivity(workflows.map((w) => w.trigger_type), deps),
   ]);
 
+  // A failed count read must not become a zero. `send_node_count: 0` telling an
+  // operator a workflow cannot text sellers is the defect this whole projection
+  // exists to fix, so an unreadable graph surfaces instead of being averaged
+  // down to "no sends".
+  for (const [what, res] of [['workflow_nodes', nodesRes], ['workflow_edges', edgesRes], ['workflow_steps', stepsRes]]) {
+    if (res?.error) {
+      // Spreading the PostgREST error onto the Error would overwrite `message`
+      // with its own, losing which count failed. Carry the code separately.
+      const failure = new Error(`${what} count failed: ${res.error.message ?? res.error}`);
+      failure.code = res.error.code ?? null;
+      failure.cause = res.error;
+      throw failure;
+    }
+  }
+
   const nodeCounts = {};
   const sendNodeCounts = {};
   const edgeCounts = {};

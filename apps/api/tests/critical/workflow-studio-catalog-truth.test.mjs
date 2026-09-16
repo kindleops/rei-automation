@@ -263,6 +263,43 @@ test('the catalog still names workflow_definitions as canonical and legacy as re
   assert.equal(result.legacy_read_only, true);
 });
 
+/**
+ * The fabricated zero has one more way in: a failed count read. If
+ * `workflow_nodes` errors and the result is treated as an empty list, every
+ * workflow reports 0 nodes and 0 send nodes — which is exactly the claim
+ * ("this workflow cannot text sellers") that must never be guessed.
+ */
+test('a failed node count surfaces instead of reporting zero send nodes', async () => {
+  const broken = {
+    rpc: async () => ({ data: [], error: null }),
+    from(table) {
+      const builder = {
+        select() { return builder; },
+        order() { return builder; },
+        limit() {
+          if (table === 'workflow_definitions') return Promise.resolve({ data: [definition()], error: null });
+          return Promise.resolve({ data: [], error: null });
+        },
+        in() {
+          if (table === 'workflow_nodes') {
+            return Promise.resolve({ data: null, error: { code: '42501', message: 'permission denied for table workflow_nodes' } });
+          }
+          return Promise.resolve({ data: [], error: null });
+        },
+      };
+      return builder;
+    },
+  };
+  await assert.rejects(
+    () => listWorkflowStudioCatalog({}, { supabase: broken }),
+    (thrown) => {
+      assert.match(String(thrown.message), /workflow_nodes count failed/);
+      assert.match(String(thrown.message), /permission denied/);
+      return true;
+    },
+  );
+});
+
 // ───────────────────────────────────────── legacy visibility (§3)
 
 /**
