@@ -36,6 +36,7 @@ import {
   insertNodeOnEdgeResolved,
 } from '@/lib/domain/workflow-v2/graph-mutations.js';
 import { SYSTEM_GRAPH_VERSION } from '@/lib/domain/workflow-v2/system-workflow-graphs.js';
+import { isSellerFacingNodeType } from '@/lib/domain/workflow-v2/seller-facing-nodes.js';
 
 const OPERATIONAL_MODES = Object.freeze([
   'draft',
@@ -300,6 +301,15 @@ function summarizeWorkflow(workflow, counts = {}) {
     is_locked: workflow.is_locked === true,
     node_count: counts.node_count ?? workflow.step_count ?? workflow.node_count ?? 0,
     edge_count: counts.edge_count ?? workflow.edge_count ?? 0,
+    // Whether a workflow can text a seller is the first thing an operator needs
+    // and the last thing that may be guessed. It was hardcoded to 0 for every
+    // workflow, including the four that genuinely carry a send node — so the
+    // surface reported "no sends" about workflows that send. Counted from the
+    // same node scan that produces node_count, at no extra query cost.
+    send_node_count: 'send_node_count' in counts ? counts.send_node_count : (workflow.send_node_count ?? 0),
+    trigger_event_count: 'trigger_event_count' in counts ? counts.trigger_event_count : null,
+    trigger_last_seen_at: 'trigger_last_seen_at' in counts ? counts.trigger_last_seen_at : null,
+    trigger_matchable: 'trigger_matchable' in counts ? counts.trigger_matchable : null,
     validation_state: counts.validation_state ?? workflow.validation_state ?? 'unknown',
     stage_code: meta.stage_code ?? meta.stage ?? null,
     touch_number: meta.touch_number ?? meta.touch ?? null,
@@ -362,8 +372,51 @@ function mapDefinitionToWorkflowSummary(definition) {
     is_system_template: definition.is_system_template === true,
     is_locked: definition.is_locked === true,
     step_count: 0,
-    send_node_count: 0,
   };
+}
+
+/**
+ * Observed activity for a set of trigger types.
+ *
+ * §3/§22. The catalog reported `operational_mode: 'active_safe'` for all 14
+ * published workflows, which the mobile row rendered as "active safe" — while
+ * measurement on 2026-09-15 showed ZERO events of any `trigger.*` type had ever
+ * been emitted. Production emits `opportunity_created` / `opportunity_stage_changed`
+ * / `opportunity_manual_override` / `opportunity_status_changed`; the workflow
+ * library subscribes `trigger.inbound_message_received` and friends. The two
+ * namespaces are disjoint, so none of those workflows can fire.
+ *
+ * This returns EVIDENCE, not a verdict, and deliberately does not introduce a
+ * second status authority: `workflow_definitions.status` remains the lifecycle
+ * truth. Callers get how many events of the trigger type have been seen and
+ * when, and decide how to phrase it.
+ *
+ * An unavailable aggregate yields `null`, never 0 — "we could not measure" must
+ * not render as "never happened".
+ */
+export async function fetchWorkflowTriggerActivity(triggerTypes = [], deps = {}) {
+  const wanted = [...new Set((triggerTypes ?? []).map((t) => clean(t)).filter(Boolean))];
+  const activity = new Map();
+  if (!wanted.length) return { activity, available: true };
+
+  const client = db(deps);
+  if (typeof client?.rpc !== 'function') return { activity, available: false };
+
+  const { data, error } = await client.rpc('workflow_event_type_activity', { p_event_types: wanted });
+  if (error) return { activity, available: false, error };
+
+  for (const row of data ?? []) {
+    activity.set(clean(row.event_type), {
+      event_count: Number(row.event_count ?? 0),
+      last_seen_at: row.last_seen_at ?? null,
+    });
+  }
+  // A trigger type with no row has genuinely never been observed. That is a
+  // measured zero, distinct from the unavailable case above.
+  for (const type of wanted) {
+    if (!activity.has(type)) activity.set(type, { event_count: 0, last_seen_at: null });
+  }
+  return { activity, available: true };
 }
 
 async function attachGraphCounts(workflows, deps) {
@@ -373,24 +426,44 @@ async function attachGraphCounts(workflows, deps) {
   }
 
   const client = db(deps);
-  const [nodesRes, edgesRes] = await Promise.all([
-    client.from('workflow_nodes').select('workflow_definition_id').in('workflow_definition_id', v2Ids),
+  const [nodesRes, edgesRes, triggerActivity] = await Promise.all([
+    client.from('workflow_nodes').select('workflow_definition_id, node_type').in('workflow_definition_id', v2Ids),
     client.from('workflow_edges').select('workflow_definition_id').in('workflow_definition_id', v2Ids),
+    fetchWorkflowTriggerActivity(workflows.map((w) => w.trigger_type), deps),
   ]);
 
   const nodeCounts = {};
+  const sendNodeCounts = {};
   const edgeCounts = {};
   for (const row of nodesRes.data ?? []) {
     nodeCounts[row.workflow_definition_id] = (nodeCounts[row.workflow_definition_id] ?? 0) + 1;
+    if (isSellerFacingNodeType(row.node_type)) {
+      sendNodeCounts[row.workflow_definition_id] = (sendNodeCounts[row.workflow_definition_id] ?? 0) + 1;
+    }
   }
   for (const row of edgesRes.data ?? []) {
     edgeCounts[row.workflow_definition_id] = (edgeCounts[row.workflow_definition_id] ?? 0) + 1;
   }
 
-  return workflows.map((w) => summarizeWorkflow(w, {
-    node_count: w.is_legacy ? (w.step_count ?? 0) : (nodeCounts[w.id] ?? 0),
-    edge_count: w.is_legacy ? 0 : (edgeCounts[w.id] ?? 0),
-  }));
+  return workflows.map((w) => {
+    const observed = triggerActivity.available
+      ? triggerActivity.activity.get(clean(w.trigger_type)) ?? null
+      : null;
+    return summarizeWorkflow(w, {
+      node_count: w.is_legacy ? (w.step_count ?? 0) : (nodeCounts[w.id] ?? 0),
+      edge_count: w.is_legacy ? 0 : (edgeCounts[w.id] ?? 0),
+      // A legacy workflow's steps are not graph nodes, so its send count is not
+      // measurable here; null says "unknown", which is not the same as zero.
+      send_node_count: w.is_legacy ? null : (sendNodeCounts[w.id] ?? 0),
+      // Evidence, not a verdict. null means unmeasured.
+      trigger_event_count: observed ? observed.event_count : null,
+      trigger_last_seen_at: observed ? observed.last_seen_at : null,
+      // execution-service.js matchDefinitions selects on trigger_type AND
+      // status='active'. A published workflow is therefore not selectable, which
+      // is the single most load-bearing fact the list was not saying.
+      trigger_matchable: w.is_legacy ? false : w.status === 'active',
+    });
+  });
 }
 
 async function attachStats(workflow, deps) {

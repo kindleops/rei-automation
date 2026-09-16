@@ -8,6 +8,7 @@
 
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { enqueueWorkflowSms, enqueueWorkflowEmail } from '@/lib/domain/workflow-v2/queue-adapter.js';
+import { SELLER_FACING_NODE_TYPES } from '@/lib/domain/workflow-v2/seller-facing-nodes.js';
 import {
   updateEnrollmentContext,
   enrollSubject,
@@ -763,6 +764,12 @@ async function executeCreateOrUpdateOpportunity(node, enrollment, deps) {
 // ─────────────────────────────────────────────
 // Main dispatcher
 // ─────────────────────────────────────────────
+
+/**
+ * Re-exported so the list of send-capable node types is discoverable from the
+ * dispatcher that implements them. The definition lives in the leaf module.
+ */
+export { SELLER_FACING_NODE_TYPES };
 
 export async function executeActionNode(node, enrollment, definition, deps = {}) {
   switch (node.node_type) {

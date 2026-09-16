@@ -2395,6 +2395,51 @@
   color: var(--wfs2-orange);
 }
 
+/* §3/§4 — measured activation truth, sat beside the lifecycle status.
+   Deliberately quiet: this is evidence an operator reads, not a call to action.
+   `not-armed` and `unsubscribed` are the common production states and must not
+   look like failures; `unknown` must not look like calm. */
+.wfs2-nav__row-activation,
+.wfs2-nav__row-sends {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--wfs2-border);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--wfs2-text-dim);
+}
+
+.wfs2-nav__row-activation.is-armed {
+  color: var(--wfs2-green);
+  border-color: color-mix(in srgb, var(--wfs2-green) 45%, transparent);
+}
+
+.wfs2-nav__row-activation.is-not-armed,
+.wfs2-nav__row-activation.is-unsubscribed {
+  color: var(--wfs2-text-dim);
+  border-color: color-mix(in srgb, var(--wfs2-text-dim) 40%, transparent);
+}
+
+.wfs2-nav__row-activation.is-unknown {
+  color: var(--wfs2-orange);
+  border-color: color-mix(in srgb, var(--wfs2-orange) 50%, transparent);
+}
+
+/* A workflow that can text a seller is the one fact worth colour. */
+.wfs2-nav__row-sends {
+  color: var(--wfs2-gold);
+  border-color: color-mix(in srgb, var(--wfs2-gold) 45%, transparent);
+}
+
+.wfs2-nav__row-sends.is-unknown {
+  color: var(--wfs2-orange);
+  border-color: color-mix(in srgb, var(--wfs2-orange) 50%, transparent);
+}
+
 .wfs2-nav__row-trail {
   display: flex;
   flex-direction: column;
@@ -3215,9 +3260,15 @@
    Mobile Studio Shell
 ========================= */
 
+/* §37 — the studio consumes the shell, it does not size itself from the
+   viewport. `.wfs2` is already `height: 100%; min-height: 0`, which is the
+   contract every other certified mobile surface follows: html owns the
+   standalone extent at 100lvh and descendants take 100% of it
+   (scripts/assert-mobile-fullscreen-contract.mjs). A 100dvh override
+   reintroduces the SHORT layout viewport into that ancestry — the exact failure
+   that probe measured at 1163 of a 1242 screen — and the guard only inspects
+   the standalone media block, so this rule escaped it. */
 .wfs2--mobile-studio {
-  height: 100dvh;
-  min-height: 100dvh;
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
@@ -3738,8 +3789,9 @@
   display: none;
 }
 
+/* Same reason: the shell's own base rule is already `height: 100%`. */
 .nx-fullscreen-app-shell.is-view-workflow_studio:has(.wfs2--mobile-studio) {
-  height: 100dvh;
+  height: 100%;
 }
 
 .wfs2-activity {

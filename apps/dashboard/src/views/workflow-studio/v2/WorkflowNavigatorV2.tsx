@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon, type IconName } from '../../../shared/icons'
 import type { Workflow } from '../workflow.types'
 import { workflowKindBadge } from './workflow-studio-mode'
+import { describeActivation, describeSendCapability, lifecycleLabel } from './workflow-activation-truth'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -65,13 +66,6 @@ function formatTimestamp(value?: string | null) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date)
-}
-
-function lifecycleLabel(workflow: Workflow) {
-  if (workflow.operational_mode) {
-    return workflow.operational_mode.replace(/_/g, ' ')
-  }
-  return workflow.status
 }
 
 function matchesTab(workflow: Workflow, tab: NavigatorTab) {
@@ -285,6 +279,11 @@ export const WorkflowNavigatorV2 = ({
     const stats = workflow.stats ?? {}
     const activeCount = stats.active ?? 0
     const waitingCount = stats.waiting ?? 0
+    // The list is served in lightweight mode, so `stats` is absent and the
+    // active/waiting KPI silently renders nothing. Activation truth is measured
+    // by the catalog itself and is always present.
+    const activation = describeActivation(workflow)
+    const sendCapability = describeSendCapability(workflow)
 
     return (
       <article
@@ -309,6 +308,24 @@ export const WorkflowNavigatorV2 = ({
               <span className={cls('wfs2-nav__row-status', `is-${workflow.status}`)}>
                 {lifecycleLabel(workflow)}
               </span>
+              <span
+                className={cls('wfs2-nav__row-activation', `is-${activation.tone}`)}
+                title={activation.detail}
+              >
+                {activation.label}
+              </span>
+              {sendCapability.sends !== false && (
+                <span
+                  className={cls('wfs2-nav__row-sends', sendCapability.sends === null && 'is-unknown')}
+                  title={
+                    sendCapability.sends === null
+                      ? 'Send capability could not be counted for this workflow.'
+                      : 'This workflow contains nodes that can text or email a seller.'
+                  }
+                >
+                  {sendCapability.label}
+                </span>
+              )}
             </span>
           </div>
           <div className="wfs2-nav__row-trail">

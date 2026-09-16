@@ -51,7 +51,24 @@ export interface Workflow {
   hourly_cap?: number | null
   timezone?: string | null
   step_count?: number
-  send_node_count?: number
+  node_count?: number
+  edge_count?: number
+  /** Nodes that can put a message in front of a seller (SELLER_FACING_NODE_TYPES). */
+  send_node_count?: number | null
+  trigger_type?: string | null
+  /**
+   * WORKFLOW-STUDIO-MOBILE-LOCK-1 §3/§22 — measured trigger evidence, not a
+   * second status authority. `status` remains the lifecycle truth.
+   *
+   * `trigger_event_count` is how many events of this workflow's trigger_type
+   * have ever been recorded; 0 means never observed, null means unmeasured.
+   * `trigger_matchable` reflects the real selector in
+   * workflow-v2/execution-service.js `matchDefinitions`, which requires
+   * status='active' — so a `published` workflow is not selectable at all.
+   */
+  trigger_event_count?: number | null
+  trigger_last_seen_at?: string | null
+  trigger_matchable?: boolean | null
   created_at?: string
   updated_at?: string
 }

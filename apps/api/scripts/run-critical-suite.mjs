@@ -48,6 +48,12 @@ for (let i = 0; i < CHUNKS; i += 1) {
   const res = spawnSync(
     process.execPath,
     [
+      // The Workflow Studio routing contract imports the dashboard app registry
+      // (.ts) so it executes the real resolver instead of grepping source. Node
+      // strips types by default from 23.6; the flag is what makes CI's Node 22
+      // behave the same way.
+      "--experimental-strip-types",
+      "--no-warnings=ExperimentalWarning",
       "--import",
       "./tests/register-aliases.mjs",
       "--test",

@@ -553,9 +553,16 @@ export const WorkflowStudioV2 = ({
       dryRunResult={dryRunResult}
       selectedNodeId={selectedNodeId}
       selectedNodeIds={selectedNodeIds}
-      onSelectNode={(id) => {
+      onSelectNode={(id, source) => {
         setSelectedNodeId(id)
-        if (isMobile && id) setMobilePanel('inspect')
+        // §38. The canvas pre-selects nodes[0] on load so the desktop inspector
+        // is not blank. On mobile that same callback force-opened the Inspect
+        // sheet, and `.wfs2-mobile-sheet-root` is a fixed, inset:0, z-index
+        // 10060 modal — so at 390px the studio came up with a sheet nobody
+        // asked for covering all five dock buttons. Measured: every dock
+        // button's centre hit-tested to `.wfs2-mobile-sheet__header`, leaving
+        // Flows, Nodes and Log unreachable. Only an operator tap opens a sheet.
+        if (isMobile && id && source !== 'auto') setMobilePanel('inspect')
       }}
       onSelectNodes={setSelectedNodeIds}
       busy={busy}

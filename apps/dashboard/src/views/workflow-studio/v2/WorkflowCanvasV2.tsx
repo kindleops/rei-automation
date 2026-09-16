@@ -548,7 +548,12 @@ interface WorkflowCanvasV2Props {
   dryRunResult: WorkflowDryRunResult | null
   selectedNodeId: string | null
   selectedNodeIds?: string[]
-  onSelectNode: (nodeId: string) => void
+  /**
+   * `source` distinguishes the canvas pre-selecting a node for convenience from
+   * the operator actually tapping one. On mobile the difference is load-bearing:
+   * a selection force-opens a full-screen sheet.
+   */
+  onSelectNode: (nodeId: string, source?: 'auto' | 'operator') => void
   onSelectNodes?: (nodeIds: string[]) => void
   onCreateDraft?: () => void
   onDropNode?: (item: WorkflowNodeLibraryItem, position: { x: number; y: number }) => void
@@ -640,8 +645,10 @@ export const WorkflowCanvasV2 = forwardRef<WorkflowCanvasV2Handle, WorkflowCanva
     return new Set<string>()
   }, [selectedNodeId, selectedNodeIds])
 
+  // Pre-select the entry node so the desktop inspector pane is never blank.
+  // Reported as 'auto' — the operator has not chosen anything yet.
   useEffect(() => {
-    if (!selectedNodeId && nodes[0]) onSelectNode(nodes[0].id)
+    if (!selectedNodeId && nodes[0]) onSelectNode(nodes[0].id, 'auto')
   }, [nodes, onSelectNode, selectedNodeId])
 
   const selectedConnections = useMemo(() => {
