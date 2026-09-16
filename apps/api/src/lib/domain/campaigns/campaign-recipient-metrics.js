@@ -165,6 +165,71 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
 }
 
 /**
+ * Canonical seller language for a set of graph candidates.
+ *
+ * The campaign target graph carries `language` NULL on all 169,797 rows — the
+ * seller schema it is built from has no language column at all. But language
+ * IS canonical elsewhere, keyed by identifiers the graph does carry:
+ *
+ *   prospects.language_preference   keyed by individual_key  (= seller_person_key)
+ *   master_owners.best_language     keyed by master_owner_id
+ *
+ * Together they cover 63,186 of 103,595 ready-capable rows (61%). The person
+ * key is preferred because it identifies the ACTUAL PERSON being messaged;
+ * the owner-level language is the fallback.
+ *
+ * This matters for safety, not just coverage: 20,859 owners are Spanish and
+ * ~4,000 speak another non-English language. Defaulting everyone to English
+ * because the graph is silent would silently send them the wrong language.
+ * Unknown stays unknown — nothing is written back to the graph.
+ */
+export async function fetchCanonicalLanguages(rows = [], deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const personKeys = [...new Set(rows.map((r) => clean(r?.seller_person_key)).filter(Boolean))]
+  const ownerIds = [...new Set(rows.map((r) => clean(r?.master_owner_id)).filter(Boolean))]
+  const byPerson = new Map()
+  const byOwner = new Map()
+  const CHUNK = 500
+
+  const page = async (table, column, select, ids, sink, valueKey) => {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK)
+      const { data, error } = await supabase.from(table).select(select).in(column, chunk)
+      // Language is an enrichment, never a gate: if it cannot be read the
+      // target simply has no stated language and the documented fallback
+      // applies. It must not block an otherwise-ready target.
+      if (error) return
+      for (const row of data || []) {
+        const value = clean(row?.[valueKey])
+        if (value) sink.set(clean(row[column]), value)
+      }
+    }
+  }
+
+  if (personKeys.length) {
+    await page('prospects', 'individual_key', 'individual_key,language_preference', personKeys, byPerson, 'language_preference')
+  }
+  if (ownerIds.length) {
+    await page('master_owners', 'master_owner_id', 'master_owner_id,best_language', ownerIds, byOwner, 'best_language')
+  }
+
+  return {
+    /** Known language for a row, or null when genuinely unknown. */
+    resolve(row = {}) {
+      const person = clean(row?.seller_person_key)
+      const owner = clean(row?.master_owner_id)
+      const fromPerson = person ? byPerson.get(person) : null
+      if (fromPerson) return { language: fromPerson, source: 'prospect' }
+      const fromOwner = owner ? byOwner.get(owner) : null
+      if (fromOwner) return { language: fromOwner, source: 'master_owner' }
+      return { language: null, source: 'unknown' }
+    },
+    personCount: byPerson.size,
+    ownerCount: byOwner.size,
+  }
+}
+
+/**
  * Canonical entity-contact review flags for a set of properties.
  *
  * `seller.property_entity_contact_v1` decides WHO to contact about an

@@ -25,7 +25,7 @@ import {
   BLOCK_REASONS,
 } from "@/lib/domain/outbound/presend-eligibility-engine.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
-import { resolveLanguage } from "@/lib/sms/language_aliases.js";
+import { isLanguagePolicyToken, resolveLanguage } from "@/lib/sms/language_aliases.js";
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
@@ -1499,7 +1499,8 @@ function normalizeLanguageToken(value = "") {
 }
 
 function filterTemplatesByPreferredLanguage(templates = [], selector = {}) {
-  const preferred_language = clean(pick(selector.preferred_language, selector.language, "English")) || "English";
+  const stated = pick(selector.preferred_language, selector.language);
+  const preferred_language = clean(isLanguagePolicyToken(stated) ? null : stated) || "English";
   const preferred_language_normalized = normalizeLanguageToken(preferred_language);
   const rows = Array.isArray(templates) ? templates : [];
   const matching = rows.filter((template) =>
@@ -3116,7 +3117,15 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     return deps.renderOutboundTemplate(candidate, options);
   }
 
-  const rawLanguage = clean(pick(candidate.best_language, candidate.language, "English")) || "English";
+  /**
+   * A policy token ('auto') is not a language. Reading it as one made
+   * `preferred_language: 'auto'`, which the fetch applies as
+   * `.ilike("language","auto")` — matching none of the 8,784 templates and
+   * starving every fallback level, including the universal English one.
+   * Treated as unstated so the existing English default applies.
+   */
+  const statedLanguage = pick(candidate.best_language, candidate.language);
+  const rawLanguage = clean(isLanguagePolicyToken(statedLanguage) ? null : statedLanguage) || "English";
   const languageResolved = resolveLanguage(rawLanguage);
 
   const selector = {

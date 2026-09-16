@@ -4161,7 +4161,21 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     market: clean(row.market) || clean(campaign?.market) || 'unknown',
     asset_type: clean(row.canonical_property_group || row.property_type || 'campaign_automation'),
     strategy: clean(campaign?.objective || options.template_use_case || row.template_use_case || 'ownership_check') || 'ownership_check',
-    language: clean(row.language || campaign?.language_policy || 'auto') || 'auto',
+    /**
+     * The seller's language, or nothing.
+     *
+     * This used to fall back to `campaign.language_policy`, which is 'auto' on
+     * every campaign — a policy token meaning "decide automatically", not a
+     * language. It was then applied as a literal template filter
+     * (`.ilike("language","auto")`), matching none of the 8,784 templates, so
+     * 997 of 2,587 existing targets are untemplatable for that reason alone.
+     *
+     * A known language now comes from the canonical sources; when it is
+     * genuinely unknown the field stays NULL and the resolver's documented
+     * English default applies. Storing 'auto' as if it were a language is what
+     * broke template selection.
+     */
+    language: clean(row.resolved_language || row.language) || null,
     source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
     daily_cap: campaign?.daily_cap || null,
     status: readiness.ready ? 'ready' : 'blocked',
@@ -4183,6 +4197,13 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
     block_reason: readiness.blockReason,
     metadata: {
       source: CAMPAIGN_TARGET_GRAPH_TABLE,
+      /**
+       * §6 — how the language was decided, so a rendered message can be
+       * explained without guessing: 'prospect' and 'master_owner' are canonical
+       * seller data; 'unknown' means the resolver's documented default applies.
+       */
+      language_source: clean(row.resolved_language_source) || (clean(row.language) ? 'graph' : 'unknown'),
+      language_known: Boolean(clean(row.resolved_language || row.language)),
       graph_id: row.graph_id || null,
       graph_source: row.graph_source || CAMPAIGN_TARGET_GRAPH_TABLE,
       property_export_id: row.property_export_id || null,
@@ -6178,13 +6199,24 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
      * it an entity contact the canonical source says needs review becomes
      * campaign-ready.
      */
-    const { fetchEntityContactReviewBlocks } = await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
-    const entityReview = await fetchEntityContactReviewBlocks(
-      eligibleRows.map((row) => row.property_id),
-      deps,
-    )
+    const { fetchEntityContactReviewBlocks, fetchCanonicalLanguages } =
+      await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+    const [entityReview, languages] = await Promise.all([
+      fetchEntityContactReviewBlocks(eligibleRows.map((row) => row.property_id), deps),
+      /**
+       * The graph has no language at all, but the seller's language IS
+       * canonical on prospects/master_owners under keys the graph carries.
+       * Resolved here, set-based, so a Spanish-speaking owner is not handed an
+       * English template by default. Unknown stays unknown — nothing is
+       * written back to the graph.
+       */
+      fetchCanonicalLanguages(eligibleRows, deps),
+    ])
     for (const row of eligibleRows) {
       row.entity_contact_requires_review = entityReview.blocked.has(clean(row.property_id))
+      const resolvedLanguage = languages.resolve(row)
+      row.resolved_language = resolvedLanguage.language
+      row.resolved_language_source = resolvedLanguage.source
     }
     const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(eligibleRows, { touch_number: touchNumber })
     const rows = recipients
@@ -6549,7 +6581,10 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     snapshot.owner_name,
     metadata.owner_name
   )
-  const languageRaw = firstNonEmpty(target.language, snapshot.language, campaign.language_policy, 'English')
+  // campaign.language_policy is deliberately NOT in this chain: it is a policy
+  // token ('auto'), and treating it as a language is what starved the template
+  // fetch. Unknown falls through to the resolver's documented English default.
+  const languageRaw = firstNonEmpty(target.language, snapshot.language, 'English')
   const languageResolved = resolveLanguage(languageRaw)
   const canonicalLanguage = languageResolved.canonical || languageRaw || 'English'
   const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
@@ -7257,16 +7292,26 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       recordSkip('missing_to_phone_number', target)
       continue
     }
-    if (!candidate.master_owner_id) {
-      recordSkip('missing_master_owner_id', target)
-      continue
-    }
+    /**
+     * Identity at queue time: a resolved PERSON and a reachable PHONE.
+     *
+     * This gate independently repeated the build-time linkage check against
+     * the same three retired `public.phones` identifiers, so repairing
+     * readiness alone was not enough — a target could be `target_status:
+     * ready` and still be skipped here as `missing_master_owner_id` /
+     * `missing_phone_id`. Measured on a real six-property graph cohort: 6
+     * ready targets, 0 planned, skipped 2 + 4 on exactly those two fields.
+     *
+     * `phone_id` needs no check at all: `canonical_e164` is verified directly
+     * above, and it is the reachability fact. `master_owner_id` is provenance
+     * "where applicable" — absent on ~74% of graph rows across every ownership
+     * shape — so it cannot gate outreach.
+     *
+     * The person check stays, and the canonical owner/identity verification
+     * below is untouched.
+     */
     if (!candidate.prospect_id) {
       recordSkip('missing_prospect_id', target)
-      continue
-    }
-    if (!candidate.phone_id) {
-      recordSkip('missing_phone_id', target)
       continue
     }
     // Canonical owner/identity verification — the same deterministic,
