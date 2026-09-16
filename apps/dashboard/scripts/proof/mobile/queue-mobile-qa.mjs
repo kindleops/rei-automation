@@ -84,6 +84,44 @@ const runCell = async (browser, width, theme) => {
     `${listMaps.length}: ${listMaps.slice(0, 2).join(' | ')}`)
   await page.screenshot({ path: path.join(OUT, `${width}-${theme}-list.png`) })
 
+  // ── §12 search, run BEFORE any detail sheet is opened. The first version
+  // ran it after opening a row, and the sheet covered the filter control so the
+  // click never landed — the same sequencing mistake as the Workflow Studio
+  // harness. Search operates on the list, so it belongs with the list.
+  //
+  // Reached through the mobile filter menu (`filtersOpen`),
+  // which hosts the only queue search input; the header's magnifier is the
+  // UNIVERSAL search, not this one. Asserted functionally: a term that matches
+  // fewer rows must actually narrow the list.
+  const beforeSearch = await page.evaluate(() => document.querySelectorAll('.qm-row__body').length)
+  const filterBtn = page.locator('button[aria-label="All rows"], .qm-bar__filters').first()
+  let searchResult = null
+  if (await filterBtn.count()) {
+    await filterBtn.click({ timeout: 12_000 }).catch(() => {})
+    await page.waitForTimeout(2500)
+    const input = page.locator('input[type="search"]').first()
+    if (await input.count()) {
+      await input.fill('zzzznomatchqueue')
+      await page.waitForTimeout(2500)
+      const narrowed = await page.evaluate(() => document.querySelectorAll('.qm-row__body').length)
+      await input.fill('')
+      await page.waitForTimeout(2000)
+      const restored = await page.evaluate(() => document.querySelectorAll('.qm-row__body').length)
+      searchResult = { beforeSearch, narrowed, restored }
+      check('search narrows the list on a non-matching term', narrowed < beforeSearch || narrowed === 0,
+        `${beforeSearch} -> ${narrowed}`)
+      check('clearing search restores the list', restored === beforeSearch,
+        `${narrowed} -> ${restored}, expected ${beforeSearch}`)
+    } else {
+      check('queue search input is reachable on mobile', false, 'no input[type=search] in the filter menu')
+    }
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.waitForTimeout(1200)
+  } else {
+    check('the mobile filter control is present', false, 'no filters button')
+  }
+
+
   // ── §12 detail: open one row, and the sheet may load its one property.
   watchingList = false
   const detailMaps = []
@@ -148,7 +186,7 @@ const runCell = async (browser, width, theme) => {
   check('no console errors', real.length === 0, real.slice(0, 2).join(' | '))
 
   await context.close()
-  return { cell: `${width}-${theme}`, loadMs, rows: p.rows, detail, listMaps, detailMaps, findings }
+  return { cell: `${width}-${theme}`, loadMs, rows: p.rows, detail, searchResult, listMaps, detailMaps, findings }
 }
 
 const browser = await chromium.launch()
