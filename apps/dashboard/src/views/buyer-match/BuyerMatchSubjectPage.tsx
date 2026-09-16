@@ -187,6 +187,10 @@ export function BuyerMatchSubjectPage() {
       <BuyerMatchWorkspace
         key={subject.propertyId}
         paneWidth="100"
+        // This route answers "who should buy this property?" — land on the
+        // buyer list, not the property overview. The Inbox mounting keeps its
+        // own default.
+        initialTab="buyers"
         propertySnapshot={{
           property_id: subject.propertyId,
           address: property?.address ?? subject.addressHint ?? 'Property Unknown',

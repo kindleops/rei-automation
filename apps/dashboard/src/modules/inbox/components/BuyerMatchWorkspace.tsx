@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { callBackend } from '../../../lib/api/backendClient'
 import { selectBuyerCandidate, setBuyerDisposition } from '../../../views/buyer-match/buyer-match-actions'
+import { readCandidatesEnvelope, type CandidatesEnvelope } from '../../../views/buyer-match/buyer-match-subject'
 import type { DealContext } from '../../../lib/data/dealContext'
 import { resolveCoordinatesFromContext } from '../../../domain/comp-intelligence/coordinate-resolver'
 import {
@@ -217,6 +218,14 @@ export interface BuyerMatchWorkspaceProps {
   onClearFilters?: () => void
   onPinSelected?: () => void
   paneWidth?: '25' | '50' | '75' | '100'
+  /**
+   * Which dossier tab to land on. Defaults to 'overview', which is right when
+   * the workspace is a panel inside the Inbox. The standalone /buyer-match
+   * route exists to answer "who should buy this property?", and the buyer list
+   * lives under the 'buyers' tab — landing on Overview there showed the
+   * operator a property summary and no buyers at all.
+   */
+  initialTab?: DossierTab
   apiBase?: string
   paused?: boolean
 }
@@ -2199,6 +2208,7 @@ export function BuyerMatchWorkspace({
   onPinSelected,
   paneWidth = '100',
   paused = false,
+  initialTab = 'overview',
 }: BuyerMatchWorkspaceProps) {
   const [candidates, setCandidates]       = useState<BuyerMatchCandidate[]>([])
   const [purchases, setPurchases]         = useState<PurchaseEvent[]>([])
@@ -2212,7 +2222,7 @@ export function BuyerMatchWorkspace({
   const [demandStats, setDemandStats]     = useState<{ entity_count: number; match_count: number } | null>(null)
   const [demandRollup, setDemandRollup]   = useState<BuyerDemandRollup | null>(null)
   const [realComps, setRealComps]         = useState<RealComp[]>([])
-  const [activeTab, setActiveTab]         = useState<DossierTab>('overview')
+  const [activeTab, setActiveTab]         = useState<DossierTab>(initialTab)
   const [intelState, setIntelState]       = useState<IntelRunState>({
     buyer_match_status: 'idle',
     comp_intel_status:  'idle',
@@ -2591,14 +2601,26 @@ export function BuyerMatchWorkspace({
     let active = true
     const load = async () => {
       try {
-        // Prefer the API route (uses service role + correct column names)
-        const res = await callBackend<{ candidates: any[]; total: number; run_id: string }>(
+        /**
+         * Prefer the API route (uses service role + correct column names).
+         *
+         * This branch never once succeeded. `callBackend` returns the whole
+         * response BODY as `res.data`, and the body is `{ ok, data: {...} }` —
+         * so `res.data.candidates` was undefined and `.length` threw a
+         * TypeError, which jumped straight to the catch below and skipped the
+         * Supabase fallback entirely. Measured 2026-09-16 against property
+         * 24613730: HTTP 200, 25 canonical candidates, 0 buyer cards rendered.
+         * The fallback only ran when the API FAILED, which is the opposite of
+         * what the code above it claims.
+         */
+        const res = await callBackend<CandidatesEnvelope<any>>(
           `/api/cockpit/buyer-match/property/${property_id}/candidates`
         )
         if (!active) return
-        if (res.ok && res.data.candidates.length > 0) {
+        const read = readCandidatesEnvelope<any>(res)
+        if (read.ok && read.candidates.length > 0) {
           // Merge candidate + buyer entity fields into flat object
-          const merged = res.data.candidates.map((c: any) => ({
+          const merged = read.candidates.map((c: any) => ({
             ...c.buyer_entities_v2,
             ...c,
             buyer_match_candidate_id: c.id || c.buyer_match_candidate_id,

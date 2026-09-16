@@ -59,8 +59,17 @@ const canonical = async (propertyId) => {
     })),
     distinctEntities: new Set((d.candidates ?? []).map((c) => c.buyer_entity_id)).size,
     rows: (d.candidates ?? []).length,
+    names: (d.candidates ?? []).map((c) => c.buyer_name),
   }
 }
+
+/**
+ * Read live rather than reusing the values captured at startup: a match run can
+ * be commissioned between then and now, and comparing the UI against a stale
+ * snapshot would report drift as a defect.
+ */
+const canonicalRunId = async (propertyId) => (await canonical(propertyId)).runId
+const canonicalNames = async (propertyId) => (await canonical(propertyId)).names
 
 const A = await canonical(SUBJECT_A.id)
 const B = await canonical(SUBJECT_B.id)
@@ -305,6 +314,55 @@ const runCell = async (width, theme) => {
   }
 }
 
+/**
+ * DESKTOP, on the same route.
+ *
+ * The same envelope defect broke desktop harder than mobile. `res.data.candidates.length`
+ * threw a TypeError on every success, which skipped past the Supabase fallback
+ * (that fallback only ran when the API FAILED), so the canonical workspace
+ * rendered zero buyers for a property with 25 matches.
+ *
+ * It had a second consequence. The auto-run condition is
+ * `candidates.length === 0 && (isStale || !latestRun)` — with candidates stuck
+ * at 0 forever, every desktop visit to a property commissioned a FRESH
+ * production match run. So this also proves the run id is stable across a
+ * load: a correct read makes the auto-run stand down.
+ */
+async function runDesktopCell() {
+  const check = (n, ok, d) => { if (!ok) findings.push({ cell: 'desktop-1600', n, d }); return ok }
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+  await context.addInitScript(setTheme, 'dark')
+  const page = await context.newPage()
+  const ran = []
+  page.on('console', (m) => { if (/runMatch:start|runMatch:complete/.test(m.text())) ran.push(m.text().slice(0, 60)) })
+
+  const runBefore = await canonicalRunId(SUBJECT_A.id)
+  await page.goto(`${BASE}/buyer-match?property_id=${SUBJECT_A.id}`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+  await page.waitForSelector('.aic-buyer-list', { timeout: 60_000 }).catch(() => {})
+  await page.waitForTimeout(6000)
+  const d = await page.evaluate(() => ({
+    cards: document.querySelectorAll('.aic-buyer-card__header').length,
+    toolbarCount: document.querySelector('.aic-buyer-toolbar__count')?.textContent?.trim() ?? null,
+    names: [...document.querySelectorAll('.aic-buyer-name')].map((e) => e.textContent.trim()),
+  }))
+  const runAfter = await canonicalRunId(SUBJECT_A.id)
+  const endpointOrder = await canonicalNames(SUBJECT_A.id)
+
+  check('desktop: the canonical workspace renders the buyer list', d.cards > 0, `${d.cards} cards`)
+  check('desktop: every candidate in the run is rendered',
+    d.cards === endpointOrder.length && d.toolbarCount === String(endpointOrder.length),
+    `${d.cards} cards, toolbar="${d.toolbarCount}", endpoint=${endpointOrder.length}`)
+  check('desktop: ordering is the engine\'s, not re-sorted',
+    d.names.slice(0, 5).join('|') === endpointOrder.slice(0, 5).join('|'),
+    `ui=${d.names.slice(0, 3).join(', ')} :: endpoint=${endpointOrder.slice(0, 3).join(', ')}`)
+  check('desktop: a cached run is NOT re-commissioned on load',
+    runBefore === runAfter && ran.length === 0,
+    `run ${String(runBefore).slice(0, 8)} -> ${String(runAfter).slice(0, 8)}, runMatch=${ran.length}`)
+  await page.screenshot({ path: path.join(OUT, 'desktop-A.png') })
+  await context.close()
+  return { cell: 'desktop-1600', cards: d.cards, runStable: runBefore === runAfter }
+}
+
 const results = []
 try {
   for (const w of WIDTHS) for (const t of THEMES) {
@@ -315,6 +373,11 @@ try {
     console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} A:${r.a.cards} cards  B:${r.b.cards} cards  maps A:${r.mapsA} B:${r.mapsB}  ${r.ms}ms  ${r.payload?.rows} rows/${Math.round((r.payload?.bytes ?? 0) / 1024)}KB`)
     for (const f of findings.slice(before)) console.log(`   ✗ ${f.n}: ${f.d}`)
   }
+  const beforeDesktop = findings.length
+  const dres = await runDesktopCell()
+  const badDesktop = findings.length - beforeDesktop
+  console.log(`${dres.cell.padEnd(12)} ${(badDesktop ? `FAIL (${badDesktop})` : 'PASS').padEnd(10)} ${dres.cards} buyer cards  run stable: ${dres.runStable}`)
+  for (const f of findings.slice(beforeDesktop)) console.log(`   ✗ ${f.n}: ${f.d}`)
 } finally { await browser.close() }
 
 console.log('')
