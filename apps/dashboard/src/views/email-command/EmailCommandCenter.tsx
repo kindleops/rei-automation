@@ -7,6 +7,15 @@ import {
   valueOr,
   type LoadState,
 } from './email-load-state'
+import {
+  describeSubject,
+  describeSubjectEmpty,
+  hasSubject,
+  resolveEmailSubject,
+  sameSubject,
+  type EmailSubject,
+} from './email-subject'
+import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { useMobileKeyboardInset } from '../../modules/mobile/useMobileKeyboardInset'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
@@ -134,7 +143,7 @@ const OverviewTab = ({ load }: { load: LoadState<EmailOverview> }) => {
 
 // ── Records Tab ───────────────────────────────────────────────────────────────
 
-const RecordsTab = ({ health }: { health: BrevoHealth | null }) => {
+const RecordsTab = ({ health, subject }: { health: BrevoHealth | null; subject: EmailSubject }) => {
   const [load, setLoad] = useState<LoadState<{ records: EmailRecord[]; count: number }>>(LOADING)
   const [search, setSearch] = useState('')
   const [eligFilter, setEligFilter] = useState<string>('all')
@@ -142,11 +151,18 @@ const RecordsTab = ({ health }: { health: BrevoHealth | null }) => {
   useEffect(() => {
     let active = true
     setLoad(LOADING)
-    getEmailRecords({ search, eligibility: eligFilter as any }).then((r) => {
+    getEmailRecords({
+      search,
+      eligibility: eligFilter as any,
+      property_id: subject.propertyId,
+      master_owner_id: subject.masterOwnerId,
+    }).then((r) => {
       if (active) setLoad(fromLoad(r))
     })
     return () => { active = false }
-  }, [search, eligFilter])
+    // The subject is a dependency: switching from A to B must re-query, never
+    // keep showing A's rows (§6).
+  }, [search, eligFilter, subject.propertyId, subject.masterOwnerId])
 
   const records = valueOr(load, { records: [], count: 0 }).records
   // §28 — the corpus count from the server, not records.length.
@@ -198,12 +214,14 @@ const RecordsTab = ({ health }: { health: BrevoHealth | null }) => {
         ) : records.length === 0 ? (
           <div className="ecc__empty-panel">
             <div className="ecc__empty-label">
-              {describeEmptyReason({
-                noun: 'records',
-                providerConnected: health?.connected ?? null,
-                providerMissing: health?.missing ?? null,
-                hasSubstrate: true,
-              })}
+              {hasSubject(subject)
+                ? describeSubjectEmpty(subject)
+                : describeEmptyReason({
+                    noun: 'records',
+                    providerConnected: health?.connected ?? null,
+                    providerMissing: health?.missing ?? null,
+                    hasSubstrate: true,
+                  })}
             </div>
           </div>
         ) : (
@@ -298,7 +316,7 @@ const FOLDERS: { id: InboxFolder; label: string }[] = [
   { id: 'all', label: 'All' },
 ]
 
-const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
+const InboxTab = ({ paneWidth = '100', health }: { paneWidth?: string; health: BrevoHealth | null }) => {
   const { isMobile } = useBreakpoint()
   const keyboardInset = useMobileKeyboardInset(isMobile)
   const [folder, setFolder] = useState<InboxFolder>('all')
@@ -371,9 +389,30 @@ const InboxTab = ({ paneWidth = '100' }: { paneWidth?: string }) => {
           ))}
         </div>
         <div className="ecc__thread-list">
-          {threads.length === 0 && (
-            <div style={{ padding: '20px 14px', fontSize: 12, color: 'var(--text-2)' }}>
-              No threads in this folder.
+          {/**
+            * §30 — four distinguishable outcomes. "No threads in this folder"
+            * was previously shown for all of them, including a failed read and
+            * an unconfigured provider.
+            */}
+          {load.status === 'loading' && (
+            <div className="ecc__loading">Loading conversations…</div>
+          )}
+          {load.status === 'failed' && (
+            <div className="ecc__error-panel" role="status">
+              <div className="ecc__error-title">Couldn't load conversations</div>
+              <div className="ecc__error-detail">{load.error}</div>
+            </div>
+          )}
+          {load.status === 'ready' && threads.length === 0 && (
+            <div className="ecc__empty-panel">
+              <div className="ecc__empty-label">
+                {describeEmptyReason({
+                  noun: 'conversations',
+                  providerConnected: health?.connected ?? null,
+                  providerMissing: health?.missing ?? null,
+                  hasSubstrate: false,
+                })}
+              </div>
             </div>
           )}
           {threads.map((t) => (
@@ -1175,6 +1214,25 @@ export const EmailCommandCenter = ({
 }: {
   paneWidth?: ViewWidthPercent
 }) => {
+  /**
+   * §5/§6 — the operator's current subject, re-read whenever the locator is
+   * republished or the URL changes. Selection happens in another view, so this
+   * listens rather than polls.
+   */
+  const [subject, setSubject] = useState<EmailSubject>(() => resolveEmailSubject())
+  useEffect(() => {
+    const sync = () => {
+      const next = resolveEmailSubject()
+      setSubject((prev) => (sameSubject(prev, next) ? prev : next))
+    }
+    window.addEventListener(PROPERTY_LOCATOR_EVENT, sync as EventListener)
+    window.addEventListener('popstate', sync)
+    return () => {
+      window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync as EventListener)
+      window.removeEventListener('popstate', sync)
+    }
+  }, [])
+
   const [activeTab, setActiveTab] = useState<EmailTab>('overview')
   const [overviewLoad, setOverviewLoad] = useState<LoadState<EmailOverview>>(LOADING)
   const [healthLoad, setHealthLoad] = useState<LoadState<BrevoHealth>>(LOADING)
@@ -1222,6 +1280,17 @@ export const EmailCommandCenter = ({
           </div>
         </div>
         <div className="ecc__header-right">
+          {/**
+            * §5 — the subject is stated, so the operator can see whether they
+            * are looking at one seller's addresses or the whole corpus. Without
+            * this a scoped view and an unscoped one are indistinguishable.
+            */}
+          {hasSubject(subject) && (
+            <div className="ecc__status-pill is-subject" title={describeSubject(subject)}>
+              <Icon name="home" size={11} />
+              <span className="ecc__subject-label">{describeSubject(subject)}</span>
+            </div>
+          )}
           {overview && (
             <div className={cls('ecc__status-pill', brevoStatusClass)}>
               <span className="ecc__dot" />
@@ -1260,8 +1329,8 @@ export const EmailCommandCenter = ({
 
       <main className="ecc__body">
         {activeTab === 'overview'     && <OverviewTab load={overviewLoad} />}
-        {activeTab === 'inbox'        && <InboxTab paneWidth={paneWidth} />}
-        {activeTab === 'records'      && <RecordsTab health={health} />}
+        {activeTab === 'inbox'        && <InboxTab paneWidth={paneWidth} health={health} />}
+        {activeTab === 'records'      && <RecordsTab health={health} subject={subject} />}
         {activeTab === 'composer'     && <ComposerTab templates={templates} health={health} />}
         {activeTab === 'campaigns'    && <CampaignsTab load={campaignsLoad} />}
         {activeTab === 'templates'    && <TemplatesTab templates={templates} />}

@@ -283,23 +283,24 @@ export async function getEmailRecords(filters = {}) {
     suppression = eligibility === "eligible" ? "none" : null;
   }
 
-  const args = {
-    p_limit: limit,
-    p_offset: offset,
+  // §5/§6 — the operator's current subject, scoped in the database so the
+  // page and the count agree. An unknown subject yields 0 rows rather than
+  // silently falling back to the whole corpus.
+  const propertyId = clean(filters.property_id || filters.propertyId) || null;
+  const masterOwnerId = clean(filters.master_owner_id || filters.masterOwnerId) || null;
+
+  const subjectArgs = { p_property_id: propertyId, p_master_owner_id: masterOwnerId };
+  const filterArgs = {
     p_search: search,
     p_market: market,
     p_suppression: suppression,
     p_confidence: confidence,
+    ...subjectArgs,
   };
 
   const [rowsRes, countRes] = await Promise.all([
-    db.rpc("get_email_records", args),
-    db.rpc("get_email_records_count", {
-      p_search: search,
-      p_market: market,
-      p_suppression: suppression,
-      p_confidence: confidence,
-    }),
+    db.rpc("get_email_records", { p_limit: limit, p_offset: offset, ...filterArgs }),
+    db.rpc("get_email_records_count", filterArgs),
   ]);
 
   if (rowsRes.error) {
@@ -330,6 +331,9 @@ export async function getEmailRecords(filters = {}) {
     count: Number(countRes.data ?? 0),
     limit,
     offset,
+    subject: propertyId || masterOwnerId
+      ? { property_id: propertyId, master_owner_id: masterOwnerId }
+      : null,
   };
 }
 

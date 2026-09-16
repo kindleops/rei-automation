@@ -153,6 +153,7 @@ export function clearPropertyLocator(): void {
  *                    from this locator on mount
  *   /queue           reads `property_id`
  *   /buyer-match     reads `property_id` (BuyerMatchSubjectPage)
+ *   /email-command   reads `property_id` (EmailCommandCenter subject scope)
  *
  * Campaign Command is deliberately absent: it has no property-focus concept at
  * any layer and no endpoint answers "which campaign contains this property", so
@@ -169,6 +170,11 @@ export function resolveDockDestination(path: string, locator: PropertyLocator | 
       return locator.propertyId ? `/entity-graph/property/${encodeURIComponent(locator.propertyId)}` : null
     case '/queue':
       return locator.propertyId ? `/queue?property_id=${encodeURIComponent(locator.propertyId)}` : null
+    case '/email-command':
+      // Email Command scopes its records to the subject's owner/property, so
+      // arriving from a seller shows THAT seller's addresses rather than the
+      // whole 165,655-row corpus. It reads `property_id`.
+      return locator.propertyId ? `/email-command?property_id=${encodeURIComponent(locator.propertyId)}` : null
     case '/buyer-match':
       // Buyer Match is property-SCOPED — it answers "who should buy this one?"
       // — so reaching it from the dock without the property was the defect that

@@ -1,0 +1,326 @@
+/**
+ * EMAIL-COMMAND-MOBILE-LOCK-1 §40 — Email Command on mobile.
+ *
+ * Canonical truth is read from Node first (service-side), then the UI is
+ * compared against it. Nothing here sends mail: the composer is exercised for
+ * reachability and refusal only, and the send control is never clicked.
+ */
+import { chromium } from 'playwright'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+
+const arg = (name, fallback) => {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`)) ??
+    (process.argv.includes(`--${name}`) ? process.argv[process.argv.indexOf(`--${name}`) + 1] : null)
+  return hit ? hit.replace(`--${name}=`, '') : fallback
+}
+
+const BASE = arg('base', 'http://localhost:5174')
+const list = (raw, fb) => (raw ? String(raw).split(',').map((v) => v.trim()).filter(Boolean) : fb)
+const WIDTHS = list(arg('width'), ['375', '390', '430']).map(Number)
+const THEMES = list(arg('theme'), ['dark', 'light'])
+if (WIDTHS.some((w) => !Number.isInteger(w))) throw new Error(`--width must be integers`)
+
+const OUT = path.resolve('artifacts/email-command-mobile')
+await fs.mkdir(OUT, { recursive: true })
+
+const readSecret = async () => {
+  for (const f of ['.env.local', '.env', '.env.development']) {
+    try {
+      const txt = await fs.readFile(path.resolve(process.cwd(), f), 'utf8')
+      const m = txt.match(/^\s*(?:VITE_)?OPS_DASHBOARD_SECRET\s*=\s*(.+)$/m)
+      if (m) return m[1].trim().replace(/^['"]|['"]$/g, '')
+    } catch { /* next */ }
+  }
+  return null
+}
+const secret = await readSecret()
+if (!secret) throw new Error('OPS_DASHBOARD_SECRET not found — canonical truth unreadable')
+
+const api = async (p) => {
+  const res = await fetch(`${BASE}/api/cockpit/email/${p}`, { headers: { 'x-ops-dashboard-secret': secret } })
+  const body = await res.json().catch(() => null)
+  return { status: res.status, body }
+}
+
+// ── canonical truth, service-side
+const overview = await api('overview')
+const records = await api('records?limit=25')
+const threads = await api('threads?limit=25')
+const templates = await api('templates')
+const health = await api('brevo-health')
+
+const TRUTH = {
+  total: overview.body?.total_emails ?? null,
+  eligible: overview.body?.email_eligible ?? null,
+  suppressed: overview.body?.suppressed ?? null,
+  recordCount: records.body?.count ?? null,
+  recordRows: (records.body?.records ?? []).length,
+  firstEmail: records.body?.records?.[0]?.email ?? null,
+  threadCount: threads.body?.count ?? null,
+  templateCount: (templates.body?.templates ?? []).length,
+  providerConnected: health.body?.connected ?? null,
+  providerMissing: health.body?.missing ?? [],
+  sendEnabled: health.body?.send_enabled ?? null,
+}
+
+console.log('\nCANONICAL TRUTH (service-side)')
+console.log(`  overview        http ${overview.status}  total=${TRUTH.total} eligible=${TRUTH.eligible} suppressed=${TRUTH.suppressed}`)
+console.log(`  records         http ${records.status}  count=${TRUTH.recordCount} rows=${TRUTH.recordRows} first=${TRUTH.firstEmail}`)
+console.log(`  threads         http ${threads.status}  count=${TRUTH.threadCount}`)
+console.log(`  templates       http ${templates.status}  count=${TRUTH.templateCount}`)
+console.log(`  provider        connected=${TRUTH.providerConnected} send_enabled=${TRUTH.sendEnabled} missing=${JSON.stringify(TRUTH.providerMissing)}`)
+
+// §3 — no endpoint may 500
+const findings = []
+for (const [name, r] of [['overview', overview], ['records', records], ['threads', threads], ['templates', templates], ['brevo-health', health]]) {
+  if (r.status !== 200) findings.push({ cell: 'api', n: `§3 ${name} must not fail`, d: `http ${r.status} ${JSON.stringify(r.body).slice(0, 160)}` })
+  else if (r.body?.ok === false) findings.push({ cell: 'api', n: `§3 ${name} envelope ok:false`, d: JSON.stringify(r.body).slice(0, 160) })
+}
+
+const setTheme = (t) => {
+  // addInitScript can run before the document element exists, and an
+  // unguarded setAttribute then throws a pageerror that looks like an
+  // application fault. The harness must not manufacture its own findings.
+  try { document.documentElement?.setAttribute('data-nexus-theme', t) } catch {}
+  try { localStorage.setItem('nexus:theme', t) } catch {}
+  try {
+    document.addEventListener('DOMContentLoaded', () => {
+      document.documentElement?.setAttribute('data-nexus-theme', t)
+    })
+  } catch {}
+}
+
+const browser = await chromium.launch()
+
+async function runCell(width, theme) {
+  const check = (n, ok, d) => { if (!ok) findings.push({ cell: `${width}-${theme}`, n, d }); return ok }
+  const context = await browser.newContext({
+    viewport: { width, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+  })
+  await context.addInitScript(setTheme, theme)
+  const page = await context.newPage()
+
+  const maps = []
+  page.on('request', (r) => {
+    const u = r.url()
+    if (/maps\.googleapis\.com|streetview|maps\/embed\/v1/.test(u)) maps.push(u.slice(0, 80))
+  })
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e).slice(0, 140)))
+
+  await page.goto(`${BASE}/email-command`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+  await page.waitForSelector('.ecc', { timeout: 60_000 })
+  await page.waitForTimeout(4500)
+
+  const openTab = async (label) => {
+    const btn = page.locator('.ecc__tab', { hasText: label }).first()
+    if (await btn.count() === 0) return false
+    await btn.click()
+    await page.waitForTimeout(1800)
+    return true
+  }
+
+  const probe = () => page.evaluate(() => {
+    const txt = (sel) => document.querySelector(sel)?.textContent?.replace(/\s+/g, ' ').trim() ?? null
+    const reach = (el) => {
+      if (!el) return null
+      const b = el.getBoundingClientRect()
+      if (b.width === 0 || b.height === 0) return { visible: false }
+      const hit = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2))
+      return { visible: true, w: Math.round(b.width), h: Math.round(b.height), reachable: !!(hit && (hit === el || el.contains(hit) || el.contains(hit))) }
+    }
+    return {
+      overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+      theme: document.documentElement.getAttribute('data-nexus-theme'),
+      isMobile: document.querySelector('.ecc__inbox')?.classList.contains('is-mobile') ?? null,
+      sectionTitle: txt('.ecc__section-title'),
+      errorPanels: [...document.querySelectorAll('.ecc__error-panel')].map((e) => e.textContent.replace(/\s+/g, ' ').trim().slice(0, 120)),
+      emptyLabels: [...document.querySelectorAll('.ecc__empty-label')].map((e) => e.textContent.replace(/\s+/g, ' ').trim().slice(0, 140)),
+      kpis: [...document.querySelectorAll('.ecc__kpi-value')].map((e) => e.textContent.trim()),
+      kpiLabels: [...document.querySelectorAll('.ecc__kpi-label')].map((e) => e.textContent.trim()),
+      statusPills: [...document.querySelectorAll('.ecc__status-pill')].map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
+      tableRows: document.querySelectorAll('.ecc__table tbody tr').length,
+      firstEmailCell: txt('.ecc__table tbody tr td:nth-child(2)'),
+      threadRows: document.querySelectorAll('.ecc__thread-list > div[class*="thread"]').length,
+      loading: document.querySelectorAll('.ecc__loading').length,
+      tabs: [...document.querySelectorAll('.ecc__tab')].map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
+      searchInput: reach(document.querySelector('.ecc__search input')),
+      dockTop: (() => { const e = document.querySelector('.nx-pinned-app-dock'); return e ? Math.round(e.getBoundingClientRect().top) : null })(),
+      rawVars: (document.body.innerText.match(/\{\{[\w.]+\}\}/g) || []).slice(0, 5),
+      bodyText: document.body.innerText.replace(/\s+/g, ' ').slice(0, 400),
+    }
+  })
+
+  // ── Overview
+  const ov = await probe()
+  check('theme applied', ov.theme === theme, `${ov.theme}`)
+  check('no page-wide horizontal overflow', ov.overflow === 0, `${ov.overflow}px`)
+  check('§28 overview shows the real corpus total, not a zero',
+    TRUTH.total === null || ov.kpis.some((v) => v.replace(/,/g, '') === String(TRUTH.total)),
+    `kpis=${ov.kpis.slice(0, 4).join(' | ')} canonical total=${TRUTH.total}`)
+  check('§30 no error panel on a healthy overview', ov.errorPanels.length === 0, ov.errorPanels.join(' | '))
+  check('§31 provider state is shown truthfully',
+    TRUTH.providerConnected === true
+      ? ov.statusPills.some((p) => /connected/i.test(p))
+      : ov.statusPills.some((p) => /disconnected|degraded/i.test(p)),
+    `pills=${ov.statusPills.join(' | ')} canonical connected=${TRUTH.providerConnected}`)
+  check('§31 an unconfigured provider is never shown as Connected',
+    !(TRUTH.providerConnected === false && ov.statusPills.some((p) => /\bconnected\b/i.test(p) && !/dis/i.test(p))),
+    `pills=${ov.statusPills.join(' | ')}`)
+  check('§21 no raw template variables anywhere on screen', ov.rawVars.length === 0, ov.rawVars.join(' '))
+  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-overview.png`) })
+
+  // ── Records
+  await openTab('Records')
+  const rec = await probe()
+  check('§28 the records header reports the corpus count, not the page length',
+    TRUTH.recordCount === null || (rec.sectionTitle || '').replace(/,/g, '').includes(String(TRUTH.recordCount)),
+    `title="${rec.sectionTitle}" canonical count=${TRUTH.recordCount}`)
+  check('records render rows from the canonical read',
+    TRUTH.recordRows === 0 || rec.tableRows > 0, `${rec.tableRows} rows, canonical page=${TRUTH.recordRows}`)
+  check('the first row matches canonical ordering',
+    !TRUTH.firstEmail || (rec.firstEmailCell || '').toLowerCase().includes(TRUTH.firstEmail.toLowerCase()),
+    `ui="${rec.firstEmailCell}" canonical="${TRUTH.firstEmail}"`)
+  check('§26 the records search control is reachable at its own centre',
+    rec.searchInput?.visible && rec.searchInput?.reachable, JSON.stringify(rec.searchInput))
+  check('§30 records show no error panel when the read succeeded',
+    records.status === 200 ? rec.errorPanels.length === 0 : true, rec.errorPanels.join(' | '))
+  check('no horizontal page overflow on records', rec.overflow === 0, `${rec.overflow}px`)
+  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-records.png`) })
+
+  // ── §26 server-backed search
+  if (rec.searchInput?.visible) {
+    await page.fill('.ecc__search input', 'yahoo.com')
+    await page.waitForTimeout(2600)
+    const searched = await probe()
+    const canonical = await api('records?limit=25&search=yahoo.com')
+    check('§26 search narrows against the server, not the loaded page',
+      canonical.body?.count > 0 && (searched.sectionTitle || '').replace(/,/g, '').includes(String(canonical.body.count)),
+      `title="${searched.sectionTitle}" canonical=${canonical.body?.count}`)
+    await page.fill('.ecc__search input', 'zzz-no-such-address-zzz')
+    await page.waitForTimeout(2600)
+    const none = await probe()
+    check('§30 a search with no matches says so and shows no error',
+      none.errorPanels.length === 0 && none.tableRows === 0 && none.emptyLabels.length > 0,
+      `rows=${none.tableRows} empty="${none.emptyLabels[0]}" errors=${none.errorPanels.length}`)
+    await page.fill('.ecc__search input', '')
+    await page.waitForTimeout(1800)
+  }
+
+  // ── Inbox
+  await openTab('Inbox')
+  const inbox = await probe()
+  check('§38 the inbox uses its mobile layout', inbox.isMobile === true, `is-mobile=${inbox.isMobile}`)
+  check('§30 an empty inbox explains WHY, not just "none"',
+    TRUTH.threadCount > 0
+      ? inbox.threadRows > 0
+      : inbox.emptyLabels.some((l) => /no connected email account|not configured|sent or received/i.test(l)),
+    `threads=${inbox.threadRows} canonical=${TRUTH.threadCount} empty="${inbox.emptyLabels.join(' | ')}"`)
+  check('§30 an empty inbox is not reported as an error',
+    threads.status === 200 ? inbox.errorPanels.length === 0 : true, inbox.errorPanels.join(' | '))
+  check('§37 the message list makes NO Street View request',
+    maps.length === 0, `${maps.length} requests :: ${maps.join(' | ') || 'none'}`)
+  check('no horizontal page overflow on the inbox', inbox.overflow === 0, `${inbox.overflow}px`)
+  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-inbox.png`) })
+
+  // ── Composer — reachability and refusal only. The send control is NEVER clicked.
+  await openTab('Composer')
+  await page.waitForTimeout(1200)
+  /**
+   * Scroll the send control into view before measuring it. Measuring a long
+   * form's footer at the initial scroll position reports "unreachable" for
+   * every control below the fold, which is not what §39 asks: the question is
+   * whether the operator CAN reach it and whether it clears the dock once
+   * reached.
+   */
+  await page.evaluate(() => {
+    const sendBtn = [...document.querySelectorAll('.ecc__compose-actions button, .ecc__btn')]
+      .find((b) => /^send/i.test((b.textContent || '').trim()))
+    sendBtn?.scrollIntoView({ block: 'center' })
+  })
+  await page.waitForTimeout(700)
+  const comp = await page.evaluate(() => {
+    const reach = (el) => {
+      if (!el) return { present: false }
+      const b = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2))
+      return {
+        present: true, w: Math.round(b.width), h: Math.round(b.height),
+        top: Math.round(b.top), bottom: Math.round(b.bottom),
+        reachable: !!(hit && (hit === el || el.contains(hit))),
+      }
+    }
+    const byLabel = (re) => [...document.querySelectorAll('.ecc__field')]
+      .find((f) => re.test(f.querySelector('.ecc__field-label')?.textContent || ''))
+    const inputIn = (f) => f?.querySelector('input, textarea, select') ?? null
+    const sendBtn = [...document.querySelectorAll('.ecc__compose-actions button, .ecc__btn')]
+      .find((b) => /^send/i.test((b.textContent || '').trim()))
+    return {
+      to: reach(inputIn(byLabel(/to|recipient/i))),
+      subject: reach(inputIn(byLabel(/subject/i))),
+      body: reach(document.querySelector('.ecc__composer textarea')),
+      send: sendBtn ? { ...reach(sendBtn), disabled: sendBtn.disabled, label: sendBtn.textContent.trim() } : { present: false },
+      dock: (() => { const e = document.querySelector('.nx-pinned-app-dock'); return e ? Math.round(e.getBoundingClientRect().top) : null })(),
+      overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+    }
+  })
+  check('§39 the recipient field is reachable', comp.to?.present && comp.to?.reachable, JSON.stringify(comp.to))
+  check('§39 the subject field is reachable', comp.subject?.present && comp.subject?.reachable, JSON.stringify(comp.subject))
+  check('§39 the body field is reachable', comp.body?.present && comp.body?.reachable, JSON.stringify(comp.body))
+  check('§39 the send control is reachable once scrolled to',
+    comp.send?.present && comp.send?.reachable, JSON.stringify(comp.send))
+  check('§39 the send control clears the bottom dock',
+    comp.dock === null || comp.send?.bottom == null || comp.send.bottom <= comp.dock,
+    `send bottom=${comp.send?.bottom} dock top=${comp.dock}`)
+  check('§11 send is disabled until the message is complete',
+    comp.send?.disabled === true, `disabled=${comp.send?.disabled} label="${comp.send?.label}"`)
+  check('no horizontal page overflow in the composer', comp.overflow === 0, `${comp.overflow}px`)
+  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-composer.png`) })
+
+  // ── §21 unresolved variables block the send
+  await page.fill('.ecc__composer textarea', 'Hi {{first_name}}, about your property.')
+  const toField = page.locator('.ecc__field input').first()
+  if (await toField.count()) await toField.fill('proof@example.invalid')
+  const subjField = page.locator('.ecc__field input').nth(1)
+  if (await subjField.count()) await subjField.fill('Proof subject')
+  await page.waitForTimeout(900)
+  const guarded = await page.evaluate(() => {
+    const sendBtn = [...document.querySelectorAll('.ecc__compose-actions button, .ecc__btn')]
+      .find((b) => /^send/i.test((b.textContent || '').trim()))
+    return { disabled: sendBtn?.disabled ?? null }
+  })
+  check('§21/§44 a body with unresolved {{variables}} cannot be sent',
+    guarded.disabled === true, `send disabled=${guarded.disabled}`)
+
+  // ── Campaigns: an absent authority must say so
+  await openTab('Campaigns')
+  const camp = await probe()
+  check('§27 the campaigns tab does not pretend to be an empty list',
+    camp.emptyLabels.some((l) => /not available|does not exist|no email campaign/i.test(l)) ||
+    camp.errorPanels.some((l) => /campaign/i.test(l)),
+    `empty="${camp.emptyLabels.join(' | ')}" errors="${camp.errorPanels.join(' | ')}"`)
+
+  check('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '))
+  await context.close()
+  return { cell: `${width}-${theme}`, maps: maps.length, rows: rec.tableRows }
+}
+
+const results = []
+try {
+  for (const w of WIDTHS) for (const t of THEMES) {
+    const before = findings.length
+    const r = await runCell(w, t)
+    results.push(r)
+    const bad = findings.filter((f) => f.cell === r.cell).length
+    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} records ${r.rows} rows  maps ${r.maps}`)
+    for (const f of findings.slice(before)) console.log(`   x ${f.n}: ${f.d}`)
+  }
+} finally { await browser.close() }
+
+console.log('')
+const badCells = new Set(findings.map((f) => f.cell))
+console.log(`EMAIL COMMAND MATRIX ${results.length - [...badCells].filter((c) => c !== 'api').length}/${results.length} cells clean, ${findings.length} finding(s)`)
+await fs.writeFile(path.join(OUT, 'result.json'), JSON.stringify({ TRUTH, results, findings }, null, 2))
+if (findings.length) process.exit(1)

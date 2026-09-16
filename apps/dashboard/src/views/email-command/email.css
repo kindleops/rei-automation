@@ -1338,3 +1338,23 @@
     padding: 12px;
   }
 }
+
+/* The subject chip. Truncates rather than widening the header — a long
+   address must never push the page into horizontal overflow on mobile. */
+.ecc__status-pill.is-subject {
+  max-width: 46vw;
+  min-width: 0;
+}
+
+.ecc__subject-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .ecc__status-pill.is-subject {
+    max-width: 58vw;
+  }
+}

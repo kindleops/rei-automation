@@ -147,7 +147,13 @@ export const getEmailOverview = async (): Promise<EmailLoad<EmailOverview>> => {
 }
 
 export const getEmailRecords = async (
-  filters?: Partial<RecordFilters> & { limit?: number; offset?: number },
+  filters?: Partial<RecordFilters> & {
+    limit?: number
+    offset?: number
+    /** §5/§6 — scope to the operator's current subject, server-side. */
+    property_id?: string | null
+    master_owner_id?: string | null
+  },
 ): Promise<EmailLoad<{ records: EmailRecord[]; count: number }>> => {
   const qs = new URLSearchParams()
   if (filters?.search) qs.set('search', filters.search)
@@ -158,6 +164,8 @@ export const getEmailRecords = async (
   // §29 — a page, never the whole 165k corpus.
   qs.set('limit', String(filters?.limit ?? 100))
   if (filters?.offset) qs.set('offset', String(filters.offset))
+  if (filters?.property_id) qs.set('property_id', filters.property_id)
+  if (filters?.master_owner_id) qs.set('master_owner_id', filters.master_owner_id)
 
   const read = readBody(await callBackend(`/api/cockpit/email/records?${qs.toString()}`))
   if (!read.ok) return read
