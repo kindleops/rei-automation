@@ -3411,6 +3411,16 @@
   min-height: 0;
 }
 
+/* §24 — the subject empty state fills the stage, because the alternative was
+   showing an unrelated workflow's canvas as if it were this subject's. */
+.wfs2-mobile-empty.is-subject-empty {
+  flex: 1;
+  align-content: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+}
+
 .wfs2-mobile-dock {
   flex-shrink: 0;
   padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));

@@ -1030,10 +1030,24 @@ async function loadRunPositions(definitionId, enrollmentIds, client) {
     stepsByRun.get(step.workflow_run_id).push(step);
   }
 
+  // An enrollment accumulates one RUN PER TICK — a wait ends a run, and the
+  // worker starts another when it resumes. So completed nodes must be merged
+  // across every run of the enrollment; taking only the latest run reported
+  // `completed: [guard_suppression, schedule_proof, notify_done]` and silently
+  // dropped `trig` and `wait_proof` from the tick before. Runs are ordered
+  // ascending, so the last one seen carries the position.
   for (const run of runRows) {
     const runSteps = stepsByRun.get(run.id) ?? [];
-    const completed = [];
+    const previous = positions.get(run.enrollment_id);
+    const completed = [...(previous?.completed_node_keys ?? [])];
+    // TRAVERSED is not COMPLETED, and the difference is load-bearing for a
+    // wait. A `waiting` step is not completed — the run is sitting on it — but
+    // once a later tick has moved past it the run demonstrably went through it.
+    // Completed stays strict so a parked wait is never marked done; traversed
+    // is what the canvas needs to draw the path the run actually took.
+    const traversed = [...(previous?.traversed_node_keys ?? [])];
     for (const step of runSteps) {
+      traversed.push(step.node_key);
       if (TERMINAL_STEP_STATUSES.has(clean(step.status))) completed.push(step.node_key);
     }
     // The position is the last step the engine wrote. For a parked run that is
@@ -1042,10 +1056,12 @@ async function loadRunPositions(definitionId, enrollmentIds, client) {
     positions.set(run.enrollment_id, {
       run_id: run.id,
       run_status: run.status,
-      started_at: run.started_at,
+      started_at: previous?.started_at ?? run.started_at,
       completed_at: run.completed_at,
-      step_count: runSteps.length,
+      run_count: (previous?.run_count ?? 0) + 1,
+      step_count: (previous?.step_count ?? 0) + runSteps.length,
       completed_node_keys: [...new Set(completed)],
+      traversed_node_keys: [...new Set(traversed)],
       current_step: last
         ? {
             node_id: last.node_id,
@@ -1055,11 +1071,137 @@ async function loadRunPositions(definitionId, enrollmentIds, client) {
             block_reason: last.block_reason ?? null,
             at: last.created_at,
           }
-        : null,
+        : previous?.current_step ?? null,
     });
   }
 
   return positions;
+}
+
+/**
+ * §24/§25 — what automation, if any, is running for ONE subject.
+ *
+ * THE DEFECT. Workflow Studio already knew when it had been opened from a
+ * subject: `applyUniversalContextToWorkflowStudio()` carries thread_key /
+ * property_id / master_owner_id from the cross-app carrier. But the load effect
+ * unconditionally ran `const first = rows[0]; loadSelected(first.id)`, so
+ * opening the Studio from a property with no automation displayed the FIRST
+ * workflow in the catalog — "Master Acquisition Orchestrator" — as though it
+ * were that property's automation. §24 forbids exactly that fallback.
+ *
+ * This answers the question honestly: the enrollments that actually exist for
+ * the subject, each with its durable run position. An empty list is a real
+ * answer and the caller must render it as one.
+ *
+ * Subject identity is the thread key, because that is what
+ * `workflow_enrollments.subject_id` holds — `emitOpportunityWorkflowEvent` and
+ * the canonical bridge both key on conversation_thread_id.
+ */
+export async function getWorkflowSubjectAutomation(input = {}, deps = {}) {
+  const client = db(deps);
+  const subjectIds = [...new Set(
+    [input.thread_key, input.subject_id, input.opportunity_id, input.property_id]
+      .map((v) => clean(v))
+      .filter(Boolean),
+  )];
+
+  if (!subjectIds.length) {
+    return { ok: false, status: 400, error: 'subject_required' };
+  }
+
+  const { data: enrollments, error } = await client
+    .from('workflow_enrollments')
+    .select('*')
+    .in('subject_id', subjectIds)
+    .order('enrolled_at', { ascending: false });
+  // A failed read must surface. "No automation" is a claim, and it must not be
+  // the thing an unreadable table looks like.
+  if (error) throw error;
+
+  const rows = enrollments ?? [];
+  if (!rows.length) {
+    return {
+      ok: true,
+      subject_ids: subjectIds,
+      enrollments: [],
+      workflows: [],
+      // The caller renders this verbatim rather than inventing copy.
+      empty_reason: 'no_automation_for_subject',
+    };
+  }
+
+  const definitionIds = [...new Set(rows.map((r) => r.workflow_definition_id).filter(Boolean))];
+  const [{ data: definitions }, { data: nodes }] = await Promise.all([
+    client
+      .from('workflow_definitions')
+      .select('id, name, definition_key, status, trigger_type, metadata, is_system_template, is_locked')
+      .in('id', definitionIds),
+    client
+      .from('workflow_nodes')
+      .select('id, workflow_definition_id, node_key, label, node_type')
+      .in('workflow_definition_id', definitionIds),
+  ]);
+
+  const nodesById = new Map((nodes ?? []).map((n) => [n.id, n]));
+  const definitionsById = new Map((definitions ?? []).map((d) => [d.id, d]));
+
+  // One position lookup per definition, reusing the same history-derived
+  // projection the live state uses, so the two surfaces cannot disagree.
+  const positionsByDefinition = new Map();
+  for (const definitionId of definitionIds) {
+    const forDefinition = rows.filter((r) => r.workflow_definition_id === definitionId).map((r) => r.id);
+    positionsByDefinition.set(
+      definitionId,
+      await loadRunPositions(definitionId, forDefinition, client),
+    );
+  }
+
+  const projected = rows.map((enrollment) => {
+    const definition = definitionsById.get(enrollment.workflow_definition_id) ?? null;
+    const position = positionsByDefinition.get(enrollment.workflow_definition_id)?.get(enrollment.id) ?? null;
+    const currentNodeId = position?.current_step?.node_id ?? enrollment.current_node_id;
+    const current = nodesById.get(currentNodeId) ?? null;
+    const next = nodesById.get(enrollment.current_node_id) ?? null;
+
+    return {
+      enrollment_id: enrollment.id,
+      workflow_definition_id: enrollment.workflow_definition_id,
+      workflow_name: definition?.name ?? null,
+      workflow_status: definition?.status ?? null,
+      subject_id: enrollment.subject_id,
+      subject_type: enrollment.subject_type,
+      status: enrollment.status,
+      enrolled_at: enrollment.enrolled_at,
+      next_execution_at: enrollment.next_execution_at ?? null,
+      waiting_reason: enrollment.waiting_reason ?? null,
+      block_reason: enrollment.block_reason ?? null,
+      run_id: position?.run_id ?? null,
+      run_status: position?.run_status ?? null,
+      // Where the run IS, from durable history.
+      current_step_key: current?.node_key ?? position?.current_step?.node_key ?? null,
+      current_step_label: current?.label ?? null,
+      current_step_status: position?.current_step?.status ?? null,
+      current_step_block_reason: position?.current_step?.block_reason ?? null,
+      // The resume pointer, named as such.
+      next_step_key: next?.node_key ?? null,
+      next_step_label: next?.label ?? null,
+      completed_node_keys: position?.completed_node_keys ?? [],
+      traversed_node_keys: position?.traversed_node_keys ?? [],
+      history_step_count: position?.step_count ?? 0,
+      // An enrollment accumulates one run per tick, so this is how many times
+      // the engine has picked the subject up.
+      run_count: position?.run_count ?? 0,
+      context: enrollment.context ?? {},
+    };
+  });
+
+  return {
+    ok: true,
+    subject_ids: subjectIds,
+    enrollments: projected,
+    workflows: [...definitionsById.values()],
+    empty_reason: null,
+  };
 }
 
 export async function getWorkflowLiveState(definitionId, deps = {}) {

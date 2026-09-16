@@ -23,6 +23,7 @@ import {
   resumeWorkflowBackend,
   upsertWorkflowTemplateTranslationBackend,
 } from '../../lib/api/backendClient'
+import { loadWorkflowSubjectAutomationBackend } from '../../lib/api/backendClient'
 import type { BackendResult } from '../../lib/api/backendClient'
 import type {
   Workflow,
@@ -302,6 +303,55 @@ export const deleteWorkflowDraft = async (workflowId: string) => {
   )
   if (!result.ok) throw new Error(result.message || result.error || 'Delete failed')
   return result.data
+}
+
+/**
+ * §24/§25 — the automation actually running for one subject, or an honest
+ * nothing. `empty_reason: 'no_automation_for_subject'` is a real answer and the
+ * caller must render it rather than falling back to any workflow.
+ */
+export interface SubjectAutomation {
+  subject_ids: string[]
+  enrollments: SubjectEnrollment[]
+  empty_reason: string | null
+}
+
+export interface SubjectEnrollment {
+  enrollment_id: string
+  workflow_definition_id: string
+  workflow_name: string | null
+  workflow_status: string | null
+  subject_id: string
+  status: string
+  enrolled_at?: string | null
+  next_execution_at?: string | null
+  block_reason?: string | null
+  run_id?: string | null
+  run_status?: string | null
+  run_count?: number
+  current_step_key?: string | null
+  current_step_label?: string | null
+  current_step_status?: string | null
+  current_step_block_reason?: string | null
+  next_step_key?: string | null
+  next_step_label?: string | null
+  completed_node_keys?: string[]
+  traversed_node_keys?: string[]
+  history_step_count?: number
+}
+
+export const loadSubjectAutomation = async (params: {
+  thread_key?: string | null
+  property_id?: string | null
+  opportunity_id?: string | null
+}): Promise<SubjectAutomation> => {
+  const result = await loadWorkflowSubjectAutomationBackend(params)
+  const payload = unwrapWorkflowResponse<SubjectAutomation>(result)
+  return {
+    subject_ids: payload.subject_ids ?? [],
+    enrollments: payload.enrollments ?? [],
+    empty_reason: payload.empty_reason ?? null,
+  }
 }
 
 export const enableWorkflowLive = async (workflowId: string): Promise<WorkflowDetail> => {

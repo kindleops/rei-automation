@@ -1624,6 +1624,24 @@ export function listWorkflowsBackend(): Promise<BackendResult<WorkflowBackendRes
   return callBackend<WorkflowBackendResponse>('/api/cockpit/workflows')
 }
 
+/**
+ * §24/§25 — what automation is running for ONE subject.
+ *
+ * Workflow Studio already knew it had been opened from a subject but selected
+ * `rows[0]` regardless, so a property with no automation displayed the first
+ * workflow in the catalog as though it were its own. This is how the surface
+ * asks the question instead.
+ */
+export function loadWorkflowSubjectAutomationBackend(
+  params: { thread_key?: string | null; property_id?: string | null; opportunity_id?: string | null },
+): Promise<BackendResult<WorkflowBackendResponse>> {
+  const query = new URLSearchParams()
+  if (params.thread_key) query.set('thread_key', params.thread_key)
+  if (params.property_id) query.set('property_id', params.property_id)
+  if (params.opportunity_id) query.set('opportunity_id', params.opportunity_id)
+  return callBackend<WorkflowBackendResponse>(`/api/cockpit/workflows/subject?${query.toString()}`)
+}
+
 export function createWorkflowBackend(payload: Record<string, unknown>): Promise<BackendResult<WorkflowBackendResponse>> {
   return callBackend<WorkflowBackendResponse>('/api/cockpit/workflows', {
     method: 'POST',

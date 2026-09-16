@@ -47,6 +47,17 @@ const THEMES = arg('theme') ? [arg('theme')] : ['dark', 'light']
 const HEIGHT = Number(arg('height', '844'))
 const OUT_ROOT = path.resolve(process.cwd(), '.screenshots/workflow-studio-mobile')
 
+/**
+ * §24/§25 subjects. `thread_key` is a Workflow Studio context query param, so
+ * these drive the real subject-scoped path rather than a mocked one.
+ *
+ * Subject A is the runtime-proof fixture and genuinely has an enrollment.
+ * Subject B is a thread key no workflow has ever seen, so the surface must say
+ * so instead of resolving to the first workflow in the catalog.
+ */
+const SUBJECT_WITH_AUTOMATION = 'wfproof:thread:0f7e1a00-runtime-proof-a'
+const SUBJECT_WITHOUT_AUTOMATION = 'wfproof:thread:definitely-no-automation'
+
 /** The studio's own bottom navigation. Every one must be touchable. */
 const DOCK_CONTROLS = [
   ['dock canvas', 'button[aria-label="Canvas"]'],
@@ -565,8 +576,49 @@ const runCell = async (browser, width, theme, canonical) => {
   const realFailures = failedRequests.filter((r) => !/favicon/.test(r))
   check('no failed requests', realFailures.length === 0, realFailures.slice(0, 4).join(' | '))
 
+  // ── §24/§25 subject scoping. Opened from a subject, the surface must show
+  // THAT subject's automation or say there is none — never the first workflow
+  // in the catalog, which is what it used to do.
+  const subjectProbe = async (threadKey) => {
+    const subjectPage = await context.newPage()
+    try {
+      await subjectPage.goto(`${BASE}/workflow-studio?thread_key=${encodeURIComponent(threadKey)}`,
+        { waitUntil: 'domcontentloaded', timeout: 120_000 })
+      await subjectPage.waitForTimeout(7000)
+      return await subjectPage.evaluate(() => ({
+        emptyState: document.querySelector('.wfs2-mobile-empty.is-subject-empty')?.innerText
+          ?.replace(/\s+/g, ' ').trim() ?? null,
+        heroText: document.querySelector('.wfs2-mobile-hero')?.innerText?.replace(/\s+/g, ' ').trim() ?? null,
+        canvasNodes: document.querySelectorAll('.wfs2-canvas__node, .wfs2-node').length,
+      }))
+    } finally {
+      await subjectPage.close()
+    }
+  }
+
+  const withAutomation = await subjectProbe(SUBJECT_WITH_AUTOMATION)
+  check('a subject WITH automation shows its own workflow, not an empty state',
+    withAutomation.emptyState === null,
+    `empty state shown: ${withAutomation.emptyState}`)
+  check('a subject WITH automation renders its graph',
+    withAutomation.canvasNodes > 0, `${withAutomation.canvasNodes} nodes`)
+  check('a subject WITH automation names the test fixture, not the first catalog entry',
+    /Runtime Proof/i.test(withAutomation.heroText ?? ''),
+    `hero: ${String(withAutomation.heroText).slice(0, 120)}`)
+
+  const withoutAutomation = await subjectProbe(SUBJECT_WITHOUT_AUTOMATION)
+  check('a subject with NO automation says so explicitly',
+    /no active automation for this opportunity/i.test(withoutAutomation.emptyState ?? ''),
+    `empty state: ${withoutAutomation.emptyState}`)
+  check('a subject with NO automation does not fall back to any workflow graph',
+    withoutAutomation.canvasNodes === 0,
+    `${withoutAutomation.canvasNodes} canvas nodes rendered for a subject with no automation`)
+  check('a subject with NO automation does not name a workflow in the header',
+    !/Runtime Proof|Master Acquisition|Inbound Classification/i.test(withoutAutomation.heroText ?? ''),
+    `hero: ${String(withoutAutomation.heroText).slice(0, 120)}`)
+
   await context.close()
-  return { cell: `${width}-${theme}`, loadMs, probe: p, flows, findings }
+  return { cell: `${width}-${theme}`, loadMs, probe: p, flows, findings, subjects: { withAutomation, withoutAutomation } }
 }
 
 const main = async () => {

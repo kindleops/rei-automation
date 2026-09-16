@@ -48,6 +48,7 @@ import {
 import { SellerAutomationStudioPanel } from './SellerAutomationStudioPanel'
 import { WorkflowAutomationActivityPanel } from './WorkflowAutomationActivityPanel'
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
+import { loadSubjectAutomation, type SubjectAutomation } from '../workflowStudio.adapter'
 import {
   WorkflowMobileActionsSheet,
   WorkflowMobileDock,
@@ -120,6 +121,14 @@ export const WorkflowStudioV2 = ({
   const [railSection, setRailSection] = useState<RailSection>('workflows')
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [liveMode, setLiveMode] = useState<'off' | 'live' | 'demo'>('off')
+  /**
+   * §24/§25 — subject-scoped automation.
+   *
+   * `null` means not asked yet; an object with an empty `enrollments` array is
+   * the real answer "this subject has no automation", and must be rendered as
+   * that rather than resolved to any workflow.
+   */
+  const [subjectAutomation, setSubjectAutomation] = useState<SubjectAutomation | null>(null)
   const [layoutRevision, setLayoutRevision] = useState(0)
   const [apiAvailable, setApiAvailable] = useState(true)
   const [apiError, setApiError] = useState<{ message: string; traceId?: string | null } | null>(null)
@@ -179,8 +188,41 @@ export const WorkflowStudioV2 = ({
     let cancelled = false
     setLoading(true)
     refreshList()
-      .then((rows) => {
+      .then(async (rows) => {
         if (cancelled) return
+
+        // §24. Opening the Studio from a subject is a different question from
+        // opening it as a builder. This effect used to run
+        // `loadSelected(rows[0].id)` unconditionally, so a property with no
+        // automation displayed the FIRST workflow in the catalog — "Master
+        // Acquisition Orchestrator" — as though it belonged to that property.
+        const subjectKeys = {
+          thread_key: studioContext.thread_key ?? null,
+          property_id: studioContext.property_id ?? null,
+        }
+        const hasSubject = Boolean(subjectKeys.thread_key || subjectKeys.property_id)
+
+        if (hasSubject) {
+          try {
+            const automation = await loadSubjectAutomation(subjectKeys)
+            if (cancelled) return
+            setSubjectAutomation(automation)
+            const enrolled = automation.enrollments[0]
+            if (enrolled) {
+              void loadSelected(enrolled.workflow_definition_id)
+            }
+            // No enrollment: select NOTHING. The empty state is the answer.
+            return
+          } catch {
+            if (cancelled) return
+            // A failed subject read must not silently become "here is a
+            // workflow" — leave the selection empty and let the surface say the
+            // state is unknown.
+            setSubjectAutomation({ subject_ids: [], enrollments: [], empty_reason: 'subject_automation_unavailable' })
+            return
+          }
+        }
+
         const first = rows[0]
         if (first && !selected) void loadSelected(first.id)
       })
@@ -593,6 +635,16 @@ export const WorkflowStudioV2 = ({
     />
   )
 
+  /**
+   * §24 — the honest empty state. Only shown when the Studio was opened FROM a
+   * subject and that subject genuinely has no automation. Never shown for the
+   * builder view, and never substituted by an unrelated workflow.
+   */
+  const subjectHasNoAutomation = Boolean(
+    subjectAutomation && subjectAutomation.enrollments.length === 0,
+  )
+  const subjectEmptyReason = subjectAutomation?.empty_reason ?? null
+
   if (isMobile) {
     return (
       <section className={cls('wfs2', 'wfs2--mobile-studio', `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
@@ -613,7 +665,25 @@ export const WorkflowStudioV2 = ({
 
         {sharedBanners}
 
-        <div className="wfs2-mobile__stage">{canvasBlock}</div>
+        <div className="wfs2-mobile__stage">
+          {subjectHasNoAutomation ? (
+            <div className="wfs2-mobile-empty is-subject-empty">
+              <Icon name="layers" size={20} />
+              <strong>
+                {subjectEmptyReason === 'subject_automation_unavailable'
+                  ? 'Automation state unavailable'
+                  : 'No active automation for this opportunity'}
+              </strong>
+              <p>
+                {subjectEmptyReason === 'subject_automation_unavailable'
+                  ? 'This subject\u2019s automation could not be read, so its state is unverified. Nothing is shown rather than a workflow that may not apply.'
+                  : 'This seller is not enrolled in any workflow. Pick a flow below to see the automation library.'}
+              </p>
+            </div>
+          ) : (
+            canvasBlock
+          )}
+        </div>
 
         <WorkflowMobileDock
           active={mobilePanel}
