@@ -263,6 +263,149 @@ test('the catalog still names workflow_definitions as canonical and legacy as re
   assert.equal(result.legacy_read_only, true);
 });
 
+// ───────────────────────────────────────── legacy visibility (§3)
+
+/**
+ * §3. FIVE WORKFLOWS WERE INVISIBLE, WITH NO ERROR.
+ *
+ * `listDefinitionsLightweight` asked `public.workflows` for `trigger_type` and
+ * `version`. Neither column exists, so PostgREST failed the WHOLE select with
+ *
+ *   42703  column workflows.trigger_type does not exist
+ *
+ * and the result was then read as `v1Res.data ?? []` while only `v2Res.error`
+ * was thrown. One unknown column killed the entire legacy read and the surface
+ * quietly listed 18 workflows instead of 23. A list that omits things without
+ * saying so is worse than one that errors.
+ *
+ * Their size was a second fabricated zero: legacy shape lives in
+ * `workflow_steps`, which was never read, so every legacy workflow showed 0
+ * nodes while carrying 3 to 16 steps.
+ */
+function legacySupabase({ legacyRows = [], steps = [], legacyError = null } = {}) {
+  return {
+    rpc: async () => ({ data: [], error: null }),
+    from(table) {
+      const builder = {
+        select(columns) {
+          builder._columns = String(columns ?? '');
+          return builder;
+        },
+        order() { return builder; },
+        limit() {
+          if (table === 'workflow_definitions') return Promise.resolve({ data: [], error: null });
+          if (table === 'workflows') {
+            if (legacyError) return Promise.resolve({ data: null, error: legacyError });
+            // Model PostgREST: any unknown column fails the whole select.
+            for (const column of builder._columns.split(',').map((c) => c.trim()).filter(Boolean)) {
+              if (!LEGACY_COLUMNS.has(column)) {
+                return Promise.resolve({
+                  data: null,
+                  error: { code: '42703', message: `column workflows.${column} does not exist` },
+                });
+              }
+            }
+            return Promise.resolve({ data: legacyRows, error: null });
+          }
+          return Promise.resolve({ data: [], error: null });
+        },
+        in() {
+          if (table === 'workflow_steps') return Promise.resolve({ data: steps, error: null });
+          return Promise.resolve({ data: [], error: null });
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+/** The real column set of public.workflows, measured 2026-09-15. */
+const LEGACY_COLUMNS = new Set([
+  'id', 'workflow_key', 'name', 'description', 'channel', 'workflow_type', 'status',
+  'live_send_enabled', 'market_scope', 'state_scope', 'property_type_scope',
+  'language_scope', 'owner_type_scope', 'asset_type_scope', 'daily_cap', 'hourly_cap',
+  'timezone', 'created_at', 'updated_at',
+]);
+
+const legacyRow = (over = {}) => ({
+  id: 'legacy-1',
+  workflow_key: 'sfr_owner_check_sms',
+  name: 'SFR Owner Check SMS Workflow',
+  description: null,
+  channel: 'sms',
+  workflow_type: 'automation',
+  status: 'draft',
+  live_send_enabled: false,
+  updated_at: '2026-06-03T00:00:00.000Z',
+  created_at: '2026-06-03T00:00:00.000Z',
+  ...over,
+});
+
+test('legacy workflows are listed, not silently dropped by an unknown column', async () => {
+  const result = await listWorkflowStudioCatalog({}, {
+    supabase: legacySupabase({
+      legacyRows: [legacyRow()],
+      steps: Array.from({ length: 6 }, () => ({ workflow_id: 'legacy-1' })),
+    }),
+  });
+  assert.equal(result.workflows.length, 1, 'the legacy read must succeed against the real column set');
+  const [workflow] = result.workflows;
+  assert.equal(workflow.is_legacy, true);
+  assert.equal(workflow.name, 'SFR Owner Check SMS Workflow');
+});
+
+test('legacy size is counted from workflow_steps rather than reported as zero', async () => {
+  const result = await listWorkflowStudioCatalog({}, {
+    supabase: legacySupabase({
+      legacyRows: [legacyRow()],
+      steps: Array.from({ length: 6 }, () => ({ workflow_id: 'legacy-1' })),
+    }),
+  });
+  assert.equal(result.workflows[0].node_count, 6);
+  assert.equal(result.workflows[0].step_count, 6);
+});
+
+/** Legacy steps are not graph nodes, so send capability is genuinely unknown. */
+test('legacy send capability is unknown, never a reassuring zero', async () => {
+  const result = await listWorkflowStudioCatalog({}, {
+    supabase: legacySupabase({ legacyRows: [legacyRow()], steps: [] }),
+  });
+  assert.equal(result.workflows[0].send_node_count, null);
+});
+
+test('a legacy read failure surfaces instead of hiding workflows', async () => {
+  await assert.rejects(
+    () => listWorkflowStudioCatalog({}, {
+      supabase: legacySupabase({ legacyError: { code: '42501', message: 'permission denied for table workflows' } }),
+    }),
+    (thrown) => {
+      assert.match(String(thrown.message), /permission denied/);
+      return true;
+    },
+    'silently listing fewer workflows is the defect this replaces',
+  );
+});
+
+test('smoke and duplicate legacy workflows stay filtered out', async () => {
+  const result = await listWorkflowStudioCatalog({}, {
+    supabase: legacySupabase({
+      legacyRows: [
+        legacyRow(),
+        legacyRow({ id: 'l2', workflow_key: 'workflow_studio_smoke_1780528901493', name: 'Workflow Studio Smoke' }),
+        legacyRow({ id: 'l3', workflow_key: 'owner_acquisition_follow_up_mq5t1yl9', name: 'Owner Acquisition Follow-Up' }),
+        legacyRow({ id: 'l4', workflow_key: 'owner_acquisition_follow_up', name: 'Owner Acquisition Follow-Up' }),
+        legacyRow({ id: 'l5', workflow_key: 'archived_one', status: 'archived' }),
+      ],
+      steps: [],
+    }),
+  });
+  assert.deepEqual(
+    result.workflows.map((w) => w.workflow_key).sort(),
+    ['owner_acquisition_follow_up', 'sfr_owner_check_sms'],
+    'the smoke run, the suffixed duplicate and the archived row stay hidden',
+  );
+});
+
 // ───────────────────────────────────────── cadence agreement (§33)
 
 /**

@@ -300,6 +300,7 @@ function summarizeWorkflow(workflow, counts = {}) {
     is_system_template: workflow.is_system_template === true,
     is_locked: workflow.is_locked === true,
     node_count: counts.node_count ?? workflow.step_count ?? workflow.node_count ?? 0,
+    step_count: 'step_count' in counts ? counts.step_count : (workflow.step_count ?? 0),
     edge_count: counts.edge_count ?? workflow.edge_count ?? 0,
     // Whether a workflow can text a seller is the first thing an operator needs
     // and the last thing that may be guessed. It was hardcoded to 0 for every
@@ -326,13 +327,26 @@ async function listDefinitionsLightweight(deps = {}) {
       .order('updated_at', { ascending: false })
       .limit(200),
     client
+      // Only columns that exist. `public.workflows` has no trigger_type and no
+      // version — asking for them returned 42703 "column
+      // workflows.trigger_type does not exist", which fails the WHOLE PostgREST
+      // select, and the error was then swallowed by `v1Res.data ?? []` below.
+      // Net effect measured 2026-09-15: all 9 legacy rows (5 after the smoke
+      // and duplicate filters) were invisible in Workflow Studio with no error
+      // and no signal — the list simply showed 18 instead of 23.
       .from('workflows')
-      .select('id, name, description, workflow_key, status, trigger_type, version, updated_at, created_at')
+      .select(
+        'id, name, description, workflow_key, status, channel, workflow_type, '
+        + 'live_send_enabled, updated_at, created_at',
+      )
       .order('updated_at', { ascending: false })
       .limit(100),
   ]);
 
   if (v2Res.error) throw v2Res.error;
+  // A legacy read failure must be visible. Silently omitting workflows is the
+  // defect above; throwing here means the next schema drift is loud.
+  if (v1Res.error) throw v1Res.error;
 
   const v2Workflows = (v2Res.data ?? []).map((definition) => ({
     ...mapDefinitionToWorkflowSummary(definition),
@@ -342,8 +356,14 @@ async function listDefinitionsLightweight(deps = {}) {
   const v1Workflows = (v1Res.data ?? []).map((workflow) => ({
     ...workflow,
     workflow_key: workflow.workflow_key,
+    // The legacy table carries neither, and a legacy workflow is read-only in
+    // V2 anyway. Reported as absent rather than defaulted to a plausible value.
+    trigger_type: null,
+    version: null,
     is_v2: false,
     is_legacy: true,
+    // Legacy rows have a live_send_enabled column, but legacy cannot execute in
+    // V2 at all, so the answer is false regardless of what it stores.
     live_send_enabled: false,
   }));
 
@@ -421,14 +441,26 @@ export async function fetchWorkflowTriggerActivity(triggerTypes = [], deps = {})
 
 async function attachGraphCounts(workflows, deps) {
   const v2Ids = workflows.filter((w) => !w.is_legacy).map((w) => w.id);
-  if (!v2Ids.length) {
+  const legacyIds = workflows.filter((w) => w.is_legacy).map((w) => w.id);
+  if (!v2Ids.length && !legacyIds.length) {
     return workflows.map((w) => summarizeWorkflow(w));
   }
 
   const client = db(deps);
-  const [nodesRes, edgesRes, triggerActivity] = await Promise.all([
-    client.from('workflow_nodes').select('workflow_definition_id, node_type').in('workflow_definition_id', v2Ids),
-    client.from('workflow_edges').select('workflow_definition_id').in('workflow_definition_id', v2Ids),
+  const [nodesRes, edgesRes, stepsRes, triggerActivity] = await Promise.all([
+    v2Ids.length
+      ? client.from('workflow_nodes').select('workflow_definition_id, node_type').in('workflow_definition_id', v2Ids)
+      : Promise.resolve({ data: [], error: null }),
+    v2Ids.length
+      ? client.from('workflow_edges').select('workflow_definition_id').in('workflow_definition_id', v2Ids)
+      : Promise.resolve({ data: [], error: null }),
+    // A legacy workflow's shape lives in workflow_steps, so its size is
+    // measurable after all — it was reported as 0 nodes only because
+    // `step_count` was never read. Production carries 83 step rows across the
+    // legacy workflows, 3 to 16 each.
+    legacyIds.length
+      ? client.from('workflow_steps').select('workflow_id').in('workflow_id', legacyIds)
+      : Promise.resolve({ data: [], error: null }),
     fetchWorkflowTriggerActivity(workflows.map((w) => w.trigger_type), deps),
   ]);
 
@@ -444,13 +476,18 @@ async function attachGraphCounts(workflows, deps) {
   for (const row of edgesRes.data ?? []) {
     edgeCounts[row.workflow_definition_id] = (edgeCounts[row.workflow_definition_id] ?? 0) + 1;
   }
+  const stepCounts = {};
+  for (const row of stepsRes.data ?? []) {
+    stepCounts[row.workflow_id] = (stepCounts[row.workflow_id] ?? 0) + 1;
+  }
 
   return workflows.map((w) => {
     const observed = triggerActivity.available
       ? triggerActivity.activity.get(clean(w.trigger_type)) ?? null
       : null;
     return summarizeWorkflow(w, {
-      node_count: w.is_legacy ? (w.step_count ?? 0) : (nodeCounts[w.id] ?? 0),
+      node_count: w.is_legacy ? (stepCounts[w.id] ?? 0) : (nodeCounts[w.id] ?? 0),
+      step_count: w.is_legacy ? (stepCounts[w.id] ?? 0) : 0,
       edge_count: w.is_legacy ? 0 : (edgeCounts[w.id] ?? 0),
       // A legacy workflow's steps are not graph nodes, so its send count is not
       // measurable here; null says "unknown", which is not the same as zero.
