@@ -87,6 +87,37 @@ export async function findDueTasks(opts = {}, deps = {}) {
   return { ok: true, tasks: data ?? [] };
 }
 
+/**
+ * Atomically claim a due task.
+ *
+ * `completeTask` updates by id alone, so two concurrent worker ticks could both
+ * find the same `pending` row and both advance its enrollment — the task would
+ * be processed twice. This is a compare-and-swap: the status predicate is part
+ * of the UPDATE, so exactly one caller can move a task out of `pending`, and a
+ * loser gets `claimed: false` rather than a row.
+ *
+ * `running` is used rather than a new value on purpose:
+ * workflow_scheduled_tasks_status_check allows exactly
+ * pending / running / completed / cancelled / failed, so 'processing' would
+ * have failed the constraint at runtime and every claim would have thrown.
+ *
+ * Returns the claimed row so the caller does not need a second read.
+ */
+export async function claimTask(taskId, deps = {}) {
+  const client = db(deps);
+  const now = new Date().toISOString();
+  const { data, error } = await client
+    .from('workflow_scheduled_tasks')
+    .update({ status: 'running', updated_at: now })
+    .eq('id', taskId)
+    .eq('status', 'pending')
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return { ok: true, claimed: false, task: null };
+  return { ok: true, claimed: true, task: data };
+}
+
 export async function completeTask(taskId, result = {}, deps = {}) {
   const client = db(deps);
   const now = new Date().toISOString();

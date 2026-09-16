@@ -13,6 +13,11 @@
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js';
 import { enrollSubject } from '@/lib/domain/workflow-v2/enrollment-service.js';
 import { runEnrollment } from '@/lib/domain/workflow-v2/workflow-runner.js';
+import {
+  definitionTriggersForKind,
+  triggerKindForCanonicalEvent,
+  triggerKindForDefinitionTrigger,
+} from '@/lib/domain/workflow-v2/canonical-event-bridge.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -22,11 +27,45 @@ function db(deps = {}) {
   return deps.supabase ?? deps.supabaseClient ?? getDefaultSupabaseClient();
 }
 
+/**
+ * Resolve an incoming event type to every stored trigger_type that means the
+ * same thing.
+ *
+ * This is what removes the namespace disjunction. Production emits
+ * `inbound_message_received`; the definitions subscribe
+ * `trigger.inbound_message_received`; both resolve to the kind
+ * `inbound_reply`, so the matcher can keep filtering on the indexed
+ * `trigger_type` column rather than scanning every definition to translate it.
+ *
+ * An unrecognised type falls back to an exact match, so anything that matched
+ * before this change still matches.
+ */
+export function resolveMatchableTriggerTypes(eventType) {
+  const raw = clean(eventType);
+  if (!raw) return [];
+  const kind = triggerKindForCanonicalEvent(raw) ?? triggerKindForDefinitionTrigger(raw);
+  if (!kind) return [raw];
+  const candidates = new Set(definitionTriggersForKind(kind));
+  candidates.add(raw);
+  return [...candidates];
+}
+
+/**
+ * `status = 'active'` is the containment gate and it is deliberately unchanged.
+ *
+ * It is the reason this bridge could be built before production activation: a
+ * canonical event can now reach the matcher, and the matcher will still select
+ * nothing, because the 14 real workflows are `published`. Arming them is a
+ * separate, explicit decision — not a side effect of wiring the events up.
+ */
 async function matchDefinitions(eventType, client) {
+  const triggerTypes = resolveMatchableTriggerTypes(eventType);
+  if (!triggerTypes.length) return [];
+
   const { data, error } = await client
     .from('workflow_definitions')
     .select('*')
-    .eq('trigger_type', eventType)
+    .in('trigger_type', triggerTypes)
     .eq('status', 'active');
   if (error) throw error;
   return (data ?? []).map((d) => ({ ...d, live_send_enabled: false }));

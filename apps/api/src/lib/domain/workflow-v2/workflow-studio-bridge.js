@@ -876,6 +876,83 @@ export async function getWorkflowConsole(definitionId, filters = {}, deps = {}) 
   return { ok: true, events: events.slice(0, limit), filters_applied: filters };
 }
 
+/**
+ * §9 — "you are here", derived from durable run history.
+ *
+ * THE DEFECT. `workflow_enrollments.current_node_id` is a RESUME POINTER, not a
+ * position. When the runner hits a timing node it calls
+ * `advanceEnrollment(next)` and THEN `pauseEnrollmentForWait(...)`, so a
+ * waiting enrollment's current_node_id names the node that will run when the
+ * wait expires. Reporting it as the current step told the operator the run was
+ * sitting at a node that had never executed — measured on the runtime proof:
+ * status "waiting", step "guard_suppression", while the run was parked on
+ * `wait_proof` and the guard had not run at all.
+ *
+ * Current position comes from what the engine actually recorded. The resume
+ * pointer is still reported, labelled as what it is: the NEXT node.
+ */
+const TERMINAL_STEP_STATUSES = new Set(['completed', 'triggered', 'scaffolded', 'exit']);
+
+async function loadRunPositions(definitionId, enrollmentIds, client) {
+  const positions = new Map();
+  if (!enrollmentIds.length) return positions;
+
+  const { data: runs, error: runsError } = await client
+    .from('workflow_runs')
+    .select('id, enrollment_id, status, started_at, completed_at')
+    .eq('workflow_definition_id', definitionId)
+    .in('enrollment_id', enrollmentIds)
+    .order('started_at', { ascending: true });
+  if (runsError) throw runsError;
+
+  const runRows = runs ?? [];
+  if (!runRows.length) return positions;
+
+  const { data: steps, error: stepsError } = await client
+    .from('workflow_run_steps')
+    .select('workflow_run_id, node_id, node_key, node_type, status, block_reason, created_at')
+    .in('workflow_run_id', runRows.map((r) => r.id))
+    .order('created_at', { ascending: true });
+  if (stepsError) throw stepsError;
+
+  const stepsByRun = new Map();
+  for (const step of steps ?? []) {
+    if (!stepsByRun.has(step.workflow_run_id)) stepsByRun.set(step.workflow_run_id, []);
+    stepsByRun.get(step.workflow_run_id).push(step);
+  }
+
+  for (const run of runRows) {
+    const runSteps = stepsByRun.get(run.id) ?? [];
+    const completed = [];
+    for (const step of runSteps) {
+      if (TERMINAL_STEP_STATUSES.has(clean(step.status))) completed.push(step.node_key);
+    }
+    // The position is the last step the engine wrote. For a parked run that is
+    // the `waiting` step; for a blocked run it is the guard that refused.
+    const last = runSteps.length ? runSteps[runSteps.length - 1] : null;
+    positions.set(run.enrollment_id, {
+      run_id: run.id,
+      run_status: run.status,
+      started_at: run.started_at,
+      completed_at: run.completed_at,
+      step_count: runSteps.length,
+      completed_node_keys: [...new Set(completed)],
+      current_step: last
+        ? {
+            node_id: last.node_id,
+            node_key: last.node_key,
+            node_type: last.node_type,
+            status: last.status,
+            block_reason: last.block_reason ?? null,
+            at: last.created_at,
+          }
+        : null,
+    });
+  }
+
+  return positions;
+}
+
 export async function getWorkflowLiveState(definitionId, deps = {}) {
   const client = db(deps);
   const [{ data: enrollments }, { data: nodes }] = await Promise.all([
@@ -891,13 +968,25 @@ export async function getWorkflowLiveState(definitionId, deps = {}) {
   ]);
 
   const nodesById = new Map((nodes ?? []).map((n) => [n.id, n]));
+  const positions = await loadRunPositions(
+    definitionId,
+    (enrollments ?? []).map((e) => e.id),
+    client,
+  );
 
   const tokens = [];
   const nodeStates = new Map();
 
   for (const enrollment of enrollments ?? []) {
     const ctx = enrollment.context ?? {};
-    const current = nodesById.get(enrollment.current_node_id);
+    const position = positions.get(enrollment.id) ?? null;
+    // The resume pointer, named as such.
+    const nextNode = nodesById.get(enrollment.current_node_id);
+    // Where the run actually is, from what the engine recorded. Falls back to
+    // the resume pointer only when no step has been written yet, which is the
+    // one case where they genuinely coincide.
+    const currentNodeId = position?.current_step?.node_id ?? enrollment.current_node_id;
+    const current = nodesById.get(currentNodeId);
     const tokenStatus =
       enrollment.status === 'waiting' ? 'waiting' :
       enrollment.status === 'paused' ? 'blocked' :
@@ -906,11 +995,21 @@ export async function getWorkflowLiveState(definitionId, deps = {}) {
     const token = {
       id: enrollment.id,
       enrollment_id: enrollment.id,
-      run_id: enrollment.workflow_run_id ?? enrollment.id,
-      step_id: enrollment.current_node_id,
-      step_key: current?.node_key,
-      node_type: current?.node_type,
+      run_id: position?.run_id ?? enrollment.workflow_run_id ?? enrollment.id,
+      step_id: currentNodeId,
+      step_key: current?.node_key ?? position?.current_step?.node_key,
+      node_type: current?.node_type ?? position?.current_step?.node_type,
       label: current?.label ?? current?.node_type,
+      // Everything the engine has finished, so the canvas can mark a path
+      // rather than inferring one from colours.
+      completed_node_keys: position?.completed_node_keys ?? [],
+      step_status: position?.current_step?.status ?? null,
+      step_block_reason: position?.current_step?.block_reason ?? null,
+      next_step_id: enrollment.current_node_id ?? null,
+      next_step_key: nextNode?.node_key ?? null,
+      next_step_label: nextNode?.label ?? nextNode?.node_type ?? null,
+      run_status: position?.run_status ?? null,
+      history_step_count: position?.step_count ?? 0,
       status: tokenStatus,
       seller: ctx.seller_display_name ?? ctx.seller_name ?? enrollment.subject_id,
       property: ctx.property_address ?? ctx.property_id ?? null,

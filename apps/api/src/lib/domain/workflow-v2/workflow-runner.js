@@ -179,7 +179,10 @@ async function executeNode(node, enrollment, definition, client, deps) {
     live_send_blocked: false,
   };
 
-  if (isTriggerNode(node.node_type)) {
+  // Registry first, stored node_kind second — same reason as entry resolution.
+  // A trigger type absent from the registry was recorded as `scaffolded`, so
+  // the run history said "not handled" about the node that started the run.
+  if (isTriggerNode(node.node_type) || clean(node.node_kind) === 'trigger') {
     return { ...base, status: 'triggered' };
   }
 
@@ -277,12 +280,32 @@ export async function runEnrollment(enrollmentId, deps = {}) {
   const { nodes, edges } = await loadGraph(enrollment.workflow_definition_id, client);
   const nodesById = new Map(nodes.map((n) => [n.id, n]));
 
+  // Entry resolution used to consult the node REGISTRY alone
+  // (`isTriggerNode` -> getNodeMeta(...).node_kind === 'trigger'). Any trigger
+  // node_type absent from the registry therefore yielded no entry node, and the
+  // whole workflow failed with a bare `no_entry_node` — a graph that looks
+  // perfectly valid in the database and in Workflow Studio simply never runs.
+  //
+  // `workflow_nodes.node_kind` is stored on the row and is NOT NULL, so a node
+  // that declares itself a trigger in the database is trusted as the fallback.
+  // Registry first (it stays authoritative for node semantics), stored kind
+  // second.
+  const entryNode = nodes.find((n) => isTriggerNode(n.node_type))
+    ?? nodes.find((n) => clean(n.node_kind) === 'trigger');
+
   let currentNode = enrollment.current_node_id
     ? nodesById.get(enrollment.current_node_id)
-    : nodes.find((n) => isTriggerNode(n.node_type));
+    : entryNode;
 
   if (!currentNode) {
-    return { ok: false, error: 'no_entry_node', enrollment_id: enrollmentId };
+    return {
+      ok: false,
+      error: 'no_entry_node',
+      enrollment_id: enrollmentId,
+      // Name what was looked at, so the next occurrence is diagnosable.
+      node_count: nodes.length,
+      node_kinds: [...new Set(nodes.map((n) => clean(n.node_kind)))],
+    };
   }
 
   const run = await createRunRecord(client, definition, enrollment, currentNode);
