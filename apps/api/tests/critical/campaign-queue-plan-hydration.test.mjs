@@ -336,7 +336,25 @@ test("owner verification: ambiguous/unverified identity is blocked, zero queue r
   assert.equal(result.skipped_counts_by_reason[BLOCK_REASONS.OWNERSHIP_NOT_CONFIRMED], 1);
 });
 
-test("owner verification: missing owner-identity evidence blocks queueing (structural gate, unchanged)", async () => {
+test("owner verification: a missing legacy master_owner_id is NOT missing identity evidence", async () => {
+  /**
+   * This asserted that a null `master_owner_id` blocks queueing as
+   * `missing_master_owner_id`. That is the inference the gate below this one
+   * explicitly forbids — its own comment says owner eligibility is "never
+   * inferred merely from the presence of master_owner_id/prospect_id/phone_id".
+   *
+   * `master_owner_id` is a retired identifier from the decommissioned
+   * public.phones export: it is absent on ~74% of campaign_target_graph rows
+   * across EVERY ownership shape (26% of Individual owners have one), so
+   * blocking on it rejected most legitimately reachable sellers while proving
+   * nothing about ownership.
+   *
+   * Real owner-identity evidence is `identity_alignment` plus
+   * evaluatePreSendEligibility, which is untouched and is covered by the three
+   * tests above: renter -> RENTER_NOT_OWNER, explicit non-owner ->
+   * IDENTITY_MISMATCH, ambiguous/unverified -> OWNERSHIP_NOT_CONFIRMED, each
+   * with zero queue rows.
+   */
   const { store, deps, campaignId } = setup();
   store.seedRow("campaign_targets", makeReadyTarget({
     id: "tgt_no_owner",
@@ -346,8 +364,28 @@ test("owner verification: missing owner-identity evidence blocks queueing (struc
   }));
 
   const result = await createCampaignQueuePlan(campaignId, { now: NOW, explicit_operator_action: true }, deps);
+  assert.equal(
+    result.skipped_counts_by_reason.missing_master_owner_id,
+    undefined,
+    "a retired identifier must not be a queue-time gate",
+  );
+  assert.equal(result.send_queue_rows_created, 1, "a resolved person with a reachable phone queues");
+  assert.equal(store.rows("send_queue").length, 1);
+});
+
+test("owner verification: a missing PERSON still blocks queueing", async () => {
+  /** The fail-closed half of the same contract: no person, no queue row. */
+  const { store, deps, campaignId } = setup();
+  store.seedRow("campaign_targets", makeReadyTarget({
+    id: "tgt_no_person",
+    campaign_id: campaignId,
+    prospect_id: null,
+    to_phone_number: "+15551230003",
+  }));
+
+  const result = await createCampaignQueuePlan(campaignId, { now: NOW, explicit_operator_action: true }, deps);
+  assert.equal(result.skipped_counts_by_reason.missing_prospect_id, 1);
   assert.equal(result.send_queue_rows_created, 0);
-  assert.equal(result.skipped_counts_by_reason.missing_master_owner_id, 1);
   assert.equal(store.rows("send_queue").length, 0);
 });
 
