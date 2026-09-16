@@ -164,7 +164,7 @@ export const resolveMobileAwareLayoutMode = (
    */
   if (
     view === 'pipeline' || view === 'command_map' || view === 'queue' ||
-    view === 'workflow_studio' || view === 'calendar'
+    view === 'workflow_studio' || view === 'calendar' || view === 'metrics'
   ) {
     return 'compact'
   }

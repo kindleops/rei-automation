@@ -154,6 +154,40 @@ function stateRecommendation({ sent, replyRate, optOutRate, deliveryRate }) {
 const MAJOR_STATES = ['FL','TX','CA','GA','NC','SC','TN','NV','AZ','MO','MN','IL','MI','OH','PA','MD','VA','OK','AR','AL','MS']
 
 // ── Core builder ──────────────────────────────────────────────────────────────
+/**
+ * §32/§33 — EXACT aggregation over a windowed cohort.
+ *
+ * PostgREST caps responses at max-rows (typically 1000) regardless of
+ * `.limit()`, so counting the rows a single select returns silently under-
+ * reports any cohort larger than the cap — and a suspiciously round total is
+ * the only tell. This pages with `.range()` until a short page proves the end.
+ *
+ * Exported and client-injected so the >1000 invariant is testable: no window
+ * this surface offers currently reaches 1000 rows (the widest, 40d, holds
+ * ~974), so live data cannot exercise the pager and a regression here would
+ * be invisible until the corpus grew.
+ */
+export async function fetchWindowedRows(client, table, cols, startIso, endIso, pageSize = 1000) {
+  let from = 0
+  const all = []
+  for (;;) {
+    const { data, error } = await client
+      .from(table).select(cols)
+      .gte('created_at', startIso).lte('created_at', endIso)
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1)
+    // A failed page returns what was gathered SO FAR plus the error, so the
+    // caller can report degradation rather than treat partial data as total.
+    if (error) return { data: all, error }
+    const batch = data || []
+    all.push(...batch)
+    if (batch.length < pageSize) break
+    from += pageSize
+    if (from > 500000) break // hard safety cap
+  }
+  return { data: all, error: null }
+}
+
 export async function buildWarRoom(params = {}) {
   const startedAt = Date.now()
   const window = resolveWindow(params.window)
@@ -175,27 +209,8 @@ export async function buildWarRoom(params = {}) {
   const ME_COLS = 'id,direction,delivery_status,provider_delivery_status,detected_intent,is_opt_out,' +
     'opt_out_keyword,thread_key,template_id,market,created_at,from_phone_number'
 
-  // PostgREST caps responses at max-rows (typically 1000) regardless of .limit(),
-  // so page through the windowed cohort with .range() to capture every row.
-  const fetchAllInWindow = async (table, cols) => {
-    const pageSize = 1000
-    let from = 0
-    const all = []
-    for (;;) {
-      const { data, error } = await supabase
-        .from(table).select(cols)
-        .gte('created_at', startIso).lte('created_at', endIso)
-        .order('created_at', { ascending: true })
-        .range(from, from + pageSize - 1)
-      if (error) return { data: all, error }
-      const batch = data || []
-      all.push(...batch)
-      if (batch.length < pageSize) break
-      from += pageSize
-      if (from > 500000) break // hard safety cap
-    }
-    return { data: all, error: null }
-  }
+  const fetchAllInWindow = (table, cols) =>
+    fetchWindowedRows(supabase, table, cols, startIso, endIso)
 
   const [sqRes, meRes, campRes, emailTplRes, emailEvtRes, agentAttrRes, tgRes] = await Promise.all([
     fetchAllInWindow('send_queue', SQ_COLS),
@@ -343,6 +358,20 @@ export async function buildWarRoom(params = {}) {
   // cohort, so replies whose thread isn't in it must be excluded from totals too.
   const hasGeoFilter = Boolean(filterState || filterMarket)
   let unattributedReplies = 0
+  /**
+   * §12 — REPLY RATE NEEDS A CONVERSATION GRAIN, NOT A MESSAGE GRAIN.
+   *
+   * `replied` counts inbound MESSAGES and was divided by DELIVERED messages:
+   * 48 / 68 = 70.6% on 2026-09-16, which is not a reply rate, it is two
+   * different grains over each other. One seller sending five messages moves
+   * it by 7 points. The brief names this exact antipattern: do not divide all
+   * inbound by all outbound if that is not the product definition.
+   *
+   * These sets give the defensible denominator — distinct conversations
+   * delivered to, and distinct conversations that replied — while the
+   * message counts stay available and labelled as messages.
+   */
+  const repliedThreads = new Set()
   for (const r of inbound) {
     const c = classifyInbound(r)
     const tk = clean(r.thread_key)
@@ -350,6 +379,7 @@ export async function buildWarRoom(params = {}) {
     if (hasGeoFilter && !dim) continue
 
     totals.replied++
+    if (tk) repliedThreads.add(tk)
     if (c.isPositive) totals.positive++
     if (c.isOptOut) totals.optOut++
     if (c.isWrong) totals.wrong++
@@ -380,6 +410,23 @@ export async function buildWarRoom(params = {}) {
     if (lower(r.delivery_status) === 'delivered' || lower(r.provider_delivery_status) === 'delivered') a.delivered++
   }
 
+  /**
+   * Distinct conversations actually DELIVERED to — the denominator a reply
+   * rate needs (§12). Built from the same rows the delivered count uses, so
+   * the two can never describe different cohorts.
+   */
+  const deliveredThreads = new Set()
+  for (const r of sqRows) {
+    const tk = clean(r.thread_key)
+    if (!tk) continue
+    // MUST be the canonical predicate. My first attempt here tested
+    // delivery_status / provider_delivery_status — columns that exist on
+    // message_events, not send_queue — so the set came back EMPTY and the
+    // reply rate reported null against 64 replied conversations. Computing the
+    // same fact a second way is exactly what the brief forbids.
+    if (isDeliveredRow(r)) deliveredThreads.add(tk)
+  }
+
   // ── Rate helpers for a dimension accumulator ───────────────────────────────
   const rates = (a) => {
     const deliveryRate = safeRate(a.delivered, a.sent, 0)
@@ -404,24 +451,84 @@ export async function buildWarRoom(params = {}) {
   const channelZero = channel === 'email'
   const spend = Math.round(t.spend * 100) / 100
 
+  /**
+   * §4/§16/§44 — UNAVAILABLE IS NOT ZERO, AND NO DATA IS NOT PERFECT HEALTH.
+   *
+   * Three fabrications lived in this object:
+   *
+   *  1. `buyerDemandScore: 0` was a hardcoded literal while source_audit
+   *     reported "buyer_source = not wired". A zero reads as "no buyer
+   *     demand"; the truth is that nothing measures it.
+   *  2. `channelZero` turned EVERY metric into 0 when the operator selected
+   *     the Email channel. Email has never been commissioned (0 templates, 0
+   *     events), so those zeros described a working system performing badly
+   *     rather than a system that does not run yet.
+   *  3. The health scores divide by Math.max(rows, 1), so an empty window
+   *     reported automationHealthScore 100 and dataQualityScore 100 —
+   *     "perfect health" computed from no data at all.
+   *
+   * null means "not measurable"; a number means measured. The surface must
+   * render those differently.
+   */
+  const hasQueueData = sqRows.length > 0
+  const emailNotCommissioned = channel === 'email'
+
+  const conversationReplyRate = deliveredThreads.size > 0
+    ? Math.round((repliedThreads.size / deliveredThreads.size) * 1000) / 10
+    : null
+
   const kpis = {
-    sentCount: channelZero ? 0 : t.sent,
-    deliveredCount: channelZero ? 0 : t.delivered,
-    repliedCount: channelZero ? 0 : t.replied,
-    positiveReplies: channelZero ? 0 : t.positive,
-    optOutCount: channelZero ? 0 : t.optOut,
-    failedCount: channelZero ? 0 : t.failed,
-    deliveryRate: channelZero ? 0 : tr.deliveryRate,
-    replyRate: channelZero ? 0 : tr.replyRate,
-    positiveRate: channelZero ? 0 : tr.positiveRate,
-    optOutRate: channelZero ? 0 : tr.optOutRate,
-    spendPeriod: channelZero ? 0 : spend,
+    sentCount: emailNotCommissioned ? null : t.sent,
+    deliveredCount: emailNotCommissioned ? null : t.delivered,
+    repliedCount: emailNotCommissioned ? null : t.replied,
+    positiveReplies: emailNotCommissioned ? null : t.positive,
+    optOutCount: emailNotCommissioned ? null : t.optOut,
+    failedCount: emailNotCommissioned ? null : t.failed,
+    deliveryRate: emailNotCommissioned ? null : tr.deliveryRate,
+
+    /**
+     * §12 — the conversation-grain rate is the headline. The message-grain
+     * ratio is kept beside it, explicitly named, because it is what the
+     * previous number actually was.
+     */
+    replyRate: emailNotCommissioned ? null : conversationReplyRate,
+    replyRateBasis: emailNotCommissioned ? null : {
+      definition: 'distinct conversations with an inbound reply / distinct conversations delivered to',
+      repliedConversations: repliedThreads.size,
+      deliveredConversations: deliveredThreads.size,
+    },
+    replyMessagesPerDeliveredMessage: emailNotCommissioned ? null : tr.replyRate,
+
+    positiveRate: emailNotCommissioned ? null : tr.positiveRate,
+    optOutRate: emailNotCommissioned ? null : tr.optOutRate,
+    spendPeriod: emailNotCommissioned ? null : spend,
     costPerReply: t.replied > 0 ? Math.round((spend / t.replied) * 100) / 100 : null,
     costPerPositive: t.positive > 0 ? Math.round((spend / t.positive) * 100) / 100 : null,
-    queueHealth,
-    automationHealthScore: Math.max(0, 100 - Math.round(queueFailRate * 100)),
-    buyerDemandScore: 0,
-    dataQualityScore: Math.max(0, 100 - Math.round(((failedQueue + blankBody + routingBlocked) / Math.max(sqRows.length, 1)) * 100)),
+
+    // A health verdict with nothing to judge is not "good".
+    queueHealth: hasQueueData ? queueHealth : null,
+    automationHealthScore: hasQueueData ? Math.max(0, 100 - Math.round(queueFailRate * 100)) : null,
+    dataQualityScore: hasQueueData
+      ? Math.max(0, 100 - Math.round(((failedQueue + blankBody + routingBlocked) / sqRows.length) * 100))
+      : null,
+
+    // Nothing measures buyer demand. Reported as unmeasured, not as zero.
+    buyerDemandScore: null,
+  }
+
+  /**
+   * Per-metric availability, so the surface can say WHICH number cannot be
+   * trusted instead of rendering a plausible figure (§43).
+   */
+  const metricAvailability = {
+    sms: { available: hasQueueData, reason: hasQueueData ? null : 'no_queue_rows_in_window' },
+    email: { available: false, reason: 'not_commissioned' },
+    buyer_demand: { available: false, reason: 'source_not_wired' },
+    reply_rate: {
+      available: conversationReplyRate !== null,
+      reason: conversationReplyRate === null ? 'no_delivered_conversations_in_window' : null,
+    },
+    health_scores: { available: hasQueueData, reason: hasQueueData ? null : 'no_queue_rows_in_window' },
   }
 
   // ── Timeseries (zero-filled by date across window) ──────────────────────────
@@ -584,12 +691,26 @@ export async function buildWarRoom(params = {}) {
   }
 
   // ── Email + automation + buyer health ───────────────────────────────────────
+  /**
+   * §16 — an uncommissioned email system must not report 0% performance.
+   *
+   * These counters were hardcoded zeros. With 0 templates and 0 events that
+   * renders as "Emails sent 0 · Open rate 0%", which an operator reads as bad
+   * performance rather than as a channel that has never run. They are null
+   * until there is an event ledger to count.
+   */
+  const emailWired = emailTemplates.length > 0 && emailEvents.length > 0
   const email_health = {
     templatesAvailable: emailTemplates.length,
     activeTemplates: emailTemplates.filter((e) => e.is_active !== false).length,
     eventsInWindow: emailEvents.length,
-    sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, unsubscribed: 0,
-    wired: emailTemplates.length > 0 && emailEvents.length > 0,
+    sent: emailWired ? 0 : null,
+    delivered: emailWired ? 0 : null,
+    opened: emailWired ? 0 : null,
+    clicked: emailWired ? 0 : null,
+    bounced: emailWired ? 0 : null,
+    unsubscribed: emailWired ? 0 : null,
+    wired: emailWired,
     note: emailTemplates.length === 0
       ? 'No rows in public.email_templates — email channel has no template inventory yet.'
       : emailEvents.length === 0
@@ -613,7 +734,20 @@ export async function buildWarRoom(params = {}) {
     } : null,
   }
 
-  const buyer_demand = { totalMatches: 0, topMarkets: [], avgConfidence: 0, wired: false, note: 'Buyer demand not wired into war room — connect buyer_match tables to enable.' }
+  /**
+   * §17 — nothing here measures buyer demand, so nothing is reported as a
+   * measurement. The zeros were indistinguishable from "no demand found".
+   * buyer_match_runs / buyer_match_candidates are canonical and populated, so
+   * wiring this is possible future work — but an unwired metric must read as
+   * unwired, not as zero.
+   */
+  const buyer_demand = {
+    totalMatches: null,
+    topMarkets: [],
+    avgConfidence: null,
+    wired: false,
+    note: 'Buyer demand is not wired into the war room. buyer_match_runs / buyer_match_candidates are canonical and could supply it; until then nothing is measured, which is not the same as zero demand.',
+  }
 
   // ── Alerts (derived from real metrics only) ─────────────────────────────────
   const alerts = []
@@ -662,6 +796,11 @@ export async function buildWarRoom(params = {}) {
     generated_at: new Date().toISOString(),
     source_audit,
     kpis,
+    /**
+     * §43/§44 — which metrics can be trusted right now. The operator needs to
+     * know WHICH number is unavailable, not be handed a plausible zero.
+     */
+    metric_availability: metricAvailability,
     timeseries,
     funnel,
     map_states,

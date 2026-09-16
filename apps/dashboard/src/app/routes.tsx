@@ -63,9 +63,6 @@ const BuyerMatchSubjectPage = lazy(() =>
 const QueueView = lazy(() =>
   import('../views/queue/QueueView').then((m) => ({ default: m.QueueView })),
 )
-const KpiIntelligencePage = lazy(() =>
-  import('../views/analytics/KpiIntelligencePage').then((m) => ({ default: m.KpiIntelligencePage })),
-)
 const ClosingDeskView = lazy(() =>
   import('../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })),
 )
@@ -188,11 +185,38 @@ const mapRoute = defineRoute<null>({
   render: () => <InboxView initialWorkspaceView="command_map" routeMode="fullscreen" />,
 })
 
+/**
+ * ANALYTICS-MOBILE-LOCK-1 §2 — the production route now serves the CANONICAL
+ * analytics workspace.
+ *
+ * It previously rendered KpiIntelligencePage, which mixed a real performance
+ * overview with two entirely FABRICATED datasets held as module constants:
+ *
+ *   stateData    8 states of invented metrics — TX "sent 12,400 / delivered
+ *                11,800 / replies 1,840 / contracts 12 / spend $2,400" — which
+ *                fed the USA map
+ *   funnelSteps  a 12-step funnel from "Queued 45,200" to "Closed 18" with
+ *                invented conversion percentages
+ *
+ * None of it came from a source. Real send_queue holds 18,091 rows in total,
+ * and the contracts/closings authorities do not exist in this database at all,
+ * so "Under Contract 42 · Closed 18" described a business that is not there.
+ *
+ * MetricsWarRoom is the canonical surface — one endpoint
+ * (/api/cockpit/metrics/war-room) which returns a source_audit naming the
+ * table and column behind every metric — and it was only reachable from
+ * inside the Inbox, so the dock never led to it. Same defect and same fix as
+ * the Buyer Match route.
+ *
+ * KpiIntelligencePage is deliberately NOT deleted: the USA map component and
+ * its performance-intelligence reads are useful reference. It is simply no
+ * longer the production Analytics surface.
+ */
 const analyticsRoute = defineRoute<null>({
   path: '/analytics',
   title: 'NEXUS | Analytics',
   loader: async () => null,
-  render: () => wrapFullscreen(<KpiIntelligencePage />, 'metrics'),
+  render: () => <InboxView initialWorkspaceView="metrics" routeMode="fullscreen" />,
 })
 
 const closingDeskRoute = defineRoute<null>({
