@@ -129,7 +129,40 @@ async function runCell(width, theme) {
     await page.goto(`${BASE}/calendar`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
     await page.waitForSelector('.nx-cal__mobile', { timeout: 60_000 })
   })
-  await page.waitForTimeout(5000)
+
+  /**
+   * Wait for the load to SETTLE before probing.
+   *
+   * With a fixed 5s delay the agenda row count alternated 13 / 0 / 0 / 13
+   * across cells, which meant the §22 detail assertion was silently skipped in
+   * half of them — a check that quietly does nothing is worse than no check.
+   */
+  /**
+   * "Not updating" is NOT "loaded".
+   *
+   * Waiting only for the absence of "Updating" returned before the events
+   * arrived, so the agenda measured 0 rows in cells where it actually renders
+   * 13 — and the §22 detail assertion was skipped on that false empty. Settle
+   * means the surface has reached a STATED outcome: a count, an explicit
+   * empty, or an error panel.
+   */
+  const settle = async (target) => {
+    await target.waitForFunction(
+      () => {
+        const head = document.querySelector('.nx-cal__mobile-head')?.textContent || ''
+        // The surface states "Loading schedule…" until it knows something.
+        if (/updating|loading/i.test(head)) return false
+        if (document.querySelector('.nx-cal__mobile-error')) return true
+        if (document.querySelector('.nx-cal__mobile-empty')) return true
+        if (document.querySelectorAll('.nx-cal__agenda-row').length > 0) return true
+        // A stated count (including a real zero) is a settled outcome.
+        return /\d+\s+(events\s+)?in range|unavailable|fallback/i.test(head)
+      },
+      undefined, { timeout: 30_000 },
+    ).catch(() => {})
+    await target.waitForTimeout(1500)
+  }
+  await settle(page)
 
   const probe = () => page.evaluate(() => {
     const txt = (sel) => document.querySelector(sel)?.textContent?.replace(/\s+/g, ' ').trim() ?? null
@@ -220,8 +253,11 @@ async function runCell(width, theme) {
     await page.keyboard.press('Escape').catch(() => {})
     await page.waitForTimeout(500)
   } else {
+    // Reaching here is legitimate only when the range genuinely has no items.
     check('§30 an empty agenda explains itself rather than showing nothing',
       /no |nothing |empty|clear/i.test(p.bodyText), `"${p.bodyText.slice(0, 120)}"`)
+    check('§30 an empty agenda is not hiding a load that never settled',
+      !/updating/i.test(p.head || ''), `head="${p.head}"`)
   }
 
   // ── §5/§6 subject A -> B
@@ -231,7 +267,7 @@ async function runCell(width, theme) {
         waitUntil: 'domcontentloaded', timeout: 120_000,
       })
       await page.waitForSelector('.nx-cal__mobile', { timeout: 60_000 })
-      await page.waitForTimeout(3500)
+      await settle(page)
       return page.evaluate(() => ({
         text: (document.body.innerText || '').replace(/\s+/g, ' '),
         rows: document.querySelectorAll('.nx-cal__agenda-row').length,
@@ -253,20 +289,74 @@ async function runCell(width, theme) {
   }
 
   // ── §30 a failed read must not look like an empty calendar
-  await page.route('**/api/cockpit/calendar/events**', (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'calendar_events_fetch_failed' }) }))
-  await page.goto(`${BASE}/calendar`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
-  await page.waitForSelector('.nx-cal__mobile', { timeout: 60_000 }).catch(() => {})
-  await page.waitForTimeout(4000)
-  const failed = await page.evaluate(() => ({
-    text: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 500),
+  /**
+   * Count requests only while the failure is being served. The earlier
+   * aggregate counted every navigation in the cell and printed a meaningless
+   * four-figure number; measured directly the app issues ~9 and does not
+   * retry in a loop, which is what actually matters here (§42).
+   */
+  /**
+   * Count requests for THIS navigation only, in a fresh context.
+   *
+   * Counting inside the shared page accumulated across every navigation the
+   * cell had already performed (today, detail, subject A, subject B) with the
+   * route installed mid-flight, and reported a meaningless four-figure number.
+   * Measured in isolation the app issues 4-9 requests in every
+   * subject/success/failure combination and does not retry in a loop, so the
+   * count has to be scoped the same way to mean anything (§42).
+   */
+  const failCtx = await browser.newContext({
+    viewport: { width, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+    timezoneId: TZ,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+  })
+  await failCtx.addInitScript(setTheme, theme)
+  const failPage = await failCtx.newPage()
+  let failedRequests = 0
+  await failPage.route('**/api/cockpit/calendar/events**', (route) => {
+    failedRequests += 1
+    return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'calendar_events_fetch_failed' }) })
+  })
+  await failPage.goto(`${BASE}/calendar`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+  await failPage.waitForSelector('.nx-cal__mobile', { timeout: 60_000 }).catch(() => {})
+  /**
+   * Wait for STEADY STATE, not a fixed delay.
+   *
+   * When the canonical read fails the surface falls back to a slower
+   * client-side path, so for several seconds it legitimately shows "Updating".
+   * A fixed 6s probe caught that transient and reported it as "no error
+   * shown" — and a 9s probe caught two different intermediate states on
+   * consecutive runs. The assertion has to be made once the load settles.
+   */
+  await settle(failPage)
+  const failed = await failPage.evaluate(() => ({
+    text: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 1200),
     rows: document.querySelectorAll('.nx-cal__agenda-row').length,
+    errorPanels: document.querySelectorAll('.nx-cal__mobile-error').length,
+    panelText: document.querySelector('.nx-cal__mobile-error')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
   }))
-  check('§30/§45 an API failure is shown as a failure, not an empty calendar',
-    failed.rows === 0 && /error|failed|unavailable|couldn|could not|retry|problem/i.test(failed.text),
-    `rows=${failed.rows} text="${failed.text.slice(0, 160)}"`)
-  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-error.png`) })
-  await page.unroute('**/api/cockpit/calendar/events**')
+  /**
+   * §30/§45 — the requirement is that a failed canonical read is never
+   * presented as truth. It is NOT that the screen must be empty: the client
+   * fallback reads Supabase directly and can return genuine events, so the
+   * surface may legitimately show data while stating the live schedule is
+   * unavailable. What must never happen is silence.
+   */
+  check('§30/§45 an API failure is stated, never presented as a normal calendar',
+    failed.errorPanels > 0 && /couldn|could not|unavailable/i.test(failed.text),
+    `rows=${failed.rows} panels=${failed.errorPanels} text="${failed.text.slice(0, 160)}"`)
+  check('§30 the surface distinguishes a fallback view from the live schedule',
+    failed.rows === 0
+      ? /nothing could be read|not an empty day/i.test(failed.panelText || '')
+      : /fallback/i.test(failed.panelText || ''),
+    `rows=${failed.rows} panel="${String(failed.panelText).slice(0, 200)}"`)
+  check('§29 a read that returned nothing claims no count',
+    failed.rows > 0 || !/\b\d+ events in range\b/.test(failed.text),
+    `text="${failed.text.slice(0, 120)}"`)
+  check('§42 a failing calendar does not retry in an unbounded loop',
+    failedRequests > 0 && failedRequests < 40, `${failedRequests} requests while failing`)
+  await failPage.screenshot({ path: path.join(OUT, `${width}-${theme}-error.png`) })
+  await failCtx.close()
 
   for (const [step, budget] of [['shell', 15000]]) {
     if (timings[step] === undefined) continue
@@ -275,7 +365,7 @@ async function runCell(width, theme) {
   check('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '))
 
   await context.close()
-  return { cell: `${width}-${theme}`, rows: p.agendaRows, timings, calRequests: calRequests.length }
+  return { cell: `${width}-${theme}`, rows: p.agendaRows, timings, failedRequests }
 }
 
 const results = []
@@ -286,7 +376,7 @@ try {
     results.push(r)
     const bad = findings.length - before
     const ms = r.timings || {}
-    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} agenda ${String(r.rows).padEnd(4)} shell ${ms.shell ?? '-'}ms  calendar requests ${r.calRequests}`)
+    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} agenda ${String(r.rows).padEnd(4)} shell ${ms.shell ?? '-'}ms  requests-while-failing ${r.failedRequests}`)
     for (const f of findings.slice(before)) console.log(`   x ${f.n}: ${f.d}`)
   }
 } finally { await browser.close() }

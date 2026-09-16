@@ -135,6 +135,58 @@ export type CalendarLoadMeta = {
 
 let lastLoadMeta: CalendarLoadMeta = {}
 
+/**
+ * A LOAD GENERATION, so a concurrent success cannot erase a failure.
+ *
+ * One calendar refresh issues several reads (the range load plus today's
+ * execution summary), and each wrote the same module-level `lastLoadMeta`.
+ * Whichever finished last won, so whether an outage was visible was a race:
+ * the same 500 produced either a visible error or a normal-looking calendar
+ * showing 145 fallback events with "Updating" beside it.
+ *
+ * A failure recorded during the current generation stays readable until the
+ * next generation begins, regardless of completion order.
+ */
+let loadGeneration = 0
+let generationError: { generation: number; message: string } | null = null
+/**
+ * Whether the CANONICAL (nexus) read succeeded at least once this generation.
+ *
+ * Recording only failures made visibility order-dependent: several loads run
+ * per refresh and some swallow their own errors, so whether an outage
+ * surfaced depended on which finished last. Asking "did the canonical read
+ * ever succeed?" is order-independent — if it never did, the surface has no
+ * basis for presenting its contents as the live schedule.
+ */
+let generationSuccess = 0
+
+export const beginCalendarLoadGeneration = (): number => {
+  loadGeneration += 1
+  generationError = null
+  generationSuccess = 0
+  return loadGeneration
+}
+
+export const recordCalendarNexusSuccess = () => { generationSuccess += 1 }
+
+/** True when no canonical read succeeded during the current generation. */
+export const calendarCanonicalReadFailed = (): boolean => generationSuccess === 0
+
+/** The failure recorded during the current generation, if any. */
+export const getCalendarGenerationError = (): string | null =>
+  generationError && generationError.generation === loadGeneration ? generationError.message : null
+
+export const recordCalendarGenerationError = (message: string) => {
+  if (generationError && generationError.generation === loadGeneration) return
+  generationError = { generation: loadGeneration, message }
+}
+
+const recordGenerationError = (message: string) => {
+  // First failure in a generation wins: it is the most upstream one.
+  if (generationError && generationError.generation === loadGeneration) return
+  generationError = { generation: loadGeneration, message }
+}
+
 export function getLastCalendarLoadMeta() {
   return lastLoadMeta
 }
@@ -207,6 +259,7 @@ async function loadFromNexus(filters: CalendarFilters): Promise<CalendarEvent[]>
     synchronizedAt: response.synchronized_at,
     error: null,
   }
+  recordCalendarNexusSuccess()
   return (response.events || []).map((event) => mapApiEvent(event as unknown as AnyRecord))
 }
 
@@ -322,14 +375,39 @@ async function loadClientFallback(filters: CalendarFilters): Promise<CalendarEve
     .slice(0, filters.limit ?? 500)
 }
 
-export const loadCalendarEvents = async (filters: CalendarFilters = {}): Promise<CalendarEvent[]> => {
+/**
+ * Loads events AND reports whether the canonical read succeeded, per call.
+ *
+ * `lastLoadMeta` is a module-level singleton, so two concurrent loads race to
+ * write it and a successful one erases the other's error. The calendar issues
+ * exactly that pair — the main range load and today's execution summary — so
+ * whether an outage was visible depended on which finished last. Callers that
+ * need to know should use this and not the singleton.
+ */
+export const loadCalendarEventsWithMeta = async (
+  filters: CalendarFilters = {},
+): Promise<{ events: CalendarEvent[]; error: string | null; usedFallback: boolean }> => {
   try {
-    return await loadFromNexus(filters)
+    const events = await loadFromNexus(filters)
+    return { events, error: null, usedFallback: false }
   } catch (error) {
     console.warn('[calendarData] nexus API unavailable, using client fallback', error)
-    lastLoadMeta = { error: error instanceof Error ? error.message : 'calendar_api_unavailable' }
-    return loadClientFallback(filters)
+    const message = error instanceof Error ? error.message : 'calendar_api_unavailable'
+    lastLoadMeta = { error: message }
+    recordGenerationError(message)
+    // The fallback may itself fail; that is still a failed load, not an empty one.
+    try {
+      return { events: await loadClientFallback(filters), error: message, usedFallback: true }
+    } catch (fallbackError) {
+      console.warn('[calendarData] client fallback also failed', fallbackError)
+      return { events: [], error: message, usedFallback: true }
+    }
   }
+}
+
+export const loadCalendarEvents = async (filters: CalendarFilters = {}): Promise<CalendarEvent[]> => {
+  const result = await loadCalendarEventsWithMeta(filters)
+  return result.events
 }
 
 export const loadDailyCalendar = async (date: string, filters: CalendarFilters = {}) => {
@@ -374,8 +452,10 @@ export const loadTodayExecutionSummary = async (filters: CalendarFilters = {}): 
       layers: filters.layers,
       timezone: resolveOperatorTimezone(),
     })
+    recordCalendarNexusSuccess()
     return response.kpis
-  } catch {
+  } catch (summaryError) {
+    recordGenerationError(summaryError instanceof Error ? summaryError.message : 'calendar_api_unavailable')
     const events = await loadDailyCalendar(new Date().toISOString(), filters)
     const count = (predicate: (event: CalendarEvent) => boolean) => events.filter(predicate).length
     return [

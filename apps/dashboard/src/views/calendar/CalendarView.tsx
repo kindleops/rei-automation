@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  beginCalendarLoadGeneration,
+  calendarCanonicalReadFailed,
+  getCalendarGenerationError,
   getCalendarModeRangeLabel,
   getLastCalendarLoadMeta,
   loadDailyCalendar,
@@ -27,6 +30,16 @@ import { CalendarExecutionDrawer } from './CalendarExecutionDrawer'
 import { CalendarKpiRibbon, KPI_LAYER_MAP } from './CalendarKpiRibbon'
 import { buildCalendarProofFixtures, isCalendarProofMode } from '../../lib/calendar/calendar-proof-fixtures'
 import { CalendarMobileView } from './CalendarMobileView'
+import {
+  NO_CALENDAR_SUBJECT,
+  describeCalendarSubject,
+  describeCalendarSubjectEmpty,
+  hasCalendarSubject,
+  resolveCalendarSubject,
+  sameCalendarSubject,
+  type CalendarSubject,
+} from './calendar-subject'
+import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { CalendarIntelligenceRail } from './CalendarIntelligenceRail'
 import { filterViewEvents } from '../../lib/calendar/calendar-event-classification'
 import { DailyExecutionSchedule } from './DailyExecutionSchedule'
@@ -51,21 +64,34 @@ type InboxCalendarViewProps = {
   onOpenDealIntelligence?: (threadId?: string | null) => void
 }
 
+/**
+ * §5/§6 — an explicit subject (URL or property locator) outranks the Inbox's
+ * selected thread, and applies regardless of scopeMode.
+ *
+ * Calendar previously scoped ONLY from selectedThread and only when scopeMode
+ * was 'selected', so arriving from Pipeline, Deal Intelligence or the mobile
+ * dock always showed the global schedule and a ?property_id= deep link was
+ * ignored.
+ */
 const buildFilters = (
   threads: InboxWorkflowThread[],
   selectedThread: InboxWorkflowThread | null,
   scopeMode: CalendarScopeMode,
   layers: CalendarLayerId[],
   range: { startIso: string; endIso: string },
-): CalendarFilters => ({
-  threads,
-  layers,
-  startDate: range.startIso,
-  endDate: range.endIso,
-  propertyId: scopeMode === 'selected' ? selectedThread?.propertyId ?? null : null,
-  sellerId: scopeMode === 'selected' ? selectedThread?.ownerId ?? null : null,
-  threadId: scopeMode === 'selected' ? selectedThread?.id ?? null : null,
-})
+  subject: CalendarSubject = NO_CALENDAR_SUBJECT,
+): CalendarFilters => {
+  const scoped = scopeMode === 'selected'
+  return {
+    threads,
+    layers,
+    startDate: range.startIso,
+    endDate: range.endIso,
+    propertyId: subject.propertyId ?? (scoped ? selectedThread?.propertyId ?? null : null),
+    sellerId: subject.masterOwnerId ?? (scoped ? selectedThread?.ownerId ?? null : null),
+    threadId: subject.threadKey ?? (scoped ? selectedThread?.id ?? null : null),
+  }
+}
 
 export function CalendarView({
   threads,
@@ -105,6 +131,27 @@ export function CalendarView({
   const [developerMode] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem('developer_mode') === 'true')
   const abortRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
+  /** Latches a failed load so the 'live' reset below cannot erase it. */
+  const failedRef = useRef(false)
+
+  /**
+   * §5/§6 — the operator's current subject, re-read when the locator is
+   * republished or the URL changes. Selection happens in another view, so this
+   * listens rather than polls.
+   */
+  const [subject, setSubject] = useState<CalendarSubject>(() => resolveCalendarSubject())
+  useEffect(() => {
+    const sync = () => {
+      const next = resolveCalendarSubject()
+      setSubject((prev) => (sameCalendarSubject(prev, next) ? prev : next))
+    }
+    window.addEventListener(PROPERTY_LOCATOR_EVENT, sync as EventListener)
+    window.addEventListener('popstate', sync)
+    return () => {
+      window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync as EventListener)
+      window.removeEventListener('popstate', sync)
+    }
+  }, [])
 
   useEffect(() => {
     if (selectedThread && scopeMode === 'global' && layoutMode !== 'compact') {
@@ -136,8 +183,8 @@ export function CalendarView({
   }, [anchorDate, viewMode])
 
   const filters = useMemo(
-    () => buildFilters(threads, selectedThread, scopeMode, layers, range),
-    [threads, selectedThread, scopeMode, layers, range],
+    () => buildFilters(threads, selectedThread, scopeMode, layers, range, subject),
+    [threads, selectedThread, scopeMode, layers, range, subject],
   )
 
   const loadAll = useCallback(async () => {
@@ -147,14 +194,21 @@ export function CalendarView({
     abortRef.current = controller
     setRefreshState('updating')
     setRefreshError(null)
+    // Any failure inside this generation stays visible regardless of which
+    // concurrent read finishes last.
+    beginCalendarLoadGeneration()
 
     const watchdog = window.setTimeout(() => {
       if (requestId === requestIdRef.current) {
         setRefreshState((state) => (state === 'updating' ? 'error' : state))
         setRefreshError((err) => err || 'Refresh timed out')
-        window.setTimeout(() => {
-          if (requestId === requestIdRef.current) setRefreshState('live')
-        }, 2000)
+        failedRef.current = true
+        /**
+         * The watchdog used to clear itself back to 'live' after 2s, which
+         * erased the very timeout it had just reported — the same defect as
+         * the finally-block reset below. A timed-out refresh stays visible
+         * until a load actually succeeds.
+         */
       }
     }, 12000)
 
@@ -228,25 +282,113 @@ export function CalendarView({
       setClosingItems(nextClosings)
       setContractItems(nextContracts)
       setOfferItems(nextOffers)
+      /**
+       * §30/§45 — the nexus read can FAIL without throwing.
+       *
+       * loadCalendarEvents() catches an API failure and falls back to a
+       * client-side Supabase path (deliberately, for offline/dev), recording
+       * the reason in the load meta but still RETURNING events. So loadAll
+       * never threw, refreshState never reached 'error', and a 500 rendered as
+       * "0 events in range · No events · Updated just now" — an outage
+       * presented as a clear day. Verified 2026-09-16 by answering the events
+       * endpoint with 500.
+       *
+       * The fallback is kept: if it produced events the surface is degraded
+       * but usable. If it produced nothing, there is no basis for claiming the
+       * schedule is empty, so that is reported as a failure.
+       */
+      /**
+       * Order-independent: if the canonical read never succeeded during this
+       * generation, the contents cannot be presented as the live schedule —
+       * regardless of which concurrent load finished last.
+       */
+      const canonicalFailed = calendarCanonicalReadFailed()
+      const generationError = getCalendarGenerationError()
+      const meta = canonicalFailed
+        ? { error: generationError || 'Calendar service unavailable' }
+        : getLastCalendarLoadMeta()
+
+      /**
+       * Two different outcomes, said differently.
+       *
+       * The fallback reads Supabase directly, so it can return REAL events.
+       * Claiming "Schedule unavailable" over 145 fallback events is as
+       * misleading as claiming an empty calendar: the data is genuine, the
+       * canonical read is not. So:
+       *   fallback produced events  -> DEGRADED, and say which view this is
+       *   fallback produced nothing -> FAILED, and claim no count at all
+       */
+      if (meta?.error && primaryEvents.length === 0) {
+        setRefreshError(`${meta.error} — nothing could be read`)
+        setRefreshState('error')
+        failedRef.current = true
+        return
+      }
+
       setLastUpdated(new Date().toISOString())
-      setRefreshState('updated')
+      setRefreshState(meta?.error ? 'error' : 'updated')
+      failedRef.current = Boolean(meta?.error)
+      setRefreshError(meta?.error ? `${meta.error} — showing a local fallback view, not the live schedule` : null)
     } catch (error) {
       if (controller.signal.aborted || requestId !== requestIdRef.current) return
       setRefreshError(error instanceof Error ? error.message : 'Refresh failed')
       setRefreshState('error')
+      failedRef.current = true
     } finally {
       window.clearTimeout(watchdog)
       if (requestId === requestIdRef.current) {
+        /**
+         * §30/§45 — DO NOT return to 'live' after a failure.
+         *
+         * This reset ran unconditionally, so an error state survived 2.2
+         * seconds and then the surface reported "Updated just now" over an
+         * empty agenda. A 500 therefore rendered as a beautifully empty
+         * calendar: "0 events in range · No events". Verified 2026-09-16 by
+         * answering the events endpoint with 500 — nine requests, no retry
+         * storm, and no indication anything was wrong.
+         */
         window.setTimeout(() => {
-          if (requestId === requestIdRef.current) setRefreshState('live')
+          if (requestId !== requestIdRef.current) return
+          if (failedRef.current) return
+          setRefreshState('live')
         }, 2200)
       }
     }
   }, [anchorDate, filters, proofMode, scopeMode, selectedThread?.ownerId, selectedThread?.propertyId, threads, viewMode])
 
+  /**
+   * A STABLE load trigger.
+   *
+   * This effect depended on `loadAll`, whose useCallback depends on `filters`,
+   * whose useMemo depends on the `threads` PROP ARRAY. A new array identity on
+   * any parent render therefore produced a new loadAll and re-ran this effect,
+   * which set state and caused another render. Each invocation aborted the
+   * previous one at the `requestId !== requestIdRef.current` guard, so with a
+   * slow path (the client fallback during an outage) nothing ever completed:
+   * the surface sat on "Updating" indefinitely while showing 145 fallback
+   * events. Observed 2026-09-16 in 2 of 4 matrix cells.
+   *
+   * The effect now keys off a SIGNATURE of the values that actually change the
+   * query, so identity churn alone cannot retrigger a load.
+   */
+  const loadSignature = useMemo(() => JSON.stringify({
+    start: filters.startDate ?? null,
+    end: filters.endDate ?? null,
+    propertyId: filters.propertyId ?? null,
+    sellerId: filters.sellerId ?? null,
+    threadId: filters.threadId ?? null,
+    layers: [...(filters.layers ?? [])].sort(),
+    viewMode,
+    scopeMode,
+    proofMode,
+  }), [filters.startDate, filters.endDate, filters.propertyId, filters.sellerId, filters.threadId, filters.layers, viewMode, scopeMode, proofMode])
+
+  const loadAllRef = useRef(loadAll)
+  useEffect(() => { loadAllRef.current = loadAll }, [loadAll])
+
   useEffect(() => {
-    void loadAll()
-  }, [loadAll, liveTick])
+    void loadAllRef.current()
+  }, [loadSignature, liveTick])
 
   useEffect(() => {
     let cancelled = false
@@ -424,6 +566,13 @@ export function CalendarView({
           onSelect={handleSelectEvent}
           onNewEvent={() => setNewEventOpen(true)}
           onDateChange={(date) => setAnchorDate(startOfDay(date))}
+          // §30 — the mobile surface had no way to say a load failed.
+          loadError={refreshState === 'error' ? (refreshError || 'Calendar could not be loaded') : null}
+          degraded={refreshState === 'error' && events.length > 0}
+          loading={refreshState === 'updating'}
+          onRetry={() => { failedRef.current = false; void loadAll() }}
+          subjectLabel={hasCalendarSubject(subject) ? describeCalendarSubject(subject) : null}
+          emptyLabel={describeCalendarSubjectEmpty(subject)}
         />
       )
     }

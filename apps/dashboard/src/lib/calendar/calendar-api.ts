@@ -35,8 +35,22 @@ export type CalendarFetchParams = {
   timezone?: string
 }
 
+/**
+ * §30/§45 — an error body must not become "data".
+ *
+ * `callBackend` reports transport success for ANY parsed response, including
+ * an HTTP 500 carrying `{ ok: false, error: ... }`. This checked only
+ * `result.ok`, so a 500 was unwrapped as a successful payload whose `events`
+ * key was simply missing. The calendar then rendered "0 events in range · No
+ * events" over an outage — verified 2026-09-16 by answering the endpoint with
+ * 500: no error surfaced anywhere. The envelope's own ok flag is now honoured.
+ */
 function unwrap<T>(result: Awaited<ReturnType<typeof callBackend>>): T {
   if (!result.ok) throw new Error(result.message || result.error || 'calendar_request_failed')
+  const body = result.data as { ok?: boolean; error?: string; message?: string } | null
+  if (body && body.ok === false) {
+    throw new Error(body.message || body.error || 'calendar_request_failed')
+  }
   return result.data as T
 }
 

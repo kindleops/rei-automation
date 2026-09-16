@@ -152,7 +152,20 @@ export const resolveMobileAwareLayoutMode = (
   const layoutMode = resolveLayoutModeForPane(flexBasis, widthOverride)
   if (!isMobile) return layoutMode
 
-  if (view === 'pipeline' || view === 'command_map' || view === 'queue' || view === 'workflow_studio') {
+  /**
+   * CALENDAR-MOBILE-LOCK-1 §20/§39 — 'calendar' was missing from this list.
+   *
+   * CalendarMobileView exists and was UNREACHABLE on a phone: without a
+   * compact layout the view fell through to the pane-width mode, which at
+   * paneWidth '100' is 'full', so mobile rendered the desktop calendar — the
+   * multi-column grid §20 explicitly says must not be squeezed into 390px.
+   * The mobile day strip, month sheet and new-event control could not be
+   * reached at all.
+   */
+  if (
+    view === 'pipeline' || view === 'command_map' || view === 'queue' ||
+    view === 'workflow_studio' || view === 'calendar'
+  ) {
     return 'compact'
   }
   if (view === 'deal_intelligence') return 'compact'

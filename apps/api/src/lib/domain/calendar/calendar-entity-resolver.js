@@ -293,22 +293,36 @@ export async function hydrateResolverFromDatabase(client, opts = {}) {
     return out;
   };
 
+  /**
+   * Enrichment must DEGRADE, never throw. It improves labels; it is not a gate
+   * on the calendar loading. A client that cannot serve these lookups (or a
+   * transient failure) must leave items unresolved, not turn the whole request
+   * into a 500 — which is what happened when this first shipped: `.in(...)` is
+   * absent from the contract test's mock client and the entire
+   * fetchCalendarNexusEvents call threw.
+   */
+  const lookup = async (table, columns, column, ids) => {
+    try {
+      const query = client.from(table).select(columns);
+      if (typeof query?.in !== 'function') return [];
+      const { data, error } = await query.in(column, ids);
+      if (error) return [];
+      return data ?? [];
+    } catch {
+      return [];
+    }
+  };
+
   const owners = new Map();
   for (const ids of chunk(ownerIds)) {
-    const { data } = await client
-      .from('master_owners')
-      .select('master_owner_id, display_name, routing_market, best_language')
-      .in('master_owner_id', ids);
-    for (const row of data ?? []) owners.set(clean(row.master_owner_id), row);
+    const rows = await lookup('master_owners', 'master_owner_id, display_name, routing_market, best_language', 'master_owner_id', ids);
+    for (const row of rows) owners.set(clean(row.master_owner_id), row);
   }
 
   const properties = new Map();
   for (const ids of chunk(propertyIds)) {
-    const { data } = await client
-      .from('properties')
-      .select('property_id, property_address_full, property_address, market, property_type')
-      .in('property_id', ids);
-    for (const row of data ?? []) properties.set(clean(row.property_id), row);
+    const rows = await lookup('properties', 'property_id, property_address_full, property_address, market, property_type', 'property_id', ids);
+    for (const row of rows) properties.set(clean(row.property_id), row);
   }
 
   if (owners.size || properties.size) {
@@ -360,23 +374,32 @@ export async function hydrateResolverForEvents(client, resolver, events = []) {
   let owners = 0;
   let properties = 0;
 
+  // Same contract as above: a client without `.in` (or a failing lookup)
+  // degrades to unresolved labels and is REPORTED, never thrown.
+  const lookup = async (table, columns, column, ids) => {
+    try {
+      const query = client.from(table).select(columns);
+      if (typeof query?.in !== 'function') {
+        errors.push(`${table}: client does not support .in()`);
+        return [];
+      }
+      const { data, error } = await query.in(column, ids);
+      if (error) { errors.push(`${table}: ${error.message}`); return []; }
+      return data ?? [];
+    } catch (err) {
+      errors.push(`${table}: ${err?.message || String(err)}`);
+      return [];
+    }
+  };
+
   for (const ids of chunk(ownerIds)) {
-    const { data, error } = await client
-      .from('master_owners')
-      .select('master_owner_id, display_name, routing_market')
-      .in('master_owner_id', ids);
-    // A failed lookup is recorded, never folded into "unresolved".
-    if (error) { errors.push(`master_owners: ${error.message}`); continue; }
-    for (const row of data ?? []) { resolver.ingestOwner(row); owners += 1; }
+    const rows = await lookup('master_owners', 'master_owner_id, display_name, routing_market', 'master_owner_id', ids);
+    for (const row of rows) { resolver.ingestOwner(row); owners += 1; }
   }
 
   for (const ids of chunk(propertyIds)) {
-    const { data, error } = await client
-      .from('properties')
-      .select('property_id, master_owner_id, property_address_full, property_address, market, property_type, owner_display_name, owner_name')
-      .in('property_id', ids);
-    if (error) { errors.push(`properties: ${error.message}`); continue; }
-    for (const row of data ?? []) { resolver.ingestProperty(row); properties += 1; }
+    const rows = await lookup('properties', 'property_id, master_owner_id, property_address_full, property_address, market, property_type, owner_display_name, owner_name', 'property_id', ids);
+    for (const row of rows) { resolver.ingestProperty(row); properties += 1; }
   }
 
   return { owners, properties, errors };
