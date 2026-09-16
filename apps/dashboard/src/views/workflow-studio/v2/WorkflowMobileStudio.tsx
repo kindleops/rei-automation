@@ -12,7 +12,15 @@ interface WorkflowMobileHeaderProps {
   detail: WorkflowDetail | null
   busy?: boolean
   validationCount: number
-  liveMode: boolean
+  /**
+   * The real mode, not a boolean. `liveMode !== 'off'` collapsed 'live' and
+   * 'demo' into one chip that read "Live overlay" — and demo mode paints
+   * FABRICATED tokens ("Demo Seller", "123 Demo St", demo-run-1) onto the
+   * canvas. The mobile header's toggle cycles off -> live -> demo, so two taps
+   * put synthetic runs on screen labelled as live, on an engine that currently
+   * has nothing in flight at all.
+   */
+  liveMode: 'off' | 'live' | 'demo'
   consoleOpen: boolean
   onDryRun: () => void
   onToggleConsole: () => void
@@ -68,7 +76,12 @@ export function WorkflowMobileHeader({
         {workflow?.live_send_enabled === false && (
           <span className="wfs2-mobile-hero__chip is-safe">Live blocked</span>
         )}
-        {liveMode && <span className="wfs2-mobile-hero__chip is-live">Live overlay</span>}
+        {liveMode === 'live' && <span className="wfs2-mobile-hero__chip is-live">Live overlay</span>}
+        {liveMode === 'demo' && (
+          <span className="wfs2-mobile-hero__chip is-demo" title="Sample tokens drawn on the canvas to show how the overlay behaves. Not real runs, not real sellers.">
+            Sample data · not real runs
+          </span>
+        )}
         {consoleOpen && <span className="wfs2-mobile-hero__chip is-console">Console</span>}
       </div>
 
@@ -79,7 +92,7 @@ export function WorkflowMobileHeader({
         </button>
         <button
           type="button"
-          className={cls('wfs2-mobile-hero__action', liveMode && 'is-active')}
+          className={cls('wfs2-mobile-hero__action', liveMode !== 'off' && 'is-active')}
           disabled={!detail}
           onClick={onToggleLiveMode}
         >

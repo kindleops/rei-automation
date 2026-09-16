@@ -600,7 +600,7 @@ export const WorkflowStudioV2 = ({
           detail={selected}
           busy={busy}
           validationCount={validationCount}
-          liveMode={liveMode !== 'off'}
+          liveMode={liveMode}
           consoleOpen={consoleOpen}
           onDryRun={runDryRun}
           onToggleConsole={() => {

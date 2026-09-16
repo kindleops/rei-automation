@@ -3353,6 +3353,14 @@
 .wfs2-mobile-hero__chip.is-safe { color: var(--wfs2-muted); }
 .wfs2-mobile-hero__chip.is-live { color: var(--wfs2-accent); border-color: color-mix(in srgb, var(--wfs2-accent) 35%, transparent); }
 .wfs2-mobile-hero__chip.is-console { color: var(--wfs2-blue); }
+/* Sample data must not wear the live colour. The demo overlay draws fabricated
+   tokens ("Demo Seller", "123 Demo St"), so it gets the warning tone — an
+   operator glancing at the canvas has to be able to tell at once that those
+   tokens are not sellers. */
+.wfs2-mobile-hero__chip.is-demo {
+  color: var(--wfs2-gold);
+  border-color: color-mix(in srgb, var(--wfs2-gold) 45%, transparent);
+}
 
 .wfs2-mobile-hero__actions {
   display: grid;

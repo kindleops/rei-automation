@@ -497,6 +497,62 @@ const runCell = async (browser, width, theme, canonical) => {
     check('flows dock button exists', false, 'cannot verify list truth without it')
   }
 
+  // The Flows sheet is a modal — its backdrop legitimately intercepts the
+  // header, so it has to be dismissed before the header checks. (That
+  // interception is correct for a sheet the OPERATOR opened; the defect was a
+  // sheet opening by itself on load.)
+  const closeSheet = page.locator('.wfs2-mobile-sheet__close')
+  if (await closeSheet.count()) {
+    await closeSheet.first().click()
+    await page.waitForTimeout(700)
+  }
+  const stillOpen = await page.evaluate(() => document.querySelectorAll('.wfs2-mobile-sheet').length)
+  check('an open sheet can be dismissed', stillOpen === 0, `${stillOpen} sheet(s) still open`)
+
+  // ── a fabricated run may never be presented as a live one.
+  //
+  // The header toggle cycles off -> live -> demo, and demo mode paints
+  // synthetic tokens ("Demo Seller", "123 Demo St", demo-run-1) onto the
+  // canvas. The hero chip was fed `liveMode !== 'off'`, so both states rendered
+  // "Live overlay" — two taps put fake runs on screen labelled as real, on an
+  // engine that has nothing in flight.
+  const liveToggle = page.locator('.wfs2-mobile-hero__action').filter({ hasText: /live/i })
+  const toggleCount = await liveToggle.count()
+  check('the live-mode toggle is present', toggleCount > 0, 'cannot verify demo labelling without it')
+  if (toggleCount > 0) {
+    const chips = async () => page.evaluate(() =>
+      [...document.querySelectorAll('.wfs2-mobile-hero__chip')].map((el) => ({
+        text: el.innerText.replace(/\s+/g, ' ').trim(),
+        demo: el.classList.contains('is-demo'),
+        live: el.classList.contains('is-live'),
+      })))
+
+    await liveToggle.first().click()           // -> live
+    await page.waitForTimeout(900)
+    const liveChips = await chips()
+    check('live mode is labelled live', liveChips.some((c) => c.live && /live/i.test(c.text)),
+      JSON.stringify(liveChips))
+
+    await liveToggle.first().click()           // -> demo
+    await page.waitForTimeout(900)
+    const demoChips = await chips()
+    check('demo mode is labelled as sample data, not as live',
+      demoChips.some((c) => c.demo && /not real runs/i.test(c.text)),
+      JSON.stringify(demoChips))
+    check('demo mode never claims to be a live overlay',
+      !demoChips.some((c) => c.live), JSON.stringify(demoChips))
+
+    // Any fabricated token on the canvas must be reachable only under that
+    // label — never while the surface says live.
+    const fabricated = await page.evaluate(() =>
+      /Demo Seller|123 Demo St/.test(document.body.innerText))
+    check('fabricated tokens only appear under the sample-data label',
+      !fabricated || demoChips.some((c) => c.demo), 'demo tokens rendered without the sample-data chip')
+
+    await liveToggle.first().click()           // -> off
+    await page.waitForTimeout(600)
+  }
+
   // ── contrast, both themes
   for (const [what, ratio] of Object.entries(p.contrast)) {
     if (ratio == null) continue
