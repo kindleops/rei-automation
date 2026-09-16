@@ -96,6 +96,13 @@ console.log(`  subject A       count=${SUB_A.count} addr=${SUB_A.address}`)
 console.log(`  subject B       count=${SUB_B.count} addr=${SUB_B.address}`)
 console.log(`  subject none    count=${SUB_NONE.count}`)
 
+// §3 — no endpoint may 500
+const findings = []
+for (const [name, r] of [['overview', overview], ['records', records], ['threads', threads], ['templates', templates], ['brevo-health', health]]) {
+  if (r.status !== 200) findings.push({ cell: 'api', n: `§3 ${name} must not fail`, d: `http ${r.status} ${JSON.stringify(r.body).slice(0, 160)}` })
+  else if (r.body?.ok === false) findings.push({ cell: 'api', n: `§3 ${name} envelope ok:false`, d: JSON.stringify(r.body).slice(0, 160) })
+}
+
 // §6 — the subject scope must be real before the UI is judged against it.
 if (SUB_A.count !== null) {
   if (!(SUB_A.count > 0 && SUB_B.count > 0))
@@ -106,12 +113,6 @@ if (SUB_A.count !== null) {
     findings.push({ cell: 'api', n: '§6 an unknown subject must yield ZERO, not the corpus', d: `${SUB_NONE.count}` })
 }
 
-// §3 — no endpoint may 500
-const findings = []
-for (const [name, r] of [['overview', overview], ['records', records], ['threads', threads], ['templates', templates], ['brevo-health', health]]) {
-  if (r.status !== 200) findings.push({ cell: 'api', n: `§3 ${name} must not fail`, d: `http ${r.status} ${JSON.stringify(r.body).slice(0, 160)}` })
-  else if (r.body?.ok === false) findings.push({ cell: 'api', n: `§3 ${name} envelope ok:false`, d: JSON.stringify(r.body).slice(0, 160) })
-}
 
 const setTheme = (t) => {
   // addInitScript can run before the document element exists, and an
@@ -328,6 +329,43 @@ async function runCell(width, theme) {
   })
   check('§21/§44 a body with unresolved {{variables}} cannot be sent',
     guarded.disabled === true, `send disabled=${guarded.disabled}`)
+
+  // ── §7/§8/§9/§10 thread list and detail, when a thread exists
+  if (TRUTH.threadCount > 0) {
+    await openTab('Inbox')
+    await page.waitForTimeout(1500)
+    const row = page.locator('.ecc__thread-list > div[class*="thread"]').first()
+    const listed = await page.evaluate(() => {
+      const r = document.querySelector('.ecc__thread-list > div[class*="thread"]')
+      return r ? r.textContent.replace(/\s+/g, ' ').trim() : null
+    })
+    check('§7 a thread row carries recipient and subject', !!listed && listed.length > 4, `"${String(listed).slice(0, 120)}"`)
+
+    if (await row.count()) {
+      await row.click()
+      await page.waitForTimeout(2200)
+      const detail = await page.evaluate(() => {
+        const msgs = [...document.querySelectorAll('[class*="ecc__msg"], [class*="ecc__message"]')]
+        return {
+          messageCount: msgs.length,
+          directions: msgs.map((m) => (/inbound|is-in/.test(m.className) ? 'inbound' : /outbound|is-out/.test(m.className) ? 'outbound' : 'unknown')),
+          text: (document.querySelector('[class*="ecc__thread-detail"], .ecc__inbox')?.textContent || '').replace(/\s+/g, ' ').slice(0, 500),
+          errorPanels: document.querySelectorAll('.ecc__error-panel').length,
+          overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+        }
+      })
+      check('§8 opening a thread renders its messages', detail.messageCount > 0, `${detail.messageCount} messages`)
+      check('§9 inbound and outbound are visually distinguished',
+        new Set(detail.directions).size > 1 || detail.directions.every((d) => d !== 'unknown'),
+        detail.directions.join(','))
+      check('§8 a thread detail read does not error', detail.errorPanels === 0, `${detail.errorPanels} panels`)
+      check('§8 no overflow in the thread detail', detail.overflow === 0, `${detail.overflow}px`)
+      check('§10 the detail never claims delivery it does not have',
+        !/\bdelivered\b/i.test(detail.text) || /queued|sent|received/i.test(detail.text),
+        detail.text.slice(0, 120))
+      await page.screenshot({ path: path.join(OUT, `${width}-${theme}-thread.png`) })
+    }
+  }
 
   // ── §5/§6 subject scoping, A -> B -> unknown
   const openSubject = async (id) => {
