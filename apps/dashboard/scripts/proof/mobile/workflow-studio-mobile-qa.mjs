@@ -96,6 +96,7 @@ const canonicalTruth = async (secret) => {
     /** §3 — which workflows can text a seller. */
     withSendNodes: workflows.filter((w) => (w.send_node_count ?? 0) > 0).map((w) => w.name),
     sendNodeTotal: workflows.reduce((n, w) => n + (w.send_node_count ?? 0), 0),
+    draftCount: workflows.filter((w) => String(w.status ?? '').toLowerCase() === 'draft').length,
     statuses: workflows.reduce((m, w) => {
       const s = String(w.status ?? 'unknown').toLowerCase()
       m[s] = (m[s] ?? 0) + 1
@@ -428,6 +429,70 @@ const runCell = async (browser, width, theme, canonical) => {
     // Every row must say something about whether it can run.
     const silent = flows.rows.filter((r) => !r.activation).map((r) => r.name)
     check('every row reports its activation state', silent.length === 0, silent.slice(0, 5).join(', '))
+
+    // ── search narrows the real list, and clearing restores it byte-for-byte
+    const search = page.locator('input[aria-label="Search workflows"]')
+    if (await search.count()) {
+      await search.first().fill('Underwriting')
+      await page.waitForTimeout(700)
+      const narrowed = await page.evaluate(PROBE_FLOWS)
+      const expected = canonical.names.filter((n) => /underwriting/i.test(n)).length
+      check('search narrows to the matching workflows', narrowed.rowCount === expected,
+        `search "Underwriting" -> ${narrowed.rowCount} rows, canonical has ${expected}`)
+      check('search matches by name, not by accident', narrowed.rows.every((r) => /underwriting/i.test(r.name ?? '')),
+        narrowed.rows.map((r) => r.name).join(', '))
+
+      // A term that cannot match must empty the list rather than fall back to
+      // showing everything — a filter that silently ignores itself is worse
+      // than one that returns nothing.
+      await search.first().fill('zzzznotaworkflow')
+      await page.waitForTimeout(700)
+      const empty = await page.evaluate(PROBE_FLOWS)
+      check('a zero-match search shows nothing rather than everything', empty.rowCount === 0,
+        `${empty.rowCount} rows survived an impossible search`)
+
+      await search.first().fill('')
+      await page.waitForTimeout(700)
+      const restored = await page.evaluate(PROBE_FLOWS)
+      check('clearing search restores the full list', restored.rowCount === canonical.count,
+        `${restored.rowCount} of ${canonical.count} after clearing`)
+    } else {
+      check('flows search input exists', false, 'the list cannot be narrowed on mobile')
+    }
+
+
+    // ── filter tabs must agree with the canonical statuses they claim to select
+    // Fail closed. A missing tab must not make this assertion disappear — the
+    // silent-skip guard is how six count checks quietly stopped running on the
+    // Campaign Command harness.
+    // On mobile each tab carries its own count badge, so the label is "Draft 7"
+    // rather than "Draft" — an anchored /^Draft$/ matched nothing and the
+    // `if (count)` guard then skipped the assertion entirely. Fail closed.
+    const tabs = await page.evaluate(() =>
+      [...document.querySelectorAll('.wfs2-nav__tab')].map((el) => ({
+        label: el.innerText.replace(/\s+/g, ' ').trim(),
+        badge: el.querySelector('.wfs2-nav__tab-count')?.innerText.trim() ?? null,
+      })))
+    check('the mobile filter tabs are present', tabs.length > 0, 'no filter tabs at all')
+    const draftIndex = tabs.findIndex((t) => /^draft\b/i.test(t.label))
+    check('a Draft filter tab exists', draftIndex >= 0, `tabs: ${tabs.map((t) => t.label).join(' | ')}`)
+
+    if (draftIndex >= 0) {
+      // The badge is a count, so it must agree with the list it filters.
+      check('the Draft tab badge matches the canonical draft count',
+        Number(tabs[draftIndex].badge) === canonical.draftCount,
+        `badge ${tabs[draftIndex].badge} vs canonical ${canonical.draftCount}`)
+
+      await page.locator('.wfs2-nav__tab').nth(draftIndex).click()
+      await page.waitForTimeout(700)
+      const drafts = await page.evaluate(PROBE_FLOWS)
+      check('the Draft tab selects exactly the draft workflows',
+        drafts.rowCount === canonical.draftCount,
+        `${drafts.rowCount} rows vs canonical draft count ${canonical.draftCount}`)
+      check('every row under the Draft tab is a draft',
+        drafts.rows.every((r) => /draft/i.test(r.status ?? '')),
+        drafts.rows.map((r) => `${r.name}=${r.status}`).join(', ').slice(0, 200))
+    }
   } else {
     check('flows dock button exists', false, 'cannot verify list truth without it')
   }

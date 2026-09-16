@@ -270,16 +270,26 @@ export function WorkflowMobileActionsSheet({
           <button type="button" className="wfs2-mobile-actions__btn" disabled={busy || !detail} onClick={() => { onResume(); onClose() }}>
             <span className="wfs2-mobile-actions__icon"><Icon name="play" size={15} /></span>
             <span className="wfs2-mobile-actions__copy">
-              <strong>Resume</strong>
-              <small>Restart paused enrollments</small>
+              <strong>Resume workflow</strong>
+              {/* The copy said "Restart paused enrollments". It does not touch
+                  enrollments at all — run-control.js is the only enrollment
+                  writer. `resumeDefinition` sets workflow_definitions.status to
+                  'active', which is exactly the status matchDefinitions
+                  requires, so this button ARMS the definition for live trigger
+                  matching. That is the most consequential action on the sheet
+                  and it was labelled as a harmless restart. */}
+              <small>Sets this definition to active, so new triggers can match it. Existing enrollments are not restarted.</small>
             </span>
           </button>
         ) : (
           <button type="button" className="wfs2-mobile-actions__btn" disabled={busy || !detail} onClick={() => { onPause(); onClose() }}>
             <span className="wfs2-mobile-actions__icon"><Icon name="pause" size={15} /></span>
             <span className="wfs2-mobile-actions__copy">
-              <strong>Pause</strong>
-              <small>Hold new runs without losing state</small>
+              <strong>Pause workflow</strong>
+              {/* Definition-scoped, like Resume: status becomes 'paused', so the
+                  trigger matcher stops selecting it. Per-enrollment pause is a
+                  different operation on a different table. */}
+              <small>Stops this definition matching new triggers. In-flight enrollments keep their state.</small>
             </span>
           </button>
         )}
