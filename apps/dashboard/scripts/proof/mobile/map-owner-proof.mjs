@@ -77,7 +77,46 @@ const PROBE = (families) => {
     ? { owner: window.__nexusInventoryOwner.owner, reason: window.__nexusInventoryOwner.reason, appliedLayers: window.__nexusInventoryOwner.appliedLayers }
     : null
 
-  const out = { zoom: Number(map.getZoom().toFixed(2)), owner, families: {} }
+  /**
+   * Canvas size and centre are recorded because symbol collision is resolved against the
+   * CANVAS, not against the data: the same properties at the same zoom produce a
+   * different number of placed icons if the map is a different height. The bottom sheet
+   * resizes the map container, so a run where the seller card settled at a different
+   * detent is not comparable to one where it did not, however identical the tile data.
+   */
+  /**
+   * Which marker icons are actually registered on this map. A symbol whose icon-image is
+   * absent is silently NOT PLACED, which is indistinguishable from a collision drop when
+   * all you have is a rendered count — and would explain a second run placing far fewer
+   * icons than the first from an identical admitted set.
+   */
+  const iconState = (() => {
+    try {
+      if (!map.getLayer('prop-tiles-icon')) return null
+      // The real names, from pin-icons.ts PIN_ICON — an earlier version of this probe
+      // guessed them and reported "0 of 6 registered" for icons that were never called
+      // that, which proved nothing at all.
+      const imgs = [
+        'nexus-pin-sfr', 'nexus-pin-multi', 'nexus-pin-apt', 'nexus-pin-land',
+        'nexus-pin-comm', 'nexus-pin-default', 'nexus-pin-selected',
+      ]
+      const missing = imgs.filter((n) => { try { return !map.hasImage(n) } catch { return true } })
+      let total = null
+      try { total = map.listImages().length } catch { /* not exposed */ }
+      return { missing, registeredTotal: total }
+    } catch { return null }
+  })()
+  const canvas = map.getCanvas()
+  const centre = map.getCenter()
+  const out = {
+    zoom: Number(map.getZoom().toFixed(2)),
+    canvasW: canvas.clientWidth,
+    canvasH: canvas.clientHeight,
+    centre: [Number(centre.lng.toFixed(5)), Number(centre.lat.toFixed(5))],
+    iconState,
+    owner,
+    families: {},
+  }
   for (const [name, def] of Object.entries(families)) {
     const present = def.all.filter((id) => map.getLayer(id))
     if (present.length === 0) { out.families[name] = { present: false, kind: def.kind }; continue }
@@ -154,15 +193,30 @@ const arrive = async (page) => {
   await page.waitForTimeout(16_000)
 }
 
-const browser = await chromium.launch()
 await fs.mkdir(OUT, { recursive: true })
 const runs = []
 
 for (let run = 1; run <= RUNS; run += 1) {
-  // A FRESH CONTEXT per run, not just a reload: the non-determinism being hunted came
-  // from arrival ordering, and a warm cache hides exactly that.
+  /**
+   * A FRESH BROWSER per run, not merely a fresh context.
+   *
+   * Contexts share the browser's GPU process, and symbol placement degrades in a second
+   * context that follows a full eight-zoom walk: run 1 placed 96 icons at z15 and run 2
+   * placed 7, from byte-identical source and admitted sets, in the same process. Walking
+   * every path into z15 in short-lived contexts gave 96 every time, so the variable was
+   * accumulated GPU state in the harness rather than anything in the render. Isolating
+   * the process per run is the only way this proof can claim to compare two renders
+   * rather than two levels of resource pressure.
+   */
+  const browser = await chromium.launch()
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
   const page = await context.newPage()
+  const consoleNoise = []
+  page.on('console', (msg) => {
+    const t = msg.text()
+    if (/image|glyph|sprite|sdf|atlas|could not be loaded|missing/i.test(t)) consoleNoise.push(`${msg.type()}: ${t.slice(0, 160)}`)
+  })
+  page.on('pageerror', (e) => consoleNoise.push(`pageerror: ${String(e.message).slice(0, 160)}`))
   await arrive(page)
 
   const rows = []
@@ -176,7 +230,7 @@ for (let run = 1; run <= RUNS; run += 1) {
      * of the run never took, and every later zoom was fine because nothing was animating
      * by then. Retried rather than asserted once, since the fly-out has no fixed length.
      */
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const landed = await page.evaluate(({ center, z }) => {
         const maps = window.__nexusMaps ?? []
         let best = null; let bestArea = 0
@@ -192,7 +246,7 @@ for (let run = 1; run <= RUNS; run += 1) {
         return Math.abs(best.getZoom() - z) < 0.01
       }, { center: CENTER, z: zoom })
       if (landed) break
-      await page.waitForTimeout(1500)
+      await page.waitForTimeout(2000)
     }
 
     /**
@@ -243,24 +297,16 @@ for (let run = 1; run <= RUNS; run += 1) {
       return count > 0 && window.__nexusTileSettle.stable >= 3
     }, null, { timeout: 60_000, polling: 1200 }).catch(() => {})
     /**
-     * Finally, wait for the PLACEMENT to settle, not just the data.
+     * Finally, let PLACEMENT finish — by waiting, not by polling it.
      *
-     * Symbol collision runs asynchronously after tiles land, so queryRenderedFeatures
-     * can report a mid-placement snapshot. Two runs with identical source and identical
-     * admitted counts reported 2 and 6 rendered at z16 for exactly this reason — the
-     * render agreed, the moment of sampling did not.
+     * This used to poll queryRenderedFeatures until the count repeated, which is a
+     * self-defeating measurement: the poll latches onto a plateau while placement is
+     * still climbing, and reported 7 icons at z15 where the settled figure is 96. Proven
+     * against the product by walking every path into z15 — 13>15, 14>15, 13>14>15 and
+     * direct — all of which settle at 96 when left alone for nine seconds. The render was
+     * never the variable; the polling was.
      */
-    await page.waitForFunction(() => {
-      const maps = window.__nexusMaps ?? []
-      const m = maps.find((c) => c.getContainer?.()?.isConnected)
-      if (!m || !m.getLayer('prop-tiles-icon')) return false
-      let n = -1
-      try { n = m.queryRenderedFeatures(undefined, { layers: ['prop-tiles-icon'] }).length } catch { return false }
-      const prev = window.__nexusPlacementSettle
-      window.__nexusPlacementSettle = { n, stable: prev && prev.n === n ? prev.stable + 1 : 0 }
-      return window.__nexusPlacementSettle.stable >= 3
-    }, null, { timeout: 30_000, polling: 700 }).catch(() => {})
-    await page.waitForTimeout(1500)
+    await page.waitForTimeout(9000)
 
     const probe = await page.evaluate(PROBE, FAMILIES).catch((error) => ({ error: String(error?.message ?? error) }))
     rows.push({ requestedZoom: zoom, ...probe })
@@ -276,7 +322,13 @@ for (let run = 1; run <= RUNS; run += 1) {
     )
   }
   runs.push(rows)
+  if (consoleNoise.length) {
+    say(`run${run} image/glyph console (${consoleNoise.length}): ${[...new Set(consoleNoise)].slice(0, 6).join(' | ')}`)
+  } else {
+    say(`run${run} image/glyph console: clean`)
+  }
   await context.close()
+  await browser.close()
 }
 
 // ── Determinism: compare every run against run 1, per zoom ────────────────────
@@ -288,6 +340,9 @@ for (let r = 1; r < runs.length; r += 1) {
     const am = a.families?.mvtTiles ?? {}; const bm = b.families?.mvtTiles ?? {}
     // The camera has to have been in the same place, or nothing below compares anything.
     if (a.zoom !== b.zoom) diffs.push(`z${a.requestedZoom}: sampled at different cameras, ${a.zoom} vs ${b.zoom}`)
+    if (a.canvasH !== b.canvasH || a.canvasW !== b.canvasW) {
+      diffs.push(`z${a.requestedZoom}: canvas ${a.canvasW}x${a.canvasH} vs ${b.canvasW}x${b.canvasH} — collision viewport differs`)
+    }
     if (a.owner?.owner !== b.owner?.owner) diffs.push(`z${a.requestedZoom}: owner ${a.owner?.owner} vs ${b.owner?.owner}`)
     if (am.layersVisible !== bm.layersVisible) diffs.push(`z${a.requestedZoom}: mvt layersVisible ${am.layersVisible} vs ${bm.layersVisible}`)
     if ((a.genericOwners ?? []).join(',') !== (b.genericOwners ?? []).join(',')) diffs.push(`z${a.requestedZoom}: generic owners [${a.genericOwners}] vs [${b.genericOwners}]`)
@@ -314,4 +369,3 @@ say(`determinism across ${RUNS} fresh runs: ${diffs.length === 0 ? 'PASS' : `FAI
 
 await fs.writeFile(path.join(OUT, 'report.json'), JSON.stringify({ runs, diffs }, null, 2))
 console.log(`\nscreenshots: ${OUT}`)
-await browser.close()

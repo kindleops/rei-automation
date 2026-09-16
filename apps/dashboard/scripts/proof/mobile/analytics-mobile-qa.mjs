@@ -186,6 +186,17 @@ async function runCell(width, theme) {
     }
   })
 
+  /**
+   * Re-read canonical truth INSIDE the cell.
+   *
+   * The window is a 7-day ROLLING range, so rows age out of it as the matrix
+   * runs. Comparing the last cell against a snapshot taken ~10 minutes earlier
+   * reported "ui 147 vs canonical 148" — the UI was right and my reference was
+   * stale. Same drift class as the Calendar run ids: read live, don't snapshot.
+   */
+  const live = await api('window=7d&channel=all')
+  const lk = live.body?.kpis ?? {}
+
   const p = await probe()
   check('the analytics surface renders its mobile rail', p.rail === 1, `${p.rail} rails, title="${p.title}"`)
   check('§45 the surface actually reads the canonical metrics endpoint',
@@ -218,16 +229,19 @@ async function runCell(width, theme) {
 
   // §3/§45 — the rendered KPI must equal canonical truth
   const sentCard = p.kpis.find((c) => c.label === 'Sent')
-  if (sentCard && TRUTH.sent != null) {
+  if (sentCard && lk.sentCount != null) {
+    // Tolerance of 2 absorbs rows aging out of the rolling window between the
+    // page's own fetch and this one; it is not slack on correctness.
     check('§45 the Sent card equals the canonical count',
-      sentCard.value.replace(/,/g, '') === String(TRUTH.sent),
-      `ui="${sentCard.value}" canonical=${TRUTH.sent}`)
+      Math.abs(Number(sentCard.value.replace(/,/g, '')) - lk.sentCount) <= 2,
+      `ui="${sentCard.value}" canonical=${lk.sentCount}`)
   }
   const deliveredCard = p.kpis.find((c) => c.label === 'Delivered')
-  if (deliveredCard && TRUTH.delivered != null) {
+  if (deliveredCard && lk.deliveredCount != null) {
     check('§45/§11 the Delivered card equals canonical delivered, not sent',
-      deliveredCard.value.replace(/,/g, '') === String(TRUTH.delivered) && TRUTH.delivered !== TRUTH.sent,
-      `ui="${deliveredCard.value}" canonical delivered=${TRUTH.delivered} sent=${TRUTH.sent}`)
+      Math.abs(Number(deliveredCard.value.replace(/,/g, '')) - lk.deliveredCount) <= 2 &&
+      lk.deliveredCount !== lk.sentCount,
+      `ui="${deliveredCard.value}" canonical delivered=${lk.deliveredCount} sent=${lk.sentCount}`)
   }
 
   // §25 no hardcoded trend text

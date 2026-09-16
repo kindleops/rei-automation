@@ -296,8 +296,11 @@ export interface SpendPerformance {
 export interface FunnelStage {
   id: string
   label: string
-  count: number
+  /** null when the step's source authority does not exist (§18). */
+  count: number | null
   prevCount: number
+  /** Set when this step cannot be measured at all. */
+  unavailable?: string | null
   conversionRate: number | null
   dropOffRate: number | null
   trend: 'up' | 'down' | 'neutral'
@@ -478,6 +481,30 @@ interface WarRoomPayload {
 }
 
 const num = (v: unknown, d = 0): number => { const n = Number(v); return Number.isFinite(n) ? n : d }
+
+/**
+ * Nullable coercion — PRESERVES "not measured".
+ *
+ * `num()` cannot: Number(null) is 0 and Number.isFinite(0) is true, so a null
+ * from the service silently became a zero and undid the whole point of
+ * reporting absence. Same trap as the buyer-match scores.
+ */
+export const numOrNull = (v: unknown): number | null => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  /**
+   * Only a number or a numeric STRING is a measurement. Coercing anything
+   * else invites the same class of bug this helper exists to prevent:
+   * Number([]) is 0 and Number(true) is 1, so an empty array or a boolean
+   * would arrive as a confident figure.
+   */
+  if (typeof v === 'string') {
+    const trimmed = v.trim()
+    if (trimmed === '') return null
+    const n = Number(trimmed)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
 const str = (v: unknown, d = ''): string => (v == null ? d : String(v))
 
 const timeRangeToWindow = (r: KpiTimeRange): string => {
@@ -750,7 +777,8 @@ export const loadFunnelPerformance = async (filters: KpiFilters): Promise<Funnel
   const p = await fetchWarRoom(filters)
   if (!p?.funnel) return []
   return p.funnel.map((s): FunnelStage => ({
-    id: s.id, label: s.label, count: num(s.count), prevCount: num(s.prevCount),
+    id: s.id, label: s.label, count: numOrNull(s.count), prevCount: num(s.prevCount),
+    unavailable: (s as { unavailable?: string }).unavailable ?? null,
     conversionRate: s.conversionRate == null ? null : num(s.conversionRate),
     dropOffRate: s.dropOffRate == null ? null : num(s.dropOffRate),
     trend: s.trend ?? 'neutral', isEstimate: Boolean(s.isEstimate),

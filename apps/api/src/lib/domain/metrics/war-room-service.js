@@ -566,12 +566,33 @@ export async function buildWarRoom(params = {}) {
     { id: 'delivered', label: 'Delivered', count: t.delivered, isEstimate: false },
     { id: 'replied', label: 'Replied', count: t.replied, isEstimate: false },
     { id: 'positive', label: 'Positive Intent', count: t.positive, isEstimate: false },
-    { id: 'offer_created', label: 'Offer Created', count: 0, isEstimate: false },
-    { id: 'contract_sent', label: 'Contract Sent', count: 0, isEstimate: false },
-    { id: 'closed', label: 'Closed', count: 0, isEstimate: false },
+    /**
+     * §18 — THESE AUTHORITIES DO NOT EXIST, SO THEY ARE NOT ZERO.
+     *
+     * offers, contracts, closings and title_routing_closing_engine are absent
+     * from this database entirely (verified 2026-09-16 via
+     * information_schema; the closing substrate was never provisioned). These
+     * three steps were hardcoded `count: 0, isEstimate: false` — zero asserted
+     * as measured fact — so the funnel told the operator "0 offers created, 0
+     * contracts sent, 0 closed" about a pipeline it cannot see at all.
+     *
+     * null means unmeasured. A conversion rate is not computed from it, and a
+     * step whose predecessor is unmeasured gets no rate either.
+     */
+    { id: 'offer_created', label: 'Offer Created', count: null, unavailable: 'offers authority absent' },
+    { id: 'contract_sent', label: 'Contract Sent', count: null, unavailable: 'contracts authority absent' },
+    { id: 'closed', label: 'Closed', count: null, unavailable: 'closings authority absent' },
   ].map((s, i, arr) => {
     const prev = i > 0 ? arr[i - 1].count : s.count
-    return { ...s, prevCount: 0, conversionRate: prev > 0 ? safeRate(s.count, prev, 0) : null, dropOffRate: null, trend: 'neutral' }
+    const measurable = s.count !== null && prev !== null && prev > 0
+    return {
+      ...s,
+      isEstimate: s.isEstimate ?? false,
+      prevCount: 0,
+      conversionRate: measurable ? safeRate(s.count, prev, 0) : null,
+      dropOffRate: null,
+      trend: 'neutral',
+    }
   })
 
   // ── State leaderboard + map ─────────────────────────────────────────────────

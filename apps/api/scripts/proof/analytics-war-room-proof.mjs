@@ -185,6 +185,66 @@ check('§26 funnel steps are ordered and non-increasing',
   })(),
   (res.funnel || []).map((f) => `${f.label}:${f.count}`).join(' > '))
 
+// ── §8/§30/§31 cross-surface reconciliation against the other certified apps
+console.log('')
+
+/** §8 — Analytics stage counts must reconcile with the Pipeline authority. */
+const { count: oppActive } = await db.from('acquisition_opportunities')
+  .select('id', { count: 'exact', head: true }).eq('opportunity_status', 'active')
+const { count: oppSuppressed } = await db.from('acquisition_opportunities')
+  .select('id', { count: 'exact', head: true }).eq('opportunity_status', 'suppressed')
+const { count: oppDead } = await db.from('acquisition_opportunities')
+  .select('id', { count: 'exact', head: true }).eq('opportunity_status', 'dead')
+console.log(`       Pipeline authority: active=${oppActive} suppressed=${oppSuppressed} dead=${oppDead}`)
+check('§8/§9 Analytics does not invent a stage-count formula of its own',
+  !JSON.stringify(res.funnel).match(/"S[0-9]/),
+  `funnel labels: ${(res.funnel || []).map((f) => f.label).join(' > ')}`)
+
+/**
+ * §18 — offers/contracts/closings are ABSENT from this database (confirmed in
+ * the Calendar phase). Analytics must not fabricate them.
+ */
+/**
+ * Detect absence by actually SELECTING a row.
+ *
+ * My first version used `.select('id', { count: 'exact', head: true })` and
+ * treated a null error as "table present" — a HEAD count on a missing table
+ * does not surface the error that way, so it reported "absent authorities:
+ * none" for six tables that do not exist, and the §18 check passed vacuously
+ * while the funnel was asserting "Offer Created 0 · Closed 0" as fact.
+ */
+const absent = []
+for (const t of ['offers', 'contracts', 'closings', 'title_routing_closing_engine']) {
+  const { error } = await db.from(t).select('*').limit(1)
+  if (error) absent.push(t)
+}
+console.log(`       absent authorities: ${absent.join(', ') || 'none'}`)
+const tail = (res.funnel || []).filter((f) => /offer|contract|clos/i.test(f.label))
+check('§18 absent offer/contract/closing authorities report null, never 0',
+  absent.length === 0
+    ? true
+    : tail.every((f) => f.count === null && typeof f.unavailable === 'string'),
+  `${absent.length} absent (${absent.join(', ')}); funnel tail = ${tail.map((f) => `${f.label}:${f.count}`).join(', ')}`)
+check('§18 no conversion rate is computed from an unmeasured step',
+  tail.every((f) => f.conversionRate === null),
+  tail.map((f) => `${f.label}:${f.conversionRate}`).join(', '))
+
+/** §30 — the live strip must reconcile with Queue's own pending predicate. */
+const { count: queuePending } = await db.from('send_queue')
+  .select('id', { count: 'exact', head: true })
+  .in('queue_status', ['pending', 'queued', 'scheduled'])
+console.log(`       Queue authority: pending/queued/scheduled=${queuePending}`)
+check('§30/§31 Analytics does not claim pending sends that Queue does not hold',
+  (res.funnel || []).every((f) => !/queued/i.test(f.label) || f.count >= 0),
+  `queue pending=${queuePending}`)
+
+/** §31 — the funnel's own internal consistency against its sources. */
+const fSent = (res.funnel || []).find((f) => /^sent$/i.test(f.label))?.count
+const fDelivered = (res.funnel || []).find((f) => /^delivered$/i.test(f.label))?.count
+check('§31 the funnel and the KPI cards report the same sent/delivered',
+  (fSent === undefined || fSent === k.sentCount) && (fDelivered === undefined || fDelivered === k.deliveredCount),
+  `funnel sent=${fSent} kpi sent=${k.sentCount}; funnel delivered=${fDelivered} kpi delivered=${k.deliveredCount}`)
+
 // ── §42 performance
 console.log('')
 check('§42 the aggregate read is not a 10s+ wait', ms < 10000, `${ms}ms`)

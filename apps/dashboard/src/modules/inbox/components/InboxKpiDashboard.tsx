@@ -727,7 +727,8 @@ function AcquisitionFunnel({ stages, loading }: {
   stages: FunnelStage[]
   loading: boolean
 }) {
-  const maxCount = useMemo(() => Math.max(...stages.map(s => s.count), 1), [stages])
+  // §18 — an unmeasured stage (count null) contributes no magnitude.
+  const maxCount = useMemo(() => Math.max(...stages.map(s => s.count ?? 0), 1), [stages])
 
   if (loading) {
     return (
@@ -747,7 +748,9 @@ function AcquisitionFunnel({ stages, loading }: {
     <div className="kpi-funnel">
       <div className="kpi-section-title">Acquisition Funnel</div>
       {stages.map((stage, i) => {
-        const widthPct = maxCount > 0 ? Math.max(2, Math.round((stage.count / maxCount) * 100)) : 2
+        const widthPct = stage.count === null
+          ? 0
+          : maxCount > 0 ? Math.max(2, Math.round((stage.count / maxCount) * 100)) : 2
         const barColor =
           i < 4
             ? 'rgba(72,138,236,0.65)'
@@ -759,7 +762,7 @@ function AcquisitionFunnel({ stages, loading }: {
             <div className="kpi-funnel__stage-header">
               <span className="kpi-funnel__label">{stage.label}</span>
               <span className="kpi-funnel__count">
-                {stage.count.toLocaleString()}
+                {stage.count === null ? '—' : stage.count.toLocaleString()}
                 {stage.isEstimate && <em> ~</em>}
               </span>
               {stage.conversionRate !== null && i > 0 && (

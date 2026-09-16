@@ -649,11 +649,19 @@ function WrUsaMap({
 // ── WrFunnel ──────────────────────────────────────────────────────────────────
 
 function WrFunnel({ stages, loading, compact = false }: { stages: FunnelStage[]; loading: boolean; compact?: boolean }) {
-  // Split wired stages (have real data) from unwired pipeline stages (count=0, not an estimate).
-  // Find the last stage index that has count > 0 or is an estimate derived from real data.
+  /**
+   * Split MEASURED stages from unmeasurable ones.
+   *
+   * This design already separated "wired" from "not yet wired", but used
+   * `count === 0` as the signal — so a genuine zero and an absent authority
+   * were indistinguishable. The service now sends `count: null` with an
+   * `unavailable` reason for steps whose source table does not exist
+   * (offers/contracts/closings are all absent here), which is an unambiguous
+   * signal.
+   */
   const lastWiredIdx = useMemo(() => {
     let idx = -1
-    stages.forEach((s, i) => { if (s.count > 0 || s.isEstimate) idx = i })
+    stages.forEach((s, i) => { if (s.count !== null && (s.count > 0 || s.isEstimate)) idx = i })
     return idx
   }, [stages])
 
@@ -661,7 +669,7 @@ function WrFunnel({ stages, loading, compact = false }: { stages: FunnelStage[];
   const hasPendingStages = lastWiredIdx < stages.length - 1 && stages.length > 0
 
   const visibleWired = compact ? wiredStages.slice(0, 7) : wiredStages
-  const maxCount = useMemo(() => Math.max(...wiredStages.map(s => s.count), 1), [wiredStages])
+  const maxCount = useMemo(() => Math.max(...wiredStages.map(s => s.count ?? 0), 1), [wiredStages])
 
   if (loading) {
     return (
@@ -685,13 +693,19 @@ function WrFunnel({ stages, loading, compact = false }: { stages: FunnelStage[];
       </div>
       <div className="wr-panel__body wr-funnel">
         {visibleWired.map((stage, i) => {
-          const widthPct = maxCount > 0 ? Math.max(2, Math.round((stage.count / maxCount) * 100)) : 2
+          // An unmeasured stage gets no bar to read a magnitude from.
+          const widthPct = stage.count === null
+            ? 0
+            : maxCount > 0 ? Math.max(2, Math.round((stage.count / maxCount) * 100)) : 2
           const barColor = i < 4 ? 'rgba(14,207,206,0.55)' : 'rgba(14,212,138,0.55)'
           return (
             <div key={stage.id} className="wr-funnel__stage">
               <div className="wr-funnel__stage-head">
                 <span className="wr-funnel__label">{stage.label}</span>
-                <span className="wr-funnel__count">{stage.count.toLocaleString()}{stage.isEstimate && <em> ~</em>}</span>
+                <span className="wr-funnel__count">
+                  {stage.count === null ? '—' : stage.count.toLocaleString()}
+                  {stage.isEstimate && <em> ~</em>}
+                </span>
                 {stage.conversionRate !== null && i > 0 && (
                   <span className={cls('wr-funnel__rate', stage.conversionRate < 50 && 'is-amber')}>{stage.conversionRate}%</span>
                 )}
@@ -704,7 +718,10 @@ function WrFunnel({ stages, loading, compact = false }: { stages: FunnelStage[];
         })}
         {hasPendingStages && (
           <div className="wr-funnel__pending-note">
-            Offer / contract stages not yet wired.
+            {/* Names the reason rather than implying a zero result. */}
+            {stages.find((s) => s.unavailable)?.unavailable
+              ? 'Offer / contract / closing stages have no data authority in this system — not measured, not zero.'
+              : 'Offer / contract stages not yet wired.'}
           </div>
         )}
       </div>
