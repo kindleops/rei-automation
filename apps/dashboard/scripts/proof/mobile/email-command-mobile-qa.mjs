@@ -114,12 +114,25 @@ if (SUB_A.count !== null) {
 }
 
 
+/**
+ * Seed the theme the way the APP reads it.
+ *
+ * Setting `data-nexus-theme` (and a `nexus:theme` key) is not enough: the
+ * settings module persists under `nexus-settings` with a `nexusTheme` field
+ * and reapplies it on boot, so the attribute was overwritten back to 'dark'
+ * and every light cell measured dark. 'dark' and 'light' are both valid
+ * NexusTheme values, so the real store is seeded and the attribute is set too
+ * for the instant before the app boots.
+ */
 const setTheme = (t) => {
-  // addInitScript can run before the document element exists, and an
-  // unguarded setAttribute then throws a pageerror that looks like an
-  // application fault. The harness must not manufacture its own findings.
+  try {
+    const raw = localStorage.getItem('nexus-settings')
+    const settings = raw ? JSON.parse(raw) : {}
+    localStorage.setItem('nexus-settings', JSON.stringify({ ...settings, nexusTheme: t }))
+  } catch {}
+  // documentElement can be null this early inside addInitScript; an unguarded
+  // setAttribute here throws a pageerror that looks like an application fault.
   try { document.documentElement?.setAttribute('data-nexus-theme', t) } catch {}
-  try { localStorage.setItem('nexus:theme', t) } catch {}
   try {
     document.addEventListener('DOMContentLoaded', () => {
       document.documentElement?.setAttribute('data-nexus-theme', t)
@@ -146,8 +159,21 @@ async function runCell(width, theme) {
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 140)))
 
-  await page.goto(`${BASE}/email-command`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
-  await page.waitForSelector('.ecc', { timeout: 60_000 })
+  /**
+   * §41 — measured, not asserted. Each figure is time-to-CONTENT for that
+   * step, excluding the fixed settle waits that follow it.
+   */
+  const timings = {}
+  const mark = async (name, fn) => {
+    const t0 = Date.now()
+    await fn()
+    timings[name] = Date.now() - t0
+  }
+
+  await mark('shell', async () => {
+    await page.goto(`${BASE}/email-command`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+    await page.waitForSelector('.ecc', { timeout: 60_000 })
+  })
   await page.waitForTimeout(4500)
 
   const openTab = async (label) => {
@@ -209,7 +235,20 @@ async function runCell(width, theme) {
   await page.screenshot({ path: path.join(OUT, `${width}-${theme}-overview.png`) })
 
   // ── Records
-  await openTab('Records')
+  await mark('records', async () => {
+    const btn = page.locator('.ecc__tab', { hasText: 'Records' }).first()
+    if (await btn.count()) {
+      await btn.click()
+      // Waits for CONTENT — rows, an empty state, or an error — not a timer.
+      await page.waitForFunction(
+        () => document.querySelectorAll('.ecc__table tbody tr').length > 0 ||
+              document.querySelector('.ecc__empty-panel') !== null ||
+              document.querySelector('.ecc__error-panel') !== null,
+        undefined, { timeout: 30_000 },
+      ).catch(() => {})
+    }
+  })
+  await page.waitForTimeout(1200)
   const rec = await probe()
   check('§28 the records header reports the corpus count, not the page length',
     TRUTH.recordCount === null || (rec.sectionTitle || '').replace(/,/g, '').includes(String(TRUTH.recordCount)),
@@ -228,8 +267,14 @@ async function runCell(width, theme) {
 
   // ── §26 server-backed search
   if (rec.searchInput?.visible) {
-    await page.fill('.ecc__search input', 'yahoo.com')
-    await page.waitForTimeout(2600)
+    await mark('search', async () => {
+      await page.fill('.ecc__search input', 'yahoo.com')
+      await page.waitForFunction(
+        () => !(document.querySelector('.ecc__section-title')?.textContent || '').includes('Loading'),
+        undefined, { timeout: 30_000 },
+      ).catch(() => {})
+    })
+    await page.waitForTimeout(1600)
     const searched = await probe()
     const canonical = await api('records?limit=25&search=yahoo.com')
     check('§26 search narrows against the server, not the loaded page',
@@ -262,8 +307,14 @@ async function runCell(width, theme) {
   await page.screenshot({ path: path.join(OUT, `${width}-${theme}-inbox.png`) })
 
   // ── Composer — reachability and refusal only. The send control is NEVER clicked.
-  await openTab('Composer')
-  await page.waitForTimeout(1200)
+  await mark('composer', async () => {
+    const btn = page.locator('.ecc__tab', { hasText: 'Composer' }).first()
+    if (await btn.count()) {
+      await btn.click()
+      await page.waitForSelector('.ecc__composer', { timeout: 30_000 }).catch(() => {})
+    }
+  })
+  await page.waitForTimeout(900)
   /**
    * Scroll the send control into view before measuring it. Measuring a long
    * form's footer at the initial scroll position reports "unreachable" for
@@ -424,9 +475,16 @@ async function runCell(width, theme) {
     camp.errorPanels.some((l) => /campaign/i.test(l)),
     `empty="${camp.emptyLabels.join(' | ')}" errors="${camp.errorPanels.join(' | ')}"`)
 
+  // §41 budgets, deliberately generous: the brief asks for obvious 10s+ waits
+  // to be fixed, not for micro-optimisation.
+  for (const [step, budget] of [['shell', 15000], ['records', 15000], ['search', 15000], ['composer', 8000]]) {
+    if (timings[step] === undefined) continue
+    check(`§41 ${step} responds within budget`, timings[step] < budget, `${timings[step]}ms (budget ${budget}ms)`)
+  }
+
   check('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '))
   await context.close()
-  return { cell: `${width}-${theme}`, maps: maps.length, rows: rec.tableRows }
+  return { cell: `${width}-${theme}`, maps: maps.length, rows: rec.tableRows, timings }
 }
 
 const results = []
@@ -436,7 +494,10 @@ try {
     const r = await runCell(w, t)
     results.push(r)
     const bad = findings.filter((f) => f.cell === r.cell).length
-    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} records ${r.rows} rows  maps ${r.maps}`)
+    // NOT `const t` — that would shadow the loop variable `t` for this whole
+    // block and make `runCell(w, t)` above a TDZ reference.
+    const ms = r.timings || {}
+    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} rows ${String(r.rows).padEnd(4)} maps ${r.maps}  shell ${ms.shell ?? '-'}ms  records ${ms.records ?? '-'}ms  search ${ms.search ?? '-'}ms  composer ${ms.composer ?? '-'}ms`)
     for (const f of findings.slice(before)) console.log(`   x ${f.n}: ${f.d}`)
   }
 } finally { await browser.close() }

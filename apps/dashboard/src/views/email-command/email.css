@@ -1358,3 +1358,83 @@
     max-width: 58vw;
   }
 }
+
+/* ── The mobile inbox ──────────────────────────────────────────────────────
+   §38/§44. `is-mobile` was applied to .ecc__inbox but NOTHING styled it, so
+   mobile inherited the desktop two-column layout wholesale.
+
+   The consequence was not cosmetic. .ecc__folder-tabs is a vertical sidebar
+   (flex-direction: column, flex-shrink: 0), so at 390px its eight folder
+   buttons stacked to 376px tall and squeezed .ecc__thread-list — which is
+   flex: 1 — down to a height of ZERO. The thread row still painted, 84px tall
+   and overflowing its collapsed parent, so a conversation was visible and
+   elementFromPoint at its own centre returned .ecc__inbox instead of the row:
+   you could see a thread and could not open it. Playwright reported
+   "<div class="ecc__folder-tabs"> intercepts pointer events".
+
+   Geometry alone would have called this fine — the row measured 84px. Only
+   hit-testing the row's own centre caught it. */
+.ecc__inbox.is-mobile {
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ecc__inbox.is-mobile .ecc__inbox-sidebar {
+  width: 100%;
+  min-height: 0;
+  border-right: none;
+  /* Must be allowed to shrink; as a fixed 320px column it fought the list. */
+  flex: 1 1 auto;
+}
+
+/* Folders become one horizontally scrolling row, so they cost ~44px instead
+   of 376px. Horizontal scroll is scoped to THIS strip — it must never become
+   page-wide overflow. */
+.ecc__inbox.is-mobile .ecc__folder-tabs {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 6px 8px;
+  flex: 0 0 auto;
+}
+
+.ecc__inbox.is-mobile .ecc__folder-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ecc__inbox.is-mobile .ecc__folder-btn {
+  flex: 0 0 auto;
+  gap: 6px;
+  white-space: nowrap;
+  min-height: 34px;
+}
+
+/* min-height: 0 is load-bearing — without it a flex child refuses to shrink
+   below its content and the list cannot scroll. */
+.ecc__inbox.is-mobile .ecc__thread-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The thread row needs a real touch target now that it is actually tappable. */
+.ecc__inbox.is-mobile .ecc__thread-item {
+  min-height: 64px;
+}
+
+/* When a thread is open the list yields the viewport to the detail, which is
+   what the existing is-thread-open class already signals. */
+.ecc__inbox.is-mobile.is-thread-open .ecc__inbox-sidebar {
+  display: none;
+}
+
+.ecc__inbox.is-mobile .ecc__thread-panel {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
