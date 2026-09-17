@@ -1,0 +1,500 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Q — MOBILE QUEUE WORK SURFACE
+   ══════════════════════════════════════════════════════════════════════════
+
+   Same layer grammar as Search and Notifications, on purpose: §6 asks Q,
+   Notifications, Search and KPI to feel like one operating system, and the
+   cheapest way to make four surfaces feel like one is to give them the same
+   bar, the same scroller and the same dismissal.
+
+   The only structural difference is the footer: Q ends in a decision (go
+   operate the queue), so its primary action lives in the thumb zone above the
+   home indicator rather than at the top of a scroll.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.nx-mqs {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: rgba(6, 9, 16, 0.97);
+  backdrop-filter: blur(26px) saturate(1.4);
+  -webkit-backdrop-filter: blur(26px) saturate(1.4);
+  animation: nx-mqs-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes nx-mqs-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx-mqs__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: calc(var(--nx-mobile-safe-top, 0px) + 12px) 12px 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.nx-mqs__title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+
+.nx-mqs__title strong {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.nx-mqs__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.nx-mqs__status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.nx-mqs__status.is-healthy { color: #34d399; border-color: rgba(52, 211, 153, 0.34); }
+.nx-mqs__status.is-warning { color: #f59e0b; border-color: rgba(245, 158, 11, 0.34); }
+.nx-mqs__status.is-critical { color: #ef4444; border-color: rgba(239, 68, 68, 0.36); }
+
+.nx-mqs__bar-actions { display: flex; align-items: center; gap: 4px; }
+
+.nx-mqs__bar-btn,
+.nx-mqs__close {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.nx-mqs__bar-btn:disabled { opacity: 0.4; }
+
+.nx-mqs__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 4px 0 14px;
+}
+
+.nx-mqs__section { padding: 10px 14px 12px; }
+
+.nx-mqs__section h4 {
+  margin: 0 0 8px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.36);
+}
+
+/* ── Posture ─────────────────────────────────────────────────────────────── */
+
+.nx-mqs__posture {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nx-mqs__posture.is-paused { border-color: rgba(245, 158, 11, 0.32); background: rgba(245, 158, 11, 0.07); }
+.nx-mqs__posture.is-automatic { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.06); }
+
+.nx-mqs__posture-mode {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.nx-mqs__posture-detail { font-size: 11.5px; color: rgba(255, 255, 255, 0.55); }
+
+.nx-mqs__checked {
+  margin: 7px 2px 0;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Rows ────────────────────────────────────────────────────────────────── */
+
+.nx-mqs__rows {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.nx-mqs__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.025);
+  text-align: left;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nx-mqs__row:last-child { border-bottom: 0; }
+.nx-mqs__row:active { background: rgba(255, 255, 255, 0.06); }
+.nx-mqs__row.is-static { cursor: default; }
+
+.nx-mqs__row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.nx-mqs__row b {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.nx-mqs__row.is-critical b { color: #ef4444; }
+.nx-mqs__row.is-warning b { color: #f59e0b; }
+.nx-mqs__row svg { color: rgba(255, 255, 255, 0.28); }
+
+/* ── Metric strips — §19's "compact metric strip", not KPI tiles ─────────── */
+
+.nx-mqs__strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+
+.nx-mqs__strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.nx-mqs__strip > div:last-child { border-right: 0; }
+
+.nx-mqs__strip span {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.nx-mqs__strip b {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.nx-mqs__strip.is-compact b { font-size: 14px; }
+.nx-mqs__strip > div.is-critical b { color: #ef4444; }
+
+.nx-mqs__note {
+  margin: 7px 2px 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.nx-mqs__note.is-warning { color: #f59e0b; }
+
+.nx-mqs__empty {
+  margin: 0;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Context ─────────────────────────────────────────────────────────────── */
+
+.nx-mqs__context {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-bottom: 7px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  text-align: left;
+  cursor: pointer;
+}
+
+.nx-mqs__context.is-static { cursor: default; margin-bottom: 0; }
+
+.nx-mqs__context-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.nx-mqs__context strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-mqs__context small { font-size: 11px; color: rgba(255, 255, 255, 0.45); }
+
+/* ── Footer actions ──────────────────────────────────────────────────────── */
+
+.nx-mqs__actions {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 8px;
+  padding: 10px 14px calc(var(--nx-mobile-safe-bottom, 0px) + 12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(6, 9, 16, 0.86);
+}
+
+.nx-mqs__action {
+  min-height: 46px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.nx-mqs__action.is-primary {
+  border-color: transparent;
+  background: var(--tone-primary, #5eead4);
+  font-weight: 700;
+  color: #061018;
+}
+
+/* ── Light ───────────────────────────────────────────────────────────────── */
+
+[data-nexus-theme='light'] {
+  .nx-mqs { background: rgba(250, 251, 253, 0.97); }
+  .nx-mqs__bar { border-bottom-color: rgba(15, 23, 42, 0.08); }
+  .nx-mqs__title strong { color: rgba(15, 23, 42, 0.94); }
+  .nx-mqs__status { border-color: rgba(15, 23, 42, 0.12); color: rgba(15, 23, 42, 0.6); }
+
+  .nx-mqs__bar-btn,
+  .nx-mqs__close {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.66);
+  }
+
+  .nx-mqs__section h4 { color: rgba(15, 23, 42, 0.42); }
+
+  .nx-mqs__posture {
+    border-color: rgba(15, 23, 42, 0.1);
+    background: rgba(15, 23, 42, 0.03);
+  }
+
+  .nx-mqs__posture-mode { color: rgba(15, 23, 42, 0.94); }
+  .nx-mqs__posture-detail { color: rgba(15, 23, 42, 0.58); }
+  .nx-mqs__checked { color: rgba(15, 23, 42, 0.42); }
+
+  .nx-mqs__rows,
+  .nx-mqs__strip,
+  .nx-mqs__context,
+  .nx-mqs__empty {
+    border-color: rgba(15, 23, 42, 0.1);
+    background: rgba(15, 23, 42, 0.02);
+  }
+
+  .nx-mqs__row {
+    border-bottom-color: rgba(15, 23, 42, 0.07);
+    background: transparent;
+    color: rgba(15, 23, 42, 0.76);
+  }
+
+  .nx-mqs__row b { color: rgba(15, 23, 42, 0.94); }
+  .nx-mqs__strip > div { border-right-color: rgba(15, 23, 42, 0.07); }
+  .nx-mqs__strip span { color: rgba(15, 23, 42, 0.42); }
+  .nx-mqs__strip b { color: rgba(15, 23, 42, 0.94); }
+  .nx-mqs__note { color: rgba(15, 23, 42, 0.45); }
+  .nx-mqs__empty { color: rgba(15, 23, 42, 0.5); }
+  .nx-mqs__context-label { color: rgba(15, 23, 42, 0.4); }
+  .nx-mqs__context strong { color: rgba(15, 23, 42, 0.9); }
+  .nx-mqs__context small { color: rgba(15, 23, 42, 0.5); }
+
+  .nx-mqs__actions {
+    border-top-color: rgba(15, 23, 42, 0.08);
+    background: rgba(250, 251, 253, 0.9);
+  }
+
+  .nx-mqs__action {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.88);
+  }
+
+  .nx-mqs__action.is-primary { color: #ffffff; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-mqs { animation: none; }
+}
+
+/* ── Operations + editable limits ────────────────────────────────────────── */
+
+.nx-mqs__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nx-mqs__link {
+  border: 0;
+  background: transparent;
+  /* The visible text stays 11px; the 44px target comes from the pseudo-element. */
+  position: relative;
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tone-primary, #5eead4);
+  cursor: pointer;
+}
+
+.nx-mqs__link::after {
+  content: '';
+  position: absolute;
+  inset: -14px -10px;
+}
+
+.nx-mqs__ops {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.nx-mqs__op {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nx-mqs__op:disabled { opacity: 0.45; }
+
+/* The stop control is the one that changes posture rather than moving work. */
+.nx-mqs__op.is-warning {
+  grid-column: 1 / -1;
+  border-color: rgba(245, 158, 11, 0.36);
+  background: rgba(245, 158, 11, 0.09);
+  color: #f59e0b;
+}
+
+.nx-mqs__caps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.nx-mqs__cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 6px 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.nx-mqs__cap span { font-size: 12.5px; color: rgba(255, 255, 255, 0.72); }
+
+.nx-mqs__cap input {
+  width: 84px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.24);
+  /* 16px: anything smaller zooms the page on iOS focus and breaks every fixed
+     surface in the shell, this one included. */
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+[data-nexus-theme='light'] {
+  .nx-mqs__op {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.035);
+    color: rgba(15, 23, 42, 0.86);
+  }
+
+  .nx-mqs__caps { border-color: rgba(15, 23, 42, 0.1); }
+  .nx-mqs__cap { background: rgba(15, 23, 42, 0.02); }
+  .nx-mqs__cap span { color: rgba(15, 23, 42, 0.74); }
+
+  .nx-mqs__cap input {
+    border-color: rgba(15, 23, 42, 0.16);
+    background: #ffffff;
+    color: rgba(15, 23, 42, 0.92);
+  }
+}

@@ -5638,7 +5638,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         queueProcessorHealth={queueProcessorHealth}
         queueControlDiagnostics={queueControlDiagnostics}
         queueProcessorHealthLoading={queueProcessorHealthLoading}
-        onRefreshQueueHealth={refreshQueueHealth}
+        /**
+         * BOTH authorities, because the surface that calls this shows both.
+         *
+         * `refreshQueueHealth` alone leaves the queue control diagnostics unread, and
+         * the control read is what carries the operating mode and the live caps. The
+         * mobile Q surface calls this on open — inside the 10s background-bootstrap
+         * gap — so refreshing only half of it left the posture reading "Reading…"
+         * indefinitely while the counts filled in around it.
+         */
+        onRefreshQueueHealth={() => {
+          void refreshQueueHealth()
+          void refreshQueueControl()
+        }}
         queueCommandMode={queueCommandMode}
         queueCommandCaps={queueCommandCaps}
         queueCommandActionLoading={queueCommandActionLoading}

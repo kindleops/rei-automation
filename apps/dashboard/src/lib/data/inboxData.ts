@@ -349,6 +349,15 @@ export interface QueueProcessorHealth {
   duplicateActiveCount: number
   activeBlankRowCount: number
   routingBlockedSpike: boolean
+  /**
+   * The processor's OWN word for its state, before it is folded into the four-value
+   * health tone below. `deriveStatus` in queue-processor-health-service emits
+   * `idle | degraded | attention | healthy`, and three of those four were outside the
+   * `status` union this file declares — so `status` was blind-cast, every consumer
+   * that looked the value up in a label or tone map got `undefined`, and the mobile Q
+   * header rendered an empty badge for a queue that was simply idle.
+   */
+  processorState: 'idle' | 'degraded' | 'attention' | 'healthy' | 'unknown'
   liveAutopilotAllowed: boolean
   routingBlockedRows: Array<{
     id: string
@@ -767,8 +776,25 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
     const webhookHealthy = !Number.isFinite(latestSentTs) || latestSentTs < new Date(webhookStaleCutoffIso).getTime()
       ? true
       : Number.isFinite(latestWebhookTs) && latestWebhookTs >= new Date(webhookStaleCutoffIso).getTime()
-    const status = (payload.status as QueueProcessorHealth['status']) || 'healthy'
-    const processorHealthy = status === 'healthy'
+    /**
+     * Translate the processor's vocabulary into the UI's, keeping both.
+     *
+     * `idle` maps to `healthy` for TONE only — an empty queue is not a fault — while
+     * `processorState` preserves the precise word so a surface can say "Idle" rather
+     * than claiming everything is healthy. `degraded` (lag/stale rows) and
+     * `attention` (failures, lock conflicts) are both warnings; neither is asserted
+     * as critical, because the service does not distinguish that far.
+     */
+    const rawStatus = String(payload.status ?? '').toLowerCase()
+    const processorState: QueueProcessorHealth['processorState'] =
+      rawStatus === 'idle' || rawStatus === 'degraded' || rawStatus === 'attention' || rawStatus === 'healthy'
+        ? rawStatus
+        : 'unknown'
+    const status: QueueProcessorHealth['status'] =
+      processorState === 'healthy' || processorState === 'idle' ? 'healthy'
+        : processorState === 'degraded' || processorState === 'attention' ? 'warning'
+          : 'unknown'
+    const processorHealthy = processorState === 'healthy'
 
     return {
       checkedAt: asIso(payload.checkedAt) ?? checkedAt,
@@ -800,6 +826,7 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       retriedGtOneCount,
       processingLockConflictCount,
       routingBlockedSpike,
+      processorState,
       liveAutopilotAllowed: processorHealthy,
       routingBlockedRows: routingBlockedRows.slice(0, 8).map((row) => ({
         id: asString(row.id, ''),
@@ -835,7 +862,14 @@ export const getQueueProcessorHealth = async (): Promise<QueueProcessorHealth> =
       latestWebhookAt: null,
       webhookHealthy: false,
       processorHealthy: false,
-      status: 'warning',
+      /**
+       * A FAILED READ is not a degraded queue. This branch means the health endpoint
+       * did not answer, so the only thing that can be asserted is that the state is
+       * unknown — `warning` here described the send queue when the fact being
+       * reported was about the network.
+       */
+      status: 'unknown',
+      processorState: 'unknown',
       failedRate: null,
       duplicateActiveCount: 0,
       activeBlankRowCount: 0,

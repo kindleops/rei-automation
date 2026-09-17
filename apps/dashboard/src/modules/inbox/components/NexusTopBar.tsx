@@ -22,6 +22,7 @@ import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } f
 import { CommandPopover } from '../../shell/primitives/CommandPopover'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { MobileCommandDock, type DockSurface } from '../../mobile/MobileCommandDock'
+import { MobileQueueSurface } from '../../mobile/MobileQueueSurface'
 import { MobileSheet } from '../../mobile/MobileSheet'
 import { onNotificationsSurfaceRequested, requestAppLauncher } from '../../mobile/shell-surface-bridge'
 
@@ -439,29 +440,6 @@ export const NexusTopBar = ({
     }
   }
 
-  const queuePanel = (
-    <QueueCommandCenter
-      health={queueProcessorHealth}
-      control={queueControlDiagnostics}
-      loading={queueProcessorHealthLoading}
-      mode={queueCommandMode}
-      caps={queueCommandCaps}
-      actionLoading={queueCommandActionLoading}
-      onModeChange={onQueueCommandModeChange}
-      onCapsChange={onQueueCommandCapsChange}
-      onRefresh={() => onRefreshQueueHealth?.()}
-      onRunSafeBatch={onRunSafeBatch}
-      onQueueMore={onQueueMore}
-      onRunQueueNow={onRunQueueNow}
-      onEmergencyPause={onEmergencyPause}
-      onReprocessPaused={onReprocessPaused}
-      onRetryFailed={onRetryFailed}
-      onReconcileDelivery={onReconcileDelivery}
-      onCancelStaleFollowUps={onCancelStaleFollowUps}
-      onClose={() => closeAndRestoreFocus('queue')}
-    />
-  )
-
   if (isMobile) {
     return (
       <>
@@ -481,15 +459,33 @@ export const NexusTopBar = ({
           notificationsActive={activeOverlay === 'notifications'}
         />
 
-        <MobileSheet
+        {/*
+          Q as a mobile work surface (§6), not the desktop control board in a
+          half sheet. The real operations are still here — this host owns handlers
+          that actually write through the queue control authority, unlike
+          PortableCommandShell, which passed ten buttons that all pushed /queue.
+        */}
+        <MobileQueueSurface
           open={activeSurface === 'queue'}
-          title="Queue Intelligence"
-          subtitle={processorHealthLabel}
-          height="half"
           onClose={() => closeAndRestoreFocus('queue')}
-        >
-          {queuePanel}
-        </MobileSheet>
+          health={queueProcessorHealth}
+          control={queueControlDiagnostics ?? null}
+          mode={queueCommandMode}
+          caps={queueCommandCaps}
+          capsHydrated={Boolean(queueControlDiagnostics)}
+          loading={queueProcessorHealthLoading}
+          onRefresh={() => onRefreshQueueHealth?.()}
+          ops={{
+            actionLoading: queueCommandActionLoading,
+            onRunSafeBatch,
+            onRunQueueNow,
+            onRetryFailed,
+            onReprocessPaused: () => onReprocessPaused(),
+            onReconcileDelivery,
+            onEmergencyPause,
+            onCapsChange: onQueueCommandCapsChange,
+          }}
+        />
 
         <MobileSheet
           open={activeSurface === 'action-center'}
