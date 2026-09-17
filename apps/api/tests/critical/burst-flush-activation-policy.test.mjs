@@ -24,12 +24,16 @@ import {
   loadBurstFlushActivationPolicy,
 } from "@/lib/domain/seller-flow/burst-flush-activation-policy.js";
 import {
+  INTERNAL_PROOF_PINNED,
   INTERNAL_PROOF_SESSION_MAX_MINUTES,
   parseInternalProofSession,
 } from "@/lib/domain/queue/internal-proof-session.js";
 
 const PINNED_RECIPIENT = "+16128072000";
-const PINNED_SENDER = "+16128060495";
+// Derived from the PIN, never repeated. When INTERNAL_PROOF_PINNED.sender was
+// repointed (the original was on sms_blocked_sender_numbers) this file still
+// hardcoded the old number and built sessions the gate correctly rejected.
+const PINNED_SENDER = INTERNAL_PROOF_PINNED.sender;
 const PINNED_CAMPAIGN = "b7c9a000-7ad3-468b-9b9b-4647dbefc35f";
 // Registered internal test number that is NOT the pinned proof recipient.
 const OTHER_INTERNAL = "+16127433952";

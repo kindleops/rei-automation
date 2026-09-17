@@ -16,6 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  INTERNAL_PROOF_PINNED,
   INTERNAL_PROOF_SESSION_KEY,
   INTERNAL_PROOF_SESSION_MAX_MINUTES,
   parseInternalProofSession,
@@ -33,7 +34,10 @@ const NOW = "2026-08-01T05:30:00.000Z";
 const CAMPAIGN = "b7c9a000-7ad3-468b-9b9b-4647dbefc35f";
 const PINNED_ROW = "4d211395-bc7b-4bfe-8afb-16a329e636a4";
 const RECIPIENT = "+16128072000";
-const SENDER = "+16128060495";
+// Derived from the PIN, never repeated. When INTERNAL_PROOF_PINNED.sender was
+// repointed (the original was on sms_blocked_sender_numbers) this file still
+// hardcoded the old number and built sessions the gate correctly rejected.
+const SENDER = INTERNAL_PROOF_PINNED.sender;
 const OTHER_INTERNAL = "+16127433952"; // registered internal number, NOT the pinned recipient
 const REPLY_ROW = "9a0d0000-0000-4000-8000-000000000001";
 const REAL_SELLER_ROW = "9a0d0000-0000-4000-8000-000000000002";

@@ -11,7 +11,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { INTERNAL_PROOF_PINNED } from "@/lib/domain/queue/internal-proof-session.js";
+
 import "../helpers/critical-test-environment.mjs";
+// Reference the PIN rather than repeating its literals. When the pinned
+// sender was repointed (PRODUCTION-COMMISSIONING-1B) these fixtures still
+// named the old number, so they built sessions the gate correctly rejected
+// and five tests failed for the right reason. Importing the constant makes
+// that drift impossible.
 
 import {
   resolveSellerInboundBurstMode,
@@ -105,7 +112,7 @@ test("thread-scoped gate: internal_proof engages only internal phones; enabled e
 const PAYLOAD = {
   SmsMessageSid: "SMBURSTGATE1",
   From: "+16128072000",
-  To: "+16128060495",
+  To: INTERNAL_PROOF_PINNED.sender,
   Body: "internal proof fragment",
   SmsStatus: "received",
   http_received_at: "2026-08-02T15:00:00.000Z",
@@ -142,9 +149,9 @@ function proofSessionValue({ minutes_ago = 5, minutes_ahead = 30, closed_at = nu
   return {
     session_id: "proof-1",
     queue_row_id: "00000000-0000-4000-8000-00000000f001",
-    recipient: "+16128072000",
-    sender: "+16128060495",
-    campaign_id: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
+    recipient: INTERNAL_PROOF_PINNED.recipient,
+    sender: INTERNAL_PROOF_PINNED.sender,
+    campaign_id: INTERNAL_PROOF_PINNED.campaign_id,
     created_at: new Date(now - minutes_ago * 60_000).toISOString(),
     expires_at: new Date(now + minutes_ahead * 60_000).toISOString(),
     ...(closed_at ? { closed_at } : {}),

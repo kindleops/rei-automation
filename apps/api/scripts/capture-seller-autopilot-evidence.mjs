@@ -16,7 +16,10 @@ const SCRATCH =
   "/var/folders/6d/fcb79xwn16dd340r4_5lhf040000gn/T/grok-goal-ab5b076e3861/implementer";
 
 const PROOF_THREAD_KEY = "+15551234567";
-const PROD_ALIAS = process.env.COCKPIT_PROOF_BASE_URL || "https://api-steel-three-96.vercel.app";
+// Default repointed 2026-09-17: this fell back to the STALE VERCEL host, so an
+// evidence run with no env override would have captured "evidence" from the
+// un-governed executor rather than production.
+const PROD_ALIAS = process.env.COCKPIT_PROOF_BASE_URL || "https://ops.leadcommand.ai";
 
 const SELLER_FLOW_PATHS = [
   "apps/api/src/lib/domain/seller-flow/",

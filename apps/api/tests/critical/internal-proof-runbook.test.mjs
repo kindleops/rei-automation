@@ -22,9 +22,27 @@ import {
   SESSION_ABSOLUTE_MAX_MINUTES,
 } from "../../scripts/ops/internal-proof-runbook.mjs";
 import {
+  INTERNAL_PROOF_PINNED,
   INTERNAL_PROOF_SESSION_MAX_MINUTES,
   parseInternalProofSession,
 } from "@/lib/domain/queue/internal-proof-session.js";
+
+test("the runbook's pinned triple MATCHES the canonical pin", () => {
+  /*
+   * The runbook keeps literals so it stays runnable standalone (it is executed
+   * as `node scripts/ops/...` and the canonical module imports via `@/`). This
+   * is the guard that makes that safe: if INTERNAL_PROOF_PINNED is repointed
+   * and the runbook is not, this fails instead of the operator arming a session
+   * the dispatcher will refuse — which is exactly what happened with the
+   * previously blocked sender.
+   */
+  assert.equal(PINNED.recipient, INTERNAL_PROOF_PINNED.recipient);
+  assert.equal(PINNED.sender, INTERNAL_PROOF_PINNED.sender);
+  assert.equal(PINNED.campaign, INTERNAL_PROOF_PINNED.campaign_id);
+  // And the host must be the governed origin, never a Vercel deployment.
+  assert.match(PINNED.host, /^https:\/\/ops\.leadcommand\.ai$/);
+  assert.ok(!/vercel\.app/.test(PINNED.host), "the runbook must not target a Vercel deployment");
+});
 
 const NOW_ISO = "2026-08-01T10:00:00.000Z";
 const NOW_MS = Date.parse(NOW_ISO);

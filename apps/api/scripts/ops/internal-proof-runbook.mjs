@@ -35,12 +35,43 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
+/**
+ * DERIVED from the canonical pin, not a second copy of it.
+ *
+ * This held its own literals, and both had drifted:
+ *   sender  was +16128060495, which sits on sms_blocked_sender_numbers, so the
+ *           runbook would arm a session the dispatcher then refuses.
+ *   host    was https://api-steel-three-96.vercel.app — the STALE VERCEL
+ *           deployment. An operator following this runbook would have driven
+ *           the un-governed executor that PRODUCTION-COMMISSIONING-1B exists to
+ *           fence, against the production database, on a build months behind.
+ *
+ * The identity triple now comes from INTERNAL_PROOF_PINNED so it cannot drift
+ * again, and the host is the governed production origin.
+ */
+/**
+ * Literals ON PURPOSE, guarded by a test rather than by an import.
+ *
+ * This script is run standalone (`node scripts/ops/internal-proof-runbook.mjs`),
+ * and internal-proof-session.js imports via the `@/` alias, so importing the
+ * canonical pin here would break the operator's command line. Instead
+ * tests/critical/internal-proof-runbook.test.mjs asserts these values EQUAL
+ * INTERNAL_PROOF_PINNED, so drift fails a test instead of failing silently.
+ *
+ * Both of these had already drifted before that guard existed:
+ *   sender  was +16128060495, which sits on sms_blocked_sender_numbers, so the
+ *           runbook armed sessions the dispatcher then refused.
+ *   host    was https://api-steel-three-96.vercel.app — the STALE VERCEL
+ *           deployment. An operator following this runbook would have driven
+ *           the un-governed executor this mission exists to fence, against the
+ *           production database, on a months-old build.
+ */
 export const PINNED = {
   row: "4d211395-bc7b-4bfe-8afb-16a329e636a4",
   campaign: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
   recipient: "+16128072000",
-  sender: "+16128060495",
-  host: "https://api-steel-three-96.vercel.app",
+  sender: "+14693131600",
+  host: "https://ops.leadcommand.ai",
 };
 
 // Mirrors INTERNAL_PROOF_SESSION_MAX_MINUTES in

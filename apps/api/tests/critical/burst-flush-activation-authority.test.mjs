@@ -30,6 +30,8 @@ import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { INTERNAL_PROOF_PINNED } from "@/lib/domain/queue/internal-proof-session.js";
+
 import {
   handleFlushInboundBurstsRequest,
   summarizeFlushResults,
@@ -59,7 +61,10 @@ const INTERNAL_SECRET = "internal-secret-for-activation-test";
 // Code-pinned by INTERNAL_PROOF_PINNED — a session naming anything else is
 // invalid in its entirety, so these are not arbitrary fixtures.
 const PINNED_RECIPIENT = "+16128072000";
-const PINNED_SENDER = "+16128060495";
+// Derived from the PIN, never repeated. When INTERNAL_PROOF_PINNED.sender was
+// repointed (the original was on sms_blocked_sender_numbers) this file still
+// hardcoded the old number and built sessions the gate correctly rejected.
+const PINNED_SENDER = INTERNAL_PROOF_PINNED.sender;
 const PINNED_CAMPAIGN = "b7c9a000-7ad3-468b-9b9b-4647dbefc35f";
 
 const NOW_ISO = "2026-08-05T12:00:00.000Z";

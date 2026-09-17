@@ -37,9 +37,40 @@ export const INTERNAL_PROOF_SESSION_MAX_MINUTES = 240;
 // session naming any other recipient, sender, or campaign — including the
 // other registered internal numbers — is invalid in its entirety, so the
 // exact-target requirement is structural, not delegated to session content.
+/**
+ * SENDER REPOINTED 2026-09-17 (PRODUCTION-COMMISSIONING-1B).
+ *
+ * Was +16128060495, which sits in system_control.sms_blocked_sender_numbers
+ * (containment set on 2026-09-11). That made the entire internal-proof lane
+ * unusable: every session naming the pinned sender was valid by this constant
+ * and then refused at dispatch by the sender block, so the designed canary
+ * could not run at all.
+ *
+ * Repointed to +14693131600 rather than unblocking +16128060495 — the block
+ * list is left exactly as it is.
+ *
+ * NOT chosen on delivery rate. My first pick was +17866052999 (5.4% failure
+ * over 3,979 attempts, the best rate in production) and that was wrong: its
+ * own row says health_state='cooling', health_reason='spam_flagged_operator_note',
+ * spam_flagged_at=2026-09-10. The aggregate rate hid the flag, which is the
+ * exact trap sender-health.js was written about. The third unblocked number,
+ * +13057604780, is status='paused' — it is the REPLACEMENT for that flagged
+ * Miami number and not yet in service.
+ *
+ * So +14693131600 is the only unblocked number that is active, unflagged and
+ * not cooling. It is a Dallas number texting a Minneapolis handset, which is
+ * permitted here because require_local_routing=false and
+ * allow_regional_fallback_for_first_touch=true. Note the ORIGINAL pin
+ * (+16128060495) is the Minneapolis number — the market-correct choice — and is
+ * blocked by the 2026-09-11 containment set; unblocking it is an operator call,
+ * not mine.
+ *
+ * Still pinned in code, and still exactly one triple: a session naming any
+ * other recipient, sender or campaign remains invalid in its entirety.
+ */
 export const INTERNAL_PROOF_PINNED = Object.freeze({
   recipient: "+16128072000",
-  sender: "+16128060495",
+  sender: "+14693131600",
   campaign_id: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
 });
 
