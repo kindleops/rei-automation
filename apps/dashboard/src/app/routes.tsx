@@ -199,8 +199,16 @@ const mapRoute = defineRoute<null>({
  *                invented conversion percentages
  *
  * None of it came from a source. Real send_queue holds 18,091 rows in total,
- * and the contracts/closings authorities do not exist in this database at all,
  * so "Under Contract 42 · Closed 18" described a business that is not there.
+ *
+ * CORRECTION (2026-09-16): this note previously added "and the
+ * contracts/closings authorities do not exist in this database at all". That
+ * was wrong. public.closing_cases, closing_milestones, closing_activity_events,
+ * buyer_agreements, settlement_records and title_companies all exist and are
+ * written by src/lib/domain/closings/*. The earlier recon searched for a
+ * `closings` table and concluded from its absence that there was no closing
+ * backend — an absent NAME is not an absent CAPABILITY. The funnel numbers were
+ * still fabricated; the reason given for it was not.
  *
  * MetricsWarRoom is the canonical surface — one endpoint
  * (/api/cockpit/metrics/war-room) which returns a source_audit naming the
