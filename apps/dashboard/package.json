@@ -57,7 +57,8 @@
     "proof:master-filters": "npm run proof:master-filters --prefix ../api",
     "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api",
     "assert:fullscreen": "node scripts/assert-mobile-fullscreen-contract.mjs",
-    "proof:workflow-studio-mobile": "node scripts/proof/mobile/workflow-studio-mobile-qa.mjs"
+    "proof:workflow-studio-mobile": "node scripts/proof/mobile/workflow-studio-mobile-qa.mjs",
+    "proof:closing-desk-mobile": "node scripts/proof/mobile/closing-desk-mobile-qa.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
