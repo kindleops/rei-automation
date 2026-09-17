@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCompIntelligence } from '../../domain/comp-intelligence/useCompIntelligence'
 import {
   getUniversalEntityContextSnapshot,
@@ -37,6 +37,16 @@ import {
 } from './utils/comp-display'
 import './comp-intelligence.css'
 
+/**
+ * The mobile composition is lazy because it is never both: a phone loads the mobile
+ * tree, a desktop loads the workspace tree, and pulling the mobile map/rail/detail
+ * chunk into the desktop bundle (or the reverse) would be paid on every load of the
+ * side that does not use it.
+ */
+const CompIntelligenceMobile = lazy(() =>
+  import('./mobile/CompIntelligenceMobile').then((m) => ({ default: m.CompIntelligenceMobile })),
+)
+
 interface Props {
   thread: InboxWorkflowThread | null
   dealContext?: DealContext | null
@@ -44,6 +54,13 @@ interface Props {
   layoutMode?: ViewLayoutMode
   paneWidth?: ViewWidthPercent
   paused?: boolean
+  /**
+   * Set by the host that knows it is on a phone. Not derived from `layoutMode`:
+   * 'compact' also means "a 25% desktop pane", and those two need opposite
+   * compositions — the desktop compact pane hides the map, which is the one thing
+   * §10 says mobile must keep.
+   */
+  isMobile?: boolean
 }
 
 const FILTER_KEYS: CompFilterKey[] = ['all', 'strong', 'usable', 'review', 'excluded']
@@ -54,6 +71,7 @@ export function CompIntelligenceWorkspace({
   paneWidth = '100',
   layoutMode = 'medium',
   paused = false,
+  isMobile = false,
 }: Props) {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [openPopoverId, setOpenPopoverId] = useState<string | null>(null)
@@ -249,6 +267,44 @@ export function CompIntelligenceWorkspace({
     if (!baseEvidence.length) return 'no_comps' as const
     return null
   }, [mapStyleError, loading, canShowMap, hasCoords, mappableEvidence.length, baseEvidence.length])
+
+  /**
+   * MOBILE composition. Everything above this point — the subject resolution, the
+   * comp hook, the V3 projection, the filters and the analyst scenario — is shared,
+   * so the two compositions cannot disagree about what the evidence is. Only the
+   * arrangement differs.
+   *
+   * Placed after the hooks and before the empty-state branch so React's hook order
+   * is identical on both paths.
+   */
+  if (isMobile && effectiveThread) {
+    return (
+      <Suspense fallback={<div className="ci-workspace ci-workspace--empty" data-comp-intelligence="mobile-loading" />}>
+        <CompIntelligenceMobile
+          subject={subjectFacts}
+          address={address}
+          propertyId={propertyId ?? null}
+          loading={loading}
+          error={error ?? null}
+          hasCoords={hasCoords}
+          coords={coords}
+          displayEvidence={displayEvidence}
+          mappableEvidence={mappableEvidence}
+          filters={filters}
+          scenario={scenario}
+          v3={v3}
+          radius={radius}
+          setRadius={setRadius}
+          monthsBack={monthsBack}
+          setMonthsBack={setMonthsBack}
+          canExpandFurther={canExpandFurther}
+          findMoreComps={findMoreComps}
+          dataSource={dataSource ?? null}
+          pipelineState={pipelineState ?? null}
+        />
+      </Suspense>
+    )
+  }
 
   if (!effectiveThread) {
     return (

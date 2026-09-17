@@ -5509,6 +5509,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               paused={heavyLoadPaused}
               paneWidth={paneWidth}
               layoutMode={layoutMode}
+              /**
+               * The workspace needs to know it is on a PHONE, which `layoutMode`
+               * cannot tell it: 'compact' also describes a 25% desktop pane, and the
+               * desktop compact rules hide the map column entirely — the one thing
+               * §10 requires mobile to keep.
+               */
+              isMobile={isMobile}
             />
           )}
           </WorkspaceSuspense>

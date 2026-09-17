@@ -168,6 +168,19 @@ export const resolveMobileAwareLayoutMode = (
   ) {
     return 'compact'
   }
+  /**
+   * COMP INTELLIGENCE was missing here, and the consequence was structural rather
+   * than cosmetic. Falling through to the pane-width mode meant 'full' at
+   * paneWidth '100', so a phone rendered `.ci-workspace.is-pane-100` — a
+   * `flex-direction: row` two-column desktop workspace — inside 390px. The map
+   * column and the analysis panel each got ~190px, which is the unusable sliver
+   * §10 names.
+   *
+   * 'compact' is the honest description of the mobile pane, and the workspace now
+   * takes `isMobile` separately to choose the mobile composition, because compact
+   * ALSO means a 25% desktop pane, where hiding the map is correct.
+   */
+  if (view === 'comp_intelligence') return 'compact'
   if (view === 'deal_intelligence') return 'compact'
   if (view === 'campaigns' || view === 'email') return 'medium'
   return layoutMode

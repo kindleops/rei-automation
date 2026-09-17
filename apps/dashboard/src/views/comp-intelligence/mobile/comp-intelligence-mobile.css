@@ -1,0 +1,653 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   COMP INTELLIGENCE — MOBILE
+   ══════════════════════════════════════════════════════════════════════════
+
+   The one hard geometric rule (§10): the map may never become a sliver. It is
+   38vh of the stage, expressed against the stage rather than the viewport, so a
+   short iPhone SE viewport and a tall Pro Max viewport both get a map that is
+   a map. The comp rail overlays the map's lower edge instead of subtracting
+   from it — a rail that takes 90px OUT of a 38vh map is how a sliver starts.
+
+   Everything else is rows and strips. §19 rules out the giant-card treatment,
+   and a valuation that arrives as a 140px hero pushes the evidence that
+   justifies it below the fold.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Absolute against the shared root between the global top chrome and the pinned
+   dock — the same recipe every certified mobile surface uses (see
+   buyer-match-mobile.css). Never a viewport unit: the installed PWA resolves
+   100dvh to the SHORT layout viewport, which is what
+   scripts/assert-mobile-fullscreen-contract.mjs exists to catch. Without the
+   chrome-top inset the subject header rendered UNDERNEATH the command dock. */
+.ci-m {
+  position: absolute;
+  inset: var(--nx-mobile-chrome-top, 57px) 0 var(--nx-mobile-chrome-bottom, 22px) 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--nx-surface-0, #05070d);
+}
+
+/* ── Subject ─────────────────────────────────────────────────────────────── */
+
+.ci-m__subject {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(8, 11, 19, 0.9);
+}
+
+.ci-m__subject strong {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-m__subject-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.46);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-m__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /* The root already clears the dock, so the scroller only owes its own gutter. */
+  padding-bottom: 16px;
+}
+
+/* ── Valuation ───────────────────────────────────────────────────────────── */
+
+.ci-m__valuation { padding: 12px 14px 4px; }
+
+.ci-m__value {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ci-m__value > span {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.ci-m__value > strong {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: rgba(255, 255, 255, 0.97);
+}
+
+.ci-m__value.is-preliminary > strong { color: #f59e0b; }
+
+.ci-m__value-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 10px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+
+.ci-m__value-strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.ci-m__value-strip > div:last-child { border-right: 0; }
+
+.ci-m__value-strip span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.ci-m__value-strip b {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.ci-m__notice {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.ci-m__notice.is-warning { color: #f59e0b; }
+
+/* ── Map ─────────────────────────────────────────────────────────────────── */
+
+.ci-m__map {
+  position: relative;
+  /* 38vh, floored so a 667px-tall SE still gets a usable map and capped so a
+     tall device does not hand the whole screen to a basemap. */
+  height: clamp(232px, 38vh, 330px);
+  margin: 12px 0 0;
+  overflow: hidden;
+  background: #05070d;
+}
+
+.ci-m__map .maplibregl-map,
+.ci-m__map canvas { width: 100% !important; height: 100% !important; }
+
+.ci-m__map-state {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 16px;
+}
+
+.ci-m__map-fit {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9px;
+  background: rgba(8, 12, 20, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+}
+
+/* ── Synchronized comp rail ──────────────────────────────────────────────── */
+
+.ci-m__rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  /* Horizontal scroll is INTENTIONAL here and is the one place §20 allows it:
+     a carousel scrolling inside itself, never the page. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 12px 10px;
+  background: linear-gradient(180deg, transparent, rgba(5, 7, 13, 0.82) 38%);
+  scrollbar-width: none;
+}
+
+.ci-m__rail::-webkit-scrollbar { display: none; }
+
+.ci-m__rail-card {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 154px;
+  min-height: 56px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 11px;
+  background: rgba(10, 14, 22, 0.9);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 140ms ease, transform 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ci-m__rail-card.is-active {
+  border-color: var(--tone-primary, #5eead4);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.ci-m__rail-card b {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.ci-m__rail-card span {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-m__rail-card em {
+  font-size: 9.5px;
+  font-style: normal;
+  color: rgba(255, 255, 255, 0.36);
+}
+
+/* ── Comparables ─────────────────────────────────────────────────────────── */
+
+.ci-m__comps { padding: 14px 0 6px; }
+
+.ci-m__comps-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px 9px;
+}
+
+.ci-m__comps-head h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.ci-m__comps-head h3 b {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ci-m__filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.ci-m__filter-btn.is-active {
+  border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.5);
+  color: var(--tone-primary, #5eead4);
+}
+
+.ci-m__filter-btn i {
+  display: grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--tone-primary, #5eead4);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  color: #061018;
+}
+
+.ci-m__list { display: flex; flex-direction: column; }
+
+.ci-m__comp {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-left: 2px solid transparent;
+}
+
+.ci-m__comp.is-selected {
+  border-left-color: var(--tone-primary, #5eead4);
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.05);
+}
+
+.ci-m__comp.is-excluded { opacity: 0.44; }
+
+.ci-m__comp-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 4px 11px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ci-m__comp-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ci-m__comp-row b {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.ci-m__comp-tier {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.ci-m__comp-tier.is-strong { color: #34d399; }
+.ci-m__comp-tier.is-usable { color: var(--tone-primary, #5eead4); }
+.ci-m__comp-tier.is-weak { color: #f59e0b; }
+
+.ci-m__comp-addr {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-m__comp-meta,
+.ci-m__comp-source {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-m__comp-source { color: rgba(255, 255, 255, 0.28); }
+
+.ci-m__comp-toggle {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 66px;
+  /* 44px of interaction, 30px of paint — the visible chip stays out of the way
+     of the comp's own numbers. */
+  min-height: 30px;
+  margin: 0 12px 0 4px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.66);
+  cursor: pointer;
+  position: relative;
+}
+
+.ci-m__comp-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -7px -6px;
+}
+
+.ci-m__comp-toggle.is-on {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+.ci-m__scenario {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 14px 0;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.ci-m__scenario strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+.ci-m__scenario small { font-size: 11px; color: rgba(255, 255, 255, 0.6); }
+
+.ci-m__scenario button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+}
+
+/* ── States ──────────────────────────────────────────────────────────────── */
+
+.ci-m__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 14px;
+  padding: 30px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  text-align: center;
+}
+
+.ci-m__state strong { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.84); }
+.ci-m__state span { font-size: 11.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.46); }
+.ci-m__state.is-error strong { color: #f59e0b; }
+
+.ci-m__state button {
+  margin-top: 6px;
+  min-height: 38px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.ci-m__spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--tone-primary, #5eead4);
+  animation: ci-m-spin 760ms linear infinite;
+}
+
+@keyframes ci-m-spin { to { transform: rotate(360deg); } }
+
+/* ── Evidence ────────────────────────────────────────────────────────────── */
+
+.ci-m__evidence { margin: 14px 0 0; border-top: 1px solid rgba(255, 255, 255, 0.055); }
+
+.ci-m__evidence-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+
+.ci-m__evidence-toggle i {
+  width: 8px;
+  height: 8px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.ci-m__evidence-toggle i.is-open { transform: rotate(-135deg); }
+
+.ci-m__evidence-body { padding: 0 14px 10px; }
+
+.ci-m__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 12px 0 0;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.ci-m__facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.ci-m__facts dt {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.ci-m__facts dd {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* ── Light ───────────────────────────────────────────────────────────────── */
+
+[data-nexus-theme='light'] {
+  .ci-m { background: #f6f8fb; }
+  .ci-m__subject { background: rgba(255, 255, 255, 0.92); border-bottom-color: rgba(15, 23, 42, 0.08); }
+  .ci-m__subject strong { color: rgba(15, 23, 42, 0.94); }
+  .ci-m__subject-meta { color: rgba(15, 23, 42, 0.52); }
+  .ci-m__value > span { color: rgba(15, 23, 42, 0.45); }
+  .ci-m__value > strong { color: rgba(15, 23, 42, 0.95); }
+
+  .ci-m__value-strip,
+  .ci-m__facts,
+  .ci-m__state {
+    border-color: rgba(15, 23, 42, 0.1);
+    background: #ffffff;
+  }
+
+  .ci-m__value-strip > div { border-right-color: rgba(15, 23, 42, 0.07); }
+  .ci-m__value-strip span { color: rgba(15, 23, 42, 0.44); }
+  .ci-m__value-strip b { color: rgba(15, 23, 42, 0.92); }
+  .ci-m__notice { color: rgba(15, 23, 42, 0.52); }
+  .ci-m__comps-head h3 { color: rgba(15, 23, 42, 0.6); }
+  .ci-m__comps-head h3 b { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.62); }
+
+  .ci-m__filter-btn {
+    border-color: rgba(15, 23, 42, 0.14);
+    background: #ffffff;
+    color: rgba(15, 23, 42, 0.78);
+  }
+
+  .ci-m__comp { border-top-color: rgba(15, 23, 42, 0.07); background: #ffffff; }
+  .ci-m__comp-row b { color: rgba(15, 23, 42, 0.94); }
+  .ci-m__comp-addr { color: rgba(15, 23, 42, 0.72); }
+  .ci-m__comp-meta { color: rgba(15, 23, 42, 0.48); }
+  .ci-m__comp-source { color: rgba(15, 23, 42, 0.35); }
+
+  .ci-m__comp-toggle {
+    border-color: rgba(15, 23, 42, 0.14);
+    background: rgba(15, 23, 42, 0.03);
+    color: rgba(15, 23, 42, 0.7);
+  }
+
+  .ci-m__rail { background: linear-gradient(180deg, transparent, rgba(246, 248, 251, 0.9) 38%); }
+
+  .ci-m__rail-card {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(255, 255, 255, 0.95);
+  }
+
+  .ci-m__rail-card b { color: rgba(15, 23, 42, 0.94); }
+  .ci-m__rail-card span { color: rgba(15, 23, 42, 0.58); }
+  .ci-m__rail-card em { color: rgba(15, 23, 42, 0.4); }
+
+  .ci-m__map-fit {
+    border-color: rgba(15, 23, 42, 0.14);
+    background: rgba(255, 255, 255, 0.9);
+    color: rgba(15, 23, 42, 0.84);
+  }
+
+  .ci-m__state strong { color: rgba(15, 23, 42, 0.86); }
+  .ci-m__state span { color: rgba(15, 23, 42, 0.52); }
+  .ci-m__evidence { border-top-color: rgba(15, 23, 42, 0.08); }
+  .ci-m__evidence-toggle { color: rgba(15, 23, 42, 0.6); }
+  .ci-m__facts > div { background: #ffffff; }
+  .ci-m__facts dt { color: rgba(15, 23, 42, 0.42); }
+  .ci-m__facts dd { color: rgba(15, 23, 42, 0.88); }
+  .ci-m__scenario small { color: rgba(15, 23, 42, 0.6); }
+  .ci-m__scenario button { border-color: rgba(15, 23, 42, 0.16); color: rgba(15, 23, 42, 0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ci-m__rail-card,
+  .ci-m__evidence-toggle i { transition: none; }
+  .ci-m__spinner { animation-duration: 2.4s; }
+}
