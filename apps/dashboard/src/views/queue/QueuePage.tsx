@@ -1622,16 +1622,49 @@ export const QueuePage = ({
         ? selectedRows.filter(i => !['cancelled', 'delivered'].includes(i.status))
         : selectedRows.filter(i => ['scheduled', 'queued', 'ready', 'failed', 'retry'].includes(i.status))
     try {
+      /**
+       * Every result is inspected. These helpers RESOLVE with
+       * `{ ok: false, errorMessage }` — they do not throw — so the previous
+       * `await` without a check meant a run in which the backend refused all
+       * fifty rows (a 423 safety refusal, a 500) completed without entering
+       * catch, and the toast reported "Bulk action complete - 50 rows
+       * processed" in SUCCESS severity. The operator would believe fifty
+       * messages were retried when none were.
+       *
+       * The single-row path above already does this correctly: it tests
+       * `res.ok` and throws manually.
+       */
+      const failures: string[] = []
+      let succeeded = 0
       for (const item of eligible) {
-        if (action === 'bulk-retry') await retryQueueItem(item)
-        else if (action === 'bulk-pause') await holdQueueItem(item)
-        else if (action === 'bulk-cancel' || action === 'bulk-suppress') await cancelQueueItem(item)
+        let res: { ok: boolean; errorMessage?: string | null } | null = null
+        if (action === 'bulk-retry') res = await retryQueueItem(item)
+        else if (action === 'bulk-pause') res = await holdQueueItem(item)
+        else if (action === 'bulk-cancel' || action === 'bulk-suppress') res = await cancelQueueItem(item)
         else if (action === 'bulk-reschedule') {
           const t = new Date(); t.setDate(t.getDate() + 1)
-          await rescheduleQueueItem(item, t.toISOString())
+          res = await rescheduleQueueItem(item, t.toISOString())
         }
+        if (res && res.ok) succeeded += 1
+        else if (res) failures.push(`${item.sellerName || item.id}: ${res.errorMessage ?? 'refused'}`)
       }
-      emitNotification({ title: 'Bulk action complete', detail: `${eligible.length} rows processed`, severity: 'success', sound: 'notification' })
+
+      // Report what actually happened, at the severity it actually warrants.
+      if (failures.length === 0) {
+        emitNotification({ title: 'Bulk action complete', detail: `${succeeded} of ${eligible.length} rows processed`, severity: 'success', sound: 'notification' })
+      } else if (succeeded === 0) {
+        emitNotification({
+          title: 'Bulk action refused',
+          detail: `0 of ${eligible.length} rows changed. ${failures[0]}${failures.length > 1 ? ` (+${failures.length - 1} more)` : ''}`,
+          severity: 'critical',
+        })
+      } else {
+        emitNotification({
+          title: 'Bulk action partially applied',
+          detail: `${succeeded} of ${eligible.length} succeeded, ${failures.length} refused. ${failures[0]}`,
+          severity: 'warning',
+        })
+      }
       clearSelection()
       await refreshData(currentPage)
     } catch (err) {

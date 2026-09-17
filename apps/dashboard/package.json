@@ -58,7 +58,10 @@
     "proof:master-filters:offline": "npm run proof:master-filters:offline --prefix ../api",
     "assert:fullscreen": "node scripts/assert-mobile-fullscreen-contract.mjs",
     "proof:workflow-studio-mobile": "node scripts/proof/mobile/workflow-studio-mobile-qa.mjs",
-    "proof:closing-desk-mobile": "node scripts/proof/mobile/closing-desk-mobile-qa.mjs"
+    "proof:closing-desk-mobile": "node scripts/proof/mobile/closing-desk-mobile-qa.mjs",
+    "proof:whole-product": "node scripts/proof/mobile/whole-product-smoke.mjs",
+    "proof:cross-app-subject": "node scripts/proof/mobile/cross-app-subject-proof.mjs",
+    "proof:shell-notifications": "node scripts/proof/mobile/shell-notifications-proof.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

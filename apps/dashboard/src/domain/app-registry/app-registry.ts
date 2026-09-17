@@ -259,9 +259,18 @@ export const NEXUS_APPS: NexusApp[] = [
     defaultDock: false,
     shortcut: 'B',
     badge: null,
-    // BuyerMatchWorkspace resolves its subject from its own selection, not the
-    // locator. Left empty until it reads one.
-    context: {},
+    /**
+     * This was `{}` with the note "resolves its subject from its own selection,
+     * not the locator. Left empty until it reads one." That condition has since
+     * been met: BUYER-MATCH-MOBILE-LOCK-1 replaced the routed demo with
+     * BuyerMatchSubjectPage, which subscribes to PROPERTY_LOCATOR_EVENT and
+     * scopes every candidate read to `subject.propertyId`.
+     *
+     * 'locator' leaves the path untouched — the surface seeds itself on mount —
+     * so this only changes whether the platform can honestly say the jump was
+     * focused, which it now is.
+     */
+    context: { propertyId: 'locator' },
   },
   {
     id: 'map',
