@@ -19,6 +19,7 @@ import {
 import { classifyInboxBucket, type CanonicalBucket } from '../../../domain/inbox/classifyInboxBucket'
 import { isInboxDebugEnabled } from '../inbox.adapter'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
+import { PropertyAssetLine } from './PropertyAssetLine'
 import { PropertySignalTile } from './PropertySignalTile'
 import {
   buildPropertySignalTileModel,
@@ -1131,6 +1132,14 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
           ) : (
             <span className="nx-card-state is-muted" aria-hidden="true" />
           )}
+          {/* The phone suppresses the media zone (see inbox-mobile-premium.css),
+              which is the only place asset class, value and equity appear at
+              that width — the metrics zone is desktop-only and the context line
+              is hidden. They move into this row rather than onto a new one: the
+              footer already runs half empty between the delivery state and the
+              stage badge, so the facts cost no row height. Desktop keeps the
+              tile and this element is display:none there. */}
+          <PropertyAssetLine model={tileModel} market={false} />
           {stageBadge ? (
             <span
               className={cls('nx-card-stage', `is-band-${stageBadge.band}`)}

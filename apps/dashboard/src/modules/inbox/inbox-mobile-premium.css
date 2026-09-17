@@ -1283,3 +1283,121 @@ html.is-mobile-layout .nx-inbox-rebuilt-floating-bar::before {
     radial-gradient(60% 120% at 20% 0%, rgba(var(--nx-accent-rgb, 120 140 255), 0.16) 0%, transparent 70%),
     radial-gradient(50% 120% at 85% 100%, rgba(var(--nx-accent-rgb, 120 140 255), 0.10) 0%, transparent 72%);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PROPERTY FACTS AS PART OF THE CARD, NOT AS A PICTURE FRAME
+
+   The phone row kept an 88x66 media box from when it held a Street View
+   thumbnail. Street View was removed from list rows (25 rows = up to 25 billed
+   requests per load) and PropertySignalTile moved the facts INTO that frame, so
+   they arrived as six ~9px fragments stacked inside a rounded box that still
+   read as a photo which had failed to load — 88px of a 390px row, nearly a
+   quarter of its width, spent saying less than one line of type can.
+
+   Measured before the change: `.nx-row25__zone--media` 88x66 in a 108px row,
+   `.nx-row25__zone--metrics` absent at this width and `.nx-row25__context`
+   display:none — so the tile was the ONLY place the phone stated value and
+   equity. Removing the frame without restating them would have lost real data,
+   which is why this is a move, not a deletion.
+
+   They move into the footer rather than onto a line of their own. The footer
+   already ran half empty between the delivery state and the stage badge
+   (measured: state ended at x=250 of a 356px content box), so the facts cost no
+   row height: the row keeps its 108px and the conversation copy gains the 88px
+   the frame was holding.
+
+   Mobile only — desktop rows have the width for the tile and keep it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Collapse the grid along with the frame. `display: none` on the child leaves
+   the TRACK standing, so without this the row keeps an empty 88px gutter and
+   the copy gains nothing — the whole point of removing the frame is that the
+   address and the message get that width back.
+
+   Written out rather than nested, because specificity decides this one. The
+   rail25 rule in inbox-workspace-layout.css is
+   `.nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25` (0,3,0) and declares
+   BOTH the columns and the areas `!important`. Nested under
+   `html.is-mobile-layout` this selector would be (0,2,1) and lose to it even
+   with `!important` of its own — which is exactly what the first attempt did,
+   measured still at `88px 239px`. Naming `.nx-premium-inbox` takes it to
+   (0,3,1). The areas have to move with the columns or a two-name template is
+   left describing a one-track grid. */
+html.is-mobile-layout .nx-premium-inbox .nx-row25 {
+  --nx-row-media: 0px;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-areas: 'conversation' !important;
+}
+
+/* Desktop shows the tile, so the line is off unless the mobile shell is up. */
+.nx-card-assetline { display: none; }
+
+html.is-mobile-layout {
+  /* The frame, not the facts. Its veil goes too — that only ever existed to
+     darken a photograph. */
+  .nx-row25__zone--media,
+  .nx-row25__media-veil {
+    display: none;
+  }
+
+
+  .nx-card-assetline {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    flex: 0 0 auto;
+    margin-inline-start: auto;
+    white-space: nowrap;
+  }
+
+  /* The delivery state is a label and the facts are the scarce information, so
+     the label yields the width. Upstream it is `flex: 1 1 auto`, which would
+     have let a long state ("Awaiting seller reply") squeeze the figures out. */
+  .nx-row25__footer .nx-card-state {
+    flex: 0 1 auto;
+    overflow: hidden;
+  }
+
+  /* Asset class carries the row's identity, so it is the one part set in the
+     label voice rather than as running text. */
+  .nx-card-assetline__type {
+    flex: 0 0 auto;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--nx-ib-text-3);
+  }
+
+  .nx-card-assetline__value {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--nx-ib-text);
+  }
+
+  /* Equity is the qualifying number — how much of that value is actually
+     reachable — so it is tinted rather than left to read as a second price. */
+  .nx-card-assetline__equity {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: rgb(var(--nx-accent-rgb, 120 140 255));
+    opacity: 0.92;
+  }
+
+  /* Underwater. Same figure, opposite meaning — it must not read in the tone
+     the qualifying numbers use. */
+  .nx-card-assetline__equity.is-negative {
+    color: #ff7a72;
+    opacity: 1;
+  }
+
+  /* Off in this row: the address two lines up already states city and state.
+     Kept in the component for surfaces that do not print an address. */
+  .nx-row25__footer .nx-card-assetline__market {
+    display: none;
+  }
+}
