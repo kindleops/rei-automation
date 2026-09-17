@@ -3,11 +3,14 @@
  *
  * Two acceptance criteria that only a driven browser can answer:
  *
- *   §20/§30.27  a normal application screen must not become a BROKEN sideways
- *               desktop composition. Phone landscape renders the command-center
- *               layout by deliberate design (`useBreakpoint.isCommandCenterLayout`),
- *               so what is asserted here is that it is not broken: no horizontal
- *               overflow and no page errors at 844x390.
+ *   §20/§30.27  rotating the handset must not hand the operator a different
+ *               product. A phone in landscape is 844px wide, which reads as a
+ *               tablet on layout width alone, so the shell used to fall back to
+ *               the desktop command-center composition. Phone-ness is now
+ *               measured on the DEVICE's short edge, and what is asserted here
+ *               is the whole contract at 844x390: the mobile shell is mounted,
+ *               both docks are present, no desktop-only chrome leaks in, and
+ *               there is no horizontal overflow or page error.
  *   §5          tapping a notification must reach the entity it names. The row
  *               states its destination before the tap ("Open campaign"), so the
  *               test is that the URL afterwards matches what the row promised.
@@ -56,14 +59,47 @@ const browser = await chromium.launch()
     try {
       await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded', timeout: 90_000 })
       await page.waitForSelector('#root > *', { timeout: 60_000 })
-      await page.waitForTimeout(5000)
+      // Wait for the CHROME, not a stopwatch. A flat 5s read /inbox — the
+      // heaviest route, and the first one in the list — as dock-less whenever the
+      // dev server was still compiling, which is a harness flake reported as a
+      // product failure. A missing dock is still a failure; it is just asserted
+      // below, after the shell has actually had its chance to mount.
+      await page
+        .waitForSelector('.nx-mobile-command-dock', { timeout: 45_000 })
+        .catch(() => { /* recorded as topDock:false below, which is the finding */ })
+      await page.waitForTimeout(2500)
       const d = await page.evaluate(() => {
         const doc = document.scrollingElement || document.documentElement
-        return { overflow: Math.max(0, doc.scrollWidth - window.innerWidth) }
+        const visible = (sel) => {
+          const el = document.querySelector(sel)
+          if (!el) return false
+          const r = el.getBoundingClientRect()
+          return r.width > 0 && r.height > 0
+        }
+        return {
+          overflow: Math.max(0, doc.scrollWidth - window.innerWidth),
+          mobileShell: document.documentElement.classList.contains('is-mobile-layout'),
+          landscapeFlag: document.documentElement.classList.contains('is-landscape-phone'),
+          mobileOs: Boolean(document.querySelector('.nx-os.is-mobile-os')),
+          topDock: visible('.nx-mobile-command-dock'),
+          appDock: visible('.nx-pinned-app-dock'),
+          // Desktop-only chrome. Its presence means the command-center layout won.
+          desktopChrome: Boolean(document.querySelector('.nx-room-label')),
+        }
       })
       if (d.overflow > 1) failures.push(`landscape ${route}: overflows by ${d.overflow}px`)
+      if (!d.mobileShell) failures.push(`landscape ${route}: html is missing .is-mobile-layout — the shell fell back to desktop`)
+      if (!d.landscapeFlag) failures.push(`landscape ${route}: html is missing .is-landscape-phone`)
+      if (!d.mobileOs) failures.push(`landscape ${route}: .nx-os is not .is-mobile-os`)
+      if (!d.topDock) failures.push(`landscape ${route}: the mobile command dock is not rendered`)
+      // The map owns the whole screen and deliberately yields the app dock.
+      if (!d.appDock && route !== '/map') failures.push(`landscape ${route}: the pinned app dock is not rendered`)
+      if (d.desktopChrome) failures.push(`landscape ${route}: desktop-only chrome (.nx-room-label) leaked in`)
       if (errors.length) failures.push(`landscape ${route}: ${errors.slice(0, 2).join(' | ')}`)
-      console.log(`landscape ${route.padEnd(16)} overflow=${d.overflow} errors=${errors.length}`)
+      console.log(
+        `landscape ${route.padEnd(16)} overflow=${d.overflow} shell=${d.mobileShell ? 'mobile' : 'DESKTOP'}`
+        + ` landscapeFlag=${d.landscapeFlag} topDock=${d.topDock} appDock=${d.appDock} errors=${errors.length}`,
+      )
     } catch (error) {
       failures.push(`landscape ${route}: ${String(error?.message || error).slice(0, 120)}`)
     }

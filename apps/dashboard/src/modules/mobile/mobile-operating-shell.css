@@ -2896,3 +2896,47 @@ html.is-mobile-layout.is-keyboard-open .nx-active-prospect.is-compact {
   background: rgba(100, 210, 255, 0.12);
   border-color: rgba(100, 210, 255, 0.28);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LANDSCAPE PHONE
+
+   Rotating the handset used to hand the operator the desktop command-center
+   composition, because a phone in landscape is 844px wide and width alone reads
+   as a tablet. Phone-ness is now decided on the DEVICE's short edge, so the
+   mobile shell owns the screen in both orientations and this block is the whole
+   adaptation: the same shell, adjusted for a viewport that is 390px tall and
+   notched on its side instead of its top.
+
+   Scoped entirely to `html.is-landscape-phone`, which only ever exists on a
+   phone held sideways — portrait, tablet and desktop cannot reach any of it.
+
+   Explicitly spatial surfaces (the full-screen map, the workflow canvas) are
+   free to opt into more than this by hanging their own rules off the same class.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-landscape-phone {
+  /* No --nx-dock-height override here. The obvious move was to shave the 52px
+     base down for a 390px-tall viewport, but inbox-mobile-premium.css already
+     drives the mobile dock to 40px for every orientation, so a "compaction" to
+     44px would have made the landscape dock TALLER than the portrait one. The
+     top chrome is already 47px measured, insets included. */
+
+  /* Portrait spends 56vh on the expanded dock because 56% of 844px is still a
+     usable 470px. 56% of 390px is 218px, which is not enough to browse the app
+     catalogue in, so the landscape dock is allowed a larger share of a much
+     smaller screen and capped well under the viewport. */
+  --nx-pinned-dock-expanded: min(76vh, 300px);
+
+  /* The notch eats a side edge in landscape rather than the top one. Both docks
+     span the full width, so without this their outermost controls sit under it.
+     env() resolves to 0 wherever there is no inset, so this is inert in a
+     browser that reports none. */
+  .nx-mobile-command-dock {
+    padding-left: calc(10px + var(--nx-mobile-safe-left, 0px));
+    padding-right: calc(10px + var(--nx-mobile-safe-right, 0px));
+  }
+
+  .nx-pinned-app-dock {
+    padding-left: calc(12px + var(--nx-mobile-safe-left, 0px));
+    padding-right: calc(12px + var(--nx-mobile-safe-right, 0px));
+  }
+}

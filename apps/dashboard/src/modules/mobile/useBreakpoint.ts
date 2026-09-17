@@ -36,11 +36,15 @@ export function useBreakpoint(): {
   isPhone: boolean
   isTablet: boolean
   isDesktop: boolean
-  /** Portrait phone — compact single-panel mobile UX */
+  /** Phone in either orientation — the mobile shell owns the whole product */
   isMobile: boolean
-  /** Phone in landscape — preserve command-center multi-panel layouts */
+  /**
+   * Phone held sideways. The mobile shell still owns the screen; this exists so
+   * explicitly spatial surfaces (full-screen map, workflow canvas) can opt into
+   * landscape-specific composition. It is not a fallback to the desktop layout.
+   */
   isLandscapeMobile: boolean
-  /** Desktop, tablet, or landscape phone */
+  /** Desktop or tablet — never a phone, in any orientation */
   isCommandCenterLayout: boolean
   isPortrait: boolean
   width: number
@@ -65,11 +69,29 @@ export function useBreakpoint(): {
     }
   }, [])
 
-  const { effectiveWidth: width, effectiveHeight: height, isPortrait, layoutWidth, layoutHeight } = viewport
-  const breakpoint = resolveBreakpoint(width)
-  const isPhone = breakpoint === 'phone'
+  const {
+    effectiveWidth: width,
+    effectiveHeight: height,
+    isPortrait,
+    isPhoneClass,
+    layoutWidth,
+    layoutHeight,
+  } = viewport
+
+  // A phone turned sideways is 844px wide, which reads as a tablet on width
+  // alone. Device class wins so rotating the handset never hands the operator
+  // a different product; `width` keeps reporting the real box for layout.
+  //
+  // The width rule is kept for PORTRAIT boxes only, which is deliberately
+  // narrower than it was: it used to admit any viewport <= 767px, so a desktop
+  // window dragged to 700x500 resolved to a landscape phone. Narrowing it to
+  // portrait leaves that window on exactly the desktop composition it has
+  // today, and confines this change to devices that really are phones.
+  const isNarrowPortrait = isPortrait && resolveBreakpoint(width) === 'phone'
+  const isPhone = isPhoneClass || isNarrowPortrait
+  const breakpoint: Breakpoint = isPhone ? 'phone' : resolveBreakpoint(width)
   const isLandscapeMobile = isPhone && !isPortrait
-  const isMobile = isPhone && isPortrait
+  const isMobile = isPhone
 
   return {
     breakpoint,

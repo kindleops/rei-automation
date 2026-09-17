@@ -4,6 +4,18 @@ export type ViewportMetrics = {
   effectiveWidth: number
   effectiveHeight: number
   isPortrait: boolean
+  /**
+   * The device is phone-sized, irrespective of how it is currently held.
+   *
+   * Orientation must not decide which product the operator gets, so phone-ness
+   * is measured on the device's short edge rather than the current layout
+   * width: a phone in landscape is 844px wide but is still a phone. The long
+   * edge is bounded so small tablets (iPad mini, 744x1133) stay tablets.
+   *
+   * Measured from `window.screen` where available; falls back to the layout box
+   * so headless/SSR callers that only know their own viewport still resolve.
+   */
+  isPhoneClass: boolean
 }
 
 /** Correct Safari "Request Desktop Website" layout viewport inflation on phones. */
@@ -43,11 +55,14 @@ export function resolveViewportMetrics(input: {
   const effectiveWidth = inflatedDesktopViewport ? shortEdge : layoutWidth
   const effectiveHeight = inflatedDesktopViewport ? longEdge : layoutHeight
 
+  const isPhoneClass = shortEdge <= PHONE_MAX && longEdge <= PHONE_LONG_EDGE_MAX
+
   return {
     layoutWidth,
     layoutHeight,
     effectiveWidth,
     effectiveHeight,
     isPortrait,
+    isPhoneClass,
   }
 }

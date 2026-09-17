@@ -153,7 +153,7 @@ const GlobalNotificationShell = ({
 export const CommandCenterApp = () => {
   const path = useRoutePath()
   const route = resolveRoute(path)
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isLandscapeMobile } = useBreakpoint()
 
   const [routeState, setRouteState] = useState<RouteLoadState>({
     ...initialState,
@@ -187,8 +187,14 @@ export const CommandCenterApp = () => {
 
   useEffect(() => {
     document.documentElement.classList.toggle('is-mobile-layout', isMobile)
-    return () => document.documentElement.classList.remove('is-mobile-layout')
-  }, [isMobile])
+    // Same shell, sideways. Published so the shell chrome can tighten against a
+    // ~390px tall viewport and so spatial surfaces can claim the extra width.
+    document.documentElement.classList.toggle('is-landscape-phone', isLandscapeMobile)
+    return () => {
+      document.documentElement.classList.remove('is-mobile-layout')
+      document.documentElement.classList.remove('is-landscape-phone')
+    }
+  }, [isMobile, isLandscapeMobile])
 
   // ── Room transition sound ──
   const prevPathRef = useRef(route.path)
