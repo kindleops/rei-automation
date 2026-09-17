@@ -11,6 +11,13 @@ export interface ClosingDeskHeaderProps {
 
 export function ClosingDeskHeader({ surfaceState, summary, cases, loading }: ClosingDeskHeaderProps) {
   const pulse = portfolioPulse(cases)
+  const revenueUnavailable =
+    summary == null ||
+    summary.expectedRevenue === null ||
+    summary.metricSources?.expectedRevenue === 'absent'
+  const revenueNote = revenueUnavailable
+    ? summary?.metricNotes?.expectedRevenue ?? 'Expected revenue is not available from the closing authority.'
+    : null
   const now = new Date()
   const timeLabel = now.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
@@ -53,7 +60,17 @@ export function ClosingDeskHeader({ surfaceState, summary, cases, loading }: Clo
           <span className="cd-pulse-metric__label">Needs attention</span>
         </div>
         <div className="cd-pulse-metric is-revenue">
-          <span className="cd-pulse-metric__value">{loading ? '…' : money(summary?.expectedRevenue ?? 0) ?? '—'}</span>
+          {/*
+            `money(summary?.expectedRevenue ?? 0)` rendered a hard "$0" whenever
+            the revenue authority had nothing to say — no summary loaded, the
+            read failed, or no case carries expected_gross_revenue. "$0 revenue
+            in motion" is a claim about the business; "—" is the truth about the
+            data. The `?? '—'` after money() could never fire because the `?? 0`
+            before it had already removed the null.
+          */}
+          <span className="cd-pulse-metric__value" title={revenueNote ?? undefined}>
+            {loading ? '…' : revenueUnavailable ? '—' : money(summary?.expectedRevenue) ?? '—'}
+          </span>
           <span className="cd-pulse-metric__label">Revenue in motion</span>
         </div>
       </div>

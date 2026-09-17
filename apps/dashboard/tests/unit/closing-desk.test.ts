@@ -16,7 +16,7 @@ import {
 } from '../../src/domain/closing-desk/closing-milestones'
 import { orderIssues, highestSeverityBlocker, isActivelyBlocking } from '../../src/domain/closing-desk/closing-issues'
 import { deriveBoardColumn } from '../../src/domain/closing-desk/closing-board'
-import { mapToClosingStage, projectClosingCase } from '../../src/domain/closing-desk/closing-projection'
+import { projectClosingCaseFromCase } from '../../src/domain/closing-desk/closing-projection'
 import { computeClosingSummary } from '../../src/domain/closing-desk/closing-summary'
 import { buildClosingDeskFixtureModel } from '../../src/domain/closing-desk/closing-fixtures'
 import { buildCopilotReadout } from '../../src/domain/closing-desk/closing-copilot'
@@ -104,24 +104,21 @@ test('health: deterministic — identical inputs produce identical score', () =>
 })
 
 // ── Stage mapping ───────────────────────────────────────────────────────────
-test('stage: contract_to_close maps to formal_contract (derived)', () => {
-  const r = mapToClosingStage({ acquisition_stage: 'contract_to_close' })
-  assert.equal(r.stage, 'formal_contract')
-  assert.equal(r.source, 'derived')
-})
-
-test('stage: metadata override is honored and flagged as podio_mirror', () => {
-  const r = mapToClosingStage({ acquisition_stage: 'contract_to_close', metadata: { closing_universal_stage: 'disposition' } })
-  assert.equal(r.stage, 'disposition')
-  assert.equal(r.source, 'podio_mirror')
-})
-
-test('stage: a real closing-band stage on the row is trusted directly (prod supports it)', () => {
-  for (const s of ['formal_contract', 'under_contract', 'disposition', 'prepared_to_close', 'closed'] as const) {
-    const r = mapToClosingStage({ acquisition_stage: s })
-    assert.equal(r.stage, s)
-    assert.equal(r.source, 'acquisition_opportunities')
+// These previously exercised mapToClosingStage(), which inferred a closing
+// stage from an acquisition_opportunities row — including a `podio_mirror`
+// metadata override. closing_cases.universal_stage is the stage, under a CHECK
+// constraint, so there is nothing left to infer and no Podio to mirror.
+test('stage: universal_stage is read directly from the canonical column', () => {
+  for (const stage of ['formal_contract', 'under_contract', 'disposition', 'prepared_to_close', 'closed'] as const) {
+    const c = projectClosingCaseFromCase({ closing_case_id: 'closing:1', universal_stage: stage })
+    assert.equal(c.universalStage, stage)
+    assert.equal(c.provenance.fields.universal_stage, 'closing_cases')
   }
+})
+
+test('stage: a value outside the CHECK constraint does not become a real stage', () => {
+  const c = projectClosingCaseFromCase({ closing_case_id: 'closing:1', universal_stage: 'contract_to_close' })
+  assert.equal(c.universalStage, 'formal_contract')
 })
 
 // ── Milestone idempotency ─────────────────────────────────────────────────────
@@ -176,8 +173,13 @@ test('board: clear-to-close wins over scheduled', () => {
 })
 
 // ── Projection: missing data + no fabrication ───────────────────────────────────
-test('projection: deep state is absent (never fabricated) and degraded is declared', () => {
-  const c = projectClosingCase({ id: 'op1', acquisition_stage: 'contract_to_close', property_address_full: '1 Main St', current_offer: 150000, seller_display_name: 'Jane' })
+test('projection: an unset deep column is absent (never fabricated)', () => {
+  const c = projectClosingCaseFromCase({
+    closing_case_id: 'closing:op1',
+    universal_stage: 'formal_contract',
+    property_address: '1 Main St',
+    seller_contract_price: 150000,
+  })
   assert.equal(c.titleStatus, 'unknown')
   assert.equal(c.financials.buyerPrice, null)
   assert.equal(c.financials.expectedGrossRevenue, null)
@@ -187,16 +189,29 @@ test('projection: deep state is absent (never fabricated) and degraded is declar
 })
 
 test('projection: backed fields carry the right source', () => {
-  const c = projectClosingCase({ id: 'op2', acquisition_stage: 'contract_to_close', current_offer: 99000 })
+  const c = projectClosingCaseFromCase({ closing_case_id: 'closing:op2', seller_contract_price: 99000 })
   assert.equal(c.financials.sellerContractPrice, 99000)
-  assert.equal(c.provenance.fields.seller_contract_price, 'acquisition_opportunities')
+  assert.equal(c.provenance.fields.seller_contract_price, 'closing_cases')
 })
 
-test('projection: blocker text becomes a contract_issue and lands in curative lane', () => {
-  const c = projectClosingCase({ id: 'op3', acquisition_stage: 'contract_to_close', blocker: 'Missing signer' })
-  assert.equal(c.issues.length, 1)
-  assert.equal(c.issues[0].category, 'contract_issue')
-  assert.equal(c.boardColumn, 'issues_curative')
+test('projection: a populated deep column is actually read, not stubbed', () => {
+  // The old projection hardcoded every one of these to unknown/null, so a
+  // fully-populated closing still rendered as an empty shell.
+  const c = projectClosingCaseFromCase({
+    closing_case_id: 'closing:op4',
+    universal_stage: 'prepared_to_close',
+    title_status: 'opened',
+    escrow_status: 'funded',
+    funding_status: 'funded',
+    expected_gross_revenue: 12500,
+    scheduled_closing_date: '2026-07-01T00:00:00Z',
+    readiness: { clear_to_close: true },
+  })
+  assert.equal(c.titleStatus, 'opened')
+  assert.equal(c.escrowStatus, 'funded')
+  assert.equal(c.financials.expectedGrossRevenue, 12500)
+  assert.equal(c.readiness.clearToClose, true)
+  assert.equal(c.dates.scheduledClosingDate, '2026-07-01T00:00:00Z')
 })
 
 // ── Revenue / summary ───────────────────────────────────────────────────────────

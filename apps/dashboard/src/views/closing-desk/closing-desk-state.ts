@@ -16,6 +16,10 @@ export function resolveClosingDeskSurfaceState(
   if (opts.error) return 'error'
   if (opts.fixtureQuery) return 'demo'
   if (!model) return 'degraded'
+  // A failed canonical read is an ERROR surface, never a quiet zero-state.
+  // 'zero' and 'error' look identical to an operator otherwise, and one of
+  // them means "nothing to do today" while the other means "you are blind".
+  if (model.mode === 'error') return 'error'
 
   const renderable = resolveRenderableCases(model.cases, { fixtureQuery: false, modelMode: model.mode })
   if (renderable.length > 0) return 'live'

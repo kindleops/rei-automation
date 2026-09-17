@@ -1,4 +1,4 @@
-import type { ClosingCase, ClosingBoardColumn, ClosingDeskSummary } from '../../domain/closing-desk/closing-desk.types'
+import type { ClosingCase, ClosingBoardColumn, ClosingDeskMode, ClosingDeskSummary } from '../../domain/closing-desk/closing-desk.types'
 import { CLOSING_BOARD_COLUMNS } from '../../domain/closing-desk/closing-board'
 import { computeClosingSummary } from '../../domain/closing-desk/closing-summary'
 import { highestSeverityBlocker, isActivelyBlocking } from '../../domain/closing-desk/closing-issues'
@@ -58,24 +58,64 @@ export function groupCasesByLane(cases: ClosingCase[]): Map<ClosingBoardColumn, 
  */
 export function resolveRenderableCases(
   filteredCases: ClosingCase[],
-  opts: { fixtureQuery: boolean; modelMode: 'live' | 'fixture' | null },
+  opts: { fixtureQuery: boolean; modelMode: ClosingDeskMode | null },
 ): ClosingCase[] {
   if (opts.fixtureQuery) return filteredCases
   if (opts.modelMode === 'live') return filteredCases
+  // 'error' and 'fixture' both fall through to empty on a live route: a read
+  // failure must never put synthetic transactions in front of an operator.
   return []
 }
 
-/** Metrics must derive from the same cases the board renders — never orphan fixture summary on live routes. */
+/**
+ * ONE metric, ONE calculation.
+ *
+ * This used to prefer `computeClosingSummary(renderableCases)` whenever the
+ * page held any case, so the header described the CURRENT PAGE (capped at the
+ * route limit) and the user's active filters, while the server summary scanned
+ * the whole table. Two answers to "how much revenue is in motion" is one answer
+ * too many, and the client's was the one that silently shrank as soon as the
+ * corpus outgrew a page or the operator typed in the search box.
+ *
+ * On a live route the SERVER summary is authoritative. The client computation
+ * survives only for the fixture path, which has no server to ask.
+ */
 export function resolveDisplaySummary(
   renderableCases: ClosingCase[],
   modelSummary: ClosingDeskSummary | null | undefined,
-  opts: { fixtureQuery: boolean; modelMode: 'live' | 'fixture' | null },
+  opts: { fixtureQuery: boolean; modelMode: ClosingDeskMode | null },
   now = Date.now(),
 ): ClosingDeskSummary {
-  if (renderableCases.length > 0) return computeClosingSummary(renderableCases, now)
-  if (opts.modelMode === 'live' && modelSummary) return modelSummary
-  if (opts.fixtureQuery && modelSummary && renderableCases.length === 0) return computeClosingSummary([], now)
-  return computeClosingSummary([], now)
+  if (opts.modelMode === 'live') {
+    if (modelSummary) return modelSummary
+    // Live mode with no server summary means the summary read failed. Report
+    // every metric as unanswerable rather than as a portfolio of zeros.
+    return unavailableSummary('The closing summary authority could not be read.')
+  }
+  if (opts.fixtureQuery) return computeClosingSummary(renderableCases, now)
+  return unavailableSummary('No live closing data is loaded.')
+}
+
+/** Every metric null + 'absent' provenance, so the UI renders '—', never 0. */
+export function unavailableSummary(reason: string): ClosingDeskSummary {
+  const keys = [
+    'underContract', 'closingsThisWeek', 'clearToClose', 'titleBlocked',
+    'sellerActionRequired', 'buyerActionRequired', 'emdOverdue',
+    'expectedRevenue', 'confirmedRevenueThisMonth',
+  ] as const
+  return {
+    underContract: null,
+    closingsThisWeek: null,
+    clearToClose: null,
+    titleBlocked: null,
+    sellerActionRequired: null,
+    buyerActionRequired: null,
+    emdOverdue: null,
+    expectedRevenue: null,
+    confirmedRevenueThisMonth: null,
+    metricSources: Object.fromEntries(keys.map((k) => [k, 'absent' as const])),
+    metricNotes: Object.fromEntries(keys.map((k) => [k, reason])),
+  }
 }
 
 export type TableSortKey =

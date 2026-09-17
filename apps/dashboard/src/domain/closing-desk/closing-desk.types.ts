@@ -35,23 +35,45 @@ export type ClosingBoardColumn =
   | 'closed'
   | 'cancelled'
 
+/**
+ * Values written by apps/api/src/lib/domain/closings/advance-closing-workflow.js
+ * (`title_pending`, `in_title`, `scheduled`, `closed`) plus the `not_scheduled`
+ * seed from create-closing-case-from-acceptance.js.
+ */
 export type ClosingStatus =
   | 'not_scheduled'
+  | 'title_pending'
+  | 'in_title'
   | 'scheduled'
   | 'confirmed'
   | 'rescheduled'
   | 'completed'
+  | 'closed'
   | 'cancelled'
   | 'unknown'
 
+/**
+ * CANONICAL DocuSign contract vocabulary.
+ *
+ * These are the exact values the server state machine writes to
+ * closing_cases.contract_status — see
+ * apps/api/src/lib/domain/closings/reconcile-closing-case-from-envelope.js,
+ * where they carry a monotonic rank: draft(1) -> sent_for_signature(2) ->
+ * viewed(3) -> seller_signed(4) -> buyer_signed(5) -> fully_executed(6), with
+ * declined(0) and cancelled(0) terminal and able to bypass the monotonic gate.
+ *
+ * The earlier `requested | generated | sent | partially_signed` set was a
+ * parallel invented vocabulary that no writer ever produced. Carrying two
+ * vocabularies meant the UI could only ever match one of them.
+ */
 export type ContractStatus =
-  | 'requested'
-  | 'generated'
-  | 'sent'
+  | 'draft'
+  | 'sent_for_signature'
   | 'viewed'
-  | 'partially_signed'
+  | 'seller_signed'
+  | 'buyer_signed'
   | 'fully_executed'
-  | 'closed'
+  | 'declined'
   | 'cancelled'
   | 'unknown'
 
@@ -410,18 +432,25 @@ export interface ClosingCase {
 
 // ── Header summary metrics ────────────────────────────────────────────────────
 
+/**
+ * null means "this authority cannot answer", which is NOT the same fact as 0.
+ * A zero closings-this-week is a quiet week; a null is a question the system
+ * cannot currently answer, and an operator must be able to tell them apart.
+ */
 export interface ClosingDeskSummary {
-  underContract: number
-  closingsThisWeek: number
-  clearToClose: number
-  titleBlocked: number
-  sellerActionRequired: number
-  buyerActionRequired: number
-  emdOverdue: number
-  expectedRevenue: number
-  confirmedRevenueThisMonth: number
+  underContract: number | null
+  closingsThisWeek: number | null
+  clearToClose: number | null
+  titleBlocked: number | null
+  sellerActionRequired: number | null
+  buyerActionRequired: number | null
+  emdOverdue: number | null
+  expectedRevenue: number | null
+  confirmedRevenueThisMonth: number | null
   /** Named backend source for each metric so nothing is "hardcoded". */
   metricSources: Record<string, ClosingDataSource>
+  /** Why a metric is null, or what a non-null one actually counts. */
+  metricNotes?: Record<string, string>
 }
 
 // ── Proposed actions (the ONLY representation of any future write/send) ────────
@@ -451,7 +480,12 @@ export interface ProposedClosingAction {
 
 // ── Top-level read model returned to the UI ─────────────────────────────────────
 
-export type ClosingDeskMode = 'live' | 'fixture'
+/**
+ * `error` is deliberately distinct from `fixture`. A failed read must never
+ * render synthetic transactions: an operator cannot tell a demo closing from a
+ * real one, and a fabricated closing is materially worse than a blank screen.
+ */
+export type ClosingDeskMode = 'live' | 'fixture' | 'error'
 
 export interface ClosingDeskModel {
   mode: ClosingDeskMode

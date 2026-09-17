@@ -3,6 +3,10 @@ import type { ClosingDeskFilters } from '../hooks/useClosingDesk'
 
 const money = (v: number) => `$${Math.round(v).toLocaleString()}`
 
+/** null is "cannot answer", which must render as '—' and never as 0. */
+const isUnknown = (v: number | null | undefined, source?: ClosingDataSource) =>
+  v === null || v === undefined || source === 'absent'
+
 type MetricKey = keyof ClosingDeskSummary
 
 interface PrimaryDef {
@@ -37,8 +41,8 @@ function sourceLabel(source: ClosingDataSource | undefined): string {
   return source.replace(/_/g, ' ')
 }
 
-function toneClass(raw: number, tone?: PrimaryDef['tone'], unknown?: boolean): string {
-  if (unknown) return 'is-unknown'
+function toneClass(raw: number | null, tone?: PrimaryDef['tone'], unknown?: boolean): string {
+  if (unknown || raw === null) return 'is-unknown'
   if (tone === 'warning' && raw > 0) return 'is-warning'
   if (tone === 'critical' && raw > 0) return 'is-critical'
   if (tone === 'healthy' && raw > 0) return 'is-healthy'
@@ -54,11 +58,11 @@ export interface ClosingDeskMetricsProps {
 
 export function ClosingDeskMetrics({ summary, loading, onFilter }: ClosingDeskMetricsProps) {
   const renderPrimary = (def: PrimaryDef) => {
-    const raw = summary ? (summary[def.key] as number) : 0
+    const raw = summary ? (summary[def.key] as number | null) : null
     const source = summary?.metricSources?.[def.key]
-    const unknown = source === 'absent'
-    const value = loading ? '…' : unknown ? '—' : def.format === 'money' ? money(raw) : String(raw)
-    const clickable = def.filterKey && onFilter && raw > 0
+    const unknown = isUnknown(raw, source)
+    const value = loading ? '…' : unknown ? '—' : def.format === 'money' ? money(raw as number) : String(raw)
+    const clickable = def.filterKey && onFilter && (raw ?? 0) > 0
 
     return (
       <div
@@ -79,13 +83,19 @@ export function ClosingDeskMetrics({ summary, loading, onFilter }: ClosingDeskMe
   }
 
   const renderSignal = (def: PrimaryDef) => {
-    const raw = summary ? (summary[def.key] as number) : 0
+    const raw = summary ? (summary[def.key] as number | null) : null
     const source = summary?.metricSources?.[def.key]
-    const unknown = source === 'absent'
-    const value = loading ? '…' : unknown ? '—' : def.format === 'money' ? money(raw) : String(raw)
+    const unknown = isUnknown(raw, source)
+    const value = loading ? '…' : unknown ? '—' : def.format === 'money' ? money(raw as number) : String(raw)
+    const note = unknown ? summary?.metricNotes?.[def.key] : undefined
 
     return (
-      <div key={def.key} className={`cd-signal ${toneClass(raw, def.tone, unknown)}`} data-testid={`cd-metric-${def.key}`}>
+      <div
+        key={def.key}
+        className={`cd-signal ${toneClass(raw, def.tone, unknown)}`}
+        data-testid={`cd-metric-${def.key}`}
+        title={note}
+      >
         <span className="cd-signal__value">{value}</span>
         <span className="cd-signal__label">{def.label}</span>
       </div>
