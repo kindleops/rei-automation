@@ -1411,6 +1411,13 @@
   gap: 6px;
   white-space: nowrap;
   min-height: 34px;
+  /* A folder rail is a FILTER, not a headline. At the inherited desktop size the
+     eight folders read as section titles and pushed the first conversation below
+     the fold; §15 calls that "tiny filters" when they are small and this is the
+     opposite failure — they were too loud for what they do. */
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 11.5px;
 }
 
 /* min-height: 0 is load-bearing — without it a flex child refuses to shrink
@@ -1437,4 +1444,207 @@
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EMAIL COMMAND — MOBILE (§15)
+   ══════════════════════════════════════════════════════════════════════════
+   Two destinations, one action, one sheet. The desktop rail's eight tabs do
+   not fit at 390px without becoming a horizontally scrolling strip of 11px
+   labels, and putting Overview first meant the operator scrolled that strip
+   before reaching mail.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ecc__mtabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ecc__mtab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  /* 38px paint with a 44px effective target from the ::after below. */
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.68);
+  cursor: pointer;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ecc__mtab::after { content: ''; position: absolute; inset: -3px 0; }
+
+.ecc__mtab.is-active {
+  border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.13);
+  color: var(--tone-primary, #5eead4);
+}
+
+/* Compose is pushed to the right edge, in the thumb's natural arc. */
+.ecc__mtab.is-compose { margin-left: auto; }
+.ecc__mtab.is-aux { padding: 0 11px; }
+
+.ecc__mtab-badge {
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.24);
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--tone-primary, #5eead4);
+}
+
+.ecc__msheet {
+  position: fixed;
+  inset: 0;
+  z-index: 12200;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.ecc__msheet-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(2, 5, 12, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.ecc__msheet-panel {
+  position: relative;
+  max-height: 76vh;
+  overflow-y: auto;
+  border-radius: 20px 20px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 0;
+  background: rgba(8, 12, 22, 0.97);
+  backdrop-filter: blur(26px) saturate(1.4);
+  -webkit-backdrop-filter: blur(26px) saturate(1.4);
+  padding-bottom: calc(var(--nx-mobile-safe-bottom, 0px) + 10px);
+}
+
+.ecc__msheet-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 8px;
+}
+
+.ecc__msheet-panel header strong { font-size: 14px; font-weight: 700; color: rgba(255, 255, 255, 0.95); }
+
+.ecc__msheet-panel header button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.ecc__msheet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ecc__msheet-row span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ecc__msheet-row strong { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.92); }
+.ecc__msheet-row small { font-size: 11px; color: rgba(255, 255, 255, 0.45); }
+.ecc__msheet-row.is-active strong { color: var(--tone-primary, #5eead4); }
+
+.ecc__msheet-row em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+}
+
+[data-nexus-theme='light'] {
+  .ecc__mtabs { border-bottom-color: rgba(15, 23, 42, 0.08); }
+
+  .ecc__mtab {
+    border-color: rgba(15, 23, 42, 0.13);
+    background: #ffffff;
+    color: rgba(15, 23, 42, 0.68);
+  }
+
+  .ecc__msheet-panel { background: rgba(252, 253, 255, 0.97); border-color: rgba(15, 23, 42, 0.1); }
+  .ecc__msheet-panel header strong { color: rgba(15, 23, 42, 0.94); }
+
+  .ecc__msheet-panel header button {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.68);
+  }
+
+  .ecc__msheet-row { border-top-color: rgba(15, 23, 42, 0.07); }
+  .ecc__msheet-row strong { color: rgba(15, 23, 42, 0.92); }
+  .ecc__msheet-row small { color: rgba(15, 23, 42, 0.5); }
+}
+
+/* Mobile status line — what the desktop masthead's pills said, in 26px. */
+.ecc__mstatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 8px 12px 0;
+}
+
+.ecc__mstatus::-webkit-scrollbar { display: none; }
+
+.ecc__mstatus-pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.ecc__mstatus-pill.is-subject { color: var(--tone-primary, #5eead4); }
+.ecc__mstatus-pill.is-connected { color: #34d399; }
+.ecc__mstatus-pill.is-degraded { color: #f59e0b; }
+.ecc__mstatus-pill.is-disconnected { color: #f87171; }
+
+[data-nexus-theme='light'] {
+  .ecc__mstatus-pill {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: #ffffff;
+    color: rgba(15, 23, 42, 0.6);
+  }
 }

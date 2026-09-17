@@ -1207,6 +1207,33 @@ const TABS: { id: EmailTab; label: string; icon: ReactNode }[] = [
   { id: 'brevo-health', label: 'Brevo Health',icon: <Icon name="activity" size={12} /> },
 ]
 
+/**
+ * MOBILE IS MAIL-FIRST (§15).
+ *
+ * The eight-tab rail is the DESKTOP anatomy. On a phone it put an Overview KPI
+ * dashboard in front of the operator, with Inbox as the second of eight tabs in a
+ * horizontally scrolling strip — exactly the order §15 rules out
+ * ("KPI dashboard → tabs → tiny filters → email eventually").
+ *
+ * Mobile gets two primary destinations and a Compose action, with everything else
+ * — every one of the remaining tabs, unchanged — behind an explicit Intelligence
+ * sheet. Nothing is deleted; the priority is inverted.
+ */
+const MOBILE_PRIMARY_TABS: { id: EmailTab; label: string }[] = [
+  { id: 'inbox', label: 'Mail' },
+  { id: 'records', label: 'Records' },
+]
+
+const MOBILE_INTELLIGENCE_TABS: { id: EmailTab; label: string; detail: string }[] = [
+  { id: 'overview', label: 'Overview', detail: 'Volume, replies and deliverability at a glance' },
+  { id: 'campaigns', label: 'Campaigns', detail: 'Email campaign drafts and their state' },
+  { id: 'templates', label: 'Templates', detail: 'The email template inventory' },
+  { id: 'suppression', label: 'Suppression', detail: 'Addresses that must not be mailed' },
+  { id: 'brevo-health', label: 'Brevo health', detail: 'Sending account, domain and API state' },
+]
+
+const MOBILE_INTELLIGENCE_IDS = new Set<EmailTab>(MOBILE_INTELLIGENCE_TABS.map((tab) => tab.id))
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export const EmailCommandCenter = ({
@@ -1233,7 +1260,14 @@ export const EmailCommandCenter = ({
     }
   }, [])
 
-  const [activeTab, setActiveTab] = useState<EmailTab>('overview')
+  const { isMobile } = useBreakpoint()
+  /**
+   * Mail is the landing surface on a phone and Overview is on desktop. Resolved
+   * once at mount rather than in an effect: flipping the tab after first paint
+   * would render the KPI dashboard for a frame, which is the thing being fixed.
+   */
+  const [activeTab, setActiveTab] = useState<EmailTab>(() => (isMobile ? 'inbox' : 'overview'))
+  const [intelligenceOpen, setIntelligenceOpen] = useState(false)
   const [overviewLoad, setOverviewLoad] = useState<LoadState<EmailOverview>>(LOADING)
   const [healthLoad, setHealthLoad] = useState<LoadState<BrevoHealth>>(LOADING)
   const [templatesLoad, setTemplatesLoad] = useState<LoadState<EmailTemplate[]>>(LOADING)
@@ -1268,7 +1302,38 @@ export const EmailCommandCenter = ({
     : ''
 
   return (
-    <div className={cls('ecc', `is-pane-${paneWidth}`)}>
+    <div className={cls('ecc', `is-pane-${paneWidth}`, isMobile && 'is-mobile')}>
+      {/*
+        The brand block is DESKTOP chrome. On a phone the global top bar already
+        names the application, so a second 100px "EMAIL COMMAND CENTER / Brevo ·
+        Outreach · Records · Templates" masthead is the stacked-title §2 forbids —
+        it cost a quarter of the viewport before a single conversation.
+
+        The status pills it carried are not lost: they move into the mobile tab
+        row's own status line, which is where an operator looks for "is sending
+        working" anyway.
+      */}
+      {isMobile ? (
+        <div className="ecc__mstatus">
+          {hasSubject(subject) ? (
+            <span className="ecc__mstatus-pill is-subject" title={describeSubject(subject)}>
+              <Icon name="home" size={10} />
+              {describeSubject(subject)}
+            </span>
+          ) : null}
+          {overview ? (
+            <span className={cls('ecc__mstatus-pill', brevoStatusClass)}>
+              <span className="ecc__dot" />
+              Brevo {overview.brevo_status}
+            </span>
+          ) : null}
+          {overview ? (
+            <span className="ecc__mstatus-pill">
+              {overview.email_eligible.toLocaleString()} eligible
+            </span>
+          ) : null}
+        </div>
+      ) : (
       <header className="ecc__header">
         <div className="ecc__brand">
           <div className="ecc__brand-icon">
@@ -1305,7 +1370,45 @@ export const EmailCommandCenter = ({
           )}
         </div>
       </header>
+      )}
 
+      {isMobile ? (
+        <nav className="ecc__mtabs" role="tablist" aria-label="Email">
+          {MOBILE_PRIMARY_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={cls('ecc__mtab', activeTab === tab.id && 'is-active')}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+              {tab.id === 'inbox' && overview && overview.replies_today > 0 ? (
+                <span className="ecc__mtab-badge">{overview.replies_today}</span>
+              ) : null}
+            </button>
+          ))}
+          {/* Compose is an ACTION, not a destination. As the fourth of eight tabs
+              it was further from the operator's thumb than Suppression. */}
+          <button
+            type="button"
+            className={cls('ecc__mtab is-compose', activeTab === 'composer' && 'is-active')}
+            onClick={() => setActiveTab('composer')}
+          >
+            <Icon name="mail" size={13} />
+            Compose
+          </button>
+          <button
+            type="button"
+            className={cls('ecc__mtab is-aux', MOBILE_INTELLIGENCE_IDS.has(activeTab) && 'is-active')}
+            aria-haspopup="dialog"
+            onClick={() => setIntelligenceOpen(true)}
+          >
+            <Icon name="stats" size={13} />
+          </button>
+        </nav>
+      ) : (
       <nav className="ecc__tabs">
         {TABS.map((tab) => (
           <button
@@ -1326,6 +1429,38 @@ export const EmailCommandCenter = ({
           </button>
         ))}
       </nav>
+      )}
+
+      {/* Everything the desktop rail offers, one tap away and named. */}
+      {isMobile && intelligenceOpen ? (
+        <div className="ecc__msheet" role="dialog" aria-modal="true" aria-label="Email intelligence">
+          <button type="button" className="ecc__msheet-scrim" aria-label="Close" onClick={() => setIntelligenceOpen(false)} />
+          <div className="ecc__msheet-panel">
+            <header>
+              <strong>Email intelligence</strong>
+              <button type="button" onClick={() => setIntelligenceOpen(false)} aria-label="Close">
+                <Icon name="close" size={15} />
+              </button>
+            </header>
+            {MOBILE_INTELLIGENCE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={cls('ecc__msheet-row', activeTab === tab.id && 'is-active')}
+                onClick={() => { setActiveTab(tab.id); setIntelligenceOpen(false) }}
+              >
+                <span>
+                  <strong>{tab.label}</strong>
+                  <small>{tab.detail}</small>
+                </span>
+                {tab.id === 'suppression' && overview && overview.suppressed > 0 ? (
+                  <em>{overview.suppressed.toLocaleString()}</em>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <main className="ecc__body">
         {activeTab === 'overview'     && <OverviewTab load={overviewLoad} />}

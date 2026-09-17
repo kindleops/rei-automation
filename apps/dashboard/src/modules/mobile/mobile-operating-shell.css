@@ -235,62 +235,6 @@ html.is-mobile-layout {
      overflowing on the inbox, which carries two more controls than any other
      route: the text gives up its space first and the target never drops below
      the touch floor. */
-  /* The identity chip is the ONLY shrinkable item in the bar.
-     Measured at 390px on an inbox-family route, which carries the most controls
-     (queue, search, tasks, activity, notifications): 44 orb + 122 identity +
-     5x44 = 386px against a 370px inner width. With every item shrinkable by
-     default, flexbox took the 16px out of ALL of them and the 44px glyphs
-     collapsed into each other — on /analytics the queue icon rendered on top of
-     the word "Analytics". Pinning the icon buttons and letting only this one
-     give way takes it to 44px (icon-only) and the bar fits. */
-  .nx-mobile-command-dock__btn--workspace {
-    width: auto;
-    min-width: 44px;
-    max-width: 122px;
-    flex: 0 1 auto;
-    grid-auto-flow: column;
-    grid-template-columns: auto minmax(0, 1fr);
-    justify-items: center;
-    gap: 5px;
-    padding: 0 8px 0 4px;
-    overflow: hidden;
-  }
-
-  .nx-mobile-command-dock__slot--kpi,
-  .nx-mobile-command-dock__btn:not(.nx-mobile-command-dock__btn--workspace) {
-    flex: 0 0 auto;
-  }
-
-  .nx-mobile-command-dock__identity {
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: -0.005em;
-    line-height: 1;
-    text-align: left;
-    justify-self: start;
-    color: rgba(255, 255, 255, 0.82);
-  }
-
-  .nx-mobile-command-dock__btn--workspace.is-active .nx-mobile-command-dock__identity {
-    color: var(--tone-primary, #5eead4);
-  }
-
-  /* Below ~360px (iPhone SE and the 375px class once the inbox shows all seven
-     controls) the label is the first thing to go. The glyph still names the app. */
-  @media (max-width: 374px) {
-    .nx-mobile-command-dock__identity { display: none; }
-    .nx-mobile-command-dock__btn--workspace {
-      width: 44px;
-      max-width: 44px;
-      grid-template-columns: auto;
-      padding: 0;
-    }
-  }
-
   [data-nexus-theme='light'] .nx-mobile-command-dock__identity {
     color: rgba(15, 23, 42, 0.78);
   }
@@ -317,6 +261,70 @@ html.is-mobile-layout {
   .nx-mobile-command-dock__btn:active {
     transform: scale(0.9);
   }
+
+  /* Declared AFTER the base `.nx-mobile-command-dock__btn` rule, deliberately.
+     Both are single-class selectors, so source order decides — with this block
+     above it, the base `display: grid` won, grid's default ROW flow put the app
+     label on a second line under the glyph, and the 40px dock grew a second row. */
+  /* The identity chip is the ONLY shrinkable item in the bar.
+     Measured at 390px on an inbox-family route, which carries the most controls
+     (queue, search, tasks, activity, notifications): 44 orb + 122 identity +
+     5x44 = 386px against a 370px inner width. With every item shrinkable by
+     default, flexbox took the 16px out of ALL of them and the 44px glyphs
+     collapsed into each other — on /analytics the queue icon rendered on top of
+     the word "Analytics". Pinning the icon buttons and letting only this one
+     give way takes it to 44px (icon-only) and the bar fits. */
+  .nx-mobile-command-dock__btn--workspace {
+    /* FLEX, not the base rule's grid. In an auto-width grid container a
+       `minmax(0, 1fr)` track collapses toward zero, which clipped "Email" to a
+       single "E" on a bar that had 150px to spare. Flex sizes the label to its
+       content and lets it ellipsize only under real pressure. */
+    display: flex;
+    align-items: center;
+    width: auto;
+    min-width: 44px;
+    max-width: 122px;
+    flex: 0 1 auto;
+    gap: 5px;
+    padding: 0 8px 0 4px;
+    overflow: hidden;
+  }
+
+  .nx-mobile-command-dock__slot--kpi,
+  .nx-mobile-command-dock__btn:not(.nx-mobile-command-dock__btn--workspace) {
+    flex: 0 0 auto;
+  }
+
+  .nx-mobile-command-dock__identity {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    line-height: 1;
+    text-align: left;
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .nx-mobile-command-dock__btn--workspace.is-active .nx-mobile-command-dock__identity {
+    color: var(--tone-primary, #5eead4);
+  }
+
+  /* Below ~360px (iPhone SE and the 375px class once the inbox shows all seven
+     controls) the label is the first thing to go. The glyph still names the app. */
+  @media (max-width: 374px) {
+    .nx-mobile-command-dock__identity { display: none; }
+    .nx-mobile-command-dock__btn--workspace {
+      width: 44px;
+      max-width: 44px;
+      justify-content: center;
+      padding: 0;
+    }
+  }
+
 
   .nx-mobile-command-dock__glyph {
     position: relative;
