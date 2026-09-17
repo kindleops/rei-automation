@@ -137,74 +137,76 @@
 
 /* ── Map ─────────────────────────────────────────────────────────────────── */
 
+/* A real MapLibre map, not an SVG drawing of the country. The whole block that
+   used to live here styled `USA_STATE_PATHS` — per-state fills, strokes, dim and
+   selected variants, SVG label text. None of it survives the change, including
+   the `.geo .geo-map__svg` scoping note: MapLibre renders to a canvas, so the
+   global `.nx-premium-inbox svg { width: 16px }` icon rule cannot reach it. That
+   trap is still live for any INLINE svg in a mobile surface — the trend chart
+   below still carries its own scoping for exactly that reason. */
+
 .geo-map {
   position: relative;
-  height: clamp(196px, 32vh, 280px);
+  height: clamp(220px, 36vh, 320px);
   margin: 0 0 4px;
-  background:
-    radial-gradient(120% 90% at 50% 0%, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.07), transparent 62%),
-    #05070d;
+  background: #05070d;
+  overflow: hidden;
 }
 
-/* ── A specificity trap worth naming ─────────────────────────────────────
-   `.nx-premium-inbox svg { width: 16px; height: 16px }` is a global icon rule,
-   and every workspace view renders INSIDE `.nx-premium-inbox`. At (0,1,1) it
-   outranks a bare `.geo-map__svg` (0,1,0), so an un-scoped inline SVG in any
-   mobile surface is silently crushed to a 16px square — which is exactly what
-   happened to the trend chart before this. Scoping under `.geo` takes these to
-   (0,2,0) without touching the icon rule that desktop depends on. */
-.geo .geo-map__svg { width: 100%; height: 100%; }
-
-.geo-map__state {
-  fill: rgba(255, 255, 255, 0.035);
-  stroke: rgba(255, 255, 255, 0.09);
-  stroke-width: 0.8;
-  vector-effect: non-scaling-stroke;
-  /* The camera move on drill-down. Fill transitions with it so a metric change
-     reads as a re-shade rather than a repaint. */
-  transition: fill 260ms ease, opacity 260ms ease, stroke 200ms ease;
-  cursor: default;
+.geo-map__canvas {
+  position: absolute;
+  inset: 0;
 }
 
-.geo-map__state.has-data { cursor: pointer; stroke: rgba(255, 255, 255, 0.22); }
+/* MapLibre paints its own controls; the attribution has to stay (basemap terms)
+   but it has no business being the brightest thing on a dark analytical map.
 
-/* Active in the window, zero on THIS metric: outlined, not filled. */
-.geo-map__state.is-scoped {
-  cursor: pointer;
-  stroke: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
-  stroke-width: 1.2;
-  fill: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.05);
+   `!important` is not decoration. index.css carries a GLOBAL
+   `.maplibregl-ctrl-attrib { background: rgba(5,6,8,0.75) !important }` written
+   for the Map app's dark glass, which paints a black pill onto this map in LIGHT
+   theme. It cannot be relaxed from here without changing every other map in the
+   product, so it is out-specified inside `.geo-map` and left alone everywhere
+   else. */
+.geo-map .maplibregl-ctrl-attrib {
+  background: rgba(3, 7, 15, 0.6) !important;
+  font-size: 9px !important;
 }
-.geo-map__state.is-dimmed { opacity: 0.2; }
+.geo-map .maplibregl-ctrl-attrib a { color: rgba(255, 255, 255, 0.5) !important; }
 
-.geo-map__state.is-selected {
-  stroke: var(--tone-primary, #5eead4);
-  stroke-width: 2;
-  opacity: 1;
-}
+.geo-map.is-loading .geo-map__canvas { opacity: 0.35; }
 
-.geo-map__state:focus-visible { outline: 2px solid var(--tone-primary, #5eead4); outline-offset: 1px; }
-
-.geo-map__label text {
-  font-size: 13px;
-  font-weight: 700;
-  fill: rgba(255, 255, 255, 0.72);
-  paint-order: stroke;
-  stroke: rgba(4, 7, 13, 0.85);
-  stroke-width: 3;
-}
-
-.geo-map__label-value {
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  fill: var(--tone-primary, #5eead4) !important;
-  font-variant-numeric: tabular-nums;
+.geo-map__empty,
+.geo-map.is-unavailable {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  padding: 0 24px;
+  text-align: center;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
-.geo-map__back {
+.geo-map.is-unavailable {
+  position: relative;
+  height: clamp(96px, 14vh, 130px);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  margin: 0 12px 6px;
+}
+
+.geo-map.is-unavailable strong {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.geo-map__reset {
   position: absolute;
   left: 10px;
   top: 10px;
+  z-index: 2;
   min-height: 32px;
   padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -218,14 +220,6 @@
   cursor: pointer;
 }
 
-.geo-map__loading {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.45);
-}
 
 /* ── Headline ────────────────────────────────────────────────────────────── */
 
@@ -590,24 +584,26 @@
     color: rgba(15, 23, 42, 0.66);
   }
 
-  .geo-map {
-    background:
-      radial-gradient(120% 90% at 50% 0%, rgba(var(--nexus-accent-rgb, 13, 148, 136), 0.08), transparent 62%),
-      #eef2f7;
+  /* The basemap itself switches to Positron in GeoMap.tsx; only the chrome
+     around the canvas is styled here. */
+  .geo-map { background: #eef2f7; }
+
+  .geo-map .maplibregl-ctrl-attrib {
+    background: rgba(255, 255, 255, 0.78) !important;
+    border-color: rgba(15, 23, 42, 0.1) !important;
+    color: rgba(15, 23, 42, 0.55) !important;
   }
+  .geo-map .maplibregl-ctrl-attrib a { color: rgba(15, 23, 42, 0.55) !important; }
 
-  .geo-map__state { fill: rgba(15, 23, 42, 0.05); stroke: rgba(15, 23, 42, 0.12); }
-  .geo-map__state.has-data { stroke: rgba(15, 23, 42, 0.22); }
-  .geo-map__state.is-scoped { stroke: rgba(var(--nexus-accent-rgb, 13, 148, 136), 0.6); }
-  .geo-map__label text { fill: rgba(15, 23, 42, 0.72); stroke: rgba(255, 255, 255, 0.9); }
-
-  .geo-map__back {
+  .geo-map__reset {
     border-color: rgba(15, 23, 42, 0.14);
     background: rgba(255, 255, 255, 0.9);
     color: rgba(15, 23, 42, 0.84);
   }
 
-  .geo-map__loading { color: rgba(15, 23, 42, 0.45); }
+  .geo-map__empty,
+  .geo-map.is-unavailable { color: rgba(15, 23, 42, 0.5); }
+  .geo-map.is-unavailable strong { color: rgba(15, 23, 42, 0.8); }
   .geo__headline > span { color: rgba(15, 23, 42, 0.44); }
   .geo__headline > strong { color: rgba(15, 23, 42, 0.95); }
   .geo__headline > small { color: rgba(15, 23, 42, 0.5); }
@@ -655,5 +651,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .geo-map__state { transition: none; }
+  /* The map's own drill animation is an easeTo; GeoMap keeps it short and it is
+     the camera, not decoration, so it stays. Nothing else here animates. */
+  .geo-map__canvas { transition: none; }
 }

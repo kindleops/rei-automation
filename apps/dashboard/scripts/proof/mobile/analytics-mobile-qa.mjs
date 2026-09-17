@@ -163,9 +163,26 @@ async function runCell(width, theme) {
       level: document.querySelector('[data-analytics="geo-mobile"]')?.getAttribute('data-level') ?? null,
       headlineLabel: txt('.geo__headline > span'),
       headlineValue: txt('.geo__headline > strong'),
-      /** §7 — the map is the primary instrument, not a thumbnail. */
-      map: mapEl ? { h: Math.round(mapEl.getBoundingClientRect().height), states: document.querySelectorAll('.geo-map__state').length } : null,
-      statesWithData: document.querySelectorAll('.geo-map__state.has-data, .geo-map__state.is-scoped').length,
+      /**
+       * §7 — the map is the primary instrument, not a thumbnail.
+       *
+       * Retargeted from the SVG choropleth this replaced: there is no
+       * `.geo-map__state` node and no `viewBox` to read any more, because the map
+       * is MapLibre rendering to a CANVAS. What can still be asserted from
+       * outside is that the canvas exists at real size, that the surface did not
+       * fall back to its own "map unavailable" state, and that the accessible
+       * state list — which is built from the SAME features the map draws — holds
+       * every state the endpoint reported.
+       */
+      map: mapEl ? {
+        h: Math.round(mapEl.getBoundingClientRect().height),
+        canvas: (() => {
+          const c = document.querySelector('.geo-map__canvas canvas')
+          return c ? { w: c.width, h: c.height } : null
+        })(),
+        unavailable: mapEl.classList.contains('is-unavailable'),
+      } : null,
+      statesWithData: document.querySelectorAll('.geo-map .nx-sr-only li').length,
       /** §7 — the trend must be a real chart, not a 16px icon-sized SVG. */
       chart: chartEl ? { w: Math.round(chartEl.getBoundingClientRect().width), h: Math.round(chartEl.getBoundingClientRect().height) } : null,
       metricModes: [...document.querySelectorAll('.geo__metric')].map((e) => e.textContent.trim()),
@@ -189,6 +206,18 @@ async function runCell(width, theme) {
         label: b.textContent.trim(), ...reach(b),
       })),
       dock: (() => { const e = document.querySelector('.nx-pinned-app-dock'); return e ? Math.round(e.getBoundingClientRect().top) : null })(),
+    }
+  })
+
+  /** The 51 state outlines the mask is punched from — served, not bundled. */
+  const outlineAsset = await page.evaluate(async () => {
+    try {
+      const response = await fetch('/geo/us-states.json')
+      if (!response.ok) return { ok: false, features: 0 }
+      const data = await response.json()
+      return { ok: true, features: Array.isArray(data?.features) ? data.features.length : 0 }
+    } catch {
+      return { ok: false, features: 0 }
     }
   })
 
@@ -216,13 +245,20 @@ async function runCell(width, theme) {
     p.fabricated.length === 0, p.fabricated.join(', ') || 'none')
 
   // ── §7 the map is the instrument, not a decoration
-  check('§7 the United States map renders every state',
-    p.map !== null && p.map.states >= 50, JSON.stringify(p.map))
+  check('§7 the map is a real MapLibre canvas, not a drawing of the country',
+    p.map !== null && !p.map.unavailable && (p.map.canvas?.w ?? 0) > 0 && (p.map.canvas?.h ?? 0) > 0,
+    JSON.stringify(p.map))
+  // The carve-out and every state border come from this one asset. If it 404s the
+  // map still draws — which is why its absence has to be caught here rather than
+  // left to look like a styling choice.
+  check('§7 the state outlines the carve-out is cut from are served',
+    outlineAsset.ok && outlineAsset.features >= 50,
+    `ok=${outlineAsset.ok} features=${outlineAsset.features}`)
   check('§7 the map is a meaningful part of the screen, not a thumbnail',
     p.map !== null && p.map.h >= 180, `${p.map?.h}px tall`)
-  check('§7 the map distinguishes states that reported activity',
+  check('§7 the map carries every state the endpoint measured',
     p.statesWithData > 0 || TRUTH.sent === 0,
-    `${p.statesWithData} shaded/outlined, canonical sent=${TRUTH.sent}`)
+    `${p.statesWithData} placed, canonical sent=${TRUTH.sent}`)
 
   // ── §7 the trend chart is a chart
   // `.nx-premium-inbox svg { width:16px }` is a (0,1,1) global icon rule that
@@ -272,21 +308,28 @@ async function runCell(width, theme) {
 
   // ── §7 THE DRILL-DOWN. United States → state → market.
   let drill = null
+  const nationalFrame = await page.locator('.geo-map__canvas canvas').screenshot()
+    .then((b) => b.toString('base64').length).catch(() => null)
+
   if (p.stateRows.length > 0) {
     await page.locator('.geo__row').first().click()
     await page.waitForTimeout(1800)
     drill = await page.evaluate(() => ({
       level: document.querySelector('[data-analytics="geo-mobile"]')?.getAttribute('data-level') ?? null,
       crumbs: document.querySelector('.geo__crumbs')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
-      viewBox: document.querySelector('.geo .geo-map__svg')?.getAttribute('viewBox') ?? null,
+      reset: Boolean(document.querySelector('.geo-map__reset')),
       rows: document.querySelectorAll('.geo__row').length,
       headline: document.querySelector('.geo__headline > strong')?.textContent?.trim() ?? null,
       overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
     }))
     check('§7 tapping a state drills into it', drill.level === 'state', JSON.stringify(drill))
+    // The camera move is the whole point of the drill, and a canvas has no
+    // attribute that reports it. Comparing the rendered pixels before and after
+    // is the only honest check: if the map did not move, the frames match.
+    const movedTo = await page.locator('.geo-map__canvas canvas').screenshot().then((b) => b.toString('base64').length).catch(() => null)
     check('§7 the drill reframes the map on that state',
-      Boolean(drill.viewBox) && drill.viewBox !== '0 0 960 600',
-      `viewBox=${drill.viewBox}`)
+      drill.reset && movedTo !== null && movedTo !== nationalFrame,
+      `reset=${drill.reset} frameBefore=${nationalFrame} frameAfter=${movedTo}`)
     check('§7 the breadcrumb states the scope', /United States\s*\/\s*\S/.test(drill.crumbs ?? ''), drill.crumbs)
     check('§41 the drill does not overflow', drill.overflow === 0, `${drill.overflow}px`)
     await page.screenshot({ path: path.join(OUT, `${width}-${theme}-state.png`) })

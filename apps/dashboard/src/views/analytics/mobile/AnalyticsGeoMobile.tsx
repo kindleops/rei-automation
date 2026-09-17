@@ -13,7 +13,7 @@ import {
   type StatePerformance,
   type TimeSeriesPoint,
 } from '../../../lib/data/kpiDashboardData'
-import { GeoChoropleth } from './GeoChoropleth'
+import { GeoMap } from './GeoMap'
 import { TouchTrendChart } from './TouchTrendChart'
 import {
   GEO_METRICS,
@@ -34,8 +34,12 @@ import './analytics-geo-mobile.css'
  *
  * The model here is the one §7 specifies — UNITED STATES → STATE → MARKET → METRIC —
  * with the map as the primary instrument rather than a thumbnail. One selected metric
- * drives the choropleth, the trend and every row, so drilling never changes the
- * question being asked, only the geography it is asked of.
+ * drives the map, the trend and every row, so drilling never changes the question
+ * being asked, only the geography it is asked of.
+ *
+ * The map is a real MapLibre map on the same Carto basemap the Map and Comp
+ * Intelligence surfaces use. It replaced a hand-simplified SVG outline set, which
+ * put real numbers on a drawing of the country — see GeoMap.tsx.
  *
  * Every number comes from ONE endpoint (/api/cockpit/metrics/war-room) whose
  * `source_audit` names the table behind each metric. Nothing here is computed from a
@@ -214,7 +218,7 @@ export const AnalyticsGeoMobile = () => {
         ) : null}
 
         {level !== 'market' ? (
-          <GeoChoropleth
+          <GeoMap
             states={states}
             metric={metric}
             selectedState={selectedState}
