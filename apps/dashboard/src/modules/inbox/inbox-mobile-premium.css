@@ -613,7 +613,16 @@ html.is-mobile-layout .nx-ifm-search-input {
   border: 1px solid var(--nx-ib-hairline);
   background: rgba(255, 255, 255, 0.045);
   color: var(--nx-ib-text);
-  font-size: 14px; /* 16px-safe: prevents iOS zoom-on-focus at >=14px with no user-scalable */
+  /* 16px, and the previous comment here had the rule backwards.
+     It read "16px-safe: prevents iOS zoom-on-focus at >=14px with no
+     user-scalable" — but the iOS threshold IS 16px, and index.html's viewport
+     meta is `width=device-width, initial-scale=1.0, viewport-fit=cover` with no
+     `user-scalable=no`, so 14px was precisely the unsafe case. Measured: every
+     <select> in the advanced-filter sheet computed 14px and one text input 15px,
+     so focusing any filter control zoomed the page and detached every fixed
+     surface in the shell — the docks, the sheets and the safe-area maths with
+     them. */
+  font-size: 16px;
   padding: 0 10px;
 }
 

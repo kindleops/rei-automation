@@ -276,7 +276,9 @@
   .nx-temp-select,
   select.nx-select {
     min-height: 44px !important;
-    font-size: 14px !important;
+    /* 16px for the same reason as the blanket `select` rule below: anything
+       under it zooms the page on focus and detaches every fixed surface. */
+    font-size: 16px !important;
   }
 
   /* Section toggle (Today/Week/etc): horizontal scroll */
@@ -757,13 +759,27 @@ inbox — shows critical actions
     min-width: 44px !important;
   }
 
-  /* Select elements: large enough to tap */
+  /* Select elements: large enough to tap, and above the zoom threshold.
+     This said 14px with the comment "prevent iOS auto-zoom", which has the rule
+     backwards — Safari zooms BELOW 16px, and index.html's viewport meta
+     (`width=device-width, initial-scale=1.0, viewport-fit=cover`) sets no
+     `user-scalable=no` to opt out. Being `!important` and unscoped, it made every
+     <select> on every mobile surface a zoom trigger: measured, all 30 selects in
+     the advanced-filter sheet computed 14px. The zoom is what detaches the fixed
+     docks, sheets and safe-area maths from their anchors. The sibling input rule
+     twelve lines below already used 16px and stated the threshold correctly. */
   select {
     min-height: 44px !important;
-    font-size: 14px !important;       /* prevent iOS auto-zoom */
+    font-size: 16px !important;
   }
 
-  /* Input fields: prevent iOS zoom */
+  /* Input fields: prevent iOS zoom.
+     `input:not([type])` is load-bearing — an attribute selector does not match an
+     element with no such attribute, and `<input>` with no `type` is a text input.
+     The inbox sidebar's search field is written that way and was measured at 15px,
+     i.e. below the threshold this block exists to hold, while every listed type
+     around it was correctly at 16. */
+  input:not([type]),
   input[type="text"],
   input[type="search"],
   input[type="email"],
