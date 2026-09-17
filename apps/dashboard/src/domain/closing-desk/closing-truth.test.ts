@@ -185,6 +185,27 @@ describe('§48 — a failed read is an error surface, never a zero-state', () =>
     const out = resolveDisplaySummary([], null, { fixtureQuery: false, modelMode: 'error' })
     expect(out.expectedRevenue).toBeNull()
   })
+
+  it('a failed read never resolves to a state the header badges "Live Data"', () => {
+    /*
+     * Found on the deployed SHA by the §8 error proof: the board was correctly
+     * empty and every KPI correctly read '—', but the status pill still said
+     * "Live Data" because the header's status ladder had no 'error' branch and
+     * fell through to its final else. The badge was the most confident thing
+     * on a screen that had loaded nothing.
+     *
+     * 'live' is the ONLY state the header badges as live data, so pinning that
+     * a failure never resolves to it pins the defect at its source.
+     */
+    for (const mode of ['error'] as const) {
+      const state = resolveClosingDeskSurfaceState(live({ mode, diagnostics: ['boom'] }), {
+        fixtureQuery: false, loading: false, error: null,
+      })
+      expect(state).not.toBe('live')
+      expect(state).not.toBe('zero')
+      expect(state).toBe('error')
+    }
+  })
 })
 
 describe('canonical vocabulary', () => {

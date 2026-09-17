@@ -135,10 +135,17 @@ export function ClosingDeskView() {
             <div className="cd-skeleton cd-skeleton--board" />
             <span>Loading closing portfolio…</span>
           </div>
-        ) : error ? (
-          <div className="cd-state" data-testid="cd-error">
+        ) : surfaceState === 'error' ? (
+          /*
+           * This tested `error` — the hook's thrown-exception string — alone.
+           * fetchClosingDeskModel does not throw on a failed read; it returns
+           * `mode: 'error'` precisely so a failure cannot be mistaken for data.
+           * So the canvas skipped this branch entirely and rendered the normal
+           * empty board, which is the one thing a failure must never look like.
+           */
+          <div className="cd-state" data-testid="cd-error" role="alert">
             <span className="cd-state__title">Couldn’t load Closing Desk</span>
-            <span>{error}</span>
+            <span>{error ?? model?.diagnostics[0] ?? 'The closing authority could not be read.'}</span>
           </div>
         ) : showFilteredEmpty ? (
           <div className="cd-filter-empty" data-testid="cd-filter-empty" role="status">

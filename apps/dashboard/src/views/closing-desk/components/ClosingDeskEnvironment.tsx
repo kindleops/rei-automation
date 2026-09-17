@@ -27,6 +27,22 @@ export function ClosingDeskEnvironment({ surfaceState, degradedNotes, diagnostic
     )
   }
 
+  /**
+   * A read failure is announced in the same place a projection gap is. Without
+   * this branch the component returned null, so the only difference between
+   * "no deals are closing" and "we could not look" was invisible.
+   */
+  if (surfaceState === 'error') {
+    const lead = diagnostics[0] ?? degradedNotes[0]
+      ?? 'The closing authority could not be read. Cases and metrics are withheld rather than shown as zero.'
+    return (
+      <div className="cd-env cd-env--degraded" data-testid="cd-env-error" role="alert">
+        <span className="cd-env__pill">Read failed</span>
+        <span className="cd-env__copy">{lead}</span>
+      </div>
+    )
+  }
+
   if (surfaceState === 'degraded' || surfaceState === 'zero') {
     const lead = degradedNotes[0] ?? diagnostics[0]
     return (

@@ -21,14 +21,22 @@ export function ClosingDeskHeader({ surfaceState, summary, cases, loading }: Clo
   const now = new Date()
   const timeLabel = now.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
+  /**
+   * 'error' had no branch here, so a failed read fell through to the final
+   * else and was badged "Live Data" — a confident claim of freshness on a desk
+   * that loaded nothing. The board was correctly empty and every KPI correctly
+   * read '—', which made the badge the single most misleading thing on screen.
+   */
   const status =
-    surfaceState === 'demo'
-      ? { label: 'Synthetic Demo', tone: 'demo' as const }
-      : surfaceState === 'degraded'
-        ? { label: 'Degraded Projection', tone: 'warn' as const }
-        : surfaceState === 'zero'
-          ? { label: 'Live · Zero Cases', tone: 'neutral' as const }
-          : { label: 'Live Data', tone: 'live' as const }
+    surfaceState === 'error'
+      ? { label: 'Read Failed', tone: 'warn' as const }
+      : surfaceState === 'demo'
+        ? { label: 'Synthetic Demo', tone: 'demo' as const }
+        : surfaceState === 'degraded'
+          ? { label: 'Degraded Projection', tone: 'warn' as const }
+          : surfaceState === 'zero'
+            ? { label: 'Live · Zero Cases', tone: 'neutral' as const }
+            : { label: 'Live Data', tone: 'live' as const }
 
   return (
     <header className="cd-command-header" data-testid="cd-command-header">
