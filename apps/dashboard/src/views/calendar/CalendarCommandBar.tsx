@@ -31,6 +31,8 @@ type CalendarCommandBarProps = {
   layers: CalendarLayerId[]
   visibleEventCount: number
   collapsed?: boolean
+  /** True on a phone, where the view-mode tabs do not drive anything. */
+  mobile?: boolean
   onViewChange: (mode: CalendarViewMode) => void
   onToday: () => void
   onPrev: () => void
@@ -59,6 +61,7 @@ export function CalendarCommandBar({
   layers,
   visibleEventCount,
   collapsed = false,
+  mobile = false,
   onViewChange,
   onToday,
   onPrev,
@@ -83,18 +86,28 @@ export function CalendarCommandBar({
   return (
     <header className={cls('nx-cal__command-bar', collapsed && 'is-collapsed')}>
       <div className="nx-cal__command-priority">
-        <nav className="nx-cal__command-views" aria-label="Calendar view mode">
-          {VIEW_MODES.map((mode) => (
-            <button
-              key={mode.key}
-              type="button"
-              className={cls('nx-cal__view-tab', viewMode === mode.key && 'is-active')}
-              onClick={() => onViewChange(mode.key)}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </nav>
+        {/*
+          §12 — the five view-mode tabs are DESKTOP controls.
+          On a phone CalendarView renders CalendarMobileView unconditionally and
+          ignores `viewMode` entirely, so Month / Week / Day / Agenda / Timeline
+          were five buttons that changed nothing. A control that does not do what
+          it says costs more than the row it occupies. The mobile surface has its
+          own day strip and month sheet; the date navigation below is shared.
+        */}
+        {mobile ? null : (
+          <nav className="nx-cal__command-views" aria-label="Calendar view mode">
+            {VIEW_MODES.map((mode) => (
+              <button
+                key={mode.key}
+                type="button"
+                className={cls('nx-cal__view-tab', viewMode === mode.key && 'is-active')}
+                onClick={() => onViewChange(mode.key)}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </nav>
+        )}
 
         <div className="nx-cal__command-nav">
           <button type="button" className="nx-cal__icon-btn" onClick={onPrev} aria-label="Previous range">

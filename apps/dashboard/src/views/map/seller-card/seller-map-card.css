@@ -1213,11 +1213,20 @@
    (mobile-operating-shell.css); only the collapsed-over-hero treatment below
    is map-specific. */
 
+/* z-index 61, not 6.
+   `.smc-shell` is `position: relative; z-index: 60`, so at 6 the card shell
+   painted OVER the handle and swallowed every tap in its band — including the
+   restored ::after target below. Measured on a selected property:
+   elementFromPoint at the handle's own centre returned `.smc-body--peek`, and
+   Playwright refused the click with "smc-body--peek intercepts pointer events".
+   The consequence was not cosmetic: the handle is the ONLY promotion affordance
+   at the collapsed detent, so an operator who selected a property on the map
+   could not reach Street View or the property dossier at all. */
 .smc-mobile-bottom-sheet.is-collapsed .nx-mobile-bottom-sheet__handle {
   position: absolute;
   top: 7px;
   left: 50%;
-  z-index: 6;
+  z-index: 61;
   width: 30px !important;
   height: 3px !important;
   margin: 0;
@@ -1250,6 +1259,11 @@
   height: 3px !important;
   min-width: 0 !important;
   padding: 0 !important;
+  /* Above `.smc-shell` (z-index 60) in EVERY detent, not only collapsed —
+     otherwise the restored ::after target is painted over by the card and the
+     sheet has no working resize affordance. */
+  position: relative;
+  z-index: 61;
 }
 
 /* The target: 30px tall and wide across the sheet, sitting in the reserved band ABOVE

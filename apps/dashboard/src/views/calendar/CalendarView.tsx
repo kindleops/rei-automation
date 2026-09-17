@@ -668,6 +668,7 @@ export function CalendarView({
           layers={layers}
           visibleEventCount={events.length}
           collapsed={layoutMode === 'medium'}
+          mobile={isMobile}
           onViewChange={setViewMode}
           onToday={() => setAnchorDate(startOfDay(new Date()))}
           onPrev={handlePrev}

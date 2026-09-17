@@ -118,7 +118,14 @@ const buildHeaderBadges = (
     { key: 'status', label: canonical.statusLabel, tone: 'status' },
   ]
   if (priorityScore != null) {
-    badges.push({ key: 'score', label: `Score ${Math.round(priorityScore)}`, tone: 'score' })
+    /**
+     * "Priority", not "Score". This reads the OWNER priority score
+     * (owner_priority_score / master_owner_priority_score / priority_score) — a
+     * current master_owners rollup, and not an acquisition verdict. Labelled
+     * "Score" on a property card it sat one row above the valuation and read as
+     * the engine's number, which is the ambiguity §24 exists to close.
+     */
+    badges.push({ key: 'score', label: `Priority ${Math.round(priorityScore)}`, tone: 'score' })
   }
   badges.push({ key: 'asset', label: presentation.label.toUpperCase(), tone: 'asset' })
   if (units != null && units > 1) {
