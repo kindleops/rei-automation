@@ -119,7 +119,16 @@ export function CalendarCommandBar({
           </button>
         </div>
 
-        <CalendarDatePicker value={anchorDate} onChange={onDateChange} />
+        {/*
+          Desktop only.
+
+          The mobile calendar already owns a date jump: CalendarMobileView's
+          Month control opens a full month grid whose cells call the same
+          `onDateChange`. Keeping this 64px native picker beside it was a second
+          control for one capability — and it was 64 of the 52px by which the bar
+          overran 390px, which is what pushed the overflow button off-screen.
+        */}
+        {mobile ? null : <CalendarDatePicker value={anchorDate} onChange={onDateChange} />}
       </div>
 
       <div className="nx-cal__command-secondary">
@@ -174,18 +183,35 @@ export function CalendarCommandBar({
           <Icon name="refresh-cw" />
         </button>
 
-        <span
-          className={cls(
-            'nx-cal__live-pill',
-            refreshState === 'error' && 'is-error',
-            refreshState === 'updating' && 'is-updating',
-            refreshState === 'updated' && 'is-updated',
-          )}
-          title={errorMessage || statusLabel}
-        >
-          <span className="nx-cal__live-dot" aria-hidden="true" />
-          <span className="nx-cal__live-label">{statusLabel}</span>
-        </span>
+        {/*
+          Desktop only.
+          
+          Measured at 390px: the bar is 362px wide and its content needs 414. All
+          52px of that overflow landed on the LAST child — the "More calendar
+          controls" button — which sat at x 383–427 with 7px of a 44px target on
+          screen and hit-tested to the page background. Timezone mode, the scope
+          toggle and the layer picker live behind that button, so on a phone they
+          were unreachable.
+
+          This 56px pill is the cheapest honest thing to drop, because the mobile
+          calendar states its own load and failure ("Loading schedule…",
+          "Schedule unavailable — couldn't load the schedule"). It is a status
+          readout, not a control, so nothing becomes unreachable by removing it.
+        */}
+        {mobile ? null : (
+          <span
+            className={cls(
+              'nx-cal__live-pill',
+              refreshState === 'error' && 'is-error',
+              refreshState === 'updating' && 'is-updating',
+              refreshState === 'updated' && 'is-updated',
+            )}
+            title={errorMessage || statusLabel}
+          >
+            <span className="nx-cal__live-dot" aria-hidden="true" />
+            <span className="nx-cal__live-label">{statusLabel}</span>
+          </span>
+        )}
 
         {showRailToggle ? (
           <button type="button" className={cls('nx-cal__icon-btn nx-cal__cmd-desktop-only', railOpen && 'is-active')} onClick={onToggleRail} aria-label="Toggle contextual rail">

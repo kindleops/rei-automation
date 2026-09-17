@@ -2227,3 +2227,28 @@ html[data-theme='light'] .nx-cal__intel-rail {
   line-height: 1.5;
   color: var(--text-2, rgba(232, 235, 242, 0.66));
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MOBILE — clear the global command dock
+   ══════════════════════════════════════════════════════════════════════════
+
+   `.nx-stage` reserves `--nx-mobile-chrome-top` as padding, but
+   `.nx-premium-inbox` is `position: absolute; top: 0` and escapes it — so every
+   inbox-family surface has to reserve the band itself, and Map, Comps and the
+   geographic analytics surface each do. The calendar did not: measured at
+   390x844 its command bar sat at y 10–78 under a dock occupying y 0–47, which
+   put "Today", the range arrows and the overflow control in the covered band.
+
+   Positioned against the workspace surface rather than `.nx-premium-inbox`, so
+   the bottom reservation the surface already carries is not re-derived here.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-workspace-surface--calendar {
+  position: relative;
+}
+
+html.is-mobile-layout .nx-workspace-surface--calendar .nx-cal {
+  position: absolute;
+  inset: var(--nx-mobile-chrome-top, 41px) 0 0 0;
+  height: auto;
+}
