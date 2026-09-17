@@ -30,6 +30,7 @@ import { EntityGraphMobileTable } from './EntityGraphMobileTable'
 import { defaultVisibleColumns } from './entity-graph-table-columns'
 import { EntityGraphColumnSheet } from './EntityGraphColumnSheet'
 import { EntityGraphMobileGraph } from './EntityGraphMobileGraph'
+import { EntityGraphScopeStrip } from './EntityGraphScopeStrip'
 import { EntityGraphUniverseLens } from './EntityGraphUniverseLens'
 import { EntityGraphCampaignSheet } from './EntityGraphCampaignSheet'
 import { EntityGraphCompareSheet, type CohortSnapshot } from './EntityGraphCompareSheet'
@@ -424,10 +425,16 @@ export function EntityGraphMobile({
   const graphIsCurrent = graphState.key === graphKey
   const graphAnchor = graphIsCurrent ? graphState.anchor : null
   const graphDossier = graphIsCurrent ? graphState.dossier : null
-  const graphLoading = viewMode === 'graph' && Boolean(graphCandidate) && !graphIsCurrent
+  const graphLoading = Boolean(graphCandidate) && !graphIsCurrent
 
+  /**
+   * The dossier is fetched for the SCOPE STRIP as well as the graph, so the
+   * landing state can state relationship scope (§9) without the operator first
+   * switching to the graph tab. It was gated on `viewMode === 'graph'`, which is
+   * why nothing above the fold ever knew an owner had seven properties.
+   */
   useEffect(() => {
-    if (viewMode !== 'graph' || !graphCandidate) return
+    if (!graphCandidate) return
     const entity = selectedEntityFromResult(graphCandidate)
     const apiType = dossierApiType(entity)
     if (!apiType || !entity.id) return
@@ -447,7 +454,7 @@ export function EntityGraphMobile({
 
     return () => { cancelled = true; controller.abort() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphKey, viewMode])
+  }, [graphKey])
 
   /* ── Deep links from elsewhere in the app open the sheet ───────────────── */
   /**
@@ -825,6 +832,16 @@ export function EntityGraphMobile({
           </button>
         ) : null}
       </div>
+
+      {/* §9 — relationship scope, stated before anything is scrolled, and the
+          one-tap entry into the graph. */}
+      <EntityGraphScopeStrip
+        anchor={graphCandidate}
+        dossier={graphDossier}
+        loading={graphLoading}
+        active={viewMode === 'graph'}
+        onOpenGraph={() => setViewMode((mode) => (mode === 'graph' ? 'cards' : 'graph'))}
+      />
 
       <div className="egm-toolbar">
         <span className="egm-toolbar__count">

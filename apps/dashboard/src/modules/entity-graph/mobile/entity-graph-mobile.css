@@ -2961,3 +2961,97 @@
   line-height: 1.25;
   opacity: 0.6;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RELATIONSHIP SCOPE STRIP (§9)
+   ══════════════════════════════════════════════════════════════════════════
+   One row, above the fold, that answers "what is this connected to" and opens
+   the graph. Deliberately a row and not a card: the graph is the thing worth
+   screen space, and a 90px summary panel above it would push the relationship
+   structure back below the fold, which is the problem it exists to fix.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.egm-relscope {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.022);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.egm-relscope:active { background: rgba(255, 255, 255, 0.055); }
+
+.egm-relscope.is-active {
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.08);
+  border-bottom-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.28);
+}
+
+.egm-relscope__icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tone-primary, #5eead4);
+}
+
+.egm-relscope__copy {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.egm-relscope__copy strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.egm-relscope__copy small {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.egm-relscope__cta {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.35);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--tone-primary, #5eead4);
+}
+
+[data-nexus-theme='light'] {
+  .egm-relscope {
+    border-bottom-color: rgba(15, 23, 42, 0.08);
+    background: rgba(15, 23, 42, 0.02);
+  }
+
+  .egm-relscope__icon {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+  }
+
+  .egm-relscope__copy strong { color: rgba(15, 23, 42, 0.92); }
+  .egm-relscope__copy small { color: rgba(15, 23, 42, 0.55); }
+}

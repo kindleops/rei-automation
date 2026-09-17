@@ -13,6 +13,8 @@
  * the 160 that have answers.
  */
 
+import { isLegacyAcquisitionField } from '../../../domain/acquisition/legacy-acquisition-fields'
+
 export type FieldSectionKey =
   | 'overview'
   | 'ownership'
@@ -44,7 +46,7 @@ export const RECORD_SECTIONS: FieldSectionDef[] = [
       'property_type', 'normalized_asset_class', 'asset_class', 'asset_type', 'property_group',
       'property_subtype', 'property_class', 'units_count', 'total_bedrooms', 'total_baths',
       'building_square_feet', 'year_built', 'effective_year_built', 'stories',
-      'estimated_value', 'equity_percent', 'equity_amount', 'final_acquisition_score',
+      'estimated_value', 'equity_percent', 'equity_amount',
       'display_name', 'full_name', 'first_name', 'owner_type_guess', 'priority_tier',
       'priority_score', 'property_count', 'portfolio_total_value', 'portfolio_total_units',
       'canonical_e164', 'phone', 'phone_type', 'email', 'email_normalized',
@@ -99,9 +101,8 @@ export const RECORD_SECTIONS: FieldSectionDef[] = [
       'arv_estimate', 'arv_ppsf', 'rent_estimate', 'monthly_rent', 'gross_monthly_income',
       'gross_annual_income', 'noi_estimate', 'cap_rate', 'ppsf', 'ppu', 'ppbd',
       'sqft_per_unit', 'avg_sqft_per_unit', 'beds_per_unit', 'rehab_level',
-      'estimated_repair_cost', 'estimated_repair_cost_per_sqft', 'cash_offer',
-      'offer_ppsf', 'offer_ppu', 'offer_ppbd', 'offer_ppls', 'offer_vs_loan',
-      'offer_vs_sale_price', 'potential_spread', 'price_off_value', 'percent_off',
+      'estimated_repair_cost', 'estimated_repair_cost_per_sqft',
+      'potential_spread', 'price_off_value', 'percent_off',
       'comp_confidence_score', 'renovation_level_classification', 'latitude', 'longitude',
       'total_loan_balance', 'total_loan_amt', 'total_loan_payment', 'sale_date', 'sale_price',
       'saleprice', 'recording_date', 'last_sale_doc_type', 'document_type',
@@ -121,8 +122,7 @@ export const RECORD_SECTIONS: FieldSectionDef[] = [
       'preforeclosure_stage', 'trustee_name', 'trustee_phone', 'trustee_address',
       'lender_name', 'beneficiary_name', 'opening_bid', 'case_number', 'court_name',
       'county_case_url', 'property_flags_text', 'seller_tags_text', 'podio_tags',
-      'tag_distress_score', 'structured_motivation_score', 'deal_strength_score',
-      'acquisition_bucket', 'import_asset_signal', 'ai_score', 'deal_list_label',
+      'acquisition_bucket', 'import_asset_signal', 'deal_list_label',
       'deal_list_type', 'deal_list_normalized', 'highlighted',
       'tax_delinquent_count', 'active_lien_count', 'urgency_score', 'financial_pressure_score',
     ],
@@ -161,9 +161,23 @@ export const RECORD_SECTIONS: FieldSectionDef[] = [
 
 /** Columns that carry no operator meaning even when populated. */
 const SUPPRESSED = new Set([
-  'raw_payload_json', 'seller_tags_json', 'property_flags_json', 'options',
+  'raw_payload_json', 'seller_tags_json', 'property_flags_json',
   'map_image', 'satellite_image', 'streetview_image', 'purchase_info', 'other_rooms',
 ])
+
+/**
+ * §9 — the Podio-era acquisition OUTPUT family never reaches this inspector.
+ *
+ * Removing them from the section lists above is necessary but not sufficient:
+ * this file's whole design is that anything no rule claims still appears under
+ * "Other fields", so an un-claimed `cash_offer` would simply move rather than
+ * disappear. Suppression is what actually removes them, and it is a DISPLAY rule
+ * — the columns stay on `properties`, the importer keeps writing them, and no
+ * migration touches them.
+ */
+function isSuppressedField(key: string): boolean {
+  return SUPPRESSED.has(key) || isLegacyAcquisitionField(key)
+}
 
 /**
  * Boolean-flag columns are only interesting when true. `is_office: false` on a
@@ -259,7 +273,7 @@ export function buildRecordSections(record: Record<string, unknown> | null | und
     const fields: RecordField[] = []
 
     for (const key of def.fields ?? []) {
-      if (claimed.has(key) || SUPPRESSED.has(key)) continue
+      if (claimed.has(key) || isSuppressedField(key)) continue
       if (!(key in record)) continue
       const value = record[key]
       if (isUninformative(key, value)) { claimed.add(key); continue }
@@ -269,7 +283,7 @@ export function buildRecordSections(record: Record<string, unknown> | null | und
 
     if (def.patterns?.length) {
       const matched = Object.keys(record)
-        .filter((key) => !claimed.has(key) && !SUPPRESSED.has(key))
+        .filter((key) => !claimed.has(key) && !isSuppressedField(key))
         .filter((key) => def.patterns!.some((pattern) => pattern.test(key)))
         .sort()
       for (const key of matched) {
@@ -285,7 +299,7 @@ export function buildRecordSections(record: Record<string, unknown> | null | und
 
   // Nothing upstream can hide: whatever no rule claimed still gets a home.
   const leftovers = Object.keys(record)
-    .filter((key) => !claimed.has(key) && !SUPPRESSED.has(key))
+    .filter((key) => !claimed.has(key) && !isSuppressedField(key))
     .filter((key) => !isUninformative(key, record[key]))
     .sort()
 

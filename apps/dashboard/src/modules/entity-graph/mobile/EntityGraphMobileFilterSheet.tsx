@@ -223,8 +223,12 @@ export function EntityGraphMobileFilterSheet({
                 </label>
                 <Field label="Units min" value={draft.unitsMin} onChange={(v) => patch('unitsMin', v)} type="number" inputMode="numeric" />
                 <Field label="Units max" value={draft.unitsMax} onChange={(v) => patch('unitsMax', v)} type="number" inputMode="numeric" />
-                <Field label="Score min" value={draft.scoreMin} onChange={(v) => patch('scoreMin', v)} type="number" inputMode="numeric" />
-                <Field label="Score max" value={draft.scoreMax} onChange={(v) => patch('scoreMax', v)} type="number" inputMode="numeric" />
+                {/* Named for its author (§24). This bounds
+                    `properties.final_acquisition_score`, a Podio-era screening
+                    output the current Decision Engine never reads — a legitimate
+                    corpus selector, and not this system's verdict on a deal. */}
+                <Field label="Legacy screening min" value={draft.scoreMin} onChange={(v) => patch('scoreMin', v)} type="number" inputMode="numeric" />
+                <Field label="Legacy screening max" value={draft.scoreMax} onChange={(v) => patch('scoreMax', v)} type="number" inputMode="numeric" />
               </div>
             </section>
           </>

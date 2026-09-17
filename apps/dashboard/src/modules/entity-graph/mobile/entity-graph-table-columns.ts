@@ -67,18 +67,17 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
       width: 68,
       render: (r) => (typeof r.details?.equity === 'number' ? `${Math.round(r.details.equity)}%` : null),
     },
-    {
-      key: 'score',
-      group: 'scores',
-      label: 'Score',
-      sortBy: 'final_acquisition_score',
-      align: 'right',
-      width: 64,
-      render: (r) => {
-        const score = r.details?.acquisitionScore ?? r.score
-        return typeof score === 'number' ? String(Math.round(score)) : null
-      },
-    },
+    /**
+     * §9 — the "Score" column is gone.
+     *
+     * It sorted and rendered `final_acquisition_score`, a Podio-era OUTPUT the
+     * current Decision Engine never reads (see decisionAuthority.js, which names
+     * it explicitly among the columns that are "never inputs to this engine").
+     * Headed simply "Score" in a table of live acquisition data, it read as the
+     * engine's verdict on 104,217 properties of which 163 have an engine row.
+     * Current economics live in `property_acquisition_scores` and are surfaced in
+     * the detail sheet, where the engine's state can be stated alongside them.
+     */
     { key: 'owner', group: 'ownership', label: 'Owner', width: 156, render: (r) => text(r.details?.ownerName) },
     {
       key: 'contacts',
@@ -268,13 +267,11 @@ const EXTRA_PROPERTY_COLUMNS: Array<{ key: string; label: string; group: ColumnG
   { key: 'rent_estimate', label: 'Rent estimate', group: 'scores', width: 118, numeric: true },
   { key: 'cap_rate', label: 'Cap rate', group: 'scores', width: 92, numeric: true },
   { key: 'ppsf', label: 'PPSF', group: 'scores', width: 84, numeric: true },
-  { key: 'cash_offer', label: 'Cash offer', group: 'scores', width: 106, numeric: true },
   { key: 'estimated_repair_cost', label: 'Repair estimate', group: 'scores', width: 126, numeric: true },
   { key: 'rehab_level', label: 'Rehab level', group: 'scores', width: 106 },
-  { key: 'structured_motivation_score', label: 'Motivation', group: 'scores', width: 100, numeric: true },
-  { key: 'deal_strength_score', label: 'Deal strength', group: 'scores', width: 112, numeric: true },
-  { key: 'tag_distress_score', label: 'Distress score', group: 'scores', width: 116, numeric: true },
-  { key: 'ai_score', label: 'AI score', group: 'scores', width: 90, numeric: true },
+  /* cash_offer / structured_motivation_score / deal_strength_score /
+     tag_distress_score / ai_score removed — see the note on the Score column
+     above and domain/acquisition/legacy-acquisition-fields. */
 
   { key: 'property_id', label: 'Property ID', group: 'provenance', width: 130 },
   { key: 'master_owner_id', label: 'Master owner ID', group: 'provenance', width: 190 },

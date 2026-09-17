@@ -45,10 +45,22 @@ export type SortOption = { key: string; label: string; sortBy: string; ascending
  */
 export const SCOPE_SORTS: Record<EntityScope, SortOption[]> = {
   properties: [
-    { key: 'score', label: 'Top score', sortBy: 'final_acquisition_score', ascending: false },
+    { key: 'value', label: 'Top value', sortBy: 'estimated_value', ascending: false },
     { key: 'address', label: 'A–Z', sortBy: 'property_address_full', ascending: true },
     { key: 'market', label: 'Market', sortBy: 'market', ascending: true },
-    { key: 'value', label: 'Top value', sortBy: 'estimated_value', ascending: false },
+    /**
+     * §9/§24 — kept as CAPABILITY, renamed so it cannot be mistaken for the
+     * engine's verdict.
+     *
+     * `final_acquisition_score` is a Podio-era screening output the current
+     * Decision Engine never reads. Sorting by it is a legitimate way to walk the
+     * corpus — 104,217 rows carry one — but it was labelled "Top score" and was
+     * the DEFAULT, so the first thing an operator saw was a list ranked by a
+     * retired system's heuristic, presented as this system's ranking, with the
+     * 65,580 unscored rows silently excluded. The default is now Top value,
+     * which is a current field and hides nothing.
+     */
+    { key: 'score', label: 'Legacy screening', sortBy: 'final_acquisition_score', ascending: false },
   ],
   master_owners: [
     { key: 'priority', label: 'Priority', sortBy: 'priority_score', ascending: false },
@@ -70,7 +82,7 @@ export const SCOPE_SORTS: Record<EntityScope, SortOption[]> = {
 }
 
 export const SCOPE_DEFAULT_SORT_KEY: Record<EntityScope, string> = {
-  properties: 'score',
+  properties: 'value',
   master_owners: 'priority',
   people: 'contact',
   organizations: 'name',

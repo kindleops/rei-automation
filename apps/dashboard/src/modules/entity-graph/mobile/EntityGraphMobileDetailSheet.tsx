@@ -518,6 +518,27 @@ function ContactNode({
   )
 }
 
+/**
+ * How old the engine's answer is, in the operator's terms.
+ *
+ * decisionAuthority.js recomputes past DEFAULT_MAX_AGE_DAYS (30) because comps and
+ * buyer behaviour move under a decision even when the subject does not, so an
+ * offer from last quarter is a different claim from one computed this morning and
+ * the surface has to say which it is.
+ */
+const ENGINE_MAX_AGE_DAYS = 30
+
+function engineFreshness(computedAt: string | null): string {
+  if (!computedAt) return 'Decision Engine'
+  const at = new Date(computedAt)
+  if (Number.isNaN(at.getTime())) return 'Decision Engine'
+  const days = Math.floor((Date.now() - at.getTime()) / 86_400_000)
+  if (days <= 0) return 'Decision Engine · today'
+  if (days === 1) return 'Decision Engine · 1 day ago'
+  if (days > ENGINE_MAX_AGE_DAYS) return `Decision Engine · ${days} days ago, past recompute horizon`
+  return `Decision Engine · ${days} days ago`
+}
+
 function DetailStats({
   scope,
   result,
@@ -553,20 +574,48 @@ function DetailStats({
             ? `${Math.round(num(scores.equityPercent) as number)}%`
             : (typeof d.equity === 'number' ? `${Math.round(d.equity)}%` : null),
         },
-        {
-          label: 'Screening score',
-          value: num(scores.acquisition) !== null
-            ? String(Math.round(num(scores.acquisition) as number))
-            : (typeof d.acquisitionScore === 'number' ? String(Math.round(d.acquisitionScore)) : null),
-          note: engine ? undefined : 'Decision Engine has not run',
-        },
+        /**
+         * §9/§24 — ACQUISITION INTELLIGENCE HERE COMES FROM THE ENGINE OR IT
+         * DOES NOT COME.
+         *
+         * The "Screening score" stat that stood here rendered
+         * `properties.final_acquisition_score`, and it was shown for EVERY
+         * property — including the 104,054 that have no engine row at all. It
+         * carried an honest "Decision Engine has not run" note, which helped,
+         * but a number in a stat slot is read as the answer and the note as
+         * fine print. decisionAuthority.js is unambiguous: "There is no legacy
+         * fallback."
+         *
+         * So when the engine has run the operator sees ITS offer, tier and
+         * confidence. When it has not, they see the state — which is an
+         * instruction to run it, not a missing number to be filled from a
+         * retired system.
+         */
         ...(engine
-          ? [{
-            label: 'Decision tier',
-            value: text(engine.decisionTier)?.replace(/_/g, ' ') ?? null,
-            note: num(engine.confidence) !== null ? `${Math.round(num(engine.confidence) as number)}% confidence` : undefined,
-          }]
-          : []),
+          ? [
+            {
+              label: 'Recommended offer',
+              value: compactCurrency(num(engine.recommendedCashOffer)),
+              // Freshness is part of the answer: decisionAuthority recomputes on a
+              // 30-day horizon because comps and buyer behaviour move underneath a
+              // decision even when the subject does not.
+              note: engineFreshness(text(engine.computedAt)),
+            },
+            {
+              label: 'Decision tier',
+              value: text(engine.decisionTier)?.replace(/_/g, ' ') ?? null,
+              note: num(engine.confidence) !== null ? `${Math.round(num(engine.confidence) as number)}% confidence` : undefined,
+            },
+            {
+              label: 'Strategy',
+              value: text(engine.bestStrategy)?.replace(/_/g, ' ') ?? null,
+            },
+          ]
+          : [{
+            label: 'Acquisition',
+            value: null,
+            note: 'Decision Engine has not run for this property',
+          }]),
       ]
     : scope === 'master_owners'
       ? [

@@ -146,15 +146,43 @@ export type EntityGraphLens = {
   dimensions: EntityGraphLensDimension[]
 }
 
+/**
+ * The lens endpoint is NOT DEPLOYED.
+ *
+ * `/api/cockpit/entity-graph/lens` has no route in apps/api — the entity-graph
+ * directory contains browse, contact, counts, filter-catalog, market,
+ * organization, owner, property, prospect, search and zip, and no lens. Every
+ * call 404s, and the mobile Entity Graph fires TWO of them (fast + deep) on every
+ * scope, subtype or filter change.
+ *
+ * The UI already fails correctly — EntityGraphUniverseLens renders nothing rather
+ * than shimmering — so this latch is about the requests, not the pixels: once the
+ * route has answered 404 we stop asking for the rest of the session. It is a
+ * per-session latch rather than a permanent flag so that deploying the endpoint
+ * makes the lens work on the next load with no client change.
+ *
+ * Saved cohorts and the compare sheet are built on the lens payload, so they are
+ * unreachable until that endpoint exists. That is a backend gap, not a mobile one,
+ * and removing the UI here would delete the operator capability rather than
+ * uncover it.
+ */
+let lensRouteAbsent = false
+
 export async function fetchEntityGraphLens(
   params: Record<string, string | number | undefined>,
   signal?: AbortSignal,
 ): Promise<EntityGraphLens> {
+  if (lensRouteAbsent) throw new Error('entity_graph_lens_not_deployed')
+
   const qs = buildQueryString(params)
   const res = await backendClient.callBackend<{ ok: boolean; lens: EntityGraphLens }>(
     `/api/cockpit/entity-graph/lens?${qs}`,
     { signal },
   )
+  if (res.status === 404) {
+    lensRouteAbsent = true
+    throw new Error('entity_graph_lens_not_deployed')
+  }
   if (!res.ok || !res.data?.lens) {
     throw new Error(res.ok ? 'entity_graph_lens_failed' : (res.message || res.error || 'entity_graph_lens_failed'))
   }

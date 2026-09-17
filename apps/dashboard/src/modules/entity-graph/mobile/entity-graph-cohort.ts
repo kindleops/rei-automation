@@ -118,6 +118,13 @@ export function cohortToCampaignFilters({
 
   if (filters.unitsMin) push('properties.units_count', 'gte', Number(filters.unitsMin))
   if (filters.unitsMax) push('properties.units_count', 'lte', Number(filters.unitsMax))
+  /**
+   * The score bounds still target `final_acquisition_score` because that is the
+   * column the corpus actually carries — the campaign target graph has no
+   * engine-score column to filter on, and 163 engine rows could not build a
+   * cohort. It is a corpus SELECTOR, not acquisition truth, and the filter sheet
+   * now names it as legacy screening so nobody reads it as the engine's verdict.
+   */
   if (filters.scoreMin) push('properties.final_acquisition_score', 'gte', Number(filters.scoreMin))
   if (filters.scoreMax) push('properties.final_acquisition_score', 'lte', Number(filters.scoreMax))
   if (filters.ownerType) push('properties.owner_type_guess', 'contains', filters.ownerType)
