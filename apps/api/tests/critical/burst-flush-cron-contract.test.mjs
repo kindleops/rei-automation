@@ -3,9 +3,31 @@
  *
  * SELLER_INBOUND_BURST_ENABLED has an activation prerequisite: the flush route
  * must be driven by a scheduler, otherwise non-safety bursts only finalize when
- * a later inbound trips the hard-close rollover. The route was never scheduled —
- * not even in main's vercel.json. These tests pin the cron wiring and the route
- * preconditions the mandate requires before scheduling it.
+ * a later inbound trips the hard-close rollover.
+ *
+ * PRODUCTION-COMMISSIONING-1 (2026-09-17) — this contract was pointed at the
+ * WRONG AUTHORITY and asserting a lane production governance had refused.
+ *
+ * It required the flush route to be scheduled in apps/api/vercel.json every
+ * minute. It genuinely was — but by a live Vercel deployment running a build
+ * 135 commits behind production, which was a SECOND un-governed executor on the
+ * production database. Meanwhile the governed scheduler,
+ * PRODUCTION_CRON_JOBS in infra/cloudflare/worker/index.ts, lists this exact
+ * path in FORBIDDEN_JOBS as an unbraked follow-up leg, and
+ * cloudflare-cron-scope.test.mjs asserts it appears nowhere in the Worker's
+ * executable code. The two contracts flatly contradicted each other, and the
+ * vercel.json entry was the only thing hiding it.
+ *
+ * The crons are now removed from vercel.json, so this file asserts the truth:
+ * the route is auth-gated and fail-closed, and it is DELIBERATELY UNSCHEDULED.
+ *
+ * The functional consequence is real and named rather than papered over: burst
+ * flush is NOT commissioned. In practice the lane was already inert —
+ * seller-inbound-burst-coordinator resolves
+ * `asBoolean(env.SELLER_INBOUND_BURST_ENABLED, false)` and that variable is not
+ * set in wrangler.production.jsonc — so removing the cron changed no behaviour.
+ * Commissioning it is an explicit operator decision that must also reconcile
+ * FORBIDDEN_JOBS, not something a config file grants by accident.
  */
 
 import "../helpers/critical-test-environment.mjs";
@@ -25,21 +47,48 @@ function readVercelConfig() {
 
 // ── cron registration ────────────────────────────────────────────────────────
 
-test("flush route is registered as a production cron", () => {
+test("vercel.json schedules NOTHING, so there is one governed scheduler", () => {
+  // The whole point of the consolidation: a second executor cannot reappear by
+  // someone adding a cron back to this file without this test going red.
   const config = readVercelConfig();
-  const entry = (config.crons || []).find((cron) => cron.path === FLUSH_PATH);
-  assert.ok(entry, `${FLUSH_PATH} must be scheduled`);
-  // Vercel Cron's finest granularity is one minute. The burst policy is a 20s
-  // quiet window with a 90s hard cap, so once per minute is the closest
-  // compatible cadence: worst-case finalize latency stays inside ~1 policy
-  // cycle, and the hard cap guarantees nothing waits indefinitely.
-  assert.equal(entry.schedule, "* * * * *");
+  assert.deepEqual(
+    config.crons ?? [],
+    [],
+    "apps/api/vercel.json must declare no crons; the governed scheduler is PRODUCTION_CRON_JOBS"
+  );
 });
 
-test("cron list has no duplicate paths", () => {
-  const config = readVercelConfig();
-  const paths = (config.crons || []).map((cron) => cron.path);
-  assert.equal(new Set(paths).size, paths.length, "duplicate cron paths would double-fire");
+test("the flush route is deliberately NOT scheduled by the governed scheduler", async () => {
+  // Agreement with cloudflare-cron-scope.test.mjs, which lists this path in
+  // FORBIDDEN_JOBS. If it is ever commissioned, BOTH contracts must change
+  // together and the reason must be written down in both.
+  const workerPath = path.resolve(__dirname, "../../../../infra/cloudflare/worker/index.ts");
+  const worker = fs.readFileSync(workerPath, "utf8");
+  const executable = worker
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+    })
+    .join("\n");
+  assert.ok(
+    !executable.includes(FLUSH_PATH),
+    `${FLUSH_PATH} must not be reachable from any schedule while it sits in FORBIDDEN_JOBS`
+  );
+});
+
+test("burst flush stays fail-closed, so being unscheduled cannot silently arm it", async () => {
+  // The activation authority is what makes the unscheduled state safe rather
+  // than merely quiet: absent configuration resolves to disabled.
+  const { isSellerInboundBurstEnabled } = await import(
+    "@/lib/domain/seller-flow/seller-inbound-burst-coordinator.js"
+  );
+  assert.equal(isSellerInboundBurstEnabled({ env: {} }), false, "absent config must be disabled");
+  assert.equal(
+    isSellerInboundBurstEnabled({ env: { SELLER_INBOUND_BURST_ENABLED: "" } }),
+    false,
+    "empty config must be disabled"
+  );
 });
 
 // ── route auth: canonical internal auth, cron-compatible, never anonymous ────
