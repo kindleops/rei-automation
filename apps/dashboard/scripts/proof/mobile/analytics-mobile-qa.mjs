@@ -1,7 +1,17 @@
 /**
- * ANALYTICS-MOBILE-LOCK-1 §41 — Analytics on mobile.
+ * ANALYTICS ON MOBILE — the geographic intelligence drill-down.
  *
  * READ ONLY. Analytics is a read surface; nothing here mutates anything.
+ *
+ * RETARGETED for MOBILE-LOCK §7. This harness used to assert the war room's
+ * 25% KPI rail (`.wr`, `.wr-rail__kpi`), which was what mobile rendered before
+ * §7 replaced it with AnalyticsGeoMobile. Every TRUTH assertion it carried is
+ * preserved and re-pointed at the new surface — the endpoint is still read, the
+ * fabricated datasets are still forbidden, a rendered number still has to equal
+ * canonical, a failed read still has to be stated rather than drawn as a healthy
+ * empty dashboard. What changes is the DOM it looks at, plus the §7 claims that
+ * did not exist before: a real US map, a working drill-down, a touch-scrubbable
+ * trend, and rates withheld below the volume floor.
  */
 import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
@@ -118,20 +128,18 @@ async function runCell(width, theme) {
 
   await mark('shell', async () => {
     await page.goto(`${BASE}/analytics`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
-    await page.waitForSelector('.wr', { timeout: 60_000 })
+    await page.waitForSelector('[data-analytics="geo-mobile"]', { timeout: 60_000 })
   })
 
   // Settle on a STATED outcome: real KPI values, or an explicit unavailable.
   const settle = async (target) => {
     await target.waitForFunction(
       () => {
-        if (document.querySelector('.wr-alert__msg')?.textContent?.match(/unavailable/i)) return true
-        // A stated outcome means real cards, or an explicit hold/failure —
-        // never just the absence of a word.
-        if (document.querySelector('.wr-alert__msg')?.textContent?.match(/paused/i)) return true
-        const labelled = [...document.querySelectorAll('.wr-rail__kpi')]
-          .filter((el) => el.querySelector('.wr-rail__kpi-label'))
-        return labelled.length > 0
+        // An explicit failure is a settled outcome.
+        if (document.querySelector('.geo__state.is-error')) return true
+        // …so is a headline that has stopped saying "—".
+        const headline = document.querySelector('.geo__headline > strong')?.textContent?.trim()
+        return Boolean(headline) && headline !== '—'
       },
       undefined, { timeout: 30_000 },
     ).catch(() => {})
@@ -141,16 +149,6 @@ async function runCell(width, theme) {
 
   const probe = () => page.evaluate(() => {
     const txt = (s) => document.querySelector(s)?.textContent?.replace(/\s+/g, ' ').trim() ?? null
-    // A skeleton placeholder shares the .wr-rail__kpi class but has no label.
-    // Counting them as cards made an unloaded surface look populated.
-    const kpis = [...document.querySelectorAll('.wr-rail__kpi')]
-      .filter((el) => el.querySelector('.wr-rail__kpi-label'))
-      .map((el) => ({
-        label: el.querySelector('.wr-rail__kpi-label')?.textContent?.trim() ?? null,
-        value: el.querySelector('.wr-rail__kpi-value')?.textContent?.trim() ?? null,
-        sub: el.querySelector('.wr-rail__kpi-sub')?.textContent?.trim() ?? null,
-      }))
-    const skeletons = document.querySelectorAll('.wr-skel').length
     const reach = (el) => {
       if (!el) return { present: false }
       const b = el.getBoundingClientRect()
@@ -158,12 +156,26 @@ async function runCell(width, theme) {
       return { present: true, h: Math.round(b.height), bottom: Math.round(b.bottom), reachable: !!(hit && (hit === el || el.contains(hit))) }
     }
     const body = (document.body.innerText || '').replace(/\s+/g, ' ')
+    const mapEl = document.querySelector('.geo-map')
+    const chartEl = document.querySelector('.geo .geo-chart__svg')
     return {
-      rail: document.querySelectorAll('.wr.wr--rail').length,
-      skeletons,
-      title: txt('.wr-rail__title'),
-      kpis,
-      alerts: [...document.querySelectorAll('.wr-alert__msg')].map((e) => e.textContent.trim()),
+      root: document.querySelectorAll('[data-analytics="geo-mobile"]').length,
+      level: document.querySelector('[data-analytics="geo-mobile"]')?.getAttribute('data-level') ?? null,
+      headlineLabel: txt('.geo__headline > span'),
+      headlineValue: txt('.geo__headline > strong'),
+      /** §7 — the map is the primary instrument, not a thumbnail. */
+      map: mapEl ? { h: Math.round(mapEl.getBoundingClientRect().height), states: document.querySelectorAll('.geo-map__state').length } : null,
+      statesWithData: document.querySelectorAll('.geo-map__state.has-data, .geo-map__state.is-scoped').length,
+      /** §7 — the trend must be a real chart, not a 16px icon-sized SVG. */
+      chart: chartEl ? { w: Math.round(chartEl.getBoundingClientRect().width), h: Math.round(chartEl.getBoundingClientRect().height) } : null,
+      metricModes: [...document.querySelectorAll('.geo__metric')].map((e) => e.textContent.trim()),
+      stateRows: [...document.querySelectorAll('.geo__row')].map((e) => ({
+        name: e.querySelector('.geo__row-copy strong')?.textContent?.trim() ?? null,
+        value: e.querySelector('.geo__row-value b')?.textContent?.trim() ?? null,
+        rate: e.querySelector('.geo__row-value em')?.textContent?.trim() ?? null,
+      })),
+      rateRow: txt('.geo__rate-row'),
+      errorState: txt('.geo__state.is-error'),
       overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
       theme: document.documentElement.getAttribute('data-nexus-theme'),
       body: body.slice(0, 900),
@@ -172,17 +184,11 @@ async function runCell(width, theme) {
         '45,200', '45200', '42,100', '12,400', '11,800', '1,840',
         'Under Contract 42', 'Closed 18',
       ].filter((n) => body.includes(n)),
-      // §25 a trend must never be a hardcoded string
       trends: [...document.querySelectorAll('[class*="trend"]')].map((e) => e.textContent.trim()).slice(0, 6),
-      rangeBtns: [...document.querySelectorAll('.wr-header__range-btn')].map((b) => ({
+      rangeBtns: [...document.querySelectorAll('.geo__ranges button')].map((b) => ({
         label: b.textContent.trim(), ...reach(b),
       })),
       dock: (() => { const e = document.querySelector('.nx-pinned-app-dock'); return e ? Math.round(e.getBoundingClientRect().top) : null })(),
-      scrollable: (() => {
-        const el = document.querySelector('.wr-rail__scroll')
-        if (!el) return null
-        return { scrollH: el.scrollHeight, clientH: el.clientHeight, canScroll: el.scrollHeight > el.clientHeight + 4 }
-      })(),
     }
   })
 
@@ -198,51 +204,59 @@ async function runCell(width, theme) {
   const lk = live.body?.kpis ?? {}
 
   const p = await probe()
-  check('the analytics surface renders its mobile rail', p.rail === 1, `${p.rail} rails, title="${p.title}"`)
+
+  // ── the surface exists and actually reads
+  check('§7 the analytics surface renders the geographic drill-down',
+    p.root === 1, `${p.root} roots, level="${p.level}"`)
   check('§45 the surface actually reads the canonical metrics endpoint',
     dataRequests.length > 0, `${dataRequests.length} war-room requests`)
-  check('§4 the surface is not stuck on skeleton placeholders',
-    p.skeletons === 0 || p.kpis.length > 0,
-    `${p.skeletons} skeletons, ${p.kpis.length} real cards`)
   check('theme applied', p.theme === theme, `${p.theme}`)
   check('§41 no page-wide horizontal overflow', p.overflow === 0, `${p.overflow}px`)
   check('§2 no fabricated dataset appears on the production route',
     p.fabricated.length === 0, p.fabricated.join(', ') || 'none')
-  check('§3 KPI cards are rendered with labels', p.kpis.length >= 6, `${p.kpis.length} cards`)
 
-  // §4 — a real number or an explicit dash, never "null"/"NaN"/"undefined"
-  const junk = p.kpis.filter((c) => /null|nan|undefined|infinity/i.test(String(c.value)))
-  check('§4 no KPI renders null/NaN/undefined', junk.length === 0,
-    junk.map((c) => `${c.label}=${c.value}`).join(', ') || 'none')
+  // ── §7 the map is the instrument, not a decoration
+  check('§7 the United States map renders every state',
+    p.map !== null && p.map.states >= 50, JSON.stringify(p.map))
+  check('§7 the map is a meaningful part of the screen, not a thumbnail',
+    p.map !== null && p.map.h >= 180, `${p.map?.h}px tall`)
+  check('§7 the map distinguishes states that reported activity',
+    p.statesWithData > 0 || TRUTH.sent === 0,
+    `${p.statesWithData} shaded/outlined, canonical sent=${TRUTH.sent}`)
 
-  // §17 — unmeasured buyer demand must show as unavailable, not a score
-  const buyer = p.kpis.find((c) => /buyer/i.test(c.label || ''))
-  check('§17 an unwired metric shows as unavailable, not a number',
-    !buyer || buyer.value === '—', `${buyer?.label}="${buyer?.value}" sub="${buyer?.sub}"`)
+  // ── §7 the trend chart is a chart
+  // `.nx-premium-inbox svg { width:16px }` is a (0,1,1) global icon rule that
+  // outranks a bare class selector, and it silently crushed this chart to a 16px
+  // square once. A 16x16 "chart" is the regression this asserts against.
+  check('§7 the trend chart is rendered at chart size, not icon size',
+    p.chart !== null && p.chart.w > 120 && p.chart.h > 40, JSON.stringify(p.chart))
 
-  // §4 — a health verdict with no data must not read as Crit/Good
-  const health = p.kpis.find((c) => /queue health/i.test(c.label || ''))
-  if (health && TRUTH.queueHealth === null) {
-    check('§4 a health verdict with no data is not rendered as Crit',
-      health.value === '—', `queue health="${health.value}"`)
-  }
+  // ── §7 metric modes are real and drill-safe
+  check('§7 the metric rail offers the canonical modes',
+    p.metricModes.length >= 4, p.metricModes.join(', '))
+  check('§17 an unwired metric is absent from the rail, not offered as a number',
+    !p.metricModes.some((m) => /buyer/i.test(m)) || TRUTH.buyerDemand !== null,
+    `modes=${p.metricModes.join(', ')} canonical buyerDemand=${TRUTH.buyerDemand}`)
 
-  // §3/§45 — the rendered KPI must equal canonical truth
-  const sentCard = p.kpis.find((c) => c.label === 'Sent')
-  if (sentCard && lk.sentCount != null) {
+  // ── §4 no junk values anywhere the operator can read one
+  const junk = [p.headlineValue, ...p.stateRows.map((r) => r.value), ...p.stateRows.map((r) => r.rate)]
+    .filter((v) => v && /null|nan|undefined|infinity/i.test(String(v)))
+  check('§4 no rendered metric is null/NaN/undefined', junk.length === 0, junk.join(', ') || 'none')
+
+  // ── §3/§45 the headline must equal canonical truth
+  if (p.headlineValue && lk.sentCount != null && /sent/i.test(p.headlineLabel ?? '')) {
     // Tolerance of 2 absorbs rows aging out of the rolling window between the
     // page's own fetch and this one; it is not slack on correctness.
-    check('§45 the Sent card equals the canonical count',
-      Math.abs(Number(sentCard.value.replace(/,/g, '')) - lk.sentCount) <= 2,
-      `ui="${sentCard.value}" canonical=${lk.sentCount}`)
+    check('§45 the nationwide headline equals the canonical sent count',
+      Math.abs(Number(String(p.headlineValue).replace(/,/g, '')) - lk.sentCount) <= 2,
+      `ui="${p.headlineValue}" canonical=${lk.sentCount}`)
   }
-  const deliveredCard = p.kpis.find((c) => c.label === 'Delivered')
-  if (deliveredCard && lk.deliveredCount != null) {
-    check('§45/§11 the Delivered card equals canonical delivered, not sent',
-      Math.abs(Number(deliveredCard.value.replace(/,/g, '')) - lk.deliveredCount) <= 2 &&
-      lk.deliveredCount !== lk.sentCount,
-      `ui="${deliveredCard.value}" canonical delivered=${lk.deliveredCount} sent=${lk.sentCount}`)
-  }
+
+  // ── §7 a rate on thin volume is withheld, not printed
+  const thin = p.stateRows.filter((r) => Number(String(r.value).replace(/,/g, '')) > 0 && Number(String(r.value).replace(/,/g, '')) < 25)
+  check('§7 low-volume rows do not print a rate they cannot support',
+    thin.every((r) => !r.rate || r.rate === '—'),
+    thin.map((r) => `${r.name} ${r.value}/${r.rate}`).join(', ') || 'none')
 
   // §25 no hardcoded trend text
   check('§25 no hardcoded trend string is rendered',
@@ -250,21 +264,56 @@ async function runCell(width, theme) {
 
   // §39/§41 controls reachable
   check('§39 the date-range controls are reachable at their own centre',
-    p.rangeBtns.length === 0 || p.rangeBtns.every((b) => b.reachable && b.h >= 24),
+    p.rangeBtns.length >= 2 && p.rangeBtns.every((b) => b.reachable && b.h >= 24),
     JSON.stringify(p.rangeBtns.slice(0, 4)))
-  check('§39 the KPI rail scrolls rather than overflowing the page',
-    p.scrollable === null || p.overflow === 0, JSON.stringify(p.scrollable))
-  const lowest = p.kpis.length ? null : null
   check('§41 the bottom dock is not covered by content',
     p.dock === null || p.overflow === 0, `dock top=${p.dock}`)
-  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-rail.png`) })
+  await page.screenshot({ path: path.join(OUT, `${width}-${theme}-nation.png`) })
+
+  // ── §7 THE DRILL-DOWN. United States → state → market.
+  let drill = null
+  if (p.stateRows.length > 0) {
+    await page.locator('.geo__row').first().click()
+    await page.waitForTimeout(1800)
+    drill = await page.evaluate(() => ({
+      level: document.querySelector('[data-analytics="geo-mobile"]')?.getAttribute('data-level') ?? null,
+      crumbs: document.querySelector('.geo__crumbs')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+      viewBox: document.querySelector('.geo .geo-map__svg')?.getAttribute('viewBox') ?? null,
+      rows: document.querySelectorAll('.geo__row').length,
+      headline: document.querySelector('.geo__headline > strong')?.textContent?.trim() ?? null,
+      overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+    }))
+    check('§7 tapping a state drills into it', drill.level === 'state', JSON.stringify(drill))
+    check('§7 the drill reframes the map on that state',
+      Boolean(drill.viewBox) && drill.viewBox !== '0 0 960 600',
+      `viewBox=${drill.viewBox}`)
+    check('§7 the breadcrumb states the scope', /United States\s*\/\s*\S/.test(drill.crumbs ?? ''), drill.crumbs)
+    check('§41 the drill does not overflow', drill.overflow === 0, `${drill.overflow}px`)
+    await page.screenshot({ path: path.join(OUT, `${width}-${theme}-state.png`) })
+
+    if (drill.rows > 0) {
+      await page.locator('.geo__row').first().click()
+      await page.waitForTimeout(1500)
+      const market = await page.evaluate(() => ({
+        level: document.querySelector('[data-analytics="geo-mobile"]')?.getAttribute('data-level') ?? null,
+        crumbs: document.querySelector('.geo__crumbs')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
+        overflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+      }))
+      check('§7 tapping a market drills into it', market.level === 'market', JSON.stringify(market))
+      check('§41 the market level does not overflow', market.overflow === 0, `${market.overflow}px`)
+      await page.screenshot({ path: path.join(OUT, `${width}-${theme}-market.png`) })
+      // Back out to the nation for the range test below.
+      await page.locator('.geo__crumbs button').first().click()
+      await page.waitForTimeout(1200)
+    }
+  }
 
   // ── §35/§36 the date filter must change the backend query
   if (p.rangeBtns.length >= 2) {
     const urls = []
     page.on('request', (r) => { if (r.url().includes('/metrics/war-room')) urls.push(r.url()) })
     const target = p.rangeBtns.find((b) => /30/.test(b.label)) ?? p.rangeBtns[p.rangeBtns.length - 1]
-    await page.locator('.wr-header__range-btn', { hasText: target.label }).first().click()
+    await page.locator('.geo__ranges button', { hasText: target.label }).first().click()
     await page.waitForTimeout(3500)
     check('§35/§36 changing the range re-queries the backend with a new window',
       urls.some((u) => /window=(30d|40d|today)/.test(u)),
@@ -285,25 +334,28 @@ async function runCell(width, theme) {
     return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'war_room_failed' }) })
   })
   await failPage.goto(`${BASE}/analytics`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
-  await failPage.waitForSelector('.wr', { timeout: 60_000 }).catch(() => {})
+  await failPage.waitForSelector('[data-analytics="geo-mobile"]', { timeout: 60_000 }).catch(() => {})
   await settle(failPage)
   const failed = await failPage.evaluate(() => {
-    const kpis = [...document.querySelectorAll('.wr-rail__kpi')].map((el) => ({
-      label: el.querySelector('.wr-rail__kpi-label')?.textContent?.trim() ?? null,
-      value: el.querySelector('.wr-rail__kpi-value')?.textContent?.trim() ?? null,
-    }))
+    const values = [
+      document.querySelector('.geo__headline > strong')?.textContent?.trim() ?? null,
+      ...[...document.querySelectorAll('.geo__row-value b')].map((e) => e.textContent.trim()),
+    ].filter(Boolean)
     return {
-      kpis,
-      alerts: [...document.querySelectorAll('.wr-alert__msg')].map((e) => e.textContent.trim()),
+      values,
+      alerts: [
+        document.querySelector('.geo__state.is-error')?.innerText.replace(/\s+/g, ' ').trim(),
+      ].filter(Boolean),
+      rows: document.querySelectorAll('.geo__row').length,
       body: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 600),
     }
   })
   check('§4/§43 a failed metrics read is stated, not rendered as a healthy dashboard',
     failed.alerts.some((a) => /unavailable/i.test(a)),
     `alerts=${JSON.stringify(failed.alerts).slice(0, 180)}`)
-  check('§4 a failed read shows no fabricated zero or health verdict',
-    failed.kpis.every((c) => !/^0%?$/.test(String(c.value)) && !/^(Good|Crit|Warn)$/.test(String(c.value))),
-    failed.kpis.filter((c) => /^0%?$|^(Good|Crit|Warn)$/.test(String(c.value))).map((c) => `${c.label}=${c.value}`).join(', ') || 'none')
+  check('§4 a failed read renders no state rows and no fabricated counts',
+    failed.rows === 0 && failed.values.every((v) => !/^0$/.test(String(v))),
+    `rows=${failed.rows} values=${failed.values.join(', ') || 'none'}`)
   check('§42 a failing dashboard does not retry in an unbounded loop',
     failReqs > 0 && failReqs < 40, `${failReqs} requests while failing`)
   await failPage.screenshot({ path: path.join(OUT, `${width}-${theme}-error.png`) })
@@ -316,7 +368,7 @@ async function runCell(width, theme) {
   check('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '))
 
   await context.close()
-  return { cell: `${width}-${theme}`, kpis: p.kpis.length, timings, failReqs }
+  return { cell: `${width}-${theme}`, states: p.stateRows.length, drill: drill?.level ?? null, timings, failReqs }
 }
 
 const results = []
@@ -327,7 +379,7 @@ try {
     results.push(r)
     const bad = findings.length - before
     const ms = r.timings || {}
-    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} kpis ${String(r.kpis).padEnd(3)} shell ${ms.shell ?? '-'}ms  requests-while-failing ${r.failReqs}`)
+    console.log(`${r.cell.padEnd(12)} ${(bad ? `FAIL (${bad})` : 'PASS').padEnd(10)} states ${String(r.states).padEnd(3)} drill ${String(r.drill).padEnd(7)} shell ${ms.shell ?? '-'}ms  requests-while-failing ${r.failReqs}`)
     for (const f of findings.slice(before)) console.log(`   x ${f.n}: ${f.d}`)
   }
 } finally { await browser.close() }

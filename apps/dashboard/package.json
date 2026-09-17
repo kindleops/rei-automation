@@ -61,7 +61,9 @@
     "proof:closing-desk-mobile": "node scripts/proof/mobile/closing-desk-mobile-qa.mjs",
     "proof:whole-product": "node scripts/proof/mobile/whole-product-smoke.mjs",
     "proof:cross-app-subject": "node scripts/proof/mobile/cross-app-subject-proof.mjs",
-    "proof:shell-notifications": "node scripts/proof/mobile/shell-notifications-proof.mjs"
+    "proof:shell-notifications": "node scripts/proof/mobile/shell-notifications-proof.mjs",
+    "proof:mobile-launcher": "node scripts/proof/mobile/mobile-launcher-qa.mjs",
+    "proof:mobile-shell": "node scripts/proof/mobile/mobile-shell-qa.mjs --label guard"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

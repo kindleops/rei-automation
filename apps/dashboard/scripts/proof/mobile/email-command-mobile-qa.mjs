@@ -176,10 +176,51 @@ async function runCell(width, theme) {
   })
   await page.waitForTimeout(4500)
 
+  /**
+   * Navigate to a surface by NAME, on whichever chrome this viewport renders.
+   *
+   * MOBILE-LOCK §15 inverted the mobile priority: the eight-tab desktop rail
+   * (`.ecc__tab`) is desktop-only now, and a phone gets two primary chips plus a
+   * Compose action (`.ecc__mtab`), with the rest behind an Intelligence sheet.
+   * This helper used to click `.ecc__tab` unconditionally, so on mobile it found
+   * nothing, returned silently, and every composer assertion then timed out
+   * against a surface that had never been opened.
+   *
+   * Mobile label mapping: "Inbox" is the "Mail" chip; Composer is the "Compose"
+   * action; Overview / Campaigns / Templates / Suppression / Brevo Health live in
+   * the sheet.
+   */
+  const MOBILE_CHIP = { Inbox: 'Mail', Records: 'Records', Composer: 'Compose' }
+
   const openTab = async (label) => {
-    const btn = page.locator('.ecc__tab', { hasText: label }).first()
-    if (await btn.count() === 0) return false
-    await btn.click()
+    const desktop = page.locator('.ecc__tab', { hasText: label }).first()
+    if (await desktop.count()) {
+      await desktop.click()
+      await page.waitForTimeout(1800)
+      return true
+    }
+
+    const chipLabel = MOBILE_CHIP[label]
+    if (chipLabel) {
+      const chip = page.locator('.ecc__mtab', { hasText: chipLabel }).first()
+      if (await chip.count()) {
+        await chip.click()
+        await page.waitForTimeout(1800)
+        return true
+      }
+    }
+
+    // Everything else is in the Intelligence sheet.
+    const aux = page.locator('.ecc__mtab.is-aux').first()
+    if (await aux.count() === 0) return false
+    await aux.click()
+    await page.waitForTimeout(600)
+    const row = page.locator('.ecc__msheet-row', { hasText: label }).first()
+    if (await row.count() === 0) {
+      await page.locator('.ecc__msheet-scrim').click().catch(() => {})
+      return false
+    }
+    await row.click()
     await page.waitForTimeout(1800)
     return true
   }
@@ -202,7 +243,10 @@ async function runCell(width, theme) {
       emptyLabels: [...document.querySelectorAll('.ecc__empty-label')].map((e) => e.textContent.replace(/\s+/g, ' ').trim().slice(0, 140)),
       kpis: [...document.querySelectorAll('.ecc__kpi-value')].map((e) => e.textContent.trim()),
       kpiLabels: [...document.querySelectorAll('.ecc__kpi-label')].map((e) => e.textContent.trim()),
-      statusPills: [...document.querySelectorAll('.ecc__status-pill')].map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
+      /* Desktop masthead pills OR the mobile status line — §15 moved them, it
+         did not remove them, so the truth assertion reads both. */
+      statusPills: [...document.querySelectorAll('.ecc__status-pill, .ecc__mstatus-pill')]
+        .map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
       tableRows: document.querySelectorAll('.ecc__table tbody tr').length,
       firstEmailCell: txt('.ecc__table tbody tr td:nth-child(2)'),
       threadRows: document.querySelectorAll('.ecc__thread-list > div[class*="thread"]').length,
@@ -216,6 +260,11 @@ async function runCell(width, theme) {
   })
 
   // ── Overview
+  //
+  // §15 made Mail the mobile landing surface and moved Overview behind the
+  // Intelligence sheet, so this has to ASK for it. Probing at landing and then
+  // asserting "overview shows the corpus total" was testing the inbox.
+  await openTab('Overview')
   const ov = await probe()
   check('theme applied', ov.theme === theme, `${ov.theme}`)
   check('no page-wide horizontal overflow', ov.overflow === 0, `${ov.overflow}px`)
@@ -236,7 +285,7 @@ async function runCell(width, theme) {
 
   // ── Records
   await mark('records', async () => {
-    const btn = page.locator('.ecc__tab', { hasText: 'Records' }).first()
+    const btn = page.locator('.ecc__tab, .ecc__mtab', { hasText: 'Records' }).first()
     if (await btn.count()) {
       await btn.click()
       // Waits for CONTENT — rows, an empty state, or an error — not a timer.
@@ -308,9 +357,9 @@ async function runCell(width, theme) {
 
   // ── Composer — reachability and refusal only. The send control is NEVER clicked.
   await mark('composer', async () => {
-    const btn = page.locator('.ecc__tab', { hasText: 'Composer' }).first()
-    if (await btn.count()) {
-      await btn.click()
+    // Through `openTab`, which knows about both chromes. Clicking `.ecc__tab`
+    // directly here is what left the composer unmounted on mobile after §15.
+    if (await openTab('Composer')) {
       await page.waitForSelector('.ecc__composer', { timeout: 30_000 }).catch(() => {})
     }
   })
@@ -425,10 +474,11 @@ async function runCell(width, theme) {
     })
     await page.waitForSelector('.ecc', { timeout: 60_000 })
     await page.waitForTimeout(2200)
-    const btn = page.locator('.ecc__tab', { hasText: 'Records' }).first()
+    const btn = page.locator('.ecc__tab, .ecc__mtab', { hasText: 'Records' }).first()
     if (await btn.count()) { await btn.click(); await page.waitForTimeout(2600) }
     return page.evaluate(() => ({
-      subjectPill: document.querySelector('.ecc__status-pill.is-subject')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
+      subjectPill: document.querySelector('.ecc__status-pill.is-subject, .ecc__mstatus-pill.is-subject')
+        ?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
       sectionTitle: document.querySelector('.ecc__section-title')?.textContent?.replace(/\s+/g, ' ').trim() ?? null,
       rows: document.querySelectorAll('.ecc__table tbody tr').length,
       emails: [...document.querySelectorAll('.ecc__table tbody tr td:nth-child(2)')].map((e) => e.textContent.trim()),

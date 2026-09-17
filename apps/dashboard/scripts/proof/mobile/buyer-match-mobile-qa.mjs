@@ -29,7 +29,19 @@ await fs.mkdir(OUT, { recursive: true })
 const SUBJECT_A = { id: '24613730', label: 'Phoenix SFR', addressPart: 'Monterey' }
 const SUBJECT_B = { id: '239280459', label: 'Atlanta SFR', addressPart: 'Mozley' }
 const SUBJECT_EMPTY = { id: '2145766246', label: 'Spokane (run, 0 candidates)' }
-const SUBJECT_NO_RUN = { id: '278477219', label: 'KC (no run)' }
+/**
+ * REPOINTED. This was 278477219, which stopped being a no-run fixture the moment
+ * anything opened Buyer Match on it: the workspace auto-commissions a match run
+ * when a property has no candidates, so visiting the fixture destroys the
+ * fixture. (It was consumed exactly that way during the MOBILE-LOCK pass, by a
+ * desktop probe on the same property the Comps and Map checks use.)
+ *
+ * 256541080 has no row in `buyer_match_runs`, verified service-side. It carries
+ * the same risk, so treat a future failure here as "the fixture has been used"
+ * before treating it as a regression — and repoint rather than deleting the run,
+ * which is real engine output.
+ */
+const SUBJECT_NO_RUN = { id: '256541080', label: 'KC 1501 N 23rd (no run)' }
 
 const readSecret = async () => {
   for (const f of ['../api/.env.local', '../api/.env']) {

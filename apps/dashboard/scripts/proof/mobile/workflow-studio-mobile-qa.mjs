@@ -60,11 +60,24 @@ const SUBJECT_WITHOUT_AUTOMATION = 'wfproof:thread:definitely-no-automation'
 
 /** The studio's own bottom navigation. Every one must be touchable. */
 const DOCK_CONTROLS = [
-  ['dock canvas', 'button[aria-label="Canvas"]'],
+  /**
+   * MOBILE-LOCK §16 changed this dock.
+   *
+   *   'dock steps'  is NEW and is the mobile default — a workflow read as an
+   *                 ordered structure. The canvas is no longer what a phone
+   *                 opens on; §16 forbids that explicitly.
+   *   'dock canvas' gained a hint suffix, so its aria-label is now
+   *                 "Canvas — Full-screen graph".
+   *   'dock log'    is GONE. The mobile header already carries a Console
+   *                 toggle, so the dock was a second control for one surface —
+   *                 and six columns clipped every label. The header's Console
+   *                 control is asserted below instead.
+   */
+  ['dock steps', 'button[aria-label="Steps — Ordered structure"]'],
+  ['dock canvas', 'button[aria-label="Canvas — Full-screen graph"]'],
   ['dock flows', 'button[aria-label="Flows — Switch flow"]'],
   ['dock nodes', 'button[aria-label="Nodes — Add step"]'],
   ['dock inspect', 'button[aria-label="Node config"], button[aria-label="Inspect — Node config"]'],
-  ['dock log', 'button[aria-label="Log — Run log"]'],
 ]
 
 const HEADER_CONTROLS = [['workflow actions', 'button[aria-label="Workflow actions"]']]
@@ -213,10 +226,10 @@ const PROBE = () => {
 
     controls: Object.fromEntries(
       [['workflow actions', 'button[aria-label="Workflow actions"]'],
-       ['dock canvas', 'button[aria-label="Canvas"]'],
+       ['dock steps', 'button[aria-label="Steps — Ordered structure"]'],
+       ['dock canvas', 'button[aria-label="Canvas — Full-screen graph"]'],
        ['dock flows', 'button[aria-label="Flows — Switch flow"]'],
-       ['dock nodes', 'button[aria-label="Nodes — Add step"]'],
-       ['dock log', 'button[aria-label="Log — Run log"]']].map(([k, sel]) => [k, reachable(sel)]),
+       ['dock nodes', 'button[aria-label="Nodes — Add step"]']].map(([k, sel]) => [k, reachable(sel)]),
     ),
 
     horizontalOverflowPx: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
@@ -600,8 +613,12 @@ const runCell = async (browser, width, theme, canonical) => {
   check('a subject WITH automation shows its own workflow, not an empty state',
     withAutomation.emptyState === null,
     `empty state shown: ${withAutomation.emptyState}`)
-  check('a subject WITH automation renders its graph',
-    withAutomation.canvasNodes > 0, `${withAutomation.canvasNodes} nodes`)
+  /**
+   * §16 — a phone opens on the STRUCTURE, so the canvas has no nodes until it is
+   * asked for. The claim worth testing is that the subject's automation is
+   * rendered at all, which the hero assertion below carries. Asserting canvas
+   * nodes here would be asserting the very default §16 removed.
+   */
   check('a subject WITH automation names the test fixture, not the first catalog entry',
     /Runtime Proof/i.test(withAutomation.heroText ?? ''),
     `hero: ${String(withAutomation.heroText).slice(0, 120)}`)
