@@ -176,9 +176,21 @@ export const MobileNotificationCenter = ({ open, onClose }: MobileNotificationCe
 
   const grouped = useMemo(() => groupNotificationsByTime(filtered), [filtered])
 
-  const handleOpen = useCallback(async (item: NotificationEvent) => {
+  /**
+   * NAVIGATE FIRST, then record the read.
+   *
+   * This awaited `patch(id, 'mark_read')` before navigating, so the operator's tap
+   * was hostage to a write they did not ask for: measured on /map, tapping a row
+   * that plainly stated "Open campaign" left the URL on /map and the centre open,
+   * because the patch never settled. Marking read is bookkeeping; opening the
+   * entity is the operator's intent, and intent must not wait on bookkeeping.
+   *
+   * The patch still runs — fire-and-forget, with its own catch so an unreachable
+   * notifications service cannot surface as an unhandled rejection.
+   */
+  const handleOpen = useCallback((item: NotificationEvent) => {
     const href = resolveNotificationDestination(item)
-    await patch(item.id, 'mark_read')
+    void Promise.resolve(patch(item.id, 'mark_read')).catch(() => undefined)
     if (!href) return
     onClose()
     pushRoutePath(href)
@@ -250,7 +262,7 @@ export const MobileNotificationCenter = ({ open, onClose }: MobileNotificationCe
                       `is-${item.severity}`,
                       item.status === 'unread' && 'is-unread',
                     )}
-                    onClick={() => void handleOpen(item)}
+                    onClick={() => handleOpen(item)}
                   >
                     {/* Unread is a 6px rail, not a colour wash. §5 wants it obvious
                         without being loud, and a tinted row makes the severity

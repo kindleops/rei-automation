@@ -64,7 +64,8 @@
     "proof:shell-notifications": "node scripts/proof/mobile/shell-notifications-proof.mjs",
     "proof:mobile-launcher": "node scripts/proof/mobile/mobile-launcher-qa.mjs",
     "proof:mobile-shell": "node scripts/proof/mobile/mobile-shell-qa.mjs --label guard",
-    "proof:mobile-keyboard": "node scripts/proof/mobile/mobile-keyboard-qa.mjs"
+    "proof:mobile-keyboard": "node scripts/proof/mobile/mobile-keyboard-qa.mjs",
+    "proof:mobile-shell-contract": "node scripts/proof/mobile/mobile-shell-contract-qa.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
