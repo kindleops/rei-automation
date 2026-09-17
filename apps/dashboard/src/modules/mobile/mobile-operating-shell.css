@@ -235,15 +235,30 @@ html.is-mobile-layout {
      overflowing on the inbox, which carries two more controls than any other
      route: the text gives up its space first and the target never drops below
      the touch floor. */
+  /* The identity chip is the ONLY shrinkable item in the bar.
+     Measured at 390px on an inbox-family route, which carries the most controls
+     (queue, search, tasks, activity, notifications): 44 orb + 122 identity +
+     5x44 = 386px against a 370px inner width. With every item shrinkable by
+     default, flexbox took the 16px out of ALL of them and the 44px glyphs
+     collapsed into each other — on /analytics the queue icon rendered on top of
+     the word "Analytics". Pinning the icon buttons and letting only this one
+     give way takes it to 44px (icon-only) and the bar fits. */
   .nx-mobile-command-dock__btn--workspace {
     width: auto;
     min-width: 44px;
     max-width: 122px;
+    flex: 0 1 auto;
     grid-auto-flow: column;
     grid-template-columns: auto minmax(0, 1fr);
     justify-items: center;
     gap: 5px;
     padding: 0 8px 0 4px;
+    overflow: hidden;
+  }
+
+  .nx-mobile-command-dock__slot--kpi,
+  .nx-mobile-command-dock__btn:not(.nx-mobile-command-dock__btn--workspace) {
+    flex: 0 0 auto;
   }
 
   .nx-mobile-command-dock__identity {

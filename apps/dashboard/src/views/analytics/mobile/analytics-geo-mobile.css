@@ -1,0 +1,659 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   KPI INTELLIGENCE — MOBILE GEOGRAPHIC DRILL-DOWN
+   ══════════════════════════════════════════════════════════════════════════
+
+   §7's visual brief: cinematic and analytical, not cartoonish; a map that is a
+   meaningful part of the screen rather than a decorative thumbnail; compact
+   metric strips and elegant value hierarchy rather than giant KPI tiles.
+
+   Budget: the map gets 32vh, the headline value gets 30px of type and
+   everything else is an 11–13px row. There is exactly one large number on
+   screen at a time — the one for the scope you are standing in.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.geo {
+  position: absolute;
+  inset: var(--nx-mobile-chrome-top, 57px) 0 var(--nx-mobile-chrome-bottom, 22px) 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--nx-surface-0, #05070d);
+}
+
+/* ── Bar: breadcrumb + range ─────────────────────────────────────────────── */
+
+.geo__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 7px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.geo__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.geo__crumbs button,
+.geo__crumbs span {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.geo__crumbs .is-current { color: rgba(255, 255, 255, 0.95); }
+.geo__crumbs i { font-style: normal; color: rgba(255, 255, 255, 0.24); }
+
+.geo__ranges {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.geo__ranges button {
+  min-width: 38px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+
+.geo__ranges button.is-active {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* ── Metric rail ─────────────────────────────────────────────────────────── */
+
+.geo__metrics {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  /* An intentional horizontal rail — five metrics do not fit as text at 375px,
+     and §20 allows a carousel to scroll inside itself. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 9px 14px 10px;
+}
+
+.geo__metrics::-webkit-scrollbar { display: none; }
+
+.geo__metric {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.66);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.geo__metric.is-active {
+  border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.14);
+  color: var(--tone-primary, #5eead4);
+}
+
+/* Opt-outs are the one metric where more is worse; the active chip says so. */
+.geo__metric.is-inverse.is-active {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+}
+
+.geo__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: 18px;
+}
+
+/* ── Map ─────────────────────────────────────────────────────────────────── */
+
+.geo-map {
+  position: relative;
+  height: clamp(196px, 32vh, 280px);
+  margin: 0 0 4px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.07), transparent 62%),
+    #05070d;
+}
+
+/* ── A specificity trap worth naming ─────────────────────────────────────
+   `.nx-premium-inbox svg { width: 16px; height: 16px }` is a global icon rule,
+   and every workspace view renders INSIDE `.nx-premium-inbox`. At (0,1,1) it
+   outranks a bare `.geo-map__svg` (0,1,0), so an un-scoped inline SVG in any
+   mobile surface is silently crushed to a 16px square — which is exactly what
+   happened to the trend chart before this. Scoping under `.geo` takes these to
+   (0,2,0) without touching the icon rule that desktop depends on. */
+.geo .geo-map__svg { width: 100%; height: 100%; }
+
+.geo-map__state {
+  fill: rgba(255, 255, 255, 0.035);
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+  /* The camera move on drill-down. Fill transitions with it so a metric change
+     reads as a re-shade rather than a repaint. */
+  transition: fill 260ms ease, opacity 260ms ease, stroke 200ms ease;
+  cursor: default;
+}
+
+.geo-map__state.has-data { cursor: pointer; stroke: rgba(255, 255, 255, 0.22); }
+
+/* Active in the window, zero on THIS metric: outlined, not filled. */
+.geo-map__state.is-scoped {
+  cursor: pointer;
+  stroke: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.55);
+  stroke-width: 1.2;
+  fill: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.05);
+}
+.geo-map__state.is-dimmed { opacity: 0.2; }
+
+.geo-map__state.is-selected {
+  stroke: var(--tone-primary, #5eead4);
+  stroke-width: 2;
+  opacity: 1;
+}
+
+.geo-map__state:focus-visible { outline: 2px solid var(--tone-primary, #5eead4); outline-offset: 1px; }
+
+.geo-map__label text {
+  font-size: 13px;
+  font-weight: 700;
+  fill: rgba(255, 255, 255, 0.72);
+  paint-order: stroke;
+  stroke: rgba(4, 7, 13, 0.85);
+  stroke-width: 3;
+}
+
+.geo-map__label-value {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  fill: var(--tone-primary, #5eead4) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.geo-map__back {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+}
+
+.geo-map__loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Headline ────────────────────────────────────────────────────────────── */
+
+.geo__headline {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 12px 14px 6px;
+}
+
+.geo__headline > span {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.geo__headline > strong {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.97);
+}
+
+.geo__headline > small { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); }
+
+.geo__rate { padding: 4px 14px 2px; }
+
+.geo__rate-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.022);
+}
+
+.geo__rate-row span {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.geo__rate-row b {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.geo__rate-row em {
+  font-size: 10.5px;
+  font-style: normal;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: right;
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.geo__section { padding: 12px 14px 4px; }
+
+.geo__section h4 {
+  margin: 0 0 8px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.36);
+}
+
+.geo__rows {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  overflow: hidden;
+}
+
+.geo__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 10px 8px 11px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.geo__row:last-child { border-bottom: 0; }
+.geo__row:active { background: rgba(255, 255, 255, 0.055); }
+
+.geo__row-abbr {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.geo__row-copy {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.geo__row-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geo__row-copy small {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geo__row-value {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.geo__row-value b {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.geo__row-value em {
+  font-size: 10px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.geo__row svg { color: rgba(255, 255, 255, 0.26); }
+
+.geo__strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 7px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.geo__strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.geo__strip > div:last-child { border-right: 0; }
+
+.geo__strip span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.geo__strip b {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.geo__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  overflow: hidden;
+}
+
+.geo__facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.geo__facts dt {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.geo__facts dd { margin: 0; font-size: 12.5px; color: rgba(255, 255, 255, 0.9); }
+
+.geo__note,
+.geo__empty {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.geo__stamp {
+  margin: 16px 14px 0;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.geo__state {
+  margin: 10px 14px;
+  padding: 12px;
+  border-radius: 11px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.07);
+}
+
+.geo__state strong { display: block; font-size: 12.5px; color: #f59e0b; }
+.geo__state span { font-size: 11px; color: rgba(255, 255, 255, 0.55); }
+
+/* ── Chart ───────────────────────────────────────────────────────────────── */
+
+.geo-chart {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.geo-chart.is-loading,
+.geo-chart.is-empty {
+  display: grid;
+  place-items: center;
+  min-height: 108px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.geo-chart__readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px 4px;
+}
+
+.geo-chart__readout > div { display: flex; flex-direction: column; gap: 1px; }
+
+.geo-chart__readout span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.geo-chart__readout b {
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.geo-chart__readout time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.geo .geo-chart__svg {
+  display: block;
+  width: 100%;
+  height: 96px;
+  /* The scrub is horizontal; letting the browser pan vertically keeps the page
+     scrollable through the chart instead of trapping the finger in it. */
+  touch-action: pan-y;
+}
+
+.geo-chart__area { fill: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.16); }
+.geo-chart__area.is-inverse { fill: rgba(239, 68, 68, 0.14); }
+
+.geo-chart__line {
+  fill: none;
+  stroke: var(--tone-primary, #5eead4);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.geo-chart__line.is-inverse { stroke: #f87171; }
+
+.geo-chart__cursor {
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.geo-chart__dot {
+  fill: #fff;
+  stroke: var(--tone-primary, #5eead4);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.geo-chart__axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 11px 8px;
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.32);
+}
+
+/* ── Light ───────────────────────────────────────────────────────────────── */
+
+[data-nexus-theme='light'] {
+  .geo { background: #f6f8fb; }
+  .geo__bar { border-bottom-color: rgba(15, 23, 42, 0.08); }
+  .geo__crumbs button, .geo__crumbs span { color: rgba(15, 23, 42, 0.5); }
+  .geo__crumbs .is-current { color: rgba(15, 23, 42, 0.95); }
+  .geo__ranges { background: rgba(15, 23, 42, 0.05); }
+  .geo__ranges button { color: rgba(15, 23, 42, 0.5); }
+  .geo__ranges button.is-active { background: #ffffff; color: rgba(15, 23, 42, 0.95); }
+
+  .geo__metric {
+    border-color: rgba(15, 23, 42, 0.13);
+    background: #ffffff;
+    color: rgba(15, 23, 42, 0.66);
+  }
+
+  .geo-map {
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(var(--nexus-accent-rgb, 13, 148, 136), 0.08), transparent 62%),
+      #eef2f7;
+  }
+
+  .geo-map__state { fill: rgba(15, 23, 42, 0.05); stroke: rgba(15, 23, 42, 0.12); }
+  .geo-map__state.has-data { stroke: rgba(15, 23, 42, 0.22); }
+  .geo-map__state.is-scoped { stroke: rgba(var(--nexus-accent-rgb, 13, 148, 136), 0.6); }
+  .geo-map__label text { fill: rgba(15, 23, 42, 0.72); stroke: rgba(255, 255, 255, 0.9); }
+
+  .geo-map__back {
+    border-color: rgba(15, 23, 42, 0.14);
+    background: rgba(255, 255, 255, 0.9);
+    color: rgba(15, 23, 42, 0.84);
+  }
+
+  .geo-map__loading { color: rgba(15, 23, 42, 0.45); }
+  .geo__headline > span { color: rgba(15, 23, 42, 0.44); }
+  .geo__headline > strong { color: rgba(15, 23, 42, 0.95); }
+  .geo__headline > small { color: rgba(15, 23, 42, 0.5); }
+
+  .geo__rate-row,
+  .geo__rows,
+  .geo__strip,
+  .geo__facts,
+  .geo-chart {
+    border-color: rgba(15, 23, 42, 0.1);
+    background: #ffffff;
+  }
+
+  .geo__rate-row span { color: rgba(15, 23, 42, 0.55); }
+  .geo__rate-row b { color: rgba(15, 23, 42, 0.94); }
+  .geo__rate-row em { color: rgba(15, 23, 42, 0.45); }
+  .geo__section h4 { color: rgba(15, 23, 42, 0.42); }
+  .geo__row { border-bottom-color: rgba(15, 23, 42, 0.07); background: transparent; }
+  .geo__row:active { background: rgba(15, 23, 42, 0.04); }
+
+  .geo__row-abbr {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.7);
+  }
+
+  .geo__row-copy strong { color: rgba(15, 23, 42, 0.92); }
+  .geo__row-copy small { color: rgba(15, 23, 42, 0.48); }
+  .geo__row-value b { color: rgba(15, 23, 42, 0.94); }
+  .geo__row-value em { color: rgba(15, 23, 42, 0.45); }
+  .geo__strip > div { border-right-color: rgba(15, 23, 42, 0.07); }
+  .geo__strip span, .geo__facts dt { color: rgba(15, 23, 42, 0.42); }
+  .geo__strip b, .geo__facts dd { color: rgba(15, 23, 42, 0.92); }
+  .geo__facts > div { background: #ffffff; }
+  .geo__note, .geo__empty { color: rgba(15, 23, 42, 0.48); }
+  .geo__stamp { color: rgba(15, 23, 42, 0.36); }
+  .geo__state span { color: rgba(15, 23, 42, 0.58); }
+  .geo-chart__readout span { color: rgba(15, 23, 42, 0.42); }
+  .geo-chart__readout b { color: rgba(15, 23, 42, 0.95); }
+  .geo-chart__readout time { color: rgba(15, 23, 42, 0.5); }
+  .geo-chart__cursor { stroke: rgba(15, 23, 42, 0.24); }
+  .geo-chart__dot { fill: #ffffff; }
+  .geo-chart__axis { color: rgba(15, 23, 42, 0.4); }
+  .geo-chart.is-loading, .geo-chart.is-empty { color: rgba(15, 23, 42, 0.45); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .geo-map__state { transition: none; }
+}

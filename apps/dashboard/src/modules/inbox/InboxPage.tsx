@@ -300,6 +300,7 @@ const BUYER_MATCH_V4_ENABLED =
   Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.buyer.v4') !== '0')
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
+const AnalyticsGeoMobile = lazy(() => import('../../views/analytics/mobile/AnalyticsGeoMobile').then((m) => ({ default: m.AnalyticsGeoMobile })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
 const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
 const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })))
@@ -5486,7 +5487,19 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               * On the /analytics route that pause never lifted, leaving the
               * dashboard permanently blank.
               */}
-            <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={false} />
+            {/**
+              * §7 — on a phone this is the GEOGRAPHIC intelligence surface, not the
+              * war room's 25% desktop KPI rail.
+              *
+              * MetricsRail25 is a correct narrow desktop pane and was the only thing
+              * mobile could reach: a vertical stack of tiles with no map at all. The
+              * drill-down reads the same war-room endpoint, so the two surfaces
+              * cannot disagree about a number — they disagree only about what a
+              * phone should be shown first.
+              */}
+            {isMobile
+              ? <AnalyticsGeoMobile />
+              : <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={false} />}
           </WorkspaceSuspense>
         </section>
       )

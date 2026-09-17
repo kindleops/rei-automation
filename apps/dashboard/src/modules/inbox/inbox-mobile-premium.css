@@ -730,6 +730,21 @@ html.is-mobile-layout .nx-mobile-command-dock__btn {
   height: 38px !important;
   border-radius: 10px;
 }
+/* The identity chip is the ONE exception to the 38px square above.
+   That rule is `!important`, so it was silently crushing the active
+   application's name out of the bar — on /analytics the chip rendered as a bare
+   icon while 80px of the inner width sat unused. It carries a glyph AND a label,
+   so it sizes to content and caps instead.
+
+   Budget at 390px: 370 inner − 12 padding − 6 gaps − 44 orb − 5x38 icons = 118px
+   available; the chip needs ~94 for "Workflow Studio". It still shrinks to the
+   38px square before anything else does, which is the documented degradation. */
+html.is-mobile-layout .nx-mobile-command-dock__btn--workspace {
+  width: auto !important;
+  min-width: 38px !important;
+  max-width: 118px !important;
+}
+
 html.is-mobile-layout .nx-mobile-command-dock__btn::after {
   content: '';
   position: absolute;
