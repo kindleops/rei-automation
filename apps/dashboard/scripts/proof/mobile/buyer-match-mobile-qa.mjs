@@ -56,11 +56,26 @@ const readSecret = async () => {
 const secret = await readSecret()
 if (!secret) throw new Error('OPS_DASHBOARD_SECRET not found — canonical truth unreadable')
 
-const canonical = async (propertyId) => {
+/**
+ * A dev server compiling a route for the first time answers 502/503 for a few
+ * seconds, and this read is the harness's own source of truth — so a cold start
+ * used to abort the whole matrix with `candidates … -> HTTP 502` before a single
+ * assertion ran. Transport-level retry only: a 4xx is still a real failure and is
+ * raised immediately.
+ */
+const canonical = async (propertyId, attempt = 0) => {
   const res = await fetch(`${BASE}/api/cockpit/buyer-match/property/${propertyId}/candidates?limit=50`, {
     headers: { 'x-ops-dashboard-secret': secret },
   })
-  if (!res.ok) throw new Error(`candidates ${propertyId} -> HTTP ${res.status}`)
+  if (!res.ok) {
+    // Up to ~60s: a Next dev server can spend that long compiling a route on
+    // first hit, and this harness is frequently the first thing to touch it.
+    if (res.status >= 500 && attempt < 12) {
+      await new Promise((r) => setTimeout(r, 5000))
+      return canonical(propertyId, attempt + 1)
+    }
+    throw new Error(`candidates ${propertyId} -> HTTP ${res.status}`)
+  }
   const body = await res.json()
   const d = body.data ?? body
   return {
@@ -82,6 +97,21 @@ const canonical = async (propertyId) => {
  */
 const canonicalRunId = async (propertyId) => (await canonical(propertyId)).runId
 const canonicalNames = async (propertyId) => (await canonical(propertyId)).names
+
+/**
+ * Warm the deal-context route before the matrix.
+ *
+ * The subject header is hydrated from /api/cockpit/deal-context, which a Next dev
+ * server compiles on first hit — and the FIRST cell of the matrix was that first
+ * hit. The surface behaved correctly (it said "Loading property…" because it was
+ * loading), but the harness then measured a genuinely mid-flight state and
+ * reported it as a product failure. Warming it makes the matrix measure the
+ * product rather than the dev server's cold start; the request is a read and
+ * changes nothing.
+ */
+await fetch(`${BASE}/api/cockpit/deal-context/property/${SUBJECT_A.id}`, {
+  headers: { 'x-ops-dashboard-secret': secret },
+}).catch(() => undefined)
 
 const A = await canonical(SUBJECT_A.id)
 const B = await canonical(SUBJECT_B.id)
@@ -152,11 +182,48 @@ const runCell = async (width, theme) => {
     maps[bucket] = []
     const startedAt = Date.now()
     await page.goto(`${BASE}/buyer-match?property_id=${id}`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+    /**
+     * Wait for a SETTLED outcome, not for a fixed delay.
+     *
+     * The old wait only cleared "Loading canonical" and then slept 3.5s, which is
+     * enough on a warm dev server and not on a cold one — the first cell of a run
+     * (and the desktop cell) pays the route's first compile, so it measured a
+     * surface still showing "Loading property…" and reported nine product
+     * failures for a timing artifact. A settled surface is one that has cards, a
+     * subject address, or has said why it has neither.
+     */
     await page.waitForFunction(
-      () => !document.querySelector('.bmm__state')?.textContent?.includes('Loading canonical'),
-      undefined, { timeout: 60_000 },
+      () => {
+        const state = document.querySelector('.bmm__state')?.textContent ?? ''
+        if (/Loading canonical|Loading property/i.test(state)) return false
+
+        /**
+         * The SUBJECT settles independently of the candidates, and later: the
+         * property record is a separate read, so cards can be on screen while the
+         * header still says "Loading property…". Requiring only the cards is what
+         * left the first cell asserting against a half-hydrated surface.
+         */
+        const address = document.querySelector('.bmm__subject-address')?.textContent?.trim()
+        const subjectSettled = Boolean(address) && !/^Loading/i.test(address)
+        const hydrationFailed = /details unavailable/i.test(document.body.innerText)
+        if (!subjectSettled && !hydrationFailed) return false
+
+        if (document.querySelectorAll('.bmm__card').length > 0) return true
+        if (document.querySelectorAll('.aic-buyer-card__header').length > 0) return true
+        // An explicit no-run / no-buyers / error message is also settled.
+        return /no match run|returned no buyers|unavailable|could not/i.test(state)
+      },
+      /**
+       * 120s, because on a COLD dev server this page waits on two routes being
+       * compiled for the first time (the candidates read and deal-context), and
+       * 60s was not enough for both — the harness gave up mid-hydration and
+       * reported "Loading property…" as a product failure. Measured directly:
+       * with a 30s settle the same surface shows the real address and 25 cards.
+       * On a warm server this returns in well under a second.
+       */
+      undefined, { timeout: 120_000 },
     ).catch(() => {})
-    await page.waitForTimeout(3500)
+    await page.waitForTimeout(1500)
     const elapsedMs = Date.now() - startedAt
     return Object.assign({ elapsedMs }, await page.evaluate(() => ({
       address: document.querySelector('.bmm__subject-address')?.textContent?.trim() ?? null,
@@ -351,7 +418,14 @@ async function runDesktopCell() {
   const runBefore = await canonicalRunId(SUBJECT_A.id)
   await page.goto(`${BASE}/buyer-match?property_id=${SUBJECT_A.id}`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
   await page.waitForSelector('.aic-buyer-list', { timeout: 60_000 }).catch(() => {})
-  await page.waitForTimeout(6000)
+  // Same settle rule as the mobile cells: a cold first compile made this report
+  // "0 cards" for a workspace that renders 25 a second later.
+  await page.waitForFunction(
+    () => document.querySelectorAll('.aic-buyer-card__header').length > 0
+      || Boolean(document.querySelector('.aic-buyer-empty, .bmm__state')),
+    undefined, { timeout: 60_000 },
+  ).catch(() => {})
+  await page.waitForTimeout(2500)
   const d = await page.evaluate(() => ({
     cards: document.querySelectorAll('.aic-buyer-card__header').length,
     toolbarCount: document.querySelector('.aic-buyer-toolbar__count')?.textContent?.trim() ?? null,

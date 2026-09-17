@@ -63,6 +63,17 @@ export function BuyerMatchSubjectPage() {
   const [subject, setSubject] = useState<BuyerMatchSubject | null>(() => resolveBuyerMatchSubject())
   const [property, setProperty] = useState<HydratedProperty | null>(null)
   const [hydrationFailed, setHydrationFailed] = useState<string | null>(null)
+  /**
+   * §21 — LOADING AND FAILED ARE DIFFERENT CLAIMS.
+   *
+   * The header's address fell back to the literal string 'Loading property…'
+   * whenever `property` was null, and a FAILED hydration with no address hint
+   * leaves it null. So a property whose context read had already failed sat on
+   * "Loading property…" for as long as the operator looked at it, while a
+   * separate block below said the details were unavailable. Measured against a
+   * cold API: the header never stopped claiming it was loading.
+   */
+  const [hydrating, setHydrating] = useState(false)
 
   /**
    * §4 — A -> B. The locator broadcasts on selection, so switching subject in
@@ -82,6 +93,7 @@ export function BuyerMatchSubjectPage() {
   const hydrate = useCallback(async (propertyId: string, addressHint: string | null) => {
     setProperty(null)
     setHydrationFailed(null)
+    setHydrating(true)
     try {
       // Same envelope shape: res.data is the BODY, so the payload is one level
       // deeper. Reading res.data directly yielded "Property address unavailable"
@@ -118,8 +130,23 @@ export function BuyerMatchSubjectPage() {
       setProperty(addressHint ? {
         property_id: propertyId, address: addressHint, market: '', zip: '', property_type: '',
       } : null)
+    } finally {
+      setHydrating(false)
     }
   }, [])
+
+  /**
+   * What the header may claim about the subject, in order of what is known:
+   * the real address, the locator's hint, an honest in-flight state, or an
+   * honest failure naming the id that could not be resolved.
+   */
+  const headerAddress = property?.address
+    ?? subject?.addressHint
+    ?? (hydrating
+      ? 'Loading property…'
+      : hydrationFailed
+        ? `Property ${subject?.propertyId ?? ''} — address unavailable`.trim()
+        : 'Loading property…')
 
   useEffect(() => {
     if (!subject?.propertyId) return
@@ -165,7 +192,7 @@ export function BuyerMatchSubjectPage() {
         <BuyerMatchMobile
           key={subject.propertyId}
           propertyId={subject.propertyId}
-          address={property?.address ?? subject.addressHint ?? 'Loading property…'}
+          address={headerAddress}
           market={property?.market}
           propertyType={property?.property_type}
           estimatedValue={property?.estimated_value ?? null}
