@@ -402,8 +402,77 @@ const QUEUE_RUN: CronJob = {
   path: "/api/internal/queue/run",
 };
 
+/**
+ * WORKFLOW RUNTIME TICK -- the workflow scheduler.
+ *
+ * PRODUCTION-COMMISSIONING-1 moved this here from apps/api/vercel.json. It was
+ * the ONLY thing driving Workflow V2: one tick bridges canonical
+ * `automation_events` into the workflow inbox, then executes whatever
+ * `workflow_scheduled_tasks` became due. Without it a workflow `wait` node
+ * never wakes, so "future work schedules itself" was untrue.
+ *
+ * Send-incapable, structurally and on two independent grounds:
+ *   - runWorkflowRuntimeTick returns live_send_blocked:true and
+ *     no_outbound_messages_sent:true; workflow-generated communication is
+ *     written `no_send` and the queue processor refuses it;
+ *   - matchDefinitions requires `status = 'active'`. The 14 real acquisition
+ *     workflows are `published`, so a bridged event reaches the matcher and the
+ *     matcher selects nothing until an operator arms a definition.
+ *
+ * `workflow_event_bridge_mode` (default `active_only`) is the kill switch.
+ */
+const WORKFLOW_RUNTIME_TICK: CronJob = {
+  id: "workflow_runtime_tick",
+  enabledBy: "CRON_WORKFLOW_RUNTIME_ENABLED",
+  path: "/api/internal/workflows/runtime-tick",
+};
+
+/**
+ * QUEUE RECONCILIATION -- send-incapable queue state repair.
+ *
+ * Also moved from apps/api/vercel.json. Keeps send_queue lifecycle state
+ * honest (stale-expiration containment); it writes terminal//delivered states
+ * that are disjoint from the statuses the processor claims, so it cannot
+ * produce a claimable row.
+ */
+const QUEUE_RECONCILE: CronJob = {
+  id: "queue_reconcile",
+  enabledBy: "CRON_QUEUE_RECONCILE_ENABLED",
+  path: "/api/internal/queue/reconcile",
+};
+
+/**
+ * THE ONE GOVERNED PRODUCTION SCHEDULE.
+ *
+ * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
+ * ALSO running 15 crons against this same production database from
+ * apps/api/vercel.json -- including `/queue/run` every minute, plus
+ * `/autopilot/run`, `/campaigns/feed`, `/campaigns/activate-due`,
+ * `/queue/retry` and the two seller-flow follow-up legs, every one of which
+ * this table deliberately excludes. Proven by heartbeat cadence: keys written
+ * only by Vercel-only routes advanced on exactly their vercel.json intervals
+ * while running a build 135 commits behind production.
+ *
+ * Two executors on one send queue is a duplicate-live-send hazard, and the
+ * stale one carried jobs that were never granted production authority. The
+ * crons are now removed from vercel.json so this table is the only scheduler,
+ * and the two lanes worth keeping were moved here under their own flags.
+ *
+ * Still deliberately absent (each can cause a seller-visible send or arm a row
+ * a later processor would send): queue/retry, queue/force-due, campaigns/feed,
+ * campaigns/activate-due, campaigns/recover-stale-expired, autopilot/run,
+ * outbound/feed-master-owners, seller-flow/flush-inbound-bursts,
+ * seller-flow/recover-inbound, webhooks/recover-inbound, offers/recalculate.
+ * Campaign feed/activation are commissioned with the campaign arming step, not
+ * here.
+ */
 const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
-  "*/5 * * * *": [SELLER_STATE_RECONCILIATION, DELIVERY_RECONCILIATION],
+  "*/5 * * * *": [
+    SELLER_STATE_RECONCILIATION,
+    DELIVERY_RECONCILIATION,
+    WORKFLOW_RUNTIME_TICK,
+    QUEUE_RECONCILE,
+  ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule
   // is send-capable.

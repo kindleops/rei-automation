@@ -97,6 +97,14 @@
     // queue_processor_mode, queue_emergency_stop_at) still decide whether any
     // individual row is allowed to leave, and they outrank this.
     "CRON_QUEUE_RUN_ENABLED": "true",
+    // PRODUCTION-COMMISSIONING-1. Both moved here from apps/api/vercel.json,
+    // whose crons are now removed so this Worker is the ONLY scheduler touching
+    // the production database. Both lanes are send-incapable: the workflow tick
+    // returns live_send_blocked/no_outbound_messages_sent and its matcher needs
+    // status='active' (the 14 real workflows are 'published'); queue reconcile
+    // writes only terminal/delivered states, disjoint from claimable ones.
+    "CRON_WORKFLOW_RUNTIME_ENABLED": "true",
+    "CRON_QUEUE_RECONCILE_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
