@@ -14,10 +14,27 @@ const WORKER = new URL("../../../../infra/cloudflare/worker/index.ts", import.me
 const STAGING = new URL("../../../../infra/cloudflare/wrangler.jsonc", import.meta.url);
 const PRODUCTION = new URL("../../../../infra/cloudflare/wrangler.production.jsonc", import.meta.url);
 
-// Reconciliation lanes. Neither can produce a dispatchable send_queue row.
+// Reconciliation lanes. None can produce a dispatchable send_queue row.
+//
+// PRODUCTION-COMMISSIONING-1 added the last two, both moved off
+// apps/api/vercel.json when its crons were removed so this Worker became the
+// only scheduler touching the production database. Each is send-incapable for a
+// stated structural reason, not because a flag happens to be off:
+//
+//   workflows/runtime-tick  runWorkflowRuntimeTick returns live_send_blocked
+//                           and no_outbound_messages_sent; workflow-generated
+//                           communication is written `no_send` and the queue
+//                           processor refuses it. Independently,
+//                           matchDefinitions requires status='active' and the
+//                           14 real acquisition workflows are 'published'.
+//   queue/reconcile         writes only terminal/delivered statuses, which are
+//                           disjoint from the five the processor claims, so it
+//                           cannot produce a claimable row.
 const RECONCILIATION_JOB_PATHS = [
   "/api/internal/seller-flow/reconcile-state",
   "/api/internal/webhooks/recover-delivery",
+  "/api/internal/workflows/runtime-tick",
+  "/api/internal/queue/reconcile",
 ];
 
 // THE ONE SEND-CAPABLE JOB, commissioned by explicit operator authorization.
@@ -182,8 +199,12 @@ test("production declares the reconciliation and send schedules, and only approv
     [
       "CRON_DELIVERY_RECONCILE_ENABLED",
       "CRON_ENABLED",
+      // PRODUCTION-COMMISSIONING-1. Both send-incapable; see
+      // RECONCILIATION_JOB_PATHS for the structural reason each one is.
+      "CRON_QUEUE_RECONCILE_ENABLED",
       "CRON_QUEUE_RUN_ENABLED",
       "CRON_SELLER_STATE_RECONCILE_ENABLED",
+      "CRON_WORKFLOW_RUNTIME_ENABLED",
     ],
     `unexpected enabled cron flags: ${enabled.join(", ")}`
   );
