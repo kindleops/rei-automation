@@ -29,7 +29,9 @@ import {
   parseInternalProofSession,
 } from "@/lib/domain/queue/internal-proof-session.js";
 
-const PINNED_RECIPIENT = "+16128072000";
+// Derived from the pin. The sib:* burst ids below are HISTORICAL record
+// identifiers for the preserved 2026-08-03 incident burst and stay literal.
+const PINNED_RECIPIENT = INTERNAL_PROOF_PINNED.recipient;
 // Derived from the PIN, never repeated. When INTERNAL_PROOF_PINNED.sender was
 // repointed (the original was on sms_blocked_sender_numbers) this file still
 // hardcoded the old number and built sessions the gate correctly rejected.

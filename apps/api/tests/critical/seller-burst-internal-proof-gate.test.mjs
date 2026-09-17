@@ -60,7 +60,7 @@ test("thread-scoped gate: internal_proof engages only internal phones; enabled e
 
   assert.equal(
     isSellerInboundBurstEnabledForThread({
-      thread_key: "+16128072000",
+      thread_key: INTERNAL_PROOF_PINNED.recipient,
       env: { SELLER_INBOUND_BURST_ENABLED: "internal_proof" },
       isInternalPhone: internal,
     }),
@@ -85,7 +85,7 @@ test("thread-scoped gate: internal_proof engages only internal phones; enabled e
   );
   assert.equal(
     isSellerInboundBurstEnabledForThread({
-      thread_key: "+16128072000",
+      thread_key: INTERNAL_PROOF_PINNED.recipient,
       env: {},
       isInternalPhone: internal,
     }),
@@ -111,7 +111,7 @@ test("thread-scoped gate: internal_proof engages only internal phones; enabled e
 
 const PAYLOAD = {
   SmsMessageSid: "SMBURSTGATE1",
-  From: "+16128072000",
+  From: INTERNAL_PROOF_PINNED.recipient,
   To: INTERNAL_PROOF_PINNED.sender,
   Body: "internal proof fragment",
   SmsStatus: "received",
@@ -226,7 +226,8 @@ test("engaged internal_proof gate yields a thread-scoped, time-floored activatio
   assert.ok(scope, "an engaged internal_proof gate must carry an activation scope");
   assert.equal(scope.authorized, true);
   assert.equal(scope.global, false, "internal_proof must never assert global activation");
-  assert.deepEqual(scope.thread_keys, ["+16128072000"]);
+  // Thread scope must be the PINNED recipient, whatever it currently is.
+  assert.deepEqual(scope.thread_keys, [INTERNAL_PROOF_PINNED.recipient]);
   assert.ok(scope.min_first_received_at, "a message-time floor is required");
   assert.ok(scope.min_created_at, "a row-creation floor is required");
   assert.equal(scope.session_id, "proof-1");

@@ -46,6 +46,10 @@ export const INTERNAL_PROOF_SESSION_MAX_MINUTES = 240;
  * and then refused at dispatch by the sender block, so the designed canary
  * could not run at all.
  *
+ * RECIPIENT repointed 2026-09-17 to +13055376631 at operator direction.
+ * +16128072000 returned `SEND FAILED - NO SID` twice from two different
+ * senders while the provider was healthy, so it is treated as unreachable.
+ *
  * Repointed to +14693131600 rather than unblocking +16128060495 — the block
  * list is left exactly as it is.
  *
@@ -69,7 +73,7 @@ export const INTERNAL_PROOF_SESSION_MAX_MINUTES = 240;
  * other recipient, sender or campaign remains invalid in its entirety.
  */
 export const INTERNAL_PROOF_PINNED = Object.freeze({
-  recipient: "+16128072000",
+  recipient: "+13055376631",
   sender: "+14693131600",
   campaign_id: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
 });

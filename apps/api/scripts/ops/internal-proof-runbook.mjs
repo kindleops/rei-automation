@@ -69,7 +69,7 @@ import { createClient } from "@supabase/supabase-js";
 export const PINNED = {
   row: "4d211395-bc7b-4bfe-8afb-16a329e636a4",
   campaign: "b7c9a000-7ad3-468b-9b9b-4647dbefc35f",
-  recipient: "+16128072000",
+  recipient: "+13055376631",
   sender: "+14693131600",
   host: "https://ops.leadcommand.ai",
 };

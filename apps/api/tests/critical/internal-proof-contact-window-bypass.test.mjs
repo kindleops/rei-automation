@@ -33,7 +33,9 @@ import {
 const NOW = "2026-08-01T05:30:00.000Z";
 const CAMPAIGN = "b7c9a000-7ad3-468b-9b9b-4647dbefc35f";
 const PINNED_ROW = "4d211395-bc7b-4bfe-8afb-16a329e636a4";
-const RECIPIENT = "+16128072000";
+// Derived from the pin. The sib:* burst ids below are HISTORICAL record
+// identifiers for the preserved 2026-08-03 incident burst and stay literal.
+const RECIPIENT = INTERNAL_PROOF_PINNED.recipient;
 // Derived from the PIN, never repeated. When INTERNAL_PROOF_PINNED.sender was
 // repointed (the original was on sms_blocked_sender_numbers) this file still
 // hardcoded the old number and built sessions the gate correctly rejected.

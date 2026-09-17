@@ -16,6 +16,23 @@ export const INTERNAL_TEST_PHONE_SET = new Set([
   // enqueue-time window exemption additionally requires an exact
   // campaign + target + recipient + sender pin AND a live scoped authorization.
   "+13059807795", // Approved internal canary recipient (Offer Authority opener proof)
+  /**
+   * Operator-designated replacement canary handset (2026-09-17). +16128072000
+   * returned `SEND FAILED - NO SID` twice, on 09-07 and 09-17, from two
+   * DIFFERENT senders, while the provider itself was healthy (505 sends in the
+   * prior 30 days), so the fault tracked the recipient rather than the sender.
+   *
+   * Registering it here is what makes excludeInternalCanaryRows keep it out of
+   * KPIs and what lets isInternalTestPhone admit it; as the note above says,
+   * registration alone grants NOTHING at dispatch.
+   *
+   * It carries prior two-way traffic, and that traffic is test traffic rather
+   * than a seller conversation: every message_events row has master_owner_id,
+   * prospect_id and property_id NULL, it is absent from the 169k-row `phones`
+   * graph, it has never been a campaign_target, and on 2026-09-10 it INITIATED
+   * contact. Campaign-contacted sellers are graph-linked; this is not.
+   */
+  "+13055376631", // Approved internal canary recipient (commissioning 1B)
 ]);
 
 /**
