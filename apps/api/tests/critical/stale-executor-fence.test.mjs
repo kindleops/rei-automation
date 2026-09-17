@@ -35,17 +35,43 @@ import {
  * (infra/cloudflare/worker/index.ts). The Vercel runtime uses neither, and
  * Vercel injects VERCEL_ENV itself, so it resolves to `vercel:production`.
  *
- * HONEST LIMIT OF THIS FENCE: it is CONFIGURATIONAL, not cryptographic. Adding
- * DEPLOYMENT_PROVIDER=cloudflare to that project's environment variables would
- * forge it. What the fence guarantees is that restoring BILLING alone cannot
- * resurrect the executor — billing state is not an input to the decision — and
- * that resurrection now requires a deliberate, visible configuration change
- * rather than happening silently. The durable removals (delete the project, or
- * strip its Supabase/TextGrid credentials) remain the stronger step and need
- * access this session does not have.
+ * WHAT THIS FENCE DOES NOT DO — corrected after tracing it properly.
  *
- * ACCEPTANCE: even if Vercel billing returns tomorrow, its scheduled executor
- * cannot dispatch the send queue or run a scheduled mutation.
+ * It does NOT reach the existing stale Vercel deployment. That deployment
+ * serves its OWN 9-day-old build, which does not contain this check, and its
+ * cron calls ITSELF rather than the governed API. No code written here can be
+ * executed by a build that predates it. So this fence protects the GOVERNED
+ * path: it denies Cloudflare staging (which shares the production database and
+ * defaults to DEPLOYMENT_ENV=staging) and any future non-governed redeploy of
+ * the current code. That is its real and narrower value.
+ *
+ * WHAT ACTUALLY CONTAINS THE STALE EXECUTOR TODAY is the database, not this
+ * file. queue_atomic_claim_send_row calls queue_execution_mode_normalized() and
+ * queue_processor_mode_normalized(), which read system_control inside SQL and
+ * DEFAULT CLOSED ('stopped' / 'off'). Every claim passes through them whoever
+ * calls, so while queue_execution_mode = scoped_canary_only an unrestricted
+ * claim from ANY deployment — including the stale one — is refused with
+ * queue_execution_mode_scoped_canary_only.
+ *
+ * That property is deliberately NOT asserted here. It was verified against
+ * production on 2026-09-17 by reading pg_get_functiondef for all three
+ * routines, and it lives only in the database: none of them appears in
+ * supabase/migrations (the repo holds 7 migrations against prod's ~135 — the
+ * known divergence). A test asserting it from this checkout would have to
+ * either reach production or match a file that does not exist, so an earlier
+ * version of this file failed honestly and was removed rather than weakened
+ * into something that passes without checking anything.
+ *
+ * THE ORDERING CONSTRAINT THAT FOLLOWS, and it is hard: that containment ends
+ * the moment queue_execution_mode = 'normal', which live sending requires. A
+ * resurrected stale executor could then claim and send using its own
+ * SUPABASE_SERVICE_ROLE_KEY and TEXTGRID_AUTH_TOKEN. The Vercel deployment must
+ * therefore be genuinely removed — project deleted, env stripped, or the
+ * service-role key rotated — BEFORE execution_mode goes to 'normal'. This fence
+ * is not a substitute for that step.
+ *
+ * It is also configurational, not cryptographic: adding
+ * DEPLOYMENT_PROVIDER=cloudflare to that project's env would forge it.
  */
 
 const VERCEL_STALE_ENV = {
@@ -140,9 +166,9 @@ test("the fence denies a Vercel-shaped identity and admits the governed one", ()
   assert.equal(decide({ NODE_ENV: "test" }), true, "test runtime must remain allowed");
 });
 
-test("restoring Vercel billing cannot re-arm the executor", () => {
-  // The acceptance condition, stated as an assertion. Billing state is not an
-  // input to the decision at all — which is the point.
+test("billing state is not an input to the governed-provider decision", () => {
+  // Narrowly what it says. This does NOT claim the stale deployment is fenced:
+  // that build predates this check and cannot execute it. See the header.
   for (const billing of [{}, { VERCEL_DEPLOYMENT_DISABLED: "false" }]) {
     const id = resolveRuntimeIdentity({ ...VERCEL_STALE_ENV, ...billing });
     const governed =
@@ -150,3 +176,4 @@ test("restoring Vercel billing cannot re-arm the executor", () => {
     assert.equal(governed, false);
   }
 });
+
