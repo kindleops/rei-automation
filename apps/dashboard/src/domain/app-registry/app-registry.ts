@@ -373,7 +373,13 @@ export const NEXUS_APPS: NexusApp[] = [
     shortcut: 'W',
     badge: null,
     context: {},
-    mobileCaveat: 'Canvas editing is desktop-only for now',
+    /**
+     * The caveat read "Canvas editing is desktop-only for now" and is gone: §16's
+     * mobile model is the ordered STRUCTURE view, which is now what a phone opens
+     * on, with step inspection, add-step and the node palette all reachable — and
+     * the canvas itself available as an explicitly entered full-screen mode that
+     * pans and drags on pointer events (so it works under a finger).
+     */
   },
   {
     id: 'closing-desk',

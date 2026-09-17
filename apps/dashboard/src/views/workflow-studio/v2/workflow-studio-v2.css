@@ -3431,6 +3431,10 @@
   backdrop-filter: blur(22px) saturate(1.55);
 }
 
+/* FIVE columns. Steps joined the dock (§16) and Log left it — the mobile header
+   already carries a Console toggle, so the dock was showing a second control for
+   one surface. At six columns every label clipped ("CANVA", "NSPEC"); at five,
+   390px − 20 padding − 8 inner = 362 / 5 = ~69px per button. */
 .wfs2-mobile-dock__inner {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3454,11 +3458,16 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   cursor: pointer;
+  /* Clip rather than reflow: a wrapped label grows the dock, and the dock's
+     height is part of the bottom safe-area contract. */
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 0 2px;
 }
 
 .wfs2-mobile-dock__icon {
@@ -3897,4 +3906,262 @@
 .wfs2-activity__empty {
   font-size: 11px;
   color: var(--wfs2-text-muted);
+}
+/* ══════════════════════════════════════════════════════════════════════════
+   WORKFLOW — MOBILE STRUCTURED VIEW (§16)
+   ══════════════════════════════════════════════════════════════════════════
+   A workflow is an ordered thing before it is a spatial one. This is that
+   order: a rail with a dot per step, the node type under the label, the
+   runtime's wait and conditions in words, and any fork stated as named paths.
+
+   No canvas geometry, no zoom, no pan. The canvas is one tap away and gets the
+   whole stage when it is asked for.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.wfs2-struct {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.wfs2-struct__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.wfs2-struct__head strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.wfs2-struct__head small { font-size: 11px; color: rgba(255, 255, 255, 0.45); }
+
+.wfs2-struct__canvas-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+}
+
+.wfs2-struct__list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0 4px;
+}
+
+.wfs2-struct__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px 10px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wfs2-struct__step:active { background: rgba(255, 255, 255, 0.045); }
+.wfs2-struct__step.is-selected { background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.08); }
+.wfs2-struct__step.is-disabled { opacity: 0.5; }
+
+/* The rail is the sequence made visible: a dot per step, joined by a line. */
+.wfs2-struct__rail {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: stretch;
+  width: 26px;
+}
+
+.wfs2-struct__dot {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.4);
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.1);
+  color: var(--tone-primary, #5eead4);
+}
+
+.wfs2-struct__line {
+  flex: 1 1 auto;
+  width: 1px;
+  min-height: 12px;
+  margin-top: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.wfs2-struct__copy {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wfs2-struct__title { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+
+.wfs2-struct__title strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.93);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfs2-struct__off {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #f59e0b;
+}
+
+.wfs2-struct__copy > small {
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.wfs2-struct__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.wfs2-struct__branches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 5px;
+  padding-left: 9px;
+  border-left: 1px solid rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.3);
+}
+
+.wfs2-struct__branches em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--tone-primary, #5eead4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wfs2-struct__step > svg { flex: 0 0 auto; margin-top: 5px; color: rgba(255, 255, 255, 0.24); }
+
+.wfs2-struct__add {
+  margin: 6px 14px calc(var(--nx-mobile-safe-bottom, 0px) + 14px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+}
+
+.wfs2-struct__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 100%;
+  min-height: 200px;
+  padding: 30px 26px;
+  text-align: center;
+}
+
+.wfs2-struct__state strong { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
+.wfs2-struct__state span { font-size: 11.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.48); }
+
+.wfs2-struct__state button {
+  margin-top: 6px;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.wfs2-struct__spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--tone-primary, #5eead4);
+  animation: wfs2-struct-spin 760ms linear infinite;
+}
+
+@keyframes wfs2-struct-spin { to { transform: rotate(360deg); } }
+
+[data-nexus-theme='light'] {
+  .wfs2-struct__head { border-bottom-color: rgba(15, 23, 42, 0.08); }
+  .wfs2-struct__head strong { color: rgba(15, 23, 42, 0.94); }
+  .wfs2-struct__head small { color: rgba(15, 23, 42, 0.5); }
+
+  .wfs2-struct__canvas-btn {
+    border-color: rgba(15, 23, 42, 0.14);
+    background: #ffffff;
+    color: rgba(15, 23, 42, 0.82);
+  }
+
+  .wfs2-struct__step:active { background: rgba(15, 23, 42, 0.04); }
+  .wfs2-struct__title strong { color: rgba(15, 23, 42, 0.92); }
+  .wfs2-struct__copy > small { color: rgba(15, 23, 42, 0.42); }
+  .wfs2-struct__meta { color: rgba(15, 23, 42, 0.55); }
+  .wfs2-struct__line { background: rgba(15, 23, 42, 0.14); }
+  .wfs2-struct__add { border-color: rgba(15, 23, 42, 0.2); color: rgba(15, 23, 42, 0.78); }
+  .wfs2-struct__state strong { color: rgba(15, 23, 42, 0.86); }
+  .wfs2-struct__state span { color: rgba(15, 23, 42, 0.52); }
+
+  .wfs2-struct__state button {
+    border-color: rgba(15, 23, 42, 0.16);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.88);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wfs2-struct__spinner { animation-duration: 2.4s; }
 }

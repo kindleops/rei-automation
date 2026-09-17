@@ -6,7 +6,12 @@ import { Icon } from '../../../shared/icons'
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
-export type WorkflowMobilePanel = 'canvas' | 'workflows' | 'nodes' | 'inspect' | 'console'
+/**
+ * `steps` is the mobile DEFAULT (§16): a workflow read as an ordered structure.
+ * `canvas` remains, as an explicitly entered full-screen visual mode rather than
+ * the thing a 390px screen opens on.
+ */
+export type WorkflowMobilePanel = 'steps' | 'canvas' | 'workflows' | 'nodes' | 'inspect' | 'console'
 
 interface WorkflowMobileHeaderProps {
   detail: WorkflowDetail | null
@@ -120,14 +125,21 @@ interface WorkflowMobileDockProps {
 }
 
 const DOCK_ITEMS: Array<{ id: WorkflowMobilePanel; label: string; icon: 'grid' | 'layers' | 'bolt' | 'settings' | 'activity' }> = [
+  { id: 'steps', label: 'Steps', icon: 'layers' },
   { id: 'canvas', label: 'Canvas', icon: 'grid' },
   { id: 'workflows', label: 'Flows', icon: 'layers' },
   { id: 'nodes', label: 'Nodes', icon: 'bolt' },
   { id: 'inspect', label: 'Inspect', icon: 'settings' },
-  { id: 'console', label: 'Log', icon: 'activity' },
+  /* 'console' is deliberately NOT a dock item. The mobile header already carries
+     a Console toggle, and two controls for one surface is the duplication this
+     pass exists to remove — it also took the dock to six columns, where every
+     label clipped ("CANVA", "NSPEC"). The panel type still exists; the header
+     owns it. */
 ]
 
 const DOCK_HINTS: Partial<Record<WorkflowMobilePanel, string>> = {
+  steps: 'Ordered structure',
+  canvas: 'Full-screen graph',
   workflows: 'Switch flow',
   nodes: 'Add step',
   inspect: 'Node config',

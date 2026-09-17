@@ -56,6 +56,7 @@ import {
   WorkflowMobileSheet,
   type WorkflowMobilePanel,
 } from './WorkflowMobileStudio'
+import { WorkflowMobileStructure } from './WorkflowMobileStructure'
 import './workflow-studio-v2.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -137,7 +138,11 @@ export const WorkflowStudioV2 = ({
   const [renameTarget, setRenameTarget] = useState<Workflow | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Workflow | null>(null)
-  const [mobilePanel, setMobilePanel] = useState<WorkflowMobilePanel>('canvas')
+  /**
+   * §16 — a phone opens on the ordered STRUCTURE, not the node canvas. The canvas
+   * is reached deliberately, from the dock or from the structure header.
+   */
+  const [mobilePanel, setMobilePanel] = useState<WorkflowMobilePanel>('steps')
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
 
   const { isMobile } = useBreakpoint()
@@ -534,10 +539,10 @@ export const WorkflowStudioV2 = ({
       setConsoleOpen(true)
       return
     }
-    if (panel === 'canvas') setConsoleOpen(false)
+    if (panel === 'canvas' || panel === 'steps') setConsoleOpen(false)
   }
 
-  const closeMobileSheet = () => setMobilePanel('canvas')
+  const closeMobileSheet = () => setMobilePanel('steps')
 
   const sharedBanners = (
     <>
@@ -680,8 +685,22 @@ export const WorkflowStudioV2 = ({
                   : 'This seller is not enrolled in any workflow. Pick a flow below to see the automation library.'}
               </p>
             </div>
-          ) : (
+          ) : mobilePanel === 'canvas' ? (
+            /* The advanced visual mode. Entered on purpose, and the only mobile
+               state that gives the whole stage to a pan-and-zoom surface. */
             canvasBlock
+          ) : (
+            <WorkflowMobileStructure
+              detail={selected}
+              selectedStepId={selectedNodeId}
+              loading={loading}
+              onSelectStep={(id) => {
+                setSelectedNodeId(id)
+                setMobilePanel('inspect')
+              }}
+              onOpenCanvas={() => setMobilePanel('canvas')}
+              onAddStep={() => setMobilePanel('nodes')}
+            />
           )}
         </div>
 
@@ -755,7 +774,7 @@ export const WorkflowStudioV2 = ({
             <div className="wfs2-mobile-empty">
               <Icon name="settings" size={20} />
               <strong>No node selected</strong>
-              <p>Tap a node on the canvas to inspect configuration, validation, and dry-run output.</p>
+              <p>Tap a step in the Steps list — or a node on the canvas — to inspect configuration, validation and dry-run output.</p>
             </div>
           )}
         </WorkflowMobileSheet>
@@ -794,7 +813,7 @@ export const WorkflowStudioV2 = ({
           open={consoleOpen}
           onClose={() => {
             setConsoleOpen(false)
-            if (mobilePanel === 'console') setMobilePanel('canvas')
+            if (mobilePanel === 'console') setMobilePanel('steps')
           }}
           dryRunEvents={fallbackConsoleEvents}
           apiAvailable={apiAvailable}
