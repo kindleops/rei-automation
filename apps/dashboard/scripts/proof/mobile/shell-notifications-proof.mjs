@@ -193,6 +193,82 @@ async function run(label, { width, desktop }) {
     }
   }
 
+  /**
+   * §21 — the SHARED app launcher sheet. Workflow Studio previously
+   * auto-opened a sheet over the entire dock, so the global sheet is checked
+   * for the same failure: it must open, expose a reachable close control, and
+   * leave the dock usable once dismissed.
+   */
+  if (!desktop) {
+    // Close the notification centre first so the two overlays cannot be confused.
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.waitForTimeout(800)
+
+    /**
+     * Open the launcher the way the PRODUCT does: PinnedAppDock listens for the
+     * `nexus:app-launcher-open` window event (PortableCommandShell dispatches
+     * it). Clicking a dock button by a name guess found a control but never
+     * opened the sheet, and because the checks below were nested inside
+     * `if (sheet.present)` they SKIPPED and the run reported PASS. A check that
+     * silently does not run is worse than a failing one.
+     */
+    const launcherOpened = await page.evaluate(() => {
+      window.dispatchEvent(new Event('nexus:app-launcher-open'))
+      return { found: true }
+    })
+    await page.waitForTimeout(2000)
+
+    const sheet = await page.evaluate(() => {
+      const el = document.querySelector('.nx-app-launcher__sheet')
+      if (!el) return { present: false }
+      const b = el.getBoundingClientRect()
+      const close = document.querySelector('.nx-app-launcher__close')
+      const hit = (n) => {
+        if (!n) return null
+        const r = n.getBoundingClientRect()
+        if (r.width === 0 || r.height === 0) return { zero: true }
+        const cx = Math.round(r.left + r.width / 2)
+        const cy = Math.round(Math.min(Math.max(r.top + r.height / 2, 1), window.innerHeight - 1))
+        const top = document.elementFromPoint(cx, cy)
+        return { h: Math.round(r.height), reachable: !!(top && (top === n || n.contains(top))) }
+      }
+      return {
+        present: true,
+        visible: b.width > 0 && b.height > 0,
+        withinViewport: b.bottom <= window.innerHeight + 2 && b.top >= -2,
+        scrollable: el.scrollHeight > el.clientHeight + 4,
+        close: hit(close),
+      }
+    })
+
+    // Asserted unconditionally: if the sheet does not open, that is a finding.
+    check(label, '§21 the shared launcher sheet opens', sheet.present, JSON.stringify(sheet))
+    if (sheet.present) {
+      check(label, '§21 the launcher sheet is visible', sheet.visible, JSON.stringify(sheet))
+      check(label, '§21 the launcher sheet close control is reachable',
+        sheet.close?.reachable !== false, JSON.stringify(sheet.close))
+
+      // Dismiss, then confirm the dock is usable again — a sheet that
+      // permanently blocks the dock is the Workflow Studio defect.
+      await page.evaluate(() => document.querySelector('.nx-app-launcher__close')?.click())
+      await page.waitForTimeout(1200)
+      const after = await page.evaluate(() => {
+        const sheetGone = !document.querySelector('.nx-app-launcher__sheet')
+        const dock = document.querySelector('.nx-pinned-app-dock')
+        if (!dock) return { sheetGone, dock: null }
+        const r = dock.getBoundingClientRect()
+        const top = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(Math.min(r.top + r.height / 2, window.innerHeight - 1)))
+        return { sheetGone, dockReachable: !!(top && (dock.contains(top) || top === dock)) }
+      })
+      check(label, '§21 the sheet dismisses', after.sheetGone, JSON.stringify(after))
+      check(label, '§21 the dock is usable after the sheet closes',
+        after.dockReachable !== false, JSON.stringify(after))
+      console.log(`   launcher sheet: visible=${sheet.visible} withinViewport=${sheet.withinViewport} close=${sheet.close?.reachable} dismissed=${after.sheetGone} dockAfter=${after.dockReachable}`)
+    } else {
+      console.log(`   launcher sheet: DID NOT OPEN`)
+    }
+  }
+
   console.log(`${label.padEnd(16)} route=${route} bell=${opened.found} centre=${centre.present ? `${centre.w}x${centre.h}` : 'absent'} cards=${centre.cards ?? '-'} badge=${JSON.stringify(badge)} allClear=${centre.statesAllClear} unavailable=${centre.statesUnavailable} err=${errors.length}`)
   if (centre.present) console.log(`   centre: ${centre.txt}`)
 

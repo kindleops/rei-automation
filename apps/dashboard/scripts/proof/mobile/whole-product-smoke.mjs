@@ -90,24 +90,45 @@ const rows = []
 
 /**
  * Settle on STABILITY, not on a fixed timeout and not on the absence of a
- * loading word. Two consecutive identical text lengths means the surface has
- * stopped changing; `/properties` needed ~12s, so a 5s sample reported it as
- * an infinite skeleton when it was merely slow.
+ * loading word. `/properties` needed ~12s, so a 5s sample reported it as an
+ * infinite skeleton when it was merely slow.
+ *
+ * TWO consecutive stable samples was not enough. A skeleton holds a constant
+ * text length while it waits, so /analytics settled at 224 chars — its
+ * pre-render state — in five of six cells and was reported as rendering only
+ * "KPI COMMAND". Its healthy state is 398 chars with ten labelled KPIs, and a
+ * direct probe showed it reaching that within 5s and holding for 35s.
+ *
+ * So: require THREE consecutive identical samples AND a non-trivial app
+ * region. A surface that never produces one keeps waiting and then legitimately
+ * fails as unsettled, rather than being measured half-built.
  */
-async function settle(page, { timeout = 45_000 } = {}) {
+const MIN_APP_CHARS = 40
+
+async function settle(page, { timeout = 60_000 } = {}) {
   const t0 = Date.now()
   let last = -1
   let stable = 0
   while (Date.now() - t0 < timeout) {
     await page.waitForTimeout(1500)
-    const n = await page.evaluate(() => (document.body.innerText || '').replace(/\s+/g, ' ').length)
-      .catch(() => -1)
-    if (n === last && n > 0) {
-      if (++stable >= 2) return { ms: Date.now() - t0, chars: n, settled: true }
+    const m = await page.evaluate(() => {
+      const CHROME = '.nx-pinned-app-dock, .nx-mobile-command-dock, .nx-topbar,'
+        + ' [class*="launcher"], [class*="more-sheet"], [class*="search-overlay"],'
+        + ' script, style, noscript, template'
+      const clone = document.body.cloneNode(true)
+      for (const n of clone.querySelectorAll(CHROME)) n.remove()
+      return {
+        full: (document.body.innerText || '').replace(/\s+/g, ' ').length,
+        app: (clone.textContent || '').replace(/\s+/g, ' ').trim().length,
+      }
+    }).catch(() => ({ full: -1, app: -1 }))
+
+    if (m.full === last && m.full > 0 && m.app >= MIN_APP_CHARS) {
+      if (++stable >= 3) return { ms: Date.now() - t0, chars: m.full, appChars: m.app, settled: true }
     } else {
       stable = 0
     }
-    last = n
+    last = m.full
   }
   return { ms: Date.now() - t0, chars: last, settled: false }
 }
