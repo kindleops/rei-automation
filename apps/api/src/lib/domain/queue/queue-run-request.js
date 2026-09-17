@@ -209,6 +209,55 @@ export async function handleQueueRunRequest(request, method, deps = {}) {
       cron_source: auth.auth.cron_source,
     });
 
+    /**
+     * SCHEDULED SENDS REQUIRE THE GOVERNED DEPLOYMENT (§1 fence).
+     *
+     * requireCronAuth proves the caller holds a cron secret. It does NOT prove
+     * WHICH DEPLOYMENT is executing, and for the one send-capable job that gap
+     * is the whole risk: a stale Vercel deployment carrying its own
+     * SUPABASE_SERVICE_ROLE_KEY and TextGrid credentials ran this exact route
+     * every minute from a build 135 commits behind production. Rotating a
+     * shared secret cannot fence it — its cron calls its own route and
+     * validates against its own env, so it authenticates against itself.
+     *
+     * What it cannot forge is the provider identity: DEPLOYMENT_PROVIDER is
+     * baked into the container image at build time (apps/api/Dockerfile), not
+     * supplied as deployment config. So an AUTOMATED run must come from the
+     * governed provider.
+     *
+     * Scoped to `is_scheduled_cron` on purpose. Operator and scoped-canary
+     * dispatch are not scheduled runs and keep their existing authority, so
+     * this fences the unattended lane without disarming the attended proof.
+     */
+    if (auth.auth.is_scheduled_cron) {
+      const { resolveRuntimeIdentity, DEPLOYMENT_PROVIDERS } = await import(
+        "@/lib/config/runtime-environment.js"
+      );
+      const identity = resolveRuntimeIdentity();
+      const governed =
+        (identity.is_production_deployment &&
+          identity.provider === DEPLOYMENT_PROVIDERS.CLOUDFLARE) ||
+        identity.is_explicit_non_production;
+      if (!governed) {
+        route_logger?.warn?.("queue_run.denied_by_runtime_identity", {
+          provider: identity.provider,
+          environment: identity.environment,
+          label: identity.label,
+        });
+        return json_response(
+          {
+            ok: false,
+            error: "scheduled_send_runtime_not_authorized",
+            runtime_identity: identity.label,
+            message:
+              "An automated queue run requires the governed production deployment identity. " +
+              "A deployment that is not the governed provider may not dispatch the send queue.",
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     const queue_processor_mode = clean(await get_system_value("queue_processor_mode") || "paused").toLowerCase();
     // Provider-neutral: queue_processor_mode "safe" means an AUTOMATED
     // scheduled run must not auto-send. This used to key off the Vercel

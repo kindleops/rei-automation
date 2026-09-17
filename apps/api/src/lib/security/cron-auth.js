@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  DEPLOYMENT_PROVIDERS,
   describeRuntimeEnvironment,
   isExplicitNonProductionRuntime,
   resolveRuntimeIdentity,
@@ -229,7 +230,38 @@ export function requireScheduledMutationAuth(request, logger = null) {
   if (!cron_result.authorized) return cron_result;
 
   const identity = resolveRuntimeIdentity();
-  const allowed = identity.is_production_deployment || identity.is_explicit_non_production;
+  /**
+   * PROVIDER, not just environment. The doc above always said
+   * `cloudflare:production -> allowed`, but the check was
+   * `is_production_deployment` alone, which is true for ANY provider whose
+   * deployment environment resolves to production.
+   *
+   * PRODUCTION-COMMISSIONING-1B: that gap was load-bearing. A Vercel
+   * deployment holding its own copies of SUPABASE_SERVICE_ROLE_KEY and the
+   * TextGrid credentials resolved to `vercel:production` — Vercel injects
+   * VERCEL_ENV itself — and therefore PASSED this gate. It ran 15 crons,
+   * including /api/internal/queue/run every minute, against the production
+   * database from a build 135 commits behind. It is currently silent only
+   * because the project is billing-disabled (HTTP 402, DEPLOYMENT_DISABLED),
+   * which is an accident, not a boundary: restoring billing would resurrect it.
+   *
+   * Rotating a shared secret does NOT fence it, because its crons invoke its
+   * OWN routes and validate against its OWN env — the caller and the validator
+   * are the same deployment, so it authenticates against itself no matter what
+   * this side rotates.
+   *
+   * What it can never forge is the provider identity, because
+   * DEPLOYMENT_PROVIDER=cloudflare is baked into the container image at build
+   * time (apps/api/Dockerfile) rather than supplied as deployment config. So a
+   * production scheduled mutation now requires the cloudflare provider.
+   *
+   * Non-production runtimes are unaffected: an explicitly non-production
+   * identity (local, test) still passes, which is what keeps the suite honest.
+   */
+  const production_on_governed_provider =
+    identity.is_production_deployment &&
+    identity.provider === DEPLOYMENT_PROVIDERS.CLOUDFLARE;
+  const allowed = production_on_governed_provider || identity.is_explicit_non_production;
 
   if (!allowed) {
     logger?.warn?.("scheduled_mutation.denied_by_runtime_identity", {
