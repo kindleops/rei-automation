@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { pushRoutePath } from '../../app/router'
-import { useBreakpoint } from '../mobile/useBreakpoint'
 import type {
   NotificationDomain,
   NotificationEvent,
@@ -28,10 +27,6 @@ const SEVERITY_LABELS: Record<NotificationSeverity, string> = {
   warning: 'Warning',
   critical: 'Critical',
 }
-
-const MOBILE_DOMAIN_FILTERS: NotificationDomain[] = [
-  'campaigns', 'templates', 'numbers', 'markets', 'inbox', 'acquisition', 'closing', 'workflow', 'platform',
-]
 
 const DOMAIN_LABELS: Record<NotificationDomain, string> = {
   campaigns: 'Campaigns',
@@ -84,7 +79,6 @@ const NotificationCard = ({
   onSnooze,
   onMuteSource,
   onRunAction,
-  mobileCompact = false,
 }: {
   item: NotificationEvent
   expanded: boolean
@@ -97,7 +91,6 @@ const NotificationCard = ({
   onSnooze: () => void
   onMuteSource: () => void
   onRunAction: (actionType: string) => void
-  mobileCompact?: boolean
 }) => {
   const isUnread = item.status === 'unread'
   const [overflowOpen, setOverflowOpen] = useState(false)
@@ -121,11 +114,9 @@ const NotificationCard = ({
 
       <div className="lcnc-card__inner">
         <div className="lcnc-card__top">
-          {!mobileCompact ? (
-            <label className="lcnc-card__select">
-              <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label="Select notification" />
-            </label>
-          ) : null}
+          <label className="lcnc-card__select">
+            <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label="Select notification" />
+          </label>
           <span className="lcnc-card__icon-wrap">
             <Icon name={severityIcon(item.severity)} size={12} />
           </span>
@@ -137,11 +128,9 @@ const NotificationCard = ({
             {item.createdAt ? formatRelativeTime(item.createdAt) : 'Now'}
           </span>
           {isUnread ? <span className="lcnc-card__unread-dot" aria-label="Unread" /> : null}
-          {!mobileCompact ? (
-            <button type="button" className="lcnc-card__dismiss-btn" onClick={onDismiss} aria-label="Dismiss">
-              <Icon name="close" size={12} />
-            </button>
-          ) : null}
+          <button type="button" className="lcnc-card__dismiss-btn" onClick={onDismiss} aria-label="Dismiss">
+            <Icon name="close" size={12} />
+          </button>
         </div>
 
         <button type="button" className="lcnc-card__body-btn" onClick={onOpen}>
@@ -163,7 +152,7 @@ const NotificationCard = ({
           </div>
         ) : null}
 
-        <div className={cls('lcnc-card__actions', mobileCompact && 'is-mobile-compact')}>
+        <div className="lcnc-card__actions">
           {primaryAction ? (
             <button
               type="button"
@@ -233,19 +222,27 @@ const EmptyState = ({ loading, error }: { loading: boolean; error: string | null
   </div>
 )
 
+/**
+ * THE DESKTOP NOTIFICATION CENTER.
+ *
+ * It used to double as the mobile one through a `mobileSheet` prop, which put the
+ * whole desktop control matrix — search field, density toggle, four severity chips
+ * and ten domain chips — above the first notification on a 390px screen. §5 calls
+ * that a compressed desktop intelligence panel, which is exactly what it was.
+ *
+ * Mobile now has its own surface (MobileNotificationCenter) and the sheet mode is
+ * gone rather than left dormant: a second mobile centre nobody mounts is one more
+ * thing that looks like truth to whoever edits this next.
+ */
 export const LeadCommandNotificationCenter = ({
   open,
   onClose,
   anchorTop = 58,
-  mobileSheet = false,
 }: {
   open: boolean
   onClose: () => void
   anchorTop?: number
-  mobileSheet?: boolean
 }) => {
-  const { isMobile } = useBreakpoint()
-  const useSheetLayout = mobileSheet || isMobile
   const {
     notifications,
     unreadCount,
@@ -355,16 +352,10 @@ export const LeadCommandNotificationCenter = ({
 
   return createPortal(
     <>
-      {useSheetLayout ? (
-        <button type="button" className="nx-mobile-sheet-backdrop" aria-label="Close notifications" onClick={onClose} />
-      ) : null}
       <section
       ref={panelRef}
-      className={cls(
-        'lcnc-panel nx-notification-center nx-liquid-panel',
-        useSheetLayout && 'is-mobile-sheet',
-      )}
-      style={useSheetLayout ? undefined : ({ '--lcnc-anchor-top': `${anchorTop}px` } as React.CSSProperties)}
+      className="lcnc-panel nx-notification-center nx-liquid-panel"
+      style={{ '--lcnc-anchor-top': `${anchorTop}px` } as React.CSSProperties}
       aria-label="LeadCommand notification center"
       role="dialog"
       aria-modal="true"
@@ -467,7 +458,7 @@ export const LeadCommandNotificationCenter = ({
               >
                 All Domains
               </button>
-              {(useSheetLayout ? MOBILE_DOMAIN_FILTERS : NOTIFICATION_DOMAINS).map((domain) => (
+              {NOTIFICATION_DOMAINS.map((domain) => (
                 <button
                   key={domain}
                   type="button"
@@ -502,7 +493,6 @@ export const LeadCommandNotificationCenter = ({
                       item={item}
                       expanded={expanded}
                       selected={selectedIds.includes(item.id)}
-                      mobileCompact={useSheetLayout}
                       onToggleSelect={() => toggleSelected(item.id)}
                       onOpen={() => void handleOpen(item)}
                       onDismiss={() => void patch(item.id, 'dismiss')}

@@ -13,6 +13,8 @@ import { ErrorBoundary } from '../shared/ErrorBoundary'
 import { DevRuntimeDiagnostics } from '../components/dev/DevRuntimeDiagnostics'
 import { applyThemeToDOM, subscribeSettings, updateSetting, type NexusTheme } from '../shared/settings'
 import { GlobalCommandOverlay } from '../modules/command-center/GlobalCommandOverlay'
+import { MobileGlobalSearch } from '../modules/command-center/MobileGlobalSearch'
+import { recordRecentCommandResult } from '../modules/command-center/recent-command-results'
 import { saveRecentCommandLocation } from '../modules/command-center/providers/locationCommandProvider'
 import {
   GLOBAL_COMMAND_CONTEXT_EVENT,
@@ -168,7 +170,14 @@ export const CommandCenterApp = () => {
   const commandContext = useMemo<GlobalCommandSearchContext>(() => ({
     ...commandContextOverrides,
     routePath: route.path,
-  }), [commandContextOverrides, route.path])
+    /**
+     * The registry decides which applications exist per platform; the search has to
+     * be told which platform it is running on to honour that. Without it the mobile
+     * layer offers Property OS while the launcher, reading the same registry,
+     * refuses to.
+     */
+    isMobile,
+  }), [commandContextOverrides, route.path, isMobile])
 
   // ── Theme system — apply on mount + subscribe to changes ──
   useEffect(() => {
@@ -269,6 +278,10 @@ export const CommandCenterApp = () => {
     if (result.location) {
       saveRecentCommandLocation(result.location)
     }
+
+    // Recents are the operator's own history: only ever written from a result the
+    // providers actually returned and the operator actually chose.
+    recordRecentCommandResult(result)
 
     const targetRoute = canonicalizeRoutePath(result.route)
     const shouldNavigate = Boolean(targetRoute && targetRoute !== route.path)
@@ -582,13 +595,32 @@ export const CommandCenterApp = () => {
             {stageContent}
           </main>
 
-          <GlobalCommandOverlay
-            open={cmdOpen}
-            initialQuery={cmdInitialQuery}
-            context={commandContext}
-            onClose={closeCmd}
-            onExecute={executeGlobalCommand}
-          />
+          {/*
+            ONE global search, two presentations — never two systems.
+
+            The desktop palette and the mobile layer read the SAME hook, the same
+            providers and the same execute path; only the composition differs, because
+            a two-column palette with a preview rail is not a thing a phone can show.
+            The mobile half of this replaced a second search (MobileSearchOverlay +
+            useInboxTopSearch) that the inbox family opened instead.
+          */}
+          {isMobile ? (
+            <MobileGlobalSearch
+              open={cmdOpen}
+              initialQuery={cmdInitialQuery}
+              context={commandContext}
+              onClose={closeCmd}
+              onExecute={executeGlobalCommand}
+            />
+          ) : (
+            <GlobalCommandOverlay
+              open={cmdOpen}
+              initialQuery={cmdInitialQuery}
+              context={commandContext}
+              onClose={closeCmd}
+              onExecute={executeGlobalCommand}
+            />
+          )}
 
           {grammarState.pending && (
             <div className="nx-grammar-hint">

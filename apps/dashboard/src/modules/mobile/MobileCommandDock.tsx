@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
+import { useRoutePath } from '../../app/router'
+import { resolveAppForRoute } from '../../domain/app-registry/app-registry'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -65,6 +67,9 @@ export const MobileCommandDock = ({
   showTasks = true,
   showActivity = true,
 }: MobileCommandDockProps) => {
+  const routePath = useRoutePath()
+  const activeApp = resolveAppForRoute(routePath)
+
   const toggle = (surface: Exclude<DockSurface, null>) => {
     onSurfaceChange(activeSurface === surface ? null : surface)
   }
@@ -86,6 +91,19 @@ export const MobileCommandDock = ({
           {kpiControl}
         </div>
 
+        {/*
+          THE IDENTITY CONTROL.
+
+          §2 asks the mobile top bar to say which application the operator is in. A
+          390px bar holding seven 44px targets has no room for a separate title, and
+          a second row would be exactly the stacked-chrome §2 forbids. So identity and
+          the launcher are one control: it shows where you ARE and opens the list of
+          where you can go, which is also the honest answer to what the button does.
+
+          The label shrinks away before the glyph does, so on the densest bar (the
+          inbox, which also carries Tasks and Live Activity) it degrades to the app's
+          own icon rather than overflowing.
+        */}
         <button
           type="button"
           className={cls(
@@ -93,13 +111,14 @@ export const MobileCommandDock = ({
             'nx-mobile-command-dock__btn--workspace',
             (workspaceActive || activeSurface === 'workspace') && 'is-active',
           )}
-          aria-label="Workspace launcher"
+          aria-label={`${activeApp.label} — open applications`}
           aria-expanded={activeSurface === 'workspace'}
           onClick={() => toggle('workspace')}
         >
           <DockGlyph hub>
-            <Icon name="layout-split" size={DOCK_ICON_HUB} strokeWidth={1.55} />
+            <Icon name={activeApp.icon} size={DOCK_ICON_HUB} strokeWidth={1.55} />
           </DockGlyph>
+          <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
         </button>
 
         <button

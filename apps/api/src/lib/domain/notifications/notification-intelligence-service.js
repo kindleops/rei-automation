@@ -278,6 +278,20 @@ export async function upsertNotificationEvent(fields = {}) {
       return { ok: false, error: error.message }
     }
 
+    /**
+     * PUSH IS A COPY OF THIS ROW, never an independent signal.
+     *
+     * Fired only on a genuinely NEW notification — the evolve paths above return
+     * before reaching here — so a grouped event that ticks from 4 to 5 does not buzz
+     * the operator's phone a fifth time.
+     *
+     * Deliberately not awaited: the push service is a third party on the far side of
+     * the internet, and the caller of this function is a business flow (a send, a
+     * reply, a scan). A slow push must never slow a write, and a failed push must
+     * never fail one — which is why the catch swallows.
+     */
+    void dispatchPushForNotification({ ...baseRow, id: data?.id ?? null })
+
     return { ok: true, id: data?.id ?? null, evolved: false }
   } catch (err) {
     logger.warn('notification.upsert_exception', { error: String(err?.message ?? err) })
@@ -617,4 +631,49 @@ export default {
   buildGroupingKey,
   isRateLimited,
   isMuted,
+}
+
+/**
+ * Translate a notification row into a push payload and hand it to the transport.
+ *
+ * The deep link is computed HERE rather than in the service worker so that the
+ * in-app centre and the push notification can never disagree about where an event
+ * leads — the same carriers, in the same order, with the same fallbacks.
+ */
+async function dispatchPushForNotification(row) {
+  try {
+    /**
+     * Imported lazily. `web-push-transport` pulls in the web-push library and the
+     * VAPID configuration, and this module is imported by scanners and test harnesses
+     * that have no business loading either.
+     */
+    const { deliverPushNotification } = await import('./web-push-transport.js')
+
+    const severity = String(row.severity ?? 'neutral')
+    // Only work-shaped signals are worth interrupting a phone for. `positive` and
+    // `neutral` still land in the notification centre; they do not buzz.
+    if (severity !== 'critical' && severity !== 'warning') return
+
+    await deliverPushNotification({
+      id: row.id,
+      title: row.title,
+      body: row.description || '',
+      severity,
+      domain: row.domain,
+      url: resolveNotificationDeepLink(row),
+      createdAt: row.created_at ?? new Date().toISOString(),
+    })
+  } catch (err) {
+    logger.warn('notification.push_dispatch_failed', { error: String(err?.message ?? err) })
+  }
+}
+
+function resolveNotificationDeepLink(row) {
+  if (row.participant_id) return `/inbox?thread=${encodeURIComponent(row.participant_id)}`
+  if (row.property_id) return `/deal-intelligence?property=${encodeURIComponent(row.property_id)}`
+  if (row.campaign_id) return `/campaign-command?campaign=${encodeURIComponent(row.campaign_id)}`
+  if (row.closing_id) return '/closing-desk'
+  if (row.workflow_id) return '/workflow-studio'
+  if (row.domain === 'markets') return '/map'
+  return '/inbox'
 }

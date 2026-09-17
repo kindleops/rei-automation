@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { pushRoutePath } from '../../app/router'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
-import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotificationCenter'
+import { MobileNotificationCenter } from '../notifications/MobileNotificationCenter'
 import { InboxKpiOrb } from '../inbox/components/InboxKpiOrb'
 import { QueueCommandCenter } from '../inbox/components/QueueCommandCenter'
 import { useQueueCommandState } from './useQueueCommandState'
-import { onNotificationsSurfaceRequested } from './shell-surface-bridge'
-import { APP_LAUNCHER_OPEN_EVENT } from './AppLauncher'
+import { onNotificationsSurfaceRequested, requestAppLauncher } from './shell-surface-bridge'
 import { useShellSurface } from '../shell/useShellSurface'
 import { GLOBAL_COMMAND_OPEN_EVENT } from '../../domain/command-center/command.types'
 import { MobileCommandDock, type DockSurface } from './MobileCommandDock'
@@ -68,7 +67,7 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
       // navigated to /analytics — a straightforwardly wrong destination.
       setNotifOpen(false)
       setActiveSurface(null)
-      window.dispatchEvent(new CustomEvent(APP_LAUNCHER_OPEN_EVENT))
+      requestAppLauncher()
       return
     }
     if (surface === 'queue') {
@@ -130,11 +129,14 @@ export const PortableCommandShell = ({ onOpenSearch }: PortableCommandShellProps
         />
       </MobileSheet>
 
-      <LeadCommandNotificationCenter
-        open={notifOpen}
-        onClose={() => setNotifOpen(false)}
-        mobileSheet
-      />
+      {/*
+        The MOBILE notification centre, not the desktop panel in a sheet.
+        LeadCommandNotificationCenter is still the desktop surface; what it was
+        doing here was rendering its full filter matrix — search, density toggle,
+        four severity chips and ten domain chips — above the first notification on
+        a 390px screen.
+      */}
+      <MobileNotificationCenter open={notifOpen} onClose={() => setNotifOpen(false)} />
     </>
   )
 }

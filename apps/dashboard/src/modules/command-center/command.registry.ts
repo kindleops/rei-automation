@@ -1,5 +1,10 @@
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { GLOBAL_COMMAND_ACTION_EVENT } from '../../domain/command-center/command.types'
+import {
+  NEXUS_APPS,
+  isAppActive,
+  type NexusApp,
+} from '../../domain/app-registry/app-registry'
 
 const buildStatic = (input: Omit<CommandResult, 'score' | 'action'> & {
   score?: number
@@ -20,139 +25,58 @@ const buildStatic = (input: Omit<CommandResult, 'score' | 'action'> & {
     : undefined,
 })
 
+/**
+ * APPLICATION DESTINATIONS, derived from the canonical registry.
+ *
+ * These were seven hand-written "Open X" commands — Inbox, Command Map, Pipeline,
+ * Queue, Metrics, Buyers, Comp Intelligence — and every one of them declared
+ * `route: '/inbox'` plus a `focus_workspace_view` event, because that was how those
+ * surfaces were reached before they became routes. So the command palette named
+ * SEVEN of the eighteen applications, addressed them all at one URL, and disagreed
+ * with the launcher, the dock and the router about where they live. Entity Graph,
+ * Campaign Command, Email Command, Workflow Studio, Closing Desk and Calendar were
+ * simply not findable by name.
+ *
+ * Deriving them removes the fourth list. `isAppActive` gives the same
+ * "you are already here" ranking the hardcoded `onInboxSurface` ternaries were
+ * approximating, and action-only entries (Notifications, Settings) are excluded
+ * because they cannot be pushed as a route — the launcher opens those.
+ */
+const applicationDestinations = (context: GlobalCommandSearchContext): CommandResult[] => {
+  const available = context.isMobile
+    ? NEXUS_APPS.filter((app) => app.mobile)
+    : NEXUS_APPS.filter((app) => app.desktop)
+
+  return available
+    .filter((app: NexusApp) => !app.action)
+    .map((app) => buildStatic({
+      id: `app-open-${app.id}`,
+      type: 'app',
+      title: `Open ${app.label}`,
+      subtitle: app.description,
+      badge: 'App',
+      icon: app.icon,
+      route: app.route,
+      score: isAppActive(context.routePath, app) ? 96 : 84,
+      preview: {
+        eyebrow: 'App',
+        title: app.label,
+        summary: app.description,
+      },
+      meta: {
+        provider: 'app',
+        groupLabel: 'Actions',
+        keywords: [app.label.toLowerCase(), app.shortLabel.toLowerCase(), app.id],
+      },
+    }))
+}
+
 export const getStaticCommandRegistry = (context: GlobalCommandSearchContext): CommandResult[] => {
-  const onMapSurface = context.routePath === '/inbox' && context.currentView === 'command_map'
   const onInboxSurface = context.routePath === '/inbox'
-  const onBuyerSurface = context.routePath === '/inbox' && context.currentView === 'buyer_match'
   const onQueueSurface = context.routePath === '/inbox' && context.currentView === 'queue'
 
   return [
-    buildStatic({
-      id: 'app-open-inbox',
-      type: 'app',
-      title: 'Open Inbox',
-      subtitle: 'Seller conversation command center',
-      description: 'Jump into the inbox workspace.',
-      badge: 'App',
-      icon: 'inbox',
-      route: '/inbox',
-      score: onInboxSurface ? 96 : 88,
-      preview: {
-        eyebrow: 'App',
-        title: 'Inbox',
-        summary: 'Open the acquisition inbox with threads, queue visibility, and seller actions.',
-      },
-      meta: { provider: 'app', groupLabel: 'Actions', keywords: ['inbox', 'messages', 'conversations'] },
-    }),
-    buildStatic({
-      id: 'app-open-command-map',
-      type: 'map_action',
-      title: 'Open Command Map',
-      subtitle: 'Command Map workspace inside Inbox',
-      description: 'Open the cinematic acquisition map workspace.',
-      badge: 'Map',
-      icon: 'map',
-      route: '/inbox',
-      actionId: 'focus_workspace_view',
-      eventPayload: { kind: 'focus_workspace_view', view: 'command_map' },
-      score: onMapSurface ? 100 : 90,
-      preview: {
-        eyebrow: 'Map',
-        title: 'Command Map',
-        summary: 'Move into the command map with seller pins, map themes, and market overlays.',
-      },
-      meta: { provider: 'app', groupLabel: 'Actions', keywords: ['map', 'command map', 'geography', 'pins'] },
-    }),
-    buildStatic({
-      id: 'app-open-pipeline',
-      type: 'pipeline',
-      title: 'Open Pipeline',
-      subtitle: 'Stage-based pipeline workspace',
-      badge: 'View',
-      icon: 'layout-split',
-      route: '/inbox',
-      actionId: 'focus_workspace_view',
-      eventPayload: { kind: 'focus_workspace_view', view: 'pipeline' },
-      score: context.currentView === 'pipeline' ? 98 : 84,
-      preview: {
-        eyebrow: 'Pipeline',
-        title: 'Pipeline View',
-        summary: 'Open the stage-based pipeline view for seller and deal flow management.',
-      },
-      meta: { provider: 'app', groupLabel: 'Pipeline', keywords: ['pipeline', 'kanban', 'stage'] },
-    }),
-    buildStatic({
-      id: 'app-open-queue',
-      type: 'queue',
-      title: 'Open Queue',
-      subtitle: 'Outbound queue and execution status',
-      badge: 'Queue',
-      icon: 'send',
-      route: '/inbox',
-      actionId: 'focus_workspace_view',
-      eventPayload: { kind: 'focus_workspace_view', view: 'queue' },
-      score: onQueueSurface ? 98 : 86,
-      preview: {
-        eyebrow: 'Queue',
-        title: 'Queue',
-        summary: 'Open the queue view for scheduling, delivery, and recovery workflows.',
-      },
-      meta: { provider: 'app', groupLabel: 'Queue', keywords: ['queue', 'delivery', 'sends', 'outbound'] },
-    }),
-    buildStatic({
-      id: 'app-open-metrics',
-      type: 'app',
-      title: 'Open Metrics',
-      subtitle: 'Metrics workspace inside Inbox',
-      badge: 'Metrics',
-      icon: 'stats',
-      route: '/inbox',
-      actionId: 'focus_workspace_view',
-      eventPayload: { kind: 'focus_workspace_view', view: 'metrics' },
-      score: context.currentView === 'metrics' ? 97 : 82,
-      preview: {
-        eyebrow: 'Metrics',
-        title: 'Metrics View',
-        summary: 'Open KPI and operational intelligence without leaving the inbox shell.',
-      },
-      meta: { provider: 'app', groupLabel: 'Actions', keywords: ['metrics', 'kpis', 'war room', 'dashboard'] },
-    }),
-    buildStatic({
-      id: 'app-open-buyers',
-      type: 'buyer',
-      title: 'Open Buyers',
-      subtitle: 'Buyer intelligence workspace',
-      badge: 'Buyers',
-      icon: 'users',
-      route: '/inbox',
-      actionId: 'focus_workspace_view',
-      eventPayload: { kind: 'focus_workspace_view', view: 'buyer_match' },
-      score: onBuyerSurface ? 98 : 84,
-      preview: {
-        eyebrow: 'Buyers',
-        title: 'Buyer Intelligence',
-        summary: 'Jump into buyer intelligence, match scoring, and demand behavior.',
-      },
-      meta: { provider: 'app', groupLabel: 'Buyers', keywords: ['buyer', 'buyers', 'dispo', 'investor'] },
-    }),
-    buildStatic({
-      id: 'app-open-comp-intelligence',
-      type: 'app',
-      title: 'Open Comp Intelligence',
-      subtitle: 'Comp and valuation workspace',
-      badge: 'Comps',
-      icon: 'database',
-      route: '/inbox',
-      actionId: 'focus_workspace_view',
-      eventPayload: { kind: 'focus_workspace_view', view: 'comp_intelligence' },
-      score: context.currentView === 'comp_intelligence' ? 97 : 80,
-      preview: {
-        eyebrow: 'Comp Intelligence',
-        title: 'Comp Intelligence',
-        summary: 'Open comps, pricing context, and valuation workspace inside the inbox shell.',
-      },
-      meta: { provider: 'app', groupLabel: 'Actions', keywords: ['comp', 'comps', 'valuation', 'arv'] },
-    }),
+    ...applicationDestinations(context),
     buildStatic({
       id: 'filter-clear',
       type: 'filter',

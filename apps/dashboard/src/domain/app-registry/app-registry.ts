@@ -194,6 +194,23 @@ export const NEXUS_APPS: NexusApp[] = [
     action: 'deal_intelligence',
   },
   {
+    /**
+     * "Property Intelligence OS" — the <h1> PropertiesPage renders, which is what the
+     * operator calls Property OS.
+     *
+     * MOBILE-LOCK §0: it is deliberately ABSENT from the mobile application
+     * launcher, the dock catalog and the mobile results of global search. Not
+     * repositioned, not moved under "More" — absent.
+     *
+     * This is an information-architecture decision, not a deprecation: /properties
+     * still routes, still renders, and is still a first-class desktop application.
+     * `mobile: false` is the ONE switch that removes it everywhere on a phone,
+     * because every mobile navigation surface derives from this registry. Setting
+     * `dockable: false` alongside it matters for a second reason — the pinned dock
+     * is mobile-only, and `isDockableAppId` is what sanitises an operator's
+     * persisted pins, so a phone that already had Property OS pinned drops it on
+     * next load instead of keeping a rail entry the launcher can no longer reach.
+     */
     id: 'properties',
     label: 'Properties',
     shortLabel: 'Property',
@@ -202,8 +219,8 @@ export const NEXUS_APPS: NexusApp[] = [
     route: '/properties',
     group: 'intelligence',
     desktop: true,
-    mobile: true,
-    dockable: true,
+    mobile: false,
+    dockable: false,
     defaultDock: false,
     badge: null,
     // PropertyIntelligenceApp has no locator consumer, so it cannot be focused yet.
@@ -447,6 +464,19 @@ export const APPS_BY_GROUP: Array<{ group: AppGroup; label: string; apps: NexusA
   label: APP_GROUP_LABELS[group],
   apps: NEXUS_APPS.filter((app) => app.group === group),
 }))
+
+/**
+ * The SAME grouping, restricted to applications that exist on a phone.
+ *
+ * Every mobile launcher, switcher and app-search result must read this rather than
+ * filtering `APPS_BY_GROUP` itself — a surface that does its own filtering is exactly
+ * how Property OS survived in one menu after being removed from another. Empty groups
+ * are dropped so the launcher never paints a heading with nothing under it.
+ */
+export const MOBILE_APPS_BY_GROUP: Array<{ group: AppGroup; label: string; apps: NexusApp[] }> =
+  APPS_BY_GROUP
+    .map((entry) => ({ ...entry, apps: entry.apps.filter((app) => app.mobile) }))
+    .filter((entry) => entry.apps.length > 0)
 
 /** Inbox owns three paths; everything else is exact-or-prefix. */
 const INBOX_ROUTE_PATHS = new Set(['/', '/inbox', '/conversation'])

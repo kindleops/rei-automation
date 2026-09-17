@@ -8,11 +8,11 @@ import {
   type CommandNavRoute,
 } from './command-navigation-registry'
 import { closeInboxDealIntelligence, isInboxRoute, openInboxDealIntelligence } from './mobile-inbox-bridge'
-import { AppLauncher, APP_LAUNCHER_OPEN_EVENT } from './AppLauncher'
+import { AppLauncher } from './AppLauncher'
 import { navigateToApp as navigateToRegistryApp } from '../../domain/app-registry/contextual-navigation'
 import type { NexusApp } from '../../domain/app-registry/app-registry'
 import { MobileSettingsSheet } from './MobileSettingsSheet'
-import { requestNotificationsSurface } from './shell-surface-bridge'
+import { onAppLauncherRequested, requestNotificationsSurface } from './shell-surface-bridge'
 import { publishBottomSurface, releaseBottomSurface } from './mobile-bottom-layout'
 import {
   DOCKABLE_APPS,
@@ -194,11 +194,7 @@ export const PinnedAppDock = ({ routePath }: PinnedAppDockProps) => {
 
   // The top bar and the command palette can raise the launcher without knowing
   // where it is mounted.
-  useEffect(() => {
-    const open = () => setLauncherRoute(routePath)
-    window.addEventListener(APP_LAUNCHER_OPEN_EVENT, open)
-    return () => window.removeEventListener(APP_LAUNCHER_OPEN_EVENT, open)
-  }, [routePath])
+  useEffect(() => onAppLauncherRequested(() => setLauncherRoute(routePath)), [routePath])
 
   const handleReorder = useCallback((fromId: PinnedAppId, toId: PinnedAppId) => {
     if (fromId === toId) return

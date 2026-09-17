@@ -25,3 +25,26 @@ export function onNotificationsSurfaceRequested(handler: () => void): () => void
   window.addEventListener(NEXUS_OPEN_NOTIFICATIONS_EVENT, listener)
   return () => window.removeEventListener(NEXUS_OPEN_NOTIFICATIONS_EVENT, listener)
 }
+
+/**
+ * THE APPLICATION LAUNCHER, raised by event.
+ *
+ * The constant used to be exported from AppLauncher.tsx, so every host that only
+ * wanted to OPEN the launcher had to import the component module to get the string —
+ * which is how the inbox top bar would have pulled the launcher, its CSS and its
+ * badge hook into the inbox route chunk just to dispatch an event. The owner is still
+ * the dock; this is only the address.
+ */
+export const APP_LAUNCHER_OPEN_EVENT = 'nexus:app-launcher-open'
+
+export function requestAppLauncher() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(APP_LAUNCHER_OPEN_EVENT))
+}
+
+export function onAppLauncherRequested(handler: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const listener = () => handler()
+  window.addEventListener(APP_LAUNCHER_OPEN_EVENT, listener)
+  return () => window.removeEventListener(APP_LAUNCHER_OPEN_EVENT, listener)
+}

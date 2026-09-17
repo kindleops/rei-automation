@@ -44,6 +44,12 @@ const GROUP_ORDER: CommandResultType[] = [
   'system_action',
 ]
 
+/**
+ * Four result types used to share the label "Actions", so the mobile layer painted
+ * three consecutive sections all headed ACTIONS with unrelated rows under each —
+ * map themes, then applications, then inbox filters. A heading that does not
+ * distinguish its section is worse than no heading.
+ */
 const GROUP_LABELS: Record<CommandResultType, string> = {
   recent: 'Recent Searches',
   location: 'Locations',
@@ -57,10 +63,10 @@ const GROUP_LABELS: Record<CommandResultType, string> = {
   queue: 'Queue',
   comps: 'Comparables',
   underwrite: 'Underwriting',
-  map_action: 'Actions',
-  app: 'Actions',
-  filter: 'Actions',
-  system_action: 'Actions',
+  map_action: 'Map',
+  app: 'Applications',
+  filter: 'Filters',
+  system_action: 'System',
 }
 
 const dedupeResults = (results: CommandResult[]): CommandResult[] => {
@@ -85,9 +91,19 @@ export const useGlobalCommandSearch = (query: string, context: GlobalCommandSear
       const staticResults = await Promise.all(STATIC_PROVIDERS.map((provider) => provider.search(normalizedQuery, context)))
       if (!active) return
       
+      /**
+       * An EMPTY field is not a search — it is a starting point.
+       *
+       * Every static provider answers an empty query with its whole catalogue, so
+       * opening the mobile layer used to paint eighteen "Open <app>" rows, four map
+       * themes and five inbox filters before the operator had typed anything. The
+       * launcher already lists applications; what belongs here is the operator's
+       * recents and a short jump list. Typing restores the full static set, which is
+       * where discovering "Switch Map Theme: Matrix" actually belongs.
+       */
       let mergedStatic = dedupeResults(staticResults.flat())
         .sort((left, right) => right.score - left.score)
-        .slice(0, 20)
+        .slice(0, normalizedQuery.length === 0 ? 5 : 20)
 
       if (normalizedQuery.length === 0) {
         const recents = getRecentCommandLocations().map((loc, i) => ({

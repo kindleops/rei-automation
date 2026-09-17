@@ -4,11 +4,13 @@ import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
 import type { AccentPalette } from '../../../shared/settings'
 import type { CommandResult } from '../../../domain/command-center/command.types'
+import { GLOBAL_COMMAND_OPEN_EVENT } from '../../../domain/command-center/command.types'
 import type { ActiveOverlay } from '../../../domain/inbox/inbox-layout-state'
 import type { NexusGlobalThemeId } from '../../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../../domain/inbox/view-layout'
 import { useNotificationIntelligence } from '../../../domain/notifications/useNotificationIntelligence'
 import { LeadCommandNotificationBell, LeadCommandNotificationCenter } from '../../notifications/LeadCommandNotificationCenter'
+import { MobileNotificationCenter } from '../../notifications/MobileNotificationCenter'
 import type { AutonomousEngineModel } from '../autonomy-engine'
 import { InboxKpiOrb } from './InboxKpiOrb'
 import { QueueCommandCenter, type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './QueueCommandCenter'
@@ -20,9 +22,8 @@ import type { ActionCenterItem, WorkspaceAvailability, WorkspaceLauncherItem } f
 import { CommandPopover } from '../../shell/primitives/CommandPopover'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { MobileCommandDock, type DockSurface } from '../../mobile/MobileCommandDock'
-import { MobileSearchOverlay } from '../../mobile/MobileSearchOverlay'
 import { MobileSheet } from '../../mobile/MobileSheet'
-import { onNotificationsSurfaceRequested } from '../../mobile/shell-surface-bridge'
+import { onNotificationsSurfaceRequested, requestAppLauncher } from '../../mobile/shell-surface-bridge'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -363,7 +364,6 @@ export const NexusTopBar = ({
   }, 0)
 
   const resolveDockSurface = (): DockSurface => {
-    if (searchOpen) return 'search'
     if (activeSurface === 'workspace') return 'workspace'
     if (activeSurface === 'queue') return 'queue'
     if (activeSurface === 'action-center') return 'tasks'
@@ -380,13 +380,44 @@ export const NexusTopBar = ({
       return
     }
     if (surface === 'search') {
+      /**
+       * ONE global search.
+       *
+       * This used to raise MobileSearchOverlay, the inbox family's private mobile
+       * search: a half-height sheet over `useInboxTopSearch`, which knew about six
+       * entity providers and nothing about applications, filters or map actions.
+       * Every route outside the inbox opened the canonical command surface from the
+       * identical button in the identical bar, so which search the operator got was
+       * decided by where they happened to be standing.
+       *
+       * The canonical surface now answers here too. `GLOBAL_COMMAND_OPEN_EVENT` is
+       * the same address PortableCommandShell uses; CommandCenterApp owns the one
+       * instance and renders the full-screen mobile layer.
+       */
       onCloseOverlay()
       setActiveSurface(null)
-      setSearchOpen(true)
+      window.dispatchEvent(new CustomEvent(GLOBAL_COMMAND_OPEN_EVENT, { detail: {} }))
       return
     }
     if (surface === 'workspace') {
-      openExclusiveSurface('workspace')
+      /**
+       * ONE mobile application launcher.
+       *
+       * This used to open WorkspaceLauncher in `mobileShell` mode — a second
+       * application switcher, rendering a long labelled text list from
+       * COMMAND_NAV_ROUTES with no `mobile` filter, reachable only from the inbox
+       * family. The dock's launcher (the icon grid §3 names as the right direction)
+       * was what every OTHER route opened from the same button in the same bar.
+       *
+       * Two switchers is not a cosmetic inconsistency: they disagreed about which
+       * applications exist. Property OS was excluded from one and present in the
+       * other, and only the grid could show live badges. The inbox now raises the
+       * same canonical launcher every other route raises.
+       */
+      onCloseOverlay()
+      setSearchOpen(false)
+      setActiveSurface(null)
+      requestAppLauncher()
       return
     }
     if (surface === 'queue') {
@@ -407,47 +438,6 @@ export const NexusTopBar = ({
       else openOverlayExclusive('notifications')
     }
   }
-
-  const workspaceLauncher = (
-    <WorkspaceLauncher
-      open={activeSurface === 'workspace'}
-      mobileShell
-      compact={false}
-      anchorRef={workspaceTriggerRef}
-      onClose={() => closeAndRestoreFocus('workspace')}
-      activeWorkspaceKey={activeWorkspaceKey}
-      workspaceOptions={launcherWorkspaces}
-      viewOptions={launcherViews}
-      activeViewKeys={activeViewKeys}
-      activeViewWidths={activeViewWidths}
-      activeViewChips={activeViewChips}
-      activeViewKey={activeViewKey}
-      activeThemeId={activeThemeId}
-      activeAccentId={activeAccentId}
-      onSelectWorkspace={(key) => {
-        onSelectWorkspace?.(key)
-        closeAndRestoreFocus('workspace')
-      }}
-      onSelectView={(key) => onSelectView?.(key)}
-      onSelectViewWidth={(key, width) => onSelectViewWidth?.(key, width)}
-      onToggleActiveViewChip={onToggleActiveViewChip}
-      onSelectTheme={onSelectTheme}
-      onSelectAccent={onSelectAccent}
-      onSaveCurrentLayout={onSaveCurrentLayout}
-      onResetLayout={onResetLayout}
-      onWorkspaceSettings={onWorkspaceSettings}
-      profileInitials={profileInitials}
-      authReady={authReady}
-      authLoading={authLoading}
-      onProfile={onOpenDossier}
-      onSettings={onOpenSettings}
-      onThemeSettings={onOpenKpis}
-      onKeyboardShortcuts={onOpenKeys}
-      onDiagnostics={onOpenAi}
-      onSignOut={onSignOut}
-      onOpenNotifications={() => openOverlayExclusive('notifications')}
-    />
-  )
 
   const queuePanel = (
     <QueueCommandCenter
@@ -479,35 +469,17 @@ export const NexusTopBar = ({
         <span ref={queueTriggerRef} className="nx-sr-only" aria-hidden />
         <span ref={actionTriggerRef} className="nx-sr-only" aria-hidden />
 
-        <MobileSearchOverlay
-          open={searchOpen}
-          query={topSearchQuery}
-          loading={topSearchLoading}
-          groups={topSearchGroups}
-          activeIndex={searchActiveIndex}
-          onQueryChange={onTopSearchQueryChange}
-          onActiveIndexChange={setSearchActiveIndex}
-          onSubmit={handleSearchSubmit}
-          onClose={() => {
-            setSearchOpen(false)
-            onTopSearchQueryChange('')
-          }}
-        />
-
         <MobileCommandDock
           activeSurface={resolveDockSurface()}
           onSurfaceChange={handleDockSurfaceChange}
           kpiControl={<InboxKpiOrb />}
           workspaceActive={activeSurface === 'workspace'}
           queueStatus={processorStatus}
-          searchActive={searchOpen}
           tasksCount={actionCountTotal}
           activityActive={activeOverlay === 'activity'}
           notificationCount={unreadNotifications}
           notificationsActive={activeOverlay === 'notifications'}
         />
-
-        {workspaceLauncher}
 
         <MobileSheet
           open={activeSurface === 'queue'}
@@ -547,10 +519,11 @@ export const NexusTopBar = ({
           </div>
         </MobileSheet>
 
-        <LeadCommandNotificationCenter
+        {/* The mobile centre — see MobileNotificationCenter. The desktop branch
+            below still renders LeadCommandNotificationCenter. */}
+        <MobileNotificationCenter
           open={activeOverlay === 'notifications'}
           onClose={onCloseOverlay}
-          mobileSheet
         />
       </>
     )
@@ -598,7 +571,6 @@ export const NexusTopBar = ({
 
             <WorkspaceLauncher
               open={activeSurface === 'workspace'}
-              mobileShell={false}
               compact={isCompactMenu}
               anchorRef={workspaceTriggerRef}
               onClose={() => closeAndRestoreFocus('workspace')}
@@ -623,16 +595,6 @@ export const NexusTopBar = ({
               onSaveCurrentLayout={onSaveCurrentLayout}
               onResetLayout={onResetLayout}
               onWorkspaceSettings={onWorkspaceSettings}
-              profileInitials={profileInitials}
-              authReady={authReady}
-              authLoading={authLoading}
-              onProfile={onOpenDossier}
-              onSettings={onOpenSettings}
-              onThemeSettings={onOpenKpis}
-              onKeyboardShortcuts={onOpenKeys}
-              onDiagnostics={onOpenAi}
-              onSignOut={onSignOut}
-              onOpenNotifications={() => openOverlayExclusive('notifications')}
             />
           </div>
 

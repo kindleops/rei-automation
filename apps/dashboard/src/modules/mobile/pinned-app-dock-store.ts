@@ -21,9 +21,16 @@ export const DEFAULT_PINNED_APP_IDS: PinnedAppId[] = NEXUS_APPS
   .filter((app) => app.defaultDock)
   .map(dockIdForApp)
 
+/**
+ * The dock and its customise catalog exist ONLY on a phone (CommandCenterApp mounts
+ * PinnedAppDock behind `isMobile`), so `mobile` is a precondition here and not just
+ * `dockable`. Requiring both means an application removed from mobile — Property OS,
+ * per §0 — cannot reappear in the catalog because someone set `dockable` and forgot
+ * the other flag.
+ */
 export const DOCKABLE_APPS: CommandNavRoute[] = COMMAND_NAV_ROUTES.filter((route) => {
   const app = NEXUS_APPS.find((candidate) => dockIdForApp(candidate) === route.path)
-  return Boolean(app?.dockable)
+  return Boolean(app?.dockable && app.mobile)
 })
 
 const DOCKABLE_BY_ID = new Map(DOCKABLE_APPS.map((app) => [app.path, app]))

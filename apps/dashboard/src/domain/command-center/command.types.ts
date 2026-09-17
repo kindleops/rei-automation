@@ -88,6 +88,16 @@ export type GlobalCommandSearchContext = {
   selectedMarket?: string | null
   activeMapTheme?: string | null
   activeFilters?: Record<string, unknown> | null
+  /**
+   * Set by the host that owns the search surface.
+   *
+   * Application destinations are registry-derived, and the registry knows which
+   * applications exist on a phone. Without this flag the ONE global search would
+   * happily offer Property OS as a destination on mobile while the launcher — reading
+   * the same registry — refuses to show it, which is the exact class of disagreement
+   * §26 exists to end.
+   */
+  isMobile?: boolean
 }
 
 export type GlobalCommandProvider = {

@@ -1,0 +1,270 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   MOBILE GLOBAL SEARCH — one full-screen layer, one result vocabulary
+   ══════════════════════════════════════════════════════════════════════════
+
+   Layout rules this file exists to enforce:
+
+   * The layer owns the whole viewport. `100dvh` rather than `100vh`, because
+     100vh on iOS is the URL-bar-collapsed height and puts the last row of
+     results under the browser chrome on first paint.
+   * The field is pinned; only the results scroll. A search whose input scrolls
+     away is the single most common way a mobile search feels broken.
+   * The keyboard inset is subtracted from the SCROLLER, not from the layer, so
+     the field never moves when the keyboard opens.
+   * Rows, not cards. §19 is explicit that density is the point; a result list
+     made of floating rounded panels fits five items on a 390x844 screen.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.nx-mgs {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: rgba(6, 9, 16, 0.97);
+  backdrop-filter: blur(26px) saturate(1.4);
+  -webkit-backdrop-filter: blur(26px) saturate(1.4);
+  animation: nx-mgs-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes nx-mgs-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx-mgs__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The bar owns the top inset itself so the field clears the Dynamic Island
+     without the shell reserving a second band above it. */
+  padding: calc(var(--nx-mobile-safe-top, 0px) + 10px) 12px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.nx-mgs__field {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.nx-mgs__field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.95);
+  outline: none;
+}
+
+.nx-mgs__field input::placeholder { color: rgba(255, 255, 255, 0.36); }
+.nx-mgs__field input::-webkit-search-cancel-button { display: none; }
+
+.nx-mgs__clear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
+.nx-mgs__cancel {
+  flex: 0 0 auto;
+  /* 44px of interaction, 13px of type. */
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tone-primary, #5eead4);
+  cursor: pointer;
+}
+
+.nx-mgs__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: calc(var(--nx-mgs-keyboard, 0px) + var(--nx-mobile-safe-bottom, 0px) + 16px);
+}
+
+.nx-mgs__group { padding: 4px 0 2px; }
+
+.nx-mgs__group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 14px 5px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.nx-mgs__group-head button {
+  border: 0;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+
+.nx-mgs__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  /* 52px rows: comfortably above the 44px touch floor, dense enough that a
+     390x844 screen shows a dozen results without scrolling. */
+  min-height: 52px;
+  padding: 7px 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nx-mgs__row:active { background: rgba(255, 255, 255, 0.05); }
+.nx-mgs__row.is-disabled { opacity: 0.4; }
+
+.nx-mgs__row-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.nx-mgs__row-copy {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nx-mgs__row-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.94);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-mgs__row-copy small {
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.46);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-mgs__row-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.nx-mgs__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 44px 30px;
+  text-align: center;
+}
+
+.nx-mgs__state strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.nx-mgs__state span {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.nx-mgs__spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--tone-primary, #5eead4);
+  animation: nx-mgs-spin 720ms linear infinite;
+}
+
+@keyframes nx-mgs-spin { to { transform: rotate(360deg); } }
+
+[data-nexus-theme='light'] {
+  .nx-mgs { background: rgba(250, 251, 253, 0.97); }
+  .nx-mgs__bar { border-bottom-color: rgba(15, 23, 42, 0.08); }
+
+  .nx-mgs__field {
+    border-color: rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.6);
+  }
+
+  .nx-mgs__field input { color: rgba(15, 23, 42, 0.92); background: transparent; }
+  .nx-mgs__field input::placeholder { color: rgba(15, 23, 42, 0.4); }
+  .nx-mgs__clear { background: rgba(15, 23, 42, 0.1); color: rgba(15, 23, 42, 0.68); }
+  .nx-mgs__group-head { color: rgba(15, 23, 42, 0.45); }
+  .nx-mgs__group-head button { color: rgba(15, 23, 42, 0.5); }
+  .nx-mgs__row { border-bottom-color: rgba(15, 23, 42, 0.07); }
+  .nx-mgs__row:active { background: rgba(15, 23, 42, 0.04); }
+
+  .nx-mgs__row-icon {
+    border-color: rgba(15, 23, 42, 0.1);
+    background: rgba(15, 23, 42, 0.04);
+    color: rgba(15, 23, 42, 0.62);
+  }
+
+  .nx-mgs__row-copy strong { color: rgba(15, 23, 42, 0.92); }
+  .nx-mgs__row-copy small { color: rgba(15, 23, 42, 0.52); }
+  .nx-mgs__row-badge { border-color: rgba(15, 23, 42, 0.12); color: rgba(15, 23, 42, 0.55); }
+  .nx-mgs__state strong { color: rgba(15, 23, 42, 0.85); }
+  .nx-mgs__state span { color: rgba(15, 23, 42, 0.52); }
+  .nx-mgs__spinner { border-color: rgba(15, 23, 42, 0.14); border-top-color: var(--tone-primary, #0d9488); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-mgs { animation: none; }
+  .nx-mgs__spinner { animation-duration: 2s; }
+}

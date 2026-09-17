@@ -1,32 +1,29 @@
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { pushRoutePath, useRoutePath } from '../../app/router'
 import { Icon } from '../../shared/icons'
 import type { AccentPalette } from '../../shared/settings'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import type { ViewWidthPercent } from '../../domain/inbox/view-layout'
-import {
-  appForCommandNavRoute,
-  COMMAND_NAV_ROUTES,
-  isCommandNavRouteActive,
-  type CommandNavRoute,
-} from '../mobile/command-navigation-registry'
-import { navigateToApp } from '../../domain/app-registry/contextual-navigation'
-import { openInboxDealIntelligence } from '../mobile/mobile-inbox-bridge'
-import { MobileSheet } from '../mobile/MobileSheet'
 import { CommandDrawer } from './primitives/CommandDrawer'
 import { FilterChip } from './primitives/FilterChip'
 import type { WorkspaceAvailability, WorkspaceLauncherItem } from './shell-types'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-type LauncherCategory = 'applications' | 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration' | 'account'
-
-/** Mobile portrait shell — applications + appearance only (desktop keeps full launcher). */
-const MOBILE_CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
-  { id: 'applications', label: 'Applications' },
-  { id: 'appearance', label: 'Appearance' },
-]
+/**
+ * DESKTOP ONLY.
+ *
+ * This component used to carry a `mobileShell` mode: a bottom sheet whose
+ * "Applications" tab rendered COMMAND_NAV_ROUTES as a long labelled text list. That
+ * made it the SECOND mobile application switcher — the dock's icon-grid AppLauncher
+ * being the first — and the two disagreed about which applications exist, because
+ * this list never applied the registry's `mobile` flag.
+ *
+ * §3 settles it in favour of the icon grid, so the mobile mode is gone rather than
+ * merely unused: a dead second launcher reads like truth to whoever edits mobile
+ * navigation next. The mobile launcher is modules/mobile/AppLauncher.
+ */
+type LauncherCategory = 'pinned' | 'workspaces' | 'views' | 'appearance' | 'administration'
 
 const DESKTOP_CATEGORY_OPTIONS: Array<{ id: LauncherCategory; label: string }> = [
   { id: 'pinned', label: 'Pinned' },
@@ -85,8 +82,6 @@ const workspaceIcon = (key: string): Parameters<typeof Icon>[0]['name'] => {
 export interface WorkspaceLauncherProps {
   open: boolean
   compact: boolean
-  /** Portrait mobile shell — bottom sheet + Applications/Account tabs */
-  mobileShell?: boolean
   anchorRef: React.RefObject<HTMLElement | null>
   onClose: () => void
   activeWorkspaceKey?: string
@@ -107,22 +102,11 @@ export interface WorkspaceLauncherProps {
   onSaveCurrentLayout?: () => void
   onResetLayout: () => void
   onWorkspaceSettings?: () => void
-  profileInitials?: string
-  authReady?: boolean
-  authLoading?: boolean
-  onProfile?: () => void
-  onSettings?: () => void
-  onThemeSettings?: () => void
-  onKeyboardShortcuts?: () => void
-  onDiagnostics?: () => void
-  onSignOut?: () => void
-  onOpenNotifications?: () => void
 }
 
 export const WorkspaceLauncher = ({
   open,
   compact,
-  mobileShell = false,
   anchorRef,
   onClose,
   activeWorkspaceKey,
@@ -143,30 +127,19 @@ export const WorkspaceLauncher = ({
   onSaveCurrentLayout,
   onResetLayout,
   onWorkspaceSettings,
-  profileInitials = 'RK',
-  authReady = false,
-  authLoading = false,
-  onProfile,
-  onSettings,
-  onThemeSettings,
-  onKeyboardShortcuts,
-  onDiagnostics,
-  onSignOut,
-  onOpenNotifications,
 }: WorkspaceLauncherProps) => {
-  const routePath = useRoutePath()
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null)
-  const categoryOptions = mobileShell ? MOBILE_CATEGORY_OPTIONS : DESKTOP_CATEGORY_OPTIONS
-  const [category, setCategory] = useState<LauncherCategory>(mobileShell ? 'applications' : 'workspaces')
+  const categoryOptions = DESKTOP_CATEGORY_OPTIONS
+  const [category, setCategory] = useState<LauncherCategory>('workspaces')
   const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (!open) return
     if (!categoryOptions.some((item) => item.id === category)) {
-      setCategory(mobileShell ? 'applications' : 'workspaces')
+      setCategory('workspaces')
     }
-  }, [open, category, categoryOptions, mobileShell])
+  }, [open, category, categoryOptions])
 
   const updatePopoverPosition = useCallback(() => {
     const anchor = anchorRef.current?.getBoundingClientRect()
@@ -186,7 +159,7 @@ export const WorkspaceLauncher = ({
     })
   }, [anchorRef])
 
-  const usePopover = !mobileShell && !compact
+  const usePopover = !compact
 
   useLayoutEffect(() => {
     if (!open || !usePopover) {
@@ -345,56 +318,7 @@ export const WorkspaceLauncher = ({
     )
   }
 
-  const filteredApplications = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return COMMAND_NAV_ROUTES
-    return COMMAND_NAV_ROUTES.filter((item) =>
-      `${item.label} ${item.description ?? ''}`.toLowerCase().includes(q),
-    )
-  }, [query])
-
-  /**
-   * Desktop launcher navigation, through the SAME contextual primitive the mobile dock
-   * uses. It used to `pushRoutePath(path)` with no payload, so selecting a property and
-   * then opening Entity Graph from here landed on the unfocused graph while the identical
-   * jump from the dock landed on that property. One navigator, one behaviour.
-   */
-  const handleApplicationSelect = (item: CommandNavRoute) => {
-    const app = appForCommandNavRoute(item)
-    if (!app) {
-      pushRoutePath(item.path)
-      onClose()
-      return
-    }
-    navigateToApp(app, {
-      openDealIntelligence: (identity) => openInboxDealIntelligence(identity ?? undefined),
-      openNotifications: () => onOpenNotifications?.(),
-      openSettings: () => onSettings?.(),
-    })
-    onClose()
-  }
-
   const renderCategoryPanel = () => {
-    if (category === 'applications' && mobileShell) {
-      return (
-        <div className="nx-wsl-panel__section">
-          <h4>Applications</h4>
-          {filteredApplications.map((item) => (
-            <button
-              key={item.path}
-              type="button"
-              className={cls('nx-wsl-menu-row', isCommandNavRouteActive(routePath, item) && 'is-active')}
-              onClick={() => handleApplicationSelect(item)}
-            >
-              <Icon name={item.icon} size={14} />
-              <strong>{item.label}</strong>
-              {item.description ? <small>{item.description}</small> : null}
-            </button>
-          ))}
-        </div>
-      )
-    }
-
     if (category === 'pinned') {
       return (
         <div className="nx-wsl-panel__section">
@@ -521,63 +445,7 @@ export const WorkspaceLauncher = ({
       )
     }
 
-    if (!mobileShell) return null
-
-    return (
-      <div className="nx-wsl-panel__section">
-        <header className="nx-wsl-account-header">
-          <span className="nx-profile-menu__avatar">{profileInitials}</span>
-          <div>
-            <strong>Operator</strong>
-            <small>Nexus command shell</small>
-          </div>
-        </header>
-        {onProfile ? (
-          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onProfile())}>
-            <Icon name="briefing" size={14} />
-            <strong>Profile</strong>
-          </button>
-        ) : null}
-        {onSettings ? (
-          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onSettings())}>
-            <Icon name="settings" size={14} />
-            <strong>Preferences</strong>
-          </button>
-        ) : null}
-        {onThemeSettings ? (
-          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onThemeSettings())}>
-            <Icon name="stats" size={14} />
-            <strong>Theme Settings</strong>
-          </button>
-        ) : null}
-        {onKeyboardShortcuts ? (
-          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onKeyboardShortcuts())}>
-            <Icon name="key" size={14} />
-            <strong>Keyboard Shortcuts</strong>
-          </button>
-        ) : null}
-        {onDiagnostics ? (
-          <button type="button" className="nx-wsl-menu-row" onClick={() => selectAndClose(() => onDiagnostics())}>
-            <Icon name="activity" size={14} />
-            <strong>Diagnostics</strong>
-          </button>
-        ) : null}
-        {onSignOut ? (
-          <button
-            type="button"
-            className="nx-wsl-menu-row is-sign-out"
-            disabled={!authReady || authLoading}
-            onClick={() => {
-              if (!authReady || authLoading) return
-              selectAndClose(() => onSignOut())
-            }}
-          >
-            <Icon name="close" size={14} />
-            <strong>{authLoading ? 'Checking session…' : authReady ? 'Sign Out' : 'Sign Out unavailable'}</strong>
-          </button>
-        ) : null}
-      </div>
-    )
+    return null
   }
 
   const launcherBody = (
@@ -587,12 +455,12 @@ export const WorkspaceLauncher = ({
         <input
           type="search"
           value={query}
-          placeholder={mobileShell ? 'Search applications…' : 'Search workspaces and views…'}
-          aria-label={mobileShell ? 'Search applications' : 'Search workspaces and views'}
+          placeholder="Search workspaces and views…"
+          aria-label="Search workspaces and views"
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      <div className={cls('nx-wsl-body', compact && 'is-compact', mobileShell && 'is-mobile-shell')}>
+      <div className={cls('nx-wsl-body', compact && 'is-compact')}>
         <nav className="nx-wsl-nav" aria-label="Workspace launcher categories">
           {categoryOptions.map((item) => (
             <button
@@ -609,14 +477,6 @@ export const WorkspaceLauncher = ({
       </div>
     </div>
   )
-
-  if (mobileShell) {
-    return (
-      <MobileSheet open={open} title="Workspace Launcher" height="full" className="is-mobile-wsl" onClose={onClose}>
-        {launcherBody}
-      </MobileSheet>
-    )
-  }
 
   if (compact) {
     return (

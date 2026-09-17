@@ -1,29 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import {
-  applyThemeToDOM,
-  loadSettings,
-  subscribeSettings,
-  updateSetting,
-  type NexusTheme,
-} from '../../shared/settings'
-import {
   formatBuildIdentityLine,
   resolveBuildIdentity,
   resolveRuntimeShellReport,
   type RuntimeShellReport,
 } from '../../lib/build-identity'
+import { MobileAppearanceControls } from './MobileAppearanceControls'
+import { MobileNotificationPermission } from '../notifications/MobileNotificationPermission'
 import { useBreakpoint } from './useBreakpoint'
 import { getViewportDebug } from './viewport-runtime'
-
-const THEME_OPTIONS: Array<{ id: NexusTheme; label: string }> = [
-  { id: 'dark', label: 'Dark' },
-  { id: 'true_black', label: 'True Black' },
-  { id: 'light', label: 'Light' },
-  { id: 'midnight-glass', label: 'Midnight' },
-  { id: 'tactical-blue', label: 'Tactical' },
-  { id: 'operator-black', label: 'Operator' },
-]
 
 interface MobileSettingsSheetProps {
   open: boolean
@@ -31,7 +17,6 @@ interface MobileSettingsSheetProps {
 }
 
 export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps) => {
-  const [theme, setTheme] = useState<NexusTheme>(() => loadSettings().nexusTheme)
   const build = resolveBuildIdentity()
   const viewport = useBreakpoint()
 
@@ -100,10 +85,6 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
     return () => { live = false }
   }, [build.gitSha])
 
-  useEffect(() => {
-    return subscribeSettings(() => setTheme(loadSettings().nexusTheme))
-  }, [])
-
   if (!open) return null
 
   return (
@@ -117,22 +98,19 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
           </button>
         </header>
         <div className="nx-mobile-settings-sheet__body">
-          <p className="nx-mobile-settings-sheet__label">Theme</p>
-          <div className="nx-mobile-settings-sheet__themes">
-            {THEME_OPTIONS.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className={`nx-mobile-settings-sheet__theme${theme === option.id ? ' is-active' : ''}`}
-                onClick={() => {
-                  updateSetting('nexusTheme', option.id)
-                  applyThemeToDOM()
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          {/*
+            The SAME appearance component the launcher renders.
+
+            This sheet used to carry its own six-theme list — a different six from
+            the four the inbox launcher offered, out of the eleven the theme engine
+            actually ships, and with no accent control at all. Three partial copies
+            of one feature is how "Appearance is broken on mobile" happens without
+            any single list being wrong.
+          */}
+          <MobileAppearanceControls />
+
+          <p className="nx-mobile-settings-sheet__label">Notifications</p>
+          <MobileNotificationPermission variant="setting" />
           <p className="nx-mobile-settings-sheet__label">About</p>
           <div className="nx-mobile-settings-sheet__about">
             <span>Build</span>

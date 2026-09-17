@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import {
-  APPS_BY_GROUP,
+  MOBILE_APPS_BY_GROUP,
   isAppActive,
   type NexusApp,
 } from '../../domain/app-registry/app-registry'
+import { MobileAppearanceControls } from './MobileAppearanceControls'
 import { resolveAppDestination } from '../../domain/app-registry/contextual-navigation'
 import { readPropertyLocator } from '../../domain/locator/property-locator'
 import { badgeForApp, usePinnedAppDockBadges } from './usePinnedAppDockBadges'
@@ -28,7 +29,7 @@ import './app-launcher.css'
  * apps that cannot accept the context say so rather than pretending.
  */
 
-export const APP_LAUNCHER_OPEN_EVENT = 'nexus:app-launcher-open'
+export { APP_LAUNCHER_OPEN_EVENT } from './shell-surface-bridge'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -73,16 +74,24 @@ export const AppLauncher = ({ routePath, onClose, onSelect }: AppLauncherProps) 
     return () => window.removeEventListener('keydown', handleKey)
   }, [onClose])
 
+  /**
+   * MOBILE_APPS_BY_GROUP, not APPS_BY_GROUP filtered here.
+   *
+   * The `app.mobile` test used to live in this component, which meant every OTHER
+   * mobile surface had to remember to repeat it — and WorkspaceLauncher's mobile
+   * application list did not, so Property OS was absent from this launcher's rules
+   * and present in the one the inbox opened. The registry now exports the mobile
+   * projection and this reads it.
+   */
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return APPS_BY_GROUP
+    if (!q) return MOBILE_APPS_BY_GROUP
+    return MOBILE_APPS_BY_GROUP
       .map((group) => ({
         ...group,
-        apps: group.apps.filter((app) => {
-          if (!app.mobile) return false
-          if (!q) return true
-          return `${app.label} ${app.shortLabel} ${app.description}`.toLowerCase().includes(q)
-        }),
+        apps: group.apps.filter((app) =>
+          `${app.label} ${app.shortLabel} ${app.description}`.toLowerCase().includes(q),
+        ),
       }))
       .filter((group) => group.apps.length > 0)
   }, [query])
@@ -176,6 +185,12 @@ export const AppLauncher = ({ routePath, onClose, onSelect }: AppLauncherProps) 
               </div>
             </section>
           ))}
+
+          {/* Appearance is part of the launcher, not a separate menu: §0 requires the
+              theme/accent system to survive this pass, and the only way it survives
+              CONSISTENTLY is by living in the one surface every route can open.
+              Hidden while searching — a query is a search for an application. */}
+          {query.trim() ? null : <MobileAppearanceControls />}
         </div>
       </div>
     </div>
