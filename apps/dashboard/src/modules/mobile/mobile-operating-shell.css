@@ -120,6 +120,29 @@ html.is-mobile-layout .nx-dev-runtime-banner {
 }
 
 /* Class-gated (not viewport media queries) so Safari desktop-website mode still styles mobile shell. */
+/* ══════════════════════════════════════════════════════════════════════════
+   WHY EVERY THEME SELECTOR IN THIS BLOCK CARRIES `&`
+   ══════════════════════════════════════════════════════════════════════════
+
+   Everything below is nested inside `html.is-mobile-layout { … }`, and native
+   CSS nesting inserts a DESCENDANT combinator when a nested selector does not
+   start with `&`. So `[data-nexus-theme='light'] .nx-mobile-command-dock__inner`
+   resolved to
+
+       html.is-mobile-layout [data-nexus-theme='light'] .nx-…__inner
+
+   — which requires the theme attribute to sit on a DESCENDANT of <html>. It does
+   not: applyThemeToDOM writes `data-nexus-theme` onto documentElement, the same
+   element as `html.is-mobile-layout`. Every one of these rules was therefore
+   dead, and the mobile shell rendered its dark treatment in light mode: measured
+   at 390px in light, `.nx-mobile-command-dock__inner` computed
+   rgba(6, 10, 18, 0.68) — the dark value — and the KPI orb, styled for a light
+   PAGE elsewhere, sat on it as a white square.
+
+   `&[data-nexus-theme='light']` compounds with the parent instead, which is what
+   was meant.
+   ══════════════════════════════════════════════════════════════════════════ */
+
 html.is-mobile-layout {
   .nx-os.is-mobile-os .nx-room-label {
     display: none;
@@ -218,6 +241,20 @@ html.is-mobile-layout {
     transform: scale(0.92);
   }
 
+  /* The orb is a DOCK GLYPH here, so it wears the glyph's geometry.
+     Its own styling is written for a page, where a square-cornered card is
+     right; inside a bar of 10px-radius glyphs it read as a hard white square
+     with a 0px radius — measured, `.nx-kpi-orb` computed `border-radius: 0px`
+     beside neighbours at 10px. Radius only: colour still comes from the theme's
+     own orb rules, which is what makes it follow every theme rather than this
+     one. */
+  .nx-mobile-command-dock__slot--kpi .nx-kpi-orb,
+  .nx-mobile-command-dock__slot--kpi .nx-kpi-orb-container,
+  .nx-mobile-command-dock__slot--kpi .nx-kpi-orb__glow,
+  .nx-mobile-command-dock__slot--kpi .nx-kpi-orb__inner {
+    border-radius: 10px !important;
+  }
+
   .nx-mobile-command-dock__slot--kpi {
     z-index: 1;
     display: grid;
@@ -235,7 +272,7 @@ html.is-mobile-layout {
      overflowing on the inbox, which carries two more controls than any other
      route: the text gives up its space first and the target never drops below
      the touch floor. */
-  [data-nexus-theme='light'] .nx-mobile-command-dock__identity {
+  &[data-nexus-theme='light'] .nx-mobile-command-dock__identity {
     color: rgba(15, 23, 42, 0.78);
   }
 
@@ -419,7 +456,7 @@ html.is-mobile-layout {
     box-shadow: 0 0 6px rgba(52, 211, 153, 0.65);
   }
 
-  [data-nexus-theme='light'] .nx-mobile-command-dock__inner {
+  &[data-nexus-theme='light'] .nx-mobile-command-dock__inner {
     background: rgba(255, 255, 255, 0.82);
     border-color: rgba(15, 23, 42, 0.1);
     box-shadow:
@@ -427,11 +464,11 @@ html.is-mobile-layout {
       inset 0 1px 0 rgba(255, 255, 255, 0.9);
   }
 
-  [data-nexus-theme='light'] .nx-mobile-command-dock__btn {
+  &[data-nexus-theme='light'] .nx-mobile-command-dock__btn {
     color: rgba(15, 23, 42, 0.72);
   }
 
-  [data-nexus-theme='light'] .nx-mobile-command-dock__glyph {
+  &[data-nexus-theme='light'] .nx-mobile-command-dock__glyph {
     border-color: rgba(15, 23, 42, 0.1);
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(15, 23, 42, 0.03) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.08);
@@ -589,248 +626,12 @@ html.is-mobile-layout {
 
   /* ── Mobile workspace launcher (portrait only) ──────────────────────── */
 
-  .nx-mobile-sheet.is-mobile-wsl {
-    border-color: rgba(255, 255, 255, 0.12);
-    background:
-      linear-gradient(165deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 28%, rgba(6, 10, 18, 0.94) 100%);
-    box-shadow:
-      0 20px 56px rgba(0, 0, 0, 0.48),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__header {
-    background:
-      linear-gradient(180deg, rgba(8, 12, 20, 0.98) 0%, rgba(8, 12, 20, 0.9) 100%);
-    border-bottom-color: rgba(255, 255, 255, 0.08);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__handle {
-    background: rgba(255, 255, 255, 0.24);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__body {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-root {
-    flex: 1;
-    min-height: 0;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-body.is-mobile-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-    min-height: 0;
-    flex: 1;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-body.is-mobile-shell .nx-wsl-nav {
-    flex-direction: row;
-    flex-wrap: nowrap;
-    border-right: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 8px 10px;
-    gap: 6px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-body.is-mobile-shell .nx-wsl-panel {
-    max-height: none;
-    flex: 1;
-    min-height: 0;
-    padding: 8px 10px 14px;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search {
-    border-bottom-color: rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search input {
-    color: rgba(255, 255, 255, 0.92);
-    font-size: 15px;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search input::placeholder {
-    color: rgba(255, 255, 255, 0.38);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-nav__item {
-    height: 34px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.03);
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 12px;
-    white-space: nowrap;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-nav__item.is-active {
-    border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.34);
-    background: color-mix(in srgb, var(--nx-accent, #5eead4) 14%, rgba(255, 255, 255, 0.04));
-    color: var(--nx-accent, #5eead4);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row {
-    min-height: 40px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.88);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row strong {
-    color: rgba(255, 255, 255, 0.94);
-    font-size: 13px;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row small {
-    display: block;
-    width: 100%;
-    margin-top: 1px;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.42);
-    font-weight: 500;
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row.is-active {
-    border-color: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.3);
-    background: color-mix(in srgb, var(--nx-accent, #5eead4) 12%, rgba(255, 255, 255, 0.04));
-    color: var(--nx-accent, #5eead4);
-  }
-
-  .nx-mobile-sheet.is-mobile-wsl .nx-wsl-panel__section h4 {
-    color: rgba(255, 255, 255, 0.42);
-  }
 
   /* Light mode */
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl {
-    border-color: rgba(15, 23, 42, 0.1);
-    background:
-      linear-gradient(165deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
-    box-shadow:
-      0 20px 48px rgba(15, 23, 42, 0.12),
-      inset 0 1px 0 rgba(255, 255, 255, 0.95);
-  }
 
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__header {
-    background: rgba(255, 255, 255, 0.96);
-    border-bottom-color: rgba(15, 23, 42, 0.08);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__title-wrap strong {
-    color: #0f172a;
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__title-wrap small {
-    color: rgba(15, 23, 42, 0.52);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__close {
-    background: rgba(15, 23, 42, 0.04);
-    color: rgba(15, 23, 42, 0.62);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search {
-    border-bottom-color: rgba(15, 23, 42, 0.08);
-    background: rgba(15, 23, 42, 0.02);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search svg {
-    color: rgba(15, 23, 42, 0.42);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search input {
-    color: #0f172a;
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search input::placeholder {
-    color: rgba(15, 23, 42, 0.38);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-body.is-mobile-shell .nx-wsl-nav {
-    border-bottom-color: rgba(15, 23, 42, 0.08);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-nav__item {
-    border-color: rgba(15, 23, 42, 0.08);
-    background: rgba(15, 23, 42, 0.03);
-    color: rgba(15, 23, 42, 0.62);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-nav__item.is-active {
-    border-color: color-mix(in srgb, var(--nx-accent, #0ea5e9) 30%, rgba(15, 23, 42, 0.1));
-    background: color-mix(in srgb, var(--nx-accent, #0ea5e9) 10%, rgba(255, 255, 255, 0.9));
-    color: var(--nx-accent, #0ea5e9);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row {
-    color: rgba(15, 23, 42, 0.78);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row strong {
-    color: #0f172a;
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row small {
-    color: rgba(15, 23, 42, 0.48);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row.is-active {
-    border-color: color-mix(in srgb, var(--nx-accent, #0ea5e9) 28%, rgba(15, 23, 42, 0.08));
-    background: color-mix(in srgb, var(--nx-accent, #0ea5e9) 10%, rgba(255, 255, 255, 0.92));
-    color: var(--nx-accent, #0ea5e9);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-panel__section h4 {
-    color: rgba(15, 23, 42, 0.42);
-  }
-
-  [data-nexus-theme='light'] .nx-mobile-sheet.is-mobile-wsl .nx-portable-wsl-nav .nx-wsl-nav__item {
-    border-color: rgba(15, 23, 42, 0.08);
-    background: rgba(15, 23, 42, 0.03);
-    color: rgba(15, 23, 42, 0.62);
-  }
 
   /* Red Ops */
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl {
-    border-color: rgba(248, 113, 113, 0.18);
-    background:
-      linear-gradient(165deg, rgba(248, 113, 113, 0.08) 0%, rgba(18, 4, 6, 0.96) 38%, rgba(10, 3, 5, 0.98) 100%);
-    box-shadow:
-      0 20px 56px rgba(0, 0, 0, 0.52),
-      inset 0 1px 0 rgba(248, 113, 113, 0.12);
-  }
 
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl .nx-mobile-sheet__header {
-    background: linear-gradient(180deg, rgba(18, 4, 6, 0.98) 0%, rgba(14, 3, 5, 0.92) 100%);
-    border-bottom-color: rgba(248, 113, 113, 0.12);
-  }
-
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-search {
-    border-bottom-color: rgba(248, 113, 113, 0.1);
-    background: rgba(248, 113, 113, 0.03);
-  }
-
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-body.is-mobile-shell .nx-wsl-nav {
-    border-bottom-color: rgba(248, 113, 113, 0.1);
-  }
-
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-nav__item.is-active,
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl .nx-portable-wsl-nav .nx-wsl-nav__item.is-active {
-    border-color: rgba(248, 113, 113, 0.34);
-    background: rgba(248, 113, 113, 0.1);
-    color: #fca5a5;
-  }
-
-  [data-nexus-theme='red_ops'] .nx-mobile-sheet.is-mobile-wsl .nx-wsl-menu-row.is-active {
-    border-color: rgba(248, 113, 113, 0.3);
-    background: rgba(248, 113, 113, 0.08);
-    color: #fca5a5;
-  }
 
   .nx-os.is-mobile-os {
     display: flex !important;
@@ -1484,28 +1285,28 @@ html.is-mobile-layout {
     height: 12px !important;
   }
 
-  [data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-back {
+  &[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-back {
     color: rgba(15, 23, 42, 0.82);
   }
 
-  [data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-back__glyph {
+  &[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-back__glyph {
     border-color: rgba(15, 23, 42, 0.1);
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(15, 23, 42, 0.03) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 6px rgba(15, 23, 42, 0.08);
   }
 
-  [data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-conv-back,
-  [data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger {
+  &[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-conv-back,
+  &[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger {
     color: rgba(15, 23, 42, 0.82);
   }
 
-  [data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-conv-back__glyph {
+  &[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-conv-back__glyph {
     border-color: rgba(15, 23, 42, 0.1);
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(15, 23, 42, 0.03) 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 2px 8px rgba(15, 23, 42, 0.08);
   }
 
-  [data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger.is-open .nx-conv-back__glyph {
+  &[data-nexus-theme='light'] .nx-conv-header.is-mobile-header .nx-mobile-header-actions-trigger.is-open .nx-conv-back__glyph {
     border-color: color-mix(in srgb, var(--nx-accent, #3b82f6) 28%, rgba(15, 23, 42, 0.12));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.95),
@@ -1513,7 +1314,7 @@ html.is-mobile-layout {
       0 4px 12px color-mix(in srgb, var(--nx-accent, #3b82f6) 12%, rgba(15, 23, 42, 0.1));
   }
 
-  [data-nexus-theme='light'] .nx-mobile-header-actions-portal {
+  &[data-nexus-theme='light'] .nx-mobile-header-actions-portal {
     border-color: rgba(15, 23, 42, 0.1) !important;
     background:
       linear-gradient(155deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%) !important;
@@ -1522,16 +1323,16 @@ html.is-mobile-layout {
       0 14px 32px rgba(15, 23, 42, 0.12) !important;
   }
 
-  [data-nexus-theme='light'] .nx-mobile-header-actions-portal .nx-chat-action-icon {
+  &[data-nexus-theme='light'] .nx-mobile-header-actions-portal .nx-chat-action-icon {
     color: rgba(15, 23, 42, 0.86);
   }
 
-  [data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-streetview {
+  &[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-streetview {
     border-color: rgba(15, 23, 42, 0.12);
     box-shadow: 0 3px 10px rgba(15, 23, 42, 0.1);
   }
 
-  [data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-layer-b--mobile {
+  &[data-nexus-theme='light'] .nx-inbox-shell.is-mobile-inbox .nx-conv-layer-b--mobile {
     border-top: none;
   }
 
@@ -1854,8 +1655,8 @@ html.is-mobile-layout {
     box-shadow: none !important;
   }
 
-  [data-nexus-theme='light'] .nx-icm.is-mobile-map .nx-icm__toolbar,
-  [data-nexus-theme='light'] .nx-icm.is-mobile-map .nx-icm__header {
+  &[data-nexus-theme='light'] .nx-icm.is-mobile-map .nx-icm__toolbar,
+  &[data-nexus-theme='light'] .nx-icm.is-mobile-map .nx-icm__header {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -2072,7 +1873,7 @@ html.is-mobile-layout {
     opacity: 0.35;
   }
 
-  [data-nexus-theme='light'] .nx-icm-activity__peek-row {
+  &[data-nexus-theme='light'] .nx-icm-activity__peek-row {
     color: rgba(15, 23, 42, 0.82);
   }
 
@@ -2475,7 +2276,7 @@ html.is-mobile-layout {
     z-index: 168;
   }
 
-  [data-nexus-theme='light'] .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
+  &[data-nexus-theme='light'] .nx-mobile-bottom-sheet.smc-mobile-bottom-sheet {
     border-color: rgba(12, 25, 48, 0.1);
     background:
       radial-gradient(ellipse 120% 80% at 50% 0%, rgba(10, 132, 255, 0.07), transparent 55%),
@@ -2486,45 +2287,45 @@ html.is-mobile-layout {
     color: #0c1930;
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__name {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__name {
     color: #0c1930;
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__address,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-summary,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric span,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-head__label,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip__cell span {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-identity__address,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-summary,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric span,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-head__label,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip__cell span {
     color: #4a6a8a;
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-activity,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-kv {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-activity,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-kv {
     background: rgba(255, 255, 255, 0.55);
     border-color: rgba(12, 25, 48, 0.08);
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric strong,
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip__cell strong {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-metric strong,
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-intel-strip__cell strong {
     color: #0c1930;
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-badge {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-badge {
     border-color: rgba(12, 25, 48, 0.1);
     background: rgba(255, 255, 255, 0.5);
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-actions {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-actions {
     background: linear-gradient(180deg, transparent, rgba(248, 250, 255, 0.94) 24%);
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action {
     color: #0c1930;
   }
 
-  [data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action--message {
+  &[data-nexus-theme='light'] .smc-mobile-bottom-sheet .smc-action--message {
     background: color-mix(in srgb, var(--smc-accent, #0a84ff) 14%, rgba(255, 255, 255, 0.72));
     border-color: color-mix(in srgb, var(--smc-accent, #0a84ff) 28%, rgba(12, 25, 48, 0.1));
   }
