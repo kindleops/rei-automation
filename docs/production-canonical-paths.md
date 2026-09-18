@@ -386,6 +386,80 @@ sent — which is the expected state while contact enrichment is `not_started`,
 and is the number to watch when it lands.
 
 
+### Campaign Command — canonical path (traced 2026-09-18)
+
+    Campaign Command mobile   views/campaign-command/mobile/CampaignCommandMobile
+    builder                   views/campaign-command/CreateCampaignModal
+                              (+ mobile/CampaignBuildMobile | ReachMobile | LaunchMobile)
+    draft persistence         campaign-builder-launch.buildCampaignPersistPayload
+                              -> POST /api/cockpit/campaigns
+                              -> campaign-automation-service.createCampaign
+                              -> normalizeCampaignInput -> public.campaigns
+    rehydration               campaign-builder-launch.hydrateLaunchSettings
+    audience                  POST /api/cockpit/campaigns/preview-targets
+                              -> campaign-field-filter-compiler (locked catalog)
+    targets                   POST /api/cockpit/campaigns/[id]/build-targets
+                              -> public.campaign_targets
+    SCHEDULE (canonical)      POST /api/cockpit/campaigns/[id]/lifecycle
+                              { action: 'schedule', scheduled_for }
+                              -> applyCampaignLifecycleAction
+                              -> campaign-state-machine.transitionCampaignStatus
+                              -> RPC campaign_transition_status  (advisory-locked)
+                              -> campaigns.status='scheduled' + campaigns.scheduled_for
+    activation (scheduled)    cron */5 -> GET /api/internal/campaigns/activate-due
+                              -> runDueScheduledCampaignActivations
+                              -> campaign-activation-orchestrator.activateCampaignNow
+    activation (now)          same orchestrator — ONE activation authority
+    queue materialization     createCampaignQueuePlan
+                              -> sms-engine.insertSupabaseSendQueueRow -> public.send_queue
+    execution                 process-send-queue (claim/lease, contact window,
+                              suppression, sender revalidation, canonical send
+                              authority, emergency stop) -> sendTextgridSMS
+    provider result           finalizeSendQueueSuccess / Failure
+    delivery                  reconcileDeliveryReceipt (RPC or local)
+    inbound                   flows/handle-textgrid-inbound
+
+**Authority.** `campaigns` owns the campaign; `campaign_targets` owns the target;
+`send_queue` owns the touch and its execution; `campaign_transition_status` (a
+DB function, advisory-locked) owns every status change AND the schedule. The
+schedule is not a second state machine: `scheduled_for` is only meaningful
+paired with `status='scheduled'`, and one RPC writes both.
+
+**FIXED this pass.**
+
+`callBackend` had NO request deadline. Any surface awaiting it stayed in
+`loading` forever when the upstream neither answered nor refused — the mechanism
+behind "Campaign Command hangs in readiness". The error branch each component
+wrote was unreachable because the promise never settled. Now 60s reads / 120s
+mutations, overridable, reported as `BACKEND_TIMEOUT` (never as an unreachable
+backend, which would send an operator to check a healthy server).
+
+The builder wrote pacing to real columns and never read any of them back, and
+never persisted the start time at all — so a reload silently replaced the
+operator's settings with presets. Pacing and the contact window now rehydrate
+from the campaign; the planned start persists as
+`metadata.planned_first_scheduled_at` (intent), with `campaigns.scheduled_for`
+still written only by the state machine.
+
+`/api/cockpit/campaigns/market-inventory` HAS NO ROUTE and never did — the
+request fell through to `campaigns/[id]` and was rejected as a non-UUID campaign
+id, so every load fired a guaranteed 400 to feed two components that could never
+render. Removed.
+
+**Controlled proof — campaign `928cc2c0-5570-4837-ae75-f0efc97e415d`** (inert,
+no targeting, archived afterwards so the activation cron can never act on it):
+
+    created draft            pacing 300/90/250, interval 60s, window 09:00-18:00
+    reload (GET)             returned every value exactly
+    schedule action          draft -> scheduled, scheduled_for 2026-09-20 14:00Z
+                             (= 09:00 America/Chicago — correct offset)
+    6 CONCURRENT schedules   all idempotent:true
+                             1 campaign row, 0 targets, 0 queue rows
+    pause                    scheduled -> paused
+    resume                   truthfully REFUSED: "No ready recipients in target
+                             snapshot" (this campaign has 0 targets)
+    archive                  paused -> archived
+
 ### Queue writers — VERIFIED
 **No direct `send_queue` table inserts exist anywhere.** Every row is created by
 `sms-engine.insertSupabaseSendQueueRow`. Nine callers converge on it:
