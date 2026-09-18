@@ -22,12 +22,9 @@
  *              all five as candidates for an operator to resolve. Picking the
  *              newest would silently attribute an investor's "yes" to an
  *              arbitrary property.
- *   unknown    Buyer outreach was UNREADABLE. Fail closed and defer: the message
- *              is neither dropped nor attributed. `mayMutateSellerLifecycle`
- *              already states that an unknown domain must not enter the seller
- *              lifecycle, and deferring rather than discarding is what makes
- *              that safe — a transient read error delays a seller reply by one
- *              retry instead of losing it.
+ *   unknown    Buyer outreach was UNREADABLE — and what happens next depends on
+ *              whether buyer outreach EXISTS AT ALL. See below; getting this
+ *              wrong turns a buyer-table outage into a total seller outage.
  *   not_buyer  The only answer that lets the seller pipeline proceed.
  *
  * OPT-OUT IS HONOURED REGARDLESS OF DOMAIN (§22). "STOP" from a buyer is a
@@ -44,6 +41,54 @@ import {
 } from "@/lib/domain/buyers/route-inbound-buyer-reply.js";
 
 const OUTREACH_TABLE = "buyer_outreach_targets";
+
+/**
+ * IS THERE ANY BUYER OUTREACH AT ALL?
+ *
+ * This exists because the first version of this boundary deferred every inbound
+ * whose buyer lookup failed, and the critical suite caught what that means:
+ * if `buyer_outreach_targets` becomes unreadable for any reason — an RLS
+ * change, a permission, a transient fault — EVERY SELLER REPLY stops being
+ * processed. A safeguard for traffic that does not exist yet would have taken
+ * down the traffic that does.
+ *
+ * So an unreadable per-phone lookup is only a reason to defer when buyer
+ * outreach is actually live. If this answers `empty`, no buyer has ever been
+ * contacted and the failed lookup cannot be hiding one. If this ALSO fails, the
+ * database is broadly unavailable and the seller pipeline will fail on its own
+ * merits — blocking here adds nothing and loses the message.
+ *
+ * Memoised briefly because it runs on the failure path of every inbound, and
+ * the answer changes at most once in the life of the product.
+ */
+const PRESENCE_TTL_MS = 60_000;
+let presence_cache = { value: null, at: 0 };
+
+export function resetBuyerOutreachPresenceCache() {
+  presence_cache = { value: null, at: 0 };
+}
+
+async function buyerOutreachPresence(db, deps = {}) {
+  if (typeof deps.buyerOutreachPresence === "function") return deps.buyerOutreachPresence();
+
+  const now = Date.now();
+  if (presence_cache.value && now - presence_cache.at < PRESENCE_TTL_MS) {
+    return presence_cache.value;
+  }
+
+  let value = "unknown";
+  try {
+    const { data, error } = await db.from(OUTREACH_TABLE).select("id").limit(1);
+    if (error) throw error;
+    value = Array.isArray(data) && data.length > 0 ? "present" : "empty";
+  } catch {
+    value = "unknown";
+  }
+
+  // Only a confident answer is cached; an outage must not be remembered.
+  if (value !== "unknown") presence_cache = { value, at: now };
+  return value;
+}
 
 /** Destination-level suppression — the same authority, not a buyer copy of it. */
 async function suppressBuyerNumber(db, phone, now, deps = {}) {
@@ -87,7 +132,21 @@ export async function handleInboundBuyerReply(
   const phone = normalizePhone(from_phone_number);
 
   if (classification.domain === "unknown") {
-    // Nothing is written and nothing is claimed. The caller defers.
+    const presence = await buyerOutreachPresence(db, deps);
+    if (presence !== "present") {
+      // No buyer has ever been contacted, so the failed lookup cannot be hiding
+      // one. Let the seller path proceed rather than stalling real traffic for
+      // a hazard that does not exist yet — and say so in the result.
+      return {
+        handled: false,
+        domain: "not_buyer",
+        degraded: classification.reason || "buyer_outreach_unreadable",
+        buyer_outreach_presence: presence,
+      };
+    }
+    // Buyer outreach IS live and we cannot tell whose reply this is. Nothing is
+    // written and nothing is claimed — the caller defers and the message is
+    // neither dropped nor misattributed.
     return {
       handled: true,
       defer: true,

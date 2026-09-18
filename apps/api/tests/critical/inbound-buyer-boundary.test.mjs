@@ -19,7 +19,10 @@
 import "../helpers/critical-test-environment.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleInboundBuyerReply } from "@/lib/domain/buyers/handle-inbound-buyer-reply.js";
+import {
+  handleInboundBuyerReply,
+  resetBuyerOutreachPresenceCache,
+} from "@/lib/domain/buyers/handle-inbound-buyer-reply.js";
 
 const BUYER_PHONE = "+13055550100";
 
@@ -73,17 +76,43 @@ test("§20 a buyer with live outreach on several properties is AMBIGUOUS, not gu
   assert.equal(result.candidates.length, 2);
 });
 
-test("§21 unreadable buyer outreach DEFERS — it does not attribute and does not drop", async () => {
+test("§21 unreadable buyer outreach DEFERS — while buyer outreach is live", async () => {
+  resetBuyerOutreachPresenceCache();
   const result = await handleInboundBuyerReply(
     { from_phone_number: BUYER_PHONE, body: "hello" },
-    { loadBuyerOutreachByPhone: async () => { throw new Error("outreach table unreachable") } }
+    {
+      loadBuyerOutreachByPhone: async () => { throw new Error("outreach table unreachable") },
+      buyerOutreachPresence: async () => "present",
+    }
   );
 
   assert.equal(result.handled, true);
   assert.equal(result.defer, true);
   assert.equal(result.domain, "unknown");
-  // Critically NOT handled:false — that would send an unclassifiable message
-  // into the seller acquisition pipeline.
+  // Critically NOT handled:false — with live buyer traffic, an unclassifiable
+  // message must not be sent into the seller acquisition pipeline.
+});
+
+test("AN UNREADABLE BUYER TABLE MUST NOT STOP SELLER INBOUND", async () => {
+  // The first version of this boundary deferred EVERY inbound whose buyer
+  // lookup failed. The critical suite caught what that means: one unreadable
+  // table — an RLS change, a permission, a transient fault — and every seller
+  // reply stops being processed. A safeguard for traffic that does not exist
+  // yet would have taken down the traffic that does.
+  resetBuyerOutreachPresenceCache();
+  for (const presence of ["empty", "unknown"]) {
+    const result = await handleInboundBuyerReply(
+      { from_phone_number: BUYER_PHONE, body: "yes I own it" },
+      {
+        loadBuyerOutreachByPhone: async () => { throw new Error("outreach table unreachable") },
+        buyerOutreachPresence: async () => presence,
+      }
+    );
+    assert.equal(result.handled, false, `presence=${presence} must let the seller path run`);
+    assert.equal(result.domain, "not_buyer");
+    // ...and it says it was degraded rather than claiming a confident verdict.
+    assert.equal(result.degraded, "buyer_outreach_unreadable");
+  }
 });
 
 test("§22 STOP from a buyer is suppressed through the SHARED destination authority", async () => {
