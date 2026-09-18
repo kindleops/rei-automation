@@ -1,4 +1,9 @@
 import crypto from 'node:crypto'
+import {
+  INTERNAL_CANARY_SOURCE,
+  isInternalCanaryAudienceRequested,
+  resolveInternalCanaryAudience,
+} from '@/lib/domain/campaigns/canary-audience-source.js'
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { buildSendQueueDedupeKey } from '@/lib/supabase/sms-engine.js'
@@ -75,6 +80,18 @@ const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'appro
 const PREFERRED_PREVIEW_CANDIDATE_SOURCE = 'outbound_feeder_candidates'
 const FALLBACK_PREVIEW_CANDIDATE_SOURCE = 'v_sms_ready_contacts'
 const PREVIEW_CANDIDATE_SOURCES = new Set([
+  /**
+   * §3 — the internal proof audience is a FIRST-CLASS SOURCE, not a special
+   * case bolted onto the graph path. It has to be listed here or
+   * `previewSourcePlan` normalizes it away to the production default, which is
+   * precisely the silent fallback that would have targeted real sellers while
+   * reporting that a canary cohort had been requested.
+   *
+   * Listing it grants nothing on its own: resolution still requires internal
+   * authorization and explicit proof intent, and every destination is
+   * re-checked against the approved registry.
+   */
+  INTERNAL_CANARY_SOURCE,
   'outbound_feeder_candidates',
   'v_feeder_candidates_fast',
   'v_outbound_discovery_open_now',
@@ -1114,6 +1131,9 @@ function previewOptionsFromInput(input = {}, campaign = null) {
     catalog_filters: catalogFilters,
     candidate_source: sourcePlan.normalizedSource || DEFAULT_CANDIDATE_SOURCE,
     candidate_source_candidates: sourcePlan.sourceCandidates,
+    // Proof intent must reach the resolver; it is one half of the canary gate.
+    internal_proof_intent: input.internal_proof_intent === true,
+    canary_phones: Array.isArray(input.canary_phones) ? input.canary_phones : null,
     received_source: sourcePlan.receivedSource,
     source_normalization_reason: sourcePlan.reason,
     source_warnings: sourcePlan.warnings,
@@ -6138,12 +6158,28 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       }
     }
 
-    const graph = await summarizeCampaignGraph({
-      supabase,
-      options,
-      rowLimit: targetLimit,
-      requireQueueEligibleRows: true,
-    })
+    /**
+     * §3 — AUDIENCE SOURCE, THEN ONE PIPELINE.
+     *
+     * Production cohorts resolve from `campaign_target_graph`; internal proof
+     * cohorts resolve from the approved canary registry. They converge HERE,
+     * as graph-shaped rows, so everything below this line — dedup, entity
+     * review, language resolution, target persistence, queue materialization —
+     * is identical for both and there is no such thing as a canary campaign
+     * object downstream.
+     */
+    const graph = isInternalCanaryAudienceRequested(options)
+      ? await resolveInternalCanaryAudience({
+          supabase,
+          options,
+          context: { internal_authorized: input.internal_authorized === true },
+        })
+      : await summarizeCampaignGraph({
+          supabase,
+          options,
+          rowLimit: targetLimit,
+          requireQueueEligibleRows: true,
+        })
     if (graph.ok === false) {
       await finishCampaignRun(run.id, {
         status: 'completed',
