@@ -9,6 +9,18 @@ const QUEUE_PAGE_COLUMNS = [
   'thread_key', 'template_id', 'use_case_template', 'message_type', 'metadata',
   'message_body', 'message_text', 'touch_number', 'current_stage', 'queue_key',
   'failed_reason', 'blocked_reason', 'paused_reason', 'guard_reason', 'property_address',
+  /**
+   * §10/§11 — A CAMPAIGN QUEUE ROW MUST NOT ARRIVE ANONYMOUS.
+   *
+   * Both columns exist on `send_queue` and are populated by campaign
+   * materialization, and neither was selected here. So a row created by a
+   * campaign reached the Queue surface with no campaign identity at all: the
+   * operator could see a message to a phone number about a property and had no
+   * way to tell WHICH campaign put it there, no way to deep-link back, and no
+   * way to answer "why is this scheduled" without querying the database by
+   * hand — which is exactly what the Queue is supposed to make unnecessary.
+   */
+  'campaign_id', 'campaign_target_id',
 ].join(',')
 
 const OWNER_SELECT = 'master_owner_id,display_name,owner_type_guess,priority_score'
