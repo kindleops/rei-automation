@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
-import { useRoutePath } from '../../app/router'
+import { useRoutePath, useRouteLocation } from '../../app/router'
 import { resolveAppForRoute } from '../../domain/app-registry/app-registry'
 import { clearActiveContext, readActiveContext, type ActiveContext } from '../../domain/locator/active-context'
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
+import { goBack } from '../../domain/navigation/back-stack'
+import { useBackTarget } from '../../domain/navigation/useBackHandler'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -70,7 +72,9 @@ export const MobileCommandDock = ({
   showActivity = true,
 }: MobileCommandDockProps) => {
   const routePath = useRoutePath()
+  const routeLocation = useRouteLocation()
   const activeApp = resolveAppForRoute(routePath)
+  const backTarget = useBackTarget()
 
   /**
    * §3 — context must be OBVIOUS, and must never be impossible to escape.
@@ -85,7 +89,9 @@ export const MobileCommandDock = ({
     sync()
     window.addEventListener(PROPERTY_LOCATOR_EVENT, sync)
     return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync)
-  }, [routePath])
+    // `routeLocation`, not `routePath`: clearing a context changes only the
+    // query, and the path-only hook reports no change for that.
+  }, [routeLocation])
 
   const toggle = (surface: Exclude<DockSurface, null>) => {
     onSurfaceChange(activeSurface === surface ? null : surface)
@@ -121,22 +127,46 @@ export const MobileCommandDock = ({
           inbox, which also carries Tasks and Live Activity) it degrades to the app's
           own icon rather than overflowing.
         */}
-        <button
-          type="button"
-          className={cls(
-            'nx-mobile-command-dock__btn',
-            'nx-mobile-command-dock__btn--workspace',
-            (workspaceActive || activeSurface === 'workspace') && 'is-active',
-          )}
-          aria-label={`${activeApp.label} — open applications`}
-          aria-expanded={activeSurface === 'workspace'}
-          onClick={() => toggle('workspace')}
-        >
-          <DockGlyph hub>
-            <Icon name={activeApp.icon} size={DOCK_ICON_HUB} strokeWidth={1.55} />
-          </DockGlyph>
-          <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
-        </button>
+        {/*
+          §4 — THE LEFT SLOT IS BACK, OR IDENTITY. Never neither.
+
+          Every nested state in this product (a thread, a comp detail, a buyer, a
+          campaign step, a closing record) was reachable and not leaveable,
+          because the bar rendered no Back at all. It renders one whenever
+          `back-stack` reports a destination: a registered dismiss handler first,
+          then our own route history. When there is genuinely nowhere back, the
+          slot returns to identity-and-launcher, so the control is never dead.
+        */}
+        {backTarget.kind !== 'none' ? (
+          <button
+            type="button"
+            className={cls('nx-mobile-command-dock__btn', 'nx-mobile-command-dock__btn--back')}
+            aria-label={`Back to ${backTarget.label}`}
+            onClick={() => { if (!goBack()) toggle('workspace') }}
+          >
+            <DockGlyph hub>
+              <Icon name="chevron-left" size={DOCK_ICON_HUB} strokeWidth={1.9} />
+            </DockGlyph>
+            <span className="nx-mobile-command-dock__identity">{backTarget.label}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={cls(
+              'nx-mobile-command-dock__btn',
+              'nx-mobile-command-dock__btn--workspace',
+              (workspaceActive || activeSurface === 'workspace') && 'is-active',
+            )}
+            aria-label={`${activeApp.label} — open applications`}
+            aria-expanded={activeSurface === 'workspace'}
+            onClick={() => toggle('workspace')}
+          >
+            <DockGlyph hub>
+              <Icon name={activeApp.icon} size={DOCK_ICON_HUB} strokeWidth={1.55} />
+            </DockGlyph>
+            <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
+          </button>
+        )}
 
         {/*
           THE CONTEXT CHIP.
@@ -201,6 +231,37 @@ export const MobileCommandDock = ({
           </DockGlyph>
         </button>
 
+
+        <button
+          type="button"
+          className={cls(
+            'nx-mobile-command-dock__btn',
+            notificationsActive && 'is-active',
+          )}
+          aria-label="Notifications"
+          aria-expanded={notificationsActive}
+          onClick={() => toggle('notifications')}
+        >
+          <DockGlyph>
+            <Icon name="bell" size={DOCK_ICON} strokeWidth={1.55} />
+          </DockGlyph>
+          {notificationCount > 0 ? (
+            <span className="nx-mobile-command-dock__badge">{notificationCount > 99 ? '99+' : notificationCount}</span>
+          ) : null}
+        </button>
+
+        {/*
+          §5 — APPLICATION-LOCAL CONTROLS, AFTER THE GLOBALS AND MARKED AS SUCH.
+
+          The bar carried four controls on some routes, five on others and six on
+          others, because these two were injected into the GLOBAL shell by
+          whichever host happened to be able to open them. The three globals
+          above (Queue, Search, Notifications) are now fixed in count, order and
+          position on every route; anything a single application contributes
+          trails them behind a hairline so the operator can see which is which.
+        */}
+        {showTasks || showActivity ? <span className="nx-mobile-command-dock__divider" aria-hidden /> : null}
+
         {showTasks ? (
           <button
             type="button"
@@ -238,23 +299,6 @@ export const MobileCommandDock = ({
           </button>
         ) : null}
 
-        <button
-          type="button"
-          className={cls(
-            'nx-mobile-command-dock__btn',
-            notificationsActive && 'is-active',
-          )}
-          aria-label="Notifications"
-          aria-expanded={notificationsActive}
-          onClick={() => toggle('notifications')}
-        >
-          <DockGlyph>
-            <Icon name="bell" size={DOCK_ICON} strokeWidth={1.55} />
-          </DockGlyph>
-          {notificationCount > 0 ? (
-            <span className="nx-mobile-command-dock__badge">{notificationCount > 99 ? '99+' : notificationCount}</span>
-          ) : null}
-        </button>
       </div>
     </nav>
   )

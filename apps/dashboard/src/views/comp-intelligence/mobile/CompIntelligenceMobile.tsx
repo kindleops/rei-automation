@@ -22,6 +22,7 @@ import type { useAnalystScenario } from '../hooks/useAnalystScenario'
 import type { useCompDecisionProjection } from '../hooks/useCompDecisionProjection'
 import { CompFilterSheet } from './CompFilterSheet'
 import { CompDetailLayer } from './CompDetailLayer'
+import { useBackHandler } from '../../../domain/navigation/useBackHandler'
 import './comp-intelligence-mobile.css'
 
 /**
@@ -107,6 +108,14 @@ export const CompIntelligenceMobile = ({
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [mapStyleError, setMapStyleError] = useState(false)
+
+  /**
+   * §4 — these are nested states, not routes, so browser history cannot leave
+   * them. Registering them means the ONE global Back in the top bar dismisses
+   * whichever is innermost, in the order the operator opened them.
+   */
+  useBackHandler(Boolean(detailId), 'comps:detail', 'Comparables', () => setDetailId(null))
+  useBackHandler(filterSheetOpen, 'comps:filters', 'Comparables', () => setFilterSheetOpen(false))
   const [fitBoundsToken, setFitBoundsToken] = useState(0)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const railRef = useRef<HTMLDivElement | null>(null)

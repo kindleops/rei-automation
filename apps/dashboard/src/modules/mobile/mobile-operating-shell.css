@@ -3024,3 +3024,37 @@ html.is-mobile-layout {
   .nx-mobile-command-dock__context-label { color: rgba(15, 23, 42, 0.92); }
   .nx-mobile-command-dock__context-clear { color: rgba(15, 23, 42, 0.7); }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §5 — GLOBAL SLOTS, THEN APPLICATION-LOCAL ONES
+
+   The bar used to carry four controls on some routes, five on others and six
+   on others, because Tasks and Live Activity were injected into the GLOBAL
+   shell by whichever host could open them. The three globals (Queue, Search,
+   Notifications) are now fixed in count and order everywhere; whatever a single
+   application contributes trails them behind this hairline, so the operator can
+   tell which half of the bar belongs to the product and which to the screen.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout {
+  .nx-mobile-command-dock__divider {
+    flex: 0 0 auto;
+    width: 1px;
+    height: 18px;
+    margin: 0 1px;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  /* §4 — Back takes the identity slot when there is a destination, so it never
+     costs a slot the bar does not have. The chevron reads as a direction, and
+     the label names where it goes rather than saying "Back" twice. */
+  .nx-mobile-command-dock__btn--back .nx-mobile-command-dock__identity {
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+[data-nexus-theme='light'] {
+  .nx-mobile-command-dock__divider { background: rgba(15, 23, 42, 0.16); }
+}
