@@ -70,9 +70,28 @@ function normalizeCompRow(row, index, subjectFlat) {
     asset_type: row.normalized_asset_class || row.asset_class || null,
     property_subtype: row.property_type || null,
     units: row.units_count ?? null,
-    bedrooms: row.total_bedrooms ?? null,
-    bathrooms: row.total_baths ?? null,
-    square_feet: row.building_square_feet ?? null,
+    /**
+     * TWO ROW VOCABULARIES REACH THIS MAPPER, AND IT ONLY SPOKE ONE.
+     *
+     * `fetchMarketComps` reads `v_recent_sold_comps`, whose columns are
+     * `total_bedrooms` / `total_baths` / `building_square_feet` /
+     * `computed_ppsf`. `fetchSubjectComps` — the PRIMARY path — calls the RPC
+     * `get_comp_candidates_for_subject`, which returns `beds` / `baths` / `sqft`
+     * / `ppsf`. The mapper named only the view's columns, so every comp arriving
+     * from the RPC was flattened to null.
+     *
+     * Measured on subject 2172967028: the API returned six comps, each with
+     * `bedrooms: null, bathrooms: null, ppsf: null` while its own `raw` carried
+     * `beds: 4, baths: 2, ppsf: 638.46, mls_sold_price: 830000`. The data was
+     * present the whole time and the card had nothing to render — which is
+     * exactly the "meaningless marker with no information" §7 forbids.
+     *
+     * Both vocabularies are accepted rather than picking one, because both
+     * sources are canonical for their own path.
+     */
+    bedrooms: row.total_bedrooms ?? row.beds ?? null,
+    bathrooms: row.total_baths ?? row.baths ?? null,
+    square_feet: row.building_square_feet ?? row.sqft ?? null,
     lot_size: row.lot_square_feet ?? null,
     year_built: row.year_built ?? null,
     condition: row.building_condition || row.renovation_level_classification || null,
@@ -82,13 +101,21 @@ function normalizeCompRow(row, index, subjectFlat) {
     zip: row.property_address_zip || row.zip || null,
     ppsf:
       row.computed_ppsf ||
-      (soldPrice && row.building_square_feet ? Math.round(soldPrice / row.building_square_feet) : null),
+      row.ppsf ||
+      (soldPrice && (row.building_square_feet || row.sqft)
+        ? Math.round(soldPrice / (row.building_square_feet || row.sqft))
+        : null),
     ppu:
       row.ppu ||
       (soldPrice && row.units_count && row.units_count > 1
         ? Math.round(soldPrice / row.units_count)
         : null),
     estimated_value: row.estimated_value ?? null,
+    // The RPC scores every candidate; surfacing it lets a card say WHY a comp
+    // matters instead of only that it exists (§9).
+    comp_confidence_score: row.comp_confidence_score ?? null,
+    similarity_score: row.similarity_score ?? null,
+    deal_grade: row.deal_grade || null,
     data_freshness: soldDate,
     raw: row,
   };
