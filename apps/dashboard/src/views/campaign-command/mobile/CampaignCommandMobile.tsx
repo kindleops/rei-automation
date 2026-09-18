@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import {
-  getCampaignMarketInventory,
   getQueueControlSettings,
-  type CampaignMarketInventoryResponse,
 } from '../../../lib/api/backendClient'
 import type { CampaignModel, CampaignSummary } from '../campaigns.types'
 import type { CampaignListFilter } from '../campaign-health'
@@ -253,37 +251,27 @@ export function CampaignCommandMobile({
   onNew: () => void
 }) {
   const [searchOpen, setSearchOpen] = useState(false)
-  const [inv, setInv] = useState<CampaignMarketInventoryResponse | null>(null)
   /**
-   * Inventory is a separate, optional feed — and right now an ABSENT one:
-   * `/api/cockpit/campaigns/market-inventory` has no route, so the request
-   * falls through to `campaigns/[id]` and is correctly rejected as a non-UUID
-   * campaign id (400 invalid_campaign_id on every load).
+   * THE MARKET INVENTORY FEED IS GONE, NOT HIDDEN.
    *
-   * That left two dead affordances: an INVENTORY button reading "— ready of —
-   * sellers" that expanded to nothing, and a MARKETS strip showing a permanent
-   * ghost row. Tracking the outcome lets them be withheld rather than rendered
-   * as things the operator could interact with.
+   * `/api/cockpit/campaigns/market-inventory` has no route and never did: the
+   * request fell through to `campaigns/[id]` and was correctly rejected as a
+   * non-UUID campaign id, so every single load of this screen fired a
+   * guaranteed 400. The INVENTORY ladder and MARKETS strip it fed were already
+   * withheld on failure, which meant the only thing the call still produced was
+   * a failing request and two components that could never render.
+   *
+   * Removed rather than left "temporarily unavailable" — a capability with no
+   * backend is not unavailable, it does not exist. When a canonical inventory
+   * source lands, this is the seam to restore.
    */
-  const [invState, setInvState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
   const [sendMode, setSendMode] = useState<string | null>(null)
   const [autoMode, setAutoMode] = useState<string | null>(null)
-  const [ladderOpen, setLadderOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
 
-  // Global inventory + canonical operating posture. Loaded alongside the list,
-  // never blocking it.
+  // Canonical operating posture. Loaded alongside the list, never blocking it.
   useEffect(() => {
     let dead = false
-    void getCampaignMarketInventory(10).then((res) => {
-      if (dead) return
-      if (res.ok && res.data?.ok) {
-        setInv(res.data)
-        setInvState('ready')
-      } else {
-        setInvState('unavailable')
-      }
-    }).catch(() => { if (!dead) setInvState('unavailable') })
     void getQueueControlSettings().then((res) => {
       if (dead || !res.ok) return
       const d = (res.data?.diagnostics ?? {}) as Record<string, unknown>
@@ -393,69 +381,6 @@ export function CampaignCommandMobile({
             })}
           </div>
 
-          {invState !== 'unavailable' && (
-            <button
-              type="button"
-              className="cmk__ladder"
-              onClick={() => setLadderOpen((v) => !v)}
-              aria-expanded={ladderOpen}
-              disabled={invState === 'loading'}
-            >
-              <span className="cmk__ladder-key">INVENTORY</span>
-              <span className="cmk__ladder-main">
-                <strong>{inv ? nf(inv.inventory.ready) : '—'}</strong> ready
-                <em>of {inv ? nf(inv.inventory.universe_properties) : '—'} sellers</em>
-              </span>
-              <Icon name={ladderOpen ? 'chevron-up' : 'chevron-down'} size={13} />
-            </button>
-          )}
-
-          {ladderOpen && inv && (
-            <div className="cmk__rungs">
-              {[
-                ['Seller universe', inv.inventory.universe_properties],
-                ['Contact resolved', inv.inventory.contact_resolved],
-                ['SMS-eligible', inv.inventory.sms_eligible],
-                ['READY globally', inv.inventory.ready],
-              ].map(([label, value]) => (
-                <div key={String(label)} className="cmk__rung">
-                  <span>{label}</span>
-                  <strong>{nf(Number(value))}</strong>
-                </div>
-              ))}
-              <div className="cmk__rung is-route">
-                <span>Routing</span>
-                <strong>
-                  {nf(inv.inventory.route_local)} local · {nf(inv.inventory.route_cross_state)} cross-state
-                  {inv.inventory.route_none > 0 ? ` · ${nf(inv.inventory.route_none)} no route` : ''}
-                </strong>
-              </div>
-            </div>
-          )}
-
-          {invState !== 'unavailable' && (
-          <div className="cmk__markets">
-            <div className="cmk__markets-head">
-              <span>MARKETS</span>
-              <em>global ready inventory</em>
-            </div>
-            <div className="cmk__markets-scroll">
-              {(inv?.markets ?? []).map((m) => {
-                const route = m.unrouted === m.universe
-                  ? 'no route'
-                  : m.cross_state > m.local_route ? 'cross-state' : 'local'
-                return (
-                  <div key={m.market} className="cmk__market">
-                    <span className="cmk__market-name">{m.market}</span>
-                    <span className="cmk__market-ready">{compact(m.ready)}</span>
-                    <span className={`cmk__market-route is-${route.replace(/\s/g, '-')}`}>{route}</span>
-                  </div>
-                )
-              })}
-              {!inv && <div className="cmk__market is-ghost" aria-hidden="true" />}
-            </div>
-          </div>
-          )}
         </section>
 
         {searchOpen && (

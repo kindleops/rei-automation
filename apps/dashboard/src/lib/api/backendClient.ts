@@ -271,9 +271,77 @@ async function resolveSessionToken(): Promise<string | null> {
   return token
 }
 
+/**
+ * EVERY BACKEND REQUEST GETS A DEADLINE.
+ *
+ * There was none. A caller could pass its own `signal`, but nothing imposed a
+ * limit, so any surface awaiting `callBackend` hung forever whenever the
+ * upstream neither answered nor refused — which is exactly what a dev proxy in
+ * front of a dead API does, and what a stalled connection does in production.
+ *
+ * That is the mechanism behind "Campaign Command sits in readiness forever":
+ * the promise never settles, so the component never leaves `loading`, and no
+ * amount of per-surface error handling can help — the error branch is never
+ * reached. One deadline here fixes the whole class, rather than every surface
+ * growing its own timer.
+ *
+ * The limits are deliberately GENEROUS. The goal is to make an infinite hang
+ * impossible, not to police latency: real campaign preflights on this system
+ * have been measured above 40s, and turning slow-but-working into a failure
+ * would be its own defect. Callers that know better can override.
+ */
+const DEFAULT_READ_TIMEOUT_MS = 60_000
+const DEFAULT_MUTATION_TIMEOUT_MS = 120_000
+
+export interface BackendRequestInit extends RequestInit {
+  /** Override the deadline for this call. `0` or a negative value disables it. */
+  timeoutMs?: number
+}
+
+function resolveTimeoutMs(method: string, options: BackendRequestInit): number {
+  if (typeof options.timeoutMs === 'number') return options.timeoutMs
+  return method === 'GET' ? DEFAULT_READ_TIMEOUT_MS : DEFAULT_MUTATION_TIMEOUT_MS
+}
+
+/**
+ * Compose the caller's signal with our deadline so BOTH can abort the request,
+ * and so a caller cancelling a superseded fetch is still distinguishable from a
+ * timeout. Returns the signal to use plus a cleanup that must always run.
+ */
+function withDeadline(
+  callerSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal | undefined; timedOut: () => boolean; done: () => void } {
+  if (!(timeoutMs > 0)) {
+    return { signal: callerSignal ?? undefined, timedOut: () => false, done: () => {} }
+  }
+
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+
+  const onCallerAbort = () => controller.abort()
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort()
+    else callerSignal.addEventListener('abort', onCallerAbort, { once: true })
+  }
+
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    done: () => {
+      clearTimeout(timer)
+      callerSignal?.removeEventListener('abort', onCallerAbort)
+    },
+  }
+}
+
 async function executeBackendRequest<T>(
   path: string,
-  options: RequestInit = {},
+  options: BackendRequestInit = {},
 ): Promise<BackendResult<T>> {
   const base = getBackendBaseUrl()
   const isBrowser = typeof window !== 'undefined'
@@ -289,6 +357,8 @@ async function executeBackendRequest<T>(
       message: 'VITE_BACKEND_API_URL is not set. Configure it to point to real-estate-automation.',
     }
   }
+
+  const method = (options.method || 'GET').toUpperCase()
 
   const { secret } = getBackendApiSecretDebugSafe()
   const headers: Record<string, string> = {
@@ -314,6 +384,8 @@ async function executeBackendRequest<T>(
     path,
     method: options.method ?? 'GET',
   })
+  const deadline = withDeadline(options.signal, resolveTimeoutMs(method, options))
+
   let response: Response
   try {
     /**
@@ -330,8 +402,45 @@ async function executeBackendRequest<T>(
     response = await fetch(url, {
       ...options,
       headers,
+      signal: deadline.signal,
     })
   } catch (err) {
+    /**
+     * A TIMEOUT IS NOT A NETWORK ERROR, AND NEITHER IS A CANCELLATION.
+     *
+     * Reporting the deadline as "backend unreachable" would send an operator to
+     * check a server that is up and answering other calls. Reporting a caller's
+     * own cancellation as a failure would make superseded fetches look broken.
+     */
+    if (deadline.timedOut()) {
+      deadline.done()
+      const timeoutMs = resolveTimeoutMs(method, options)
+      console.warn('[BACKEND_API_TIMEOUT]', { url, path, method, timeoutMs })
+      logDataLayerQueryDone(path, dataLayerStartedAt, {
+        transport: 'backend',
+        status: null,
+        ok: false,
+        bodyCount: null,
+        bodyCountPath: null,
+        error: 'BACKEND_TIMEOUT',
+      })
+      return {
+        ok: false,
+        status: 504,
+        error: 'BACKEND_TIMEOUT',
+        message: `${method} ${path} did not respond within ${Math.round(timeoutMs / 1000)}s. The request was abandoned — it did not fail, it never answered.`,
+      }
+    }
+    if (options.signal?.aborted) {
+      deadline.done()
+      return {
+        ok: false,
+        status: 499,
+        error: 'BACKEND_REQUEST_CANCELLED',
+        message: `${method} ${path} was cancelled by the caller.`,
+      }
+    }
+    deadline.done()
     const errMsg = err instanceof Error ? err.message : String(err)
     const origin = typeof window !== 'undefined' ? window.location.origin : 'unknown'
     const sameOriginProxy = !base || base === origin
@@ -372,6 +481,9 @@ async function executeBackendRequest<T>(
           : `Network error calling ${url}: ${errMsg}`,
     }
   }
+
+  // The response arrived; the deadline no longer applies to reading its body.
+  deadline.done()
 
   let body: unknown
   let bodyText = ''
@@ -472,7 +584,7 @@ async function executeBackendRequest<T>(
 
 export async function callBackend<T = unknown>(
   path: string,
-  options: RequestInit = {},
+  options: BackendRequestInit = {},
 ): Promise<BackendResult<T>> {
   const method = (options.method || 'GET').toUpperCase()
   const bodyKey = typeof options.body === 'string' ? options.body : ''

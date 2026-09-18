@@ -21,6 +21,7 @@ import {
   buildActivateNowPayload,
   buildCampaignPersistPayload,
   extractMarketFromFilterDraft,
+  hydrateLaunchSettings,
   isInsideContactWindow,
   resolveCampaignTimezone,
 } from './campaign-builder-launch'
@@ -891,6 +892,16 @@ export const CreateCampaignModal = ({
           target_filters: groups,
         }))
         setFilterStatuses((prev) => ({ ...prev, ...statuses }))
+        /**
+         * §12 — the launch configuration is RESTORED, not rebuilt from
+         * defaults. Pacing and the contact window were already written to real
+         * campaign columns and then never read back, so reopening a saved
+         * draft silently replaced the operator's settings with preset ones.
+         * The schedule comes from the canonical `scheduled_for` when the
+         * campaign genuinely is scheduled, and from the recorded intent
+         * otherwise.
+         */
+        setLaunchSettings((prev) => hydrateLaunchSettings(prev, c))
         setSavedCampaignId(campaignId)
         setLoadStage(4)
         setIsLoadingCampaign(false)

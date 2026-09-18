@@ -21,6 +21,15 @@ export interface LaunchPersistSettings {
   spread_interval_seconds: string
   contact_window_start: string
   contact_window_end: string
+  /**
+   * The operator's intended first send, as a local datetime string.
+   *
+   * It was absent here, which meant the whole schedule lived in React state:
+   * an operator set a start time on the phone, the draft saved without it, and
+   * a reload silently reset it to "two hours from now". A schedule that does
+   * not survive a reload is not a schedule.
+   */
+  first_scheduled_at?: string
 }
 
 function clean(value: unknown): string {
@@ -140,6 +149,15 @@ export function buildCampaignPersistPayload(
     metadata: {
       launch_timezone: timezone,
       timezone,
+      /**
+       * PLANNED, not canonical. `campaigns.scheduled_for` is owned by the
+       * state machine and is only meaningful paired with `status='scheduled'`
+       * — writing it on a draft would claim a campaign is scheduled when no
+       * transition has happened and no activation will ever fire. This records
+       * the operator's INTENT so the builder can restore it, and the canonical
+       * schedule is still set by the `schedule` lifecycle action.
+       */
+      planned_first_scheduled_at: clean(launch.first_scheduled_at) || null,
       template_use_case: draft.template_use_case,
       stage_code: draft.stage_code,
       target_filters: {
@@ -192,3 +210,71 @@ export function buildActivateNowPayload(
 }
 
 export type { CreateCampaignPayload }
+
+/**
+ * REHYDRATE THE LAUNCH CONFIGURATION FROM A SAVED CAMPAIGN.
+ *
+ * The builder persisted pacing to real columns — `daily_cap`,
+ * `per_sender_cap`, `market_cap`, `send_interval_seconds`,
+ * `contact_window_start/end` — and then never read a single one of them back.
+ * Loading a saved draft rebuilt the whole launch panel from DEFAULTS, so an
+ * operator who set a 60/hr pace and a 09:00-18:00 window on their phone came
+ * back to 750/day and 08:00-21:00, with nothing to indicate their settings had
+ * been discarded rather than never saved.
+ *
+ * Only values the campaign actually carries are applied; anything absent keeps
+ * the caller's default rather than inventing a zero.
+ */
+export function hydrateLaunchSettings<T extends LaunchPersistSettings>(
+  current: T,
+  campaign: Record<string, unknown> | null | undefined,
+): T {
+  if (!campaign) return current
+
+  const metadata = (campaign.metadata && typeof campaign.metadata === 'object'
+    ? campaign.metadata
+    : {}) as Record<string, unknown>
+
+  const next: Record<string, unknown> = { ...(current as unknown as Record<string, unknown>) }
+  const put = (key: string, value: unknown) => {
+    const text = clean(value)
+    if (text) next[key] = text
+  }
+
+  put('daily_cap', campaign.daily_cap)
+  put('per_sender_cap', campaign.per_sender_cap)
+  put('per_market_cap', campaign.market_cap)
+  put('max_targets', campaign.total_cap ?? campaign.batch_max)
+  put('spread_interval_seconds', campaign.send_interval_seconds)
+  put('contact_window_start', campaign.contact_window_start)
+  put('contact_window_end', campaign.contact_window_end)
+
+  /**
+   * The canonical `scheduled_for` wins when the campaign really is scheduled —
+   * that is the live schedule the activation cron will act on. A draft falls
+   * back to the recorded intent.
+   */
+  const canonical = clean(campaign.scheduled_for)
+  const planned = clean(metadata.planned_first_scheduled_at)
+  const scheduled = canonical || planned
+  if (scheduled) {
+    const asDate = new Date(scheduled)
+    if (!Number.isNaN(asDate.getTime())) {
+      next.first_scheduled_at = toLocalDateTimeInputValue(asDate)
+    }
+  }
+
+  return next as T
+}
+
+/**
+ * A `datetime-local` input speaks the BROWSER's wall clock, so the value must
+ * be built from local parts. Using `toISOString().slice(0,16)` here — the
+ * obvious-looking one-liner — shifts the displayed time by the UTC offset, so a
+ * campaign scheduled for 09:00 reads back as 14:00 and an operator "correcting"
+ * it would move the real send.
+ */
+export function toLocalDateTimeInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
