@@ -775,16 +775,12 @@ function hasSelectedTemplateReference(row = null) {
  * send authority, daily caps, claim/lease discipline, idempotency, and provider
  * reconciliation.
  */
-export const BUYER_DISPOSITION_SEND_KIND = "buyer_disposition";
-
-export function isBuyerDispositionSend(row = {}) {
-  const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
-  return (
-    lower(clean(row?.send_kind)) === BUYER_DISPOSITION_SEND_KIND ||
-    lower(clean(metadata.send_kind)) === BUYER_DISPOSITION_SEND_KIND ||
-    lower(clean(metadata.outreach_domain)) === "buyer"
-  );
-}
+export {
+  BUYER_DISPOSITION_SEND_KIND,
+  isBuyerDispositionSend,
+} from "@/lib/domain/buyers/buyer-send-kind.js";
+import { isBuyerDispositionSend } from "@/lib/domain/buyers/buyer-send-kind.js";
+import { reconcileBuyerOutreachFromQueueRow } from "@/lib/domain/buyers/reconcile-buyer-outreach.js";
 
 export function resolveQueueSellerFirstName(row = null) {
   return resolveQueueSellerFirstNameFromSources(row);
@@ -4240,6 +4236,23 @@ export async function syncDeliveryEvent(payload, options = {}) {
       .select("*")
       .or(`provider_message_id.eq.${provider_message_sid},textgrid_message_id.eq.${provider_message_sid}`);
     send_queue_data = refreshed_queue || [];
+  }
+
+  /**
+   * §2 — a delivery receipt reaches the buyer outreach target too.
+   *
+   * The receipt has already been reconciled onto the queue row above by the
+   * canonical path (RPC or local); this only mirrors that settled result across
+   * so a disposition target cannot sit at `sent` after the carrier confirmed
+   * delivery or reported failure. No polling, no second source of truth — the
+   * queue row that comes back from reconciliation is the input.
+   */
+  for (const row of send_queue_data || []) {
+    if (!isBuyerDispositionSend(row)) continue;
+    await reconcileBuyerOutreachFromQueueRow(
+      { ...row, delivery_confirmed: final_delivery_status },
+      { ...options, supabase, now }
+    );
   }
 
   const outreachUpdater = options.updateContactOutreachState || updateContactOutreachState;

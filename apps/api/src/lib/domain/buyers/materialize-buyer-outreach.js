@@ -23,10 +23,8 @@
  */
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
-import {
-  BUYER_DISPOSITION_SEND_KIND,
-  insertSupabaseSendQueueRow,
-} from "@/lib/supabase/sms-engine.js";
+import { insertSupabaseSendQueueRow } from "@/lib/supabase/sms-engine.js";
+import { BUYER_DISPOSITION_SEND_KIND } from "@/lib/domain/buyers/buyer-send-kind.js";
 
 const OUTREACH_TABLE = "buyer_outreach_targets";
 const SUPPRESSION_TABLE = "sms_suppression_list";
@@ -92,6 +90,12 @@ export function classifyBuyerTargets(buyers, { suppressed = new Set() } = {}) {
 
     if (!buyer_key) {
       blocked.push({ ...buyer, blocked_reason: "missing_buyer_identity" });
+      continue;
+    }
+    // Contact resolution may already have decided this buyer's fate — a
+    // do-not-contact flag must not be relabelled as a generic "no phone".
+    if (clean(buyer.blocked_reason)) {
+      blocked.push({ ...buyer, buyer_key });
       continue;
     }
     if (!phone) {

@@ -28,6 +28,14 @@ const num = (value: unknown): number | null => {
 export interface BuyerMatchCandidate {
   buyer_match_candidate_id: string
   buyer_entity_id: string
+  /**
+   * The stable buyer identity the engine carries in candidate metadata. It is
+   * what outreach dedupes and attributes replies on, so it is distinct from the
+   * per-run candidate id. Optional because a candidate can reach the surface
+   * without one, and a buyer with no key cannot be selected for outreach.
+   */
+  buyer_key?: string | null
+  buyer_match_run_id?: string | null
   buyer_name: string | null
   buyer_type: string | null
   total_match_score: number | null

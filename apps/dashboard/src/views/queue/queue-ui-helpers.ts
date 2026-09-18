@@ -1,4 +1,5 @@
 import type { QueueItem } from '../../domain/queue/queue.types'
+import { resolveQueueOutreachIdentity } from './queue-outreach-domain'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import { resolveQueueDispatchTruth } from '../../domain/queue/queue-dispatch-truth'
 import {
@@ -116,6 +117,24 @@ export interface SellerIdentity {
 }
 
 export const resolveSellerIdentity = (item: QueueItem): SellerIdentity => {
+  /**
+   * §10 — a buyer row has no seller, and must not be reported as one whose
+   * identity we lost. Answered first, before any seller name source is
+   * consulted, because every one of them would miss and land on
+   * "Unknown owner" — a real-looking data defect on a perfectly healthy row.
+   */
+  const buyer = resolveQueueOutreachIdentity(item)
+  if (buyer) {
+    const buyerPhone = clean(item.toPhoneNumber || item.phone)
+    return {
+      primary: buyer.name,
+      secondary: buyer.label,
+      masterOwner: null,
+      phoneEnding: buyerPhone ? `…${buyerPhone.replace(/\D/g, '').slice(-4)}` : null,
+      glyph: 'person',
+    }
+  }
+
   const md = (item.metadata && typeof item.metadata === 'object' ? item.metadata : {}) as Record<string, unknown>
   const targetSnap = (md.target_snapshot && typeof md.target_snapshot === 'object' ? md.target_snapshot : {}) as Record<string, unknown>
   const candidateSnap = (md.candidate_snapshot && typeof md.candidate_snapshot === 'object' ? md.candidate_snapshot : {}) as Record<string, unknown>

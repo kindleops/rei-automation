@@ -18,6 +18,8 @@ import {
   matchReasons,
   type BuyerMatchCandidate,
 } from '../buyer-match-presentation'
+import { BuyerOutreachSheet } from './BuyerOutreachSheet'
+import type { BuyerOutreachSelection } from '../buyer-outreach-client'
 import './buyer-match-mobile.css'
 
 /**
@@ -140,6 +142,65 @@ export function BuyerMatchMobile({
     })
   }, [candidates, query, filter])
 
+  /**
+   * §4/§5 — SELECTION IS A MODE, NOT A PERMANENT CHECKBOX COLUMN.
+   *
+   * Off by default, so the ordinary act of reading buyers stays a single tap
+   * into the detail sheet. Turned on, the same tap toggles selection. Keeping
+   * the two meanings from sharing a gesture is what stops an operator selecting
+   * a buyer while trying to read one.
+   *
+   * Selection is keyed on `buyer_key` rather than the candidate row id because
+   * that is the identity outreach is deduped on server-side; selecting the same
+   * firm from two runs must not become two touches.
+   */
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [outreachOpen, setOutreachOpen] = useState(false)
+
+  // A different property is a different selection. Carrying one across would
+  // offer buyers for a property the operator is no longer looking at.
+  useEffect(() => {
+    setSelecting(false)
+    setSelected(new Set())
+    setOutreachOpen(false)
+  }, [propertyId])
+
+  const toggleSelected = useCallback((key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  const selectionPayload = useMemo<BuyerOutreachSelection[]>(() => {
+    const byKey = new Map<string, BuyerMatchCandidate>()
+    for (const c of candidates) {
+      const key = String(c.buyer_key ?? '')
+      if (key && selected.has(key) && !byKey.has(key)) byKey.set(key, c)
+    }
+    return [...byKey.values()].map((c) => ({
+      buyer_key: String(c.buyer_key),
+      buyer_name: c.buyer_name ?? null,
+      buyer_entity_id: c.buyer_entity_id ?? null,
+      buyer_match_run_id: c.buyer_match_run_id ?? null,
+      buyer_match_candidate_id: c.buyer_match_candidate_id ?? null,
+    }))
+  }, [candidates, selected])
+
+  /**
+   * A candidate the engine produced without a `buyer_key` cannot be deduped or
+   * attributed on reply, so it cannot be selected for outreach. It still
+   * renders and still opens — it just says why it is not selectable, rather
+   * than silently ignoring the tap.
+   */
+  const selectableKey = (c: BuyerMatchCandidate): string | null => {
+    const key = String(c.buyer_key ?? '').trim()
+    return key ? key : null
+  }
+
   const [acting, setActing] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -229,6 +290,17 @@ export function BuyerMatchMobile({
               capped at {PAGE_SIZE}
             </span>
           )}
+          <button
+            type="button"
+            className={cls('bmm__selectmode', selecting && 'is-active')}
+            aria-pressed={selecting}
+            onClick={() => {
+              setSelecting((on) => !on)
+              if (selecting) setSelected(new Set())
+            }}
+          >
+            {selecting ? 'Done' : 'Select'}
+          </button>
         </div>
       )}
 
@@ -282,14 +354,25 @@ export function BuyerMatchMobile({
             const activity = describeActivity(c)
             const geography = describeGeography(c)
             const disposition = describeDisposition(c)
-            return (
+              const key = selectableKey(c)
+              const isSelected = key != null && selected.has(key)
+              return (
               <button
                 key={c.buyer_match_candidate_id}
                 type="button"
-                className="bmm__card"
-                onClick={() => setOpenId(c.buyer_match_candidate_id)}
+                className={cls('bmm__card', selecting && 'is-selecting', isSelected && 'is-selected')}
+                aria-pressed={selecting ? isSelected : undefined}
+                onClick={() => {
+                  if (!selecting) { setOpenId(c.buyer_match_candidate_id); return }
+                  if (key) toggleSelected(key)
+                }}
               >
                 <div className="bmm__card-top">
+                  {selecting ? (
+                    <span className={cls('bmm__tick', isSelected && 'is-on', !key && 'is-blocked')} aria-hidden="true">
+                      {key ? (isSelected ? '✓' : '') : '—'}
+                    </span>
+                  ) : null}
                   <strong className="bmm__buyer">{c.buyer_name || 'Unnamed buyer entity'}</strong>
                   <span className={cls('bmm__grade', `is-${grade.tone}`)}>
                     {grade.label}{grade.score ? ` · ${grade.score}` : ''}
@@ -308,10 +391,50 @@ export function BuyerMatchMobile({
                   </ul>
                 )}
                 {activity ? <span className="bmm__activity">{activity}</span> : null}
+                {selecting && !key ? (
+                  <span className="bmm__activity">No buyer identity — cannot be selected for outreach</span>
+                ) : null}
               </button>
-            )
+              )
           })}
         </div>
+      )}
+
+      {/**
+        * §6 — THE SELECTION ACTION BAR.
+        *
+        * Present only while something is selected, and it states the count it
+        * will act on rather than "Send to all". It opens the outreach sheet; it
+        * does not send. Nothing here can put a message on the wire without the
+        * operator seeing the server's eligibility verdict first.
+        */}
+      {ready && selecting && selected.size > 0 && (
+        <div className="bmm-actionbar" role="region" aria-label="Buyer selection actions">
+          <span className="bmm-actionbar__count">{selected.size} selected</span>
+          <button type="button" className="bmm-actionbar__clear" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+          <button
+            type="button"
+            className="bmm-actionbar__primary"
+            onClick={() => setOutreachOpen(true)}
+          >
+            Outreach
+          </button>
+        </div>
+      )}
+
+      {outreachOpen && selectionPayload.length > 0 && (
+        <BuyerOutreachSheet
+          propertyId={propertyId}
+          address={address}
+          selection={selectionPayload}
+          onClose={() => setOutreachOpen(false)}
+          onCommitted={() => {
+            setSelected(new Set())
+            setSelecting(false)
+          }}
+        />
       )}
 
       {open && (

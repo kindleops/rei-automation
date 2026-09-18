@@ -28,6 +28,14 @@ import {
   materializeBuyerOutreach,
 } from "@/lib/domain/buyers/materialize-buyer-outreach.js";
 import {
+  chooseBuyerContact,
+  resolveBuyerContacts,
+} from "@/lib/domain/buyers/resolve-buyer-contact.js";
+import {
+  outreachStatusForQueueRow,
+  reconcileBuyerOutreachFromQueueRow,
+} from "@/lib/domain/buyers/reconcile-buyer-outreach.js";
+import {
   isBuyerOptOut,
   mayMutateSellerLifecycle,
   routeInboundBuyerReply,
@@ -239,4 +247,138 @@ test("buyer and ambiguous replies may NEVER mutate the seller lifecycle", () => 
   assert.equal(mayMutateSellerLifecycle({ domain: "unknown" }), false);
   // Only a reply proven NOT to be buyer traffic may enter S1–S10.
   assert.equal(mayMutateSellerLifecycle({ domain: "not_buyer" }), true);
+});
+
+
+// ── delivery reconciliation (§1, §3)
+
+test("a queue row that sent moves the outreach target to sent", () => {
+  assert.deepEqual(outreachStatusForQueueRow({ queue_status: "sent" }),
+    { status: "sent", blocked_reason: null });
+  assert.deepEqual(outreachStatusForQueueRow({ queue_status: "delivered" }),
+    { status: "delivered", blocked_reason: null });
+});
+
+test("BLOCKED BEFORE THE PROVIDER IS NOT A PROVIDER FAILURE", () => {
+  // The provider was never contacted in any of these. Reporting them as
+  // "failed" would tell an operator TextGrid rejected a message that was never
+  // sent, and would put a retry count on work with nothing to retry.
+  assert.deepEqual(outreachStatusForQueueRow({ queue_status: "blocked_sender_ineligible" }),
+    { status: "blocked", blocked_reason: "sender_ineligible" });
+  assert.deepEqual(outreachStatusForQueueRow({ queue_status: "paused_sender_eligibility_unavailable" }),
+    { status: "deferred", blocked_reason: "sender_eligibility_unavailable" });
+  assert.deepEqual(outreachStatusForQueueRow({ queue_status: "duplicate_blocked" }),
+    { status: "blocked", blocked_reason: "duplicate_touch" });
+
+  // And a real transport refusal still reads as failure.
+  assert.equal(outreachStatusForQueueRow({ queue_status: "failed" }).status, "failed");
+});
+
+test("reconciliation ignores seller traffic entirely", async () => {
+  const result = await reconcileBuyerOutreachFromQueueRow(
+    { queue_status: "sent", dedupe_key: "seller-thing" },
+    { updateOutreachTarget: async () => { throw new Error("must not touch seller rows") } }
+  );
+  assert.equal(result.skipped, "not_buyer_traffic");
+});
+
+test("reconciliation carries the provider id and the EFFECTIVE sender", async () => {
+  let patched = null;
+  await reconcileBuyerOutreachFromQueueRow(
+    {
+      queue_status: "sent",
+      send_kind: BUYER_DISPOSITION_SEND_KIND,
+      dedupe_key: "buyer:P1:B1:1",
+      provider_message_id: "SM-proof-1",
+      delivery_confirmed: "pending",
+      metadata: { send_kind: BUYER_DISPOSITION_SEND_KIND, buyer_outreach_target_id: "t-1" },
+    },
+    { updateOutreachTarget: async (args) => { patched = args } }
+  );
+  assert.equal(patched.target_id, "t-1");
+  assert.equal(patched.patch.status, "sent");
+  assert.equal(patched.patch.provider_message_id, "SM-proof-1");
+  assert.equal(patched.patch.delivery_status, "pending");
+});
+
+test("a failed reconciliation write never throws into the send path", async () => {
+  // A bookkeeping failure must not turn a message that actually went out into
+  // a failed row.
+  const result = await reconcileBuyerOutreachFromQueueRow(
+    {
+      queue_status: "sent",
+      send_kind: BUYER_DISPOSITION_SEND_KIND,
+      dedupe_key: "buyer:P1:B1:1",
+      metadata: { send_kind: BUYER_DISPOSITION_SEND_KIND },
+    },
+    { updateOutreachTarget: async () => { throw new Error("db down") } }
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /db down/);
+});
+
+
+// ── who the message actually goes to (§6, §7)
+
+test("A CLIENT CANNOT NAME THE RECIPIENT", async () => {
+  // The single most dangerous shape in the old buyer blast: the caller handed
+  // in the phone numbers. Anything in the payload is discarded and the number
+  // is resolved server-side from the contact record.
+  const resolved = await resolveBuyerContacts(
+    [{ buyer_key: "B1", to_phone_number: "+13055550999", phone: "+13055550998" }],
+    { loadBuyerContacts: async () => [
+      { id: "c1", buyer_key: "B1", phone_e164: "+13055550100", is_primary: true },
+    ] }
+  );
+  assert.equal(resolved.buyers[0].to_phone_number, "+13055550100");
+});
+
+test("a buyer with no contact record is blocked with a reason, not dropped", async () => {
+  const resolved = await resolveBuyerContacts(
+    [{ buyer_key: "B1" }],
+    { loadBuyerContacts: async () => [] }
+  );
+  assert.equal(resolved.buyers[0].to_phone_number, null);
+  assert.equal(resolved.buyers[0].blocked_reason, "no_contact_on_record");
+});
+
+test("do-not-contact is not relabelled as a missing phone", async () => {
+  // The reason has to survive to the operator: one is an enrichment gap, the
+  // other is the buyer's own instruction.
+  const resolved = await resolveBuyerContacts(
+    [{ buyer_key: "B1" }],
+    { loadBuyerContacts: async () => [
+      { id: "c1", buyer_key: "B1", phone_e164: "+13055550100", do_not_contact: true },
+    ] }
+  );
+  assert.equal(resolved.buyers[0].blocked_reason, "buyer_do_not_contact");
+
+  const { blocked } = classifyBuyerTargets(resolved.buyers);
+  assert.equal(blocked[0].blocked_reason, "buyer_do_not_contact");
+});
+
+test("a do-not-contact flag is not evaded by a second number on the same buyer", () => {
+  const contact = chooseBuyerContact([
+    { id: "c1", phone_e164: "+13055550100", do_not_contact: true },
+    { id: "c2", phone_e164: "+13055550101", is_primary: true },
+  ]);
+  assert.equal(contact.do_not_contact, true);
+  assert.equal(contact.phone, null);
+});
+
+test("the verified primary number wins over an unverified one", () => {
+  const contact = chooseBuyerContact([
+    { id: "c1", phone_e164: "+13055550100", confidence_score: 20 },
+    { id: "c2", phone_e164: "+13055550101", is_primary: true, is_verified: true },
+  ]);
+  assert.equal(contact.phone, "+13055550101");
+});
+
+test("unreadable contact data refuses rather than guessing a number", async () => {
+  const resolved = await resolveBuyerContacts(
+    [{ buyer_key: "B1" }],
+    { loadBuyerContacts: async () => { throw new Error("contacts table unreachable") } }
+  );
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.reason, "buyer_contacts_unreadable");
 });

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { describeBuyerQueueRow } from '../../queue-outreach-domain'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../../shared/icons'
 import { MobileBottomSheet } from '../../../../modules/mobile/MobileBottomSheet'
@@ -96,6 +97,14 @@ export function QueueMobileItemSheet({
   onAction,
 }: QueueMobileItemSheetProps) {
   const identity = resolveSellerIdentity(item)
+  /**
+   * §11 — a buyer row is described in buyer terms. The seller stage line below
+   * is suppressed for one: S-codes describe an acquisition conversation with a
+   * homeowner, and stamping one on a disposition message would put buyer
+   * traffic inside the seller lifecycle at exactly the place an operator reads
+   * it as being there.
+   */
+  const buyerContext = describeBuyerQueueRow(item)
   const statusView = resolveStatusPresentation(item)
   const state = useMemo(() => resolveQueueStateMap(item), [item])
   const attention = useMemo(() => resolveQueueAttention(item, state), [item, state])
@@ -212,6 +221,10 @@ export function QueueMobileItemSheet({
           </div>
         )}
 
+        {buyerContext && (
+          <p className="qms-buyer-context">{buyerContext}</p>
+        )}
+
         <div className="qms-identity">
           <div className="qms-identity__copy">
             <strong className="qms-identity__address">{item.propertyAddress || 'No address on file'}</strong>
@@ -299,7 +312,9 @@ export function QueueMobileItemSheet({
             {(item.campaignName ?? item.campaignId) && (
               <span className="qms-tag">{item.campaignName ?? item.campaignId}</span>
             )}
-            {stage.stageCode && <span className="qms-tag">{stage.stageCode}{stage.touchLabel !== '—' ? ` · ${stage.touchLabel}` : ''}</span>}
+            {!buyerContext && stage.stageCode && (
+              <span className="qms-tag">{stage.stageCode}{stage.touchLabel !== '—' ? ` · ${stage.touchLabel}` : ''}</span>
+            )}
           </div>
           {routingRows.length > 0 && (
             <div className="qms-kv">

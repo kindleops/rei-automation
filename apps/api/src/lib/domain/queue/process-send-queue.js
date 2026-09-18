@@ -1,4 +1,5 @@
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
+import { reconcileBuyerOutreachFromQueueRow } from "@/lib/domain/buyers/reconcile-buyer-outreach.js";
 import {
   acquisitionQueueOperation,
   acquisitionRuntimeDisabled,
@@ -1695,7 +1696,14 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       // Throwing here would land in the provider-failure catch, consume a retry
       // and file it as a send fault for a send that never happened.
       if (number_selection?.ineligible_sender) {
-        return blockQueueRowByIneligibleSender(queue_row, number_selection, deps);
+        {
+          const blocked = await blockQueueRowByIneligibleSender(queue_row, number_selection, deps);
+          // Blocked before the provider — the target says blocked, not failed (§3).
+          void reconcileBuyerOutreachFromQueueRow(
+            { ...queue_row, queue_status: blocked.queue_status }, deps
+          );
+          return blocked;
+        }
       }
       throw new Error(number_selection?.reason || "missing_from_phone_number");
     }
@@ -2045,7 +2053,13 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         first_touch: isQueueFirstTouch(queue_row),
       });
 
-      return blockQueueRowBySmsHealthGuard(queue_row, sms_health_guard, deps);
+      {
+        const blocked = await blockQueueRowBySmsHealthGuard(queue_row, sms_health_guard, deps);
+        void reconcileBuyerOutreachFromQueueRow(
+          { ...queue_row, queue_status: blocked.queue_status }, deps
+        );
+        return blocked;
+      }
     }
 
     captureSystemEvent("sms_send_started", {
@@ -2213,6 +2227,17 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         now,
       }
     );
+
+    /**
+     * §1 — the outreach target learns what the queue just recorded.
+     *
+     * Placed with the other bookkeeping, AFTER the send is finalized, and
+     * deliberately not awaited into the send's own success/failure: a
+     * reconciliation write that fails must never turn a message that actually
+     * went out into a failed row. `reconcileBuyerOutreachFromQueueRow` returns
+     * its own verdict rather than throwing, and no-ops for seller traffic.
+     */
+    void reconcileBuyerOutreachFromQueueRow(finalized_row, deps);
 
     const bookkeeping_errors = [];
     let outbound_event = null;

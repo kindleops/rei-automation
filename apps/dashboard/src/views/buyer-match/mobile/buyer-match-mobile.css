@@ -232,3 +232,157 @@
   font-size: 11.5px;
   color: #f09090;
 }
+
+/* ── selection mode, the action bar, and the outreach sheet ──────────────── */
+
+/**
+ * The selection toggle lives in the run bar, beside the count it operates on.
+ * Themed off --nx-accent so all four themes get it without a per-theme rule —
+ * the trap this file has already been caught by once.
+ */
+.bmm__selectmode {
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.18));
+  background: transparent;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 72%, transparent);
+  font: 600 11px/1 var(--nx-font, inherit);
+}
+
+.bmm__selectmode.is-active {
+  border-color: color-mix(in srgb, var(--nx-accent, #63f4dc) 55%, transparent);
+  color: var(--nx-accent, #63f4dc);
+}
+
+.bmm__card.is-selecting {
+  padding-left: 10px;
+}
+
+.bmm__card.is-selected {
+  border-color: color-mix(in srgb, var(--nx-accent, #63f4dc) 50%, transparent);
+  background: color-mix(in srgb, var(--nx-accent, #63f4dc) 8%, var(--nx-card, rgba(16, 28, 40, 0.88)));
+}
+
+/* Fixed width so the title baseline does not shift as ticks appear. */
+.bmm__tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.28));
+  font-size: 11px;
+  line-height: 1;
+}
+
+.bmm__tick.is-on {
+  border-color: var(--nx-accent, #63f4dc);
+  background: color-mix(in srgb, var(--nx-accent, #63f4dc) 22%, transparent);
+  color: var(--nx-accent, #63f4dc);
+}
+
+.bmm__tick.is-blocked {
+  opacity: 0.4;
+}
+
+/**
+ * The action bar sits above the dock, never under it. The dock's collapsed
+ * handle owns a 44px band that nothing interactive may sit beneath.
+ */
+.bmm-actionbar {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc(var(--nx-mobile-chrome-bottom, 22px) + 52px);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 10px 0 14px;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #63f4dc) 32%, transparent);
+  background: var(--nx-panel, rgba(12, 22, 32, 0.96));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+}
+
+.bmm-actionbar__count {
+  font: 600 12px/1 var(--nx-font, inherit);
+  color: var(--nx-text, #eaf7ff);
+}
+
+.bmm-actionbar__clear {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 58%, transparent);
+  font: 500 11.5px/1 var(--nx-font, inherit);
+  min-height: 34px;
+  padding: 0 6px;
+}
+
+.bmm-actionbar__primary {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--nx-accent, #63f4dc) 55%, transparent);
+  background: color-mix(in srgb, var(--nx-accent, #63f4dc) 16%, transparent);
+  color: var(--nx-accent, #63f4dc);
+  font: 600 12px/1 var(--nx-font, inherit);
+}
+
+.bmm-outreach__counts {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 78%, transparent);
+}
+
+.bmm-outreach__counts .is-ok { color: #6fe0a8; }
+/* Zero eligible is a real, common answer here — stated plainly, not in alarm red. */
+.bmm-outreach__counts .is-zero { color: color-mix(in srgb, var(--nx-text, #eaf7ff) 60%, transparent); }
+
+.bmm-outreach__blocked,
+.bmm-outreach__targets {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 5px;
+}
+
+.bmm-outreach__blocked li,
+.bmm-outreach__targets li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.16));
+  font-size: 12px;
+}
+
+.bmm-outreach__blocked em,
+.bmm-outreach__targets em {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--nx-text, #eaf7ff) 58%, transparent);
+}
+
+.bmm-outreach__message {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--nx-border, rgba(148, 163, 184, 0.2));
+  background: var(--nx-surface-2, rgba(255, 255, 255, 0.04));
+  color: var(--nx-text, #eaf7ff);
+  font: 400 13px/1.45 var(--nx-font, inherit);
+  resize: vertical;
+}
