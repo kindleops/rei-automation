@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
-import { fetchDealContextByProperty } from '../../lib/api/backendClient'
+import { fetchCanonicalSubjectProperty } from '../../domain/comp-intelligence/comp-intelligence-api'
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { EntityGraphPropertyVisual } from '../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
 import { Icon } from '../../shared/icons'
@@ -49,6 +49,11 @@ interface HydratedProperty {
   arv?: number | null
   latitude?: number | null
   longitude?: number | null
+  /** §4 — the header states the facts the match actually used. */
+  bedrooms?: number | null
+  bathrooms?: number | null
+  square_feet?: number | null
+  year_built?: number | null
 }
 
 const str = (v: unknown): string => (v === null || v === undefined ? '' : String(v).trim())
@@ -98,32 +103,59 @@ export function BuyerMatchSubjectPage() {
       // Same envelope shape: res.data is the BODY, so the payload is one level
       // deeper. Reading res.data directly yielded "Property address unavailable"
       // for a property whose context loads fine.
-      const res = await fetchDealContextByProperty(propertyId) as {
-        ok?: boolean
-        data?: { ok?: boolean; data?: Record<string, unknown> }
-      }
-      const data = res?.data?.data ?? null
+      /**
+       * §5 — ONE PROPERTY AUTHORITY.
+       *
+       * This read `fetchDealContextByProperty`, which is a SELLER-DEAL view: it
+       * only has a row where a thread or opportunity exists. Buyer Match is
+       * property-scoped and needs no seller conversation, so for exactly the
+       * properties it is most useful on — a disposition subject nobody has
+       * texted — the header failed. Measured on the Houston acceptance subject:
+       * `deal-context/property/2130387643` returns 404 `deal_context_not_found`
+       * while the analysis itself ran fine, which is why the page showed
+       * "Property details unavailable" above 25 real ranked buyers.
+       *
+       * `/properties/:id/subject` is the canonical property authority and is
+       * already what Comp Intelligence uses. Same id, same facts, one source.
+       */
+      // fetchCanonicalSubjectProperty already unwraps the envelope and returns
+      // the subject itself, so there is no res.data.data to dig through here.
+      const data = (await fetchCanonicalSubjectProperty(propertyId)) as unknown as Record<string, unknown> | null
       if (!data) {
-        // A missing context must not silently become a blank property header.
-        setHydrationFailed('Property context could not be loaded')
+        // A missing subject must not silently become a blank property header.
+        setHydrationFailed('Property could not be loaded')
         setProperty(addressHint ? {
           property_id: propertyId, address: addressHint, market: '', zip: '', property_type: '',
         } : null)
         return
       }
+
+      /** The canonical subject wraps evidenced fields as { value, source, ... }. */
+      const field = (key: string): unknown => {
+        const raw = data[key]
+        return raw && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
+          ? (raw as { value: unknown }).value
+          : raw
+      }
+      const coords = (data.coordinates ?? {}) as Record<string, unknown>
+
       setProperty({
         property_id: propertyId,
-        address: str(data.property_address_full) || addressHint || 'Property address unavailable',
-        market: str(data.market),
-        zip: str(data.property_zip),
-        state: str(data.property_state),
-        county: str(data.property_county),
-        property_type: str(data.property_type),
-        asset_class: str(data.property_type),
-        estimated_value: numOrNull(data.estimated_value),
-        arv: numOrNull(data.estimated_arv) ?? numOrNull(data.estimated_value),
-        latitude: numOrNull(data.latitude),
-        longitude: numOrNull(data.longitude),
+        address: str(field('canonical_address')) || addressHint || 'Property address unavailable',
+        market: str(field('market')),
+        zip: str(field('zip')),
+        state: str(field('state')),
+        county: str(field('county')),
+        property_type: str(field('property_type')) || str(field('asset_type')),
+        asset_class: str(field('asset_type')) || str(field('property_type')),
+        estimated_value: numOrNull(field('estimated_value')),
+        arv: numOrNull(field('estimated_arv')) ?? numOrNull(field('estimated_value')),
+        latitude: numOrNull(coords.latitude ?? coords.lat),
+        longitude: numOrNull(coords.longitude ?? coords.lng),
+        bedrooms: numOrNull(field('bedrooms')),
+        bathrooms: numOrNull(field('bathrooms')),
+        square_feet: numOrNull(field('square_feet')),
+        year_built: numOrNull(field('year_built')),
       })
     } catch (error) {
       setHydrationFailed(error instanceof Error ? error.message : 'Property context request failed')

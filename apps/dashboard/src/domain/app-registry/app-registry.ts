@@ -260,7 +260,15 @@ export const NEXUS_APPS: NexusApp[] = [
     defaultDock: false,
     shortcut: 'O',
     badge: null,
-    context: { propertyId: 'locator' },
+    /**
+     * Comp Intelligence resolves `?property_id` FIRST (see
+     * CompIntelligenceWorkspace), so declaring the query parameter here matches
+     * what the surface actually reads. It also removes the hand-rolled
+     * `?property_id=` that entity-graph's open_comp_intelligence action was
+     * appending on its own — §9's "no route-specific hacks": one contract, and
+     * the platform applies it.
+     */
+    context: { propertyId: 'query:property_id' },
   },
   {
     id: 'buyer-match',
@@ -277,17 +285,22 @@ export const NEXUS_APPS: NexusApp[] = [
     shortcut: 'B',
     badge: null,
     /**
-     * This was `{}` with the note "resolves its subject from its own selection,
-     * not the locator. Left empty until it reads one." That condition has since
-     * been met: BUYER-MATCH-MOBILE-LOCK-1 replaced the routed demo with
-     * BuyerMatchSubjectPage, which subscribes to PROPERTY_LOCATOR_EVENT and
-     * scopes every candidate read to `subject.propertyId`.
+     * `query:property_id`, NOT `locator`.
      *
-     * 'locator' leaves the path untouched — the surface seeds itself on mount —
-     * so this only changes whether the platform can honestly say the jump was
-     * focused, which it now is.
+     * This said 'locator', which leaves the path untouched and relies on the
+     * surface seeding itself from the ambient property locator on mount. That
+     * contract was true when it was written and is not true now: the §3 context
+     * pass made `buyer-match-subject` read the URL and ONLY the URL, precisely
+     * so one selection could stop silently scoping every app.
+     *
+     * With the two out of step, a contextual "Find Buyers" resolved to a bare
+     * /buyer-match and the surface correctly showed universal mode — the exact
+     * "Buyer Match opens on the wrong thing" symptom, arriving from the other
+     * direction. Declaring the query parameter makes `resolveAppDestination`
+     * append it, so every contextual entry point carries the exact property id
+     * without any surface needing a route-specific hack.
      */
-    context: { propertyId: 'locator' },
+    context: { propertyId: 'query:property_id' },
   },
   {
     id: 'map',

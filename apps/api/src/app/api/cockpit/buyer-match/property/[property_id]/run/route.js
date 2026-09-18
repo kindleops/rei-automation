@@ -37,6 +37,68 @@ export async function OPTIONS(request) {
   return new Response(null, { status: 204, headers: corsHeaders(request) })
 }
 
+/**
+ * THE SUBJECT IS HYDRATED FROM THE PROPERTY RECORD, NOT ONLY FROM THE CALLER.
+ *
+ * This route built its entire subject out of the POST body — `zip: body.zip`,
+ * `lat: body.lat`, `estimated_value: body.estimated_value` — and never read the
+ * property it was given the canonical id for. The dashboard happens to send all
+ * of it, so the product path worked. Any other caller did not:
+ *
+ *   POST /buyer-match/property/2130387643/run  {}
+ *     -> subject.zip undefined -> subject_incomplete: true
+ *     -> run "succeeds" with 25 candidates whose total_match_score is 74.4 for
+ *        EVERY buyer, price_match_score pinned at 45 for a $173k buyer and a
+ *        $2.0M buyer alike, on a $219k property.
+ *
+ * The zip was never missing — `properties.property_address_zip` held '77051' the
+ * whole time. A degraded ranking that still reports ok:true is worse than a
+ * refusal, because nothing downstream can tell the difference.
+ *
+ * Body values still win where supplied: a caller analysing a hypothetical ARV or
+ * a corrected address must be able to say so. The record is the floor, not a
+ * cage.
+ */
+async function hydrateSubjectFromRecord(db, property_id, body) {
+  const pick = (bodyValue, recordValue) =>
+    bodyValue === undefined || bodyValue === null || bodyValue === '' ? recordValue : bodyValue
+
+  let record = null
+  try {
+    const { data } = await db
+      .from('properties')
+      .select(
+        'property_id,property_address_full,property_address_city,property_address_state,' +
+        'property_address_zip,property_address_county_name,market,latitude,longitude,' +
+        'property_type,normalized_asset_class,estimated_value'
+      )
+      .eq('property_id', property_id)
+      .limit(1)
+    record = Array.isArray(data) && data.length > 0 ? data[0] : null
+  } catch {
+    // A failed read is not a reason to refuse: the caller may have supplied
+    // everything. It only means we cannot improve on what they sent.
+    record = null
+  }
+
+  return {
+    property_id,
+    address: pick(body.address, record?.property_address_full),
+    lat: pick(body.lat ?? body.latitude, record?.latitude),
+    lng: pick(body.lng ?? body.longitude, record?.longitude),
+    zip: pick(body.zip, record?.property_address_zip),
+    market: pick(body.market, record?.market),
+    state: pick(body.state, record?.property_address_state),
+    city: pick(body.city, record?.property_address_city),
+    county: pick(body.county, record?.property_address_county_name),
+    asset_class: pick(body.asset_class, record?.normalized_asset_class),
+    property_type: pick(body.property_type, record?.property_type),
+    estimated_value: pick(body.estimated_value, record?.estimated_value),
+    arv: body.arv,
+    radius_miles: body.radius_miles,
+  }
+}
+
 export async function POST(request, { params }) {
   const cors = corsHeaders(request)
   const auth = ensureMutationAuth(request)
@@ -52,22 +114,7 @@ export async function POST(request, { params }) {
       supabase,
       persist: true,
       limit: body.limit ?? 25,
-      subject: {
-        property_id,
-        address: body.address,
-        lat: body.lat ?? body.latitude,
-        lng: body.lng ?? body.longitude,
-        zip: body.zip,
-        market: body.market,
-        state: body.state,
-        city: body.city,
-        county: body.county,
-        asset_class: body.asset_class,
-        property_type: body.property_type,
-        estimated_value: body.estimated_value,
-        arv: body.arv,
-        radius_miles: body.radius_miles,
-      },
+      subject: await hydrateSubjectFromRecord(supabase, property_id, body),
     })
 
     return NextResponse.json(
