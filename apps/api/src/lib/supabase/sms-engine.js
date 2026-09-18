@@ -1370,19 +1370,148 @@ export function evaluateContactWindow(row, deps = {}) {
   };
 }
 
+/**
+ * IS THIS OUTBOUND NUMBER ALLOWED TO SEND, RIGHT NOW? (§55 sender authority)
+ *
+ * The defect this closes: `selectAvailableTextgridNumber` short-circuited on any
+ * queue row that already carried `from_phone_number` and returned it with NO
+ * eligibility check at all. Status, cooling and daily caps were only ever
+ * consulted on the ROTATION branch — the branch that runs when a row has no
+ * sender — so for every normal campaign row (where the sender is chosen at
+ * materialization) the only dispatch-time validation was the operator blocklist
+ * in `evaluateSmsHealthGuard`. A number that went `paused`, went `cooling`, or
+ * blew its daily cap AFTER the row was enqueued still sent.
+ *
+ * `validateQueuedOutboundNumberItem` in process-send-queue looked like it
+ * covered this. It has zero callers, and it checks `hard_pause` / `pause_until`
+ * columns that do not exist on `public.textgrid_numbers`.
+ *
+ * WHY THIS ENUMERATES BLOCKING STATES RATHER THAN REQUIRING A HEALTHY ONE.
+ * Measured against production: all 12 numbers carry `health_state:'unverified'`,
+ * including all 10 that are `status:'active'` and sending. `registration_status`
+ * is NULL on every row. A gate written as "must be healthy and registered"
+ * would have stopped every send in the system. So eligibility is deny-listed:
+ * a state has to be recognisably bad to block, and anything unrecognised is
+ * allowed through to the layers that already govern it (health guard, contact
+ * window, queue brakes, campaign caps).
+ */
+const BLOCKING_NUMBER_STATUS = new Set([
+  "paused",
+  "inactive",
+  "disabled",
+  "suspended",
+  "released",
+  "retired",
+]);
+
+const BLOCKING_HEALTH_STATE = new Set([
+  "cooling",
+  "blocked",
+  "quarantined",
+  "spam_flagged",
+  "suspended",
+]);
+
+export function evaluateOutboundNumberEligibility(number_row = null, now = new Date()) {
+  if (!number_row) {
+    return { ok: false, reason: "outbound_number_not_in_fleet", terminal: true };
+  }
+
+  const status = lower(clean(number_row.status));
+  if (status && BLOCKING_NUMBER_STATUS.has(status)) {
+    return { ok: false, reason: `outbound_number_status_${status}`, terminal: false };
+  }
+
+  const health_state = lower(clean(number_row.health_state));
+  if (health_state && BLOCKING_HEALTH_STATE.has(health_state)) {
+    return { ok: false, reason: `outbound_number_health_${health_state}`, terminal: false };
+  }
+
+  const cooling_until = clean(number_row.cooling_until);
+  if (cooling_until) {
+    const cooling_ts = new Date(cooling_until).getTime();
+    const reference = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    if (!Number.isNaN(cooling_ts) && cooling_ts > reference) {
+      return { ok: false, reason: "outbound_number_cooling_until", terminal: false };
+    }
+  }
+
+  const daily_limit = asNullableNumber(number_row.daily_limit, null);
+  const sent_today = asNumber(number_row.messages_sent_today, 0);
+  if (daily_limit !== null && sent_today >= daily_limit) {
+    return { ok: false, reason: "outbound_number_daily_limit_reached", terminal: false };
+  }
+
+  return { ok: true, reason: null, terminal: false };
+}
+
+/** The fleet record for a phone number, or null when it is not in the fleet. */
+async function loadOutboundNumberByPhone(phone_number, deps = {}) {
+  if (typeof deps.loadOutboundNumberByPhone === "function") {
+    return deps.loadOutboundNumberByPhone(phone_number);
+  }
+  const supabase = getSupabase(deps);
+  const { data, error } = await supabase
+    .from(TEXTGRID_NUMBERS_TABLE)
+    .select("*")
+    .eq("phone_number", phone_number)
+    .limit(1);
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0 ? data[0] : null;
+}
+
 export async function selectAvailableTextgridNumber(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
 
   if (clean(normalized.from_phone_number)) {
+    const intended = normalizePhone(normalized.from_phone_number);
+
+    // The intended sender is REVALIDATED here, not trusted. Scheduling proved it
+    // was eligible then; this proves it is eligible now.
+    let fleet_row = null;
+    try {
+      fleet_row = await loadOutboundNumberByPhone(intended, deps);
+    } catch (error) {
+      // A lookup failure is not permission to send, and it is not a permanent
+      // verdict either. Defer: the row stays claimable and the next pass asks
+      // again. Failing closed on a transient read would otherwise be able to
+      // halt the fleet.
+      return {
+        ok: false,
+        reason: "outbound_number_eligibility_unavailable",
+        deferred: true,
+        ineligible_sender: true,
+        selected: null,
+        from_phone_number: intended,
+        error: error?.message || "outbound_number_lookup_failed",
+      };
+    }
+
+    const eligibility = evaluateOutboundNumberEligibility(fleet_row, deps.now ? new Date(deps.now) : new Date());
+    if (!eligibility.ok) {
+      // NO SILENT REPLACEMENT. Rotating to "some other working number" here
+      // would send campaign traffic from a sender the campaign never chose and
+      // the operator cannot see. The row is reported ineligible and the caller
+      // blocks it with this reason.
+      return {
+        ok: false,
+        reason: eligibility.reason,
+        ineligible_sender: true,
+        terminal: eligibility.terminal,
+        selected: null,
+        from_phone_number: intended,
+      };
+    }
+
     return {
       ok: true,
       selected: {
-        id: normalized.textgrid_number_id || null,
-        phone_number: normalizePhone(normalized.from_phone_number),
+        id: normalized.textgrid_number_id || fleet_row?.id || null,
+        phone_number: intended,
         metadata: {},
       },
-      from_phone_number: normalizePhone(normalized.from_phone_number),
-      reason: "queue_row_from_phone_number_present",
+      from_phone_number: intended,
+      reason: "queue_row_from_phone_number_revalidated",
     };
   }
 
@@ -1402,14 +1531,13 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   if (error) throw error;
 
   const rows = Array.isArray(data) ? data : [];
+  // One evaluator for both branches. The rotation filter used to apply its own
+  // partial rules (status + daily cap, but not cooling), so a cooling number was
+  // excluded from a revalidated send and eligible for a rotated one.
+  const eligibility_now = deps.now ? new Date(deps.now) : new Date();
   const active_rows = rows.filter((candidate) => {
-    const status = lower(candidate?.status);
-    const daily_limit = asNullableNumber(candidate?.daily_limit, null);
-    const sent_today = asNumber(candidate?.messages_sent_today, 0);
-
-    if (status && status !== "active") return false;
-    if (daily_limit !== null && sent_today >= daily_limit) return false;
-    return Boolean(normalizePhone(candidate?.phone_number));
+    if (!normalizePhone(candidate?.phone_number)) return false;
+    return evaluateOutboundNumberEligibility(candidate, eligibility_now).ok;
   });
 
   const preferred = active_rows.find(

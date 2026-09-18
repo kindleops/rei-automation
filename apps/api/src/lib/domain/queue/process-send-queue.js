@@ -532,6 +532,74 @@ async function blockQueueRowBySmsHealthGuard(queue_row = {}, guard = {}, deps = 
   };
 }
 
+/**
+ * The intended sender is no longer allowed to send (§55 sender authority).
+ *
+ * NOT a send failure: the provider was never contacted, so this must not consume
+ * a retry or be classified as a transport fault. It is also not a silent
+ * substitution — rotating to some other working number would put campaign
+ * traffic on a sender the campaign never chose and the operator cannot see. The
+ * row is parked with the exact reason so ops can see WHICH sender stopped it and
+ * why, and it becomes sendable again when that sender does.
+ *
+ * `deferred` marks the transient case (fleet lookup unavailable) so it is
+ * visibly distinct from a real ineligibility verdict.
+ */
+async function blockQueueRowByIneligibleSender(queue_row = {}, selection = {}, deps = {}) {
+  const queue_row_id = getQueueRowId(queue_row);
+  const now = deps.now || nowIso();
+  const reason = selection.reason || "outbound_number_ineligible";
+  const queue_status = selection.deferred
+    ? "paused_sender_eligibility_unavailable"
+    : "blocked_sender_ineligible";
+
+  const payload = {
+    queue_status,
+    guard_status: "blocked",
+    guard_reason: reason,
+    failed_reason: reason,
+    is_locked: false,
+    locked_at: null,
+    lock_token: null,
+    updated_at: now,
+    metadata: {
+      ...(queue_row.metadata ?? {}),
+      skip_reason: reason,
+      final_queue_status: queue_status,
+      blocked_by: "outbound_number_eligibility",
+      blocked_at: now,
+      sender_ineligible: {
+        intended_from_phone_number: selection.from_phone_number || queue_row.from_phone_number || null,
+        reason,
+        deferred: Boolean(selection.deferred),
+        terminal: Boolean(selection.terminal),
+        evaluated_at: now,
+      },
+    },
+  };
+
+  await updateQueueRow(queue_row_id, payload, deps);
+
+  warn("queue.sender_ineligible_blocked", {
+    queue_row_id,
+    queue_key: queue_row.queue_key || null,
+    from: selection.from_phone_number || queue_row.from_phone_number || null,
+    reason,
+    deferred: Boolean(selection.deferred),
+  });
+
+  return {
+    ok: true,
+    skipped: true,
+    sent: false,
+    reason,
+    queue_status,
+    final_queue_status: queue_status,
+    queue_row_id,
+    queue_item_id: queue_row_id,
+  };
+}
+
 async function updateQueueRow(queue_row_id, payload, deps = {}) {
   if (!queue_row_id) {
     throw new Error("missing_queue_row_id");
@@ -1622,6 +1690,12 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
 
     const number_selection = await selectAvailableTextgridNumber(queue_row, deps);
     if (!number_selection?.ok) {
+      // A sender that is no longer eligible is a BLOCK, not a transport failure.
+      // Throwing here would land in the provider-failure catch, consume a retry
+      // and file it as a send fault for a send that never happened.
+      if (number_selection?.ineligible_sender) {
+        return blockQueueRowByIneligibleSender(queue_row, number_selection, deps);
+      }
       throw new Error(number_selection?.reason || "missing_from_phone_number");
     }
 

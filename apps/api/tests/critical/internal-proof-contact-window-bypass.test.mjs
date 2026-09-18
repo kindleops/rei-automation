@@ -272,6 +272,18 @@ function makeItemDeps(overrides = {}) {
   const deps = {
     now: NOW,
     claimedLockToken: "lock-token-proof",
+    // Dispatch revalidates the intended sender against the fleet (§55): a number
+    // that went paused, cooling or over its daily cap after enqueue used to send
+    // anyway. Fixtures that model a reaching send must state the fleet fact, or
+    // revalidation correctly reports `outbound_number_not_in_fleet` and blocks.
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     getSystemValue: makeGetSystemValue(),
     scoped_canary: true,
     authorization_validated: true,

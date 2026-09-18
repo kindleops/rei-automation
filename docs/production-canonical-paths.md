@@ -122,6 +122,86 @@ No bypass defect found in product traffic.
 
 ---
 
+## §55 — sender ownership and dispatch-time eligibility
+
+Traced campaign → target → queue row → claim → dispatch → provider.
+
+| Question | Answer |
+| --- | --- |
+| Who owns initial sender selection? | `sms-engine.selectAvailableTextgridNumber`, the one named routing authority. Called from `process-send-queue` at dispatch. |
+| Where does sender identity live? | Persisted on the `send_queue` row (`from_phone_number` / `selected_from_number` / `outbound_number_phone`). `pickMessageFields` reads ONLY the row — there is no fleet fallback, so the dispatcher cannot invent one. |
+| Can any layer silently replace it? | Reassignment exists and is bounded: if selection returns a different number, `reserveFromPhoneNumber` **persists** the effective sender under the row lock before dispatch, and the health guard then runs on the effective sender. It is auditable and the row reflects what executed. |
+| Is the exact sender persisted with the attempt? | Yes — `message_fields.from` is carried into the dispatch seam, the provider request and the attempt/result records. |
+| Do campaign and global brakes still apply? | Unchanged. Queue brakes, contact window, compliance guard, idempotency and `evaluateCanonicalSendAuthority` are all upstream of this and were not touched. |
+
+### The defect this pass closed
+
+`selectAvailableTextgridNumber` short-circuited on any row that already carried
+`from_phone_number` and returned it **with no eligibility check at all**. Status,
+cooling and daily caps were consulted only on the ROTATION branch — the one that
+runs when a row has no sender. So for every normal campaign row (sender chosen at
+materialization) the only dispatch-time validation was the operator blocklist in
+`evaluateSmsHealthGuard`, which checks `blocked_sender_numbers` and
+`blocked_template_ids` and nothing else.
+
+Enforcement before / after:
+
+| Dimension | Before | After |
+| --- | --- | --- |
+| `sms_blocked_sender_numbers` | YES (loaded fresh at dispatch) | YES |
+| `blocked_template_ids` | YES | YES |
+| number `status` (paused/inactive/…) | **NO** for the intended sender | YES |
+| `health_state` (cooling/blocked/…) | **NO** anywhere | YES |
+| `cooling_until` window | **NO** | YES |
+| `daily_limit` vs `messages_sent_today` | **NO** for the intended sender | YES |
+
+`validateQueuedOutboundNumberItem` in `process-send-queue` appeared to cover
+this. It has **zero callers**, and it checks `hard_pause` / `pause_until` columns
+that do not exist on `public.textgrid_numbers`.
+
+**Ineligible now blocks rather than fails.** A sender-ineligible verdict returns
+`ineligible_sender`, and `process-send-queue` parks the row as
+`blocked_sender_ineligible` (or `paused_sender_eligibility_unavailable` when the
+fleet read itself failed) with the intended number and reason in metadata. It is
+not thrown into the provider-failure catch, so it does not consume a retry or get
+filed as a transport fault for a send that never happened. No substitute sender
+is chosen.
+
+**Eligibility is deny-listed, deliberately.** Measured against the live fleet:
+12 numbers, **all** `health_state:'unverified'` — including all 10 that are
+`status:'active'` and sending — `registration_status` NULL on every row,
+`daily_limit` 800 against a max `messages_sent_today` of 3. A gate written as
+"must be healthy and registered" would have stopped every send in the system.
+
+### The sweep is already enforced, not just audited
+
+`tests/critical/seller-send-source-inventory.test.mjs` enumerates every provider
+invocation in the tree and fails if one appears outside the permitted set: the
+definition, the hard-fenced canary, the 404-in-production dev route, the buyer
+blast (scoped out), and at most ONE inside the retained unreachable legacy body.
+It also asserts both live paths dispatch through the canonical seam
+(`dispatchSellerQueueRow`, `dispatchManualOperatorSend`) and that a manual send
+establishes durable operator identity *before* dispatch.
+
+That is a stronger guarantee than a point-in-time grep, and it independently
+confirms the §55 classification above.
+
+**Correction to an earlier conclusion in this document.**
+`processLegacyQueueItemUnreachable` is NOT dead code to delete. It is
+deliberately retained, and the same guard asserts both that it remains behind the
+unreachable marker and that the `legacy_podio_path_fenced_by_s11` fence precedes
+it. Removing it would delete a safety contract, not dead weight. It keeps its own
+provider call and does not carry the new revalidation — which is correct, because
+nothing can reach it.
+
+Covered by `tests/critical/outbound-sender-authority.test.mjs` (14 cases):
+healthy sends; paused/cooling/capped after enqueue refuse; cooling window opens
+and closes; not-in-fleet refuses; unreadable fleet defers instead of sending;
+rotation is never reached for an intended sender; rotation applies the same rules
+as revalidation; an unrecognised state does not stop the fleet.
+
+---
+
 ## Verified already canonical
 
 | Capability | Canonical path | Note |
@@ -140,14 +220,18 @@ No bypass defect found in product traffic.
 Listed with what is known so far. None is yet cleared, and no surface should be
 built against one until it is.
 
-- **Sender ownership, end to end.** The UI no longer invents one — the
-  synthesised per-row sender died with the fabricated rows. Still OPEN: trace
-  sender identity from campaign creation → `campaign_targets` → `send_queue` row
-  → claim → dispatch, establish which component *owns* selection, and confirm
-  the queue row, the canonical routing authority and the provider call all name
-  the same sender. Also confirm sender-health/eligibility is enforced in the
-  dispatch path rather than being advisory. `sms-health-guard` is imported by
-  `send-now-service`; whether `process-send-queue` enforces it is unverified.
+- **Campaign-level sender intent.** Dispatch-time authority is now closed, but
+  where a campaign's sender/routing *preference* is configured and how it reaches
+  `send_queue.from_phone_number` at materialization is still untraced. The
+  dispatcher honours whatever the row says; what writes the row is the open half.
+- **UI truthfulness for blocked senders.** `blocked_sender_ineligible` and
+  `paused_sender_eligibility_unavailable` are new queue statuses. Campaign and
+  Queue surfaces must render them with the sender and reason rather than as a
+  generic failure.
+- **`lib/domain/buyers/send-buyer-blast.js`.** A provider send path on the BUYER
+  side, explicitly scoped out by the source-inventory guard below. Not yet
+  classified against §55; seller traffic is closed, buyer/disposition outreach is
+  not.
 - **`SystemHealthOpsPanel`, `RecentQueueEvents`, `censusData`.** Flagged by the
   mock/demo/sample scan; not yet traced.
 - **Campaign / Queue / messaging duplicates.** §43's remaining list — duplicate

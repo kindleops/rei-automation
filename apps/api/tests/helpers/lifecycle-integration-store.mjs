@@ -379,6 +379,27 @@ export function makeLifecycleQueueRunDeps(store, { now, sendTextgridSMS, s11Stor
     now,
     supabase,
     supabaseClient: supabase,
+    /**
+     * The fixture's sender is in the fleet and eligible.
+     *
+     * Dispatch revalidates the intended sender against `textgrid_numbers` rather
+     * than trusting the queue row (§55 — a number that went paused, cooling or
+     * over its daily cap after enqueue used to send anyway). These fixtures model
+     * a healthy send, so they have to state the fleet fact; without it the
+     * revalidation correctly reports `outbound_number_not_in_fleet` and blocks.
+     *
+     * Deliberately eligible rather than permissive: `status:'active'` with
+     * `health_state:'unverified'` is the shape every number in the live fleet
+     * actually has.
+     */
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     // Fixed "everything enabled" fixture values, not a re-derived decision —
     // see the file-level CONTRACT note on disclosed simplifications.
     getSystemFlag: async () => true,

@@ -127,6 +127,17 @@ test("E: processSendQueueItem healthy legacy fake calls provider once", async ()
     store: createMemoryS11Store(),
     supabase,
     supabaseClient: supabase,
+    // Dispatch revalidates the intended sender against the fleet (§55). A
+    // healthy-send fixture has to state that its sender is in it; otherwise the
+    // revalidation correctly reports `outbound_number_not_in_fleet`.
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
       // the control plane permits the send.
