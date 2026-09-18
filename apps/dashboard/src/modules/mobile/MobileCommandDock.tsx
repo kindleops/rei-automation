@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import { useRoutePath } from '../../app/router'
 import { resolveAppForRoute } from '../../domain/app-registry/app-registry'
+import { clearActiveContext, readActiveContext, type ActiveContext } from '../../domain/locator/active-context'
+import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -70,6 +72,21 @@ export const MobileCommandDock = ({
   const routePath = useRoutePath()
   const activeApp = resolveAppForRoute(routePath)
 
+  /**
+   * §3 — context must be OBVIOUS, and must never be impossible to escape.
+   *
+   * Re-read on every route change (the path is the dependency) and on locator
+   * changes, because a contextual action can publish an identity for a context
+   * the URL already carried.
+   */
+  const [context, setContext] = useState<ActiveContext | null>(null)
+  useEffect(() => {
+    const sync = () => setContext(readActiveContext())
+    sync()
+    window.addEventListener(PROPERTY_LOCATOR_EVENT, sync)
+    return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync)
+  }, [routePath])
+
   const toggle = (surface: Exclude<DockSurface, null>) => {
     onSurfaceChange(activeSurface === surface ? null : surface)
   }
@@ -120,6 +137,34 @@ export const MobileCommandDock = ({
           </DockGlyph>
           <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
         </button>
+
+        {/*
+          THE CONTEXT CHIP.
+
+          Present only when the URL declares a context, which is now the single
+          source of truth for scoped-vs-universal (see domain/locator/active-context).
+          It states WHAT the app is currently aimed at and carries the X that
+          releases it — deliberately in the global bar rather than in an overflow
+          menu, because §3 requires the escape hatch to be visible wherever the
+          operator is. Clearing keeps the current application and returns it to
+          universal mode; it does not bounce anyone back to the Inbox.
+        */}
+        {context ? (
+          <div className="nx-mobile-command-dock__context" title={context.detail}>
+            <span className="nx-mobile-command-dock__context-label">{context.label}</span>
+            <button
+              type="button"
+              className="nx-mobile-command-dock__context-clear"
+              aria-label={`Clear ${context.detail} — return to all records`}
+              onClick={() => {
+                clearActiveContext()
+                setContext(null)
+              }}
+            >
+              <Icon name="x" size={12} strokeWidth={2} />
+            </button>
+          </div>
+        ) : null}
 
         <button
           type="button"

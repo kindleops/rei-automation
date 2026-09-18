@@ -515,7 +515,12 @@ export function CalendarView({
       return
     }
     if (action === 'buyer') {
-      pushRoutePath('/buyer-match')
+      // Contextual action on a dated record, so the subject travels in the URL.
+      // A bare push now lands on the universal select-a-property state, because
+      // no surface reads the ambient locator any more.
+      pushRoutePath(ctx.property_id
+        ? `/buyer-match?property_id=${encodeURIComponent(ctx.property_id)}`
+        : '/buyer-match')
       return
     }
     if (action === 'queue') {

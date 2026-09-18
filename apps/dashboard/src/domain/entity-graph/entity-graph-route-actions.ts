@@ -164,9 +164,19 @@ export function routeEntityGraphAction(
       options.onOpenBuyerMatch()
       return true
     }
-    // Same subject-carrying contract as Comp Intelligence above.
+    /**
+     * Same subject-carrying contract as Comp Intelligence above — and it was
+     * only a comment until now. This pushed a bare `/buyer-match` and leaned on
+     * the ambient locator, which no longer scopes anything (see
+     * views/buyer-match/buyer-match-subject). Without the parameter this action
+     * now lands on the universal select-a-property state, which is precisely the
+     * "Buyer Match does not load" report.
+     */
     syncContext()
-    pushRoutePath('/buyer-match')
+    const buyerPropertyId = context.propertyId || (context.entityType === 'property' ? context.entityId : null)
+    pushRoutePath(buyerPropertyId
+      ? `/buyer-match?property_id=${encodeURIComponent(buyerPropertyId)}`
+      : '/buyer-match')
     return true
   }
 

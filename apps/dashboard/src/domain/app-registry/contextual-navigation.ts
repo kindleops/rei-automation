@@ -19,6 +19,10 @@
  * command palette — pushed a bare path and dropped the context on the floor. Anything
  * that navigates should go through `navigateToApp` so there is exactly one answer.
  *
+ * That correction then over-applied: EVERY navigation carried the context, so one
+ * selection scoped every application for the rest of the session. `NavigationIntent`
+ * is the missing half — see its doc comment below.
+ *
  * Honesty rule: a focused URL is only produced when the target surface really reads
  * that identifier. The registry's `context` field is the contract, and it is empty for
  * surfaces that do not read one — the old dock appended `?property_id=` to /queue,
@@ -52,6 +56,25 @@ export interface ContextualNavigationEffects {
   isInboxRoute?: (path: string) => boolean
 }
 
+/**
+ * WHY THE OPERATOR IS NAVIGATING. This is the distinction §3 is built on.
+ *
+ * `switch` — they picked an application out of the launcher or the dock. That is
+ *   a request for the APPLICATION, not for the application aimed at whatever they
+ *   happened to be looking at ten minutes ago. It opens in universal mode.
+ *
+ * `contextual` — they took an explicit contextual action: "Find buyers for this
+ *   property", "Open comps for this property", "Open conversation". The context
+ *   is the point of the action, so it carries.
+ *
+ * Everything used to be `contextual`, unconditionally. One selection then rode
+ * through every app for the rest of the session — Buyer Match, Calendar, Email
+ * and Entity Graph all silently scoped to a property the operator had moved on
+ * from, with nothing on screen saying so and nothing anywhere calling
+ * `clearPropertyLocator` (which existed, and had no caller outside its own test).
+ */
+export type NavigationIntent = 'switch' | 'contextual'
+
 export interface ResolvedDestination {
   /** The path to push, already canonicalised. Null when the app is action-only. */
   path: string | null
@@ -70,10 +93,13 @@ export interface ResolvedDestination {
 export function resolveAppDestination(
   app: NexusApp,
   locator: PropertyLocator | null = readPropertyLocator(),
+  intent: NavigationIntent = 'switch',
 ): ResolvedDestination {
   if (app.action) return { path: null, focused: false, focusedBy: null }
 
   const plain = { path: app.route, focused: false, focusedBy: null } as const
+  // Picking an app is not asking for it to be aimed at the last thing selected.
+  if (intent === 'switch') return { ...plain }
   if (!locator) return { ...plain }
 
   const { context } = app
@@ -134,6 +160,7 @@ export function navigateToApp(
   app: NexusApp,
   effects: ContextualNavigationEffects,
   locator: PropertyLocator | null = readPropertyLocator(),
+  intent: NavigationIntent = 'switch',
 ): ResolvedDestination {
   if (app.action === 'deal_intelligence') {
     effects.openDealIntelligence(
@@ -168,7 +195,7 @@ export function navigateToApp(
     return { path: null, focused: false, focusedBy: null }
   }
 
-  const destination = resolveAppDestination(app, locator)
+  const destination = resolveAppDestination(app, locator, intent)
   if (destination.path) pushRoutePath(destination.path)
   return destination
 }
@@ -178,19 +205,21 @@ export function navigateToAppId(
   id: AppId,
   effects: ContextualNavigationEffects,
   locator?: PropertyLocator | null,
+  intent: NavigationIntent = 'switch',
 ): ResolvedDestination | null {
   const app = getApp(id)
-  return app ? navigateToApp(app, effects, locator) : null
+  return app ? navigateToApp(app, effects, locator, intent) : null
 }
 
 export function navigateToPath(
   rawPath: string,
   effects: ContextualNavigationEffects,
   locator?: PropertyLocator | null,
+  intent: NavigationIntent = 'switch',
 ): ResolvedDestination {
   const canonical = canonicalizeRoutePath(rawPath)
   const app = getAppByRoute(canonical)
-  if (app) return navigateToApp(app, effects, locator)
+  if (app) return navigateToApp(app, effects, locator, intent)
   // Deep links (/entity-graph/property/:id) are already focused; push them verbatim.
   pushRoutePath(canonical)
   return { path: canonical, focused: false, focusedBy: null }

@@ -11,16 +11,26 @@
  * every source is empty the caller must render the honest select-a-property
  * state rather than falling back to a first/last/recent property.
  *
- *   1. `?property_id=` on the URL          — an explicit deep link
- *   2. the global property locator          — what the operator is looking at,
- *      published at SELECTION time into sessionStorage (see
- *      domain/locator/property-locator), which is the only carrier that
- *      survives a dock tap
- *   3. the universal entity context         — the in-memory selected entity,
- *      useful when Buyer Match is opened without a navigation
+ *   `?property_id=` on the URL — an explicit deep link, and the ONLY source.
  */
-import { readPropertyLocator } from '../../domain/locator/property-locator'
-import { getUniversalEntityContextSnapshot } from '../../domain/entity-graph/universal-entity-context-store'
+/**
+ * CONTEXT TRAVELS IN THE URL, NOT IN THE AIR.
+ *
+ * These resolvers used to fall back to the ambient property locator (and, here,
+ * the in-memory universal snapshot) when the URL carried no subject. That
+ * fallback is how ONE selection ended up scoping every application for the rest
+ * of the session: the locator is sessionStorage-backed and, until this pass,
+ * nothing in the product ever called `clearPropertyLocator` — it had no caller
+ * outside its own unit test. Opening this app from the launcher therefore
+ * silently re-scoped it to a property the operator had moved on from, with
+ * nothing on screen saying so and no way back to universal mode.
+ *
+ * The locator is still the CARRIER: an explicit contextual action writes it and
+ * navigates with `?property_id=`, so the context is in the URL, survives a
+ * reload, can be shared, and is cleared by removing it. What it is no longer is
+ * an ambient default. No parameter means universal mode — see `NavigationIntent`
+ * in domain/app-registry/contextual-navigation.
+ */
 
 export interface BuyerMatchSubject {
   propertyId: string
@@ -28,7 +38,7 @@ export interface BuyerMatchSubject {
   addressHint: string | null
   opportunityId: string | null
   threadKey: string | null
-  source: 'url' | 'locator' | 'universal'
+  source: 'url'
 }
 
 const clean = (value: unknown): string | null => {
@@ -51,28 +61,6 @@ export function resolveBuyerMatchSubject(search?: string): BuyerMatchSubject | n
       opportunityId: clean(params.get('opportunity_id')),
       threadKey: clean(params.get('thread_key')),
       source: 'url',
-    }
-  }
-
-  const locator = readPropertyLocator()
-  if (locator?.propertyId) {
-    return {
-      propertyId: locator.propertyId,
-      addressHint: clean(locator.address),
-      opportunityId: clean(locator.opportunityId),
-      threadKey: clean(locator.threadKey),
-      source: 'locator',
-    }
-  }
-
-  const universal = getUniversalEntityContextSnapshot()
-  if (universal?.propertyId) {
-    return {
-      propertyId: String(universal.propertyId),
-      addressHint: clean((universal as { propertyAddress?: string }).propertyAddress),
-      opportunityId: null,
-      threadKey: clean(universal.threadKey),
-      source: 'universal',
     }
   }
 

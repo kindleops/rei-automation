@@ -2940,3 +2940,87 @@ html.is-landscape-phone {
     padding-right: calc(12px + var(--nx-mobile-safe-right, 0px));
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE CONTEXT CHIP (§3)
+
+   Says what the current application is aimed at, and carries the X that
+   releases it. It sits in the GLOBAL bar rather than in each application's own
+   chrome, because the state it describes is global: until this pass a selected
+   property silently scoped Buyer Match, Calendar, Email and Entity Graph with
+   nothing on screen admitting it and no control anywhere to undo it.
+
+   It takes the width it needs from the identity label beside it, which already
+   degrades to its glyph on a dense bar — the context is the more specific fact,
+   so it wins that contest.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout {
+  .nx-mobile-command-dock__context {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 1 auto;
+    min-width: 0;
+    height: 26px;
+    padding: 0 2px 0 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(var(--nx-accent-rgb, 120 140 255), 0.42);
+    background: rgba(var(--nx-accent-rgb, 120 140 255), 0.14);
+  }
+
+  .nx-mobile-command-dock__context-label {
+    min-width: 0;
+    max-width: 104px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  /* 22px of paint inside a 44px hit area: the chip cannot grow to a touch
+     target without pushing the global utilities off the bar, and a clear
+     control that is hard to hit is the defect this exists to fix. */
+  .nx-mobile-command-dock__context-clear {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .nx-mobile-command-dock__context-clear::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+
+  .nx-mobile-command-dock__context-clear:active { background: rgba(255, 255, 255, 0.12); }
+
+  /* The app's own name yields to the specific thing it is aimed at. */
+  .nx-mobile-command-dock__context ~ * .nx-mobile-command-dock__identity,
+  .nx-mobile-command-dock__btn--workspace:has(~ .nx-mobile-command-dock__context) .nx-mobile-command-dock__identity {
+    display: none;
+  }
+}
+
+[data-nexus-theme='light'] {
+  .nx-mobile-command-dock__context {
+    border-color: rgba(var(--nx-accent-rgb, 13 148 136), 0.4);
+    background: rgba(var(--nx-accent-rgb, 13 148 136), 0.12);
+  }
+  .nx-mobile-command-dock__context-label { color: rgba(15, 23, 42, 0.92); }
+  .nx-mobile-command-dock__context-clear { color: rgba(15, 23, 42, 0.7); }
+}

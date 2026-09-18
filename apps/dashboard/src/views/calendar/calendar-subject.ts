@@ -15,7 +15,6 @@
  * never fall back to the global schedule, because a global list under a
  * subject header reads as "this seller has 1,500 items".
  */
-import { readPropertyLocator } from '../../domain/locator/property-locator'
 
 export interface CalendarSubject {
   propertyId: string | null
@@ -23,7 +22,7 @@ export interface CalendarSubject {
   opportunityId: string | null
   threadKey: string | null
   address: string | null
-  source: 'url' | 'locator' | 'none'
+  source: 'url' | 'none'
 }
 
 export const NO_CALENDAR_SUBJECT: CalendarSubject = {
@@ -56,17 +55,6 @@ export function resolveCalendarSubject(search?: string): CalendarSubject {
     /* a malformed query string must not break the surface */
   }
 
-  const locator = readPropertyLocator()
-  if (locator?.propertyId || locator?.masterOwnerId || locator?.opportunityId) {
-    return {
-      propertyId: str(locator.propertyId),
-      masterOwnerId: str(locator.masterOwnerId),
-      opportunityId: str(locator.opportunityId),
-      threadKey: str(locator.threadKey),
-      address: str(locator.address),
-      source: 'locator',
-    }
-  }
   return NO_CALENDAR_SUBJECT
 }
 

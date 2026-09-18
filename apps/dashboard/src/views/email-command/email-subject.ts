@@ -17,13 +17,12 @@
  * as "this subject has none", NOT by falling back to the whole corpus. Showing
  * subject A's data while B is selected is the specific failure §6 forbids.
  */
-import { readPropertyLocator } from '../../domain/locator/property-locator'
 
 export interface EmailSubject {
   propertyId: string | null
   masterOwnerId: string | null
   address: string | null
-  source: 'url' | 'locator' | 'none'
+  source: 'url' | 'none'
 }
 
 export const NO_SUBJECT: EmailSubject = {
@@ -52,15 +51,6 @@ export function resolveEmailSubject(search?: string): EmailSubject {
     /* a malformed query string must not break the surface */
   }
 
-  const locator = readPropertyLocator()
-  if (locator?.propertyId || locator?.masterOwnerId) {
-    return {
-      propertyId: str(locator.propertyId),
-      masterOwnerId: str(locator.masterOwnerId),
-      address: str(locator.address),
-      source: 'locator',
-    }
-  }
   return NO_SUBJECT
 }
 
