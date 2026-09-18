@@ -316,9 +316,20 @@ async function executeBackendRequest<T>(
   })
   let response: Response
   try {
+    /**
+     * ORDER IS LOAD-BEARING. `...options` used to come AFTER `headers`, so any
+     * caller that passed its own `headers` — even just a Content-Type —
+     * replaced the whole built object and silently dropped
+     * `x-ops-dashboard-secret` and `Authorization`. The request went out
+     * unauthenticated and came back 401, with nothing in the client to say why.
+     *
+     * `headers` already contains `...options.headers` (merged above), so
+     * spreading options first and headers last keeps caller-supplied values
+     * AND the credentials.
+     */
     response = await fetch(url, {
-      headers,
       ...options,
+      headers,
     })
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)

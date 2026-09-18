@@ -12,6 +12,7 @@ import { normalizeInboundTextgridPhone } from "@/lib/providers/textgrid.js";
 import { resolveCanonicalInboundThreadKey } from "@/lib/domain/inbox/resolve-canonical-inbound-thread.js";
 import { getPodioRetryAfterSeconds, isPodioRateLimitError } from "@/lib/providers/podio.js";
 import { logInboundMessageEvent } from "@/lib/domain/events/log-inbound-message-event.js";
+import { handleInboundBuyerReply } from "@/lib/domain/buyers/handle-inbound-buyer-reply.js";
 import { updateBrainAfterInbound } from "@/lib/domain/brain/update-brain-after-inbound.js";
 import { updateBrainStage } from "@/lib/domain/brain/update-brain-stage.js";
 import { maybeCreateOfferFromContext } from "@/lib/domain/offers/maybe-create-offer-from-context.js";
@@ -91,6 +92,7 @@ const defaultDeps = {
   resolveRoute,
   normalizeInboundTextgridPhone,
   logInboundMessageEvent,
+  handleInboundBuyerReply,
   updateBrainAfterInbound,
   updateBrainStage,
   maybeCreateOfferFromContext,
@@ -1342,6 +1344,76 @@ async function handleTextgridInboundWebhookCore(payload = {}, opts = {}) {
   if (!message_body) {
     safeWarn("textgrid.inbound_empty_body", { message_id: extracted.message_id, inbound_from });
     return { ok: false, reason: "empty_inbound_body" };
+  }
+
+  /**
+   * ── SEGMENT: outreach_domain ────────────────────────────────────────────
+   *
+   * §13/§15 — WHOSE REPLY IS THIS?
+   *
+   * Everything below this point is the SELLER acquisition pipeline: brains,
+   * offers, stage transitions, follow-up. Buyer disposition outreach now shares
+   * this transport, so an investor answering "yes interested" about a deal
+   * would otherwise arrive here indistinguishable from a homeowner agreeing to
+   * sell, and advance S1-S10 on a seller who never spoke.
+   *
+   * Placed BEFORE the idempotency claim on purpose: a claim marks the message
+   * processed, so deferring after claiming would make the retry a duplicate and
+   * lose the reply.
+   *
+   * A seller reply — every reply, today — returns `handled: false` after one
+   * indexed read and continues down exactly the path it always did.
+   */
+  try {
+    const buyer_domain = await (
+      runtimeDeps.handleInboundBuyerReply || handleInboundBuyerReply
+    )({ from_phone_number: inbound_from, body: message_body });
+
+    if (buyer_domain?.handled) {
+      if (buyer_domain.defer) {
+        // Buyer outreach was unreadable. Neither attribute nor discard.
+        safeWarn("textgrid.inbound_buyer_domain_unresolved", {
+          message_id: extracted.message_id,
+          inbound_from,
+          reason: buyer_domain.reason || null,
+        });
+        return {
+          ok: false,
+          retryable: true,
+          reason: "buyer_domain_unresolved",
+          detail: buyer_domain.reason || null,
+        };
+      }
+
+      safeInfo("textgrid.inbound_routed_to_buyer_domain", {
+        message_id: extracted.message_id,
+        inbound_from,
+        domain: buyer_domain.domain,
+        opt_out: buyer_domain.opt_out === true,
+        target_count: (buyer_domain.target_ids || []).length,
+        errors: buyer_domain.errors || null,
+      });
+
+      return {
+        ok: true,
+        routed: "buyer",
+        domain: buyer_domain.domain,
+        opt_out: buyer_domain.opt_out === true,
+        buyer_outreach_target_ids: buyer_domain.target_ids || [],
+        // An ambiguous reply reports its candidates rather than a resolution.
+        buyer_candidates: buyer_domain.candidates || null,
+        seller_lifecycle_touched: false,
+        errors: buyer_domain.errors || null,
+      };
+    }
+  } catch (buyer_domain_error) {
+    // The classifier itself failing must not take the seller path down with
+    // it. It already fails closed internally; this is the belt on the braces.
+    safeWarn("textgrid.inbound_buyer_domain_check_failed", {
+      message_id: extracted.message_id,
+      inbound_from,
+      error: buyer_domain_error?.message || "buyer_domain_check_failed",
+    });
   }
 
   // internal_proof burst mode: upgrade the per-thread gate ONLY for an

@@ -316,31 +316,59 @@ Status: **VERIFIED** (one canonical path, proven) · **OPEN** (work remains) ·
 - legacy `processLegacyQueueItemUnreachable` — RETAINED, fenced, asserted by
   `seller-send-source-inventory.test.mjs`. Do not delete.
 
-### Buyer / disposition messaging — OPEN (bypass narrowed, not eliminated)
-- service `lib/domain/buyers/send-buyer-blast` · routes `api/internal/buyers/blast`,
-  `lib/domain/autopilot/run-deals-autopilot`
-- sender `lib/domain/routing/choose-textgrid-number`
-- provider **direct** `sendTextgridSMS` — does NOT use `send_queue`
-- gates `ENABLE_LIVE_SENDING` + `ENABLE_BUYER_SMS_BLAST` (both default false, neither
-  set in the production worker config) + `buyer_sms_blast_enabled` system flag +
-  shared-secret auth + `dry_run` default true
+### Buyer / disposition messaging — CANONICAL, and BLOCKED on contact data
+- intent `lib/domain/buyers/materialize-buyer-outreach` -> table `buyer_outreach_targets`
+- destination `lib/domain/buyers/resolve-buyer-contact` (server-side, from `buyer_contacts_v2`)
+- execution `sms-engine.insertSupabaseSendQueueRow` -> `send_queue` (the ONE queue)
+- reconciliation `lib/domain/buyers/reconcile-buyer-outreach`, called from the
+  dispatcher after finalize and from the canonical delivery-receipt path
+- inbound `lib/domain/buyers/handle-inbound-buyer-reply`, called from
+  `flows/handle-textgrid-inbound` BEFORE the idempotency claim
+- route `api/cockpit/buyer-match/property/[property_id]/outreach` (GET state,
+  POST preflight/commit; `dry_run` defaults TRUE)
+- surface `views/buyer-match/mobile/BuyerOutreachSheet`
 
-It reached the provider without clearing `evaluateCanonicalSendAuthority`, so the
-four operator gates — including EMERGENCY STOP — did not apply. Flipping the stop
-would have halted every seller message and left buyer blasts sending. Latent, not
-active, but arming a feature flag should never route traffic around the stop.
+`send-buyer-blast.js` is GONE. It picked recipients in memory and called
+`sendTextgridSMS` directly: no queue row, so no claim, lease or lock; no
+idempotency, so a retry re-sent; no contact window, so nothing stopped a 2 AM
+blast; no suppression check; and nothing durable for a receipt or a reply to
+reconcile against. Buyer work now inherits all of it from the canonical queue
+rather than re-implementing any of it.
 
-FIXED this pass: buyer sends now clear canonical send authority before any
-provider call, and `choose-textgrid-number` reads the real `health_state` /
-`cooling_until` columns. Its previous pause check used Podio-era `hard_pause` /
-`pause_until`, which do not exist on `public.textgrid_numbers` — it could never
-return true.
+Idempotency is structural, not a disabled button: the outreach row and the queue
+row share a deterministic `dedupe_key` (`buyer:<property>:<buyer>:<touch>`), and
+`uq_send_queue_active_dedupe_key` plus `uq_buyer_outreach_live_touch` refuse a
+second LIVE touch. A double-tap, a retried request and a worker retry are all
+structurally incapable of duplicating outreach.
 
-STILL OPEN: buyer outbound does not create `send_queue` rows, so it has no claim,
-lease, idempotency ledger, contact window, suppression check, health guard, retry
-or provider reconciliation. Routing it through the canonical queue is the real
-fix and is a deliberate architecture decision, not a patch — buyer rows would
-have to satisfy seller-shaped preclaim validation.
+The send kind rides in `metadata`, because **`send_queue` has no `send_kind`
+column**. A top-level field would not error — `sanitizeSendQueuePayload` sweeps
+unknown keys into `metadata.unknown_payload_fields` — it would quietly file the
+marker where no reader looks, and every buyer row would come back out of the
+database looking like seller traffic.
+
+**BLOCKED: no buyer in production has a reachable phone number.** Measured
+2026-09-18, not assumed:
+
+    public.buyer_entities_v2      26,390 rows
+    contact_enrichment_status     'not_started' on 26,390 of 26,390
+    public.buyer_contacts_v2      0 rows
+
+So preflight against the three top-ranked real buyers for property `2130387643`
+returns `selected: 3, eligible: 0`, each blocked `no_contact_on_record`, and
+nothing is queued or written. That is the correct and truthful product state.
+The provider canary (§16-§18) is BLOCKED for the same reason and was NOT run:
+there is no buyer to contact, and inventing a recipient is the one thing this
+path is built to make impossible. Buyer contact enrichment is the missing
+capability; the seam is complete and works the moment it lands.
+
+The seller boundary is now WIRED, not merely written. `routeInboundBuyerReply`
+existed and was correct for days while **nothing called it** — every buyer reply
+would still have been processed as a seller's, and a unit test on the classifier
+would have passed throughout. `tests/critical/inbound-buyer-boundary.test.mjs`
+asserts the production handler calls it, and calls it before the idempotency
+claim (claiming first would make a deferral a duplicate on retry and lose the
+reply).
 
 ### Queue writers — VERIFIED
 **No direct `send_queue` table inserts exist anywhere.** Every row is created by

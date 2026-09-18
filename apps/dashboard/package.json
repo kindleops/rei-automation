@@ -66,7 +66,8 @@
     "proof:mobile-shell": "node scripts/proof/mobile/mobile-shell-qa.mjs --label guard",
     "proof:mobile-keyboard": "node scripts/proof/mobile/mobile-keyboard-qa.mjs",
     "proof:mobile-shell-contract": "node scripts/proof/mobile/mobile-shell-contract-qa.mjs",
-    "proof:comps-pan": "node scripts/proof/mobile/comp-intelligence-pan-stability.mjs"
+    "proof:comps-pan": "node scripts/proof/mobile/comp-intelligence-pan-stability.mjs",
+    "proof:buyer-outreach": "node scripts/proof/mobile/buyer-outreach-operator-loop.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

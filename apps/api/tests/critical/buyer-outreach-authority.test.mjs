@@ -158,7 +158,15 @@ test("queued buyer work carries buyer identity and leaves seller columns alone",
 
   assert.equal(queued.length, 1);
   const row = queued[0];
-  assert.equal(row.send_kind, BUYER_DISPOSITION_SEND_KIND);
+  // The marker rides in metadata because send_queue HAS NO send_kind COLUMN.
+  // A top-level field would not error — the canonical writer sweeps unknown
+  // keys into metadata.unknown_payload_fields — it would quietly file the
+  // marker where nothing reads it, and every buyer row would come back out of
+  // the database looking like seller traffic.
+  assert.equal(row.send_kind, undefined);
+  assert.equal(row.metadata.send_kind, BUYER_DISPOSITION_SEND_KIND);
+  assert.equal(row.metadata.outreach_domain, "buyer");
+  assert.equal(isBuyerDispositionSend(row), true);
   assert.equal(row.metadata.buyer_key, "B1");
   assert.equal(row.metadata.subject_property_id, "P1");
   assert.equal(row.dedupe_key, "buyer:P1:B1:1");
@@ -381,4 +389,23 @@ test("unreadable contact data refuses rather than guessing a number", async () =
   );
   assert.equal(resolved.ok, false);
   assert.equal(resolved.reason, "buyer_contacts_unreadable");
+});
+
+
+test("send_queue HAS NO send_kind COLUMN — the marker must survive in metadata", () => {
+  // A regression here is invisible: nothing throws, the row inserts, and the
+  // buyer marker lands in metadata.unknown_payload_fields where no reader looks.
+  const buyerRow = {
+    metadata: { send_kind: BUYER_DISPOSITION_SEND_KIND, outreach_domain: "buyer" },
+  };
+  assert.equal(isBuyerDispositionSend(buyerRow), true);
+
+  const swept = {
+    metadata: { unknown_payload_fields: { send_kind: BUYER_DISPOSITION_SEND_KIND } },
+  };
+  assert.equal(
+    isBuyerDispositionSend(swept),
+    false,
+    "a marker swept into unknown_payload_fields is NOT a buyer marker — that is the failure mode"
+  );
 });

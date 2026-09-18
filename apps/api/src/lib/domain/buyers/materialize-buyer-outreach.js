@@ -229,7 +229,16 @@ export async function materializeBuyerOutreach({
       touch_number,
       queue_status: scheduled_at ? "scheduled" : "queued",
       scheduled_for: scheduled_at,
-      send_kind: BUYER_DISPOSITION_SEND_KIND,
+      /**
+       * The send kind travels in METADATA, not as a column.
+       *
+       * `send_queue` has no `send_kind` column — `manual_inbox` is carried the
+       * same way. A top-level field would not fail the insert (the canonical
+       * writer sweeps unknown keys into `metadata.unknown_payload_fields`), it
+       * would do something worse: silently move the marker somewhere nothing
+       * reads, so every buyer row would come back out of the database looking
+       * like seller traffic.
+       */
       metadata: {
         send_kind: BUYER_DISPOSITION_SEND_KIND,
         outreach_domain: "buyer",
