@@ -3,7 +3,9 @@ import crypto from "node:crypto";
 import { child } from "@/lib/logging/logger.js";
 import { normalizePhone } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
-import { evaluateContactWindow, enqueueSendQueueItem, buildSendQueueDedupeKey } from "@/lib/supabase/sms-engine.js";
+import { evaluateContactWindow, enqueueSendQueueItem, buildSendQueueDedupeKey,
+  evaluateOutboundNumberEligibility,
+} from "@/lib/supabase/sms-engine.js";
 import { normalizeTimestamp } from "@/lib/utils/normalize-timestamp.js";
 import {
   SEND_QUEUE_HISTORY_SELECT,
@@ -2959,9 +2961,21 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
 
   if (error) throw error;
 
+  /**
+   * §43 — the same eligibility rule the other two selectors use.
+   *
+   * This filter checked STATUS ONLY. Campaign materialization also checked the
+   * daily cap, and dispatch checks cap plus health and cooling — so the feeder
+   * could route a candidate to a number that was already at its ceiling, or
+   * cooling, and dispatch would then block the row it had just created. Safe,
+   * because dispatch revalidates, but the work parks instead of going to a
+   * sender that could carry it.
+   */
+  const eligibility_now = new Date();
   const numbers = (Array.isArray(data) ? data : [])
     .map(normalizeTextgridNumberRow)
-    .filter((row) => row.id && row.phone_number && (!row.status || row.status === "active"));
+    .filter((row) => row.id && row.phone_number)
+    .filter((row) => evaluateOutboundNumberEligibility(row, eligibility_now).ok);
 
   if (!numbers.length) {
     return {

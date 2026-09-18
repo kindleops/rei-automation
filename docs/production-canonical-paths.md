@@ -207,6 +207,32 @@ is chosen.
 `daily_limit` 800 against a max `messages_sent_today` of 3. A gate written as
 "must be healthy and registered" would have stopped every send in the system.
 
+### Who owns sender selection — THREE selectors, now one rule
+
+Selection happens at three moments, and the rules disagreed:
+
+| Selector | When | status | daily cap | health / cooling |
+| --- | --- | --- | --- | --- |
+| `enqueue-campaign-target-one::resolveSender` | campaign materialization | yes | yes | **no** |
+| `supabase-candidate-feeder::buildRoutingSelection` | candidate feed | yes | **no** | **no** |
+| `sms-engine::selectAvailableTextgridNumber` | dispatch | yes | yes | yes (this pass) |
+
+So the feeder could route a candidate to a number already at its ceiling, and
+either materializer could assign a cooling one. Dispatch revalidation makes that
+*safe* — the row blocks instead of sending — but the work then silently parks
+rather than going to a sender that could have carried it.
+
+All three now filter through `evaluateOutboundNumberEligibility`. The feeder was
+deliberately kept from importing the campaign path (`buildRoutingSelection` is
+module-private precisely so the feeder stays out of that primitive), so the
+shared rule lives in `sms-engine`, which both already depend on — no cycle, and
+both modules verified to still import cleanly.
+
+One deliberate difference is retained: campaign materialization additionally
+requires a configured `daily_limit > 0`. The shared evaluator treats a NULL cap
+as uncapped, which is the correct reading at dispatch; a campaign should not
+start scheduling against a number nobody has given a ceiling.
+
 ### The sweep is already enforced, not just audited
 
 `tests/critical/seller-send-source-inventory.test.mjs` enumerates every provider
@@ -254,10 +280,6 @@ as revalidation; an unrecognised state does not stop the fleet.
 Listed with what is known so far. None is yet cleared, and no surface should be
 built against one until it is.
 
-- **Campaign-level sender intent.** Dispatch-time authority is now closed, but
-  where a campaign's sender/routing *preference* is configured and how it reaches
-  `send_queue.from_phone_number` at materialization is still untraced. The
-  dispatcher honours whatever the row says; what writes the row is the open half.
 - **UI truthfulness for blocked senders.** `blocked_sender_ineligible` and
   `paused_sender_eligibility_unavailable` are new queue statuses. Campaign and
   Queue surfaces must render them with the sender and reason rather than as a

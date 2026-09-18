@@ -46,6 +46,7 @@
  * `textgrid_numbers` table the feeder ultimately selects from.
  */
 
+import { evaluateOutboundNumberEligibility } from '@/lib/supabase/sms-engine.js'
 import {
   validateCanaryEnqueueAuthorization,
   consumeEnqueueAuthorization,
@@ -392,7 +393,7 @@ async function neutralizeQueueRow(supabase, queueRowId, reason) {
 async function resolveSender(supabase, { market, recipient, dispatchBlockedSets = null }) {
   const { data, error } = await supabase
     .from('textgrid_numbers')
-    .select('id, phone_number, market, status, daily_limit, messages_sent_today, health_score')
+    .select('id, phone_number, market, status, daily_limit, messages_sent_today, health_score, health_state, cooling_until')
     .eq('status', 'active')
     .eq('market', market)
     .order('messages_sent_today', { ascending: true })
@@ -400,14 +401,33 @@ async function resolveSender(supabase, { market, recipient, dispatchBlockedSets 
 
   if (error) throw error
 
+  /**
+   * §43 — ONE ELIGIBILITY RULE, NOT THREE.
+   *
+   * Sender selection happens in three places and they disagreed:
+   *
+   *   this resolver (campaign materialization)  status + daily cap
+   *   supabase-candidate-feeder routing         status only
+   *   sms-engine at dispatch                    status + cap + health + cooling
+   *
+   * So a cooling number could be assigned here and at feed time, and a CAPPED
+   * one could be assigned by the feeder — then blocked at dispatch. Safe, since
+   * dispatch revalidates, but the work silently parks instead of being routed to
+   * a sender that could actually carry it.
+   *
+   * `evaluateOutboundNumberEligibility` is the shared rule. The extra
+   * `daily_limit` requirement below is campaign-specific and deliberately
+   * retained: the shared evaluator treats a NULL cap as "uncapped", which is the
+   * right reading at dispatch, while a campaign should not start scheduling
+   * against a number nobody has configured a ceiling for.
+   */
+  const now = new Date()
   const candidates = (Array.isArray(data) ? data : []).filter((row) => {
     const phone = clean(row.phone_number)
     if (!phone || phone === recipient) return false
     const limit = Number(row.daily_limit)
-    const used = Number(row.messages_sent_today ?? 0)
     if (!Number.isFinite(limit) || limit <= 0) return false
-    if (Number.isFinite(used) && used >= limit) return false
-    return true
+    return evaluateOutboundNumberEligibility(row, now).ok
   })
 
   const sendable = dispatchBlockedSets
