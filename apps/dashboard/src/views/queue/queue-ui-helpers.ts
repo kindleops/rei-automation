@@ -40,6 +40,9 @@ export type QueueSection = 'queue' | 'templates' | 'senders' | 'market' | 'failu
 export const BLOCKED_STATUSES = new Set([
   'blocked', 'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries',
   'paused_duplicate', 'paused_global_lock', 'duplicate_blocked', 'incident_quarantine',
+  // §55 — held because the SENDER is not allowed to send, not because the
+  // message was rejected. Blocked, never failed: the provider was not contacted.
+  'blocked_sender_ineligible', 'paused_sender_eligibility_unavailable',
 ])
 
 const DELIVERED_STATUSES = new Set(['delivered'])
@@ -202,6 +205,10 @@ export const resolveStatusPresentation = (item: QueueItem): StatusPresentation =
     paused_name_missing: 'amber', paused_invalid_queue_row: 'amber',
     paused_max_retries: 'amber', paused_duplicate: 'amber',
     paused_global_lock: 'amber', duplicate_blocked: 'muted',
+    // Amber, not red. Red means the provider rejected the message; these mean the
+    // system declined to hand it over, which is a different operational fact.
+    blocked_sender_ineligible: 'amber',
+    paused_sender_eligibility_unavailable: 'amber',
     incident_quarantine: 'red', expired: 'muted', replied_before_send: 'green',
   }
 

@@ -135,6 +135,19 @@ function extractNumberRecord(item) {
     market_id: getFirstAppReferenceId(item, TEXTGRID_NUMBER_FIELDS.markets, null) || null,
 
     status: getCategoryValue(item, TEXTGRID_NUMBER_FIELDS.status, null),
+    /**
+     * §43/§55 — the REAL health columns.
+     *
+     * `hard_pause` / `pause_until` below are Podio-era field names. Neither
+     * exists on `public.textgrid_numbers`, so `isPaused()` has been inert
+     * against production data: it could never return true. The live table
+     * expresses the same idea as `health_state` ('cooling', 'blocked', …) and
+     * `cooling_until`, which is what dispatch revalidation now enforces — so
+     * this selector has to read them or it will keep handing out numbers that
+     * dispatch will refuse.
+     */
+    health_state: getCategoryValue(item, "health_state", null) ?? item?.health_state ?? null,
+    cooling_until: item?.cooling_until ?? null,
     hard_pause: getCategoryValue(item, TEXTGRID_NUMBER_FIELDS.hard_pause, null),
     pause_reason: getTextValue(item, TEXTGRID_NUMBER_FIELDS.pause_reason, ""),
     pause_until: getDateValue(item, TEXTGRID_NUMBER_FIELDS.pause_until, null),
@@ -189,12 +202,40 @@ function hasRiskSpike(record) {
   return isPositiveCategory(record?.risk_spike_flag);
 }
 
+const BLOCKING_HEALTH_STATE = new Set([
+  "cooling",
+  "blocked",
+  "quarantined",
+  "spam_flagged",
+  "suspended",
+]);
+
+function isHealthyNumberState(record, now = new Date()) {
+  const health_state = String(record?.health_state ?? "").trim().toLowerCase();
+  if (health_state && BLOCKING_HEALTH_STATE.has(health_state)) return false;
+
+  const cooling_until = String(record?.cooling_until ?? "").trim();
+  if (cooling_until) {
+    const cooling_ts = new Date(cooling_until).getTime();
+    if (!Number.isNaN(cooling_ts) && cooling_ts > now.getTime()) return false;
+  }
+
+  return true;
+}
+
 function isUsableNumber(record, { now = new Date() } = {}) {
   if (!record?.item_id) return false;
   if (!record?.normalized_phone) return false;
 
   if (record.status && isNegativeCategory(record.status)) return false;
   if (isPaused(record)) return false;
+  // The health dimension the other three selectors now agree on. Kept as an
+  // explicit check rather than delegating to evaluateOutboundNumberEligibility,
+  // because this module works on a NORMALIZED record (normalized_phone,
+  // daily_sent) rather than raw columns, and it is legitimately the richest
+  // selector — it also enforces hourly caps, local send windows and risk spikes,
+  // which the others do not.
+  if (!isHealthyNumberState(record, now)) return false;
   if (!isWithinLocalSendWindow(record, now)) return false;
   if (hasRiskSpike(record)) return false;
 

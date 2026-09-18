@@ -5,6 +5,8 @@ import { BLOCKED_STATUSES, isFailed, isManualMessage, isDelivered, pct } from '.
 export const FAILURE_CAUSE_LABEL: Record<string, string> = {
   ...FAILURE_LABEL,
   paused_name_missing: 'Paused — Name Missing',
+  blocked_sender_ineligible: 'Blocked — Sender Ineligible',
+  paused_sender_eligibility_unavailable: 'Deferred — Sender Unverified',
   blocked_by_guard: 'Blocked By Queue Guard',
 }
 
@@ -27,6 +29,13 @@ export const FAILURE_META: Record<string, {
   carrier_failure: { category: 'Carrier', retryable: true, suppression: false, action: 'Transient carrier error — safe to retry within caps.', severity: 'medium' },
   stale_runnable_row: { category: 'Queue', retryable: false, suppression: false, action: 'Exceeded retries / stale — cancel or manually re-queue.', severity: 'low' },
   paused_name_missing: { category: 'Payload', retryable: true, suppression: false, action: 'Resolve seller name, then reprocess paused rows.', severity: 'medium' },
+  /**
+   * §55 — neither of these is a transport failure. The provider was never
+   * contacted, so neither consumes a provider retry, and neither belongs in the
+   * Transport category next to carrier rejections.
+   */
+  blocked_sender_ineligible: { category: 'Sender', retryable: true, suppression: false, action: 'The scheduled sender is paused, cooling, at its daily cap or absent from the fleet. Restore that number or re-route the campaign; the row sends itself once the sender is eligible again.', severity: 'high' },
+  paused_sender_eligibility_unavailable: { category: 'Sender', retryable: true, suppression: false, action: 'Sender eligibility could not be read, so the send was deliberately not attempted. It retries automatically on the next pass; no operator action is required unless it persists.', severity: 'medium' },
   blocked_by_guard: { category: 'Guard', retryable: false, suppression: false, action: 'Review the queue-guard reason; clear guard or cancel.', severity: 'high' },
   unknown: { category: 'Unknown', retryable: true, suppression: false, action: 'Inspect raw failed_reason and classify before bulk retry.', severity: 'low' },
 }
@@ -67,6 +76,8 @@ export function deriveFailureCause(item: QueueItem): string | null {
   if (isDelivered(item.status) && item.failureCategory === 'missing_template') return null
   if (item.failureCategory) return item.failureCategory
   if (item.status === 'paused_name_missing') return 'paused_name_missing'
+  if (item.status === 'blocked_sender_ineligible') return 'blocked_sender_ineligible'
+  if (item.status === 'paused_sender_eligibility_unavailable') return 'paused_sender_eligibility_unavailable'
   if (blocked) return 'blocked_by_guard'
   return 'unknown'
 }

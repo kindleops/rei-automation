@@ -107,6 +107,11 @@ const toQueueStatus = (value: unknown): QueueItemStatus => {
   if (status === 'paused_invalid_queue_row') return 'paused_invalid_queue_row'
   if (status === 'paused_global_lock') return 'paused_global_lock'
   if (status === 'paused_max_retries') return 'paused_max_retries'
+  // §55 — the provider was never contacted for either of these. Falling through
+  // to 'scheduled' would have shown the operator a row that looks like it is
+  // still going out, when dispatch has explicitly refused to send it.
+  if (status === 'blocked_sender_ineligible') return 'blocked_sender_ineligible'
+  if (status === 'paused_sender_eligibility_unavailable') return 'paused_sender_eligibility_unavailable'
   return 'scheduled'
 }
 

@@ -17,6 +17,24 @@ export type QueueItemStatus =
   | 'paused_invalid_queue_row'
   | 'paused_global_lock'
   | 'paused_max_retries'
+  /**
+   * §55 sender authority — the provider was NEVER CONTACTED.
+   *
+   * `blocked_sender_ineligible`: the sender this row was scheduled against is no
+   * longer allowed to send (paused, cooling, at its daily cap, or absent from the
+   * fleet). Dispatch revalidates the persisted sender immediately before the
+   * provider call and refuses rather than silently substituting another number.
+   *
+   * `paused_sender_eligibility_unavailable`: the fleet could not be READ, so
+   * eligibility could not be established. Deferred on purpose — an unverifiable
+   * sender is not permission to send — and retried on the next pass.
+   *
+   * Neither is a transport failure and neither consumes a provider retry. They
+   * must never render as a red "Failed": nothing was rejected, because nothing
+   * was sent.
+   */
+  | 'blocked_sender_ineligible'
+  | 'paused_sender_eligibility_unavailable'
 export type QueueItemPriority = 'P0' | 'P1' | 'P2' | 'P3'
 export type DeliveryStatus = 'pending' | 'sent' | 'delivered' | 'failed' | 'bounced' | 'rejected'
 export type FailureReason =

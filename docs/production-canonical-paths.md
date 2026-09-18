@@ -301,6 +301,104 @@ built against one until it is.
 
 ---
 
+## Capability register
+
+Status: **VERIFIED** (one canonical path, proven) · **OPEN** (work remains) ·
+**BLOCKED** (correct today, but a real backend is missing).
+
+### Seller SMS dispatch — VERIFIED
+- surface `views/queue/QueuePage` · adapter `lib/data/queueData.fetchQueueModel`
+- authority `lib/domain/queue/canonical-send-authority` (4 operator gates)
+- sender `sms-engine.selectAvailableTextgridNumber` + `evaluateOutboundNumberEligibility`
+- worker `lib/domain/queue/process-send-queue` → `dispatchSellerQueueRow` seam
+- provider `lib/providers/textgrid.sendTextgridSMS`
+- tables `send_queue`, `textgrid_numbers`, `message_events`
+- legacy `processLegacyQueueItemUnreachable` — RETAINED, fenced, asserted by
+  `seller-send-source-inventory.test.mjs`. Do not delete.
+
+### Buyer / disposition messaging — OPEN (bypass narrowed, not eliminated)
+- service `lib/domain/buyers/send-buyer-blast` · routes `api/internal/buyers/blast`,
+  `lib/domain/autopilot/run-deals-autopilot`
+- sender `lib/domain/routing/choose-textgrid-number`
+- provider **direct** `sendTextgridSMS` — does NOT use `send_queue`
+- gates `ENABLE_LIVE_SENDING` + `ENABLE_BUYER_SMS_BLAST` (both default false, neither
+  set in the production worker config) + `buyer_sms_blast_enabled` system flag +
+  shared-secret auth + `dry_run` default true
+
+It reached the provider without clearing `evaluateCanonicalSendAuthority`, so the
+four operator gates — including EMERGENCY STOP — did not apply. Flipping the stop
+would have halted every seller message and left buyer blasts sending. Latent, not
+active, but arming a feature flag should never route traffic around the stop.
+
+FIXED this pass: buyer sends now clear canonical send authority before any
+provider call, and `choose-textgrid-number` reads the real `health_state` /
+`cooling_until` columns. Its previous pause check used Podio-era `hard_pause` /
+`pause_until`, which do not exist on `public.textgrid_numbers` — it could never
+return true.
+
+STILL OPEN: buyer outbound does not create `send_queue` rows, so it has no claim,
+lease, idempotency ledger, contact window, suppression check, health guard, retry
+or provider reconciliation. Routing it through the canonical queue is the real
+fix and is a deliberate architecture decision, not a patch — buyer rows would
+have to satisfy seller-shaped preclaim validation.
+
+### Queue writers — VERIFIED
+**No direct `send_queue` table inserts exist anywhere.** Every row is created by
+`sms-engine.insertSupabaseSendQueueRow`. Nine callers converge on it:
+proof/s1s2-attended, `unknown-inbound-router`, `run-supabase-outbound-feeder`,
+`build-send-queue-item`, `apply-inbound-automation-decision`,
+`execute-referral-automation`, `workflow-v2/queue-adapter`, `sms/queue_message`,
+and `dev/send-test` (dev only). Multiple entry points, one writer — the shape the
+brief calls acceptable.
+
+### Sender selection — VERIFIED (four selectors, one rule)
+`enqueue-campaign-target-one::resolveSender` (materialize),
+`supabase-candidate-feeder::buildRoutingSelection` (feed),
+`sms-engine::selectAvailableTextgridNumber` (dispatch),
+`routing/choose-textgrid-number` (buyer/routing). All four now agree on status,
+daily cap, health state and cooling. Two intentional differences retained:
+campaign materialization also requires a configured `daily_limit > 0`;
+`choose-textgrid-number` additionally enforces hourly caps, local send windows and
+risk spikes.
+
+### Campaign targets — OPEN
+- writers `api/cockpit/campaigns/[id]/build-targets` (operator) and
+  `campaign-automation-service` (automation); `discord-action-router` also writes
+- Not yet proven that the two writers cannot produce overlapping targets for the
+  same campaign, which is the §3 duplicate-work question.
+
+### Notifications — VERIFIED
+- writers `api/cockpit/notifications/*`, `notification-scanners`,
+  `launch-critical-alerts` · domain `notification-intelligence-service`
+- push `web-push-transport` → `push_subscriptions`
+- No client-side synthesis: the mobile and desktop centres are two presentations
+  of one persisted source.
+
+### Live Activity — VERIFIED
+- adapter `lib/data/inboxActivityData.fetchInboxActivity` → table
+  `inbox_activity_events`. A failed read yields an empty feed, not a fabricated
+  one. Truthful empty is the correct state.
+
+### Analytics / KPI — VERIFIED
+- adapter `lib/data/kpiDashboardData` → `GET /api/cockpit/metrics/war-room`
+- No demo states, no hardcoded metrics, no DEV switch. Rates are withheld below
+  `MIN_VOLUME_FOR_RATE`; unmeasured states are absent rather than zeroed.
+
+### Entity Graph — VERIFIED clean / Universe Lens BLOCKED
+- No mock nodes, sample graphs, local fallbacks or build-mode switches.
+- `/api/cockpit/entity-graph/lens` **does not exist**. The directory holds browse,
+  contact, counts, filter-catalog, market, organization, owner, property, prospect,
+  search and zip — no `lens`. The client latches the 404 per session and the Lens,
+  saved cohorts and compare stay unreachable. That is the honest state and it must
+  stay that way until the endpoint is built. Do not fabricate lens data.
+
+### Workflow execution — OPEN
+Writers touching `workflow_enrollments` / `automation_events` span seller-flow,
+opportunity and acquisition-brain modules. Whether two of them can act on the same
+event independently is not yet established.
+
+---
+
 ## How to check a capability before building on it
 
 1. Find every implementation: `grep -rn "<Capability>" src/` including **dynamic**

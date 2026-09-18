@@ -17,7 +17,8 @@ import {
 import { recordSystemAlert, resolveSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
 import { sendEmail } from "@/lib/providers/email.js";
 import { hasTextgridSendCredentials, sendTextgridSMS } from "@/lib/providers/textgrid.js";
-import { buildDisabledResponse, getSystemFlag } from "@/lib/system-control.js";
+import { buildDisabledResponse, getSystemFlag, getSystemValue } from "@/lib/system-control.js";
+import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
   createMessageEvent,
   getCategoryValue,
@@ -251,6 +252,41 @@ export async function sendBuyerBlast({
     const buyer_sms_blast_enabled = await get_system_flag("buyer_sms_blast_enabled");
     if (!buyer_sms_blast_enabled) {
       return buildBuyerSmsBlastDisabledResult();
+    }
+
+    /**
+     * §55 — BUYER OUTBOUND CLEARS THE SAME CONTROL PLANE AS SELLER OUTBOUND.
+     *
+     * This path called `sendTextgridSMS` directly. Not through `send_queue`, so
+     * no claim, lease or lock; not through the canonical dispatch seam; and — the
+     * part that matters most — not through `evaluateCanonicalSendAuthority`, so
+     * the four operator gates (execution mode, processor mode, EMERGENCY STOP,
+     * campaign mode) did not apply to it at all. Flipping the emergency stop
+     * would have halted every seller message and left buyer blasts sending.
+     *
+     * It survived only because `ENABLE_LIVE_SENDING` and `ENABLE_BUYER_SMS_BLAST`
+     * both default false and neither is set in the production worker config — a
+     * latent bypass, not an active one. Arming a feature flag should not be able
+     * to route traffic around the emergency stop.
+     *
+     * Buyer messaging keeps its own business rules (recipients, channel choice,
+     * templates, disposition threads). What it no longer keeps is its own answer
+     * to "is this system allowed to send right now".
+     */
+    const get_system_value = deps.getSystemValue || getSystemValue;
+    const authority = await evaluateCanonicalSendAuthority({
+      getSystemValue: get_system_value,
+      action: "buyer_blast_sms",
+    });
+    if (!authority.ok) {
+      return {
+        ok: false,
+        sent: 0,
+        dry_run: false,
+        reason: authority.reason || "canonical_send_authority_denied",
+        detail: authority.detail || null,
+        authority,
+      };
     }
   }
 
