@@ -13,7 +13,7 @@ import {
   runQueueOnce,
 } from '../../lib/data/queueData'
 import { shouldUseSupabase } from '../../lib/data/shared'
-import { adaptQueueModel } from './queue.adapter'
+import { emptyQueueModel } from './queue.adapter'
 import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
@@ -1225,8 +1225,14 @@ export const QueuePage = ({
   const refreshData = useCallback(async (page = currentPage) => {
     try {
       if (!shouldUseSupabase()) {
-        // No Supabase credentials — use mock adapter immediately
-        setModel(_ => ({ ...adaptQueueModel(), totalCount: 900, currentPage: page, pageSize: 500, totalPages: 2, hasMore: page === 0, fetchOptions: {} }))
+        // No credentials is not a queue of 900 invented rows, which is what this
+        // branch used to substitute. It is an empty queue and a stated reason.
+        setModel(_ => ({ ...emptyQueueModel(), totalCount: 0, currentPage: 0, pageSize, totalPages: 0, hasMore: false, fetchOptions: {} }))
+        emitNotification({
+          title: 'Queue unavailable',
+          detail: 'Supabase is not configured for this build, so no queue work can be read.',
+          severity: 'critical',
+        })
         return
       }
       // Race Supabase against a 6s timeout — if it hangs, keep existing model and clear loading
@@ -1302,7 +1308,7 @@ export const QueuePage = ({
     void (async () => {
       try {
         if (!shouldUseSupabase()) {
-          if (!cancelled) setEventItems(adaptQueueModel().items)
+          if (!cancelled) setEventItems([])
           return
         }
         const all = await fetchAllQueueItems(eventFetchOpts)

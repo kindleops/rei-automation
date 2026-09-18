@@ -66,6 +66,60 @@ owners/properties/prospects/phones. A genuinely empty or degraded production rea
 therefore rendered demo sellers, indistinguishable from real records. Replaced
 with `emptyDataset()`; the surface's own empty state is the truthful answer.
 
+### Campaign wizard — canonical: `campaignWizardAdapter` → `/api/cockpit/campaigns/*`
+
+`explicitDevMockModeEnabled()` branched the PRODUCT route on
+`import.meta.env.DEV` plus any of `VITE_CAMPAIGN_WIZARD_MOCK_MODE` /
+`VITE_CAMPAIGN_TARGETING_MOCK` / `VITE_CAMPAIGN_WIZARD_USE_MOCK`. Removed — dev
+harness routes are fine, hidden branching inside a product route is not.
+
+`previewTargetsLocal` went with it, and this is the part worth recording: it was
+the **only** caller. `previewTargets` *throws* on a backend error and
+`CreateCampaignModal` turns that into a critical "Campaign preview failed"
+notification carrying the real message. So the honest path was already the
+production path, and the zeroed local preview existed solely to serve the mock
+flag. `preview_unavailable` is now unreachable — the backend never sets it — so
+no consumer was added for it.
+
+Field-catalog and option lookups keep their genuine degraded fallbacks: they
+return the static catalog / an empty option list with `source: 'local_fallback'`
+and an operator-visible reason. Truthful degraded, VERIFIED.
+
+### Queue rows — canonical: `lib/data/queueData.fetchQueueModel`
+
+`queue.adapter` generated **~600 fabricated queue rows** — seller names from
+`FIRST_NAMES`/`LAST_NAMES`, synthetic `+1214555xxxx` destinations,
+`Math.random()` timestamps, randomised `safeCapacityRemaining`,
+`optOutRiskCount` and `apiPressureLevel`. `loadQueue` returned them from a bare
+`catch`, so **any** failure of the real read showed the operator a Queue full of
+pending sends that do not exist — on the surface that governs real outbound —
+and the warning was `isDev`-only so production logged nothing.
+
+Removed. `loadQueue` no longer catches; the route loader already renders a
+truthful error state with the real message. The adapter went from ~310 lines to
+a real read plus an `emptyQueueModel()` that keeps the genuine
+`PRODUCTION_TEXTGRID_FLEET` market directory. Two further `adaptQueueModel()`
+call sites inside `QueuePage` (both gated on missing Supabase env, so not
+production-reachable) now yield an empty model and a stated reason.
+
+---
+
+## §55 — provider dispatch sweep
+
+Every module that reaches the provider HTTP API: `lib/providers/textgrid.js`
+and `lib/domain/delivery/delivery-polling-fallback.js` (status reads). Every
+caller of `sendTextgridSMS`, classified:
+
+| Call site | Classification |
+| --- | --- |
+| `lib/domain/queue/process-send-queue.js` (×2) | **canonical production dispatcher** |
+| `lib/domain/inbox/send-now-service.js` | operator manual send — routes through `evaluateCanonicalSendAuthority` + `sms-health-guard`. Not a bypass. VERIFIED |
+| `lib/verification/live-textgrid.js` | verification/proof tooling — KEEP |
+| `app/api/dev/force-send/route.js` | dev tooling. Double-gated: `isProductionRuntime()` 404 **and** `requireDevRouteAccess`. `NODE_ENV=production` is set in the API Dockerfile, and a live probe of production returns **HTTP 404**. VERIFIED unreachable |
+| `lib/supabase/sms-engine.js` | **not a sender** — imports only `normalizePhone` / `mapTextgridFailureBucket`. It is the canonical send-queue library |
+
+No bypass defect found in product traffic.
+
 ---
 
 ## Verified already canonical
@@ -86,20 +140,14 @@ with `emptyDataset()`; the surface's own empty state is the truthful answer.
 Listed with what is known so far. None is yet cleared, and no surface should be
 built against one until it is.
 
-- **Campaign wizard mock mode.** `campaignWizardAdapter` has
-  `explicitDevMockModeEnabled()` behind `import.meta.env.DEV` **and** an explicit
-  `VITE_CAMPAIGN_WIZARD_MOCK_MODE` / `VITE_CAMPAIGN_TARGETING_MOCK` /
-  `VITE_CAMPAIGN_WIZARD_USE_MOCK` flag. Not reachable in production and off by
-  default in dev, so it is not a §42 breach — but it is a second path through
-  campaign targeting and §43 wants dev and production to agree. Decide: delete,
-  or document as intentional.
-- **`campaignWizardAdapter` local fallback.** `fallbackMeta()` /
-  `source: 'local_fallback'` marks a degraded non-backend path. Needs tracing:
-  degraded-but-truthful is acceptable, degraded-but-populated is not.
-- **Queue senders.** `queue.adapter` aliases `MOCK_TEXTGRID_FLEET =
-  PRODUCTION_TEXTGRID_FLEET`. The data is production; the name is a lie and the
-  synthesised per-row sender assignment needs checking against canonical
-  `send_queue` routing.
+- **Sender ownership, end to end.** The UI no longer invents one — the
+  synthesised per-row sender died with the fabricated rows. Still OPEN: trace
+  sender identity from campaign creation → `campaign_targets` → `send_queue` row
+  → claim → dispatch, establish which component *owns* selection, and confirm
+  the queue row, the canonical routing authority and the provider call all name
+  the same sender. Also confirm sender-health/eligibility is enforced in the
+  dispatch path rather than being advisory. `sms-health-guard` is imported by
+  `send-now-service`; whether `process-send-queue` enforces it is unverified.
 - **`SystemHealthOpsPanel`, `RecentQueueEvents`, `censusData`.** Flagged by the
   mock/demo/sample scan; not yet traced.
 - **Campaign / Queue / messaging duplicates.** §43's remaining list — duplicate

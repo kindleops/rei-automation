@@ -1083,18 +1083,28 @@ function normalizeOperators(value: unknown, type: CampaignFieldType): CampaignOp
   return operators.length ? operators : operatorsForType(type)
 }
 
-function isEnabledFlag(value: unknown): boolean {
-  return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase())
-}
 
-function explicitDevMockModeEnabled(): boolean {
-  if (!import.meta.env.DEV) return false
-  return [
-    import.meta.env.VITE_CAMPAIGN_WIZARD_MOCK_MODE,
-    import.meta.env.VITE_CAMPAIGN_TARGETING_MOCK,
-    import.meta.env.VITE_CAMPAIGN_WIZARD_USE_MOCK,
-  ].some(isEnabledFlag)
-}
+/*
+ * §43 — `explicitDevMockModeEnabled()` is gone.
+ *
+ * It branched the PRODUCT route on `import.meta.env.DEV` plus any of
+ * VITE_CAMPAIGN_WIZARD_MOCK_MODE / VITE_CAMPAIGN_TARGETING_MOCK /
+ * VITE_CAMPAIGN_WIZARD_USE_MOCK, so the campaign wizard could run a different
+ * targeting path in development than the one it runs in production. Dedicated
+ * dev HARNESS ROUTES are fine; hidden branching inside a normal product route
+ * is what makes a surface get built against something that does not ship.
+ *
+ * `previewTargetsLocal` went with it, and that is worth recording: it was the
+ * ONLY caller. `previewTargets` throws on a backend error and the modal turns
+ * that into a critical "Campaign preview failed" notification with the real
+ * message — so the honest path was already the production path, and the local
+ * zeroed-preview existed solely to serve the mock flag. Field catalog and
+ * option lookups keep their genuine degraded fallbacks, which return empty and
+ * say why.
+ *
+ * The wizard now exercises the same canonical backend call in dev, staging and
+ * production.
+ */
 
 function fallbackMeta(reason: string): CampaignFallbackReason {
   const detail = reason.trim()
@@ -1301,10 +1311,6 @@ export function createEmptyFilterGroups(): CampaignFilterGroups {
 }
 
 export async function getFieldCatalog(): Promise<CampaignFieldCatalog> {
-  if (explicitDevMockModeEnabled()) {
-    return restrictCatalogToSupported(getLocalFieldCatalog(fallbackMeta('explicit dev mock flag enabled')))
-  }
-
   const result = await callBackend('/api/cockpit/campaigns/field-catalog')
   if (!result.ok) {
     if (shouldFallbackFromBackendError(result)) {
@@ -1317,11 +1323,6 @@ export async function getFieldCatalog(): Promise<CampaignFieldCatalog> {
 }
 
 export async function searchFieldOptions(fieldKey: string, search = ''): Promise<CampaignFieldOption[]> {
-  if (explicitDevMockModeEnabled()) {
-    const meta = fallbackMeta('explicit dev mock flag enabled')
-    return withOptionFallbackMeta([], meta)
-  }
-
   const params = new URLSearchParams({ field: fieldKey, limit: '250' })
   const trimmedSearch = search.trim()
   if (trimmedSearch) params.set('search', trimmedSearch)
@@ -1461,10 +1462,6 @@ function firstSerializedFilterValue(filters: Array<Record<string, unknown>>, fie
 }
 
 export async function previewTargets(draft: CampaignWizardDraft, options: { requestId?: string | null } = {}): Promise<CampaignPreviewResult> {
-  if (explicitDevMockModeEnabled()) {
-    return previewTargetsLocal(draft, fallbackMeta('explicit dev mock flag enabled'), options.requestId)
-  }
-
   const payload = buildPreviewPayload(draft, options.requestId)
   const result = await callBackend<Record<string, unknown>>(PREVIEW_TARGETS_ENDPOINT, {
     method: 'POST',
@@ -1517,50 +1514,6 @@ export async function previewTargets(draft: CampaignWizardDraft, options: { requ
   return normalized
 }
 
-async function previewTargetsLocal(draft: CampaignWizardDraft, meta?: CampaignFallbackReason, requestId?: string | null): Promise<CampaignPreviewResult> {
-  const filters = Object.values(draft.target_filters).flat()
-  const fieldByKey = new Map(FIELD_CATALOG.map((field) => [field.key, field]))
-  const validFilters = filters.filter((filter) => hasMeaningfulValue(filter.value, filter.operator))
-  const unsupported = validFilters
-    .map((filter) => fieldByKey.get(normalizeCampaignFieldKey(filter.fieldKey)))
-    .filter((field): field is CampaignFieldDefinition => Boolean(field && !field.supported_in_preview))
-    .map((field) => ({
-      fieldKey: field.key,
-      label: field.label,
-      reason: 'unsupported_in_preview' as const,
-    }))
-
-  // No fabricated funnel. Reach numbers must come from the backend graph query
-  // (the same source Build Targets materializes from), so Builder Reach and
-  // Campaign Ready can never disagree with real data. When the live preview is
-  // unavailable we surface an explicit "unavailable" state with zeroed counts
-  // rather than inventing reach from heuristic multipliers.
-  const warnings = unsupported.map((item) => `${item.label} is approved but unsupported in preview.`)
-  warnings.unshift(meta?.degradedReason ?? 'Live preview unavailable — reach is computed by the backend graph, not estimated locally.')
-
-  return {
-    ok: true,
-    dry_run: true,
-    request_id: requestId ?? null,
-    result_hash: null,
-    preview_unavailable: true,
-    total_matched_properties: 0,
-    total_matched: 0,
-    total_scanned: 0,
-    clean_targets: 0,
-    ready_to_queue: 0,
-    queueable_today: 0,
-    blocked_waterfall: [],
-    blocked_counts_by_reason: {},
-    distributions: buildDistributions(0),
-    sample_targets: [],
-    unsupported_in_preview: unsupported,
-    warnings,
-    applied_filters: Object.values(serializeFilterGroups(draft.target_filters)).flat(),
-    query_ms: 0,
-    ...(meta ? { degraded: true, degradedReason: meta.degradedReason, source: meta.source } : { source: 'backend' as const }),
-  }
-}
 
 function firstNumber(...values: unknown[]): number {
   for (const value of values) {
@@ -2157,65 +2110,3 @@ function mapFilterGroups<T>(
   }
 }
 
-function buildDistributions(total: number): CampaignDistribution[] {
-  return [
-    {
-      key: 'property_state',
-      label: 'Property State',
-      buckets: [
-        { label: 'TX', count: Math.round(total * 0.42) },
-        { label: 'FL', count: Math.round(total * 0.2) },
-        { label: 'GA', count: Math.round(total * 0.16) },
-        { label: 'AZ', count: Math.round(total * 0.12) },
-      ],
-    },
-    {
-      key: 'age_bucket',
-      label: 'Age Bucket',
-      buckets: [
-        { label: '45-54', count: Math.round(total * 0.24) },
-        { label: '55-64', count: Math.round(total * 0.28) },
-        { label: '65-74', count: Math.round(total * 0.22) },
-        { label: '75+', count: Math.round(total * 0.11) },
-      ],
-    },
-    {
-      key: 'sender_coverage_status',
-      label: 'Sender Coverage',
-      buckets: [
-        { label: 'Covered', count: Math.round(total * 0.78) },
-        { label: 'Limited', count: Math.round(total * 0.14) },
-        { label: 'No Route', count: Math.round(total * 0.08) },
-      ],
-    },
-    {
-      key: 'phone_owner',
-      label: 'Carrier',
-      buckets: [
-        { label: 'T-Mobile', count: Math.round(total * 0.36) },
-        { label: 'Verizon', count: Math.round(total * 0.28) },
-        { label: 'AT&T', count: Math.round(total * 0.22) },
-        { label: 'Other', count: Math.round(total * 0.14) },
-      ],
-    },
-    {
-      key: 'priority_tier',
-      label: 'Priority Tier',
-      buckets: [
-        { label: 'A', count: Math.round(total * 0.18) },
-        { label: 'B', count: Math.round(total * 0.34) },
-        { label: 'C', count: Math.round(total * 0.31) },
-        { label: 'D', count: Math.round(total * 0.17) },
-      ],
-    },
-    {
-      key: 'language_preference',
-      label: 'Language',
-      buckets: [
-        { label: 'English', count: Math.round(total * 0.82) },
-        { label: 'Spanish', count: Math.round(total * 0.15) },
-        { label: 'Unknown', count: Math.round(total * 0.03) },
-      ],
-    },
-  ]
-}
