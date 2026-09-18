@@ -379,7 +379,20 @@ test("shouldRunSendQueueRow requires to_phone_number and ignores to_number", () 
   assert.equal(decision.reason, "missing_to_phone_number");
 });
 
-test("selectAvailableTextgridNumber uses the queue row from_phone_number when present", async () => {
+/**
+ * CONTRACT CHANGE (§55). This test previously asserted the opposite: its fake
+ * threw `should_not_query_textgrid_numbers`, guarding the rule that a queue row
+ * carrying `from_phone_number` was used WITHOUT consulting the fleet.
+ *
+ * That short-circuit was the defect. It meant a number which went paused, went
+ * cooling, or passed its daily cap after the row was enqueued still dispatched,
+ * because eligibility was only ever evaluated on the rotation branch — the one
+ * that runs when a row has no sender at all.
+ *
+ * The row's sender is still AUTHORITATIVE — nothing rotates it, and no
+ * substitute is ever chosen. It is now revalidated before use.
+ */
+test("selectAvailableTextgridNumber uses the queue row from_phone_number, revalidated", async () => {
   const selection = await selectAvailableTextgridNumber(
     {
       id: 92,
@@ -390,16 +403,25 @@ test("selectAvailableTextgridNumber uses the queue row from_phone_number when pr
       from_phone_number: "+16128060495",
     },
     {
+      loadOutboundNumberByPhone: async (phone_number) => ({
+        id: "fleet-92",
+        phone_number,
+        status: "active",
+        health_state: "unverified",
+        daily_limit: 800,
+        messages_sent_today: 0,
+      }),
       supabase: {
         from() {
-          throw new Error("should_not_query_textgrid_numbers");
+          // Rotation must still never be reached for a row that names its sender.
+          throw new Error("should_not_rotate_when_row_names_its_sender");
         },
       },
     }
   );
 
   assert.equal(selection.ok, true);
-  assert.equal(selection.reason, "queue_row_from_phone_number_present");
+  assert.equal(selection.reason, "queue_row_from_phone_number_revalidated");
   assert.equal(selection.from_phone_number, "+16128060495");
 });
 
@@ -580,6 +602,17 @@ test("processSendQueueItem accepts a UUID string and does not fail with missing_
   });
 
   const result = await processSendQueueItem("sq-process-uuid-1", {
+    // Dispatch revalidates the intended sender against the fleet (§55): a number
+    // that went paused, cooling or over its daily cap after enqueue used to send
+    // anyway. A fixture modelling a reaching send has to state the fleet fact.
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
@@ -636,6 +669,17 @@ test("processSendQueueItem accepts a normalized Supabase row object directly", a
   });
 
   const result = await processSendQueueItem(row, {
+    // Dispatch revalidates the intended sender against the fleet (§55): a number
+    // that went paused, cooling or over its daily cap after enqueue used to send
+    // anyway. A fixture modelling a reaching send has to state the fleet fact.
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
@@ -698,6 +742,17 @@ test("processSendQueueItem resolves seller_first_name from candidate_snapshot.ph
   });
 
   const result = await processSendQueueItem(row, {
+    // Dispatch revalidates the intended sender against the fleet (§55): a number
+    // that went paused, cooling or over its daily cap after enqueue used to send
+    // anyway. A fixture modelling a reaching send has to state the fleet fact.
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that
@@ -761,6 +816,17 @@ test("processSendQueueItem sends manual inbox body as-is without template requir
   });
 
   const result = await processSendQueueItem(row, {
+    // Dispatch revalidates the intended sender against the fleet (§55): a number
+    // that went paused, cooling or over its daily cap after enqueue used to send
+    // anyway. A fixture modelling a reaching send has to state the fleet fact.
+    loadOutboundNumberByPhone: async (phone_number) => ({
+      id: `fleet-${phone_number}`,
+      phone_number,
+      status: "active",
+      health_state: "unverified",
+      daily_limit: 800,
+      messages_sent_today: 0,
+    }),
     store: createMemoryS11Store(),
     getSystemValue: async (key) => {
       // Canonical send authority is fail-closed: a send fixture must state that

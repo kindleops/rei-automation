@@ -85,6 +85,40 @@ Field-catalog and option lookups keep their genuine degraded fallbacks: they
 return the static catalog / an empty option list with `source: 'local_fallback'`
 and an operator-visible reason. Truthful degraded, VERIFIED.
 
+### System health panel — DELETED
+
+`SystemHealthOpsPanel` rendered a hardcoded `MOCK_SERVICES` list. A fabricated
+system-health display is worse than none: it asserts the system is healthy when
+nothing was measured. Zero consumers; removed.
+
+### Recent queue events — canonical: `fetchAllQueueItems`
+
+`RecentQueueEvents` rendered eleven hardcoded events with `Date.now()`-relative
+timestamps, so they always looked like they had just happened — "Sent to …3847 —
+Dallas", "Failed — …9921 Houston: TextGrid content filter", "Suppression written
+— opt-out keyword STOP". It is mounted by `SendQueueDashboard` in the live
+product, so an operator was reading invented delivery and COMPLIANCE events as
+real. It was also a second implementation of something the product already does
+properly — QueuePage's events section reads `fetchAllQueueItems`.
+
+Now derived from that same canonical source: a row that sent, failed or was held
+IS the event, and a row with no dispatch history produces none. Empty and failed
+reads each say so.
+
+### Census demographics — canonical: `public.census_geo_metrics` (currently empty)
+
+`loadCensusForProperty` carried a `// TODO: Connect to real Supabase
+census_geo_metrics table` directly above a hardcoded `mockData` object — tract
+"48113000100", population 4230 — described in its own comment as "shaped exactly
+like production data". Intelligence Panel ran `calculateInvestorOpportunityScore`
+over it and rendered the result as demographic intelligence for the operator's
+property. Every property got the same invented tract and the same invented grade.
+
+It now queries the real table. That table is EMPTY, so the honest result is null,
+which the panel already renders as "No demographic data found for this property
+location." Wiring the census sync is the real fix for the feature; fabricating a
+tract was not.
+
 ### Queue rows — canonical: `lib/data/queueData.fetchQueueModel`
 
 `queue.adapter` generated **~600 fabricated queue rows** — seller names from
@@ -232,8 +266,10 @@ built against one until it is.
   side, explicitly scoped out by the source-inventory guard below. Not yet
   classified against §55; seller traffic is closed, buyer/disposition outreach is
   not.
-- **`SystemHealthOpsPanel`, `RecentQueueEvents`, `censusData`.** Flagged by the
-  mock/demo/sample scan; not yet traced.
+- **Census ingestion.** `census_geo_metrics` exists with 40 columns and is
+  EMPTY — the sync has never populated it (`census_sync_runs` exists too). The
+  UI is now truthful about that; the feature itself needs the sync wired. This
+  is the one item where the honest state is "unavailable" rather than "fixed".
 - **Campaign / Queue / messaging duplicates.** §43's remaining list — duplicate
   campaign setup paths, queue scheduling logic, workflow writers, campaign
   feeders, notification implementations, direct provider calls that bypass the
