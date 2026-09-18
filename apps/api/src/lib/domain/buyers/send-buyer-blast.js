@@ -16,7 +16,8 @@ import {
 } from "@/lib/domain/documents/document-packages.js";
 import { recordSystemAlert, resolveSystemAlert } from "@/lib/domain/alerts/system-alerts.js";
 import { sendEmail } from "@/lib/providers/email.js";
-import { hasTextgridSendCredentials, sendTextgridSMS } from "@/lib/providers/textgrid.js";
+import { hasTextgridSendCredentials } from "@/lib/providers/textgrid.js";
+import { materializeBuyerOutreach } from "@/lib/domain/buyers/materialize-buyer-outreach.js";
 import { buildDisabledResponse, getSystemFlag, getSystemValue } from "@/lib/system-control.js";
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
 import {
@@ -728,18 +729,45 @@ export async function sendBuyerBlast({
 
     let send_result;
     if (planned_channel === "sms") {
+      /**
+       * §11/§13 — SMS LEAVES THROUGH THE QUEUE, NOT THE PROVIDER.
+       *
+       * This called `sendTextgridSMS` directly. No queue row, so no claim, lease
+       * or lock; no idempotency, so a retried request re-sent; no contact
+       * window, so nothing stopped a 2 AM blast; and nothing durable for a
+       * delivery receipt or an inbound reply to reconcile against.
+       *
+       * It now materializes a `buyer_outreach_targets` row and hands execution
+       * to the canonical `send_queue`, inheriting sender revalidation, quiet
+       * hours, suppression, emergency stop, caps and reconciliation rather than
+       * re-implementing any of them.
+       *
+       * "ok" here therefore means ACCEPTED FOR DELIVERY, not delivered — which
+       * is the honest claim for queued work. The queue owns the outcome now, and
+       * `buyer_outreach_targets.status` is where it lands.
+       */
       try {
-        send_result = await sendTextgridSMS({
-          to: primary_phone,
-          from: outbound_sms_number.normalized_phone,
-          body: sms_text,
-          message_type: "sms",
-          client_reference_id: `buyer-blast:${buyer_match_item.item_id}:${recipient.item_id}`,
-        });
+        const materialized = await materializeBuyerOutreach({
+          property_id: clean(property_id) || clean(buyer_match_item?.property_id),
+          buyers: [{
+            buyer_key: clean(recipient.buyer_key) || clean(recipient.item_id),
+            buyer_entity_id: clean(recipient.buyer_entity_id) || null,
+            buyer_name: clean(recipient.company_name) || null,
+            to_phone_number: primary_phone,
+          }],
+          message_body: sms_text,
+          outreach_source: "buyer_blast",
+          dry_run: false,
+        }, deps);
+
+        const blockedReason = materialized.blocked?.[0]?.blocked_reason ?? null;
+        send_result = materialized.ok && materialized.eligible > 0
+          ? { ok: true, queued: true, queue_key: materialized.targets?.[0]?.send_queue_key ?? null }
+          : { ok: false, reason: blockedReason || materialized.reason || "buyer_outreach_not_queued" };
       } catch (error) {
         send_result = {
           ok: false,
-          reason: clean(error?.message) || "buyer_blast_sms_send_failed",
+          reason: clean(error?.message) || "buyer_blast_sms_queue_failed",
         };
       }
     } else {

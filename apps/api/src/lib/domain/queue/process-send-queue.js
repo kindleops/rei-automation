@@ -42,6 +42,7 @@ import {
   finalizeSendQueueFailure,
   finalizeSendQueueSuccess,
   incrementTextgridNumberUsage,
+  isBuyerDispositionSend,
   normalizeSendQueueRow,
   normalizeQueueRowId,
   releaseSkippedQueueRow,
@@ -1810,7 +1811,21 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       });
     }
 
-    if (!manual_inbox_send && !seller_first_name) {
+    /**
+     * §4 — buyer/disposition rows have no seller, and that is not a defect.
+     *
+     * The guard below exists because a seller template renders "Hi {first
+     * name}" and an empty name ships a broken message. Buyer outreach addresses
+     * a company, so the assumption simply does not describe it.
+     *
+     * This is the ONLY seller assumption a buyer row is exempt from. It
+     * deliberately does not reuse `manual_inbox_send`, which also bypasses the
+     * contact window — that would have authorised 2 AM buyer blasts as a side
+     * effect of getting past a name check.
+     */
+    const buyer_disposition_send = isBuyerDispositionSend(queue_row);
+
+    if (!manual_inbox_send && !buyer_disposition_send && !seller_first_name) {
       // Mark row as blocked — do not send.
       const supabase_client = getSupabase(deps);
       await supabase_client

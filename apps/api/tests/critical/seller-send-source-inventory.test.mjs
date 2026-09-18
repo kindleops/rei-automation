@@ -54,7 +54,11 @@ const PROVIDER_CALL_SITES = {
   "lib/domain/inbox/send-now-service.js": "PENDING_CONVERGENCE",   // manual operator send
   "lib/verification/live-textgrid.js": "HARD_FENCED",              // canary/readiness verification
   "app/api/dev/force-send/route.js": "TEST_ONLY",                  // 404 in production, proven live
-  "lib/domain/buyers/send-buyer-blast.js": "OUT_OF_SCOPE",         // buyer messaging, not seller
+  // `lib/domain/buyers/send-buyer-blast.js` USED to sit here as OUT_OF_SCOPE.
+  // It no longer holds a provider call at all: its SMS branch materializes
+  // through `materialize-buyer-outreach` into the canonical send_queue, so the
+  // buyer side has no direct-provider site left to classify. Its removal from
+  // this inventory is the architecture change, recorded.
 };
 
 test("sendTextgridSMS is the ONLY provider send primitive", () => {
@@ -100,6 +104,9 @@ const QUEUE_ROW_CREATORS = [
   "lib/domain/acquisition/delivery-retry-engine.js",
   "lib/domain/acquisition/inbound-dispatcher.js",
   "lib/domain/acquisition/no-reply-followup-scheduler.js",
+  // Buyer/disposition outreach materializes through the SAME canonical writer
+  // rather than calling the provider directly — the point of the §13 migration.
+  "lib/domain/buyers/materialize-buyer-outreach.js",
   "lib/domain/campaigns/enqueue-campaign-target-one.js",
   "lib/domain/closings/advance-closing-workflow.js",
   "lib/domain/inbound/unknown-inbound-router.js",
@@ -248,7 +255,28 @@ test("the ONLY module that invokes the provider is the canonical seam", () => {
   for (const f of FILES) {
     const r = rel(f);
     if (r === "lib/providers/textgrid.js") continue;                 // the definition
-    if (r === "lib/domain/buyers/send-buyer-blast.js") continue;      // buyer, out of scope
+    if (r === "lib/domain/buyers/send-buyer-blast.js") {
+      /**
+       * §11/§23 — buyer traffic is NO LONGER out of scope.
+       *
+       * This was skipped with "buyer, out of scope" while buyer outreach was a
+       * direct-provider island. Now that Buyer Match materializes through
+       * `materialize-buyer-outreach` into the canonical send_queue, any NEW
+       * direct provider call on the buyer side is a bypass and must fail here.
+       *
+       * The legacy blast body is still allowed exactly one invocation while it
+       * is retained; anything beyond that is a regression, and the count is what
+       * makes "temporary dual mode" impossible to add quietly.
+       */
+      const buyer_invocations = providerInvocations(f);
+      // ZERO, not "at most one". The SMS branch now materializes through
+      // `materialize-buyer-outreach` into the canonical send_queue, so there is
+      // no remaining reason for buyer product code to hold a provider call —
+      // and no room for a "temporary" dual mode to be added back quietly.
+      assert.deepEqual(buyer_invocations, [],
+        `buyer outbound must materialize through the canonical queue, not the provider:\n  ${buyer_invocations.join("\n  ")}`);
+      continue;
+    }
     if (r === "lib/verification/live-textgrid.js") continue;          // HARD_FENCED canary
     if (r === "app/api/dev/force-send/route.js") continue;            // TEST_ONLY, 404 in prod
     if (r === "lib/domain/queue/process-send-queue.js") {

@@ -756,6 +756,36 @@ function hasSelectedTemplateReference(row = null) {
   );
 }
 
+/**
+ * IS THIS BUYER / DISPOSITION TRAFFIC? (§4)
+ *
+ * A distinct send kind exists for exactly one reason: a buyer is not a seller,
+ * so the seller-identity assumptions in the dispatcher do not describe them. It
+ * exempts NOTHING else, and that boundary is the point.
+ *
+ * Specifically it must never become a second `manual_inbox`. That kind bypasses
+ * the contact window — `isFreshManualInboxSend` treats a fresh operator send as
+ * exempt from quiet hours — which is correct for a human typing a reply right
+ * now and catastrophic for scheduled bulk disposition outreach. Reusing it
+ * would have been the easy way to get past the seller-name guard and would have
+ * quietly authorised 2 AM buyer blasts.
+ *
+ * What a buyer row still passes, unchanged: quiet hours, suppression, sender
+ * eligibility and dispatch-time revalidation, operator emergency stop, canonical
+ * send authority, daily caps, claim/lease discipline, idempotency, and provider
+ * reconciliation.
+ */
+export const BUYER_DISPOSITION_SEND_KIND = "buyer_disposition";
+
+export function isBuyerDispositionSend(row = {}) {
+  const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return (
+    lower(clean(row?.send_kind)) === BUYER_DISPOSITION_SEND_KIND ||
+    lower(clean(metadata.send_kind)) === BUYER_DISPOSITION_SEND_KIND ||
+    lower(clean(metadata.outreach_domain)) === "buyer"
+  );
+}
+
 export function resolveQueueSellerFirstName(row = null) {
   return resolveQueueSellerFirstNameFromSources(row);
 }
