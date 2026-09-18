@@ -500,376 +500,40 @@ const mapDealContextsToDataset = (contexts: DealContext[]): Dataset => {
   }
 }
 
-const mockDataset = (): Dataset => {
-  const owners: AnyRecord[] = [
-    {
-      owner_id: 'own-001',
-      master_owner_id: 'mown-001',
-      full_name: 'Diana Alvarez',
-      owner_type: 'individual',
-      market: 'Houston',
-      state: 'TX',
-      motivation_score: 88,
-      ai_score: 84,
-      risk_score: 24,
-      status: 'hot',
-      updated_at: new Date(Date.now() - 1000 * 60 * 6).toISOString(),
-    },
-    {
-      owner_id: 'own-002',
-      master_owner_id: 'mown-002',
-      full_name: 'Oakline Holdings LLC',
-      owner_type: 'corporation',
-      market: 'Dallas',
-      state: 'TX',
-      motivation_score: 74,
-      ai_score: 72,
-      risk_score: 33,
-      status: 'engaged',
-      updated_at: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
-    },
-    {
-      owner_id: 'own-003',
-      master_owner_id: 'mown-003',
-      full_name: 'Marvin Reid',
-      owner_type: 'individual',
-      market: 'Phoenix',
-      state: 'AZ',
-      motivation_score: 64,
-      ai_score: 69,
-      risk_score: 39,
-      status: 'watch',
-      updated_at: new Date(Date.now() - 1000 * 60 * 105).toISOString(),
-    },
-  ]
-
-  const properties: AnyRecord[] = [
-    {
-      property_id: 'prop-001',
-      owner_id: 'own-001',
-      property_address: '1289 Oak Ridge Dr',
-      property_address_city: 'Houston',
-      property_address_state: 'TX',
-      market: 'Houston',
-      property_type: 'single_family',
-      estimated_value: 328000,
-      equity: 176000,
-      tax_flag: true,
-      probate_flag: false,
-      foreclosure_flag: false,
-      motivation_score: 91,
-      status: 'review_needed',
-      updated_at: new Date(Date.now() - 1000 * 60 * 14).toISOString(),
-    },
-    {
-      property_id: 'prop-002',
-      owner_id: 'own-002',
-      property_address: '445 Canyon Bend Ct',
-      property_address_city: 'Dallas',
-      property_address_state: 'TX',
-      market: 'Dallas',
-      property_type: 'multifamily',
-      estimated_value: 811000,
-      equity: 312000,
-      tax_flag: false,
-      probate_flag: false,
-      foreclosure_flag: false,
-      motivation_score: 76,
-      status: 'offer_ready',
-      updated_at: new Date(Date.now() - 1000 * 60 * 33).toISOString(),
-    },
-    {
-      property_id: 'prop-003',
-      owner_id: 'own-003',
-      property_address: '2710 Mesa Verde Ave',
-      property_address_city: 'Phoenix',
-      property_address_state: 'AZ',
-      market: 'Phoenix',
-      property_type: 'single_family',
-      estimated_value: 403000,
-      equity: 146000,
-      tax_flag: false,
-      probate_flag: true,
-      foreclosure_flag: false,
-      motivation_score: 68,
-      status: 'nurture',
-      updated_at: new Date(Date.now() - 1000 * 60 * 57).toISOString(),
-    },
-  ]
-
-  const prospects: AnyRecord[] = [
-    {
-      prospect_id: 'pros-001',
-      owner_id: 'own-001',
-      full_name: 'Diana Alvarez',
-      relationship_type: 'owner',
-      market: 'Houston',
-      lead_stage: 'engaged',
-      seller_stage: 'offer_generated',
-      language: 'en',
-      updated_at: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
-    },
-    {
-      prospect_id: 'pros-002',
-      owner_id: 'own-002',
-      full_name: 'Neil Burke',
-      relationship_type: 'manager',
-      market: 'Dallas',
-      lead_stage: 'contacted',
-      seller_stage: 'preliminary',
-      language: 'en',
-      updated_at: new Date(Date.now() - 1000 * 60 * 51).toISOString(),
-    },
-  ]
-
-  const phoneNumbers: AnyRecord[] = [
-    {
-      phone_id: 'ph-001',
-      owner_id: 'own-001',
-      prospect_id: 'pros-001',
-      phone: '+1 (713) 555-0174',
-      type: 'mobile',
-      status: 'verified',
-      sms_status: 'active',
-      last_contacted: new Date(Date.now() - 1000 * 60 * 44).toISOString(),
-      last_reply: new Date(Date.now() - 1000 * 60 * 11).toISOString(),
-    },
-    {
-      phone_id: 'ph-002',
-      owner_id: 'own-002',
-      prospect_id: 'pros-002',
-      phone: '+1 (214) 555-0108',
-      type: 'mobile',
-      status: 'verified',
-      sms_status: 'active',
-      last_contacted: new Date(Date.now() - 1000 * 60 * 93).toISOString(),
-      last_reply: '',
-    },
-  ]
-
-  const emails: AnyRecord[] = [
-    {
-      email_id: 'em-001',
-      owner_id: 'own-001',
-      prospect_id: 'pros-001',
-      email: 'diana.alvarez@example.com',
-      status: 'verified',
-      last_contacted: new Date(Date.now() - 1000 * 60 * 51).toISOString(),
-    },
-    {
-      email_id: 'em-002',
-      owner_id: 'own-002',
-      prospect_id: 'pros-002',
-      email: 'operations@oaklineholdings.com',
-      status: 'verified',
-      last_contacted: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-    },
-  ]
-
-  const sendQueue: AnyRecord[] = [
-    {
-      queue_id: 'sq-001',
-      owner_id: 'own-001',
-      property_id: 'prop-001',
-      market: 'Houston',
-      status: 'ready',
-      message_text: 'Hi Diana, quick follow up on Oak Ridge…',
-      scheduled_at: new Date(Date.now() + 1000 * 60 * 20).toISOString(),
-      created_at: new Date(Date.now() - 1000 * 60 * 31).toISOString(),
-    },
-    {
-      queue_id: 'sq-002',
-      owner_id: 'own-003',
-      property_id: 'prop-003',
-      market: 'Phoenix',
-      status: 'failed',
-      message_text: 'Checking in about Mesa Verde…',
-      scheduled_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-      created_at: new Date(Date.now() - 1000 * 60 * 48).toISOString(),
-    },
-  ]
-
-  const messageEvents: AnyRecord[] = [
-    {
-      event_id: 'me-001',
-      thread_id: 'th-001',
-      owner_id: 'own-001',
-      property_id: 'prop-001',
-      market: 'Houston',
-      direction: 'inbound',
-      sentiment: 'hot',
-      message_text: 'Can you send me a number today?',
-      unread: true,
-      created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-    },
-    {
-      event_id: 'me-002',
-      thread_id: 'th-002',
-      owner_id: 'own-002',
-      property_id: 'prop-002',
-      market: 'Dallas',
-      direction: 'inbound',
-      sentiment: 'warm',
-      message_text: 'I can talk later this afternoon.',
-      unread: true,
-      created_at: new Date(Date.now() - 1000 * 60 * 17).toISOString(),
-    },
-  ]
-
-  const aiBrain: AnyRecord[] = [
-    {
-      id: 'ai-001',
-      owner_id: 'own-001',
-      seller_intent: 'Sell in 30 days',
-      objections: 'Wants confidence in timing',
-      language: 'English',
-      sentiment: 'positive',
-      stage: 'negotiation',
-      recommended_next_action: 'Share net sheet and timeline',
-      confidence: 87,
-      agent_assigned: 'Sarah Johnson',
-      template_recommendation: 'Urgency Follow-up',
-      negotiation_posture: 'collaborative',
-      follow_up_timing: 'Today 4:30 PM',
-    },
-    {
-      id: 'ai-002',
-      owner_id: 'own-002',
-      seller_intent: 'Considering options',
-      objections: 'Price sensitivity',
-      language: 'English',
-      sentiment: 'neutral',
-      stage: 'qualification',
-      recommended_next_action: 'Offer range anchoring',
-      confidence: 74,
-      agent_assigned: 'Mike Chen',
-      template_recommendation: 'Value Framing',
-      negotiation_posture: 'measured',
-      follow_up_timing: 'Tomorrow 10:00 AM',
-    },
-  ]
-
-  const offers: AnyRecord[] = [
-    {
-      offer_id: 'off-001',
-      owner_id: 'own-001',
-      property_id: 'prop-001',
-      strategy: 'cash',
-      recommended_offer: 242000,
-      seller_asking_price: 279000,
-      status: 'draft',
-      confidence: 82,
-      updated_at: new Date(Date.now() - 1000 * 60 * 26).toISOString(),
-      next_action: 'Review with operator',
-    },
-    {
-      offer_id: 'off-002',
-      owner_id: 'own-002',
-      property_id: 'prop-002',
-      strategy: 'novation',
-      recommended_offer: 603000,
-      seller_asking_price: 670000,
-      status: 'ready',
-      confidence: 79,
-      updated_at: new Date(Date.now() - 1000 * 60 * 47).toISOString(),
-      next_action: 'Generate contract',
-    },
-  ]
-
-  const underwriting: AnyRecord[] = [
-    {
-      id: 'uw-001',
-      property_id: 'prop-001',
-      arv: 336000,
-      repair_estimate: 29000,
-      equity: 176000,
-      mao: 219000,
-      cash_offer: 242000,
-      creative_offer: 258000,
-      novation_path: 'Strong retail spread',
-      multifamily_noi: 'N/A',
-      rent_estimate: 2260,
-      ai_confidence: 84,
-      risk_notes: 'Permit history incomplete',
-    },
-    {
-      id: 'uw-002',
-      property_id: 'prop-002',
-      arv: 828000,
-      repair_estimate: 57000,
-      equity: 312000,
-      mao: 571000,
-      cash_offer: 603000,
-      creative_offer: 622000,
-      novation_path: 'Moderate upside',
-      multifamily_noi: '$6.8k/mo est.',
-      rent_estimate: 5900,
-      ai_confidence: 78,
-      risk_notes: 'Lease rollover in 8 months',
-    },
-  ]
-
-  const contracts: AnyRecord[] = [
-    {
-      contract_id: 'ct-001',
-      owner_id: 'own-002',
-      property_id: 'prop-002',
-      offer_id: 'off-002',
-      status: 'pending',
-      updated_at: new Date(Date.now() - 1000 * 60 * 61).toISOString(),
-    },
-  ]
-
-  const markets: AnyRecord[] = [
-    { market_id: 'houston', name: 'Houston', state_code: 'TX', latitude: 29.7604, longitude: -95.3698 },
-    { market_id: 'dallas', name: 'Dallas', state_code: 'TX', latitude: 32.7767, longitude: -96.797 },
-    { market_id: 'phoenix', name: 'Phoenix', state_code: 'AZ', latitude: 33.4484, longitude: -112.074 },
-  ]
-
-  const agents: AnyRecord[] = [
-    { agent_id: 'ag-001', name: 'Sarah Johnson', status: 'active' },
-    { agent_id: 'ag-002', name: 'Mike Chen', status: 'active' },
-  ]
-
-  const templates: AnyRecord[] = [
-    { template_id: 'tp-001', name: 'Urgency Follow-up' },
-    { template_id: 'tp-002', name: 'Value Framing' },
-  ]
-
-  const titleRouting: AnyRecord[] = [
-    { routing_id: 'tr-001', contract_id: 'ct-001', status: 'queued' },
-  ]
-
-  const closings: AnyRecord[] = [
-    { closing_id: 'cl-001', contract_id: 'ct-001', status: 'pending' },
-  ]
-
-  const dealRevenue: AnyRecord[] = [
-    { revenue_id: 'rv-001', contract_id: 'ct-001', amount: 42000, status: 'projected' },
-  ]
-
-  return {
-    masterowners: [],
-    owners,
-    prospects,
-    properties,
-    phoneNumbers,
-    emails,
-    sendQueue,
-    messageEvents,
-    aiBrain,
-    offers,
-    underwriting,
-    contracts,
-    markets,
-    zipCodes: [],
-    agents,
-    templates,
-    titleRouting,
-    closings,
-    dealRevenue,
-  }
-}
+/**
+ * §42/§44 — AN EMPTY PRODUCTION RESULT IS AN EMPTY RESULT.
+ *
+ * This replaces `mockDataset()`: 370 lines of fabricated owners, properties and
+ * prospects — "Diana Alvarez", "Oakline Holdings LLC", invented `motivation_score`
+ * and legacy Podio `ai_score` values — that were returned in TWO runtime paths:
+ * when Supabase env was absent, and, far worse, whenever the real queries came
+ * back with zero rows across owners/properties/prospects/phones. A genuinely
+ * empty or degraded production read therefore rendered demo sellers to an
+ * operator, with nothing distinguishing them from real records.
+ *
+ * The surface's own empty state is the truthful answer, and it already exists.
+ */
+const emptyDataset = (): Dataset => ({
+  masterowners: [],
+  owners: [],
+  prospects: [],
+  properties: [],
+  phoneNumbers: [],
+  emails: [],
+  sendQueue: [],
+  messageEvents: [],
+  aiBrain: [],
+  offers: [],
+  underwriting: [],
+  contracts: [],
+  markets: [],
+  zipCodes: [],
+  agents: [],
+  templates: [],
+  titleRouting: [],
+  closings: [],
+  dealRevenue: [],
+})
 
 const safeSelect = async (
   table: string,
@@ -895,7 +559,7 @@ const safeSelect = async (
 }
 
 const fetchDatasetUncached = async (): Promise<Dataset> => {
-  if (!shouldUseSupabase()) return mockDataset()
+  if (!shouldUseSupabase()) return emptyDataset()
 
   try {
     const dealContext = await getDealContextList({
@@ -965,13 +629,15 @@ const fetchDatasetUncached = async (): Promise<Dataset> => {
   ])
 
   const mergedTemplates = [...templates, ...smsTemplates]
+  // Four empty reads used to mean "show the demo dataset". It means the corpus
+  // is empty or the reads failed; either way the operator is entitled to know.
   if (
     owners.length === 0 &&
     properties.length === 0 &&
     prospects.length === 0 &&
     phoneNumbers.length === 0
   ) {
-    return mockDataset()
+    return emptyDataset()
   }
 
   const dataset = {

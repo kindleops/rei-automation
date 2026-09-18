@@ -291,13 +291,7 @@ import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligence/CompIntelligenceWorkspace').then((m) => ({ default: m.default })))
 // DEV: Comp Intelligence V4 rebuild is the DEFAULT in dev. Opt OUT (old workspace)
 // with localStorage 'nx.comp.v4' = '0'. Production (DEV false) always uses the old one.
-const CompIntelligenceV4Workspace = lazy(() => import('../../views/comp-intelligence-v4/CompIntelligenceV4Workspace').then((m) => ({ default: m.default })))
-const COMP_V4_ENABLED = Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.comp.v4') !== '0')
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
-const BuyerMatchV4Workspace = lazy(() => import('./buyer-match-v4/BuyerMatchV4Workspace').then((m) => ({ default: m.BuyerMatchV4Workspace })))
-/** DEV: Buyer Match V4 is default in dev. Opt out with localStorage `nx.buyer.v4` = '0'. */
-const BUYER_MATCH_V4_ENABLED =
-  Boolean(import.meta.env.DEV) && (typeof window === 'undefined' || window.localStorage.getItem('nx.buyer.v4') !== '0')
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const AnalyticsGeoMobile = lazy(() => import('../../views/analytics/mobile/AnalyticsGeoMobile').then((m) => ({ default: m.AnalyticsGeoMobile })))
@@ -5509,13 +5503,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return (
         <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
-          {COMP_V4_ENABLED ? (
-            <CompIntelligenceV4Workspace
-              dealContext={canonicalSelectedContext}
-              paused={heavyLoadPaused}
-              paneWidth={paneWidth}
-            />
-          ) : (
+          {/*
+              §43 — ONE CANONICAL IMPLEMENTATION PER CAPABILITY.
+
+              This was `{COMP_V4_ENABLED ? <V4/> : <V3/>}`, and COMP_V4_ENABLED was
+              `import.meta.env.DEV && localStorage["nx.comp.v4"] !== "0"`. So DEVELOPMENT
+              rendered V4 and PRODUCTION rendered V3: two different generations of the
+              same capability, selected by build mode.
+
+              That is not a harmless flag. Every local test of Comp Intelligence was
+              exercising code that never ships, and production behaviour was never
+              exercised locally at all. It is why the mobile composition measured green on
+              deployed staging and production while rendering nothing in dev — `.ci-m`
+              lives under the canonical workspace, and dev never mounted it.
+
+              V3 is canonical: production serves it, the acquisition path qualifies from
+              it, and the mobile composition is built on it. V4 is an unfinished rebuild
+              and keeps its own dev-only harness route (see app/routes.tsx), which is
+              legitimate engineering infrastructure — it is simply not the product.
+          */}
             <CompIntelligenceWorkspace
               thread={workspaceThread}
               dealContext={canonicalSelectedContext}
@@ -5530,7 +5536,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
                */
               isMobile={isMobile}
             />
-          )}
           </WorkspaceSuspense>
         </section>
       )
@@ -5538,16 +5543,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     if (view === 'buyer_match') {
       return (
-        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`, BUYER_MATCH_V4_ENABLED && 'is-buyer-match-v4')}>
+        <section className={cls('nx-workspace-surface', 'nx-workspace-surface--map', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <WorkspaceSuspense>
-          {BUYER_MATCH_V4_ENABLED ? (
-            <BuyerMatchV4Workspace
-              paused={heavyLoadPaused}
-              dealContext={canonicalSelectedContext}
-              paneWidth={paneWidth}
-              onOpenFull={() => handleFocusWorkspaceView('buyer_match')}
-            />
-          ) : (
+          {/*
+            §43 — same correction as Comp Intelligence above: this was
+            `{BUYER_MATCH_V4_ENABLED ? <V4/> : <canonical/>}` with the flag gated on
+            `import.meta.env.DEV`, so dev and production ran different Buyer Match
+            implementations. V4 keeps its dev-only harness route.
+          */}
             <BuyerMatchWorkspace
               paused={heavyLoadPaused}
               dealContext={canonicalSelectedContext}
@@ -5571,7 +5574,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               paneWidth={paneWidth}
               apiBase="/api/cockpit"
             />
-          )}
           </WorkspaceSuspense>
         </section>
       )
