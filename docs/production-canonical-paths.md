@@ -361,11 +361,25 @@ campaign materialization also requires a configured `daily_limit > 0`;
 `choose-textgrid-number` additionally enforces hourly caps, local send windows and
 risk spikes.
 
-### Campaign targets — OPEN
-- writers `api/cockpit/campaigns/[id]/build-targets` (operator) and
-  `campaign-automation-service` (automation); `discord-action-router` also writes
-- Not yet proven that the two writers cannot produce overlapping targets for the
-  same campaign, which is the §3 duplicate-work question.
+### Campaign targets — VERIFIED (enforced by the database)
+- writers `api/cockpit/campaigns/[id]/build-targets` (operator),
+  `campaign-automation-service` (automation), `discord-action-router`
+- table `campaign_targets`
+
+Three writers, and duplicate live work is **structurally impossible** rather than
+merely unlikely:
+
+    CREATE UNIQUE INDEX idx_campaign_targets_recipient_dedup
+      ON campaign_targets (campaign_id, touch_number, to_phone_number)
+      WHERE to_phone_number IS NOT NULL
+        AND target_status IN ('ready','planned','queued','scheduled')
+
+A partial unique index, so a superseded attempt can coexist with a live one while
+two LIVE rows for the same recipient and touch cannot. Verified against
+production: 27 duplicate `(campaign_id, touch_number, to_phone_number)` groups
+exist and **every one has exactly one row in a live status** — the rest are
+terminal, e.g. `{blocked, ready}`. Zero violations. The database is the authority
+here, which is stronger than convention between three writers.
 
 ### Notifications — VERIFIED
 - writers `api/cockpit/notifications/*`, `notification-scanners`,
@@ -392,10 +406,19 @@ risk spikes.
   saved cohorts and compare stay unreachable. That is the honest state and it must
   stay that way until the endpoint is built. Do not fabricate lens data.
 
-### Workflow execution — OPEN
-Writers touching `workflow_enrollments` / `automation_events` span seller-flow,
-opportunity and acquisition-brain modules. Whether two of them can act on the same
-event independently is not yet established.
+### Workflow execution — VERIFIED by containment (not by design)
+
+Two runtimes exist: the seller-flow automation writers, and Workflow Studio V2.
+They cannot act on the same event today because **V2 is inert in production**:
+`matchDefinitions` requires `status = 'active'`, and production holds zero active
+definitions — 6 draft, 2 archived, 1 paused. `automation_events` is the canonical
+acquisition bus; `workflow_events` is V2's private inbox.
+
+State this precisely: the separation is a CONTAINMENT fact, not a structural one.
+Activating a single workflow definition reopens the question of two systems
+scheduling or mutating lifecycle state for one event. Before any workflow is
+activated, the overlap between V2 actions and seller-flow automation writers has
+to be worked out — it has not been.
 
 ---
 
