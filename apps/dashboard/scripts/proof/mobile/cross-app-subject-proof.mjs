@@ -79,7 +79,11 @@ const SCOPED = [
   { route: '/conversation', name: 'Conversation', carrier: 'locator(threadKey)', textPositive: false },
   { route: '/comp-intelligence', name: 'Comp Intelligence', carrier: 'locator(propertyId)', textPositive: true },
   { route: '/map', name: 'Map', carrier: 'locator(propertyId)', textPositive: false },
-  { route: '/buyer-match', name: 'Buyer Match', carrier: 'locator(propertyId)', textPositive: true },
+  // Buyer Match's registry contract is `query:property_id`, NOT the ambient
+  // locator — its subject resolver reads the URL and only the URL. The bare
+  // route is therefore expected to reach honest no-state, which is what this
+  // run asserts; the label said `locator` and had drifted from the contract.
+  { route: '/buyer-match', name: 'Buyer Match', carrier: 'query(property_id)', textPositive: true },
   { route: (s) => `/entity-graph/property/${s.propertyId}`, name: 'Entity Graph', carrier: 'path(propertyId)', textPositive: true },
   { route: (s) => `/pipeline?opp=${s.opportunityId}`, name: 'Pipeline', carrier: 'query(opportunityId)', textPositive: true },
 ]

@@ -370,6 +370,22 @@ asserts the production handler calls it, and calls it before the idempotency
 claim (claiming first would make a deferral a duplicate on retry and lose the
 reply).
 
+**Migration safety, counted after applying (2026-09-18):**
+
+    buyer_outreach_targets rows                0
+    buyer_outreach_targets columns            26  (4 added this pass, all additive)
+    rows with replied_at                       0
+    send_queue rows total                 18,092  (unchanged)
+    send_queue rows with buyer domain          0
+    sms_suppression_list total               331  (unchanged)
+    suppressions sourced inbound_buyer_opt_out  0
+
+No existing row was rewritten and no existing table was altered other than by
+`ADD COLUMN IF NOT EXISTS`. Every buyer count is zero because nothing has been
+sent — which is the expected state while contact enrichment is `not_started`,
+and is the number to watch when it lands.
+
+
 ### Queue writers — VERIFIED
 **No direct `send_queue` table inserts exist anywhere.** Every row is created by
 `sms-engine.insertSupabaseSendQueueRow`. Nine callers converge on it:

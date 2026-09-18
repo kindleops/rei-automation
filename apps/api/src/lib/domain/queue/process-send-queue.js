@@ -1699,7 +1699,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         {
           const blocked = await blockQueueRowByIneligibleSender(queue_row, number_selection, deps);
           // Blocked before the provider — the target says blocked, not failed (§3).
-          void reconcileBuyerOutreachFromQueueRow(
+          await reconcileBuyerOutreachFromQueueRow(
             { ...queue_row, queue_status: blocked.queue_status }, deps
           );
           return blocked;
@@ -2055,7 +2055,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
 
       {
         const blocked = await blockQueueRowBySmsHealthGuard(queue_row, sms_health_guard, deps);
-        void reconcileBuyerOutreachFromQueueRow(
+        await reconcileBuyerOutreachFromQueueRow(
           { ...queue_row, queue_status: blocked.queue_status }, deps
         );
         return blocked;
@@ -2236,8 +2236,13 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
      * reconciliation write that fails must never turn a message that actually
      * went out into a failed row. `reconcileBuyerOutreachFromQueueRow` returns
      * its own verdict rather than throwing, and no-ops for seller traffic.
+     *
+     * AWAITED, not fired and forgotten: an un-awaited write can be dropped when
+     * the invocation ends, and a target silently stuck at `queued` after a
+     * successful send is the exact lie this reconciliation exists to prevent.
+     * It cannot throw, so awaiting costs one round-trip and risks nothing.
      */
-    void reconcileBuyerOutreachFromQueueRow(finalized_row, deps);
+    await reconcileBuyerOutreachFromQueueRow(finalized_row, deps);
 
     const bookkeeping_errors = [];
     let outbound_event = null;

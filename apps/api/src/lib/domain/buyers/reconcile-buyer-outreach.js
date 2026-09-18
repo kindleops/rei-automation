@@ -82,9 +82,12 @@ export async function reconcileBuyerOutreachFromQueueRow(queue_row = {}, deps = 
     status: mapped.status,
     blocked_reason: mapped.blocked_reason,
     updated_at: now,
-    // The join back to the queue row, in case the target was linked only by id.
-    send_queue_key: dedupe_key || null,
   };
+
+  // Only ever fills the join in — never blanks an existing one. A row matched
+  // by `metadata.buyer_outreach_target_id` alone carries no dedupe key, and
+  // writing null there would erase the link the materializer already stored.
+  if (dedupe_key) patch.send_queue_key = dedupe_key;
 
   const provider_message_id = clean(queue_row.provider_message_id);
   if (provider_message_id) patch.provider_message_id = provider_message_id;
