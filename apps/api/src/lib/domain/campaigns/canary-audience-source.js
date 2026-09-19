@@ -99,6 +99,7 @@ export async function resolveInternalCanaryAudience({
   context = {},
   loadPhoneRows = null,
   loadCanaryIdentities = null,
+  loadCanaryFacts = null,
 } = {}) {
   const authorization = evaluateCanaryAudienceAuthorization(options, context);
   if (!authorization.ok) {
@@ -164,6 +165,47 @@ export async function resolveInternalCanaryAudience({
   } catch (error) {
     // An unreadable phone graph is not permission to synthesise a destination.
     return { ok: false, rows: [], counts: {}, warnings: [`canary_audience_phone_graph_unreadable:${error?.message || "unknown"}`] };
+  }
+
+  /**
+   * The REAL property and person rows behind each canary identity.
+   *
+   * Template governance lints the rendered body — a blank greeting ("Hey ,")
+   * and a property-type/wording mismatch are both hard failures. Those checks
+   * need a first name and a property type, and they are facts that already
+   * exist on the commissioned canary records. Reading them is not inventing
+   * seller data; omitting them would make the canary fail a lint for a reason
+   * that is not true of it.
+   */
+  let propertyByToken = new Map();
+  let prospectByToken = new Map();
+  try {
+    const propertyIds = [...new Set([...identityByPhone.values()].map((r) => clean(r.property_id)).filter(Boolean))];
+    const prospectIds = [...new Set(phoneRows.map((r) => clean(r.primary_prospect_id)).filter(Boolean))];
+
+    if (typeof loadCanaryFacts === "function") {
+      const facts = (await loadCanaryFacts({ propertyIds, prospectIds })) || {};
+      propertyByToken = new Map(Object.entries(facts.properties || {}));
+      prospectByToken = new Map(Object.entries(facts.prospects || {}));
+    } else {
+      if (propertyIds.length > 0) {
+        const { data } = await supabase
+          .from("properties")
+          .select("property_id,property_address_full,property_address_city,property_address_state,property_address_zip,market,property_type,normalized_asset_class")
+          .in("property_id", propertyIds);
+        for (const row of data || []) propertyByToken.set(clean(row.property_id), row);
+      }
+      if (prospectIds.length > 0) {
+        const { data } = await supabase
+          .from("prospects")
+          .select("prospect_id,first_name,full_name,language_preference,timezone,primary_market")
+          .in("prospect_id", prospectIds);
+        for (const row of data || []) prospectByToken.set(clean(row.prospect_id), row);
+      }
+    }
+  } catch {
+    // Missing facts are not fatal; the row will simply fail the lint it
+    // genuinely fails, which is the honest outcome.
   }
 
   const rows = [];
@@ -232,6 +274,18 @@ export async function resolveInternalCanaryAudience({
        */
       identity_alignment: clean(identity.identity_status) || "unknown",
       phone_owner: clean(phoneRow.phone_owner) || null,
+
+      // Facts carried from the commissioned records, never synthesised.
+      seller_first_name: clean(prospectByToken.get(clean(phoneRow.primary_prospect_id))?.first_name) || null,
+      first_name: clean(prospectByToken.get(clean(phoneRow.primary_prospect_id))?.first_name) || null,
+      seller_full_name: clean(prospectByToken.get(clean(phoneRow.primary_prospect_id))?.full_name) || null,
+      owner_name: clean(prospectByToken.get(clean(phoneRow.primary_prospect_id))?.full_name) || null,
+      property_address_full: clean(propertyByToken.get(clean(identity.property_id))?.property_address_full) || null,
+      property_city: clean(propertyByToken.get(clean(identity.property_id))?.property_address_city) || null,
+      property_zip: clean(propertyByToken.get(clean(identity.property_id))?.property_address_zip) || null,
+      state: clean(propertyByToken.get(clean(identity.property_id))?.property_address_state) || null,
+      property_type: clean(propertyByToken.get(clean(identity.property_id))?.property_type) || null,
+      canonical_property_group: clean(propertyByToken.get(clean(identity.property_id))?.normalized_asset_class) || null,
       phone_activity_status: clean(phoneRow.activity_status) || null,
       best_phone_score: phoneRow.best_phone_score ?? null,
 

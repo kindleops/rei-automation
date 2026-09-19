@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
+import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import {
   INTERNAL_CANARY_SOURCE,
   isInternalCanaryAudienceRequested,
@@ -7619,6 +7620,32 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
         }))
         targetUpdates.push(item.target.id)
       }
+      /**
+       * INTERNAL-CANARY QUARANTINE, AT THE ONE REGISTERED EXCEPTION.
+       *
+       * This is the single module allowed to insert `send_queue` rows without
+       * `insertSupabaseSendQueueRow`, and that helper is where the canary stamp
+       * normally comes from. So a campaign row addressed to a REGISTERED
+       * internal test handset was reaching the queue with no
+       * `internal_canary` marker at all — which meant it would be counted in
+       * production KPIs (`excludeInternalCanaryRows` looks for exactly this
+       * flag) and would not be recognised as proof traffic by the operator
+       * controls.
+       *
+       * Applying the same rule the canonical writer applies keeps the one
+       * exception honest. It reads the approved registry, so it cannot mark
+       * an ordinary seller as a canary.
+       */
+      for (const queueRow of queueRows) {
+        if (!isInternalTestPhone(queueRow?.to_phone_number)) continue
+        queueRow.metadata = {
+          ...(queueRow.metadata && typeof queueRow.metadata === 'object' ? queueRow.metadata : {}),
+          internal_canary: true,
+          internal_canary_stamped_by: 'campaign_launch_internal_phone_registry',
+          exclude_from_kpis: true,
+        }
+      }
+
       const hydrationTotal = queueRows.length
       for (let i = 0; i < queueRows.length; i += 500) {
         const rowChunk = queueRows.slice(i, i + 500)
