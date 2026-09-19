@@ -279,7 +279,27 @@ export async function runQueueAction({ action, payload = {}, supabase = defaultS
   if (action === 'reschedule') {
     const scheduledFor = clean(payload.scheduled_for)
     if (!scheduledFor) return blockedResponse(action, 'missing_scheduled_for', { queue_item_id: queueItemId })
+
+    /**
+     * RESCHEDULE MUST MOVE THE COLUMN THE DISPATCHER ACTUALLY READS.
+     *
+     * This wrote only `scheduled_for`. The preclaim gate resolves a row's due
+     * time as `scheduled_for_utc || scheduled_for || created_at` — so
+     * `scheduled_for_utc` WINS, and leaving it stale meant rescheduling a
+     * queue row had no effect on when it dispatched. The operator moved a
+     * message, the Queue showed the new time, and the dispatcher kept using
+     * the old one.
+     *
+     * Reproduced exactly: after a reschedule to a past instant the row held
+     * `scheduled_for` = due and `scheduled_for_utc` = four hours out, and the
+     * claim refused it as `scheduled_for_in_future`.
+     *
+     * All three are written together so a row cannot hold two different
+     * answers to "when does this send".
+     */
     patch.scheduled_for = scheduledFor
+    patch.scheduled_for_utc = scheduledFor
+    patch.scheduled_for_local = scheduledFor
   }
 
   const { data: updated, error: updateErr } = await supabase

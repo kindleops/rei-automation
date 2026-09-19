@@ -7643,6 +7643,24 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           internal_canary: true,
           internal_canary_stamped_by: 'campaign_launch_internal_phone_registry',
           exclude_from_kpis: true,
+          /**
+           * The ORIGIN the internal-proof contact-window exemption reads.
+           *
+           * `evaluateInternalProofContactWindowBypass` requires the pinned
+           * canary row to declare an internal-canary origin, on top of every
+           * other conjunct (scoped canary, validated single-row authorization,
+           * active pinned session, recipient/sender/campaign match). Without it
+           * a campaign-created canary row carries `source:
+           * campaign_launch_execution` and is denied as
+           * `origin_surface_not_internal_canary` — which would be correct for
+           * an ordinary campaign row and wrong for this one, because the row
+           * genuinely originates from the internal canary audience.
+           *
+           * It grants nothing by itself: this line only runs for destinations
+           * already in the approved registry, and the exemption still requires
+           * all eleven other conditions.
+           */
+          origin_surface: 'internal_canary',
         }
       }
 
