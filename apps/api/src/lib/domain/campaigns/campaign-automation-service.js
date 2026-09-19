@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
 import {
   INTERNAL_CANARY_SOURCE,
   isInternalCanaryAudienceRequested,
@@ -7129,6 +7130,36 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       input.suppressPriorContacted,
     true
   )
+  /**
+   * §7 — a canary campaign may only lift prior-contact suppression with the
+   * same internal authorization its AUDIENCE required. Otherwise "this is a
+   * proof" would be enough to disable a safety rule. Production keeps its
+   * existing operator control unchanged.
+   */
+  if (suppressPreviouslyContacted === false) {
+    const campaignForOverride = await getCampaign(campaignId, deps).catch(() => null)
+    const overrideVerdict = evaluateRecontactOverride({
+      suppress_previously_contacted: false,
+      candidate_source: campaignForOverride?.campaign?.candidate_source
+        || input.candidate_source
+        || null,
+      internal_authorized: input.internal_authorized === true,
+      destinations: Array.isArray(input.recontact_destinations) ? input.recontact_destinations : [],
+    })
+    if (!overrideVerdict.ok) {
+      return {
+        ok: false,
+        success: false,
+        campaign_id: campaignId,
+        blockers: [overrideVerdict.reason],
+        exact_blockers: [overrideVerdict.reason],
+        recontact_override_scope: overrideVerdict.scope,
+        queue_rows_created: 0,
+        no_send_queue_rows_created: true,
+      }
+    }
+  }
+
   const blockOnGlobalEmergencyStop = asBoolean(
     input.block_on_global_emergency_stop ??
       input.respect_global_emergency_stop_for_creation ??

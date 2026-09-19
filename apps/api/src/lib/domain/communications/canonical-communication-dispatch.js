@@ -433,6 +433,25 @@ async function runAttempt(comm, input, deps, emit) {
     delivery_possibility: outcome.delivery_possibility,
     retry_authority: outcome.retry_authority,
     logical_state: transition.next.state,
+
+    /**
+     * The transport diagnostics, returned as well as emitted.
+     *
+     * They were written to the attempt ledger and to telemetry but never handed
+     * back, so the queue runner — the one component that has to classify the
+     * row — could not see the HTTP status the seam had already read. It
+     * inferred ambiguity from the absence of a SID instead, and a terminal
+     * HTTP 400 was recorded as possibly-delivered.
+     *
+     * Still EVIDENCE, not authority: `delivery_possibility` remains the
+     * verdict. These let the row explain itself.
+     */
+    http_status: diagnostics.http_status,
+    provider_status: diagnostics.provider_status,
+    provider_error_code: diagnostics.provider_error_code,
+    transport_phase: diagnostics.transport_phase,
+    outcome_class: outcome.attempt_state || null,
+
     projection,
   };
 }

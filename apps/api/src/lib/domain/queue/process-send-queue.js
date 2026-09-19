@@ -2182,13 +2182,54 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       //
       // So carry the seam's verdict instead of re-deriving one from a string.
       const local_refusal = dispatch.reason === "local_refusal_before_request";
+
+      /**
+       * VERDICT PRECEDENCE: THE SEAM'S DELIVERY POSSIBILITY OUTRANKS A MISSING SID.
+       *
+       * A missing SID is not one fact, it is four, and they are not
+       * interchangeable:
+       *
+       *   the request never left the process        -> definitely_not_sent
+       *   the provider answered and REJECTED it     -> definitely_not_sent
+       *   the provider answered unparseably         -> may_have_been_sent
+       *   the request started and nothing came back -> may_have_been_sent
+       *
+       * Treating "no SID" as ambiguity collapsed all four into the worst one.
+       * That is how the 2026-09-17 attempt — an HTTP 400 the seam had already
+       * classified `failed_terminal / definitely_not_sent` — ended up recorded
+       * as possibly-delivered, barring a legitimate recipient on the strength
+       * of a record we knew to be wrong.
+       *
+       * `delivery_possibility` is the seam's own structured conclusion, reached
+       * from the provider's actual response. It is the authority here. The SID
+       * is only consulted when the seam reached no conclusion at all, where
+       * failing closed to ambiguous remains exactly right.
+       */
+      const seam_possibility = clean(dispatch.delivery_possibility);
+      const seam_says_not_sent = seam_possibility === "definitely_not_sent";
+      const seam_reached_a_conclusion = Boolean(seam_possibility) && seam_possibility !== "unknown";
+
       const ambiguous_error = new Error(
         local_refusal
           ? "SEND REFUSED BEFORE REQUEST"
-          : "SEND FAILED - NO SID"
+          : seam_says_not_sent
+            ? "SEND REJECTED BY PROVIDER - NO SID"
+            : "SEND FAILED - NO SID"
       );
-      // Only claim provider ambiguity when the provider was actually reachable.
-      ambiguous_error.no_sid_ambiguous_send = !local_refusal;
+      // Ambiguous ONLY when the provider was reachable AND the seam could not
+      // establish that the message failed to go out.
+      ambiguous_error.no_sid_ambiguous_send =
+        !local_refusal && !(seam_reached_a_conclusion && seam_says_not_sent);
+
+      /**
+       * Structured evidence, persisted rather than discarded. These are the
+       * columns that already existed on the attempt row and were never written,
+       * which is why the first canary had to be diagnosed by reading source.
+       */
+      ambiguous_error.provider_http_status = dispatch.http_status ?? null;
+      ambiguous_error.provider_outcome_class = clean(dispatch.outcome_class) || null;
+      ambiguous_error.transport_phase = clean(dispatch.transport_phase) || null;
+      ambiguous_error.seam_delivery_possibility = seam_possibility || null;
       ambiguous_error.local_refusal = local_refusal;
       ambiguous_error.local_refusal_reason = local_refusal ? dispatch.reason : null;
       ambiguous_error.retryable = false;

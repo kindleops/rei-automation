@@ -269,9 +269,65 @@ export function classifyTextGridProviderError(error = {}, context = {}) {
   // Ambiguous accept: the provider responded without a message SID. The SMS
   // may have been delivered anyway, so a retry risks a DUPLICATE seller
   // message. Terminal + manual review — never the 5-minute retry loop.
-  const is_ambiguous_no_sid =
-    error?.no_sid_ambiguous_send === true ||
-    lower(error?.message).includes("send failed - no sid");
+  /**
+   * THE STRING IS NOT AN AUTHORITY WHEN A STRUCTURED VERDICT EXISTS.
+   *
+   * This used to read the error MESSAGE, so any caller whose text happened to
+   * contain "send failed - no sid" was classified ambiguous regardless of what
+   * the transport seam had actually established. That made the wording of a
+   * synthetic error decide whether a human could ever be contacted again.
+   *
+   * An explicit `no_sid_ambiguous_send === false` is the seam saying it KNOWS
+   * the message did not go out. It wins, and the legacy string is ignored. The
+   * string survives only for callers that set no flag at all, where failing
+   * closed to ambiguous is still the right default.
+   */
+  const structured_verdict_present = typeof error?.no_sid_ambiguous_send === "boolean";
+  const is_ambiguous_no_sid = structured_verdict_present
+    ? error.no_sid_ambiguous_send === true
+    : lower(error?.message).includes("send failed - no sid");
+
+  // A provider that answered and refused is TERMINAL, not ambiguous. Recording
+  // it as possibly-delivered would bar the recipient forever on a message the
+  // provider explicitly declined to send.
+  if (
+    structured_verdict_present
+    && error.no_sid_ambiguous_send === false
+    && clean(error?.seam_delivery_possibility) === "definitely_not_sent"
+    && !error?.local_refusal
+  ) {
+    return {
+      provider_code,
+      provider_message: provider_message || "Provider rejected the request without a message SID",
+      provider_payload: ensureObject(error.data) || null,
+      failure_class: "provider_rejected_terminal",
+      failure_bucket: "provider_rejected",
+      normalized_reason: "provider_rejected_no_sid",
+      non_retryable_reason: "provider_rejected_no_sid",
+      retryable: false,
+      is_terminal: true,
+      compliance_related: false,
+      queue_disposition: "failed",
+      suppression_action: null,
+      sentry_level: "warning",
+      operator_reason:
+        `Provider rejected the send${error.provider_http_status ? ` (HTTP ${error.provider_http_status})` : ""} and returned no SID — the message was NOT delivered`,
+      no_sender_rotation: false,
+      no_alternate_number_retry: false,
+      no_campaign_reenqueue: false,
+      http_status: error.provider_http_status ?? null,
+      transport_phase: clean(error.transport_phase) || null,
+      metrics: {
+        event: "queue.send.provider_rejected_no_sid",
+        reason: "provider_rejected_no_sid",
+        campaign_id: context.campaign_id || null,
+        market: context.market || null,
+        sender_hash: context.sender_hash || null,
+        destination_hash: context.destination_hash || null,
+      },
+    };
+  }
+
   if (is_ambiguous_no_sid) {
     return {
       provider_code,
