@@ -285,6 +285,16 @@ function makeItemDeps(overrides = {}) {
       messages_sent_today: 0,
     }),
     getSystemValue: makeGetSystemValue(),
+    /**
+     * Dispatch now also revalidates the row's CAMPAIGN (§ campaign pause): a
+     * campaign paused after its work was materialized used to dispatch anyway,
+     * live-proven with a real accepted SID. Exactly like the fleet fact above,
+     * a fixture that models a reaching send must state the campaign fact —
+     * otherwise the authority correctly fails closed as
+     * `campaign_state_unreadable` and masks the contact-window gate these
+     * tests exist to exercise.
+     */
+    loadCampaignStatus: async () => "active",
     scoped_canary: true,
     authorization_validated: true,
     canary_run_id: "canary-proof-run-1",
