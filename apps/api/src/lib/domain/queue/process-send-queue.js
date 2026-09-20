@@ -1,4 +1,8 @@
 import { evaluateCanonicalSendAuthority } from "@/lib/domain/queue/canonical-send-authority.js";
+import {
+  CAMPAIGN_PAUSED_REASON,
+  evaluateCampaignDispatchAuthority,
+} from "@/lib/domain/queue/campaign-execution-authority.js";
 import { reconcileBuyerOutreachFromQueueRow } from "@/lib/domain/buyers/reconcile-buyer-outreach.js";
 import {
   acquisitionQueueOperation,
@@ -2626,6 +2630,46 @@ export async function processSendQueueItem(queue_row, deps = {}) {
         error: runtime_brake.error,
         message: runtime_brake.message,
         diagnostics: runtime_brake.diagnostics,
+        queue_row_id: getQueueRowId(resolved_queue_row),
+        queue_item_id: getQueueRowId(resolved_queue_row),
+      };
+    }
+  }
+
+  /**
+   * CAMPAIGN EXECUTION AUTHORITY — pause stops pending work, not just new work.
+   *
+   * Placed HERE, at the one entry point every dispatch passes through, and
+   * BEFORE the delegation below: both processors are covered by a single check,
+   * and no provider call can occur after a pause verdict.
+   *
+   * Live-proven necessity: a paused campaign dispatched its already-materialized
+   * row and TextGrid accepted it (SID SMOYUkH9NB47FNojpVoAUKGuA==). Pause was
+   * only ever enforced at materialization, so work already queued kept going.
+   *
+   * It DEFERS rather than fails — `skipped: true`, no retry consumed, row and
+   * schedule intact — because pause is reversible operational control. Resume
+   * releases the same row.
+   */
+  {
+    const campaign_authority = await evaluateCampaignDispatchAuthority(resolved_queue_row, deps);
+    if (!campaign_authority.ok) {
+      return {
+        ok: false,
+        status: 423,
+        sent: false,
+        skipped: true,
+        reason: campaign_authority.reason,
+        error: campaign_authority.reason,
+        message:
+          campaign_authority.reason === CAMPAIGN_PAUSED_REASON
+            ? "Campaign is paused; pending queue work is held and will resume with the campaign."
+            : "Campaign state could not be established; the send is deferred rather than attempted.",
+        diagnostics: {
+          scope: campaign_authority.scope,
+          campaign_id: clean(resolved_queue_row.campaign_id) || null,
+          campaign_status: campaign_authority.campaign_status ?? null,
+        },
         queue_row_id: getQueueRowId(resolved_queue_row),
         queue_item_id: getQueueRowId(resolved_queue_row),
       };
