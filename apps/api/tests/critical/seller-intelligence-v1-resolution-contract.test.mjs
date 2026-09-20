@@ -7,6 +7,8 @@ import {
   PASSTHROUGH_FIELDS,
   COHORT_VENDOR_FREE_REACH,
   RESOLUTION_PARITY,
+  REJECTED_TIEBREAKS,
+  FILE10_DRY_RUN,
   RESOLUTION_REPRODUCIBILITY,
   isRealEntityKey,
   normaliseOwnerName,
@@ -28,6 +30,14 @@ test('unmatched_* sentinels are not identities', () => {
   assert.equal(isRealEntityKey('unmatched_email:2103109213:0'), false);
   assert.equal(isRealEntityKey(''), false);
   assert.equal(isRealEntityKey(null), false);
+});
+
+test('normalisation is uppercase + strip-non-alpha, and nothing more', () => {
+  // 977/977 of name_exact winners are explained by exactly this. A suffix rule
+  // would be inert here, so it is deliberately absent.
+  assert.ok(isExactNameMatch('Charles W Price', 'CHARLES W PRICE'));
+  assert.ok(!isExactNameMatch('Charles W Price Sr', 'Charles W Price'),
+    'suffixes are NOT stripped by this function');
 });
 
 test('name normalisation strips punctuation and case', () => {
@@ -131,18 +141,51 @@ test('cohort reach is recorded honestly — 45%, not "most"', () => {
   assert.ok(r.unique_name_match / r.cohort < 0.5, 'under half the cohort — stated, not rounded up');
 });
 
-test('parity is recorded as measured, including what stays unsolved', () => {
-  assert.equal(RESOLUTION_PARITY.sampled, 12000);
-  assert.ok(RESOLUTION_PARITY.name_exact_vendor.method_and_key_pct > 95);
-  assert.ok(RESOLUTION_PARITY.name_exact_vendor.method_and_key_pct < 100, 'not claimed exact');
-  assert.equal(RESOLUTION_PARITY.name_exact_vendor.predicted_ambiguous, 432);
-  assert.match(RESOLUTION_PARITY.unrecovered, /tie-break/);
+test('GOLDEN PARITY: the cohort branch has ZERO silent wrong winners (§8)', () => {
+  assert.equal(RESOLUTION_PARITY.sampled, 60000);
+  assert.equal(RESOLUTION_PARITY.name_exact.silent_wrong, 0, 'the number that matters');
+  // The vendor branches carry a small residual; the cohort cannot use them anyway.
+  assert.equal(RESOLUTION_PARITY.name_exact_vendor.silent_wrong, 7);
+  assert.equal(RESOLUTION_PARITY.vendor_asserted.silent_wrong, 9);
+  // The entity gate agrees with production on all but one row.
+  const g = RESOLUTION_PARITY.entity_gate;
+  assert.equal(g.predicted - g.agreed_entity_owned, 1);
+});
+
+test('NO TIE-BREAK WAS ACCEPTED — 92% is not good enough (§6/§7)', () => {
+  assert.equal(REJECTED_TIEBREAKS.accepted, null);
+  // Every candidate rule is recorded with the score that disqualified it.
+  for (const [rule, score] of Object.entries(REJECTED_TIEBREAKS)) {
+    if (rule === 'accepted') continue;
+    assert.ok(score < 1, `${rule} is not deterministic`);
+  }
+  assert.ok(RESOLUTION_PARITY.refused_ambiguous > 0, 'ties fail closed');
+});
+
+test('the File-10 dry run adds up and claims nothing extra (§9/§21)', () => {
+  const d = FILE10_DRY_RUN;
+  const sum = d.high_confidence_name_exact + d.medium_confidence_vendor_asserted
+    + d.confirmed_name_exact_vendor + d.ambiguous_tie_failed_closed
+    + d.unresolved_no_qualifying_branch + d.entity_owned;
+  assert.equal(sum, d.total, 'every one of the 6,808 is accounted for');
+  assert.equal(d.safely_resolved,
+    d.high_confidence_name_exact + d.medium_confidence_vendor_asserted + d.confirmed_name_exact_vendor);
+  assert.ok(d.best_contact_derivable <= d.safely_resolved);
+  assert.ok(d.safely_resolved < d.total / 2, 'under half — stated, not rounded up');
+  assert.match(d.manifest_md5, /^[0-9a-f]{32}$/);
+});
+
+test('the earlier 3,035 estimate is superseded, not preserved (§11)', () => {
+  // 3,035 came from an exploratory query with no branch precedence and no
+  // fail-closed tie handling. Applying both moves it to 2,962 on name_exact,
+  // with 66 + 79 reaching vendor branches and 60 refused as ambiguous.
+  assert.equal(FILE10_DRY_RUN.high_confidence_name_exact, 2962);
+  assert.notEqual(FILE10_DRY_RUN.high_confidence_name_exact, 3035);
 });
 
 test('reproducibility names what is NOT solved', () => {
   assert.equal(RESOLUTION_REPRODUCIBILITY.candidate_set, 'deterministic_recovered');
   assert.match(RESOLUTION_REPRODUCIBILITY.candidate_selection, /95pct_tiebreak_unsolved/);
   assert.equal(RESOLUTION_REPRODUCIBILITY.vendor_branches, 'blocked_missing_vendor_assertion_fields');
-  // The 0.92% name residual is admitted rather than rounded to "recovered".
-  assert.match(RESOLUTION_REPRODUCIBILITY.name_normalisation, /approximate/);
+  assert.equal(RESOLUTION_REPRODUCIBILITY.name_normalisation, 'exact_for_name_exact_branch');
 });

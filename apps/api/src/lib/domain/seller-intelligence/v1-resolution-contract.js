@@ -92,13 +92,25 @@ export function isRealEntityKey(recordEntityId) {
 }
 
 /**
- * Name comparison, normalised the way the persisted data implies.
+ * THE NORMALISATION, PINNED EXACTLY — uppercase, strip everything non-alpha.
  *
- * Raw equality of the winner's `full_name` against `owner_1_name` holds on
- * 99.08% of `name_exact_vendor` rows; stripping non-alphabetic characters and
- * casing closes most of the remainder, which is punctuation and middle
- * initials. The residual is NOT claimed to be solved — see
- * RESOLUTION_REPRODUCIBILITY.name_normalisation.
+ * Measured per branch, which is what resolved the earlier "~0.92% residual":
+ * that figure conflated two branches with different contracts.
+ *
+ *   name_exact        977 /   977  = 100.000%   <- the branch the cohort uses
+ *   name_exact_vendor 53,368 / 53,413 = 99.916%
+ *
+ * For `name_exact` there is NO residual and no further rule is needed: no
+ * suffix stripping, no middle-initial handling, nothing. Adding a suffix rule
+ * changes nothing on that branch (977/977 either way), so it is deliberately
+ * absent rather than carried "just in case".
+ *
+ * The 45 `name_exact_vendor` exceptions are not normalisation failures. 33 are
+ * generational suffixes (a "Sr." matched against a "Jr", so the producer was
+ * clearly ignoring them) and the remaining 12 are genuinely different names —
+ * "Dale R Irvin" against "Donald A Irvin". On that branch the VENDOR ASSERTION
+ * is authoritative and the name never had to match, which is exactly why the
+ * cohort cannot borrow it.
  */
 export function normaliseOwnerName(name) {
   return String(name ?? '').replace(/[^A-Za-z]/g, '').toUpperCase();
@@ -193,11 +205,53 @@ export const COHORT_VENDOR_FREE_REACH = Object.freeze({
  * every candidate count past 1 and forced "ambiguous". Corrected:
  */
 export const RESOLUTION_PARITY = Object.freeze({
-  sampled: 12000,
-  name_exact_vendor: { n: 9664, method_and_key_pct: 95.47, predicted_ambiguous: 432 },
-  vendor_asserted: { n: 2316, method_pct: 99.01, method_and_key_pct: 87.09 },
-  name_exact: { n: 20, method_and_key_pct: 95.00 },
-  unrecovered: 'tie-break among multiple qualifying candidates',
+  sampled: 60000,
+  entity_gate: { predicted: 17606, agreed_entity_owned: 17605 },
+  name_exact_vendor: { predicted: 17800, correct: 17734, silent_wrong: 7 },
+  vendor_asserted: { predicted: 10192, correct: 9493, silent_wrong: 9 },
+  // The branch the cohort actually uses. Zero silent misassignments.
+  name_exact: { predicted: 216, correct: 202, silent_wrong: 0 },
+  refused_ambiguous: 12291,
+  refused_unresolved: 1895,
+  note: 'ties fail closed; no tie-break rule was accepted',
+});
+
+/**
+ * WHY THERE IS NO TIE-BREAK.
+ *
+ * Among properties with several equally-qualifying candidates, the best signal
+ * found was "most phones", at 92.2% — and a composite ordering
+ * (phones, emails, key) did slightly worse at 91.26%. Recency explained 45%,
+ * related-contact count 62%.
+ *
+ * None is deterministic, and ~8% silent misassignment is not a rounding error:
+ * it is a wrong human attached to a property with no signal that anything went
+ * wrong. So ties return `ambiguous` and pick nobody. A false unresolved costs a
+ * lead; a false identity costs the wrong person a text message.
+ */
+export const REJECTED_TIEBREAKS = Object.freeze({
+  max_phone_count: 0.922,
+  phones_then_emails_then_key: 0.9126,
+  related_contacts_count: 0.62,
+  provider_updated_at: 0.45,
+  accepted: null,
+});
+
+/**
+ * File-10 dry run, all 6,808, read-only. Manifest md5 43002ec0e483680241a3ffb95d8760e6.
+ */
+export const FILE10_DRY_RUN = Object.freeze({
+  total: 6808,
+  high_confidence_name_exact: 2962,
+  medium_confidence_vendor_asserted: 79,
+  confirmed_name_exact_vendor: 66,
+  ambiguous_tie_failed_closed: 60,
+  unresolved_no_qualifying_branch: 3641,
+  entity_owned: 0,
+  safely_resolved: 3107,
+  best_contact_derivable: 3104,
+  callable_phone: 3071,
+  manifest_md5: '43002ec0e483680241a3ffb95d8760e6',
 });
 
 export const RESOLUTION_REPRODUCIBILITY = Object.freeze({
@@ -205,7 +259,7 @@ export const RESOLUTION_REPRODUCIBILITY = Object.freeze({
   branch_table: 'deterministic_recovered',        // method -> status/confidence, categorical
   candidate_selection: 'recovered_95pct_tiebreak_unsolved',
   vendor_branches: 'blocked_missing_vendor_assertion_fields',
-  name_normalisation: 'approximate_0_92pct_residual',
+  name_normalisation: 'exact_for_name_exact_branch',
   passthrough_fields: 'deterministic_recovered',
 });
 
@@ -216,6 +270,8 @@ export default {
   PASSTHROUGH_FIELDS,
   COHORT_VENDOR_FREE_REACH,
   RESOLUTION_PARITY,
+  REJECTED_TIEBREAKS,
+  FILE10_DRY_RUN,
   RESOLUTION_REPRODUCIBILITY,
   isRealEntityKey,
   normaliseOwnerName,
