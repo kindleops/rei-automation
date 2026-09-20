@@ -115,7 +115,17 @@ export async function buildEntityGraphLens(params = {}, deps = {}) {
       buckets: rows.map((row) => ({
         key: clean(row.bucket_key),
         label: clean(row.bucket_label) || clean(row.bucket_key),
-        count: Number(row.bucket_count),
+        /**
+         * `value` is the client's declared field name, and it is load-bearing:
+         * the chart treats a bucket without a numeric `value` as NOT YET
+         * COUNTED and renders "Counting state…" forever. Emitting `count`
+         * instead produced exactly that — a lens holding correct data that
+         * displayed as permanently pending.
+         *
+         * Its contract is also explicit that null means "not counted", never a
+         * guess, so a real zero must be a real zero.
+         */
+        value: Number(row.bucket_count),
         // Share of the COVERED population, which is the only denominator these
         // buckets actually sum to.
         share: covered > 0 ? Number(row.bucket_count) / covered : null,

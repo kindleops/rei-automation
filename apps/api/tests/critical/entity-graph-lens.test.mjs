@@ -31,6 +31,15 @@ const bucket = (key, count, covered, scope) => ({
   covered_total: covered, scope_total: scope,
 });
 
+test("BUCKETS USE THE CLIENT'S DECLARED FIELD NAME", async () => {
+  const lens = await buildEntityGraphLens({ tab: "properties" }, rpcReturning({
+    state: [bucket("FL", 34329, 169802, 169802)], property_type: [], market: [],
+  }));
+  const b = lens.dimensions.find((d) => d.key === "state").buckets[0];
+  assert.equal(typeof b.value, "number", "the chart reads `value`; anything else reads as uncounted");
+  assert.equal(b.value, 34329);
+});
+
 test("the universe total and bucket counts come straight from the aggregate", async () => {
   const lens = await buildEntityGraphLens({ tab: "properties" }, rpcReturning({
     state: [bucket("FL", 34329, 169802, 169802), bucket("CA", 30470, 169802, 169802)],
@@ -40,7 +49,10 @@ test("the universe total and bucket counts come straight from the aggregate", as
 
   assert.equal(lens.total, 169802);
   const state = lens.dimensions.find((d) => d.key === "state");
-  assert.equal(state.buckets[0].count, 34329);
+  // `value` is the client's declared field name. Emitting `count` instead made
+  // the chart treat every bucket as not-yet-counted and render "Counting
+  // state…" forever over correct data.
+  assert.equal(state.buckets[0].value, 34329);
   assert.equal(state.buckets[0].label, "FL");
 });
 
