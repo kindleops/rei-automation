@@ -68,7 +68,8 @@
     "proof:mobile-shell-contract": "node scripts/proof/mobile/mobile-shell-contract-qa.mjs",
     "proof:comps-pan": "node scripts/proof/mobile/comp-intelligence-pan-stability.mjs",
     "proof:buyer-outreach": "node scripts/proof/mobile/buyer-outreach-operator-loop.mjs",
-    "proof:campaign-command": "node scripts/proof/mobile/campaign-command-mobile-proof.mjs"
+    "proof:campaign-command": "node scripts/proof/mobile/campaign-command-mobile-proof.mjs",
+    "proof:entity-graph": "node scripts/proof/mobile/entity-graph-universe-proof.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",
