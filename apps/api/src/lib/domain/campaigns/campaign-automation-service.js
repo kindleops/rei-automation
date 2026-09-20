@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
+import { evaluateCampaignResumeReadiness } from '@/lib/domain/campaigns/campaign-resume-readiness.js'
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
 import {
   INTERNAL_CANARY_SOURCE,
@@ -8480,7 +8481,24 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
     const readiness = await evaluateCampaignLaunchReadiness(campaignId, deps, {
       explicit_operator_action: true,
     })
-    if (readiness.launch_readiness === 'blocked') {
+    /**
+     * RESUMING IS NOT LAUNCHING.
+     *
+     * The readiness call above is the ACTIVATION validator, and it requires a
+     * target at `target_status = 'ready'`. Materializing a target into the
+     * queue moves it to `planned` — so a campaign whose recipients had all been
+     * queued had zero "ready" targets by construction and could never resume.
+     * Pause held the work correctly and nothing could release it; pause became
+     * one-way for exactly the campaigns most likely to be paused.
+     *
+     * Resume asks a different question: not "is there new work to start" but
+     * "is there work to continue". Existing non-terminal queue rows answer it.
+     * Every OTHER launch blocker still blocks — see the resume evaluator, which
+     * relaxes only the missing-recipients code and only when real pending work
+     * exists.
+     */
+    const resumeVerdict = await evaluateCampaignResumeReadiness(campaignId, readiness, deps)
+    if (!resumeVerdict.ok) {
       const summary = await buildCampaignCommandSummary(campaignId, deps)
       return {
         ok: false,
@@ -8495,6 +8513,7 @@ export async function applyCampaignLifecycleAction(campaignId, input = {}, deps 
         blockers: readiness.blockers || [],
         warnings: readiness.warnings || [],
         counts: summary.counts || {},
+        resume_reason: resumeVerdict.reason,
         message: 'Resume blocked — resolve readiness gates before going live.',
       }
     }
