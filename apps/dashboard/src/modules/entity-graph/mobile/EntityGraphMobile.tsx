@@ -623,8 +623,41 @@ export function EntityGraphMobile({
       setFilters((current) => ({ ...current, language: current.language === bucketKey ? '' : bucketKey }))
       return
     }
-    // Equity, value and signal dimensions have no matching browse filter, so
-    // tapping them explains rather than silently doing nothing.
+    /**
+     * GEOGRAPHY AND OWNERSHIP DRILL THE COHORT.
+     *
+     * These are the dimensions the Universe Lens actually returns —
+     * `state`, `market`, `city`, `county`, `property_type`, `owner_type` — and
+     * without them every tap on a real bucket fell through to the toast below
+     * and the lens was a read-only chart. Drilling from a distribution into the
+     * cohort it describes is the entire point of the Universe view.
+     *
+     * Each toggles, so tapping the active bucket clears it and the operator can
+     * climb back out without a separate control.
+     */
+    if (dimensionKey === 'state') {
+      setFilters((current) => ({ ...current, state: current.state === bucketKey ? '' : bucketKey }))
+      return
+    }
+    if (dimensionKey === 'market') {
+      setFilters((current) => ({ ...current, market: current.market === bucketKey ? '' : bucketKey }))
+      return
+    }
+    if (dimensionKey === 'city') {
+      setFilters((current) => ({ ...current, city: current.city === bucketKey ? '' : bucketKey }))
+      return
+    }
+    if (dimensionKey === 'property_type') {
+      setFilters((current) => ({ ...current, assetType: current.assetType === bucketKey ? '' : bucketKey }))
+      return
+    }
+    if (dimensionKey === 'owner_type') {
+      setFilters((current) => ({ ...current, ownerType: current.ownerType === bucketKey ? '' : bucketKey }))
+      return
+    }
+
+    // County has no browse filter to carry it, so tapping it explains rather
+    // than silently doing nothing.
     setToast('That dimension has no matching browse filter yet — use the cohort builder.')
   }, [])
 
