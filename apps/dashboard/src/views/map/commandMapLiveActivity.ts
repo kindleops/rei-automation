@@ -722,7 +722,17 @@ export const maybeBuildPinEvent = (
       actionLabel: 'Open Deal',
       badgeLabel: 'Hot Lead',
       scoreLabel: `Priority ${Math.round(pin.priority_score)}`,
-      valueLabel: Number.isFinite(pin.final_acquisition_score ?? NaN) ? `Acq ${Math.round(pin.final_acquisition_score as number)}` : undefined,
+      /*
+       * §21 — `final_acquisition_score` is the LEGACY SCREENING score, not
+       * Decision Engine acquisition truth. It sits on ~104k properties (0 for
+       * 88% of them, max 88) while the Decision Engine has ~163 rows, so
+       * labelling it "Acq" invited an operator to read a bulk screening number
+       * as a considered acquisition verdict. The number is kept — it is real
+       * and it ranks — but it now says what it is.
+       */
+      valueLabel: Number.isFinite(pin.final_acquisition_score ?? NaN)
+        ? `Screen ${Math.round(pin.final_acquisition_score as number)}`
+        : undefined,
     })
   }
 
