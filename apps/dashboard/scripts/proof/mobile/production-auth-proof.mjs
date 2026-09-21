@@ -82,8 +82,19 @@ try {
     body: JSON.stringify({ email: tempEmail, password: crypto.randomUUID() + 'Aa1!', email_confirm: true }),
   })
   tempId = (await created.json())?.id ?? null
-  const tempToken = await sessionFor(tempEmail)
-  const st = await apiStatus('cockpit/metrics/war-room', { Authorization: `Bearer ${tempToken}` })
+  const tempSession = await sessionFor(tempEmail)
+  /*
+   * Confirm the token is genuinely valid FIRST, against Supabase itself.
+   * Without this a token-minting hiccup returns 401 from our API and looks
+   * exactly like a refusal -- which is how this check passed for the wrong
+   * reason once already. A 401 here would mean "bad token"; only a 403 proves
+   * the ALLOWLIST is what turned a real session away.
+   */
+  const whoami = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: ANON, Authorization: `Bearer ${tempSession.access_token}` },
+  })
+  record('the non-operator token is a genuinely valid session', whoami.status === 200, `auth/v1/user=${whoami.status}`)
+  const st = await apiStatus('cockpit/metrics/war-room', { Authorization: `Bearer ${tempSession.access_token}` })
   record('a valid session that is NOT on the allowlist is refused', st === 403, `http=${st} (expect 403)`)
 } catch (e) {
   record('non-operator check ran', false, String(e.message).slice(0, 90))
@@ -158,12 +169,35 @@ if (opToken) {
   const afterReload = await p2.evaluate(() => !!document.querySelector('.nx-pinned-app-dock'))
   record('session survives a refresh', afterReload, '')
 
-  await p2.evaluate(() => { localStorage.clear(); sessionStorage.clear() })
-  await p2.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
-  await p2.waitForTimeout(7000)
-  const afterLogout = await p2.evaluate(() => !!document.querySelector('.nx-pinned-app-dock'))
-  await p2.screenshot({ path: path.join(OUT, 'after-logout.png') })
-  record('clearing the session removes console access', !afterLogout, '')
+  /*
+   * LOGOUT, TESTED WHERE IT IS DECIDABLE.
+   *
+   * The browser-only version of this could not work: ctx.addInitScript re-runs
+   * on EVERY navigation, so clearing storage and reloading simply re-injected
+   * the token and the console stayed up. That was the harness overwriting its
+   * own precondition, not the app refusing to log out. The real question is
+   * whether revoking a session removes access, so revoke it and re-test.
+   *
+   * scope=local revokes only the token this proof minted, leaving the
+   * operator's own browser sessions untouched.
+   */
+  const revoked = await fetch(`${SUPABASE_URL}/auth/v1/logout?scope=local`, {
+    method: 'POST',
+    headers: { apikey: ANON, Authorization: `Bearer ${opToken.access_token}` },
+  })
+  record('sign-out is accepted', revoked.ok || revoked.status === 204, `http=${revoked.status}`)
+  await new Promise((r) => setTimeout(r, 2000))
+  const afterLogoutApi = await apiStatus('cockpit/metrics/war-room', { Authorization: `Bearer ${opToken.access_token}` })
+  record('a signed-out session no longer reaches the API', afterLogoutApi === 401, `http=${afterLogoutApi}`)
+
+  const fresh = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const p3 = await fresh.newPage()
+  await p3.goto(`${BASE}/inbox`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+  await p3.waitForTimeout(7000)
+  const stillUp = await p3.evaluate(() => !!document.querySelector('.nx-pinned-app-dock'))
+  await p3.screenshot({ path: path.join(OUT, 'after-logout.png') })
+  record('a browser with no stored session gets no console', !stillUp, '')
+  await fresh.close()
 }
 
 await browser.close()
