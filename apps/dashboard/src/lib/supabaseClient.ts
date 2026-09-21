@@ -38,9 +38,24 @@ export const getSupabaseClient = (): SupabaseClient => {
   if (!cachedClient) {
     cachedClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
+        /*
+         * THE SESSION IS NOW THE ONLY CREDENTIAL, SO IT HAS TO SURVIVE.
+         *
+         * These were all false. That was invisible while the dashboard
+         * authenticated with a shipped secret and the auth gate was bypassed:
+         * nothing depended on the session, so nothing noticed it evaporating.
+         * With the gate enforced, `persistSession: false` means getSession()
+         * returns null on every load -- the operator would be bounced to the
+         * sign-in screen on each refresh, and autoRefreshToken: false would
+         * expire them mid-session.
+         *
+         * detectSessionInUrl matters because Google sign-in is enabled: the
+         * provider returns the session in the URL fragment, and without this
+         * the redirect lands back on the login screen having discarded it.
+         */
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
       },
     })
   }
