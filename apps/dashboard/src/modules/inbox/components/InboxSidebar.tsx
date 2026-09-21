@@ -1087,8 +1087,21 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
   const equityDisplay = formatEquityDisplay(equityAmount, equityPercent)
   const conditionDisplay = buildingCondition || '—'
   const showMetadata = contextLine && contextLine !== '—'
-  const cardSignalChips = prioritizeCardSignals(rowDisplayFlags, 3)
-  const flagMaxVisible = 3
+  /*
+   * §4 — TWO SIGNALS INLINE, AND AN HONEST COUNT OF THE REST.
+   *
+   * This asked prioritizeCardSignals for 3 and then told the badge row its
+   * maximum was also 3, so `overflow` was always zero: the "+N" affordance
+   * could never render and any further signal was dropped with no trace. A
+   * card showing three of six signals while implying there are three is worse
+   * than showing two and admitting to four.
+   *
+   * Prioritisation already ranks by actionability (preforeclosure and tax
+   * delinquency ahead of "long term owner"), so the two that survive are the
+   * two worth acting on. The full set still travels in the row's aria-label.
+   */
+  const cardSignalChips = prioritizeCardSignals(rowDisplayFlags, 6)
+  const flagMaxVisible = 2
   const flagDensity = inboxMode === 'full100' ? 'rich' : 'compact'
 
   return (

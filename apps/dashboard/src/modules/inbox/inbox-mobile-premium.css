@@ -900,15 +900,118 @@ html.is-mobile-layout .nx-row25__zone--media {
   width: 44px; height: 44px;
   border-radius: 9px;
 }
-html.is-mobile-layout .nx-row25__name { font-size: 13.5px; }
-html.is-mobile-layout .nx-row25__time { font-size: 10.5px; }
-html.is-mobile-layout .nx-row25__addr { font-size: 11.5px; }
-html.is-mobile-layout .nx-row25__preview {
-  font-size: 12px;
-  line-height: 1.3;
-  -webkit-line-clamp: 1;
+/* ══════════════════════════════════════════════════════════════════════════
+   §3/§4 — THE THREAD CARD'S FOUR LEVELS
+
+   MEASURED BEFORE REWRITING. One card carried ELEVEN text nodes at NINE font
+   sizes (13, 12, 11.5, 11, 10.5, 10, 9.5, 9, 8.5px) and SEVEN of them were
+   bold. The block this replaces was the reason: sensible sizes are set ~500
+   lines above, and this position shrank every one of them again and clamped
+   the preview to a single line.
+
+   The detail that settled the hierarchy: the seller's actual reply rendered at
+   11.5px while "$297K" rendered at 12px. The message the operator opens the
+   Inbox to read was smaller than the metadata beside it. An operator cannot
+   scan "who replied / what happened" in a second when what happened is the
+   quietest thing on the row.
+
+   Four sizes now, from the shell's locked scale, one per level:
+     L1 identity   card-title 15px, the only semibold in the row
+     L2 what happened  body 14px, two lines, the largest text after the name
+     L3 property   meta 12px, one muted line, regular weight
+     L4 signal     micro 11px, at most two chips
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* L1 — WHO. The one element allowed to be semibold when read. */
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__name,
+html.is-mobile-layout .nx-row25__name {
+  font-size: var(--nx-t-card-title, 15px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--nx-ib-text);
 }
-html.is-mobile-layout .nx-row25__zone--conversation { gap: 1px; }
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__name,
+html.is-mobile-layout .nx-row25.is-unread .nx-row25__name { font-weight: 700; }
+
+/* L1 — WHEN. Present, never competing. */
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__time,
+html.is-mobile-layout .nx-row25__time {
+  font-size: var(--nx-t-meta, 12px);
+  font-weight: 500;
+  color: var(--nx-ib-text-3);
+}
+
+/* L2 — WHAT HAPPENED. The reason the row exists, so it gets the room: two
+   lines, body size, and real contrast. Read threads sit one step back rather
+   than disappearing, so the list still scans when nothing is unread. */
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__preview,
+html.is-mobile-layout .nx-row25__preview {
+  font-size: var(--nx-t-body, 14px);
+  line-height: var(--nx-lh-body, 1.45);
+  font-weight: 400;
+  color: var(--nx-ib-text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25.is-unread .nx-row25__preview,
+html.is-mobile-layout .nx-row25.is-unread .nx-row25__preview {
+  color: var(--nx-ib-text);
+  font-weight: 500;
+}
+
+/* L3 — WHERE. One muted line. Regular weight: an address is orientation, not
+   a headline, and it was bold enough to compete with the name. */
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__addr,
+html.is-mobile-layout .nx-row25__addr {
+  font-size: var(--nx-t-meta, 12px);
+  font-weight: 400;
+  color: var(--nx-ib-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* L3 — the property facts ride the same muted line as the address rather than
+   shouting in three different bold sizes (9px type / 12px value / 10px equity,
+   all w700). Value keeps a touch more weight because it is the one number an
+   operator actually decides on. */
+html.is-mobile-layout .nx-row25__footer .nx-card-assetline__type,
+html.is-mobile-layout .nx-row25__footer .nx-card-assetline__equity {
+  font-size: var(--nx-t-meta, 12px);
+  font-weight: 500;
+  color: var(--nx-ib-text-3);
+}
+html.is-mobile-layout .nx-row25__footer .nx-card-assetline__value {
+  font-size: var(--nx-t-meta, 12px);
+  font-weight: 600;
+  color: var(--nx-ib-text-2);
+}
+
+/* L2 companion — the communication state. This is "what happened" in one
+   phrase, so it keeps its tone colour but stops out-weighting the message. */
+html.is-mobile-layout .nx-row25__footer .nx-card-state__label {
+  font-size: var(--nx-t-meta, 12px);
+  font-weight: 600;
+}
+
+/* L4 — SIGNAL. Micro floor, and only where a chip is genuinely a signal. */
+html.is-mobile-layout .nx-row25 .nx-flag-badge,
+html.is-mobile-layout .nx-row25 .nx-prop-flags__badge {
+  height: 20px;
+  font-size: var(--nx-t-micro, 11px);
+  font-weight: 600;
+  padding: 0 7px;
+}
+
+/* Breathing room between levels. 1px made four levels read as one block. */
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__zone--conversation,
+html.is-mobile-layout .nx-row25__zone--conversation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-1, 4px);
+}
 /* The receipt row only earns its height when it actually says something. */
 html.is-mobile-layout .nx-row25__footer:empty { display: none; }
 html.is-mobile-layout .nx-row25 .nx-flag-badge { height: 16px; font-size: 9.5px; padding: 0 5px; }
@@ -1400,4 +1503,25 @@ html.is-mobile-layout {
   .nx-row25__footer .nx-card-assetline__market {
     display: none;
   }
+}
+
+/* §3/§6 — the stage badge is an L1 attention signal ("S2"), and it was the last
+   sub-floor text on the card at 9.5px in a 17px pill. Two characters nobody can
+   read is not a signal. Raised to the micro floor, mobile only; the desktop
+   rail keeps its own size. */
+html.is-mobile-layout .nx-row25 .nx-card-stage {
+  height: 20px;
+  padding: 0 7px;
+  font-size: var(--nx-t-micro, 11px);
+  font-weight: 700;
+}
+
+/* §4/§9 — A CHIP MUST BE ABLE TO SAY ITS OWN NAME.
+   The 92px cap was sized for three 8.5px chips. At two chips and the 11px
+   floor it clipped the labels themselves: "Tired Landlord" needs 113px and
+   rendered "TIRED LANDLO", "Senior Owner" rendered "SENIOR OWNE". A truncated
+   signal is worse than an absent one -- it costs the same room and says less.
+   The row measures 333px; two chips plus the +N affordance fit comfortably. */
+html.is-mobile-layout .nx-row25 .nx-prop-flags__badge {
+  max-width: 148px;
 }
