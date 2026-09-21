@@ -3986,15 +3986,30 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         method: 'PATCH',
         body: JSON.stringify({ thread_key: writeKey.threadKey, patch: { is_read: true } }),
       }).then((res) => {
-        // Opening a thread marks it read, which moves it out of New Replies on
-        // the server. This write bypasses handleThreadAction, so the list
-        // consequence has to be applied here too -- otherwise the row stayed
-        // visible in New Replies until an unrelated refetch, which is exactly
-        // what it did. Only on confirmed success, and only for the bucket the
-        // read actually disqualifies it from.
+        /*
+         * §7 — READING IS NOT REPLYING, AND NEW REPLIES IS NOT "UNREAD".
+         *
+         * This used to hide the row from New Replies on a successful read,
+         * on the stated belief that "opening a thread marks it read, which
+         * moves it out of New Replies on the server". The canonical predicate
+         * says otherwise: in_new_replies (v_inbox_thread_state_buckets) has no
+         * is_read term at all. It means "the latest message is inbound and is
+         * newer than our last outbound" -- i.e. the seller is awaiting a
+         * REPLY. Production proves it: 5 of the first 100 rows the New Replies
+         * list returns are already read.
+         *
+         * So the row was being hidden from a set the server still counted it
+         * in. The badge never moved, and the next refetch brought the row
+         * back -- a disappearing-reappearing thread, and a count that
+         * disagreed with its own list.
+         *
+         * The read still happens and still matters: `unread` IS read-based, so
+         * refreshing the counts moves that badge. The row stays until the
+         * operator actually answers, which is the canonical rule and also the
+         * more useful one -- an unanswered seller should not leave the queue
+         * because someone glanced at it.
+         */
         if (!res?.ok) return
-        const id = thread?.id ?? threadKey
-        if (id && String(viewFilter) === 'new_replies') hideThreadLocally(String(id))
         void refreshInboxCounts()
       })
     } else {

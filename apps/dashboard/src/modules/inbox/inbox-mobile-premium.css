@@ -1525,3 +1525,22 @@ html.is-mobile-layout .nx-row25 .nx-card-stage {
 html.is-mobile-layout .nx-row25 .nx-prop-flags__badge {
   max-width: 148px;
 }
+
+/* §3 — WHEN THE FOOTER RUNS OUT OF ROOM, PROPERTY GIVES WAY, NOT THE STATE.
+   Measured: the state chip was `flex: 0 1 auto` (shrinkable) while the asset
+   line was `flex: 0 0 auto` (rigid), so on a row whose property text is long
+   -- "MULTIFAMILY · 2 UNITS $327K 82% EQ" -- the communication state clipped
+   to "Out..." while the property facts kept every pixel. That inverts the
+   hierarchy: "Outbound · Failed" is what the operator must act on; the asset
+   class is orientation. The state now holds its width and the asset line is
+   the one that truncates. */
+html.is-mobile-layout .nx-row25__footer .nx-card-state {
+  flex: 0 0 auto;
+}
+html.is-mobile-layout .nx-row25__footer .nx-card-assetline {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
