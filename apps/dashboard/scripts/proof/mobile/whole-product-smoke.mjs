@@ -56,7 +56,14 @@ const SURFACES = [
   { route: '/workflow-studio', name: 'Workflow Studio', sig: /workflow|orchestrator|dry run/i, mount: '.is-view-workflow_studio' },
   { route: '/queue', name: 'Queue/Outbound', sig: /queue/i, mount: '.is-view-queue' },
   { route: '/buyer-match', name: 'Buyer Match', sig: /buyer/i, mount: '.is-view-buyer_match' },
-  { route: '/email-command', name: 'Email Command', sig: /email/i, mount: '.is-view-email' },
+  /*
+   * The signature is `mail|compose`, not `email`: the surface's visible text is
+   * "Mail · Records · Compose · New Replies · Needs Review …" and never renders
+   * the literal word "email". `/email/i` therefore failed on all six cells
+   * while `.is-view-email` mounted cleanly — the router was right and the
+   * assertion was looking for a word the product does not say.
+   */
+  { route: '/email-command', name: 'Email Command', sig: /mail|compose/i, mount: '.is-view-email' },
   { route: '/calendar', name: 'Calendar', sig: /month|week|agenda|timeline/i, mount: '.nx-premium-inbox, .nx-inbox' },
   { route: '/analytics', name: 'Analytics', sig: /kpi|sent|delivered|repl/i, mount: '.nx-premium-inbox, .nx-inbox' },
   { route: '/closing-desk', name: 'Closing Desk', sig: /closing desk/i, mount: '.is-view-closing_desk' },
@@ -105,7 +112,24 @@ const rows = []
  */
 const MIN_APP_CHARS = 40
 
-async function settle(page, { timeout = 60_000 } = {}) {
+async function settle(page, { timeout = 60_000, mount = null } = {}) {
+  /*
+   * WAIT FOR THE ROUTER'S MOUNT CLASS FIRST.
+   *
+   * Text-stability alone accepts a stable LOADING screen. /queue renders
+   * "Loading Queue — fetching live intelligence", which is 58 stable
+   * characters: past the 40-char floor, identical on three samples, settled.
+   * The run then failed §3/§5 because `.is-view-queue` had not appeared yet,
+   * and reported a mounted product as a broken route on 5 of 6 cells. A direct
+   * probe with a longer wait showed the real surface every time — 2,174 chars
+   * of live queue data.
+   *
+   * So when a route declares its mount class, that class is the precondition;
+   * text stability only decides WHEN the mounted view stopped changing.
+   */
+  if (mount) {
+    await page.waitForSelector(mount, { timeout: Math.min(timeout, 45_000) }).catch(() => {})
+  }
   const t0 = Date.now()
   let last = -1
   let stable = 0
@@ -178,7 +202,7 @@ async function runCell(width, theme) {
       continue
     }
 
-    const st = await settle(page)
+    const st = await settle(page, { mount: s.mount })
 
     const p = await page.evaluate(({ demoMarkers, mount }) => {
       const txt = (document.body.innerText || '').replace(/\s+/g, ' ')
