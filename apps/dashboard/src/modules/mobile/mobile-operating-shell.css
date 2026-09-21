@@ -45,6 +45,79 @@
   --nx-mobile-chrome-bottom: calc(
     var(--nx-pinned-dock-collapsed, 62px) + var(--nx-mobile-safe-bottom) + 6px
   );
+
+  /* ── §6 THE MOBILE TYPE SCALE ────────────────────────────────────────────
+     Seven roles, and nothing between them.
+
+     Measured before writing these: a single mobile screen painted up to ELEVEN
+     distinct font sizes -- 8, 8.5, 8.64, 9, 10, 10.5, 11, 11.5, 12, 12.5, 13 --
+     and the Inbox alone rendered 257 text nodes below 11px. That is not a scale,
+     it is the residue of shrinking desktop content until it fit. 8.64px is not a
+     decision anyone made; it is 12px scaled by an inherited transform.
+
+     The floor is 11px and --nx-t-micro is the ONLY role allowed to reach it.
+     Micro-labels are meant to be exceptional; if a surface needs several, the
+     answer is progressive disclosure, not a smaller size.
+
+     Sizes are px, not rem: this shell is pinned to a phone viewport and a user's
+     root-font preference already rides on the browser zoom we honour elsewhere.
+     ───────────────────────────────────────────────────────────────────────── */
+  --nx-t-screen-title: 22px;   /* the name of the surface you are on */
+  --nx-t-section: 17px;        /* a titled region within a surface */
+  --nx-t-card-title: 15px;     /* the subject of a card or row */
+  --nx-t-value: 20px;          /* a primary number worth reading first */
+  --nx-t-body: 14px;           /* prose, message content, descriptions */
+  --nx-t-meta: 12px;           /* secondary metadata beside a subject */
+  --nx-t-micro: 11px;          /* EXCEPTIONAL: legal, units, axis ticks */
+
+  --nx-lh-tight: 1.2;
+  --nx-lh-body: 1.45;
+
+  /* ── §7 THE MOBILE SPACING SCALE ─────────────────────────────────────────
+     A 4px base, because every rhythm already in the tree rounds to it. The
+     named roles below exist so a surface asks for "screen gutter" rather than
+     re-deciding 11px / 13px / 17px per app, which is what produced the current
+     drift. Prefer a role token over a raw step when one fits.
+     ───────────────────────────────────────────────────────────────────────── */
+  --nx-s-1: 4px;
+  --nx-s-2: 8px;
+  --nx-s-3: 12px;
+  --nx-s-4: 16px;
+  --nx-s-5: 20px;
+  --nx-s-6: 24px;
+  --nx-s-8: 32px;
+
+  --nx-gutter: var(--nx-s-4);        /* screen left/right */
+  --nx-card-pad: var(--nx-s-4);      /* inside a card */
+  --nx-section-gap: var(--nx-s-6);   /* between titled regions */
+  --nx-row-gap: var(--nx-s-3);       /* between sibling rows/cards */
+  --nx-chip-gap: var(--nx-s-2);      /* between chips in a wrap */
+  --nx-sheet-pad: var(--nx-s-4);     /* inside a bottom sheet */
+
+  /* ── §17 THE MINIMUM TOUCH TARGET ────────────────────────────────────────
+     44px, expressed once. Note this is the TARGET, not the paint: several shell
+     controls deliberately paint smaller and pay the target back with an ::after.
+     Measure with elementFromPoint, never by reading the painted box -- and check
+     horizontally too. The top bar's 38px glyphs each had a 44px ::after and
+     still mis-resolved, because adjacent targets overlapped and the neighbour
+     won the point.
+     ───────────────────────────────────────────────────────────────────────── */
+  --nx-touch-min: 44px;
+
+  /* ── §10 THE AMBIENT ACCENT BUDGET ───────────────────────────────────────
+     Accent is a SIGNAL: selection, focus, active state, intelligence, primary
+     action. It was also being spent on permanent decoration -- the top bar and
+     the bottom dock each painted an accent radial bloom at 0.14 plus an accent
+     rim line at ~0.45, on every route, in every theme. With the same colour
+     glowing constantly at both edges of the screen, accent could no longer mean
+     "look here", because it was already everywhere.
+
+     These two tokens are the ambient budget, deliberately low. They are NOT
+     used by selected/active/focus states, which keep their full strength --
+     that separation is the whole point. Raising these re-introduces the bloom.
+     ───────────────────────────────────────────────────────────────────────── */
+  --nx-ambient-accent: 0.05;  /* was 0.14 as a literal, twice */
+  --nx-ambient-rim: 0.16;     /* was 0.45/0.42 as literals */
 }
 
 /* The DEV runtime-identity banner is fixed to the bottom edge at z-index 9999, which
@@ -197,7 +270,7 @@ html.is-mobile-layout {
     box-shadow:
       0 10px 36px rgba(0, 0, 0, 0.42),
       inset 0 1px 0 rgba(255, 255, 255, 0.09),
-      inset 0 -1px 0 rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.12);
+      inset 0 -1px 0 rgba(var(--nexus-accent-rgb, 94, 234, 212), var(--nx-ambient-rim, 0.16));
   }
 
   .nx-mobile-command-dock__sheen {
@@ -205,7 +278,7 @@ html.is-mobile-layout {
     position: absolute;
     inset: 0;
     background:
-      radial-gradient(130% 90% at 50% -30%, rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.14), transparent 58%),
+      radial-gradient(130% 90% at 50% -30%, rgba(var(--nexus-accent-rgb, 94, 234, 212), var(--nx-ambient-accent, 0.05)), transparent 58%),
       linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, transparent 42%);
     opacity: 0.95;
   }
@@ -220,7 +293,7 @@ html.is-mobile-layout {
     background: linear-gradient(
       90deg,
       transparent,
-      rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.45) 50%,
+      rgba(var(--nexus-accent-rgb, 94, 234, 212), var(--nx-ambient-rim, 0.16)) 50%,
       transparent
     );
     opacity: 0.7;
@@ -478,13 +551,17 @@ html.is-mobile-layout {
     position: absolute;
     top: 5px;
     right: 5px;
-    min-width: 14px;
-    height: 14px;
-    padding: 0 3px;
+    /* §6 — was 14px tall carrying 8px text, which is below the shell's own
+       floor and unreadable at arm's length. A count nobody can read is not a
+       count. Grown just enough to hold the micro size; still the smallest
+       element in the bar, so it reads as a badge and not as a control. */
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
     border-radius: 999px;
     background: linear-gradient(180deg, #f87171 0%, #ef4444 100%);
     color: #fff;
-    font-size: 8px;
+    font-size: var(--nx-t-micro, 11px);
     font-weight: 800;
     letter-spacing: -0.02em;
     display: grid;
@@ -3057,4 +3134,194 @@ html.is-mobile-layout {
 
 [data-nexus-theme='light'] {
   .nx-mobile-command-dock__divider { background: rgba(15, 23, 42, 0.16); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §1/§12 — THE OVERFLOW / ACTION SHEET
+   The destination for everything displaced from the global header. Rows are
+   full-width and 56px tall: there is no horizontal neighbour to collide with,
+   so unlike the 38px glyph row it replaced, every target resolves to itself.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-mobile-overflow__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-section-gap);
+  padding-bottom: calc(var(--nx-mobile-safe-bottom, 0px) + var(--nx-s-2));
+}
+
+.nx-mobile-overflow__group-label {
+  margin: 0 0 var(--nx-s-2);
+  font-size: var(--nx-t-micro);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.nx-mobile-overflow__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-1);
+}
+
+.nx-mobile-overflow__row {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--nx-s-2) var(--nx-s-3);
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Colour only. A transform here would fight the sheet's own entry animation. */
+  transition: background-color 140ms ease;
+}
+
+.nx-mobile-overflow__row:active { background: rgba(127, 127, 127, 0.16); }
+.nx-mobile-overflow__row.is-active { background: rgba(127, 127, 127, 0.14); }
+
+.nx-mobile-overflow__row[disabled] {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.nx-mobile-overflow__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--nx-text-secondary, currentColor);
+}
+
+/* §9 — tone carries MEANING, and is the only colour in the row. The label stays
+   default-coloured so a warning state reads as one signal, not two. */
+.nx-mobile-overflow__row.is-positive .nx-mobile-overflow__icon { color: var(--nx-ok, #34d399); }
+.nx-mobile-overflow__row.is-warning .nx-mobile-overflow__icon { color: var(--nx-warn, #fbbf24); }
+.nx-mobile-overflow__row.is-critical .nx-mobile-overflow__icon { color: var(--nx-bad, #f87171); }
+.nx-mobile-overflow__row.is-destructive .nx-mobile-overflow__label { color: var(--nx-bad, #f87171); }
+
+.nx-mobile-overflow__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.nx-mobile-overflow__label {
+  font-size: var(--nx-t-card-title);
+  font-weight: 600;
+  line-height: var(--nx-lh-tight);
+  color: var(--nx-text-primary, inherit);
+}
+
+.nx-mobile-overflow__detail {
+  font-size: var(--nx-t-meta);
+  line-height: var(--nx-lh-tight);
+  color: var(--nx-text-muted, rgba(255, 255, 255, 0.55));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-mobile-overflow__meta {
+  flex: 0 0 auto;
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.18);
+  font-size: var(--nx-t-meta);
+  font-weight: 600;
+  text-align: center;
+  color: var(--nx-text-secondary, inherit);
+}
+
+/* The trailing overflow control is a fixed slot on every route, so it must not
+   shrink away when the identity chip claims its maximum width. */
+.nx-mobile-command-dock__btn--overflow { flex: 0 0 auto; }
+
+/* §9 — the overflow's "something in here" indicator. Deliberately NOT a red
+   count pill: it sits next to the notification badge, and two competing
+   counters in adjacent 38px slots read as noise rather than priority. */
+.nx-mobile-command-dock__dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.95);
+}
+
+/* §6 — the overflow sheet's own rows honour the type scale even where a host
+   stylesheet sets a tighter default button height. */
+.nx-mobile-overflow__row { min-height: 56px; }
+
+/* §11/§13 — THE SHEET'S STICKY ACTION FOOTER.
+   Pinned above the home indicator while the body scrolls beneath it, so a long
+   filter list never buries its own Apply. Only painted when a caller supplies
+   actions; a sheet with none keeps the body flush to the safe area. */
+.nx-mobile-sheet__footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: var(--nx-s-2);
+  align-items: center;
+  padding: var(--nx-s-3) var(--nx-sheet-pad)
+           calc(var(--nx-s-3) + var(--nx-mobile-safe-bottom, 0px));
+  margin-top: auto;
+  border-top: 1px solid rgba(127, 127, 127, 0.18);
+  /* Matches the sheet's own surface so the scrolling body does not show through. */
+  background: inherit;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.nx-mobile-sheet__body.has-footer {
+  /* The footer owns the bottom inset once present; paying it twice left a gap. */
+  padding-bottom: var(--nx-s-2);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §15 — SEGMENTED CONTROLS / TABS ON A PHONE
+   The shared primitive paints a 26px pill with 10px text, which is sized for a
+   desktop toolbar. On a phone that is the "microscopic five-tab bar" §15 names.
+
+   Scoped to the mobile shell so the desktop control is untouched, and the paint
+   is grown only to 34px rather than a blanket 44px: a tab strip inflated to
+   44px of solid pill eats a quarter of the viewport, and the tax lands on every
+   surface that carries one. The remaining target is paid back with ::after,
+   which is the pattern the top bar already uses.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-shell-segmented__btn {
+  position: relative;
+  min-height: 34px;
+  padding: 0 var(--nx-s-3);
+  font-size: var(--nx-t-meta, 12px);
+}
+
+html.is-mobile-layout .nx-shell-segmented__btn::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--nx-touch-min, 44px);
+  transform: translateY(-50%);
+}
+
+/* §9 — a chip is a control or a state, never decoration. Mobile chips get a
+   readable size and a real target for the same reason. */
+html.is-mobile-layout .nx-shell-filter-chip,
+html.is-mobile-layout .nx-filter-chip {
+  min-height: 32px;
+  padding: 0 var(--nx-s-3);
+  font-size: var(--nx-t-meta, 12px);
 }

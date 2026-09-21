@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
+import { useBackHandler } from '../../domain/navigation/useBackHandler'
 import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
@@ -3917,6 +3918,26 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setMobileIntelOpen(false)
     setMobileSidebarOpen(false)
   }, [clearThreadSelection])
+
+  /*
+   * §3 — REGISTER THE CANONICAL BACK.
+   *
+   * An open conversation is nested state, not a route: the path stays /inbox,
+   * so the global bar's route-history fallback saw nowhere to go and kept
+   * rendering the identity chip. The most-used nested view in the product had
+   * no Back affordance at all in the shared header.
+   *
+   * The dismissal logic already existed and was already correct; it was simply
+   * never published to the back stack. This is the one line that lets the
+   * shared control drive it, so Back in a conversation behaves exactly as it
+   * does in a comp detail rather than being a second, app-shaped idea.
+   */
+  useBackHandler(
+    isMobile && mobileThreadOpen,
+    'inbox:thread',
+    'Inbox',
+    handleMobileBack,
+  )
 
   const handleSelect = useCallback((id: string) => {
     setPreviewContext(null)

@@ -615,6 +615,24 @@ function resolveDevGitIdentity() {
   return { commitSha, branch, worktreeId }
 }
 
+/**
+ * THE DEV MIRROR OF THE PRODUCTION WORKER.
+ *
+ * In production the browser holds no backend credential: it authenticates as a
+ * user and infra/cloudflare/worker/index.ts attaches the privileged secret
+ * server-side while proxying /api/*. This proxy is the local equivalent, and it
+ * exists so that developing against a real API never requires putting that
+ * secret back into a VITE_* variable where Vite would inline it into the bundle.
+ *
+ * It previously attached the header for map tiles ONLY, because every other
+ * call carried a secret the browser had shipped with. Once the browser stopped
+ * sending one, that narrow condition meant every other dev API call 401'd. The
+ * header is now attached to everything this proxy forwards -- which is the same
+ * rule the worker follows, and the reason both sides can stay honest.
+ *
+ * A caller-supplied header is never overwritten, so an explicit credential in a
+ * script still wins.
+ */
 function createDevApiProxy(target: string, env: Record<string, string>): ProxyOptions {
   const opsSecret = (env.VITE_OPS_DASHBOARD_SECRET || env.OPS_DASHBOARD_SECRET || '').trim()
   return {
@@ -622,11 +640,10 @@ function createDevApiProxy(target: string, env: Record<string, string>): ProxyOp
     changeOrigin: true,
     secure: false,
     configure(proxy) {
-      proxy.on('proxyReq', (proxyReq, req) => {
-        const request = req as { url?: string }
+      proxy.on('proxyReq', (proxyReq) => {
         const outbound = proxyReq as { getHeader: (name: string) => string | undefined; setHeader: (name: string, value: string) => void }
         if (!opsSecret) return
-        if (request.url?.includes('/ops/map/tiles/') && !outbound.getHeader('x-ops-dashboard-secret')) {
+        if (!outbound.getHeader('x-ops-dashboard-secret')) {
           outbound.setHeader('x-ops-dashboard-secret', opsSecret)
         }
       })
@@ -787,52 +804,20 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       headers: mode === 'development' ? { 'Cache-Control': 'no-store' } : undefined,
       proxy: {
-        '/api/cockpit': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
-        '/api/intel': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
-        '/api/ops': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
+        '/api/cockpit': createDevApiProxy(backendProxyTarget, env),
+        '/api/intel': createDevApiProxy(backendProxyTarget, env),
+        '/api/ops': createDevApiProxy(backendProxyTarget, env),
         '/api/internal': createDevApiProxy(backendProxyTarget, env),
-        '/api/workflows': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
+        '/api/workflows': createDevApiProxy(backendProxyTarget, env),
       }
     },
     preview: {
       proxy: {
-        '/api/cockpit': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
-        '/api/intel': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
-        '/api/ops': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
+        '/api/cockpit': createDevApiProxy(backendProxyTarget, env),
+        '/api/intel': createDevApiProxy(backendProxyTarget, env),
+        '/api/ops': createDevApiProxy(backendProxyTarget, env),
         '/api/internal': createDevApiProxy(backendProxyTarget, env),
-        '/api/workflows': {
-          target: backendProxyTarget,
-          changeOrigin: true,
-          secure: false,
-        },
+        '/api/workflows': createDevApiProxy(backendProxyTarget, env),
       },
     },
     resolve: {

@@ -7,12 +7,28 @@ import { clearActiveContext, readActiveContext, type ActiveContext } from '../..
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { goBack } from '../../domain/navigation/back-stack'
 import { useBackTarget } from '../../domain/navigation/useBackHandler'
+import { MobileOverflowSheet } from './MobileOverflowSheet'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
 const DOCK_ICON = 15
 const DOCK_ICON_HUB = 16
+
+/** Says what the queue state MEANS, which a status glyph alone never did. */
+const QUEUE_DETAIL: Record<string, string> = {
+  healthy: 'Processor healthy',
+  warning: 'Processor degraded',
+  critical: 'Processor critical',
+  unknown: 'Status not yet resolved',
+}
+
+const QUEUE_TONE: Record<string, 'positive' | 'warning' | 'critical' | 'default'> = {
+  healthy: 'positive',
+  warning: 'warning',
+  critical: 'critical',
+  unknown: 'default',
+}
 
 export type DockSurface =
   | 'kpi'
@@ -83,6 +99,7 @@ export const MobileCommandDock = ({
    * changes, because a contextual action can publish an identity for a context
    * the URL already carried.
    */
+  const [overflowOpen, setOverflowOpen] = useState(false)
   const [context, setContext] = useState<ActiveContext | null>(null)
   useEffect(() => {
     const sync = () => setContext(readActiveContext())
@@ -92,6 +109,10 @@ export const MobileCommandDock = ({
     // `routeLocation`, not `routePath`: clearing a context changes only the
     // query, and the path-only hook reports no change for that.
   }, [routeLocation])
+
+  /* Counts that used to ride on the displaced buttons must still be visible
+     from the closed bar, or moving them into the sheet would hide work. */
+  const overflowBadge = (showTasks ? tasksCount : 0)
 
   const toggle = (surface: Exclude<DockSurface, null>) => {
     onSurfaceChange(activeSurface === surface ? null : surface)
@@ -200,26 +221,6 @@ export const MobileCommandDock = ({
           type="button"
           className={cls(
             'nx-mobile-command-dock__btn',
-            'nx-mobile-command-dock__btn--queue',
-            `is-${queueStatus}`,
-            activeSurface === 'queue' && 'is-active',
-          )}
-          aria-label="Queue operational intelligence"
-          aria-expanded={activeSurface === 'queue'}
-          onClick={() => toggle('queue')}
-        >
-          <DockGlyph>
-            <span className={cls('nx-mobile-command-dock__queue', `is-${queueStatus}`)}>
-              <Icon name={queueIcon} size={DOCK_ICON} strokeWidth={1.55} />
-              {queueStatus === 'healthy' ? <i className="nx-mobile-command-dock__queue-dot" /> : null}
-            </span>
-          </DockGlyph>
-        </button>
-
-        <button
-          type="button"
-          className={cls(
-            'nx-mobile-command-dock__btn',
             (searchActive || activeSurface === 'search') && 'is-active',
           )}
           aria-label="Universal search"
@@ -251,57 +252,104 @@ export const MobileCommandDock = ({
         </button>
 
         {/*
-          §5 — APPLICATION-LOCAL CONTROLS, AFTER THE GLOBALS AND MARKED AS SUCH.
+          §1 — ONE OVERFLOW, ALWAYS IN THE SAME PLACE.
 
-          The bar carried four controls on some routes, five on others and six on
-          others, because these two were injected into the GLOBAL shell by
-          whichever host happened to be able to open them. The three globals
-          above (Queue, Search, Notifications) are now fixed in count, order and
-          position on every route; anything a single application contributes
-          trails them behind a hairline so the operator can see which is which.
+          Queue, Tasks and Live Activity used to sit out here as three more
+          38px glyphs, which is how the bar reached six and seven controls. At
+          390px those targets were close enough that their 44px hit areas
+          overlapped -- a probe 21px either side of a control's centre resolved
+          to its NEIGHBOUR -- so the density was not just visual clutter, it
+          made the bar mis-tappable. They are secondary utilities, which is
+          exactly what §1 says belongs behind an overflow.
+
+          The trailing slot is now fixed on every route, so the operator learns
+          one position rather than a different arrangement per application, and
+          an application contributing its own control no longer changes the
+          shape of the global bar.
         */}
-        {showTasks || showActivity ? <span className="nx-mobile-command-dock__divider" aria-hidden /> : null}
+        <button
+          type="button"
+          className={cls(
+            'nx-mobile-command-dock__btn',
+            'nx-mobile-command-dock__btn--overflow',
+            overflowOpen && 'is-active',
+          )}
+          aria-label={overflowBadge > 0 ? `More controls — ${overflowBadge} pending` : 'More controls'}
+          aria-expanded={overflowOpen}
+          aria-haspopup="dialog"
+          onClick={() => setOverflowOpen(true)}
+        >
+          <DockGlyph>
+            <Icon name="more" size={DOCK_ICON} strokeWidth={1.9} />
+          </DockGlyph>
+          {/*
+            §9 — A DOT, NOT A COUNT.
 
-        {showTasks ? (
-          <button
-            type="button"
-            className={cls('nx-mobile-command-dock__btn', activeSurface === 'tasks' && 'is-active')}
-            aria-label="Tasks"
-            aria-expanded={activeSurface === 'tasks'}
-            onClick={() => toggle('tasks')}
-          >
-            <DockGlyph>
-              <Icon name="check" size={DOCK_ICON} strokeWidth={1.55} />
-            </DockGlyph>
-            {tasksCount > 0 ? (
-              <span className="nx-mobile-command-dock__badge">{tasksCount > 99 ? '99+' : tasksCount}</span>
-            ) : null}
-          </button>
-        ) : null}
-
-        {showActivity ? (
-          <button
-            type="button"
-            className={cls(
-              'nx-mobile-command-dock__btn',
-              (activityActive || activeSurface === 'activity') && 'is-active',
-            )}
-            aria-label="Live activity"
-            aria-expanded={activityActive || activeSurface === 'activity'}
-            onClick={() => toggle('activity')}
-          >
-            <DockGlyph>
-              {/* `zap` rather than `activity`: the KPI orb already renders a
-                  waveform, and two identical squiggles in a seven-slot bar are
-                  indistinguishable at 15px. */}
-              <Icon name="zap" size={DOCK_ICON} strokeWidth={1.55} />
-            </DockGlyph>
-          </button>
-        ) : null}
+            This first shipped as a numeric badge and immediately sat beside the
+            notification badge as a second identical red "99+" pill. Two loud
+            counters competing in adjacent 38px slots is worse noise than the
+            buttons they replaced, and neither one read as more urgent than the
+            other. The dot says "there is something in here" without pretending
+            to outrank notifications; the exact figure is one tap away on the
+            Tasks row, which is where a number is actually legible.
+          */}
+          {overflowBadge > 0 ? (
+            <span className="nx-mobile-command-dock__dot" aria-hidden />
+          ) : null}
+        </button>
 
       </div>
     </nav>
   )
 
-  return typeof document !== 'undefined' ? createPortal(dock, document.body) : null
+  return typeof document !== 'undefined'
+    ? createPortal(
+      <>
+        {dock}
+        <MobileOverflowSheet
+          open={overflowOpen}
+          onClose={() => setOverflowOpen(false)}
+          subtitle={activeApp.label}
+          groups={[
+            {
+              id: 'operations',
+              label: 'Operations',
+              actions: [
+                {
+                  id: 'queue',
+                  label: 'Queue',
+                  detail: QUEUE_DETAIL[queueStatus],
+                  icon: queueIcon,
+                  tone: QUEUE_TONE[queueStatus],
+                  active: activeSurface === 'queue',
+                  onSelect: () => toggle('queue'),
+                },
+                ...(showTasks
+                  ? [{
+                    id: 'tasks',
+                    label: 'Tasks',
+                    icon: 'check' as const,
+                    meta: tasksCount > 0 ? tasksCount : undefined,
+                    active: activeSurface === 'tasks',
+                    onSelect: () => toggle('tasks'),
+                  }]
+                  : []),
+                ...(showActivity
+                  ? [{
+                    id: 'activity',
+                    label: 'Live activity',
+                    detail: 'Operating events as they happen',
+                    icon: 'zap' as const,
+                    active: activityActive || activeSurface === 'activity',
+                    onSelect: () => toggle('activity'),
+                  }]
+                  : []),
+              ],
+            },
+          ]}
+        />
+      </>,
+      document.body,
+    )
+    : null
 }

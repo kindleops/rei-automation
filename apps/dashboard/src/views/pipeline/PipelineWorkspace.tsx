@@ -16,6 +16,7 @@ import { pushRoutePath } from '../../app/router'
 import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
 import { sanitizePipelineError } from '../../domain/pipeline/pipeline-operator-error'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
+import { useBackHandler } from '../../domain/navigation/useBackHandler'
 
 const OPP_PARAM = 'opp'
 const STORAGE_KEY = 'pipeline_selected_opp_v1'
@@ -113,6 +114,10 @@ export function PipelineWorkspace({
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailState, setDetailState] = useState<'idle' | 'loading' | 'loaded' | 'partial' | 'error'>('idle')
+
+  /* §3 — the shared Back drives this nested view; see useBackHandler. */
+  useBackHandler(Boolean(detailOpportunity), 'pipeline:detail', 'Pipeline', () => setDetailOpportunity(null))
+
   const detailRequestRef = useRef(0)
 
   const listOpportunity = useMemo(

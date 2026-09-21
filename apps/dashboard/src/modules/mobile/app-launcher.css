@@ -287,7 +287,8 @@
 
 .nx-app-launcher__focus,
 .nx-app-launcher__caveat {
-  font-size: 8px;
+  /* §6 — 8px uppercase was decoration pretending to be information. */
+  font-size: var(--nx-t-micro, 11px);
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;

@@ -51,6 +51,7 @@ import { CalendarEventDetailDrawer, type CalendarDrawerAction } from './componen
 import { CalendarNewEventModal } from './components/CalendarNewEventModal'
 import { SellerContextRibbon } from './components/SellerContextRibbon'
 import './calendar-view.css'
+import { useBackHandler } from '../../domain/navigation/useBackHandler'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -140,6 +141,10 @@ export function CalendarView({
    * listens rather than polls.
    */
   const [subject, setSubject] = useState<CalendarSubject>(() => resolveCalendarSubject())
+
+  /* §3 — the shared Back drives this nested view; see useBackHandler. */
+  useBackHandler(Boolean(selectedEvent), 'calendar:event', 'Calendar', () => setSelectedEvent(null))
+
   useEffect(() => {
     const sync = () => {
       const next = resolveCalendarSubject()

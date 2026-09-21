@@ -18,6 +18,7 @@ import { ClosingDeskIntelligenceRail } from './components/ClosingDeskIntelligenc
 import { ClosingDeskHeader } from './components/ClosingDeskHeader'
 import { ClosingDeskEnvironment } from './components/ClosingDeskEnvironment'
 import { ClosingDeskDiagnosticsPanel } from './components/ClosingDeskDiagnosticsPanel'
+import { useBackHandler } from '../../domain/navigation/useBackHandler'
 
 export function ClosingDeskView() {
   const fixtureQuery = useMemo(() => {
@@ -32,6 +33,10 @@ export function ClosingDeskView() {
   const [diagOpen, setDiagOpen] = useState(false)
   const [diagTab, setDiagTab] = useState<'diagnostics' | 'lifecycle'>('diagnostics')
   const [mobileLane, setMobileLane] = useState<ClosingBoardColumn | 'all'>('all')
+
+  /* §3 — the shared Back drives this nested view; see useBackHandler. */
+  useBackHandler(Boolean(active), 'closing-desk:case', 'Closing Desk', () => setActive(null))
+
 
   const renderableCases = useMemo(
     () => resolveRenderableCases(filteredCases, { fixtureQuery, modelMode: model?.mode ?? null }),

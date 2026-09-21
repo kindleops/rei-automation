@@ -136,7 +136,21 @@ export const NEXUS_APPS: NexusApp[] = [
     route: '/conversation',
     group: 'communication',
     desktop: true,
-    mobile: true,
+    /*
+     * §5 — NOT A TOP-LEVEL APP ON A PHONE. Inbox owns it as nested state.
+     *
+     * A conversation is always ABOUT a thread: opening it from the launcher
+     * with no thread selected lands the operator on a surface with nothing in
+     * it, and it appeared in the launcher grid as a peer of Inbox, which is the
+     * app you actually reach it through. `mobile: false` removes it from the
+     * launcher, mobile search and the dock -- the same switch that keeps
+     * Property OS off the phone.
+     *
+     * This does NOT unroute it: the route is still registered and reachable as
+     * a nested state, and resolveAppForRoute still resolves it, so the header
+     * keeps showing "Conversation" with a Back affordance while you are in one.
+     */
+    mobile: false,
     dockable: false,
     defaultDock: false,
     shortcut: 'C',

@@ -18,6 +18,13 @@ export interface MobileSheetProps {
   showHandle?: boolean
   subtitle?: string
   headerActions?: React.ReactNode
+  /**
+   * §11/§13 — a STICKY action footer, pinned above the home indicator while the
+   * body scrolls under it. Filters need "Apply" reachable without scrolling to
+   * the end of a long option list, and a detail sheet needs its primary action
+   * to stay put. Sheets without actions simply omit it and render nothing.
+   */
+  footer?: React.ReactNode
 }
 
 export const MobileSheet = ({
@@ -30,6 +37,7 @@ export const MobileSheet = ({
   showHandle = true,
   subtitle,
   headerActions,
+  footer,
 }: MobileSheetProps) => {
   const { isMobile } = useBreakpoint()
 
@@ -87,7 +95,8 @@ export const MobileSheet = ({
             </button>
           </div>
         </header>
-        <div className="nx-mobile-sheet__body">{children}</div>
+        <div className={cls('nx-mobile-sheet__body', Boolean(footer) && 'has-footer')}>{children}</div>
+        {footer ? <div className="nx-mobile-sheet__footer">{footer}</div> : null}
       </aside>
     </>
   )
