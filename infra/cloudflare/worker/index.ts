@@ -182,6 +182,11 @@ interface Env {
   SUPABASE_SERVICE_ROLE_KEY?: string;
   SUPABASE_DB_URL?: string;
   OPS_DASHBOARD_SECRET?: string;
+  /**
+   * Comma-separated Supabase user IDs authorized for operator access.
+   * Unset => nobody is authorized. See handleBrowserApi.
+   */
+  OPS_ALLOWED_USER_IDS?: string;
   INTERNAL_API_SECRET?: string;
   TEXTGRID_WEBHOOK_SECRET?: string;
   TEXTGRID_ACCOUNT_SID?: string;
@@ -317,6 +322,30 @@ async function handleBrowserApi(request: Request, env: Env): Promise<Response> {
   const userId = await resolveUser(token, env);
   if (!userId) {
     return jsonError(401, "invalid_session", "Your session is not valid. Sign in again.");
+  }
+
+  /*
+   * AUTHENTICATION IS NOT AUTHORIZATION.
+   *
+   * This console is single-tenant: there is no per-user scoping, so any account
+   * that reaches the API is a full operator over real seller PII. The Supabase
+   * project also allows self-signup and Google sign-in, which together meant
+   * "require a session" would have let ANY member of the public register and
+   * walk straight in -- a lock whose key is handed out at the door.
+   *
+   * So membership is explicit. FAIL CLOSED: an unset or empty allowlist
+   * authorizes nobody. That can take production down if the secret is missing,
+   * which is the correct direction to fail -- the alternative is what this
+   * hotfix exists to repair.
+   */
+  const allowed = new Set(
+    String(env.OPS_ALLOWED_USER_IDS ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  );
+  if (!allowed.has(userId)) {
+    return jsonError(403, "not_authorized", "This account is not authorized for operator access.");
   }
 
   if (env.OPS_DASHBOARD_SECRET) {
