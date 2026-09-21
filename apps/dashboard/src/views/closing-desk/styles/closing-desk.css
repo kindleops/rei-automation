@@ -1154,7 +1154,54 @@
 @media (max-width: 720px) {
   .closing-desk-view {
     padding: 24px 10px 10px;
-    grid-template-rows: auto auto auto auto auto minmax(320px, 1fr) auto;
+    /*
+     * §15 — ONE PRIMARY VERTICAL SCROLL.
+     *
+     * The canvas row was `minmax(320px, 1fr)`, a fixed viewport holding a lane
+     * that scrolled inside itself. That is correct for a desktop kanban and
+     * wrong on a phone: the view already scrolls, so a swipe over the cards
+     * moved the lane while a swipe beside them moved the page, and which one
+     * you got depended on where your thumb landed. `auto` lets the lane's
+     * cards flow into the one scroll that already exists.
+     */
+    grid-template-rows: auto auto auto auto auto auto auto;
+  }
+  .cd-canvas {
+    min-height: 0;
+    overflow: visible;
+  }
+  .cd-lane {
+    min-height: 0;
+    min-width: 0;
+    max-width: none;
+  }
+  .cd-lane__body {
+    overflow-y: visible;
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+  /*
+   * Sticky only made sense while the lane body was the scroller. Against the
+   * page it pins a transparent header over the cards and eats their taps —
+   * the same failure mode as the command bar above.
+   */
+  .cd-lane__head {
+    position: static;
+  }
+  /*
+   * THE OVERLAP. `.cd-command-bar` is `position: sticky; top: 0; z-index: 2`.
+   * On desktop it is a thin strip and pinning it is useful. On a phone its
+   * filters wrap to ~409px — roughly half the viewport — and it pins there on
+   * top of the board, so a tap aimed at a deal card landed on the Diagnostics
+   * button instead. Measured, not inferred: elementFromPoint at the card's
+   * centre returned `button.cd-btn.cd-btn--ghost`.
+   *
+   * Controls that scroll away are fine on a phone; controls that silently eat
+   * taps are not.
+   */
+  .cd-command-bar {
+    position: static;
+    z-index: auto;
   }
   .cd-command-header__pulse { width: 100%; }
   .cd-dossier, .cd-diag-panel { width: 100vw; }
