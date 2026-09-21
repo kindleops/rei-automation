@@ -164,7 +164,17 @@ for (const width of WIDTHS) {
         }
         await page.locator('[aria-label="Close settings"]').first().click({ timeout: 10_000 }).catch(() => {})
         await page.waitForSelector('.nx-icm-activity-sheet', { state: 'detached', timeout: 10_000 }).catch(() => {})
-        await page.waitForTimeout(2500)
+        /*
+         * Wait for the feed to actually recompute, not a fixed guess. Changing
+         * scope re-runs the engine over a wider set, and a 2.5s sleep was long
+         * enough on the dev server and short enough on the production build to
+         * report "0 in flow" over a feed that was about to render 18 rows.
+         */
+        await page.waitForFunction(
+          () => document.querySelectorAll('.nx-icm-activity__timeline-grid > *').length > 0,
+          undefined, { timeout: 15_000 },
+        ).catch(() => {})
+        await page.waitForTimeout(600)
       }
 
       const populated = await page.evaluate(probeDeck, TOUCH_MIN)
