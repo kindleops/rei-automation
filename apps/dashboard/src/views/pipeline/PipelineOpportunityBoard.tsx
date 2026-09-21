@@ -1052,7 +1052,7 @@ export function PipelineOpportunityBoard({
         {dockOpen && dockOpp && (
           <div className="plv-context-dock nx-glass-menu" role="dialog" aria-label="Opportunity context">
             <button type="button" className="plv-context-dock__close" onClick={() => { setDockOpen(false); onClearSelection?.() }} aria-label="Close">×</button>
-            <strong>{dockOpp.seller_display_name || 'Unknown Seller'}</strong>
+            <strong>{dockOpp.seller_display_name || 'Seller not identified'}</strong>
             <span>{dockOpp.property_address_full || portfolioLabel(dockOpp)}</span>
             <div className="plv-context-dock__chips">
               <span>{stageLabel(resolvePipelineStage(dockOpp))}</span>

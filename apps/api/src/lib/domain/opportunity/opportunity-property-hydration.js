@@ -53,6 +53,16 @@ const PROPERTY_SELECT = [
   'equity_amount',
   'building_square_feet',
   'lot_square_feet',
+  /**
+   * Seller identity fallback. 48 of 769 production opportunities carry no
+   * `seller_display_name` and the board rendered "Unknown Seller" for all of
+   * them — but 45 of those 48 have a real `properties.owner_name` sitting one
+   * join away. "Unknown" was describing our join, not the world.
+   *
+   * Selected here rather than in a new query because this hydration already
+   * reads `properties` for the same opportunity: the fix costs no round trip.
+   */
+  'owner_name',
 ].join(',');
 
 function clean(value) {
@@ -100,6 +110,9 @@ export function hydrateOpportunityFromProperty(opportunity = {}, property = null
       ...opportunity,
       property_hydrated: false,
       property_match_status: opportunity.primary_property_id ? 'unresolved' : 'no_property_id',
+      // No property to fall back to, so the stored name is the only answer
+      // there is — and its absence is reported rather than papered over.
+      seller_name_source: clean(opportunity.seller_display_name) ? 'opportunity' : 'unresolved',
     };
   }
 
@@ -109,10 +122,25 @@ export function hydrateOpportunityFromProperty(opportunity = {}, property = null
   const market = normalizeMarket(property.market, city, state) || clean(property.market) || null;
   const propertyTypeLabel = operatorPropertyTypeLabel(property);
 
+  /**
+   * Stored name wins. This only fills a hole — it never overwrites an
+   * identity another system already resolved, and `seller_name_source`
+   * records which happened so a reader is never guessing.
+   */
+  const storedSeller = clean(opportunity.seller_display_name);
+  const propertyOwner = clean(property.owner_name);
+  const sellerDisplayName = storedSeller || propertyOwner || null;
+
   return {
     ...opportunity,
     property_hydrated: true,
     property_match_status: 'matched',
+    seller_display_name: sellerDisplayName,
+    seller_name_source: storedSeller
+      ? 'opportunity'
+      : propertyOwner
+        ? 'property_owner_name'
+        : 'unresolved',
     property_export_id: clean(property.property_export_id) || opportunity.property_export_id || null,
     property_type: propertyTypeLabel,
     property_type_raw: clean(property.property_type) || null,

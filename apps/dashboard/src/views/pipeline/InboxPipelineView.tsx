@@ -172,7 +172,7 @@ const buildCard = (thread: InboxWorkflowThread): DealCard => {
   return {
     thread,
     sellerName: first(thread.ownerDisplayName, thread.ownerName, thread.sellerName,
-      (thread as any).prospect_name) || 'Unknown Seller',
+      (thread as any).prospect_name) || 'Seller not identified',
     address: first(thread.propertyAddressFull, thread.propertyAddress, thread.subject) || 'Property Unknown',
     market: first(thread.displayMarket, thread.market, thread.marketName) || 'Market Unknown',
     propertyType: first((thread as any).propertyType, (thread as any).property_type) || 'Unknown',

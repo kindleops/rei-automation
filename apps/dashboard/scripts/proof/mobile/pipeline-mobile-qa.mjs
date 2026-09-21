@@ -26,8 +26,12 @@ const arg = (name, fallback) => {
 }
 
 const BASE = arg('base', 'http://localhost:5174')
-const WIDTHS = arg('width') ? [Number(arg('width'))] : [375, 390, 430]
-const THEMES = arg('theme') ? [arg('theme')] : ['dark', 'light']
+const list = (raw) => String(raw).split(',').map((v) => v.trim()).filter(Boolean)
+// 393 (iPhone 14/15 Pro) was missing, and the two darker themes were never
+// exercised — the stage-selection and value treatments are exactly where a
+// theme regression hides.
+const WIDTHS = arg('width') ? list(arg('width')).map(Number) : [375, 390, 393, 430]
+const THEMES = arg('theme') ? list(arg('theme')) : ['dark', 'light', 'red-ops', 'true-black']
 const HEIGHT = Number(arg('height', '844'))
 const ONLY = arg('only', '')
 /** Phase selector, so one failing scenario can be reproduced without the matrix. */

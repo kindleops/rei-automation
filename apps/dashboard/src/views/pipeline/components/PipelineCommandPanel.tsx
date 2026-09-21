@@ -142,7 +142,7 @@ export function PipelineCommandPanel({
     <div className="plv-command-panel nx-glass-panel">
       <header className="plv-command-panel__header">
         <div>
-          <strong>{opp.seller_display_name || 'Unknown Seller'}</strong>
+          <strong>{opp.seller_display_name || 'Seller not identified'}</strong>
           <span>{opp.portfolio_property_count > 1 ? `${opp.portfolio_property_count} matched properties` : (opp.property_address_full || 'Property Unknown')}</span>
         </div>
         <div className="plv-command-panel__header-actions">

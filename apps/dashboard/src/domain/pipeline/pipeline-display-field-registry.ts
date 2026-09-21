@@ -53,7 +53,7 @@ function def(
 export const PIPELINE_FIELD_REGISTRY: PipelineFieldDefinition[] = [
   def('seller_display_name', 'Seller / Owner Name', 'seller_owner', 'text', {
     description: 'Display name from opportunity record or owner enrichment.',
-    emptyLabel: 'Unknown Seller',
+    emptyLabel: 'Seller not identified',
     sortable: true,
     filterable: true,
   }),
