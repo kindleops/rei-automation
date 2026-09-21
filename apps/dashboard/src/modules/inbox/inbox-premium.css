@@ -6411,6 +6411,43 @@ center+right hidden */
   padding: 8px 12px 10px;
 }
 
+/*
+ * MOBILE: PIN THE DECK TO THE VIEWPORT, NOT THE MAP CANVAS.
+ *
+ * The rail is `position: absolute; left: 24px; right: 24px`, which resolves
+ * against the map's positioned ancestor. On desktop that ancestor fills the
+ * window so the insets behave. On a phone the map canvas is wider than the
+ * viewport and translates as you pan, so the deck inherited that coordinate
+ * space: measured at 375px it sat at x = -87 with 449px-wide children, putting
+ * roughly 74px of every event card off the left edge.
+ *
+ * Nothing flagged it. Page `scrollWidth` stayed equal to `clientWidth` because
+ * the map clips its own overflow, so an overflow check reads 0 while the
+ * content is simply gone — which is exactly how this survived a green mobile
+ * proof. `position: fixed` takes the deck out of the map's coordinate space so
+ * its insets mean what they say.
+ */
+.nx-icm-activity.is-mobile {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-width: calc(100vw - 24px);
+  /*
+   * Taking the deck out of the map's coordinate space also moved its bottom
+   * inset onto the viewport, where the global dock lives — which put two of
+   * its own controls underneath the dock. The clearance is expressed from the
+   * dock's own variables rather than a guessed constant, so a dock resize
+   * carries the deck with it instead of silently re-burying it.
+   */
+  bottom: calc(var(--nx-pinned-dock-collapsed, 44px) + var(--nx-mobile-safe-bottom, 0px) + 16px);
+}
+
+.nx-icm-activity.is-mobile > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .nx-icm-activity.is-behind-card.is-mobile {
   z-index: 18;
   opacity: 0.88;
