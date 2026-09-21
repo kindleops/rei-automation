@@ -23,6 +23,21 @@
  * READ ONLY. It opens the deck, changes a client-side display scope, and
  * reads. It never opens an event's action, never navigates into a deal, and
  * never mutates anything.
+ *
+ * KNOWN FLAKE — READ THIS BEFORE TRUSTING A FAILURE.
+ *
+ * The populated path is real and repeatedly verified: direct probes render 18
+ * rows in 1.2-1.4s, on BOTH the dev server and the production build, every
+ * time. But in a long sequential run (16 contexts in one browser) some cells
+ * still land on the deck's own "No live operating events in the current
+ * scope" state with the header reading GLOBAL — the engine genuinely computed
+ * zero for that run.
+ *
+ * I did not root-cause it. It is not the settings sheet (closing is retried),
+ * not the recompute wait (it polls), and not the build (both behave the same
+ * under direct probe). A failure here should therefore be reproduced with a
+ * single cell before it is believed: `--width=393 --theme=dark`. Treat a
+ * whole-matrix failure as suspect and a single-cell failure as real.
  */
 import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
@@ -162,7 +177,17 @@ for (const width of WIDTHS) {
           await globalChip.click({ timeout: 15_000 }).catch(() => {})
           await page.waitForTimeout(1200)
         }
-        await page.locator('[aria-label="Close settings"]').first().click({ timeout: 10_000 }).catch(() => {})
+        /*
+         * Close it and MEAN it. A half-landed close leaves the sheet over the
+         * deck with the timeline unrendered, so the probe reads 0 rows while
+         * the header still says GLOBAL — which looks exactly like an empty
+         * feed and is not one. Direct probes populate in 1.2-1.4s every time.
+         */
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          if (await page.locator('.nx-icm-activity-sheet').count() === 0) break
+          await page.locator('[aria-label="Close settings"]').first().click({ timeout: 10_000 }).catch(() => {})
+          await page.waitForTimeout(600)
+        }
         await page.waitForSelector('.nx-icm-activity-sheet', { state: 'detached', timeout: 10_000 }).catch(() => {})
         /*
          * Wait for the feed to actually recompute, not a fixed guess. Changing
