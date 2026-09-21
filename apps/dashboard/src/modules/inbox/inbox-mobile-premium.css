@@ -748,7 +748,21 @@ html.is-mobile-layout .nx-mobile-command-dock__btn {
    Budget at 390px: 370 inner − 12 padding − 6 gaps − 44 orb − 5x38 icons = 118px
    available; the chip needs ~94 for "Workflow Studio". It still shrinks to the
    38px square before anything else does, which is the documented degradation. */
-html.is-mobile-layout .nx-mobile-command-dock__btn--workspace {
+html.is-mobile-layout .nx-mobile-command-dock__btn--workspace,
+html.is-mobile-layout .nx-mobile-command-dock__btn--back {
+  display: flex !important;
+  align-items: center;
+  gap: 4px;
+  /*
+   * BOTH labelled controls need the exemption, not just one.
+   *
+   * The generic rule above pins every dock button to a 38px square. The
+   * workspace chip was excused because it carries a glyph AND the app name --
+   * and the Back control has exactly the same shape ("< Inbox"), but was never
+   * added here. Inside 38px its label had nowhere to sit, so "Inbox" wrapped
+   * BELOW the chevron and hung out of the bar. Invisible until the shell pass
+   * wired Back into nested views and the control finally started rendering.
+   */
   width: auto !important;
   min-width: 38px !important;
   max-width: 118px !important;
@@ -1543,4 +1557,66 @@ html.is-mobile-layout .nx-row25__footer .nx-card-assetline {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §30 — THE LOADING SKELETON, IN EVERY THEME
+
+   ChatThread renders five shimmer bubbles while a conversation hydrates, and
+   that markup was correct. But every rule styling it -- .nx-chat-skeleton,
+   .nx-chat-skeleton__bubble and .shimmer itself -- was written under
+   [data-nexus-theme="light"] ONLY. There was no base rule, so in Dark, Red Ops
+   and True Black the bubbles measured 381x0 with a transparent background and
+   no animation: present in the DOM, painting nothing.
+
+   Conversations take ~12s to hydrate here, so three of the four themes showed
+   a blank void for twelve seconds and the surface looked broken rather than
+   busy. The light theme looked fine, which is exactly why it survived.
+
+   Base rules, theme-agnostic. Light keeps its own palette overrides.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-s-4, 16px);
+  padding: var(--nx-s-5, 20px);
+  width: 100%;
+}
+
+.nx-chat-skeleton__bubble {
+  position: relative;
+  height: 36px;
+  border-radius: 12px;
+  /* A width per bubble, so the placeholder reads as conversation rather than
+     as five identical bars. */
+  width: 62%;
+  background: rgba(127, 127, 127, 0.13);
+}
+.nx-chat-skeleton__bubble:nth-child(2n) { width: 48%; }
+.nx-chat-skeleton__bubble:nth-child(3n) { width: 70%; }
+
+.nx-chat-skeleton__bubble.is-inbound {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+.nx-chat-skeleton__bubble.is-outbound {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+
+/* The shimmer keyframes already exist; only the light-theme paint did. */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(127, 127, 127, 0.10) 25%,
+    rgba(127, 127, 127, 0.20) 50%,
+    rgba(127, 127, 127, 0.10) 75%
+  );
+  background-size: 200% 100%;
+  animation: nx-shimmer 1.5s infinite linear;
+}
+
+/* §19/§34 — respect reduced motion: hold the surface, drop the sweep. */
+@media (prefers-reduced-motion: reduce) {
+  .shimmer { animation: none; }
 }

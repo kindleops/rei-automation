@@ -384,6 +384,17 @@ html.is-mobile-layout {
      collapsed into each other — on /analytics the queue icon rendered on top of
      the word "Analytics". Pinning the icon buttons and letting only this one
      give way takes it to 44px (icon-only) and the bar fits. */
+  /*
+   * BACK IS THE SAME SHAPE AS IDENTITY, SO IT GETS THE SAME BOX.
+   *
+   * Both controls are "glyph + word". The base button is a GRID, which stacks
+   * its children, so Back rendered the chevron with "Inbox" underneath it,
+   * spilling out of a 38px square and below the bar. The workspace chip was
+   * switched to flex for exactly this reason; Back was simply never added, and
+   * the bug stayed invisible until the shell pass wired Back into nested views
+   * and the control began to render at all.
+   */
+  .nx-mobile-command-dock__btn--back,
   .nx-mobile-command-dock__btn--workspace {
     /* FLEX, not the base rule's grid. In an auto-width grid container a
        `minmax(0, 1fr)` track collapses toward zero, which clipped "Email" to a
