@@ -52,3 +52,28 @@ export function describeEmptyReason(input: {
   if (input.hasSubstrate === false) return `No ${noun} have been sent or received yet.`
   return `No ${noun} match this view.`
 }
+
+/**
+ * May the composer's Send control be enabled?
+ *
+ * §33 — a control that cannot succeed must not look like one. Brevo is
+ * unconfigured in production (`connected: false`, `send_enabled: false`), and
+ * the composer already says so in a banner, but the Send button was gated only
+ * on the FORM. An operator could fill in a real seller address, press send,
+ * wait out a round trip and get a red toast saying sending was disabled —
+ * something the surface knew before the click.
+ *
+ * Provider capability is checked first and independently of form validity, so
+ * "you cannot send at all" is never confused with "this draft isn't ready".
+ */
+export function canSendEmail(input: {
+  providerConnected?: boolean | null
+  providerSendEnabled?: boolean | null
+  apiKeyValid?: boolean | null
+  formReady: boolean
+}): boolean {
+  if (input.providerConnected !== true) return false
+  if (input.apiKeyValid === false) return false
+  if (input.providerSendEnabled !== true) return false
+  return input.formReady === true
+}

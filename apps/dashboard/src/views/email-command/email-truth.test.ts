@@ -5,8 +5,7 @@ import {
   fromLoad,
   isFailed,
   valueOr,
-  type LoadState,
-} from './email-load-state'
+  type LoadState, canSendEmail } from './email-load-state'
 import {
   NO_SUBJECT,
   describeSubject,
@@ -127,5 +126,49 @@ describe('the email subject is exact, and A never leaks into B', () => {
     const s = resolveEmailSubject('?property_id=237787391')
     expect(describeSubject(s, '600 Raintree Dr, Jonesboro, Ga 30238'))
       .toBe('600 Raintree Dr, Jonesboro, Ga 30238')
+  })
+})
+
+/**
+ * §33 — the composer must not offer a send it cannot perform.
+ *
+ * THE DEFECT (2026-09-20). Brevo is unconfigured in production —
+ * `connected: false`, `send_enabled: false`, missing BREVO_API_KEY and
+ * BREVO_SENDER_EMAIL — and the composer already rendered a banner saying so.
+ * But `canSend` considered only the form, so "Send Email" stayed enabled. An
+ * operator could type a real seller address, press send, wait out a round
+ * trip, and receive a red toast stating sending was disabled: a fact the
+ * surface held before the click.
+ */
+describe('the composer only offers a send that can happen', () => {
+  const ready = { providerConnected: true, providerSendEnabled: true, apiKeyValid: true, formReady: true }
+
+  it('allows the send when the provider is connected and the form is ready', () => {
+    expect(canSendEmail(ready)).toBe(true)
+  })
+
+  it('refuses while Brevo is unconfigured, however complete the form is', () => {
+    // The exact production shape today.
+    expect(canSendEmail({ ...ready, providerConnected: false, providerSendEnabled: false })).toBe(false)
+  })
+
+  it('refuses when connected but sending is switched off', () => {
+    // EMAIL_SEND_ENABLED=false with a valid key — connected is not permission.
+    expect(canSendEmail({ ...ready, providerSendEnabled: false })).toBe(false)
+  })
+
+  it('refuses on an invalid api key even if the provider claims connected', () => {
+    expect(canSendEmail({ ...ready, apiKeyValid: false })).toBe(false)
+  })
+
+  it('treats unknown provider state as not sendable, never as permission', () => {
+    expect(canSendEmail({ formReady: true })).toBe(false)
+    expect(canSendEmail({ ...ready, providerConnected: null, providerSendEnabled: null })).toBe(false)
+  })
+
+  it('separates "cannot send at all" from "this draft is not ready"', () => {
+    // Provider fine, form incomplete — still false, but for the other reason.
+    expect(canSendEmail({ ...ready, formReady: false })).toBe(false)
+    expect(canSendEmail(ready)).toBe(true)
   })
 })

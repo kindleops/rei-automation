@@ -5,8 +5,7 @@ import {
   describeEmptyReason,
   fromLoad,
   valueOr,
-  type LoadState,
-} from './email-load-state'
+  type LoadState, canSendEmail } from './email-load-state'
 import {
   describeSubject,
   describeSubjectEmpty,
@@ -677,7 +676,33 @@ const ComposerTab = ({ templates, health }: { templates: EmailTemplate[]; health
   const unresolvedVars = [...new Set(
     [...`${subject}\n${body}`.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map((m) => m[1]),
   )]
-  const canSend = Boolean(to && subject && body && !saving && !sending && unresolvedVars.length === 0)
+  /**
+   * §33 — A CONTROL THAT CANNOT SUCCEED MUST NOT LOOK LIKE ONE.
+   *
+   * Brevo is unconfigured in production (`connected: false`,
+   * `send_enabled: false`, missing BREVO_API_KEY and BREVO_SENDER_EMAIL), and
+   * the composer already says so in a banner. But `canSend` only considered
+   * the FORM, so "Send Email" stayed enabled: the operator filled in a real
+   * seller address, pressed send, waited out a round trip, and got back a red
+   * toast saying sending was disabled — something the surface knew before the
+   * click.
+   *
+   * The provider's own capability now gates the control. The banner carries
+   * the reason, and `title` repeats it for anyone who reaches for the button
+   * anyway.
+   */
+  const sendCapable = canSendEmail({
+    providerConnected: health?.connected,
+    providerSendEnabled: health?.send_enabled,
+    apiKeyValid: health?.api_key_valid,
+    formReady: true,
+  })
+  const canSend = canSendEmail({
+    providerConnected: health?.connected,
+    providerSendEnabled: health?.send_enabled,
+    apiKeyValid: health?.api_key_valid,
+    formReady: Boolean(to && subject && body && !saving && !sending && unresolvedVars.length === 0),
+  })
 
   return (
     <div className="ecc__composer">
@@ -778,9 +803,14 @@ const ComposerTab = ({ templates, health }: { templates: EmailTemplate[]; health
             <Icon name="archive" size={12} />
             {saving ? 'Saving…' : 'Save Draft'}
           </button>
-          <button className="ecc__btn is-primary" onClick={handleSend} disabled={!canSend}>
+          <button
+            className="ecc__btn is-primary"
+            onClick={handleSend}
+            disabled={!canSend}
+            title={sendCapable ? undefined : 'Sending is disabled — Brevo is not configured'}
+          >
             <Icon name="send" size={12} />
-            {sending ? 'Sending…' : 'Send Email'}
+            {sending ? 'Sending…' : sendCapable ? 'Send Email' : 'Sending disabled'}
           </button>
         </div>
       </div>
