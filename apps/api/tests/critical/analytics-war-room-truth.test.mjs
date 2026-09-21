@@ -90,3 +90,56 @@ test('an empty cohort is one request and zero rows', async () => {
   assert.equal(data.length, 0);
   assert.equal(client.calls.length, 1);
 });
+
+// ───────────────────────── §12 internal canary traffic never enters a KPI
+
+/**
+ * THE INVARIANT. Operator KPIs must count BUSINESS sends, never our own proof
+ * traffic. Every governed canary of the Campaign certification passes went to
+ * a handset in INTERNAL_TEST_PHONE_SET, and those rows sit in `send_queue`
+ * beside real work.
+ *
+ * Verified against production on 2026-09-20: the 7d window held 18 send_queue
+ * rows — 9 canary, 9 business — and the ONLY row carrying `sent_at` was the
+ * Campaign canary delivered on 09-19. war-room correctly reported
+ * "9 rows in window" and `sentCount: 0`.
+ *
+ * That zero is the whole point. Without the exclusion the dashboard would have
+ * told an operator a seller had been messaged when the only message went to
+ * our own phone. A regression here does not throw — it quietly inflates every
+ * send, delivery, reply and conversion number on the surface.
+ */
+test('war-room excludes internal canary traffic from send rollups', async () => {
+  const { excludeInternalCanaryRows } = await import('@/lib/config/internal-phones.js');
+
+  const rows = [
+    { id: 'canary-sent', to_phone_number: '+16127433952', sent_at: '2026-09-19T22:58:54Z', queue_status: 'delivered' },
+    { id: 'canary-2', to_phone_number: '6128072000', queue_status: 'queued' },
+    { id: 'canary-3', to_phone_number: '+1 (305) 980-7795', queue_status: 'queued' },
+    { id: 'seller-1', to_phone_number: '+14155550101', queue_status: 'queued' },
+    { id: 'seller-2', to_phone_number: '+14155550102', queue_status: 'queued' },
+  ];
+
+  const kept = excludeInternalCanaryRows(rows);
+  const keptIds = kept.map((r) => r.id).sort();
+
+  assert.deepEqual(keptIds, ['seller-1', 'seller-2'], 'only business rows survive');
+  assert.equal(
+    kept.filter((r) => r.sent_at).length,
+    0,
+    'the delivered canary must not register as a send',
+  );
+  // Formatting must not be a way past the filter.
+  assert.equal(kept.some((r) => String(r.id).startsWith('canary')), false);
+});
+
+test('a business send is still counted — the filter is not a blanket zero', async () => {
+  const { excludeInternalCanaryRows } = await import('@/lib/config/internal-phones.js');
+  const rows = [
+    { id: 'canary', to_phone_number: '+16127433952', sent_at: '2026-09-19T22:58:54Z' },
+    { id: 'seller', to_phone_number: '+14155550101', sent_at: '2026-09-19T10:00:00Z' },
+  ];
+  const kept = excludeInternalCanaryRows(rows);
+  assert.deepEqual(kept.map((r) => r.id), ['seller']);
+  assert.equal(kept.filter((r) => r.sent_at).length, 1, 'real sends survive the exclusion');
+});
