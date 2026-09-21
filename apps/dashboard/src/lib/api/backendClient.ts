@@ -124,20 +124,26 @@ export interface BackendApiSecretResult {
   debug: BackendApiSecretDebug
 }
 
+/**
+ * THE BROWSER HOLDS NO BACKEND CREDENTIAL. This returns empty, always.
+ *
+ * It used to read VITE_BACKEND_API_SECRET / VITE_OPS_DASHBOARD_SECRET. Vite
+ * inlines every VITE_* value into the shipped bundle, so that privileged
+ * secret was being served to anyone who loaded the site -- and since the API
+ * accepts it as authorization, every cockpit route was effectively public.
+ *
+ * The credential now lives only in the Cloudflare worker, which verifies the
+ * user's Supabase session and attaches it server-side while proxying /api/*.
+ * The browser authenticates as a USER, via the Authorization header below.
+ *
+ * Kept as a function rather than deleted because callers use `debug` to render
+ * connection diagnostics; they now truthfully report that no client secret
+ * exists. Do not reintroduce a VITE_* credential here.
+ */
 export function getBackendApiSecretDebugSafe(): BackendApiSecretResult {
-  const secret = (
-    (import.meta.env.VITE_BACKEND_API_SECRET as string | undefined)
-    || (import.meta.env.VITE_OPS_DASHBOARD_SECRET as string | undefined)
-    || ''
-  )
-  if (!secret && import.meta.env.PROD) throw new Error('Missing VITE_BACKEND_API_SECRET')
   return {
-    secret,
-    debug: {
-      secretLength: secret.length,
-      first6: secret.slice(0, 6),
-      last4: secret.slice(-4),
-    },
+    secret: '',
+    debug: { secretLength: 0, first6: '', last4: '' },
   }
 }
 
@@ -246,12 +252,12 @@ const SESSION_TOKEN_CACHE_MS = 30_000
 async function resolveSessionToken(): Promise<string | null> {
   const now = Date.now()
   if (cachedSessionExpiresAt > now) return cachedSessionToken
-  const { secret } = getBackendApiSecretDebugSafe()
-  if (secret) {
-    cachedSessionToken = null
-    cachedSessionExpiresAt = now + SESSION_TOKEN_CACHE_MS
-    return null
-  }
+  /*
+   * This used to short-circuit to null whenever a client secret was present,
+   * which meant the session token was never sent in production -- the shipped
+   * secret always won. The secret is gone, so the session is now the ONLY
+   * credential the browser has, and it is always resolved.
+   */
   if (!hasSupabaseEnv) return null
   if (!sessionTokenPromise) {
     sessionTokenPromise = (async () => {
@@ -360,13 +366,17 @@ async function executeBackendRequest<T>(
 
   const method = (options.method || 'GET').toUpperCase()
 
-  const { secret } = getBackendApiSecretDebugSafe()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
-    'x-ops-dashboard-secret': secret,
   }
 
+  /*
+   * The session IS the credential. No x-ops-dashboard-secret is sent -- the
+   * worker strips any inbound copy and attaches the real one itself after
+   * verifying this token, so sending one here would be both useless and a
+   * reintroduction of the leak.
+   */
   const sessionToken = await resolveSessionToken()
   if (sessionToken) {
     headers.Authorization = `Bearer ${sessionToken}`

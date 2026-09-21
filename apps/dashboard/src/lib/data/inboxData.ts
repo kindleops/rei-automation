@@ -1395,9 +1395,15 @@ export interface SellerPhoneResult {
 }
 
 // Business numbers to exclude when direction is unknown (env-configured)
-const viteEnv = (typeof import.meta !== 'undefined' && import.meta.env)
-  ? import.meta.env as Record<string, string | undefined>
-  : {}
+/*
+ * Read by literal name. Capturing `import.meta.env` wholesale made Vite inline
+ * the entire environment -- every VITE_* value, including privileged ones --
+ * into this chunk. See the note in src/lib/supabaseClient.ts.
+ */
+const viteEnv: Record<string, string | undefined> = {
+  VITE_TEXTGRID_FROM_NUMBER: import.meta.env.VITE_TEXTGRID_FROM_NUMBER as string | undefined,
+  VITE_TEXTGRID_NUMBER: import.meta.env.VITE_TEXTGRID_NUMBER as string | undefined,
+}
 const KNOWN_OUR_NUMBERS: Set<string> = new Set(
   [
     viteEnv.VITE_TEXTGRID_FROM_NUMBER,

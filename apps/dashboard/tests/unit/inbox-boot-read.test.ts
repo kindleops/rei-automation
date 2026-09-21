@@ -39,7 +39,14 @@ test('thread fetch failure path still classifies counts fetch auth errors', () =
     isDev: false,
   })
   assert.equal(applied.ok, false)
-  assert.match(String(applied.warning ?? ''), /authentication failed/i)
+  /*
+   * Asserts the CLASSIFICATION reached the operator, not one exact sentence.
+   * This previously pinned the literal words "authentication failed", which
+   * broke when the copy stopped telling operators to go set a VITE_* secret --
+   * advice that only made sense while the browser held the credential, and
+   * which is now the thing we never want anyone to do.
+   */
+  assert.match(String(applied.warning ?? ''), /sign in|authentication/i)
 })
 
 test('degraded empty thread response is not live', () => {

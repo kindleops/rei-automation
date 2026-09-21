@@ -108,13 +108,21 @@ jobs:
           # Vercel cutover, because Vercel supplied them as project env vars and
           # this build did not.
           # Every VITE_* value is inlined into a PUBLIC browser bundle, so none of
-          # them are secret once shipped; they are stored as Actions secrets only
-          # to keep them out of the repository.
+          # them are secret once shipped. The values below are public BY DESIGN:
+          # the Supabase anon key is RLS-gated and the Maps key is referrer-bound.
+          #
+          # VITE_BACKEND_API_SECRET and VITE_OPS_DASHBOARD_SECRET were here too,
+          # and that was the bug: the API accepts OPS_DASHBOARD_SECRET as
+          # authorization, so shipping it inlined made every cockpit route
+          # readable by anyone who fetched the JS. It now lives ONLY as a worker
+          # secret and is attached server-side by infra/cloudflare/worker/index.ts
+          # after it verifies the caller's Supabase session.
+          #
+          # DO NOT ADD A PRIVILEGED CREDENTIAL TO THIS BLOCK. If the browser
+          # needs to reach a privileged API, route it through the worker.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
-          VITE_BACKEND_API_SECRET: ${{ secrets.VITE_BACKEND_API_SECRET }}
-          VITE_OPS_DASHBOARD_SECRET: ${{ secrets.VITE_OPS_DASHBOARD_SECRET }}
           VITE_USE_SUPABASE: "true"
           VITE_ENABLE_LIVE_INBOX: "true"
           # Production: no dev banner. VITE_BACKEND_API_URL is intentionally
@@ -154,13 +162,21 @@ jobs:
           # Vercel cutover, because Vercel supplied them as project env vars and
           # this build did not.
           # Every VITE_* value is inlined into a PUBLIC browser bundle, so none of
-          # them are secret once shipped; they are stored as Actions secrets only
-          # to keep them out of the repository.
+          # them are secret once shipped. The values below are public BY DESIGN:
+          # the Supabase anon key is RLS-gated and the Maps key is referrer-bound.
+          #
+          # VITE_BACKEND_API_SECRET and VITE_OPS_DASHBOARD_SECRET were here too,
+          # and that was the bug: the API accepts OPS_DASHBOARD_SECRET as
+          # authorization, so shipping it inlined made every cockpit route
+          # readable by anyone who fetched the JS. It now lives ONLY as a worker
+          # secret and is attached server-side by infra/cloudflare/worker/index.ts
+          # after it verifies the caller's Supabase session.
+          #
+          # DO NOT ADD A PRIVILEGED CREDENTIAL TO THIS BLOCK. If the browser
+          # needs to reach a privileged API, route it through the worker.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
-          VITE_BACKEND_API_SECRET: ${{ secrets.VITE_BACKEND_API_SECRET }}
-          VITE_OPS_DASHBOARD_SECRET: ${{ secrets.VITE_OPS_DASHBOARD_SECRET }}
           VITE_USE_SUPABASE: "true"
           VITE_ENABLE_LIVE_INBOX: "true"
           # Production: no dev banner. VITE_BACKEND_API_URL is intentionally

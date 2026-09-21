@@ -206,11 +206,137 @@ async function forwardToApi(request: Request, env: Env): Promise<Response> {
   return getContainer(env.API_CONTAINER, "api-singleton").fetch(request);
 }
 
+/**
+ * THE BROWSER-FACING API SURFACE.
+ *
+ * These prefixes are the ones the dashboard calls, and the ones the container
+ * gates on OPS_DASHBOARD_SECRET. Everything else under /api/ -- provider
+ * webhooks, /api/version, the internal server-to-server lanes authenticated by
+ * INTERNAL_API_SECRET, and the cron lane authenticated by CRON_SECRET -- has
+ * its own authority and is deliberately NOT routed through the session gate.
+ */
+const BROWSER_API_PREFIXES = [
+  "/api/cockpit/",
+  "/api/internal/dashboard/",
+  "/api/intel/",
+  "/api/internal/offers/",
+] as const;
+
+const isBrowserApiPath = (pathname: string) =>
+  BROWSER_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+
+const jsonError = (status: number, error: string, message: string) =>
+  new Response(JSON.stringify({ ok: false, errorType: "auth_error", error, message }), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+
+/*
+ * Validated-token cache. /auth/v1/user is a network hop, and the dashboard
+ * issues many calls per screen, so verifying every one would add that hop to
+ * every request. Keyed by a SHA-256 of the token so no raw credential is held
+ * in worker memory as a map key, and deliberately short: this caches "this
+ * token was good recently", never an authorization decision.
+ */
+const tokenCache = new Map<string, { userId: string; expiresAt: number }>();
+const TOKEN_CACHE_MS = 60_000;
+const TOKEN_CACHE_MAX = 500;
+
+async function hashToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Validates a Supabase access token against the project's own auth service.
+ *
+ * Deliberately NOT a local signature check: this project issues HS256 tokens
+ * and publishes no JWKS, so verifying in-worker would mean provisioning the
+ * Supabase JWT secret as a second credential. Asking the existing auth system
+ * whether the token is good needs no new secret and cannot drift from it.
+ */
+async function resolveUser(token: string, env: Env): Promise<string | null> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return null;
+
+  const key = await hashToken(token);
+  const hit = tokenCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.userId;
+
+  let response: Response;
+  try {
+    response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: env.SUPABASE_SERVICE_ROLE_KEY },
+    });
+  } catch {
+    // Auth service unreachable => deny. Failing open here would hand out the
+    // privileged credential precisely when we cannot check anything.
+    return null;
+  }
+  if (!response.ok) return null;
+
+  const user = (await response.json().catch(() => null)) as { id?: string } | null;
+  if (!user?.id) return null;
+
+  if (tokenCache.size >= TOKEN_CACHE_MAX) tokenCache.clear();
+  tokenCache.set(key, { userId: user.id, expiresAt: Date.now() + TOKEN_CACHE_MS });
+  return user.id;
+}
+
+/**
+ * THE TRUST BOUNDARY.
+ *
+ * The privileged OPS_DASHBOARD_SECRET used to be inlined into the public
+ * browser bundle by Vite, which made it readable by anyone who loaded the site
+ * and therefore made every cockpit route world-readable. It now lives only
+ * here. The browser authenticates as a USER; this worker verifies that session
+ * and attaches the backend credential on the way through.
+ *
+ * Two halves, and both are required:
+ *   1. STRIP whatever the caller sent. The old secret is disclosed, so an
+ *      inbound x-ops-dashboard-secret is worthless as evidence and must never
+ *      be forwarded -- otherwise anyone replaying the leaked value would still
+ *      be let through, and rotation would be the only thing standing in the way.
+ *   2. ATTACH the real credential only after a session checks out.
+ */
+async function handleBrowserApi(request: Request, env: Env): Promise<Response> {
+  const headers = new Headers(request.headers);
+  headers.delete("x-ops-dashboard-secret");
+  headers.delete("x-internal-api-secret");
+
+  // CORS preflight carries no credentials by design; let the API answer it.
+  if (request.method === "OPTIONS") {
+    return forwardToApi(new Request(request, { headers }), env);
+  }
+
+  const authorization = headers.get("authorization") ?? "";
+  const token = /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim();
+  if (!token) {
+    return jsonError(401, "unauthenticated", "Sign in to access this resource.");
+  }
+
+  const userId = await resolveUser(token, env);
+  if (!userId) {
+    return jsonError(401, "invalid_session", "Your session is not valid. Sign in again.");
+  }
+
+  if (env.OPS_DASHBOARD_SECRET) {
+    headers.set("x-ops-dashboard-secret", env.OPS_DASHBOARD_SECRET);
+  }
+  // Lets the API attribute actions to a real operator instead of to a shared
+  // credential. It is provenance, never authority.
+  headers.set("x-ops-user-id", userId);
+
+  return forwardToApi(new Request(request, { headers }), env);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
+      if (isBrowserApiPath(url.pathname)) {
+        return handleBrowserApi(request, env);
+      }
       return forwardToApi(request, env);
     }
 

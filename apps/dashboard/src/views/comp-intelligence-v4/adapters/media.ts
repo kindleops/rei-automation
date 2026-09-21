@@ -17,8 +17,14 @@ type Raw = Record<string, unknown>
 
 function envKey(): string | null {
   try {
-    const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-    return env?.VITE_GOOGLE_MAPS_API_KEY ?? null
+    /*
+     * Read the literal name. Binding `import.meta.env` to a variable first --
+     * which this did, to stay testable under node:test -- makes Vite inline the
+     * WHOLE environment into this chunk, privileged values included. Naming the
+     * key directly still compiles to `undefined` outside Vite, so the adapter
+     * remains testable, without shipping every other variable alongside it.
+     */
+    return (import.meta.env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ?? null
   } catch {
     return null
   }

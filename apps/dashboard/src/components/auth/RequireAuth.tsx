@@ -3,8 +3,21 @@ import { useAuth } from './AuthProvider'
 import { LoginPage } from '../../pages/LoginPage'
 
 export const RequireAuth = ({ children }: { children: ReactNode }) => {
-  // As requested: bypass auth when VITE_REQUIRE_AUTH !== 'true'
-  const requireAuth = import.meta.env.VITE_REQUIRE_AUTH === 'true'
+  /*
+   * PRODUCTION DEFAULTS CLOSED.
+   *
+   * This used to read `VITE_REQUIRE_AUTH === 'true'` and bypass otherwise. The
+   * production pipeline never set that variable, so the operator console --
+   * real seller PII -- rendered for anyone who loaded the URL, with no sign-in.
+   *
+   * The default is now inverted: a production build always requires a session.
+   * Only a DEV build can opt out, and only by saying so explicitly. There is
+   * deliberately no production escape hatch; an env var that can unlock prod is
+   * the same bug with a different name.
+   */
+  const requireAuth = import.meta.env.PROD
+    ? true
+    : import.meta.env.VITE_REQUIRE_AUTH === 'true'
   const { session, loading, error } = useAuth()
 
   if (!requireAuth) {

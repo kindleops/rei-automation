@@ -73,8 +73,8 @@ export function classifyInboxBackendFailure(input: InboxBackendFailureInput): In
       dataMode: 'auth_error',
       liveFetchStatus: 'fallback_error',
       message: isDev
-        ? 'Inbox API authentication failed. Set VITE_OPS_DASHBOARD_SECRET or VITE_BACKEND_API_SECRET in apps/dashboard/.env.local.'
-        : 'Inbox API authentication failed. Configure VITE_OPS_DASHBOARD_SECRET in the dashboard deployment environment.',
+        ? 'Inbox API authentication failed. Sign in, or run the API locally with OPS_DASHBOARD_SECRET set on the SERVER (never as a VITE_* value).'
+        : 'Your session is not valid. Sign in again to load the inbox.',
       retryable: false,
       diagnosticCode: 'auth_error',
     }
@@ -162,8 +162,8 @@ export function buildInboxLiveFetchError(
   if (dataMode === 'live' || dataMode === 'mock_preview') return null
   if (dataMode === 'auth_error') {
     return options.isDev
-      ? 'Inbox API authentication failed. Set VITE_OPS_DASHBOARD_SECRET or VITE_BACKEND_API_SECRET in apps/dashboard/.env.local.'
-      : 'Inbox API authentication failed. Configure VITE_OPS_DASHBOARD_SECRET in the dashboard deployment environment.'
+      ? 'Inbox API authentication failed. Sign in, or run the API locally with OPS_DASHBOARD_SECRET set on the SERVER (never as a VITE_* value).'
+      : 'Your session is not valid. Sign in again to load the inbox.'
   }
   if (dataMode === 'backend_unavailable') {
     return options.isDev
@@ -252,18 +252,14 @@ export function getBackendAuthSecretPresence(): {
   first6: string
   last4: string
 } {
-  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined
-  const secret = (
-    (env?.VITE_BACKEND_API_SECRET as string | undefined)
-    || (env?.VITE_OPS_DASHBOARD_SECRET as string | undefined)
-    || ''
-  )
-  return {
-    present: secret.length > 0,
-    secretLength: secret.length,
-    first6: secret.slice(0, 6),
-    last4: secret.slice(-4),
-  }
+  /*
+   * There is no client-held backend secret any more, so this reports absence
+   * truthfully rather than reading a VITE_* value. Vite inlines VITE_* into
+   * the public bundle, which is exactly how the privileged credential came to
+   * be served to every visitor. Authorization is now the user's Supabase
+   * session, attached by the worker. Do not reintroduce a VITE_* credential.
+   */
+  return { present: false, secretLength: 0, first6: '', last4: '' }
 }
 
 export class InboxLiveApiError extends Error {
