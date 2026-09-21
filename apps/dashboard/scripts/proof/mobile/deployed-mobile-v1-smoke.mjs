@@ -213,8 +213,26 @@ console.log('\n[390x844 portrait / dark]')
     '.nx-mobile-command-dock__btn[aria-label="Universal search"]')
   await surface('the mobile notification centre opens', '.nx-mnc',
     '.nx-mobile-command-dock__btn[aria-label="Notifications"]')
-  await surface('the mobile Q surface opens', '.nx-mqs',
-    '.nx-mobile-command-dock__btn[aria-label="Queue operational intelligence"]')
+  /*
+   * The Q surface now opens from the overflow, not from a glyph in the bar.
+   * Queue, Tasks and Live Activity were three of six 38px controls whose 44px
+   * hit areas overlapped their neighbours; they are secondary utilities and
+   * moved behind one trailing overflow control. The surface is unchanged and
+   * still reachable — this asserts the new path rather than the old one.
+   */
+  {
+    await settle(page, '/inbox')
+    await page.locator('.nx-mobile-command-dock__btn--overflow').click({ timeout: 20_000 }).catch(() => undefined)
+    await page.waitForTimeout(1200)
+    await page.locator('.nx-mobile-overflow__row', { hasText: /^Queue/ }).first()
+      .click({ timeout: 20_000 }).catch(() => undefined)
+    const found = await page.waitForSelector('.nx-mqs', { timeout: 30_000 })
+      .then(() => true).catch(() => false)
+    check('the mobile Q surface opens from the overflow', found, 'expected .nx-mqs')
+    await page.screenshot({ path: path.join(OUT, 'portrait-dark-queue-via-overflow.png') })
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(1200)
+  }
 
   // ── the rebuilt application compositions
   const composition = async (label, route, selector) => {
