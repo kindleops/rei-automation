@@ -59,6 +59,8 @@
     "assert:fullscreen": "node scripts/assert-mobile-fullscreen-contract.mjs",
     "proof:workflow-studio-mobile": "node scripts/proof/mobile/workflow-studio-mobile-qa.mjs",
     "proof:closing-desk-mobile": "node scripts/proof/mobile/closing-desk-mobile-qa.mjs",
+    "proof:calendar-mobile": "node scripts/proof/mobile/calendar-mobile-qa.mjs",
+    "proof:calendar-composition": "node scripts/proof/mobile/calendar-composition-qa.mjs",
     "proof:closing-desk-populated": "node scripts/proof/mobile/closing-desk-populated-mobile-qa.mjs",
     "proof:whole-product": "node scripts/proof/mobile/whole-product-smoke.mjs",
     "proof:cross-app-subject": "node scripts/proof/mobile/cross-app-subject-proof.mjs",

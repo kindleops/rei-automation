@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { CalendarEvent } from '../../lib/data/calendarData'
-import { toIsoDate, weekdayHeaders } from '../../lib/calendar/calendar-date-engine'
+import { toIsoDate, weekdayHeaders, shouldOfferReturnToToday } from '../../lib/calendar/calendar-date-engine'
 import { Icon } from '../../shared/icons'
 import { CalendarAgendaView } from './components/CalendarAgendaView'
 import { MonthExecutionGrid } from './MonthExecutionGrid'
@@ -83,7 +83,33 @@ export function CalendarMobileView({
                   : `${events.length} events in range`}
           </span>
         </div>
-        <button type="button" className="nx-cal__cmd-btn" onClick={() => setMonthSheetOpen(true)}>Month</button>
+        <div className="nx-cal__mobile-head-actions">
+          {/*
+            * RETURNING TO TODAY.
+            *
+            * The day strip only spans the week around the anchor, while the
+            * month sheet can jump to any date. So an operator who opened
+            * October and tapped the 24th had no way back: the strip had
+            * re-anchored around that week, and today was several month-pages
+            * away behind the Month control. `todayKey` already existed to mark
+            * today in the strip — the marker was there, the way back was not.
+            *
+            * It only appears when the anchor has actually moved, so the common
+            * case (sitting on today) keeps a two-control header rather than
+            * carrying a button that would do nothing.
+            */}
+          {shouldOfferReturnToToday(anchorDate) ? (
+            <button
+              type="button"
+              className="nx-cal__cmd-btn"
+              data-testid="cal-today-btn"
+              onClick={() => onDateChange(new Date())}
+            >
+              Today
+            </button>
+          ) : null}
+          <button type="button" className="nx-cal__cmd-btn" data-testid="cal-month-btn" onClick={() => setMonthSheetOpen(true)}>Month</button>
+        </div>
       </header>
 
       {loadError ? (

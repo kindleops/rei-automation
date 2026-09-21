@@ -7,6 +7,7 @@ import {
   resolveCalendarSubject,
   sameCalendarSubject,
 } from './calendar-subject'
+import { shouldOfferReturnToToday } from '../../lib/calendar/calendar-date-engine'
 
 /**
  * CALENDAR-MOBILE-LOCK-1 §44. Each case pins a defect found on 2026-09-16.
@@ -71,5 +72,49 @@ describe('the calendar subject is exact, and A never leaks into B', () => {
 
   it('describes an unscoped calendar as all scheduled work', () => {
     expect(describeCalendarSubject(NO_CALENDAR_SUBJECT)).toBe('All scheduled work')
+  })
+})
+
+/**
+ * §25 — a way back to Today.
+ *
+ * THE DEFECT (2026-09-20). The mobile header carried a date, a count and a
+ * `Month` button, and nothing else. The day strip spans only the week around
+ * the anchor while the month sheet can jump to any date, so an operator who
+ * opened next month and tapped a day had no route home: the strip had
+ * re-anchored around that week, and today sat several month-pages back behind
+ * the Month control. `todayKey` already existed to MARK today in the strip —
+ * the marker was there, the way back was not.
+ */
+describe('returning to today', () => {
+  it('offers no Today control while already on today', () => {
+    const now = new Date(2026, 8, 20, 9, 0, 0)
+    expect(shouldOfferReturnToToday(new Date(2026, 8, 20, 23, 59, 0), now)).toBe(false)
+    expect(shouldOfferReturnToToday(new Date(2026, 8, 20, 0, 0, 1), now)).toBe(false)
+  })
+
+  it('offers it as soon as the anchor moves to another day', () => {
+    const now = new Date(2026, 8, 20, 9, 0, 0)
+    expect(shouldOfferReturnToToday(new Date(2026, 8, 21), now)).toBe(true)
+    expect(shouldOfferReturnToToday(new Date(2026, 8, 19), now)).toBe(true)
+    expect(shouldOfferReturnToToday(new Date(2026, 9, 24), now)).toBe(true)
+  })
+
+  it('compares calendar dates, not instants', () => {
+    /*
+     * 23:00 and 01:00 the next morning are two hours apart and two different
+     * days. A `getTime()` comparison would make the control's presence depend
+     * on the clock rather than the date.
+     */
+    const lateTonight = new Date(2026, 8, 20, 23, 0, 0)
+    const earlyTomorrow = new Date(2026, 8, 21, 1, 0, 0)
+    expect(shouldOfferReturnToToday(earlyTomorrow, lateTonight)).toBe(true)
+    expect(Math.abs(earlyTomorrow.getTime() - lateTonight.getTime())).toBeLessThan(3 * 60 * 60 * 1000)
+  })
+
+  it('crosses a month boundary correctly', () => {
+    const now = new Date(2026, 8, 30, 12, 0, 0)
+    expect(shouldOfferReturnToToday(new Date(2026, 9, 1), now)).toBe(true)
+    expect(shouldOfferReturnToToday(new Date(2026, 8, 30, 0, 0, 0), now)).toBe(false)
   })
 })

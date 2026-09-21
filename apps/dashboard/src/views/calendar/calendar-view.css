@@ -1459,6 +1459,18 @@
   background: var(--cnx-glass-bg);
 }
 
+/*
+ * Header actions. `Today` only mounts once the anchor has moved, so this has
+ * to shrink back to a single control without the header reflowing — hence
+ * flex-shrink:0 on the group rather than a fixed width.
+ */
+.nx-cal__mobile-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .nx-cal__mobile-day-strip {
   display: flex;
   gap: 6px;

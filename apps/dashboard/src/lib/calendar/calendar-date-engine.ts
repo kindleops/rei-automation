@@ -38,6 +38,21 @@ export const addMonths = (value: Date, amount: number) => {
 
 export const isSameDay = (a: Date, b: Date) => toIsoDate(a) === toIsoDate(b)
 
+/**
+ * Should the surface offer a way back to today?
+ *
+ * The mobile header has room for two controls, and a `Today` button that is
+ * always present is a button that does nothing most of the time. It earns its
+ * place only once the anchor has actually moved.
+ *
+ * Compared on LOCAL calendar date via `toIsoDate`, never on instants: 23:00
+ * and 01:00 the next morning are different days to an operator even though
+ * they are an hour apart, and a `getTime()` comparison would call them equal
+ * or unequal depending on the clock rather than the date.
+ */
+export const shouldOfferReturnToToday = (anchor: Date, now: Date = new Date()) =>
+  toIsoDate(anchor) !== toIsoDate(now)
+
 export const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate()
 
 export const weekdayHeaders = (weekStart: WeekStart = 0) => {
