@@ -1263,34 +1263,47 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
    * dead.
    */
   /**
-   * The fullest record available for the selected thread.
+   * THE SELECTED-THREAD SNAPSHOT.
    *
-   * RETAINED, because it disappears. `threads` is re-filtered while a
-   * conversation is open, so the id lookup that resolves a full 247-key row on
-   * one render misses on the next and the dossier would blank out mid-view --
-   * measured: estimated_value=172000 on the first render, nothing on the
-   * second. The last non-empty row for the CURRENTLY selected thread is kept,
-   * and cleared as soon as the selection changes, so the sheet can never show
-   * one thread's facts under another thread's name.
+   * Captured ONCE, at selection, from the list row -- the fullest record that
+   * exists for a thread (247 keys) and the same one the Inbox card reads. It is
+   * then immutable for the life of that selection.
+   *
+   * WHY A SNAPSHOT AND NOT A DERIVATION. `threads` is re-filtered while a
+   * conversation is open, so deriving the row on every render resolved a full
+   * record on one pass and nothing on the next -- measured as
+   * estimated_value=172000 followed by nothing, which is why the dossier showed
+   * a property with no valuation. Three successive merge orderings were tried
+   * against that and none of them could fix it, because the problem was never
+   * the merge: it was reading a moving source. Reading once, at the moment the
+   * operator chooses the thread, removes the moving part.
+   *
+   * Identity is keyed on the selection id, so switching threads replaces the
+   * snapshot outright and a previous property can never survive underneath a
+   * new thread's name.
    */
-  const propertyIntelligenceRowRef = useRef<{ id: string; row: Record<string, unknown> } | null>(null)
+  const [selectedThreadSnapshot, setSelectedThreadSnapshot] = useState<
+    { id: string; row: Record<string, unknown> } | null
+  >(null)
+
+  const captureSelectedThreadSnapshot = useCallback((id: string, row: unknown) => {
+    if (!id || !row || typeof row !== 'object') return
+    setSelectedThreadSnapshot({ id: String(id), row: { ...(row as Record<string, unknown>) } })
+  }, [])
+
   const propertyIntelligenceRow = useMemo<Record<string, unknown> | null>(() => {
     const selectedId = String((workspaceThread as unknown as { id?: string } | null)?.id ?? '')
     if (!selectedId) return null
-    const listRow = (threads as unknown as Array<Record<string, unknown>>).find((t) => String(t.id) === selectedId)
-    const merged = { ...((workspaceThread ?? {}) as unknown as Record<string, unknown>), ...(listRow ?? {}) }
-    const cached = propertyIntelligenceRowRef.current
-    if (listRow) {
-      propertyIntelligenceRowRef.current = { id: selectedId, row: merged }
-      return merged
-    }
-    // The CACHED row wins: `merged` on this render is the selection object
-    // alone, whose numeric fields arrive as 0 and would clobber the real
-    // values the cache was kept for. Same clobbering the merge order above
-    // already had to be reversed for.
-    if (cached && cached.id === selectedId) return { ...merged, ...cached.row }
-    return merged
-  }, [threads, workspaceThread])
+    const snapshot = selectedThreadSnapshot?.id === selectedId ? selectedThreadSnapshot.row : null
+    const live = (threads as unknown as Array<Record<string, unknown>>).find((t) => String(t.id) === selectedId)
+    /*
+     * The snapshot is the base. A live row is layered on top ONLY when it is
+     * still present, so a realtime update merges in intentionally, and its
+     * absence can never subtract from what was captured.
+     */
+    if (!snapshot && !live) return (workspaceThread ?? null) as Record<string, unknown> | null
+    return { ...((workspaceThread ?? {}) as unknown as Record<string, unknown>), ...(snapshot ?? {}), ...(live ?? {}) }
+  }, [threads, workspaceThread, selectedThreadSnapshot])
 
   const propertyIntelligenceActions = useMemo<PropertyIntelligenceAction[]>(() => {
     const go = (route: string) => () => { setMobileIntelOpen(false); pushRoutePath(route) }
@@ -4003,6 +4016,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleSelect = useCallback((id: string) => {
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
+    // Snapshot the full list row at the moment of selection -- see
+    // selectedThreadSnapshot. After this point the list may be re-filtered.
+    captureSelectedThreadSnapshot(id, thread)
     const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
@@ -4093,7 +4109,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setMobileThreadOpen(true)
       setMobileIntelOpen(false)
     }
-  }, [DEV, canonicalSelectionKey, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
+  }, [DEV, canonicalSelectionKey, captureSelectedThreadSnapshot, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
 
   const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
     const phone = String(participant.canonical_e164 ?? '').trim()
