@@ -124,6 +124,28 @@ const openThread = async (page, index, attempt = 0) => {
 
 // ── B/C/D/E. REALTIME, AFFORDANCE, DEDUPE ──────────────────────────────────
 {
+  /*
+   * SEED ENOUGH HISTORY TO BE ABLE TO SCROLL.
+   *
+   * The canary carries two messages, so "scroll up and receive one" is not
+   * expressible against it: at a scroll range under the 48px near-bottom
+   * threshold, scrollTop 0 IS the bottom, the timeline correctly re-anchors,
+   * and the affordance correctly never appears. The proof was reporting its
+   * own impossible precondition as a product defect.
+   *
+   * Inbound only, on the sanctioned canary, removed at the end of the block.
+   */
+  const seedKeys = []
+  for (let i = 0; i < 14; i += 1) {
+    const key = `scrollproof:seed:${Date.now()}:${i}`
+    seedKeys.push(key)
+    await admin.from('message_events').insert({
+      ...CANARY_IDENTITY, message_event_key: key,
+      message_body: `Scroll proof history ${i + 1}`,
+      received_at: new Date(Date.now() - (20 - i) * 60_000).toISOString(),
+    })
+  }
+
   const page = await ctx.newPage()
   const start = await openThread(page, 0)
   check('B. baseline timeline present', start !== null && start.bubbles > 0, start ? `msgs=${start.bubbles} max=${start.max}` : '')
@@ -209,6 +231,7 @@ const openThread = async (page, index, attempt = 0) => {
   // Cleanup must survive an early exit: an interrupted run left two fixture
   // rows on the canary, which the final safety check caught.
   await admin.from('message_events').delete().eq('source_app', 'inbox_scroll_proof')
+  void seedKeys
   await page.close()
 }
 
