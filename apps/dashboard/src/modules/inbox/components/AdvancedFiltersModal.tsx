@@ -47,6 +47,7 @@ const GROUP_ICONS: Record<string, string> = {
   distress: '⚠️', prospect: '👤', owner: '💼', phone: '📱', email: '✉️',
 }
 
+const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const num = (v: number | undefined) => (v === undefined ? '' : String(v))
 const asNum = (v: string): number | undefined => { const n = Number(v); return v.trim() && Number.isFinite(n) ? n : undefined }
 
@@ -387,11 +388,27 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
 
   if (resolved && opts.length === 0) return null
 
+  /*
+   * §12 — A SLOW FIELD MUST SAY IT IS LOADING, NOT LOOK EMPTY.
+   *
+   * Options arrive per field and some are genuinely slow: measured against
+   * this project, Delivery Status and Automation Status still showed only
+   * "Any" six seconds in and were fully populated by fourteen. An un-annotated
+   * "Any"-only dropdown during that window is indistinguishable from a filter
+   * with no values -- it misled my own audit twice before it could mislead an
+   * operator. While unresolved the control says so and cannot be changed, so
+   * it can never be read as "this filter has nothing to offer".
+   */
   return (
-    <label className="nx-ifm-field">
+    <label className={cls('nx-ifm-field', !resolved && 'is-loading')}>
       <span>{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Any</option>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={!resolved}
+        aria-busy={!resolved}
+      >
+        <option value="">{resolved ? 'Any' : 'Loading options…'}</option>
         {opts.map((o) => <option key={o.value} value={o.value}>{o.label} ({o.count})</option>)}
       </select>
     </label>

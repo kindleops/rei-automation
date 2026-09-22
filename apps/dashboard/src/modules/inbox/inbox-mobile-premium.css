@@ -1876,3 +1876,11 @@ html.is-mobile-layout .nx-sidebar-rebuilt__search-row .nx-sidebar__icon-button {
   background: transparent; color: inherit;
   font-size: var(--nx-t-body); font-weight: 600;
 }
+
+/* §12 — a filter still fetching its options reads as busy, not as empty. */
+html.is-mobile-layout .nx-ifm-field.is-loading select { opacity: 0.55; }
+html.is-mobile-layout .nx-ifm-field.is-loading > span::after {
+  content: ' · loading';
+  font-size: var(--nx-t-micro, 11px);
+  opacity: 0.7;
+}
