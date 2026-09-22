@@ -1932,19 +1932,25 @@ html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__expand:
    nothing and the grid collapses to a single column — §3 is explicit that an
    unavailable image must not reserve a region.
    ══════════════════════════════════════════════════════════════════════════ */
-html.is-mobile-layout .nx-conv-mobile-identity {
+/* Specificity note: mobile-operating-shell.css sets this to a flex COLUMN via
+   `.nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity` (0,3,0), which
+   beat a plain `html.is-mobile-layout` prefix (0,2,1) -- the image rendered
+   stacked above the name instead of beside it. Match the shell's selector. */
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity {
   display: flex;
+  flex-direction: row;
   align-items: center;
+  justify-content: flex-start;
   gap: var(--nx-s-3, 12px);
   min-width: 0;
 }
 
-html.is-mobile-layout .nx-conv-mobile-identity__text {
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__text {
   min-width: 0;
   flex: 1 1 auto;
 }
 
-html.is-mobile-layout .nx-conv-mobile-identity__sv {
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__sv {
   flex: 0 0 auto;
   width: 72px;
   height: 48px;
@@ -2078,4 +2084,81 @@ html[data-nexus-theme="light"] .nx-composer-template-gap {
   background: rgba(180, 83, 9, 0.10);
   border-color: rgba(180, 83, 9, 0.28);
   color: #9a3412;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §2/§25 — SHORT THREADS SIT ON THE COMPOSER, NOT UNDER THE HEADER
+
+   A two-message thread rendered its bubbles at the TOP of a 409px list and
+   left the rest as void, so the newest message was as far from the composer
+   as it could possibly be. Every native messaging client grows the timeline
+   up from the bottom instead.
+
+   `margin-top: auto` on the first child rather than `justify-content: flex-end`
+   on the container: with a scrolling flex column, flex-end makes the topmost
+   content unreachable once it overflows. This idiom bottom-aligns while short
+   and scrolls normally once long.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-message-list {
+  display: flex;
+  flex-direction: column;
+}
+
+html.is-mobile-layout .nx-message-list > *:first-child {
+  margin-top: auto;
+}
+
+/* The empty and uncontacted states are centred cards, not timeline entries --
+   pinning them to the bottom would read as a message. */
+html.is-mobile-layout .nx-message-list > .nx-uncontacted-state:first-child,
+html.is-mobile-layout .nx-message-list > .nx-empty-state:first-child {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §35 — CALM THE CONVERSATION HEADER ON A PHONE
+
+   The mobile header paints three animated liquid layers at opacity 0.88 / 0.9
+   over a saturated accent. On a 390pt phone that header owns the top third of
+   the screen, so the effect reads as a neon dashboard competing with the
+   messages, which are meant to be the centre of gravity.
+
+   TWO WRONG TURNS, RECORDED SO THE NEXT PASS DOES NOT REPEAT THEM:
+
+   1. I first scoped to `.nx-conv-live .nx-conv-header__liquid`, copying the
+      desktop rule in conversation-live.css. There is no .nx-conv-live ancestor
+      in the mobile branch -- a stylesheet audit run from the page returned
+      ZERO matching rules while computed opacity sat at 0.88. It had no effect
+      whatsoever, and !important could not save a selector that never matched.
+
+   2. The real owner is mobile-operating-shell.css at (0,5,0) WITH !important,
+      driving `nx-mobile-liquid-field`. An active animation also beats
+      !important on the properties it animates, so the opacity had to be
+      lowered AND the animation cancelled -- which also releases a compositor
+      layer that was running a 9s loop forever behind text.
+
+   Reduced, not removed: the atmosphere still separates header from timeline.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--field,
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--bloom,
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--edge {
+  animation: none !important;
+  will-change: auto !important;
+  opacity: 0.24 !important;
+  filter: blur(30px) saturate(1.05) !important;
+}
+
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__glow,
+html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__glow::after {
+  animation: none !important;
+  opacity: 0.35 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--field,
+  html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--bloom,
+  html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--edge {
+    opacity: 0.16 !important;
+  }
 }

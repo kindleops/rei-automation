@@ -736,14 +736,33 @@ export const ChatThread = ({
     const node = listRef.current
     if (!node || typeof ResizeObserver === 'undefined') return undefined
     let lastHeight = node.scrollHeight
+    let lastClient = node.clientHeight
     const observer = new ResizeObserver(() => {
       const live = listRef.current
       if (!live) return
       const height = live.scrollHeight
-      if (height === lastHeight) return
+      const client = live.clientHeight
+
+      /*
+       * §26 -- THE KEYBOARD SHRINKS THE VIEWPORT, NOT THE CONTENT.
+       *
+       * This gated purely on scrollHeight, which the keyboard does not touch:
+       * it shrinks clientHeight instead. So an operator sitting on the latest
+       * message tapped the composer, the list lost ~300px of height, and the
+       * message they were reading slid up out of view with nothing to re-pin
+       * it -- the keyboard appeared to scroll the thread backwards.
+       *
+       * A shrinking viewport is treated exactly like growing content: re-anchor
+       * ONLY if they were already at the bottom. Someone reading history keeps
+       * their place, which is the other half of §26.
+       */
+      const shrankViewport = client < lastClient
+      lastClient = client
+
+      if (height === lastHeight && !shrankViewport) return
       const grew = height > lastHeight
       lastHeight = height
-      if (!grew) return
+      if (!grew && !shrankViewport) return
       if (!scrollSnapshotRef.current.nearBottom) return
       programmaticScrollRef.current = Date.now()
       live.scrollTop = Math.max(0, height - live.clientHeight)
@@ -856,6 +875,27 @@ export const ChatThread = ({
   if (overflowFlagCount > 0) propertyCells.push({ key: 'flags-more', label: 'Flags', value: `+${overflowFlagCount}`, className: 'is-flag' })
   if (isSuppressed) propertyCells.push({ key: 'suppressed', label: 'Status', value: 'Suppressed', className: 'is-status' })
   if (backgroundLoading) propertyCells.push({ key: 'sync', label: 'Sync', value: 'Syncing…' })
+
+  /*
+   * §11 -- A RESTRAINED SET, NOT A WALL.
+   *
+   * On a phone this rendered as five large chips across the full width --
+   * "Dallas, TX / SFR / 100% / Good / High Equity" -- under an already heavy
+   * title and address, before a single message was visible. §3 asks for "a
+   * restrained set of useful property facts", not everything the record holds.
+   *
+   * Priority, not truncation of the list's tail: market and asset class orient
+   * the operator, equity is the one number that changes how they negotiate,
+   * and status (Suppressed / Syncing) is never dropped because it governs
+   * whether they may send at all. The rest stays on the desktop strip, which
+   * has the room.
+   */
+  const MOBILE_CELL_PRIORITY = ['suppressed', 'sync', 'market', 'type', 'equity']
+  const mobilePropertyCells = onBack
+    ? MOBILE_CELL_PRIORITY
+      .map((key) => propertyCells.find((cell) => cell.key === key))
+      .filter((cell): cell is PropertyIntelCell => Boolean(cell))
+    : propertyCells
 
   const externalLinks = buildPropertyExternalLinks(propertyAddress || null)
   const zillowUrl = readString(thread, 'zillow_url', 'zillowUrl') || externalLinks.zillow
@@ -1054,10 +1094,10 @@ export const ChatThread = ({
           </div>
         )}
 
-        {propertyCells.length > 0 && (
+        {mobilePropertyCells.length > 0 && (
           <div className={cls('nx-conv-layer-b', onBack && 'nx-conv-layer-b--mobile')}>
             <div className="nx-conv-property-strip" aria-label="Property intelligence">
-              {propertyCells.map((cell) => (
+              {mobilePropertyCells.map((cell) => (
                 <span key={cell.key} className={cls('nx-intel-cell', cell.className)}>
                   {!cell.className?.includes('is-flag') && !onBack && (
                     <span className="nx-intel-cell__label">{cell.label}</span>
