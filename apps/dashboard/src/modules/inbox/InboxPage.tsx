@@ -2662,11 +2662,25 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
     let pollController: AbortController | null = null
     let pollInFlight = false
+    /*
+     * §3 — A REALTIME EVENT MUST MOVE THE BADGES, NOT JUST THE ROWS.
+     *
+     * This refreshed the LIST only. So when canonical state changed, the rows
+     * updated and every category count stayed exactly where it was until some
+     * unrelated fetch happened to run. Measured by archiving a thread and
+     * watching: Archived should have gone 69 -> 70 and All 9710 -> 9709, and
+     * neither moved.
+     *
+     * Counts and rows are two projections of the same change, so they refresh
+     * together, behind the same 200ms coalescing window -- a burst of events
+     * still costs one refresh of each.
+     */
     const scheduleRefreshInbox = () => {
       if (refreshTimer) return
       refreshTimer = setTimeout(() => {
         refreshTimer = null
         void refreshInbox()
+        void refreshInboxCounts()
       }, 200)
     }
 

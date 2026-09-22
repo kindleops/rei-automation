@@ -85,7 +85,24 @@ export const refreshAuthoritativeViewCounts = (
   dispatch: React.Dispatch<InboxStoreAction>,
   onWarning?: (warning: string | null) => void,
 ) => {
-  void backendClient.fetchInboxCounts().then((res) => {
+  /*
+   * §3 — A COUNTS REFRESH TRIGGERED BY A STATE CHANGE MUST ACTUALLY FETCH.
+   *
+   * backendClient caches GET /api/cockpit/inbox/counts for 60 SECONDS. This
+   * called it with no signal, so every realtime-driven refresh inside that
+   * window was served the cached response and no request left the browser.
+   * Measured by archiving a thread and watching: the realtime event applied,
+   * this function ran, and zero network calls followed -- Archived stayed on
+   * 69 when it should have read 70.
+   *
+   * callBackend deliberately bypasses the cache when a signal is present
+   * ("Abortable requests must not join cached/in-flight GETs"), so passing one
+   * is the existing, documented way to demand a fresh read. The 60s cache
+   * still protects render-driven calls; it just no longer outranks a change we
+   * were told about.
+   */
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  void backendClient.fetchInboxCounts(controller?.signal).then((res) => {
     const applied = applyInboxCountsFetchResult({
       ok: res.ok,
       status: res.status,
