@@ -58,20 +58,43 @@ async function loadProspectPhoneIndex(property_id, master_owner_id) {
   if (master_owner_id) {
     const { data: prospects } = await supabase
       .from('prospects')
-      .select('prospect_id, master_owner_id, full_name, first_name, last_name, relationship_type, matching_flags, person_flags_text, likely_owner, likely_renting, contact_score, sms_eligible, status')
+      // EVERY COLUMN HERE MUST EXIST. PostgREST fails the WHOLE select on one
+      // unknown column, and the error is swallowed by the destructure below --
+      // so `relationship_type`, `last_name`, `contact_score` and `status`
+      // (none of which are on public.prospects) silently emptied prospectById
+      // for every property. The visible symptom was a conversation headed
+      // "Charles Powell & Lou A Thomas" -- two people fused into one messaging
+      // identity -- with prospect_id null and likely_owner false while the row
+      // in the database said true.
+      .select('prospect_id, canonical_prospect_id, master_owner_id, full_name, first_name, matching_flags, person_flags_text, likely_owner, likely_renting, contact_score_final, rank_position, rank_confidence, owner_type_guess, sms_eligible')
       .eq('master_owner_id', master_owner_id)
       .limit(100)
+    // Two id namespaces are in play: prospects.prospect_id (`pros0_`/`pros2_`)
+    // and the canonical identity (`cpros_`) that phones carries. Indexing only
+    // the former meant every phone-sourced lookup missed, so a property whose
+    // owner record reads "Charles Powell & Lou A Thomas" stayed fused in the
+    // UI while the table held Charles C Powell III (#1) and Lou A Thomas (#2)
+    // as separate, separately ranked, separately contactable people.
     for (const row of Array.isArray(prospects) ? prospects : []) {
-      prospectById.set(clean(row.prospect_id), row)
+      const pid = clean(row.prospect_id)
+      const cpid = clean(row.canonical_prospect_id)
+      if (pid) prospectById.set(pid, row)
+      if (cpid && !prospectById.has(cpid)) prospectById.set(cpid, row)
     }
 
+    // public.phones was narrowed to the owner-keyed export: property_id,
+    // prospect_id, score, rank, sms_status, status, wireless_status,
+    // phone_number, last_contacted and last_reply are all gone. Ten of the
+    // thirteen columns previously requested here did not exist, so this select
+    // -- and with it every phone rank, best-phone flag and per-phone person
+    // name -- had been failing whole. The names below are the current ones.
     const { data: phones } = await supabase
       .from('phones')
-      .select('phone_id, master_owner_id, property_id, prospect_id, canonical_e164, phone_number, score, rank, sms_status, status, wireless_status, last_contacted, last_reply')
-      .or(`property_id.eq.${property_id},master_owner_id.eq.${master_owner_id}`)
+      .select('phone_id, master_owner_id, canonical_prospect_id, primary_prospect_id, canonical_e164, phone, phone_raw, best_phone_score, contact_score_final, contact_rank_position, is_best_phone_for_owner, phone_type, phone_contact_status, activity_status, wrong_number_at, phone_full_name, phone_first_name, primary_display_name')
+      .eq('master_owner_id', master_owner_id)
       .limit(200)
     for (const row of Array.isArray(phones) ? phones : []) {
-      const e164 = clean(row.canonical_e164 || row.phone_number)
+      const e164 = clean(row.canonical_e164 || row.phone || row.phone_raw)
       if (e164) phoneByE164.set(e164, row)
     }
   }
@@ -96,7 +119,7 @@ async function loadLatestInboundMessage(property_id, phone) {
 function mergeParticipantRecord(base = {}, { prospectById, phoneByE164, latestInboundMessage } = {}) {
   const phone = clean(base.canonical_e164)
   const phoneRow = phone ? phoneByE164.get(phone) : null
-  const prospectId = clean(base.prospect_id || phoneRow?.prospect_id)
+  const prospectId = clean(base.prospect_id || phoneRow?.canonical_prospect_id || phoneRow?.primary_prospect_id)
   const prospect = prospectId ? prospectById.get(prospectId) : null
 
   const displayName = clean(
@@ -118,9 +141,12 @@ function mergeParticipantRecord(base = {}, { prospectById, phoneByE164, latestIn
     person_flags_text: base.person_flags_text || prospect?.person_flags_text || null,
     likely_owner: base.likely_owner === true || prospect?.likely_owner === true,
     likely_renting: base.likely_renting === true || prospect?.likely_renting === true,
-    contact_score: base.contact_score ?? prospect?.contact_score ?? phoneRow?.score ?? null,
-    best_phone_score: base.best_phone_score ?? phoneRow?.score ?? null,
-    sms_eligible: base.sms_eligible ?? (prospect?.sms_eligible !== false && phoneRow?.sms_status !== 'Invalid'),
+    contact_score: base.contact_score ?? prospect?.contact_score_final ?? phoneRow?.contact_score_final ?? phoneRow?.best_phone_score ?? null,
+    best_phone_score: base.best_phone_score ?? phoneRow?.best_phone_score ?? null,
+    contact_rank_position: base.contact_rank_position ?? phoneRow?.contact_rank_position ?? prospect?.rank_position ?? null,
+    is_best_phone_for_owner: base.is_best_phone_for_owner ?? phoneRow?.is_best_phone_for_owner ?? null,
+    phone_type: base.phone_type ?? phoneRow?.phone_type ?? null,
+    sms_eligible: base.sms_eligible ?? (prospect?.sms_eligible !== false && !phoneRow?.wrong_number_at && phoneRow?.phone_contact_status !== 'Invalid'),
     contactability: base.safe_to_contact === false ? 'blocked' : 'contactable',
     active_thread_state: base.unread_count > 0 ? 'active' : (base.last_message_at ? 'recent' : 'inactive'),
   }
@@ -151,7 +177,40 @@ async function loadParticipantsFromGraph(property_id, selected_phone, context) {
 
   if (error) throw error
   const rows = Array.isArray(data) ? data : []
-  const participants = await enrichParticipants(rows, {
+
+  /*
+   * §5 -- THE LINKED PROSPECTS.
+   *
+   * property_participant_graph holds only people who have actually messaged:
+   * one row per property here, even where the owner record names two. The
+   * other contactable people are already modelled -- phones carries one row
+   * per person, keyed by canonical_prospect_id, with its own rank and score --
+   * so a linked candidate is a phone on this owner that the graph has not
+   * already accounted for. Nothing is invented: a person with no phone is not
+   * contactable and is not offered.
+   */
+  const seen = new Set(rows.map((row) => clean(row.canonical_e164)).filter(Boolean))
+  const linked = []
+  for (const phoneRow of context.phoneByE164?.values() ?? []) {
+    const e164 = clean(phoneRow.canonical_e164)
+    if (!e164 || seen.has(e164)) continue
+    seen.add(e164)
+    linked.push({
+      participant_id: `linked:${phoneRow.phone_id || e164}`,
+      property_id,
+      master_owner_id: clean(phoneRow.master_owner_id) || null,
+      prospect_id: clean(phoneRow.canonical_prospect_id || phoneRow.primary_prospect_id) || null,
+      phone_id: clean(phoneRow.phone_id) || null,
+      canonical_e164: e164,
+      display_name: clean(phoneRow.phone_full_name || phoneRow.primary_display_name) || null,
+      contact_rank_position: phoneRow.contact_rank_position ?? null,
+      is_current_participant: false,
+      unread_count: 0,
+      last_message_at: null,
+    })
+  }
+
+  const participants = await enrichParticipants([...rows, ...linked], {
     ...context,
     property_id,
     selected_phone,

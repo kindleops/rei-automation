@@ -1845,3 +1845,81 @@ html[data-nexus-theme="light"] .nx-mobile-sheet__close {
   color: #0f172a !important;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §12 — THE ACTIVE PROSPECT IS ONE ROW
+
+   The card used to spend an eyebrow, a heading and a separate meta row saying
+   what a single line says. On a 390pt phone with the keyboard up that was most
+   of the space the message history had left. Two lines now: who and where they
+   sit in the canonical order, then the number we are about to text alongside
+   the ownership state that belongs to THAT person.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-active-prospect__identity-line {
+  display: flex;
+  align-items: baseline;
+  /* NOT wrap. A long owner name ("INTERNAL CANARY - NOT BUSINESS DATA") pushed
+     the relationship onto its own line and left the separator stranded after
+     the rank -- a dangling "·" with nothing behind it. The name ellipsizes
+     instead, because it is the one part that can lose characters and still
+     be read. */
+  flex-wrap: nowrap;
+  gap: 0 var(--nx-s-1, 4px);
+  min-width: 0;
+}
+
+html.is-mobile-layout .nx-active-prospect__identity-line .nx-active-prospect__dot,
+html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__dot { flex: 0 0 auto; opacity: 0.45; }
+
+html.is-mobile-layout .nx-active-prospect__identity-line .nx-active-prospect__name {
+  flex: 0 1 auto;
+  font-size: var(--nx-t-body, 14px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.is-mobile-layout .nx-active-prospect__rank {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+html.is-mobile-layout .nx-active-prospect__relationship {
+  flex: 0 0 auto;
+  font-size: var(--nx-t-micro, 11px);
+  opacity: 0.72;
+  white-space: nowrap;
+}
+
+html.is-mobile-layout .nx-active-prospect__sub-line {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2, 8px);
+  margin-top: 2px;
+  min-width: 0;
+}
+
+html.is-mobile-layout .nx-active-prospect__phone {
+  font-size: var(--nx-t-micro, 11px);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+/* The linked control is the only thing here that is pressed, so it gets the
+   touch target and it sits at the end where a thumb already is. */
+html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__expand {
+  margin-left: auto;
+  position: relative;
+  min-height: 28px;
+}
+html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__expand::after {
+  content: '';
+  position: absolute;
+  inset: -8px -6px;
+}

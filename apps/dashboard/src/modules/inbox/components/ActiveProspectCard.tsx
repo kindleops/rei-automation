@@ -2,10 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon, type IconName } from '../../../shared/icons'
 import { formatPhone } from '../../../shared/formatters'
 import {
-  deriveOwnerMatchFlags,
   formatParticipantRelationship,
   hasSellerAuthorityEvidence,
-  ownerMatchFlagTone,
   resolveOwnershipPresentation,
   type OwnershipPresentation,
   type PropertyParticipant,
@@ -13,7 +11,6 @@ import {
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
-
 type Props = {
   participants: PropertyParticipant[]
   selectedParticipant: PropertyParticipant | null
@@ -31,7 +28,6 @@ type Props = {
    */
   compact?: boolean
 }
-
 const OWNERSHIP_TONE_ICON = {
   confirmed: 'check',
   inferred: 'alert-circle',
@@ -39,7 +35,6 @@ const OWNERSHIP_TONE_ICON = {
   behavioral: 'message',
   neutral: 'user',
 } as const satisfies Record<OwnershipPresentation['tone'], IconName>
-
 const OwnershipIndicator = ({
   status,
   sellerAuthority = false,
@@ -52,7 +47,6 @@ const OwnershipIndicator = ({
     </span>
   )
 }
-
 const ActiveProspectCardComponent = ({
   participants,
   selectedParticipant,
@@ -66,18 +60,17 @@ const ActiveProspectCardComponent = ({
 }: Props) => {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
-
   const selected = selectedParticipant || participants[0] || null
-  const matchFlags = useMemo(
-    () => (selected?.owner_match_flags?.length
-      ? selected.owner_match_flags
-      : deriveOwnerMatchFlags(selected || {})),
-    [selected],
-  )
-
   const switcherList = useMemo(() => participants, [participants])
+  // Both come straight from the canonical record: contact_rank_label is
+  // phones.contact_rank_position rendered as #1/#2/#3, and the relationship is
+  // the humanised form of the stored vocabulary -- never inferred here.
+  const rankLabel = selected?.contact_rank_label
+    || (selected?.contact_rank ? `#${selected.contact_rank}` : null)
+  const relationshipLabel = selected
+    ? formatParticipantRelationship(selected.relationship_to_property || selected.identity_class)
+    : null
   const headlineName = selected?.display_name || prospectName || 'Select prospect'
-
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: MouseEvent) => {
@@ -93,11 +86,8 @@ const ActiveProspectCardComponent = ({
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [open])
-
   if (!switcherList.length && !loading) return null
-
   const phone = String(selected?.canonical_e164 ?? '').trim()
-
   /**
    * COMPOSING STATE: an identity strip, not half the remaining viewport.
    *
@@ -125,18 +115,43 @@ const ActiveProspectCardComponent = ({
       </section>
     )
   }
-
   return (
     <section className="nx-active-prospect" ref={rootRef} aria-label="Active prospect">
       <div className="nx-active-prospect__card is-selected">
-        <div className="nx-active-prospect__head">
-          <div className="nx-active-prospect__identity">
-            <span className="nx-active-prospect__eyebrow">Active Prospect</span>
-            <h3 className="nx-active-prospect__name">
-              {loading && !selected ? 'Loading…' : headlineName}
-            </h3>
-          </div>
-          <div className="nx-active-prospect__actions">
+        {/*
+          §12 -- ONE CONTEXTUAL ROW, NOT A DOSSIER CARD.
+          The eyebrow ("Active Prospect") and the standalone heading were
+          spending two lines to say what the identity line already says, on the
+          surface where the message history is supposed to dominate. What
+          survives is the set an operator actually needs before typing: who,
+          where they sit in the canonical order, how this system classifies
+          their link to the property, whether ownership is settled, and the
+          number we are about to text. Everything else is one tap away.
+        */}
+        <div className="nx-active-prospect__identity-line">
+          <span className="nx-active-prospect__name">
+            {loading && !selected ? 'Loading…' : headlineName}
+          </span>
+          {rankLabel ? (
+            <>
+              <span className="nx-active-prospect__dot">·</span>
+              <span className="nx-active-prospect__rank">{rankLabel}</span>
+            </>
+          ) : null}
+          {relationshipLabel ? (
+            <>
+              <span className="nx-active-prospect__dot">·</span>
+              <span className="nx-active-prospect__relationship">{relationshipLabel}</span>
+            </>
+          ) : null}
+        </div>
+        <div className="nx-active-prospect__sub-line">
+          {phone ? <span className="nx-active-prospect__phone">{formatPhone(phone)}</span> : null}
+          <OwnershipIndicator
+            status={selected?.ownership_status}
+            sellerAuthority={hasSellerAuthorityEvidence(thread, selected)}
+          />
+          {switcherList.length > 1 ? (
             <button
               type="button"
               className={cls('nx-active-prospect__expand', open && 'is-open')}
@@ -147,27 +162,8 @@ const ActiveProspectCardComponent = ({
               <span>{switcherList.length} linked</span>
               <Icon name="chevron-down" />
             </button>
-          </div>
+          ) : null}
         </div>
-
-        <div className="nx-active-prospect__meta-row">
-          <OwnershipIndicator
-            status={selected?.ownership_status}
-            sellerAuthority={hasSellerAuthorityEvidence(thread, selected)}
-          />
-          {matchFlags.map((flag) => (
-            <span
-              key={flag.key}
-              className={cls(
-                'nx-active-prospect__match-flag',
-                `is-${ownerMatchFlagTone(flag.key)}`,
-              )}
-            >
-              {flag.label}
-            </span>
-          ))}
-        </div>
-
         {nextEligiblePreview && onTryNextEligible ? (
           <div className="nx-active-prospect__next">
             <button
@@ -183,7 +179,6 @@ const ActiveProspectCardComponent = ({
           </div>
         ) : null}
       </div>
-
       {open ? (
         <ul className="nx-active-prospect__menu" role="listbox">
           {switcherList.map((participant) => {
@@ -229,12 +224,12 @@ const ActiveProspectCardComponent = ({
                   </span>
                   <span className="nx-active-prospect__option-sub">
                     <OwnershipIndicator status={participant.ownership_status} />
-                    <span className={cls(
-                      'nx-active-prospect__option-pill',
-                      participant.sms_eligible === false && 'is-blocked',
-                    )}>
-                      {participant.sms_eligible === false ? 'No SMS' : 'SMS OK'}
-                    </span>
+                    {/* §8 -- only the exception is worth the pixels. "SMS OK"
+                        next to the number we are actively texting is noise;
+                        a blocked number is not. */}
+                    {participant.sms_eligible === false ? (
+                      <span className="nx-active-prospect__option-pill is-blocked">No SMS</span>
+                    ) : null}
                     {participant.excluded_as_renter ? (
                       <span className="nx-active-prospect__option-pill is-excluded">Renter excluded</span>
                     ) : null}
@@ -248,6 +243,5 @@ const ActiveProspectCardComponent = ({
     </section>
   )
 }
-
 export const ActiveProspectCard = memo(ActiveProspectCardComponent)
 ActiveProspectCard.displayName = 'ActiveProspectCard'

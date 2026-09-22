@@ -200,15 +200,19 @@ export function isRenterTenantOnly(participant = {}) {
   return true;
 }
 
+/*
+ * §5 -- THE RANK IS A RANK, NOT AN ENDORSEMENT.
+ *
+ * "#1 recommended" / "#2 alternate" read as advice the system is not entitled
+ * to give: the position comes from phones.contact_rank_position, which orders
+ * contactability, and calling #2 an "alternate" quietly implies #1 was
+ * verified. The ownership state is rendered separately and per person, so the
+ * rank says only where in the order this person sits.
+ */
 function contactRankLabel(rank, participant = {}) {
-  if (rank === 1) {
-    if (participant.ownership_status === "confirmed") return "Primary contact";
-    return "#1 recommended";
-  }
-  if (rank === 2) return "#2 alternate";
-  if (rank >= 3) return `#${rank} alternate`;
+  if (rank >= 1) return `#${rank}`;
   if (participant._eligibility?.hard_block || isRenterTenantOnly(participant)) return "Low-confidence contact";
-  return "Alternate contact";
+  return null;
 }
 
 function scoreParticipant(participant = {}, masterOwnerName = "") {
@@ -269,16 +273,40 @@ export function rankParticipants(participants = [], { master_owner_name = null, 
     };
   });
 
+  /*
+   * §8 -- THE CANONICAL RANK WINS.
+   *
+   * phones.contact_rank_position is the ranking this system already computed;
+   * the composite below is a tie-breaker, not a second opinion. Sorting on the
+   * composite alone put a linked candidate who has never messaged (score 104)
+   * above the person actually in the conversation (score 105, rank 1,
+   * is_best_phone_for_owner) -- a one-point difference silently reassigning who
+   * "#1" means.
+   */
+  const byCanonicalThenScore = (a, b) => {
+    const ar = asNumber(a.contact_rank_position);
+    const br = asNumber(b.contact_rank_position);
+    if (ar && br && ar !== br) return ar - br;
+    if (ar && !br) return -1;
+    if (br && !ar) return 1;
+    return b._rank_score - a._rank_score;
+  };
+
   const eligible = scored
     .filter((row) => row.contactable && !row.excluded_as_renter)
-    .sort((a, b) => b._rank_score - a._rank_score);
+    .sort(byCanonicalThenScore);
 
   const ineligible = scored
     .filter((row) => !row.contactable || row.excluded_as_renter)
-    .sort((a, b) => b._rank_score - a._rank_score);
+    .sort(byCanonicalThenScore);
 
   const ordered = [...eligible, ...ineligible];
   const normalizedSelected = clean(selected_phone);
+  // findIndex returns 0 for the first eligible row; `|| rank` then discarded it.
+  const eligibleRank = (row) => {
+    const i = eligible.findIndex((item) => item.participant_id === row.participant_id);
+    return i < 0 ? null : i + 1;
+  };
 
   return ordered.map((row, index) => {
     const rank = index + 1;
@@ -288,9 +316,7 @@ export function rankParticipants(participants = [], { master_owner_name = null, 
     return {
       ...row,
       contact_rank: rank,
-      contact_rank_label: isSelected
-        ? contactRankLabel(eligible.findIndex((item) => item.participant_id === row.participant_id) + 1 || rank, row)
-        : contactRankLabel(eligible.findIndex((item) => item.participant_id === row.participant_id) + 1 || null, row),
+      contact_rank_label: contactRankLabel(eligibleRank(row) ?? rank, row),
       is_selected: isSelected,
       owner_match_flags: deriveOwnerMatchFlags(row),
       needs_review: row.excluded_as_renter && (row._rank_score || 0) > 20,
