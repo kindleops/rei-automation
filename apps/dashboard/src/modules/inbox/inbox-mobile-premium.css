@@ -1662,3 +1662,65 @@ html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__addr
 html.is-mobile-layout .nx-premium-inbox .nx-row25__addr {
   font-size: var(--nx-t-meta, 12px) !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §13 — QUICK ACTIONS IS AN ACTION SHEET ON A PHONE
+
+   It rendered as a desktop popover anchored to the composer button: 280px wide
+   on a 390px screen, positioned by getBoundingClientRect with inline left/bottom
+   and a fixed height. Measured: 16 actions in a 420px box, so the list CLIPPED
+   -- the "Writing tools" group was cut off at the container edge with no scroll
+   -- while ~110px of screen width sat unused beside it.
+
+   The JSX keeps its handlers; only the container's geometry changes, and only
+   on the mobile shell. Overriding inline style requires !important, which is
+   this file's documented escape hatch.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-quick-actions-popover {
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  /* Tall enough to show real content, short enough that the conversation
+     behind it is still visible -- an action sheet, not a takeover. */
+  max-height: min(72vh, 620px) !important;
+  height: auto !important;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px 20px 0 0;
+  padding-bottom: var(--nx-mobile-safe-bottom, 0px);
+  /* The 16 actions could not all fit before and simply vanished. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The header stays put while the actions scroll under it. */
+html.is-mobile-layout .nx-quick-actions-popover .nx-qap-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: inherit;
+  padding-top: var(--nx-s-2);
+}
+
+/* A grabber, so it reads as a sheet you can dismiss rather than a stray panel. */
+html.is-mobile-layout .nx-quick-actions-popover::before {
+  content: '';
+  position: sticky;
+  top: 0;
+  align-self: center;
+  width: 36px;
+  height: 4px;
+  margin: 6px 0 2px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.45);
+  flex: 0 0 auto;
+}
+
+/* The backdrop is part of the modal contract; it was a bare click-catcher. */
+html.is-mobile-layout .nx-qap-backdrop {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
