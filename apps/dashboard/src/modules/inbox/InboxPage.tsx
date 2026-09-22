@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
-import { PropertyIntelligenceSheet, type PropertyIntelligenceAction } from './components/PropertyIntelligenceSheet'
 import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
@@ -833,17 +832,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [debugModalOpen, setDebugModalOpen] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileIntelOpen, setMobileIntelOpen] = useState(false)
-  /*
-   * The dossier gets its OWN flag, deliberately not `mobileIntelOpen`.
-   *
-   * That flag also drives `.m-intel-open`, which makes the deal-intelligence
-   * workspace pane `position: fixed; inset: 0` -- a full-screen takeover from
-   * before this sheet existed. Sharing the flag fired both, and the resulting
-   * reflow reset the conversation's scrollTop to 0 behind the sheet: measured
-   * as 1517 -> 0 on dismiss, with the message count unchanged, so the
-   * conversation was not remounted, merely scrolled away.
-   */
-  const [propertyIntelOpen, setPropertyIntelOpen] = useState(false)
   /** Portrait mobile: thread pane only after explicit row tap — not auto-select. */
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false)
   const isMobileInboxShell = isMobile && routeMode === 'workspace'
@@ -1264,68 +1252,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => selected ?? threadStubFromActiveContext(effectiveActiveContext, canonicalSelectedContext),
     [selected, effectiveActiveContext, canonicalSelectedContext],
   )
-
-  /*
-   * §4 — ONLY ACTIONS THAT ALREADY EXIST.
-   *
-   * Each entry is an app this product already ships, reached through the
-   * canonical route. Nothing here invents a backend call, and an app whose
-   * subject cannot be resolved is simply not offered rather than offered and
-   * dead.
-   */
-  /**
-   * THE SELECTED-THREAD SNAPSHOT.
-   *
-   * Captured ONCE, at selection, from the list row -- the fullest record that
-   * exists for a thread (247 keys) and the same one the Inbox card reads. It is
-   * then immutable for the life of that selection.
-   *
-   * WHY A SNAPSHOT AND NOT A DERIVATION. `threads` is re-filtered while a
-   * conversation is open, so deriving the row on every render resolved a full
-   * record on one pass and nothing on the next -- measured as
-   * estimated_value=172000 followed by nothing, which is why the dossier showed
-   * a property with no valuation. Three successive merge orderings were tried
-   * against that and none of them could fix it, because the problem was never
-   * the merge: it was reading a moving source. Reading once, at the moment the
-   * operator chooses the thread, removes the moving part.
-   *
-   * Identity is keyed on the selection id, so switching threads replaces the
-   * snapshot outright and a previous property can never survive underneath a
-   * new thread's name.
-   */
-  const [selectedThreadSnapshot, setSelectedThreadSnapshot] = useState<
-    { id: string; row: Record<string, unknown> } | null
-  >(null)
-
-  const captureSelectedThreadSnapshot = useCallback((id: string, row: unknown) => {
-    if (!id || !row || typeof row !== 'object') return
-    setSelectedThreadSnapshot({ id: String(id), row: { ...(row as Record<string, unknown>) } })
-  }, [])
-
-  const propertyIntelligenceRow = useMemo<Record<string, unknown> | null>(() => {
-    const selectedId = String((workspaceThread as unknown as { id?: string } | null)?.id ?? '')
-    if (!selectedId) return null
-    const snapshot = selectedThreadSnapshot?.id === selectedId ? selectedThreadSnapshot.row : null
-    const live = (threads as unknown as Array<Record<string, unknown>>).find((t) => String(t.id) === selectedId)
-    /*
-     * The snapshot is the base. A live row is layered on top ONLY when it is
-     * still present, so a realtime update merges in intentionally, and its
-     * absence can never subtract from what was captured.
-     */
-    if (!snapshot && !live) return (workspaceThread ?? null) as Record<string, unknown> | null
-    return { ...((workspaceThread ?? {}) as unknown as Record<string, unknown>), ...(snapshot ?? {}), ...(live ?? {}) }
-  }, [threads, workspaceThread, selectedThreadSnapshot])
-
-  const propertyIntelligenceActions = useMemo<PropertyIntelligenceAction[]>(() => {
-    const go = (route: string) => () => { setPropertyIntelOpen(false); pushRoutePath(route) }
-    const list: PropertyIntelligenceAction[] = [
-      { id: 'deal', label: 'Deal Intelligence', icon: 'target', onSelect: go('/deal-intelligence') },
-      { id: 'comps', label: 'Comparable Sales', icon: 'stats', onSelect: go('/comp-intelligence') },
-      { id: 'buyers', label: 'Buyer Match', icon: 'users', onSelect: go('/buyer-match') },
-      { id: 'graph', label: 'Relationships', icon: 'link', onSelect: go('/entity-graph') },
-    ]
-    return list
-  }, [])
 
   const mapSelectedPropertyId = useMemo(
     () => resolveSubjectPropertyId(
@@ -2344,22 +2270,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     if (isMobile && !isRouteFullscreen) {
-      /*
-       * On a phone, opening the dossier touches NOTHING but its own flag.
-       *
-       * mobilePaneViews mounts only the active pane, so changing
-       * selectedWorkspaceViews here remounts the conversation: dismissing the
-       * sheet dropped the operator back onto a re-hydrating thread (composer
-       * present, message list replaced by the loading skeleton) and their
-       * position was gone. The conversation is already open and already has
-       * the views it needs -- the sheet is drawn over it.
-       */
+      setSelectedWorkspaceViews((current) => (
+        current.length > 1 && current.includes('deal_intelligence')
+          ? current
+          : cloneDefaultWorkspaceViews()
+      ))
+      setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
       if (hasSubject) {
         setMobileThreadOpen(true)
-        // The dossier sheet, not the legacy full-screen pane takeover that
-        // `mobileIntelOpen` drives -- see propertyIntelOpen for why they are
-        // separate flags.
-        setPropertyIntelOpen(true)
+        setMobileIntelOpen(true)
         clearPendingInboxDealIntelligence()
         // The identity is NOT cleared alongside the flag when there is no
         // thread: it is the only thing that names the subject, and the panel
@@ -4034,9 +3953,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleSelect = useCallback((id: string) => {
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
-    // Snapshot the full list row at the moment of selection -- see
-    // selectedThreadSnapshot. After this point the list may be re-filtered.
-    captureSelectedThreadSnapshot(id, thread)
     const threadKey = thread?.threadKey || thread?.id || id
     console.log('[THREAD_CLICK]', threadKey)
     console.log('[InboxUX] select thread', { threadKey, activeFilter: viewFilter })
@@ -4127,7 +4043,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setMobileThreadOpen(true)
       setMobileIntelOpen(false)
     }
-  }, [DEV, canonicalSelectionKey, captureSelectedThreadSnapshot, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
+  }, [DEV, canonicalSelectionKey, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
 
   const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
     const phone = String(participant.canonical_e164 ?? '').trim()
@@ -5159,9 +5075,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     if (view === 'deal_intelligence') {
-      // The phone gets the dossier sheet; the pane takeover stays a desktop
-      // -shell behaviour. See propertyIntelOpen.
-      setPropertyIntelOpen(true)
+      setMobileIntelOpen(true)
       return
     }
     const routeByView: Partial<Record<InboxWorkspaceView, string>> = {
@@ -5918,35 +5832,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           }
         }}
       >
-        {/*
-          §1/§4 — PROPERTY INTELLIGENCE.
-
-          Opens from the existing mobile intelligence path (`mobileIntelOpen`),
-          which until now only toggled a layout class with no mobile surface
-          behind it. It reads the selected thread row and whatever intelligence
-          the Conversation already resolved: it fetches nothing and mutates
-          nothing.
-
-          Every action is a route this product already has, and they are built
-          HERE rather than inside the component so the sheet structurally cannot
-          paint a control without a handler.
-        */}
-        <PropertyIntelligenceSheet
-          open={Boolean(isMobile && propertyIntelOpen)}
-          onClose={() => setPropertyIntelOpen(false)}
-          /*
-           * The LIST row, not just the selected-thread object. `workspaceThread`
-           * carries identity and conversation state but not the property
-           * financials -- with it alone the sheet rendered no estimated value
-           * beside a card that was showing $297K from the very same thread. The
-           * list row is the 144-field record the card itself reads, so merging
-           * it in is what makes the dossier agree with the row that opened it.
-           */
-          thread={propertyIntelligenceRow}
-          intelligence={threadIntelligence as unknown as Record<string, unknown> | null}
-          loading={messagesLoading}
-          actions={propertyIntelligenceActions}
-        />
         {/* Mobile panel toggle buttons */}
         <div className="nx-mobile-panel-toggles nx-mobile-only">
           <button

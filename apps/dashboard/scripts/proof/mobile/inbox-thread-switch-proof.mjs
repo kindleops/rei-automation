@@ -119,45 +119,45 @@ for (let cycle = 0; cycle < CYCLES; cycle += 1) {
   }
 }
 
-// ── H. THE DOSSIER IS A TRUE OVERLAY ───────────────────────────────────────
+// ── H. QUICK ACTIONS REACHES THE EXISTING DEAL INTELLIGENCE ────────────────
+// Inbox is a communications workspace; intelligence lives in the product that
+// already owns it. This asserts the boundary: Offer / Deal NAVIGATES to the
+// existing IntelligencePanel (.nx-dossier-shell) carrying the selected thread,
+// and Back returns to the conversation rather than to a re-hydrating one.
 {
   const page = await ctx.newPage()
-  // A thread with real scroll range: a 2-message thread cannot prove position.
   const before = await openSettled(page, 2)
   check('H. baseline thread has scroll range', before !== null && before.max > 200,
     before ? `max=${before.max}` : 'no timeline')
 
-  await page.evaluate(() => { const n = document.querySelector('.nx-message-list'); if (n) { n.dataset.probeTag = 'alpha'; n.scrollTop = 200 } })
-  await page.waitForTimeout(500)
-  const pre = await read(page)
+  const subject = await page.evaluate(() => (
+    document.querySelector('.nx-chat-header-title, .nx-conversation-title')?.textContent?.trim() ?? ''
+  ))
 
   let opened = false
   for (let attempt = 0; attempt < 2 && !opened; attempt += 1) {
     await page.locator('[aria-label="Open quick actions"]').first().click({ timeout: 30_000 }).catch(() => {})
     await page.getByRole('button', { name: /Offer \/ Deal/i }).first().click({ timeout: 30_000 }).catch(() => {})
-    opened = await page.waitForFunction(() => document.querySelector('.nx-pis') !== null,
+    opened = await page.waitForFunction(() => document.querySelector('.nx-dossier-shell') !== null,
       undefined, { timeout: 25_000, polling: 200 }).then(() => true).catch(() => false)
   }
-  check('H. dossier opens', opened, '')
+  check('H. Offer / Deal opens the EXISTING Deal Intelligence', opened, '')
 
-  const during = await read(page)
-  check('H. timeline survives while the sheet is open',
-    during !== null && during.tag === 'alpha' && during.skeleton === 0,
-    during ? `tag=${during.tag} skeleton=${during.skeleton}` : 'timeline gone')
+  // No second intelligence experience may be mounted over the first.
+  const embedded = await page.evaluate(() => document.querySelectorAll('.nx-pis').length)
+  check('H. no duplicate intelligence surface inside Conversation', embedded === 0, `nx-pis=${embedded}`)
 
-  await page.waitForTimeout(2000)
-  await page.locator('.nx-mobile-sheet__close').first().click({ timeout: 20_000 }).catch(() => {})
-  await page.waitForFunction(() => document.querySelector('.nx-pis') === null, undefined, { timeout: 20_000 }).catch(() => {})
+  const carried = await page.evaluate(() => document.querySelector('.nx-dossier-shell')?.textContent ?? '')
+  const token = subject.split(/\s+/).filter((w) => w.length > 3)[0] ?? ''
+  check('H. carries the selected subject', token === '' || carried.includes(token),
+    token ? `token=${token}` : 'no subject token to match')
+
+  await page.locator('[aria-label="Back"], .nx-mobile-back').first().click({ timeout: 20_000 }).catch(() => {})
   await page.waitForTimeout(1500)
   const post = await read(page)
-
-  check('H. SAME timeline instance after dismiss (never remounted)',
-    post !== null && post.tag === 'alpha', post ? `tag=${post.tag}` : 'timeline gone')
-  check('H. no skeleton replacement', post !== null && post.skeleton === 0, post ? `skeleton=${post.skeleton}` : '')
-  check('H. message count unchanged', post !== null && pre !== null && post.msgs === pre.msgs,
-    post && pre ? `${pre.msgs} -> ${post.msgs}` : '')
-  check('H. reading position preserved', post !== null && pre !== null && Math.abs(post.top - pre.top) < 40,
-    post && pre ? `${pre.top} -> ${post.top}` : '')
+  check('H. Back returns to the conversation, hydrated',
+    post !== null && post.skeleton === 0 && post.msgs > 0,
+    post ? `msgs=${post.msgs} skeleton=${post.skeleton}` : 'timeline gone')
   await page.close()
 }
 

@@ -1,7 +1,7 @@
 /**
  * §11/§12/§13 — ORIENTATION, REAL THEMES, WIDTH MATRIX.
  *
- * READ ONLY. Opens a conversation and the dossier; writes nothing.
+ * READ ONLY. Opens a conversation; writes nothing.
  *
  * THEMES ARE ASSERTED, NOT ASSUMED. The harness seeds
  * localStorage['nexus-settings'].nexusTheme and then reads back the rendered
@@ -123,24 +123,6 @@ for (const width of WIDTHS) {
 
       if (width === 390) {
         await page.screenshot({ path: path.join(OUT, `conversation-${theme}.png`) })
-        // Dossier in every theme.
-        await page.locator('[aria-label="Open quick actions"]').first().click({ timeout: 30_000 }).catch(() => {})
-        await page.getByRole('button', { name: /Offer \/ Deal/i }).first().click({ timeout: 30_000 }).catch(() => {})
-        const sheet = await page.waitForFunction(() => document.querySelector('.nx-pis') !== null,
-          undefined, { timeout: 25_000, polling: 200 }).then(() => true).catch(() => false)
-        check(cell, 'Property Intelligence opens', sheet, '')
-        if (sheet) {
-          const s = await page.evaluate(() => {
-            const el = document.querySelector('.nx-pis')
-            const r = el.getBoundingClientRect()
-            return {
-              inViewport: r.left >= -1 && r.right <= window.innerWidth + 1,
-              overflowX: Math.max(0, Math.round(document.documentElement.scrollWidth - document.documentElement.clientWidth)),
-            }
-          })
-          check(cell, 'dossier fits the viewport', s.inViewport && s.overflowX === 0, `overflow=${s.overflowX}px`)
-          await page.screenshot({ path: path.join(OUT, `dossier-${theme}.png`) })
-        }
       }
     } catch (error) {
       findings.push({ cell, label: 'cell failed', detail: String(error?.message || error).slice(0, 110) })
