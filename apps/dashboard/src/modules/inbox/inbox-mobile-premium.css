@@ -1741,3 +1741,138 @@ html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap {
 html.is-mobile-layout .nx-sidebar-rebuilt__search-row .nx-sidebar__icon-button {
   flex: 0 0 auto;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PROPERTY INTELLIGENCE SHEET
+   A focused dossier on the locked type/spacing scale. The first screen answers
+   "what is this and who owns the next action"; everything heavier is collapsed,
+   because an accordion expanded by default is the desktop habit this replaces.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-pis .nx-mobile-sheet__body { padding-bottom: calc(var(--nx-mobile-safe-bottom, 0px) + var(--nx-s-4)); }
+
+.nx-pis__overview {
+  padding: var(--nx-s-3) 0 var(--nx-s-4);
+  border-bottom: 1px solid rgba(127, 127, 127, 0.14);
+}
+
+/* The two numbers an operator decides on, given real size. */
+.nx-pis__headline { display: flex; align-items: baseline; gap: var(--nx-s-3); }
+.nx-pis__value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: var(--nx-lh-tight);
+  letter-spacing: -0.02em;
+}
+.nx-pis__equity { font-size: var(--nx-t-body); font-weight: 600; color: var(--nx-ok, #34d399); }
+
+.nx-pis__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--nx-s-2) var(--nx-s-5);
+  margin-top: var(--nx-s-3);
+}
+.nx-pis__facts.is-stacked { flex-direction: column; gap: var(--nx-s-2); }
+.nx-pis__fact { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.nx-pis__facts.is-stacked .nx-pis__fact {
+  flex-direction: row; align-items: baseline; justify-content: space-between; gap: var(--nx-s-3);
+}
+.nx-pis__fact-label {
+  font-size: var(--nx-t-micro);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nx-text-muted, rgba(255,255,255,0.5));
+}
+.nx-pis__fact-value {
+  font-size: var(--nx-t-body);
+  font-weight: 500;
+  color: var(--nx-text-primary, inherit);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.nx-pis__seller {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: var(--nx-s-3);
+  font-size: var(--nx-t-meta);
+  color: var(--nx-text-secondary, inherit);
+}
+
+/* §2.B — the one question the sheet exists to answer first. */
+.nx-pis__now {
+  padding: var(--nx-s-4) 0;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.14);
+}
+.nx-pis__now-label {
+  margin: 0 0 var(--nx-s-1);
+  font-size: var(--nx-t-micro);
+  font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--nx-text-muted, rgba(255,255,255,0.5));
+}
+.nx-pis__now-owner {
+  margin: 0;
+  font-size: var(--nx-t-section);
+  font-weight: 600;
+  line-height: var(--nx-lh-tight);
+}
+.nx-pis__now-detail {
+  margin: 4px 0 0;
+  font-size: var(--nx-t-meta);
+  color: var(--nx-text-muted, rgba(255,255,255,0.55));
+}
+
+.nx-pis__section { border-bottom: 1px solid rgba(127, 127, 127, 0.14); }
+.nx-pis__section-head {
+  display: flex; align-items: center; gap: var(--nx-s-2);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--nx-s-2) 0;
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  text-align: left;
+}
+.nx-pis__section-title { flex: 1 1 auto; font-size: var(--nx-t-card-title); font-weight: 600; }
+.nx-pis__section-sub {
+  flex: 0 0 auto;
+  min-width: 20px; padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.18);
+  font-size: var(--nx-t-micro); font-weight: 600;
+}
+.nx-pis__section-body { padding: 0 0 var(--nx-s-4); }
+
+.nx-pis__actions { display: flex; flex-direction: column; gap: var(--nx-s-1); }
+.nx-pis__action {
+  display: flex; align-items: center; gap: var(--nx-s-3);
+  width: 100%; min-height: 52px;
+  padding: var(--nx-s-2) var(--nx-s-2);
+  border: 0; border-radius: 12px;
+  background: transparent; color: inherit;
+  font-size: var(--nx-t-card-title); font-weight: 500;
+  text-align: left; cursor: pointer;
+}
+.nx-pis__action:active { background: rgba(127, 127, 127, 0.16); }
+.nx-pis__action > span:nth-child(2) { flex: 1 1 auto; }
+.nx-pis__action-icon {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 10px;
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.nx-pis__skeleton { display: flex; flex-direction: column; gap: var(--nx-s-3); padding: var(--nx-s-4) 0; }
+.nx-pis__skeleton-row { height: 44px; border-radius: 12px; background: rgba(127,127,127,0.13); }
+.nx-pis__skeleton-row:nth-child(2n) { width: 72%; }
+.nx-pis__skeleton-row:nth-child(3n) { width: 56%; }
+
+.nx-pis__error {
+  display: flex; flex-direction: column; gap: var(--nx-s-2);
+  padding: var(--nx-s-5) 0;
+}
+.nx-pis__error strong { font-size: var(--nx-t-section); }
+.nx-pis__error span { font-size: var(--nx-t-meta); color: var(--nx-text-muted, rgba(255,255,255,0.6)); }
+.nx-pis__error-note { font-style: italic; }
+.nx-pis__retry {
+  align-self: flex-start;
+  min-height: 44px; padding: 0 var(--nx-s-4);
+  border-radius: 12px; border: 1px solid rgba(127,127,127,0.3);
+  background: transparent; color: inherit;
+  font-size: var(--nx-t-body); font-weight: 600;
+}

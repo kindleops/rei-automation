@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
+import { PropertyIntelligenceSheet, type PropertyIntelligenceAction } from './components/PropertyIntelligenceSheet'
 import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
@@ -1252,6 +1253,55 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     () => selected ?? threadStubFromActiveContext(effectiveActiveContext, canonicalSelectedContext),
     [selected, effectiveActiveContext, canonicalSelectedContext],
   )
+
+  /*
+   * §4 — ONLY ACTIONS THAT ALREADY EXIST.
+   *
+   * Each entry is an app this product already ships, reached through the
+   * canonical route. Nothing here invents a backend call, and an app whose
+   * subject cannot be resolved is simply not offered rather than offered and
+   * dead.
+   */
+  /**
+   * The fullest record available for the selected thread.
+   *
+   * RETAINED, because it disappears. `threads` is re-filtered while a
+   * conversation is open, so the id lookup that resolves a full 247-key row on
+   * one render misses on the next and the dossier would blank out mid-view --
+   * measured: estimated_value=172000 on the first render, nothing on the
+   * second. The last non-empty row for the CURRENTLY selected thread is kept,
+   * and cleared as soon as the selection changes, so the sheet can never show
+   * one thread's facts under another thread's name.
+   */
+  const propertyIntelligenceRowRef = useRef<{ id: string; row: Record<string, unknown> } | null>(null)
+  const propertyIntelligenceRow = useMemo<Record<string, unknown> | null>(() => {
+    const selectedId = String((workspaceThread as unknown as { id?: string } | null)?.id ?? '')
+    if (!selectedId) return null
+    const listRow = (threads as unknown as Array<Record<string, unknown>>).find((t) => String(t.id) === selectedId)
+    const merged = { ...((workspaceThread ?? {}) as unknown as Record<string, unknown>), ...(listRow ?? {}) }
+    const cached = propertyIntelligenceRowRef.current
+    if (listRow) {
+      propertyIntelligenceRowRef.current = { id: selectedId, row: merged }
+      return merged
+    }
+    // The CACHED row wins: `merged` on this render is the selection object
+    // alone, whose numeric fields arrive as 0 and would clobber the real
+    // values the cache was kept for. Same clobbering the merge order above
+    // already had to be reversed for.
+    if (cached && cached.id === selectedId) return { ...merged, ...cached.row }
+    return merged
+  }, [threads, workspaceThread])
+
+  const propertyIntelligenceActions = useMemo<PropertyIntelligenceAction[]>(() => {
+    const go = (route: string) => () => { setMobileIntelOpen(false); pushRoutePath(route) }
+    const list: PropertyIntelligenceAction[] = [
+      { id: 'deal', label: 'Deal Intelligence', icon: 'target', onSelect: go('/deal-intelligence') },
+      { id: 'comps', label: 'Comparable Sales', icon: 'stats', onSelect: go('/comp-intelligence') },
+      { id: 'buyers', label: 'Buyer Match', icon: 'users', onSelect: go('/buyer-match') },
+      { id: 'graph', label: 'Relationships', icon: 'link', onSelect: go('/entity-graph') },
+    ]
+    return list
+  }, [])
 
   const mapSelectedPropertyId = useMemo(
     () => resolveSubjectPropertyId(
@@ -5832,6 +5882,35 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           }
         }}
       >
+        {/*
+          §1/§4 — PROPERTY INTELLIGENCE.
+
+          Opens from the existing mobile intelligence path (`mobileIntelOpen`),
+          which until now only toggled a layout class with no mobile surface
+          behind it. It reads the selected thread row and whatever intelligence
+          the Conversation already resolved: it fetches nothing and mutates
+          nothing.
+
+          Every action is a route this product already has, and they are built
+          HERE rather than inside the component so the sheet structurally cannot
+          paint a control without a handler.
+        */}
+        <PropertyIntelligenceSheet
+          open={Boolean(isMobile && mobileIntelOpen)}
+          onClose={() => setMobileIntelOpen(false)}
+          /*
+           * The LIST row, not just the selected-thread object. `workspaceThread`
+           * carries identity and conversation state but not the property
+           * financials -- with it alone the sheet rendered no estimated value
+           * beside a card that was showing $297K from the very same thread. The
+           * list row is the 144-field record the card itself reads, so merging
+           * it in is what makes the dossier agree with the row that opened it.
+           */
+          thread={propertyIntelligenceRow}
+          intelligence={threadIntelligence as unknown as Record<string, unknown> | null}
+          loading={messagesLoading}
+          actions={propertyIntelligenceActions}
+        />
         {/* Mobile panel toggle buttons */}
         <div className="nx-mobile-panel-toggles nx-mobile-only">
           <button
