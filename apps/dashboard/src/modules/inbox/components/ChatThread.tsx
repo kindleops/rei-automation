@@ -551,8 +551,70 @@ export const ChatThread = ({
       const saved = threadScrollMemory.current.get(threadId)
       if (saved != null && saved > 0 && saved < nextHeight - node.clientHeight) {
         node.scrollTop = saved
+        initialisedThreadRef.current = threadId
+      } else if (nextHeight <= node.clientHeight) {
+        // Nothing to scroll: this thread is settled the moment it paints.
+        initialisedThreadRef.current = threadId
       } else if (nextHeight > node.clientHeight) {
         node.scrollTop = nextHeight - node.clientHeight
+        /*
+         * KEEP PINNING UNTIL THE HEIGHT STOPS GROWING.
+         *
+         * This pinned ONCE against whatever scrollHeight happened to be at the
+         * first measured paint, and message content is still laying out then.
+         * Measured across repeated opens of the same thread, it landed at 219,
+         * 503, 537, 677 and 683 of 683 -- correct only when layout happened to
+         * finish first. The sampled sequence shows the height settling in
+         * stages (0 -> 587 -> 683), so one pin can never be reliable.
+         *
+         * Re-pins frame by frame while the height is still changing, stops as
+         * soon as it holds still for two frames, and gives up after a bounded
+         * number of frames so a pathological layout cannot spin.
+         *
+         * §7 — every frame re-checks that THIS thread is still the selected one
+         * and that the operator has not taken over by scrolling. A callback
+         * captured for thread A must never move thread B.
+         */
+        const pinThreadId = threadId
+        let lastHeight = nextHeight
+        let stableFrames = 0
+        let frames = 0
+        const settle = () => {
+          const live = listRef.current
+          if (!live) return
+          /*
+           * §7 — THREAD IDENTITY IS THE ONLY GATE.
+           *
+           * A first attempt also bailed when the shared snapshot said the list
+           * was no longer near the bottom. That snapshot is rewritten by the
+           * tail of this very effect the moment content grows, so the loop
+           * cancelled itself on its first frame and the thread still landed at
+           * 325 or 0 of 683. Programmatic scrollTop also fires scroll events,
+           * so the snapshot cannot distinguish "content grew" from "the
+           * operator scrolled" -- gating on it is unsound either way.
+           *
+           * Instead this is bounded to ~1s of frames and stops as soon as the
+           * height holds still, which is short enough that it cannot fight a
+           * real operator, and it refuses to touch a list that now belongs to
+           * a different thread.
+           */
+          if (snapshotThreadKeyRef.current !== pinThreadId) return
+          // ~2s of frames: content that loads asynchronously can still be
+          // growing past one second, and a thread that stops short of its own
+          // bottom is the defect this loop exists to remove.
+          if (frames++ > 120) { initialisedThreadRef.current = pinThreadId; return }
+          const height = live.scrollHeight
+          if (height === lastHeight) {
+            if (++stableFrames >= 2) { initialisedThreadRef.current = pinThreadId; return }
+          } else {
+            stableFrames = 0
+            lastHeight = height
+          }
+          live.scrollTop = Math.max(0, height - live.clientHeight)
+          scrollSnapshotRef.current = { height, top: live.scrollTop, nearBottom: true }
+          requestAnimationFrame(settle)
+        }
+        requestAnimationFrame(settle)
       }
     }
 
@@ -575,20 +637,38 @@ export const ChatThread = ({
    */
   const [pendingBelow, setPendingBelow] = useState(0)
   const lastCountRef = useRef(0)
+  /**
+   * Which thread has finished establishing its initial position.
+   *
+   * Without this, a thread's FIRST load counted as "messages arrived while you
+   * were scrolled up": the count went 0 -> 7 while the list was still being
+   * positioned and therefore not yet near the bottom, so a freshly opened
+   * conversation announced "7 new messages" about messages the operator had
+   * just asked to see. The affordance is only meaningful for arrivals AFTER
+   * the thread is settled.
+   */
+  const initialisedThreadRef = useRef<string | null>(null)
 
   useEffect(() => {
     const count = messages?.length ?? 0
     const previousCount = lastCountRef.current
     lastCountRef.current = count
+    const threadId = String(thread?.id ?? thread?.threadKey ?? '')
+    // Before this thread has settled, adopt the count silently.
+    if (initialisedThreadRef.current !== threadId) return
     // A thread switch resets the counter rather than inheriting A's backlog.
     if (count < previousCount) { setPendingBelow(0); return }
     const added = count - previousCount
     if (added <= 0) return
     if (scrollSnapshotRef.current.nearBottom) return
     setPendingBelow((n) => n + added)
-  }, [messages])
+  }, [messages, thread?.id, thread?.threadKey])
 
-  useEffect(() => { setPendingBelow(0); lastCountRef.current = 0 }, [thread?.id])
+  useEffect(() => {
+    setPendingBelow(0)
+    lastCountRef.current = 0
+    initialisedThreadRef.current = null
+  }, [thread?.id])
 
   const jumpToLatest = useCallback(() => {
     const node = listRef.current
