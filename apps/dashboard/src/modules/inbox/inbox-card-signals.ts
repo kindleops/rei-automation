@@ -173,19 +173,36 @@ export function resolveInboxMessageState(
   if (!row) return null
   const direction = clean(latestDirection).toLowerCase()
 
+  const tokens = statusTokens(row)
+  const has = (...needles: string[]) => tokens.some((token) => needles.some((needle) => token.includes(needle)))
+
+  /*
+   * SUPPRESSION IS CHECKED BEFORE DIRECTION, AND THAT ORDER IS THE POINT.
+   *
+   * This test used to live INSIDE the outbound branch, below an inbound branch
+   * that returned early. So a suppressed thread whose last message was inbound
+   * never reached it: it was labelled "Inbound · New reply" in actionable cyan.
+   *
+   * Measured on the live list -- "Bertha A Daniels", inbox_bucket=suppressed,
+   * rendered as a new reply awaiting an answer. That is not a cosmetic bug: the
+   * card was inviting an operator to reply to someone who had opted out, and
+   * the suppression state it was supposed to show was unreachable for exactly
+   * the threads where a seller had spoken last.
+   *
+   * Suppression is a property of the CONTACT, not of the last message, so it
+   * is resolved before any direction is considered.
+   */
+  if (truthy(row, 'suppressed', 'isSuppressed', 'is_suppressed') || has('suppress', 'blocked', 'dnc')) {
+    const arrow = direction === 'inbound' ? '↙' : '↗'
+    return { direction: direction === 'inbound' ? 'inbound' : 'outbound', label: 'Suppressed', tone: 'suppressed', arrow }
+  }
+
   if (direction === 'inbound') {
     return options.unread
       ? { direction: 'inbound', label: 'Inbound · New reply', tone: 'inbound-new', arrow: '↙' }
       : { direction: 'inbound', label: 'Inbound', tone: 'inbound', arrow: '↙' }
   }
   if (direction !== 'outbound') return null
-
-  const tokens = statusTokens(row)
-  const has = (...needles: string[]) => tokens.some((token) => needles.some((needle) => token.includes(needle)))
-
-  if (truthy(row, 'suppressed', 'isSuppressed', 'is_suppressed') || has('suppress', 'blocked', 'dnc')) {
-    return { direction: 'outbound', label: 'Outbound · Suppressed', tone: 'suppressed', arrow: '↗' }
-  }
 
   const failedAt = firstPresent(row, 'latest_failed_at', 'latestFailedAt', 'failed_at', 'failedAt')
   const failureReason = firstPresent(row, 'latest_failure_reason', 'latestFailureReason', 'failure_reason', 'error_message')

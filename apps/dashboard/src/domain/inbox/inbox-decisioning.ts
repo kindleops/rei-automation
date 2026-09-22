@@ -212,8 +212,24 @@ const getSuppressionStatus = (thread: InboxWorkflowThread, sellerIntent: string)
 const getPriorityScore = (thread: InboxWorkflowThread): number =>
   num(get(thread, 'priority_score', 'priorityScore', 'finalAcquisitionScore', 'motivationScore', 'owner_priority_score'), 0)
 
+/*
+ * §2/§7 — READ STATE, LOOKED UP BY THE NAME THE PAYLOAD ACTUALLY USES.
+ *
+ * This read `isRead` / `threadIsRead` only. /api/cockpit/inbox/live returns
+ * `is_read` (snake_case), so the lookup resolved to undefined, `!bool(undefined)`
+ * was true, and EVERY thread was classified unread. Measured on the live list:
+ * five of five rows came back is_read=true, unread_count=0 and every one of
+ * them still painted an unread dot and a bold name.
+ *
+ * A dot that is true for every row carries no information -- it cannot show
+ * the operator which messages they have not seen, which is the one job it has.
+ * It also fed inferConversationStatus, so threads were being called 'new_reply'
+ * on the same bad signal.
+ */
 const getUnread = (thread: InboxWorkflowThread): boolean =>
-  bool(get(thread, 'unread')) || num(get(thread, 'unreadCount'), 0) > 0 || !bool(get(thread, 'isRead', 'threadIsRead'))
+  bool(get(thread, 'unread'))
+  || num(get(thread, 'unreadCount', 'unread_count'), 0) > 0
+  || !bool(get(thread, 'isRead', 'threadIsRead', 'is_read'))
 
 const getNextFollowUpAt = (thread: InboxWorkflowThread): string | null =>
   iso(get(thread, 'next_follow_up_at', 'nextFollowUpAt', 'follow_up_at', 'followUpAt'))

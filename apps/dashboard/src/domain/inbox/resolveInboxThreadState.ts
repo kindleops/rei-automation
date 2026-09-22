@@ -134,7 +134,23 @@ export const resolveInboxThreadState = (threadData: InboxWorkflowThread, _now: D
   const isArchived = bool(getAny(thread, 'isArchived', 'is_archived', 'archived', 'threadIsArchived'))
   const isRead = bool(getAny(thread, 'is_read', 'isRead', 'threadIsRead'))
   const unreadCount = num(getAny(thread, 'unreadCount', 'unread_count'))
-  const isUnread = !isRead || unreadCount > 0 || bool(getAny(thread, 'needsResponse', 'needsReply'))
+
+  /*
+   * §2 — UNREAD AND "OWES A RESPONSE" ARE DIFFERENT FACTS.
+   *
+   * This used to be `!isRead || unreadCount > 0 || needsResponse||needsReply`,
+   * which folded the second fact into the first. Measured on the live list:
+   * every visible thread came back is_read=true, unread_count=0 and still
+   * rendered an unread dot with a bold name, because a response was owed. The
+   * dot therefore meant nothing -- it was true for effectively every row, so
+   * it could not distinguish the messages the operator had actually not seen.
+   *
+   * Unread is now only what its name says. "A reply is owed" is a separate
+   * fact, carried by the canonical new_replies bucket, and that is the
+   * distinction the Inbox brief is explicit about: opening a thread may clear
+   * Unread; it must not clear New Replies.
+   */
+  const isUnread = !isRead || unreadCount > 0
 
   const intent = str(
     getAny(

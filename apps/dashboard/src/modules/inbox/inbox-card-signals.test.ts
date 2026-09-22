@@ -195,3 +195,39 @@ describe('signal chips', () => {
     expect(signals).toEqual(['Probate', 'Vacant'])
   })
 })
+
+describe('a suppressed contact never presents as a live reply', () => {
+  /**
+   * THE DEFECT. The suppression test lived INSIDE the outbound branch, below
+   * an inbound branch that returned early, so a suppressed thread whose last
+   * message was inbound could never reach it.
+   *
+   * Measured on the live list: "Bertha A Daniels", inbox_bucket=suppressed,
+   * rendered "Inbound · New reply" in actionable cyan. The card was inviting
+   * an operator to reply to someone who had opted out, and the suppression
+   * state was unreachable for exactly the threads where the seller spoke last.
+   *
+   * Every one of the 24 existing tests passed throughout, because none of them
+   * combined suppression with an inbound direction.
+   */
+  it('labels an inbound suppressed thread as suppressed, not as a new reply', () => {
+    const state = resolveInboxMessageState(
+      { is_suppressed: true, latest_message_body: 'stop' },
+      'inbound',
+      { unread: true },
+    )
+    expect(state?.tone).toBe('suppressed')
+    expect(state?.label).not.toMatch(/new reply/i)
+  })
+
+  it('still labels an outbound suppressed thread as suppressed', () => {
+    const state = resolveInboxMessageState({ is_suppressed: true }, 'outbound')
+    expect(state?.tone).toBe('suppressed')
+  })
+
+  it('leaves an ordinary inbound reply alone', () => {
+    const state = resolveInboxMessageState({}, 'inbound', { unread: true })
+    expect(state?.tone).toBe('inbound-new')
+    expect(state?.label).toMatch(/new reply/i)
+  })
+})
