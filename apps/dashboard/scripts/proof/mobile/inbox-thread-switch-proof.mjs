@@ -93,6 +93,7 @@ const openSettled = async (page, index, attempt = 0) => {
     .filter((r) => r.preview.length > 3)
     .map((r) => r.i))
   const resolved = withHistory.length ? withHistory[index % withHistory.length] : index
+
   const row = page.locator('.nx-row25').nth(resolved)
   /*
    * data-thread-id ALONE IS NOT UNIQUE.
@@ -103,10 +104,27 @@ const openSettled = async (page, index, attempt = 0) => {
    * and the proof alternated "msgs 1->7" / "msgs 7->1" forever. The property
    * is what separates them.
    */
+  /*
+   * WAIT FOR THE ROW'S IDENTITY TO HYDRATE, THEN READ IT.
+   *
+   * data-thread-id starts as a bare phone and resolves to the canonical
+   * `ct:...|owner:...|phone:...` composite. Read too early, the same
+   * conversation gets different keys on different cycles AND two different
+   * conversations can share the short one -- which is what produced a
+   * "msgs 7->2" comparison between unrelated threads.
+   *
+   * It cannot be read after tapping either: the mobile shell unmounts the list
+   * when a conversation opens, so there is no selected row left to ask.
+   */
+  await page.waitForFunction((i) => {
+    const r = document.querySelectorAll('.nx-row25')[i]
+    return Boolean(r && (r.getAttribute('data-thread-id') || '').startsWith('ct:'))
+  }, resolved, { timeout: 20_000, polling: 250 }).catch(() => {})
+
   const threadId = await row.getAttribute('data-thread-id').catch(() => null)
   const propertyId = await row.getAttribute('data-property-id').catch(() => null)
-  const identity = [threadId, propertyId].filter(Boolean).join('@') || null
-  const name = (await row.locator('.nx-row25__name').innerText().catch(() => '')) || identity || ''
+  const rowIdentity = [threadId, propertyId].filter(Boolean).join('@') || null
+  const name = (await row.locator('.nx-row25__name').innerText().catch(() => '')) || rowIdentity || ''
   const box = await row.boundingBox().catch(() => null)
   if (!box) return null
   await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
@@ -129,6 +147,9 @@ const openSettled = async (page, index, attempt = 0) => {
     return stable >= 6
   }, undefined, { timeout: 120_000, polling: 300 }).catch(() => {})
   await page.evaluate(() => { delete window.__settleKey; delete window.__settleN })
+
+  const identity = rowIdentity
+
   const out = await read(page)
   /*
    * Retry once on a cold load. Against a dev server holding production-shaped
@@ -136,7 +157,9 @@ const openSettled = async (page, index, attempt = 0) => {
    * window -- that is the harness's environment, not the product's behaviour,
    * and letting it score as a thread-switch failure would bury the real signal.
    */
-  if (!out && attempt < 1) return openSettled(page, index, attempt + 1)
+  // Retry on a DIFFERENT row: repeating the same index just reopens the same
+  // empty thread. Two attempts, then report honestly.
+  if (!out && attempt < 2) return openSettled(page, index + 1, attempt + 1)
   return out ? { ...out, threadId: identity, cardName: (name || '').trim().slice(0, 26) } : null
 }
 

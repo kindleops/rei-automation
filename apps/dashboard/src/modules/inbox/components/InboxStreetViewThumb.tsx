@@ -39,7 +39,7 @@ type Props = {
 const SIZE_DIMS: Record<InboxStreetViewSize, string> = {
   rail: '184x138',
   row: '200x140',
-  header: '160x96',
+  header: '208x136',
   hero: '400x240',
 }
 
