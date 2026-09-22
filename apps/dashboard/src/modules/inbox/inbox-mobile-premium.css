@@ -2104,7 +2104,13 @@ html.is-mobile-layout .nx-message-list {
   flex-direction: column;
 }
 
-html.is-mobile-layout .nx-message-list > *:first-child {
+/* ONLY when there is nothing to scroll -- see ChatThread's `is-short-timeline`.
+   Applying the auto margin unconditionally changed scrollHeight for short
+   threads, and the initial-pin settle loop reads scrollHeight to decide when
+   layout has finished: a seven-message thread landed at top=324 of max=705.
+   Gated this way, a thread with real history lays out exactly as it did
+   before, and the scroll machinery sees nothing new. */
+html.is-mobile-layout .nx-message-list.is-short-timeline > *:first-child {
   margin-top: auto;
 }
 

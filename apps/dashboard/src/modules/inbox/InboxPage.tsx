@@ -4615,6 +4615,34 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
 
+    /*
+     * §28 -- NEVER SEND TO THE PERSON WHO IS NO LONGER SELECTED.
+     *
+     * handleParticipantSelect switches the conversation when a loaded thread
+     * matches the chosen person's phone. When none does -- a linked prospect
+     * who has never been messaged -- it points the routing context at them but
+     * `selected` necessarily stays on the PREVIOUS thread, because a phone
+     * number is not a thread and fabricating one would corrupt the canonical
+     * identity model.
+     *
+     * Everything the operator can see then says the new person: the Active
+     * Prospect card, the rank, the phone, and (since §22) the template they
+     * just inserted. The send would have gone to the old one. Refusing is the
+     * only honest option -- a misdirected SMS to a real seller cannot be
+     * unsent, and §28 is explicit that switching prospect must not carry stale
+     * identity.
+     */
+    const activeParticipantPhone = String(selectedParticipant?.canonical_e164 ?? '').trim()
+    const selectedThreadPhone = String(selected.canonicalE164 ?? selected.phoneNumber ?? '').trim()
+    if (activeParticipantPhone && selectedThreadPhone && activeParticipantPhone !== selectedThreadPhone) {
+      emitNotification({
+        title: 'No conversation with this contact yet',
+        detail: `${selectedParticipant?.display_name || 'This contact'} has no thread on this property, so this message would go to the previous contact. Start from their own thread instead.`,
+        severity: 'warning',
+      })
+      return
+    }
+
     const clientSendId = crypto.randomUUID()
     const optimisticMessage = buildOptimisticOutboundMessage(selected, text, clientSendId, template)
     markOptimisticPatch('message_pending', selected.id, { body: optimisticMessage.body, deliveryStatus: optimisticMessage.deliveryStatus })

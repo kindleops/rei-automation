@@ -41,7 +41,31 @@ const openConversation = async (page, index = 2, attempt = 0) => {
   await page.waitForFunction(() => document.querySelectorAll('.nx-row25').length > 0,
     undefined, { timeout: 180_000, polling: 400 }).catch(() => {})
   await page.waitForTimeout(900)
-  const box = await page.locator('.nx-row25').nth(index).boundingBox().catch(() => null)
+
+  /*
+   * PICK A THREAD WITH HISTORY, DO NOT TRUST A POSITION.
+   *
+   * This tapped a fixed row index. The list re-orders between contexts, so
+   * index 2 is sometimes an uncontacted thread with no messages at all -- the
+   * message wait then times out and the cell scores as "conversation opened:
+   * false", which reads as a theme or width failure when it is nothing of the
+   * kind. Three of sixteen cells failed this way, taking their bubble-contrast
+   * and menu checks down with them.
+   *
+   * Prefer a row the LIST says has a preview; fall back to the requested index
+   * so behaviour is unchanged when nothing advertises one.
+   */
+  const pick = await page.evaluate((fallback) => {
+    const rows = [...document.querySelectorAll('.nx-row25')]
+    const hasPreview = (row) => {
+      const text = row.querySelector('.nx-row25__preview, [class*="preview"]')?.textContent?.trim() ?? ''
+      return text.length > 3
+    }
+    const i = rows.findIndex(hasPreview)
+    return i >= 0 ? i : Math.min(fallback, Math.max(rows.length - 1, 0))
+  }, index)
+
+  const box = await page.locator('.nx-row25').nth(pick).boundingBox().catch(() => null)
   if (!box) return false
   await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
   /*
@@ -120,6 +144,52 @@ for (const width of WIDTHS) {
       check(cell, 'Back present and inline', m.backPresent && m.backInBar !== false, `present=${m.backPresent} inline=${m.backInBar}`)
       check(cell, 'bubble text is not its own background', m.bubbleColour !== m.bubbleBg, `${m.bubbleColour} on ${m.bubbleBg}`)
       check(cell, 'no horizontal overflow', m.overflowX === 0, `${m.overflowX}px`)
+
+      /*
+       * §30 — THE AUTOMATION MENU OPENS INWARD.
+       *
+       * Its trigger sits at the right edge of the command strip, so a menu
+       * anchored to the trigger's LEFT ran off a 390pt screen and took half
+       * its actions with it. Asserted by opening it and measuring the panel
+       * against the viewport, at every width.
+       */
+      const menu = await page.evaluate(async () => {
+        const trigger = document.querySelector('.nx-conv-auto-control button, .nx-conv-auto-control [role="button"]')
+        if (!trigger) return { missing: true }
+        trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        trigger.click()
+        await new Promise((r) => setTimeout(r, 450))
+        const panel = document.querySelector('.nx-conv-dropdown-portal')
+        if (!panel) return { noPanel: true }
+        const r = panel.getBoundingClientRect()
+        const items = panel.querySelectorAll('button, [role="option"]').length
+        // Hit-test the far corners: a panel can report an in-bounds box and
+        // still be covered by the composer or the dock.
+        const probe = (x, y) => {
+          const el = document.elementFromPoint(x, y)
+          return Boolean(el && panel.contains(el))
+        }
+        const inset = 6
+        return {
+          left: Math.round(r.left), right: Math.round(r.right),
+          vw: window.innerWidth, items,
+          topLeftHit: probe(r.left + inset, r.top + inset),
+          bottomRightHit: probe(r.right - inset, r.bottom - inset),
+        }
+      })
+
+      if (menu?.missing || menu?.noPanel) {
+        check(cell, 'automation menu opens', false, menu.missing ? 'no trigger' : 'no panel')
+      } else {
+        check(cell, 'automation menu fits the viewport',
+          menu.left >= 0 && menu.right <= menu.vw, `${menu.left}..${menu.right} of ${menu.vw}`)
+        check(cell, 'automation menu is actually reachable',
+          menu.topLeftHit && menu.bottomRightHit,
+          `topLeft=${menu.topLeftHit} bottomRight=${menu.bottomRightHit}`)
+        check(cell, 'automation menu has real options', menu.items >= 2, `items=${menu.items}`)
+      }
+      await page.keyboard.press('Escape').catch(() => {})
+      await page.waitForTimeout(200)
 
       if (width === 390) {
         await page.screenshot({ path: path.join(OUT, `conversation-${theme}.png`) })

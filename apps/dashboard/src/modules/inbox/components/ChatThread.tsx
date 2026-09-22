@@ -627,13 +627,36 @@ export const ChatThread = ({
            * a different thread.
            */
           if (snapshotThreadKeyRef.current !== pinThreadId) return
+          /*
+           * STOP THE MOMENT THE OPERATOR TAKES OVER -- AND NOT BEFORE.
+           *
+           * Exiting on two stable frames of scrollHeight was too eager:
+           * messages arrive in batches with gaps wider than two frames, so the
+           * loop declared the layout finished between batches and a
+           * seven-message thread landed at 549 of 705 -- roughly one bubble
+           * short. The ResizeObserver could not rescue it either, because it
+           * watches the scroller's BOX, which does not change when its
+           * CONTENT grows.
+           *
+           * So the bottom is simply held for the frame budget. This is safe
+           * because the gate is a real gesture: programmatic scrollTop also
+           * fires scroll events, and handleScroll already tells the two apart
+           * via programmaticScrollRef, so our own pinning can never look like
+           * the operator scrolling away.
+           */
+          if (userTookOverRef.current) { initialisedThreadRef.current = pinThreadId; return }
           // ~2s of frames: content that loads asynchronously can still be
           // growing past one second, and a thread that stops short of its own
           // bottom is the defect this loop exists to remove.
           if (frames++ > 120) { initialisedThreadRef.current = pinThreadId; return }
           const height = live.scrollHeight
-          if (height === lastHeight) {
-            if (++stableFrames >= 2) { initialisedThreadRef.current = pinThreadId; return }
+          // Stability only means something once there is a bottom to hold; a
+          // list with nothing to scroll is trivially "stable" every frame.
+          const scrollable = height > live.clientHeight
+          // ~0.5s of held-still height, not two frames: batched arrivals pause
+          // for longer than two frames between bubbles.
+          if (height === lastHeight && scrollable) {
+            if (++stableFrames >= 30) { initialisedThreadRef.current = pinThreadId; return }
           } else {
             stableFrames = 0
             lastHeight = height
@@ -646,6 +669,10 @@ export const ChatThread = ({
         requestAnimationFrame(settle)
       }
     }
+
+    // The scroller's own box does not change when its CONTENT grows, so the
+    // ResizeObserver cannot be the only place this is decided.
+    node.classList.toggle('is-short-timeline', node.scrollHeight <= node.clientHeight)
 
     const distanceFromBottom = node.scrollHeight - node.clientHeight - node.scrollTop
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom: distanceFromBottom < 48 }
@@ -678,6 +705,11 @@ export const ChatThread = ({
    */
   const initialisedThreadRef = useRef<string | null>(null)
   /**
+   * Set only by a scroll the operator performed, never by one we performed.
+   * The initial pin holds the bottom until this flips -- see the settle loop.
+   */
+  const userTookOverRef = useRef(false)
+  /**
    * Scrolls this component performs itself.
    *
    * Programmatic scrollTop assignment fires the same scroll event a finger
@@ -708,6 +740,7 @@ export const ChatThread = ({
     setPendingBelow(0)
     lastCountRef.current = 0
     initialisedThreadRef.current = null
+    userTookOverRef.current = false
   }, [thread?.id])
 
   const jumpToLatest = useCallback(() => {
@@ -759,6 +792,22 @@ export const ChatThread = ({
       const shrankViewport = client < lastClient
       lastClient = client
 
+      /*
+       * §2/§25 -- BOTTOM-ALIGN ONLY WHILE THERE IS NOTHING TO SCROLL.
+       *
+       * Bottom-aligning in CSS unconditionally (margin-top:auto on the first
+       * child) changed scrollHeight for SHORT threads, and the initial-pin
+       * settle loop reads scrollHeight to decide when layout has finished. A
+       * seven-message thread landed at top=324 of max=705, and a two-message
+       * one reported max=4 where it had reported 705 moments earlier.
+       *
+       * Gating the alignment on "not scrollable" means a thread with real
+       * history lays out EXACTLY as it did before this pass -- the scroll
+       * machinery sees nothing new -- while a short thread still sits on the
+       * composer instead of hanging under the header.
+       */
+      live.classList.toggle('is-short-timeline', height <= client)
+
       if (height === lastHeight && !shrankViewport) return
       const grew = height > lastHeight
       lastHeight = height
@@ -783,6 +832,7 @@ export const ChatThread = ({
     // Returning to the latest message is itself the acknowledgement -- but only
     // when the OPERATOR did the returning. Our own re-pins land here too.
     const selfScrolled = Date.now() - programmaticScrollRef.current < 250
+    if (!selfScrolled) userTookOverRef.current = true
     if (nearBottom && !selfScrolled) setPendingBelow((n) => (n === 0 ? n : 0))
   }
 
