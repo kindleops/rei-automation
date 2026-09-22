@@ -1829,13 +1829,35 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         const supabase = getSupabaseClient()
         channel = supabase
           .channel('nexus-inbox-realtime')
+          /*
+           * §10 — ONLY PUBLISHED TABLES. Every binding here is load-bearing for
+           * the other bindings.
+           *
+           * This channel bound SEVEN tables. Checked against the project's
+           * supabase_realtime publication, only three of them are published:
+           *
+           *   published      inbox_thread_state, message_events, send_queue
+           *   NOT published  operator_thread_state, universal_lead_state_events,
+           *                  operator_entity_preferences
+           *   does not exist inbox_map_pins
+           *
+           * A single binding on an unpublished table silently disables every
+           * OTHER binding on the same channel, while subscribe() still reports
+           * SUBSCRIBED. Measured:
+           *
+           *   inbox_thread_state only              SUBSCRIBED  events=1
+           *   inbox_thread_state + an unpublished  SUBSCRIBED  events=0
+           *
+           * So four dead bindings were suppressing the three real ones, and the
+           * Inbox list has never received a realtime event -- it stayed current
+           * only through the polling fallbacks. The status callback below
+           * reported "connected" throughout, which is why it went unnoticed.
+           *
+           * Before adding a table here, confirm it is in the publication.
+           */
           .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, triggerRefresh)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_map_pins' }, triggerRefresh)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, triggerRefresh)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_thread_state' }, triggerRefresh)
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'universal_lead_state_events' }, triggerRefresh)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_entity_preferences' }, triggerRefresh)
           .subscribe((status) => {
             if (cancelled) return
             const normalizedStatus: InboxRealtimeStatus =

@@ -145,6 +145,17 @@ const bucketByName = (name: string): BucketConfig => {
 
 const VISIBLE_INBOX_CHIPS: BucketConfig[] = [
   'priority', 'new_replies', 'needs_review', 'waiting',
+  /*
+   * §2 — FOLLOW UP IS WHERE WAITING GOES, SO IT HAS TO BE REACHABLE.
+   *
+   * The rail exposed Waiting but not Follow Up, and those two are the same
+   * story either side of the canonical 24h rule: a thread sits in Waiting
+   * while the window is open and leaves when it expires. With Follow Up
+   * missing, 310 threads owed an action that had no chip to open them, and
+   * the operator watching Waiting fall to 0 had nowhere to see where the work
+   * went. It sits immediately after Waiting for that reason.
+   */
+  'follow_up',
   // Waiting's parked-work sub-views sit directly after it.
   'snoozed', 'scheduled',
   'all_messages',

@@ -1024,6 +1024,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       all_threads: allCount,
       // Authoritative server total (exact head-count) with the locally-derived value only
       // as a fallback. Never page-length arithmetic.
+      /*
+       * §2 — Scheduled and Snoozed were absent from this object entirely, so
+       * their chips read "—" (formatCount's "not measured") against counts the
+       * API had been returning all along. "—" beside a real figure is worse
+       * than the figure: it tells the operator the system does not know, when
+       * it does. Both are now mapped like every other bucket.
+       */
+      scheduled: num(sv('scheduled', [], local.scheduled)),
+      snoozed: num(sv('snoozed', [], local.snoozed)),
       archived: readStoreCount('archived') ?? local.archived,
       archived_leads: readStoreCount('archived') ?? local.archived,
       wrong_numbers: local.wrong_number,
@@ -2793,40 +2802,28 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           queueId,
         })
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'operator_thread_state' }, (payload) => {
-        const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>
-        if (!belongsToSelection(row)) return
-        if (DEV) console.log('[InboxPage realtime dossier update]', { threadKey: selectedKey, eventType: payload.eventType })
-        const patch = {
-          inboxCategory: row.inbox_category,
-          inbox_bucket: row.inbox_category,
-          uiIntent: row.detected_intent || row.ui_intent,
-          workflowStage: row.thread_stage,
-        }
-        
-        setThreadIntelligence((current) => {
-          if (!current) return current
-          return {
-            ...current,
-            ...row,
-            // Map common aliases
-            inboxCategory: row.inbox_category || current.inboxCategory,
-            uiIntent: row.detected_intent || row.ui_intent || current.uiIntent,
-            workflowStage: row.thread_stage || current.workflowStage,
-          }
-        })
-        patchDashboardThread(selectedKey, patch, {
-          source: 'selected_thread_realtime',
-          table: 'operator_thread_state',
-          eventType: payload.eventType,
-        })
-        logRealtimePatchApplied({
-          table: 'operator_thread_state',
-          eventType: payload.eventType,
-          threadKey: selectedKey,
-          patchKeys: Object.keys(patch),
-        })
-      })
+      /*
+       * §10 — THE DEAD BINDING THAT SILENTLY KILLED REALTIME.
+       *
+       * A third `.on(postgres_changes, table: 'operator_thread_state')` used to
+       * sit here. That table is not in the supabase_realtime publication, is
+       * empty, and the handler read inbox_category / detected_intent /
+       * thread_stage -- none of which are even columns on it. Dead three ways.
+       *
+       * It was not merely useless. Binding an UNPUBLISHED table silently
+       * disables every other binding on the same channel, while the channel
+       * still reports SUBSCRIBED. Measured against this project:
+       *
+       *   inbox_thread_state only            SUBSCRIBED  events=1
+       *   + operator_thread_state (as here)  SUBSCRIBED  events=0
+       *
+       * So message_events and send_queue above received NOTHING, and the
+       * Inbox's realtime has never worked -- the surface stayed current only
+       * because of the polling fallbacks below. The channel's own status was
+       * the reason this went unnoticed: it reports success either way.
+       *
+       * Do not re-add a binding without confirming the table is published.
+       */
       .subscribe()
 
     // Inbox-wide realtime for list movement + counts (invalidates short TTL cache on message/state changes)
