@@ -1732,7 +1732,7 @@ export const InboxSidebar = ({
         </button>
         <div className="nx-sidebar-rebuilt__search-input-wrap">
           <Icon name="search" className="nx-sidebar-rebuilt__search-icon" />
-          <input value={searchQuery} onChange={(e) => onSearchQueryChange?.(e.target.value)} placeholder="Search operator inbox..." aria-label="Search inbox threads" />
+          <input value={searchQuery} onChange={(e) => onSearchQueryChange?.(e.target.value)} placeholder="Search" aria-label="Search inbox threads: name, address, phone or message text" />
           {searchQuery && <button type="button" className="nx-sidebar-rebuilt__search-clear" onClick={() => onSearchQueryChange?.('')}><Icon name="close" /></button>}
         </div>
         <div className="nx-sidebar-rebuilt__top-actions">

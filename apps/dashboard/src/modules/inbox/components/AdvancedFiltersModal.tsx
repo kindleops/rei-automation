@@ -357,10 +357,36 @@ function SelectField({ label, value, onChange, loadOptions, cached }: {
   loadOptions: () => Promise<FilterOption[]>; cached?: FilterOption[]
 }) {
   const [opts, setOpts] = useState<FilterOption[]>(cached ?? [])
+  /*
+   * §6 — A FILTER WITH NOTHING TO CHOOSE IS A DEAD CONTROL, SO IT DOES NOT RENDER.
+   *
+   * Options load on mount and the failure was swallowed by `.catch(() => {})`,
+   * so a field whose values the API refuses to serve still painted a label and
+   * an empty "Any" dropdown. Measured in the Inbox & Conversation group alone:
+   * 8 of 14 selects had exactly one option. /api/cockpit/inbox/filter-options
+   * answers `inbox_filter_invalid_field` for inbox_bucket, lead_temperature,
+   * universal status, detected intent, delivery status and automation status,
+   * while stage and latest_direction return real values with counts.
+   *
+   * So the sheet was advertising filters the read model does not support. The
+   * brief is explicit that an unsupported control should be hidden rather than
+   * shown broken, and a filter that cannot narrow anything is exactly that.
+   *
+   * `resolved` distinguishes "still loading" from "loaded and genuinely empty",
+   * so the field is never hidden merely because it is slow.
+   */
+  const [resolved, setResolved] = useState<boolean>(Boolean(cached?.length))
   useEffect(() => {
-    if (cached?.length) { setOpts(cached); return }
-    void loadOptions().then(setOpts).catch(() => {})
+    if (cached?.length) { setOpts(cached); setResolved(true); return }
+    let alive = true
+    void loadOptions()
+      .then((next) => { if (alive) { setOpts(next ?? []); setResolved(true) } })
+      .catch(() => { if (alive) { setOpts([]); setResolved(true) } })
+    return () => { alive = false }
   }, [cached, loadOptions])
+
+  if (resolved && opts.length === 0) return null
+
   return (
     <label className="nx-ifm-field">
       <span>{label}</span>

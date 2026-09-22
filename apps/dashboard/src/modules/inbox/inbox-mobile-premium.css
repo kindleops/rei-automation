@@ -1724,3 +1724,20 @@ html.is-mobile-layout .nx-qap-backdrop {
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
+
+/* §4 — THE SEARCH FIELD HAS TO FIT ITS OWN PLACEHOLDER.
+   Measured at 375px: the field painted 110px wide with 90px of usable inner
+   width, while the placeholder "Search operator inbox..." needed 174px. It
+   rendered "Search operat...", which tells the operator nothing and looks
+   broken. The text is now "Search" (the full list of searchable fields moved
+   to aria-label, where it is useful to a screen reader and costs no pixels),
+   and the row gives the field the space instead of the two icon buttons.
+
+   The row is [category] [field] [filters] [clear]; only the field should grow. */
+html.is-mobile-layout .nx-sidebar-rebuilt__search-input-wrap {
+  flex: 1 1 auto;
+  min-width: 96px;
+}
+html.is-mobile-layout .nx-sidebar-rebuilt__search-row .nx-sidebar__icon-button {
+  flex: 0 0 auto;
+}
