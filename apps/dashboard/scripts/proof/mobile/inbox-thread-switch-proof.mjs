@@ -119,45 +119,46 @@ for (let cycle = 0; cycle < CYCLES; cycle += 1) {
   }
 }
 
-// ── H. QUICK ACTIONS REACHES THE EXISTING DEAL INTELLIGENCE ────────────────
-// Inbox is a communications workspace; intelligence lives in the product that
-// already owns it. This asserts the boundary: Offer / Deal NAVIGATES to the
-// existing IntelligencePanel (.nx-dossier-shell) carrying the selected thread,
-// and Back returns to the conversation rather than to a re-hydrating one.
+// ── H. QUICK ACTIONS EXPOSES ONLY WORKING CONTROLS ─────────────────────────
+// §13/§15/§19/§20. Every removal here was a control that could not do what its
+// label promised: Offer / Deal and Internal Note both navigated to Deal
+// Intelligence, AI Assist was permanently disabled behind an empty draft, and
+// Attachment was a "Soon" badge. Visible must mean working.
 {
   const page = await ctx.newPage()
   const before = await openSettled(page, 2)
   check('H. baseline thread has scroll range', before !== null && before.max > 200,
     before ? `max=${before.max}` : 'no timeline')
 
-  const subject = await page.evaluate(() => (
-    document.querySelector('.nx-chat-header-title, .nx-conversation-title')?.textContent?.trim() ?? ''
-  ))
+  const trigger = page.locator('[aria-label="Open quick actions"]').first()
+  const usable = await trigger.isEnabled().catch(() => false)
+  // A suppressed thread disables the composer by design, and Quick Actions
+  // lives inside it -- that is not a failure, but it cannot prove this check.
+  if (!usable) {
+    check('H. quick actions reachable on a sendable thread', false, 'composer disabled -- thread is suppressed')
+  } else {
+    // Type first. Operator Polish and Translate Draft act ON the draft, so with
+    // an empty composer they are correctly disabled -- auditing before typing
+    // reports working controls as dead.
+    await page.locator('.nx-composer-input, textarea').first().fill('Checking in on the property.').catch(() => {})
+    await page.waitForTimeout(400)
+    await trigger.click({ timeout: 30_000 })
+    await page.waitForTimeout(1200)
 
-  let opened = false
-  for (let attempt = 0; attempt < 2 && !opened; attempt += 1) {
-    await page.locator('[aria-label="Open quick actions"]').first().click({ timeout: 30_000 }).catch(() => {})
-    await page.getByRole('button', { name: /Offer \/ Deal/i }).first().click({ timeout: 30_000 }).catch(() => {})
-    opened = await page.waitForFunction(() => document.querySelector('.nx-dossier-shell') !== null,
-      undefined, { timeout: 25_000, polling: 200 }).then(() => true).catch(() => false)
+    const labels = await page.evaluate(() => [...document.querySelectorAll('.nx-qap-action-btn')]
+      .map((b) => ({ text: b.textContent?.trim() ?? '', disabled: b.hasAttribute('disabled') })))
+
+    for (const gone of ['Offer / Deal', 'Internal Note', 'AI Assist', 'Attachment']) {
+      check(`H. "${gone}" is absent`, !labels.some((l) => l.text.includes(gone)), '')
+    }
+    check('H. no dead control is exposed (draft present)',
+      labels.every((l) => !l.disabled),
+      labels.filter((l) => l.disabled).map((l) => l.text).join(', ') || '')
+    check('H. no duplicate intelligence surface inside Conversation',
+      await page.evaluate(() => document.querySelectorAll('.nx-pis').length) === 0, '')
+    check('H. the surviving actions are real',
+      labels.length > 0, labels.map((l) => l.text).join(' | '))
   }
-  check('H. Offer / Deal opens the EXISTING Deal Intelligence', opened, '')
-
-  // No second intelligence experience may be mounted over the first.
-  const embedded = await page.evaluate(() => document.querySelectorAll('.nx-pis').length)
-  check('H. no duplicate intelligence surface inside Conversation', embedded === 0, `nx-pis=${embedded}`)
-
-  const carried = await page.evaluate(() => document.querySelector('.nx-dossier-shell')?.textContent ?? '')
-  const token = subject.split(/\s+/).filter((w) => w.length > 3)[0] ?? ''
-  check('H. carries the selected subject', token === '' || carried.includes(token),
-    token ? `token=${token}` : 'no subject token to match')
-
-  await page.locator('[aria-label="Back"], .nx-mobile-back').first().click({ timeout: 20_000 }).catch(() => {})
-  await page.waitForTimeout(1500)
-  const post = await read(page)
-  check('H. Back returns to the conversation, hydrated',
-    post !== null && post.skeleton === 0 && post.msgs > 0,
-    post ? `msgs=${post.msgs} skeleton=${post.skeleton}` : 'timeline gone')
   await page.close()
 }
 

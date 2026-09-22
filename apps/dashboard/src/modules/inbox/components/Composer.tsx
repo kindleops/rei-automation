@@ -24,7 +24,6 @@ interface ComposerProps {
   draftText: string
   onSend: (text: string) => void
   onOpenSchedule: (currentDraft: string) => void
-  onAI: () => void
   thread: InboxThread | null
   threadContext: ThreadContext | null
   onSendTemplate: (payload: TemplateActionPayload) => void
@@ -89,7 +88,6 @@ export const Composer = ({
   draftText,
   onSend,
   onOpenSchedule,
-  onAI,
   thread,
   threadContext,
   onSendTemplate,
@@ -489,7 +487,6 @@ export const Composer = ({
       disabled={composerDisabled || !suggestion.text}
       onClick={() => {
         if (suggestion.text) setLocalDraft(suggestion.text)
-        if (suggestion.id === 'ai_assist') onAI()
         setQuickActionsOpen(false)
       }}
     >
@@ -589,29 +586,12 @@ export const Composer = ({
             <div className="nx-qap-section-label">Message actions</div>
             <div className="nx-qap-actions">
               {!isMobile ? qaScheduleButton : null}
-              <button type="button" className="nx-qap-action-btn is-not-ready" disabled title="Coming soon">
-                <Icon name="paperclip" /><span>Attachment</span><span className="nx-qap-badge">Soon</span>
-              </button>
-              <button
-                type="button"
-                className="nx-qap-action-btn"
-                onClick={() => { onQuickAction?.('add_note'); setQuickActionsOpen(false) }}
-              >
-                <Icon name="file-text" /><span>Internal Note</span>
-              </button>
               <button
                 type="button"
                 className="nx-qap-action-btn"
                 onClick={() => { onQuickAction?.('snooze'); setQuickActionsOpen(false) }}
               >
                 <Icon name="clock" /><span>Follow-Up</span>
-              </button>
-              <button
-                type="button"
-                className="nx-qap-action-btn"
-                onClick={() => { onQuickAction?.('open_property'); setQuickActionsOpen(false) }}
-              >
-                <Icon name="zap" /><span>Offer / Deal</span>
               </button>
               <button
                 type="button"

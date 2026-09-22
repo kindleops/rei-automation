@@ -5208,7 +5208,6 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           setScheduledTemplatePayload({ text: currentDraft, template: null })
           setSchedulePanelOpen(true)
         }}
-        onAI={() => setActiveOverlay('ai')}
         thread={selected}
         threadContext={threadContext}
         onSendTemplate={handleSendTemplate}

@@ -547,7 +547,6 @@ export const SellerMapCard = ({
             onOpenSchedule={(draft) => {
               if (draft.trim()) setLocalDraft(draft)
             }}
-            onAI={() => {}}
             thread={thread}
             threadContext={threadContext as ThreadContext | null}
             onSendTemplate={(payload) => { void sendTemplate(payload) }}
