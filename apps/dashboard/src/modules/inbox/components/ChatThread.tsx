@@ -532,15 +532,43 @@ export const ChatThread = ({
          * 1642, almost exactly one message short. One frame later the geometry
          * is final.
          */
-        requestAnimationFrame(() => {
+        /*
+         * SETTLE, don't re-pin once. A single extra frame still landed on a
+         * stale height when the arriving message was itself still laying out:
+         * measured top=98 against a real max=192 after an inbound. Same bounded
+         * settle the initial positioning uses, for the same reason.
+         */
+        const repinThreadId = threadId
+        let repinLast = nextHeight
+        let repinStable = 0
+        let repinFrames = 0
+        const repin = () => {
           const live = listRef.current
           if (!live) return
-          if (!scrollSnapshotRef.current.nearBottom) return
-          live.scrollTop = Math.max(0, live.scrollHeight - live.clientHeight)
-          scrollSnapshotRef.current = {
-            height: live.scrollHeight, top: live.scrollTop, nearBottom: true,
+          /*
+           * Gated on THREAD IDENTITY only -- the same lesson the initial pin
+           * had to learn. Re-reading scrollSnapshotRef.nearBottom here is
+           * circular: the tail of this effect has already rewritten it from the
+           * pre-growth geometry, so the loop cancelled itself on its first
+           * frame and the timeline stopped at 114 of a real 192. The decision
+           * that we were at the bottom was made once, above, before the
+           * content grew.
+           */
+          if (snapshotThreadKeyRef.current !== repinThreadId) return
+          if (repinFrames++ > 40) return
+          const height = live.scrollHeight
+          if (height === repinLast) {
+            if (++repinStable >= 2) return
+          } else {
+            repinStable = 0
+            repinLast = height
           }
-        })
+          programmaticScrollRef.current = Date.now()
+          live.scrollTop = Math.max(0, height - live.clientHeight)
+          scrollSnapshotRef.current = { height, top: live.scrollTop, nearBottom: true }
+          requestAnimationFrame(repin)
+        }
+        requestAnimationFrame(repin)
       } else {
         node.scrollTop = previous.top + (nextHeight - previous.height)
       }
@@ -610,6 +638,7 @@ export const ChatThread = ({
             stableFrames = 0
             lastHeight = height
           }
+          programmaticScrollRef.current = Date.now()
           live.scrollTop = Math.max(0, height - live.clientHeight)
           scrollSnapshotRef.current = { height, top: live.scrollTop, nearBottom: true }
           requestAnimationFrame(settle)
@@ -648,6 +677,17 @@ export const ChatThread = ({
    * the thread is settled.
    */
   const initialisedThreadRef = useRef<string | null>(null)
+  /**
+   * Scrolls this component performs itself.
+   *
+   * Programmatic scrollTop assignment fires the same scroll event a finger
+   * does, so handleScroll cleared the affordance every time the timeline
+   * re-pinned, and the next message re-created it. The pill detached and
+   * re-attached fast enough that Playwright could not click it -- "element is
+   * not stable", then "detached from the DOM" -- which is a fair description
+   * of what a thumb would have been chasing.
+   */
+  const programmaticScrollRef = useRef(0)
 
   useEffect(() => {
     const count = messages?.length ?? 0
@@ -673,9 +713,47 @@ export const ChatThread = ({
   const jumpToLatest = useCallback(() => {
     const node = listRef.current
     if (!node) return
+    programmaticScrollRef.current = Date.now()
     node.scrollTo({ top: node.scrollHeight - node.clientHeight, behavior: 'smooth' })
     setPendingBelow(0)
   }, [])
+
+  /*
+   * GROWTH CAN HAPPEN WITHOUT A RENDER.
+   *
+   * The re-pin chains hang off the layout effect, so they only run when
+   * `messages`, `loading` or the thread identity change. A bubble that lays
+   * out late -- or any content that resizes after React is done -- grows the
+   * timeline with no effect to react to, and the view is left short of the
+   * bottom: measured at 98 against a real 176 straight after an inbound.
+   *
+   * A ResizeObserver watches the scroller itself, which is the one signal that
+   * is true for every growth path. It only acts when the operator was already
+   * at the bottom, so it can never pull someone out of history, and it marks
+   * the scroll as ours so the affordance is not dismissed by our own movement.
+   */
+  useEffect(() => {
+    const node = listRef.current
+    if (!node || typeof ResizeObserver === 'undefined') return undefined
+    let lastHeight = node.scrollHeight
+    const observer = new ResizeObserver(() => {
+      const live = listRef.current
+      if (!live) return
+      const height = live.scrollHeight
+      if (height === lastHeight) return
+      const grew = height > lastHeight
+      lastHeight = height
+      if (!grew) return
+      if (!scrollSnapshotRef.current.nearBottom) return
+      programmaticScrollRef.current = Date.now()
+      live.scrollTop = Math.max(0, height - live.clientHeight)
+      scrollSnapshotRef.current = { height, top: live.scrollTop, nearBottom: true }
+    })
+    observer.observe(node)
+    // Children resizing is what actually changes scrollHeight.
+    for (const child of Array.from(node.children)) observer.observe(child)
+    return () => observer.disconnect()
+  }, [messages, thread?.id])
 
   const handleScroll = () => {
     const node = listRef.current
@@ -683,8 +761,10 @@ export const ChatThread = ({
     const distanceFromBottom = node.scrollHeight - node.clientHeight - node.scrollTop
     const nearBottom = distanceFromBottom < 48
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom }
-    // Returning to the latest message is itself the acknowledgement.
-    if (nearBottom) setPendingBelow((n) => (n === 0 ? n : 0))
+    // Returning to the latest message is itself the acknowledgement -- but only
+    // when the OPERATOR did the returning. Our own re-pins land here too.
+    const selfScrolled = Date.now() - programmaticScrollRef.current < 250
+    if (nearBottom && !selfScrolled) setPendingBelow((n) => (n === 0 ? n : 0))
   }
 
   const timelineMessages = useMemo(() => (
