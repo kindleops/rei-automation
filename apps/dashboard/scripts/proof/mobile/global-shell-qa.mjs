@@ -29,7 +29,7 @@ import path from 'node:path'
 const arg = (n, f) => (process.argv.find((a) => a.startsWith(`--${n}=`)) || `--${n}=${f}`).replace(`--${n}=`, '')
 const BASE = arg('base', 'http://localhost:5174')
 const WIDTHS = arg('width', '375,390,393,430').split(',').map(Number)
-const THEMES = arg('theme', 'dark,light,red-ops,true-black').split(',')
+const THEMES = arg('theme', 'dark,light,red_ops,true_black').split(',')
 const ROUTES = ['/inbox', '/map', '/entity-graph', '/pipeline', '/calendar', '/email-command']
 
 const OUT = path.resolve('artifacts/global-shell')
@@ -110,7 +110,24 @@ for (const width of WIDTHS) {
     const ctx = await browser.newContext({
       viewport: { width, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
     })
-    await ctx.addInitScript((t) => { try { localStorage.setItem('nexus.theme', t) } catch { /* ignore */ } }, theme)
+    await ctx.addInitScript((t) => {
+      try {
+        /*
+         * THE REAL KEY. Both proofs previously wrote localStorage['nexus.theme'],
+         * which nothing reads: the app persists settings as JSON on
+         * `nexus-settings` and applies `data-nexus-theme` from its nexusTheme
+         * field (src/shared/settings.ts). Every "theme" cell was therefore
+         * rendering the default dark, and a four-theme matrix was really one
+         * theme run sixteen times. Caught by LOOKING at a light-theme capture
+         * and seeing a dark screen -- no assertion in the matrix could have,
+         * because every cell genuinely passed against dark.
+         */
+        const raw = localStorage.getItem('nexus-settings')
+        const next = raw ? JSON.parse(raw) : {}
+        next.nexusTheme = t
+        localStorage.setItem('nexus-settings', JSON.stringify(next))
+      } catch { /* ignore */ }
+    }, theme)
     for (const route of ROUTES) {
       const cell = `${width}-${theme}${route}`
       const page = await ctx.newPage()

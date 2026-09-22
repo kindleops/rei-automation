@@ -1620,3 +1620,45 @@ html.is-mobile-layout .nx-row25__footer .nx-card-assetline {
 @media (prefers-reduced-motion: reduce) {
   .shimmer { animation: none; }
 }
+
+/* §6 — the "+N" affordance is the card's own admission that it is showing you
+   a subset, so it has to be legible. It sat at 9px and only became visible at
+   all once the card capped its inline chips at two. */
+html.is-mobile-layout .nx-row25 .nx-prop-flags__overflow {
+  font-size: var(--nx-t-micro, 11px);
+  font-weight: 600;
+  height: 20px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §35 — THE TYPE SCALE IS NOT A THEME'S BUSINESS
+
+   nexus-theme.css sets `font-size: !important` on the card's name (13.5px),
+   address (11.5px) and preview (12px) inside its LIGHT palette block. Those
+   rules exist to pick colours and quietly carry sizes with them, so switching
+   to light silently reverted the four-level hierarchy: the preview dropped to
+   12px and tied with the property value again -- "the message beats the money"
+   held in dark and failed in light.
+
+   This was invisible until the proofs stopped seeding the wrong localStorage
+   key and actually switched theme. A theme may own colour; it may not own the
+   scale, or the same card teaches a different hierarchy per palette.
+
+   !important is required to answer !important, and the specificity is scoped
+   to the mobile rail so no desktop or non-light surface moves.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__name,
+html.is-mobile-layout .nx-premium-inbox .nx-row25__name {
+  font-size: var(--nx-t-card-title, 15px) !important;
+}
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__preview,
+html.is-mobile-layout .nx-premium-inbox .nx-row25__preview {
+  font-size: var(--nx-t-body, 14px) !important;
+}
+html.is-mobile-layout .nx-premium-inbox .nx-sidebar--mode-rail25 .nx-row25__addr,
+html.is-mobile-layout .nx-premium-inbox .nx-row25__addr {
+  font-size: var(--nx-t-meta, 12px) !important;
+}
