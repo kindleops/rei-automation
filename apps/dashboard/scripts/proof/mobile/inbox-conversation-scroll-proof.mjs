@@ -206,7 +206,9 @@ const openThread = async (page, index, attempt = 0) => {
     check('D. affordance clears', d !== null && !d.pill, '')
   }
 
-  await admin.from('message_events').delete().in('message_event_key', [keyB, keyC])
+  // Cleanup must survive an early exit: an interrupted run left two fixture
+  // rows on the canary, which the final safety check caught.
+  await admin.from('message_events').delete().eq('source_app', 'inbox_scroll_proof')
   await page.close()
 }
 

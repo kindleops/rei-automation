@@ -1941,3 +1941,54 @@ html.is-mobile-layout .nx-ifm-field.is-loading > span::after {
    has to be a positioning context. Without this it anchors to the viewport and
    drifts over the dock. */
 html.is-mobile-layout .nx-chat-container { position: relative; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §12 — THE MOBILE SHEET FOLLOWS THE THEME
+
+   .nx-mobile-sheet paints rgba(10, 14, 22, 0.94) with no light-theme override,
+   so in Light the surface stayed dark while the text tokens correctly resolved
+   to dark ink (#0f172a on #64748b). The Property Intelligence dossier rendered
+   its values, section titles and headings essentially invisible -- dark on
+   dark. Every assertion in the matrix passed, because they checked message
+   bubbles rather than the sheet's own text; it was caught by LOOKING at the
+   light screenshot, which is exactly why §12 asks for that.
+
+   Scoped to the light palette, so no other theme moves.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* !important because this sheet's base rule lives in mobile-operating-shell.css,
+   whose import order relative to this file is not guaranteed -- the documented
+   hazard at the top of this stylesheet. Specificity alone lost the cascade. */
+html[data-nexus-theme="light"] .nx-mobile-sheet {
+  background: rgba(255, 255, 255, 0.97) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: var(--nx-text-primary, #0f172a) !important;
+}
+
+html[data-nexus-theme="light"] .nx-mobile-sheet__handle {
+  background: rgba(15, 23, 42, 0.22) !important;
+}
+
+/* The header carries its own dark slab, so the title bar stayed black over a
+   white sheet -- half-corrected is its own kind of broken. */
+html[data-nexus-theme="light"] .nx-mobile-sheet__header {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.10) !important;
+}
+html[data-nexus-theme="light"] .nx-mobile-sheet__header strong { color: #0f172a !important; }
+html[data-nexus-theme="light"] .nx-mobile-sheet__header small { color: #64748b !important; }
+html[data-nexus-theme="light"] .nx-mobile-sheet__close {
+  background: rgba(15, 23, 42, 0.06) !important;
+  color: #0f172a !important;
+}
+
+/* The dossier's own hairlines read as black bars on a white surface. */
+[data-nexus-theme="light"] .nx-pis__overview,
+[data-nexus-theme="light"] .nx-pis__now,
+[data-nexus-theme="light"] .nx-pis__section {
+  border-color: rgba(15, 23, 42, 0.10);
+}
+
+[data-nexus-theme="light"] .nx-pis__section-sub,
+[data-nexus-theme="light"] .nx-pis__action-icon {
+  background: rgba(15, 23, 42, 0.07);
+}
