@@ -69,7 +69,39 @@ function GlassControl<T extends string>({
     const update = () => {
       const rect = btnRef.current?.getBoundingClientRect()
       if (!rect) return
-      setMenuPos({ top: rect.bottom + 6, left: rect.left, minWidth: Math.max(rect.width, 168) })
+      const width = Math.max(rect.width, 168)
+
+      /*
+       * §30 -- OPEN INWARD, NOT OFF THE EDGE.
+       *
+       * `left: rect.left` anchors every menu to the LEFT of its trigger, which
+       * is fine until the trigger is the automation button at the right edge
+       * of the strip: a 168px menu from there runs past a 390pt viewport and
+       * the actions on its right half are simply unreachable. The menu now
+       * right-aligns to the trigger when there is not room to the right --
+       * i.e. it opens leftward, inward -- and is clamped inside the safe area
+       * either way so neither edge can clip it.
+       */
+      const readInset = (name: string) => {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(name)
+        const n = parseFloat(raw)
+        return Number.isFinite(n) ? n : 0
+      }
+      const safeL = readInset('--nx-mobile-safe-left') || 0
+      const safeR = readInset('--nx-mobile-safe-right') || 0
+      const margin = 8
+      const minLeft = safeL + margin
+      const maxLeft = window.innerWidth - safeR - margin - width
+
+      let left = rect.left
+      if (left > maxLeft) left = rect.right - width  // flip: open leftward
+      left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft))
+
+      // A menu opened from a control low in the viewport would otherwise run
+      // under the composer and the dock.
+      const top = rect.bottom + 6
+
+      setMenuPos({ top, left, minWidth: width })
     }
     update()
     window.addEventListener('resize', update)
@@ -344,8 +376,21 @@ export const ThreadStateBar = ({
   const statusOptions = compact
     ? compactOptions(STATUS_OPTIONS, (value) => STATUS_COMPACT_LABELS[value])
     : STATUS_OPTIONS
+  /*
+   * §11 -- "S2" ON ITS OWN IS A MACHINE ENUM.
+   *
+   * The compact bar was rendering only the short code, so the surface where an
+   * operator decides what to say next said "S2" and nothing else. The full
+   * label already exists on the same visual -- this is the canonical lifecycle
+   * definition, unchanged -- so the pill reads "S2 · Interest Probe". The code
+   * stays in front because operators use it as the handle.
+   */
   const stageOptions = compact
-    ? compactOptions(STAGE_OPTIONS, (_value, visual) => visual.shortLabel || visual.label)
+    ? compactOptions(STAGE_OPTIONS, (_value, visual) => (
+      visual.shortLabel && visual.label && visual.label !== visual.shortLabel
+        ? `${visual.shortLabel} · ${visual.label.replace(`${visual.shortLabel} `, '')}`
+        : visual.shortLabel || visual.label
+    ))
     : STAGE_OPTIONS
   const tempOptions = compact
     ? compactOptions(TEMP_OPTIONS, (value) => TEMP_COMPACT_LABELS[value])

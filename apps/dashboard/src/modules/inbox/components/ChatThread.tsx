@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
+import { InboxStreetViewThumb } from './InboxStreetViewThumb'
 import { formatCurrency, formatMessageDateTime, formatPercent } from '../../../shared/formatters'
 import { buildConversationDecision } from '../../../domain/inbox/inbox-decisioning'
 import { resolveThreadTemperature } from '../status-visuals'
@@ -968,11 +969,33 @@ export const ChatThread = ({
               </MobileHeaderActionsMenu>
             </div>
 
+            {/*
+              §3 -- PROPERTY RECOGNITION, NOT A PROPERTY APP.
+
+              One small image beside the identity so the operator knows which
+              house they are talking about before they start typing. It is a
+              SINGLE request on a detail surface -- the fan-out rule this
+              product follows bars Street View on lists (a 25-row Inbox page
+              fired 25 billed requests per load and again on every filter), not
+              on the one thread that is open.
+
+              It renders nothing at all when there is no imagery or no API key:
+              `collapseWhenUnavailable` skips the placeholder, so an unknown
+              address costs no vertical space rather than reserving a grey box.
+            */}
             <div className="nx-conv-mobile-identity">
-              <h2 className="nx-conv-seller-name nx-conv-seller-name--mobile">{prospectName}</h2>
-              {propertyAddress ? (
-                <p className="nx-conv-identity-address nx-conv-identity-address--mobile">{propertyAddress}</p>
-              ) : null}
+              <InboxStreetViewThumb
+                address={propertyAddress}
+                size="header"
+                className="nx-conv-mobile-identity__sv"
+                collapseWhenUnavailable
+              />
+              <div className="nx-conv-mobile-identity__text">
+                <h2 className="nx-conv-seller-name nx-conv-seller-name--mobile">{prospectName}</h2>
+                {propertyAddress ? (
+                  <p className="nx-conv-identity-address nx-conv-identity-address--mobile">{propertyAddress}</p>
+                ) : null}
+              </div>
             </div>
           </div>
         ) : (

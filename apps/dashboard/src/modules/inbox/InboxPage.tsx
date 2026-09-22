@@ -5201,6 +5201,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       />
 
       <Composer
+        selectedParticipant={selectedParticipant}
         draftText={draftText}
         onSend={handleSend}
         isSending={isSending}

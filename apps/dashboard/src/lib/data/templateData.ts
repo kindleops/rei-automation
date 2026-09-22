@@ -331,6 +331,19 @@ export const buildTemplateContextFromThread = (
   thread: InboxThread | null,
   threadContext: ThreadContext | null,
   manualValues: Record<string, string> = {},
+  /**
+   * §22 -- THE TEMPLATE FOLLOWS THE SELECTED PERSON.
+   *
+   * The seller name was read from the THREAD, which carries whichever prospect
+   * the conversation opened with. Switching the active prospect changed who the
+   * message would be sent to but not who it addressed, so choosing Jorge and
+   * inserting a template still produced "Hey Dinora" -- addressed to one person,
+   * delivered to another.
+   *
+   * The participant wins when one is selected. It is optional so the auto-reply
+   * and map paths, which have no participant selection, are unaffected.
+   */
+  selectedParticipant?: { display_name?: string | null; canonical_e164?: string | null } | null,
 ): Record<string, string> => {
   const threadRecord = (thread ?? {}) as AnyRecord
   // Master Owner / entity display name — ownership context only. Never used to
@@ -346,7 +359,8 @@ export const buildTemplateContextFromThread = (
     '',
   )
   const prospectName = safeHumanName(asString(
-    threadRecord.prospect_full_name
+    selectedParticipant?.display_name
+    ?? threadRecord.prospect_full_name
     ?? threadRecord.prospect_name
     ?? threadRecord.prospect_first_name,
     '',
@@ -383,6 +397,7 @@ export const buildTemplateContextFromThread = (
     ),
     company_name: asString(threadRecord.company_name ?? threadRecord.brand_name, ''),
     callback_number: asString(thread?.ourNumber ?? '', ''),
+    recipient_phone: asString(selectedParticipant?.canonical_e164 ?? thread?.phoneNumber ?? thread?.canonicalE164 ?? '', ''),
     // Never a fabricated number. Present only when the engine has produced one.
     offer_price: asString(threadRecord.offer_price ?? threadRecord.cash_offer, ''),
     ...manualValues,

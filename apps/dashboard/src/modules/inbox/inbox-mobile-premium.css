@@ -1923,3 +1923,159 @@ html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__expand:
   position: absolute;
   inset: -8px -6px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §3 — PROPERTY RECOGNITION IN THE CONVERSATION HEADER
+
+   A small landscape crop beside the identity, sized so it reads as context
+   rather than as a hero. When there is no imagery the component renders
+   nothing and the grid collapses to a single column — §3 is explicit that an
+   unavailable image must not reserve a region.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-conv-mobile-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-3, 12px);
+  min-width: 0;
+}
+
+html.is-mobile-layout .nx-conv-mobile-identity__text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+html.is-mobile-layout .nx-conv-mobile-identity__sv {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 48px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.1));
+  /* Decoration must never intercept a press meant for the header. */
+  pointer-events: none;
+}
+
+html.is-mobile-layout .nx-conv-mobile-identity__sv .nx-inbox-sv-thumb__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* The sheen and vignette are tuned for a large card; at 72x48 they just
+   muddy an already small image. */
+html.is-mobile-layout .nx-conv-mobile-identity__sv .nx-inbox-sv-thumb__sheen,
+html.is-mobile-layout .nx-conv-mobile-identity__sv .nx-inbox-sv-thumb__vignette {
+  display: none;
+}
+
+html.is-mobile-layout .nx-conv-mobile-identity__text .nx-conv-seller-name--mobile,
+html.is-mobile-layout .nx-conv-mobile-identity__text .nx-conv-identity-address--mobile {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §21 — TEMPLATES ARE BROWSED BY STAGE
+
+   Sticky stage headers so the operator always knows which part of the
+   lifecycle they are reading, in a list that can be long.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-template-stage-group { display: block; }
+
+.nx-template-stage-group__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: var(--nx-s-2, 8px);
+  margin: 0;
+  padding: var(--nx-s-2, 8px) var(--nx-s-1, 4px);
+  font-size: var(--nx-t-micro, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--nx-surface-1, rgba(10, 14, 22, 0.94));
+  border-bottom: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.08));
+  backdrop-filter: blur(8px);
+}
+
+.nx-template-stage-group__code { font-weight: 750; font-variant-numeric: tabular-nums; }
+.nx-template-stage-group__label { font-weight: 550; opacity: 0.78; letter-spacing: 0.02em; }
+.nx-template-stage-group__count {
+  margin-left: auto;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+html[data-nexus-theme="light"] .nx-template-stage-group__head {
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom-color: rgba(15, 23, 42, 0.10);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §23 — A TEMPLATE THAT CANNOT RESOLVE SAYS SO
+
+   Sits directly above the composer, because that is where the operator was
+   looking when the insert refused. Amber, not red: nothing has gone wrong,
+   the message simply is not ready to send yet.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-composer-template-gap {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2, 8px);
+  margin: 0 var(--nx-s-3, 12px) var(--nx-s-2, 8px);
+  padding: var(--nx-s-2, 8px) var(--nx-s-3, 12px);
+  border-radius: 10px;
+  background: rgba(255, 159, 10, 0.12);
+  border: 1px solid rgba(255, 159, 10, 0.32);
+  color: #ffb340;
+  font-size: var(--nx-t-micro, 11px);
+}
+
+.nx-composer-template-gap__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.nx-composer-template-gap__body strong { font-weight: 650; }
+.nx-composer-template-gap__body span {
+  opacity: 0.82;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx-composer-template-gap__open {
+  flex: 0 0 auto;
+  min-height: var(--nx-touch-min, 32px);
+  padding: 0 var(--nx-s-3, 12px);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 159, 10, 0.4);
+  background: rgba(255, 159, 10, 0.16);
+  color: inherit;
+  font-weight: 650;
+}
+
+.nx-composer-template-gap__close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  position: relative;
+}
+.nx-composer-template-gap__close::after { content: ''; position: absolute; inset: -8px; }
+
+html[data-nexus-theme="light"] .nx-composer-template-gap {
+  background: rgba(180, 83, 9, 0.10);
+  border-color: rgba(180, 83, 9, 0.28);
+  color: #9a3412;
+}

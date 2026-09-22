@@ -23,6 +23,16 @@ type Props = {
   cachedImageUrl?: string | null
   size?: InboxStreetViewSize
   className?: string
+  /**
+   * Render NOTHING when there is no imagery, instead of the placeholder.
+   *
+   * Conversation puts this inline in the header, where §3 is explicit that an
+   * unavailable image must collapse rather than reserve a region -- a grey box
+   * with a house glyph is exactly the "giant blank media placeholder" that was
+   * ruled out. List surfaces keep the placeholder so their rows stay aligned,
+   * so this defaults off.
+   */
+  collapseWhenUnavailable?: boolean
 }
 
 /** Landscape crops — property visible in full at thumbnail scale */
@@ -40,12 +50,17 @@ const InboxStreetViewThumbComponent = ({
   cachedImageUrl = null,
   size = 'rail',
   className = '',
+  collapseWhenUnavailable = false,
 }: Props) => {
   const builtUrl = useMemo(() => buildStreetViewUrl(address, lat, lng), [address, lat, lng])
   const imageUrl = useMemo(() => {
     if (cachedImageUrl) return cachedImageUrl
     if (!builtUrl) return null
-    return builtUrl.replace('600x300', SIZE_DIMS[size])
+    // buildStreetViewUrl emits `size=640x400`; this replaced the literal
+    // '600x300', which has not been in that URL for some time, so every
+    // caller silently fetched the full 640x400 at scale=2 no matter which
+    // size it asked for. Rewrite the parameter instead of a fixed string.
+    return builtUrl.replace(/([?&]size=)\d+x\d+/, `$1${SIZE_DIMS[size]}`)
   }, [builtUrl, cachedImageUrl, size])
 
   const cachedStatus = getCachedStreetViewStatus(imageUrl)
@@ -53,6 +68,7 @@ const InboxStreetViewThumbComponent = ({
   const [loaded, setLoaded] = useState(cachedStatus === 'ok')
 
   const showImage = Boolean(imageUrl) && !failed
+  if (!showImage && collapseWhenUnavailable) return null
 
   return (
     <div

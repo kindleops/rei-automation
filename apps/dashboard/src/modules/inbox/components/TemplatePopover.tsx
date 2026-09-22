@@ -15,6 +15,7 @@ interface TemplatePopoverProps {
   onClose: () => void
   thread: InboxThread | null
   threadContext: ThreadContext | null
+  selectedParticipant?: { display_name?: string | null; canonical_e164?: string | null } | null
   onInsert: (text: string) => void
   onReplace: (text: string) => void
   onSendNow: (payload: TemplateActionPayload) => void
@@ -27,6 +28,7 @@ export const TemplatePopover = ({
   onClose,
   thread,
   threadContext,
+  selectedParticipant = null,
   onInsert,
   onReplace,
   onSendNow,
@@ -63,6 +65,7 @@ export const TemplatePopover = ({
         <TemplatePicker
           thread={thread}
           threadContext={threadContext}
+          selectedParticipant={selectedParticipant}
           onInsert={(text) => {
             onInsert(text)
             onClose()

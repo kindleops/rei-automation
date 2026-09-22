@@ -21,6 +21,8 @@ const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
 
 interface ComposerProps {
+  /** §22 — the person the draft is addressed to, so templates follow a switch. */
+  selectedParticipant?: { display_name?: string | null; canonical_e164?: string | null } | null
   draftText: string
   onSend: (text: string) => void
   onOpenSchedule: (currentDraft: string) => void
@@ -89,6 +91,7 @@ export const Composer = ({
   onSend,
   onOpenSchedule,
   thread,
+  selectedParticipant = null,
   threadContext,
   onSendTemplate,
   onQueueTemplate,
@@ -119,6 +122,7 @@ export const Composer = ({
     if (!quickActionsOpen) setSuppressArmed(false)
   }, [quickActionsOpen])
   const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
+  const [templateGap, setTemplateGap] = useState<{ template: string; missing: string[] } | null>(null)
   const [voiceLevel, setVoiceLevel] = useState(0)
   const [transcription, setTranscription] = useState('')
   const [recommendedTemplates, setRecommendedTemplates] = useState<SmsTemplate[]>([])
@@ -394,12 +398,33 @@ export const Composer = ({
   }, [])
 
   const insertRenderedTemplate = useCallback((template: SmsTemplate) => {
-    const context = buildTemplateContextFromThread(thread, threadContext)
-    const { renderedText } = renderTemplate(template, context)
+    const context = buildTemplateContextFromThread(thread, threadContext, {}, selectedParticipant)
+    const { renderedText, missingVariables } = renderTemplate(template, context)
+
+    /*
+     * §23 -- BROKEN COPY DOES NOT REACH THE COMPOSER.
+     *
+     * renderTemplate already reports what it could not resolve, and this path
+     * threw that away: an unresolved variable was substituted as
+     * `[[agent_name]]` and pasted into the draft, one Send away from a real
+     * seller. The most common one is agent_name, which resolves to '' by
+     * design when the owner has no assigned agent -- precisely the case where
+     * guessing is wrong.
+     *
+     * The refusal names what is missing and sends the operator to the Template
+     * Library, which is the surface that can actually fill a variable in.
+     */
+    if (missingVariables.length > 0) {
+      setTemplateGap({ template: template.useCase || template.useCaseSlug || 'Template', missing: missingVariables })
+      setQuickActionsOpen(false)
+      return
+    }
+
+    setTemplateGap(null)
     setLocalDraft(renderedText)
     setPolishPreview(null)
     setQuickActionsOpen(false)
-  }, [thread, threadContext])
+  }, [thread, threadContext, selectedParticipant])
 
   const acceptPolish = () => {
     if (!polishPreview) return
@@ -591,14 +616,14 @@ export const Composer = ({
                 className="nx-qap-action-btn"
                 onClick={() => { onQuickAction?.('snooze'); setQuickActionsOpen(false) }}
               >
-                <Icon name="clock" /><span>Follow-Up</span>
+                <Icon name="clock" /><span>Snooze 24h</span>
               </button>
               <button
                 type="button"
                 className="nx-qap-action-btn"
                 onClick={() => { onQuickAction?.('mark_reviewed'); setQuickActionsOpen(false) }}
               >
-                <Icon name="check" /><span>Mark Reviewed</span>
+                <Icon name="check" /><span>Mark Read</span>
               </button>
               {!disabled && (
                 /**
@@ -822,11 +847,37 @@ export const Composer = ({
 
       {quickActionsPortal}
 
+      {templateGap ? (
+        <div className="nx-composer-template-gap" role="status">
+          <Icon name="alert-circle" />
+          <div className="nx-composer-template-gap__body">
+            <strong>{templateGap.template} needs {templateGap.missing.length === 1 ? 'a value' : 'values'}</strong>
+            <span>{templateGap.missing.map((v) => v.replace(/_/g, ' ')).join(', ')}</span>
+          </div>
+          <button
+            type="button"
+            className="nx-composer-template-gap__open"
+            onClick={() => { setTemplateGap(null); setTemplatePopoverOpen(true) }}
+          >
+            Fill in
+          </button>
+          <button
+            type="button"
+            className="nx-composer-template-gap__close"
+            aria-label="Dismiss"
+            onClick={() => setTemplateGap(null)}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+      ) : null}
+
       <TemplatePopover
         open={templatePopoverOpen}
         onClose={() => setTemplatePopoverOpen(false)}
         thread={thread}
         threadContext={threadContext}
+        selectedParticipant={selectedParticipant}
         onInsert={handleInsertTemplate}
         onReplace={handleReplaceTemplate}
         onSendNow={onSendTemplate}
