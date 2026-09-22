@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { ThreadMessage } from '../../../lib/data/inboxData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
@@ -524,6 +524,23 @@ export const ChatThread = ({
     if (previous.height > 0) {
       if (previous.nearBottom) {
         node.scrollTop = Math.max(0, nextHeight - node.clientHeight)
+        /*
+         * Re-pin after paint. A message appended by realtime can still be
+         * laying out when this layout effect reads scrollHeight, so pinning to
+         * the height measured here lands on the PREVIOUS bottom and leaves the
+         * new bubble hanging below the fold -- measured at 1563 against a real
+         * 1642, almost exactly one message short. One frame later the geometry
+         * is final.
+         */
+        requestAnimationFrame(() => {
+          const live = listRef.current
+          if (!live) return
+          if (!scrollSnapshotRef.current.nearBottom) return
+          live.scrollTop = Math.max(0, live.scrollHeight - live.clientHeight)
+          scrollSnapshotRef.current = {
+            height: live.scrollHeight, top: live.scrollTop, nearBottom: true,
+          }
+        })
       } else {
         node.scrollTop = previous.top + (nextHeight - previous.height)
       }
@@ -543,11 +560,51 @@ export const ChatThread = ({
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom: distanceFromBottom < 48 }
   }, [messages, loading, thread?.id])
 
+  /*
+   * §5/§14 — THE NEW-MESSAGE AFFORDANCE.
+   *
+   * The viewport already preserves an operator's reading position when a
+   * message lands while they are scrolled up (the anchor-offset branch above).
+   * What it did not do is TELL them. A message would arrive, the position would
+   * correctly not move, and nothing indicated anything had happened -- so the
+   * only way to discover a reply was to scroll down and look.
+   *
+   * Tracked by message COUNT rather than by a realtime hook, so it is true for
+   * any path that appends to the timeline and cannot drift out of step with
+   * the list it describes.
+   */
+  const [pendingBelow, setPendingBelow] = useState(0)
+  const lastCountRef = useRef(0)
+
+  useEffect(() => {
+    const count = messages?.length ?? 0
+    const previousCount = lastCountRef.current
+    lastCountRef.current = count
+    // A thread switch resets the counter rather than inheriting A's backlog.
+    if (count < previousCount) { setPendingBelow(0); return }
+    const added = count - previousCount
+    if (added <= 0) return
+    if (scrollSnapshotRef.current.nearBottom) return
+    setPendingBelow((n) => n + added)
+  }, [messages])
+
+  useEffect(() => { setPendingBelow(0); lastCountRef.current = 0 }, [thread?.id])
+
+  const jumpToLatest = useCallback(() => {
+    const node = listRef.current
+    if (!node) return
+    node.scrollTo({ top: node.scrollHeight - node.clientHeight, behavior: 'smooth' })
+    setPendingBelow(0)
+  }, [])
+
   const handleScroll = () => {
     const node = listRef.current
     if (!node) return
     const distanceFromBottom = node.scrollHeight - node.clientHeight - node.scrollTop
-    scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom: distanceFromBottom < 48 }
+    const nearBottom = distanceFromBottom < 48
+    scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom }
+    // Returning to the latest message is itself the acknowledgement.
+    if (nearBottom) setPendingBelow((n) => (n === 0 ? n : 0))
   }
 
   const timelineMessages = useMemo(() => (
@@ -840,6 +897,17 @@ export const ChatThread = ({
       />
 
       {/* ── MESSAGE TIMELINE ──────────────────────────────────────────── */}
+      {pendingBelow > 0 ? (
+        <button
+          type="button"
+          className="nx-new-message-pill"
+          onClick={jumpToLatest}
+          aria-label={`${pendingBelow} new ${pendingBelow === 1 ? 'message' : 'messages'} — jump to latest`}
+        >
+          <Icon name="arrow-down-left" size={14} strokeWidth={2} />
+          <span>{pendingBelow} new {pendingBelow === 1 ? 'message' : 'messages'}</span>
+        </button>
+      ) : null}
       <div className="nx-message-list" ref={listRef} onScroll={handleScroll}>
         {hasOlderMessages && (
           <div className="nx-load-older-row">

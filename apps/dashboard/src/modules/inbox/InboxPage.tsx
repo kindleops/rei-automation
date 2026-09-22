@@ -833,6 +833,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const [debugModalOpen, setDebugModalOpen] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileIntelOpen, setMobileIntelOpen] = useState(false)
+  /*
+   * The dossier gets its OWN flag, deliberately not `mobileIntelOpen`.
+   *
+   * That flag also drives `.m-intel-open`, which makes the deal-intelligence
+   * workspace pane `position: fixed; inset: 0` -- a full-screen takeover from
+   * before this sheet existed. Sharing the flag fired both, and the resulting
+   * reflow reset the conversation's scrollTop to 0 behind the sheet: measured
+   * as 1517 -> 0 on dismiss, with the message count unchanged, so the
+   * conversation was not remounted, merely scrolled away.
+   */
+  const [propertyIntelOpen, setPropertyIntelOpen] = useState(false)
   /** Portrait mobile: thread pane only after explicit row tap — not auto-select. */
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false)
   const isMobileInboxShell = isMobile && routeMode === 'workspace'
@@ -1306,7 +1317,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [threads, workspaceThread, selectedThreadSnapshot])
 
   const propertyIntelligenceActions = useMemo<PropertyIntelligenceAction[]>(() => {
-    const go = (route: string) => () => { setMobileIntelOpen(false); pushRoutePath(route) }
+    const go = (route: string) => () => { setPropertyIntelOpen(false); pushRoutePath(route) }
     const list: PropertyIntelligenceAction[] = [
       { id: 'deal', label: 'Deal Intelligence', icon: 'target', onSelect: go('/deal-intelligence') },
       { id: 'comps', label: 'Comparable Sales', icon: 'stats', onSelect: go('/comp-intelligence') },
@@ -2333,15 +2344,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     if (isMobile && !isRouteFullscreen) {
-      setSelectedWorkspaceViews((current) => (
-        current.length > 1 && current.includes('deal_intelligence')
-          ? current
-          : cloneDefaultWorkspaceViews()
-      ))
-      setWorkspaceWidthOverrides(cloneDefaultWorkspaceWidths())
+      /*
+       * On a phone, opening the dossier touches NOTHING but its own flag.
+       *
+       * mobilePaneViews mounts only the active pane, so changing
+       * selectedWorkspaceViews here remounts the conversation: dismissing the
+       * sheet dropped the operator back onto a re-hydrating thread (composer
+       * present, message list replaced by the loading skeleton) and their
+       * position was gone. The conversation is already open and already has
+       * the views it needs -- the sheet is drawn over it.
+       */
       if (hasSubject) {
         setMobileThreadOpen(true)
-        setMobileIntelOpen(true)
+        // The dossier sheet, not the legacy full-screen pane takeover that
+        // `mobileIntelOpen` drives -- see propertyIntelOpen for why they are
+        // separate flags.
+        setPropertyIntelOpen(true)
         clearPendingInboxDealIntelligence()
         // The identity is NOT cleared alongside the flag when there is no
         // thread: it is the only thing that names the subject, and the panel
@@ -5141,7 +5159,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return
     }
     if (view === 'deal_intelligence') {
-      setMobileIntelOpen(true)
+      // The phone gets the dossier sheet; the pane takeover stays a desktop
+      // -shell behaviour. See propertyIntelOpen.
+      setPropertyIntelOpen(true)
       return
     }
     const routeByView: Partial<Record<InboxWorkspaceView, string>> = {
@@ -5912,8 +5932,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           paint a control without a handler.
         */}
         <PropertyIntelligenceSheet
-          open={Boolean(isMobile && mobileIntelOpen)}
-          onClose={() => setMobileIntelOpen(false)}
+          open={Boolean(isMobile && propertyIntelOpen)}
+          onClose={() => setPropertyIntelOpen(false)}
           /*
            * The LIST row, not just the selected-thread object. `workspaceThread`
            * carries identity and conversation state but not the property

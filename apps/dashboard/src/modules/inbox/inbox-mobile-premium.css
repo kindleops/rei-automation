@@ -1884,3 +1884,60 @@ html.is-mobile-layout .nx-ifm-field.is-loading > span::after {
   font-size: var(--nx-t-micro, 11px);
   opacity: 0.7;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §5/§14 — THE NEW-MESSAGE AFFORDANCE
+   Compact, theme-aware, and anchored just above the composer rather than
+   floating over the conversation. It appears only when a message landed while
+   the operator was reading history, and clears the moment they return to the
+   latest message.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-new-message-pill {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Above the composer, clear of the home indicator. Positioned against the
+     conversation, so it never lands under the global dock. */
+  bottom: calc(var(--nx-composer-height, 72px) + var(--nx-mobile-safe-bottom, 0px) + var(--nx-s-3, 12px));
+  z-index: 40;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* 44px of target on a 34px pill: the row stays visually light without
+     costing reachability. */
+  min-height: 34px;
+  padding: 0 var(--nx-s-3);
+  border-radius: 999px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: var(--nx-ib-surface-raised, rgba(22, 26, 34, 0.96));
+  color: var(--nx-text-primary, inherit);
+  font-size: var(--nx-t-meta, 12px);
+  font-weight: 600;
+  /* Deliberately NOT accent-glowing: this is a notice, not a primary action. */
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+
+.nx-new-message-pill::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100%;
+  min-width: 44px;
+  height: var(--nx-touch-min, 44px);
+  transform: translate(-50%, -50%);
+}
+
+.nx-new-message-pill:active { background: rgba(127, 127, 127, 0.22); }
+
+/* §14 — state is never colour-only: the count and the arrow both say it. */
+@media (prefers-reduced-motion: reduce) {
+  .nx-new-message-pill { transition: none; }
+}
+
+/* The affordance is positioned against the conversation, so the conversation
+   has to be a positioning context. Without this it anchors to the viewport and
+   drifts over the dock. */
+html.is-mobile-layout .nx-chat-container { position: relative; }
