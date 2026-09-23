@@ -1,6 +1,8 @@
-import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react'
+import { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
+import { MobileTemplateBrowser } from '../templates/MobileTemplateBrowser'
+import { resolveThreadStage, threadStageVisuals } from '../status-visuals'
 import { TemplatePopover, type TemplateActionPayload } from './TemplatePopover'
 import type { InboxThread } from '../inbox.adapter'
 import type { ThreadContext } from '../../../lib/data/inboxData'
@@ -123,6 +125,18 @@ export const Composer = ({
   }, [quickActionsOpen])
   const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
   const [templateGap, setTemplateGap] = useState<{ template: string; missing: string[] } | null>(null)
+
+  /*
+   * The stage the conversation is actually in, as a template stage_code (S1,
+   * S2, ...). Resolved from the same helper the command strip uses so the
+   * browser highlights the same stage the pill shows -- two places disagreeing
+   * about the stage would be worse than not showing it at all.
+   */
+  const currentStageCode = useMemo(() => {
+    if (!thread) return null
+    const stage = resolveThreadStage(thread as Parameters<typeof resolveThreadStage>[0])
+    return threadStageVisuals[stage]?.shortLabel ?? null
+  }, [thread])
   const [voiceLevel, setVoiceLevel] = useState(0)
   const [transcription, setTranscription] = useState('')
   const [recommendedTemplates, setRecommendedTemplates] = useState<SmsTemplate[]>([])
@@ -568,16 +582,35 @@ export const Composer = ({
                   <Icon name="file-text" /><span>No templates for this thread</span>
                 </button>
               )}
+              {/*
+                §3 — THE STAGE COMES FROM THE TEMPLATE, NOT FROM ITS TEXT.
+
+                sms_templates.stage_code / stage_label are the canonical
+                association (S1 · Ownership Confirmation, S2 · Soft Intent
+                Probe, and the MF / follow-up codes). Showing them is the
+                difference between choosing a message and guessing one. A
+                template with no stage recorded says so rather than being
+                assigned a plausible one.
+              */}
               {recommendedTemplates.map((template) => (
                 <button
                   key={template.id}
                   type="button"
-                  className="nx-qap-template-btn"
+                  className="nx-qap-template-btn is-staged"
                   onClick={() => insertRenderedTemplate(template)}
                   title={template.templateText}
                 >
                   <Icon name="file-text" />
-                  <span>{template.useCase || template.useCaseSlug}</span>
+                  <span className="nx-qap-template-btn__text">
+                    <span className="nx-qap-template-btn__stage">
+                      {template.stageCode
+                        ? `${template.stageCode}${template.stageLabel ? ` · ${template.stageLabel}` : ''}`
+                        : 'No stage recorded'}
+                    </span>
+                    <span className="nx-qap-template-btn__name">
+                      {template.useCase || template.useCaseSlug}
+                    </span>
+                  </span>
                 </button>
               ))}
               <button
@@ -872,8 +905,28 @@ export const Composer = ({
         </div>
       ) : null}
 
+      {/*
+        §4 — one entry point, two surfaces. The desktop popover is a two-pane
+        layout with a filter rail; on a phone that was the dead end this pass
+        was asked to fix. Same data, same renderer, different hands.
+      */}
+      <MobileTemplateBrowser
+        open={isMobile && templatePopoverOpen}
+        onClose={() => setTemplatePopoverOpen(false)}
+        thread={thread}
+        threadContext={threadContext}
+        selectedParticipant={selectedParticipant}
+        currentStageCode={currentStageCode}
+        onInsert={(text) => {
+          // Insert only. Sending stays an explicit, separate press.
+          setLocalDraft(text)
+          setPolishPreview(null)
+          setTemplateGap(null)
+        }}
+      />
+
       <TemplatePopover
-        open={templatePopoverOpen}
+        open={!isMobile && templatePopoverOpen}
         onClose={() => setTemplatePopoverOpen(false)}
         thread={thread}
         threadContext={threadContext}

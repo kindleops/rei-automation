@@ -1956,8 +1956,8 @@ html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__
      Ordered rather than reversed so the text block keeps its own alignment. */
   order: 2;
   flex: 0 0 auto;
-  width: 104px;
-  height: 68px;
+  width: 124px;
+  height: 80px;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.1));
@@ -2189,4 +2189,363 @@ html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-
   html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__liquid--edge {
     opacity: 0.16 !important;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §1 — INBOX CATEGORY MULTI-SELECT
+
+   Chips, not a checkbox column: the selected state has to be readable at a
+   glance and pressable with a thumb. Selection is OR within this dimension and
+   composes with every other filter unchanged.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-ifm-categories {
+  display: block;
+  margin-bottom: var(--nx-s-3, 12px);
+  padding-bottom: var(--nx-s-3, 12px);
+  border-bottom: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.08));
+}
+
+.nx-ifm-categories__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--nx-s-2, 8px);
+}
+.nx-ifm-categories__head h4 {
+  margin: 0;
+  font-size: var(--nx-t-micro, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.72;
+}
+.nx-ifm-categories__hint { font-size: var(--nx-t-micro, 11px); opacity: 0.45; }
+.nx-ifm-categories__clear {
+  border: 0;
+  background: transparent;
+  color: var(--nx-accent, #64d2ff);
+  font-size: var(--nx-t-micro, 11px);
+  font-weight: 600;
+  padding: 0;
+  position: relative;
+}
+.nx-ifm-categories__clear::after { content: ''; position: absolute; inset: -10px -8px; }
+
+.nx-ifm-categories__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--nx-s-2, 8px);
+}
+
+.nx-ifm-cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--nx-touch-min, 34px);
+  padding: 0 var(--nx-s-3, 12px);
+  border-radius: 999px;
+  border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.14));
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font-size: var(--nx-t-micro, 12px);
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.nx-ifm-cat-chip.is-active {
+  background: var(--nx-ambient-accent, rgba(100, 210, 255, 0.18));
+  border-color: var(--nx-accent, rgba(100, 210, 255, 0.55));
+  color: var(--nx-accent, #64d2ff);
+  font-weight: 700;
+}
+.nx-ifm-cat-chip.is-active svg { width: 12px; height: 12px; }
+
+html[data-nexus-theme="light"] .nx-ifm-cat-chip {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §3 — QUICK ACTION TEMPLATES CARRY THEIR STAGE
+
+   Stage above name: the stage is what an operator scans for, the name is what
+   confirms the choice.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-qap-template-btn.is-staged { align-items: flex-start; }
+
+.nx-qap-template-btn__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 1px;
+}
+
+.nx-qap-template-btn__stage {
+  font-size: var(--nx-t-micro, 10px);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--nx-accent, #64d2ff);
+  opacity: 0.92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.nx-qap-template-btn__name {
+  font-size: var(--nx-t-body, 13px);
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §4 — THE MOBILE TEMPLATE BROWSER
+
+   A full-height Conversation overlay, not a page. Liquid glass consistent with
+   the rest of the mobile system, a scrolling stage-grouped list, and a preview
+   footer that only appears once something is chosen — so the list keeps the
+   screen until it is needed.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-mtb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10080;
+  background: rgba(3, 6, 12, 0.58);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-end;
+}
+
+.nx-mtb {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 92dvh;
+  border-radius: 18px 18px 0 0;
+  overflow: hidden;
+  background: rgba(10, 14, 22, 0.94);
+  border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.12));
+  border-bottom: 0;
+  box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.5);
+  padding-bottom: var(--nx-mobile-safe-bottom, 0px);
+}
+
+/* The one decorative layer, and it never intercepts a press. */
+.nx-mtb__glass {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(100, 210, 255, 0.10), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%);
+}
+
+.nx-mtb__header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2, 8px);
+  padding: var(--nx-s-3, 12px) var(--nx-s-4, 16px);
+  border-bottom: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.08));
+}
+.nx-mtb__title { display: flex; align-items: baseline; gap: var(--nx-s-2, 8px); min-width: 0; }
+.nx-mtb__title strong { font-size: var(--nx-t-title, 16px); font-weight: 680; }
+.nx-mtb__current {
+  font-size: var(--nx-t-micro, 11px);
+  font-weight: 700;
+  color: var(--nx-accent, #64d2ff);
+  background: var(--nx-ambient-accent, rgba(100, 210, 255, 0.14));
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.nx-mtb__close {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  position: relative;
+}
+.nx-mtb__close::after { content: ''; position: absolute; inset: -8px; }
+
+.nx-mtb__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2, 8px);
+  margin: var(--nx-s-3, 12px) var(--nx-s-4, 16px) 0;
+  padding: 0 var(--nx-s-3, 12px);
+  min-height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.10));
+}
+.nx-mtb__search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--nx-t-body, 14px);
+  /* 16px on focus would zoom iOS; the shell sets the base size, this only
+     guarantees it is never below the zoom threshold. */
+  min-height: 34px;
+}
+.nx-mtb__search input:focus { outline: none; }
+.nx-mtb__search button { border: 0; background: transparent; color: inherit; opacity: 0.6; }
+
+.nx-mtb__body {
+  position: relative;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: var(--nx-s-2, 8px) var(--nx-s-4, 16px) var(--nx-s-4, 16px);
+}
+
+.nx-mtb__state { opacity: 0.6; font-size: var(--nx-t-body, 13px); padding: var(--nx-s-4, 16px) 0; }
+
+.nx-mtb__group-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: var(--nx-s-2, 8px);
+  margin: 0;
+  padding: var(--nx-s-2, 8px) 0;
+  font-size: var(--nx-t-micro, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: rgba(10, 14, 22, 0.96);
+  backdrop-filter: blur(8px);
+}
+.nx-mtb__group-head.is-current { color: var(--nx-accent, #64d2ff); }
+.nx-mtb__group-code { font-weight: 750; font-variant-numeric: tabular-nums; }
+.nx-mtb__group-label { font-weight: 550; opacity: 0.74; letter-spacing: 0.02em; }
+.nx-mtb__group-count { margin-left: auto; opacity: 0.5; text-transform: none; }
+
+.nx-mtb__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: var(--nx-s-3, 12px);
+  margin-bottom: var(--nx-s-2, 8px);
+  border-radius: 12px;
+  border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+}
+.nx-mtb__item.is-selected {
+  border-color: var(--nx-accent, rgba(100, 210, 255, 0.55));
+  background: var(--nx-ambient-accent, rgba(100, 210, 255, 0.12));
+}
+.nx-mtb__item-name { font-size: var(--nx-t-body, 14px); font-weight: 600; }
+.nx-mtb__item-preview {
+  font-size: var(--nx-t-micro, 12px);
+  opacity: 0.66;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.nx-mtb__footer {
+  position: relative;
+  flex: 0 0 auto;
+  padding: var(--nx-s-3, 12px) var(--nx-s-4, 16px);
+  border-top: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.10));
+  background: rgba(8, 12, 20, 0.96);
+}
+.nx-mtb__preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--nx-s-2, 8px);
+  font-size: var(--nx-t-micro, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.nx-mtb__preview-who { text-transform: none; letter-spacing: 0; opacity: 0.9; }
+.nx-mtb__preview-body {
+  margin: 0 0 var(--nx-s-3, 12px);
+  font-size: var(--nx-t-body, 14px);
+  line-height: 1.4;
+  max-height: 22dvh;
+  overflow-y: auto;
+}
+
+.nx-mtb__gap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 var(--nx-s-3, 12px);
+  padding: var(--nx-s-2, 8px) var(--nx-s-3, 12px);
+  border-radius: 10px;
+  background: rgba(255, 159, 10, 0.12);
+  border: 1px solid rgba(255, 159, 10, 0.30);
+  color: #ffb340;
+  font-size: var(--nx-t-micro, 11px);
+}
+
+.nx-mtb__actions { display: flex; gap: var(--nx-s-2, 8px); }
+.nx-mtb__cancel,
+.nx-mtb__insert {
+  flex: 1 1 auto;
+  min-height: 44px;
+  border-radius: 12px;
+  font-size: var(--nx-t-body, 14px);
+  font-weight: 650;
+}
+.nx-mtb__cancel {
+  border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: inherit;
+}
+.nx-mtb__insert {
+  flex: 1.4 1 auto;
+  border: 0;
+  background: var(--nx-accent, #64d2ff);
+  color: #04121a;
+}
+/* A disabled Insert must not read as pressable. opacity alone left a solid
+   accent button looking live -- the fill has to go, not just dim. */
+.nx-mtb__insert:disabled {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  cursor: not-allowed;
+}
+html[data-nexus-theme="light"] .nx-mtb__insert:disabled {
+  background: rgba(15, 23, 42, 0.06);
+  color: rgba(15, 23, 42, 0.38);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+html[data-nexus-theme="light"] .nx-mtb { background: rgba(255, 255, 255, 0.97); border-color: rgba(15, 23, 42, 0.12); }
+html[data-nexus-theme="light"] .nx-mtb__footer { background: rgba(248, 250, 252, 0.98); }
+html[data-nexus-theme="light"] .nx-mtb__group-head { background: rgba(255, 255, 255, 0.96); }
+html[data-nexus-theme="light"] .nx-mtb__item { background: rgba(15, 23, 42, 0.03); border-color: rgba(15, 23, 42, 0.10); }
+html[data-nexus-theme="light"] .nx-mtb__search { background: rgba(15, 23, 42, 0.04); border-color: rgba(15, 23, 42, 0.12); }
+
+/* The count is the browser's honesty: 500 of 8,782 is a subset, and the
+   operator has to be able to tell browsing from searching. */
+.nx-mtb__count {
+  margin: var(--nx-s-2, 8px) var(--nx-s-4, 16px) 0;
+  font-size: var(--nx-t-micro, 11px);
+  opacity: 0.55;
 }

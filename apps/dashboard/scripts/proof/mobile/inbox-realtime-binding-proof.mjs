@@ -42,5 +42,5 @@ async function trial(label, bindUnpublished){
   await sb.removeAllChannels()
 }
 await trial('inbox_thread_state only', false)
-await trial('+ operator_thread_state (as app does)', true)
+await trial('+ operator_thread_state (CONTROL: the trap, not what the app binds)', true)
 process.exit(0)

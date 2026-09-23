@@ -82,6 +82,7 @@ import {
   getBackendHealth,
   fetchPropertyParticipants,
   updateThreadState,
+  fetchInboxThreadHydration,
 } from '../../lib/api/backendClient'
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
@@ -4045,6 +4046,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
   }, [DEV, canonicalSelectionKey, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
 
+  /**
+   * The linked-phone resolution below is async, so it must not read the
+   * `threads` array captured when the row was pressed -- realtime and paging
+   * both move it while the request is in flight.
+   */
+  const threadsRef = useRef<typeof threads>(threads)
+  useEffect(() => { threadsRef.current = threads }, [threads])
+
   const handleParticipantSelect = useCallback((participant: PropertyParticipant) => {
     const phone = String(participant.canonical_e164 ?? '').trim()
     if (!phone) return
@@ -4063,15 +4072,55 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       handleSelect(match.id)
       return
     }
-    // No loaded thread for this participant's phone: point the routing context at it, but
-    // do not fabricate a selection from a phone number. `canonicalPhone` and the thread
-    // identity are distinct fields in the canonical model and must stay distinct.
+
+    /*
+     * §4 — A LINKED PHONE OPENS THAT PHONE'S OWN CONVERSATION.
+     *
+     * The loaded page is 25 rows; a linked prospect's thread is very often not
+     * among them, and the previous behaviour only pointed the routing context
+     * at the number. Everything visible then said the new person while the
+     * conversation underneath was still the old one -- which is why sending
+     * had to be refused outright.
+     *
+     * thread-hydration resolves a conversation from canonical_e164 (+
+     * property), so the real thread can be opened instead. It is a READ: it
+     * creates nothing. A contact who has genuinely never been messaged comes
+     * back with an empty thread_key, and that is reported as what it is rather
+     * than by silently leaving the operator on somebody else's thread.
+     */
+    const propertyId = participant.property_id || activeContext.propertyId
     setActiveContext({
       ...activeContext,
       threadKey: phone,
-      propertyId: participant.property_id || activeContext.propertyId,
+      propertyId,
       sourceView: activeContext.sourceView ?? 'inbox',
     }, { preserveCurrentViews: true })
+
+    void (async () => {
+      const params = new URLSearchParams({ canonical_e164: phone })
+      if (propertyId) params.set('property_id', String(propertyId))
+      const result = await fetchInboxThreadHydration(params.toString()).catch(() => null)
+      const payload = (result as { data?: { thread?: { thread_key?: string } } } | null)?.data
+      const resolvedKey = String(payload?.thread?.thread_key ?? '').trim()
+
+      if (!resolvedKey) {
+        emitNotification({
+          title: 'No conversation yet',
+          detail: `${participant.display_name || phone} has a number on this property but has never been messaged.`,
+          severity: 'info',
+        })
+        return
+      }
+
+      // Prefer a row that arrived while the request was in flight; otherwise
+      // select by the canonical key the server just resolved.
+      const arrived = threadsRef.current.find((row) => (
+        [row.canonicalE164, row.bestPhone, row.sellerPhone, row.threadKey, row.id]
+          .map((value) => String(value ?? '').trim())
+          .includes(resolvedKey)
+      ))
+      handleSelect(arrived?.id ?? resolvedKey)
+    })()
   }, [activeContext, handleSelect, setActiveContext, threads])
 
   const handleTryNextEligible = useCallback((participant: PropertyParticipant) => {

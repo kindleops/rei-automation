@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import type { InboxAdvancedFilters, InboxViewSelectValue, InboxStageSelectValue } from '../inbox-ui-helpers'
+import { viewOptions } from '../inbox-ui-helpers'
 import {
   clearAllAdvancedFilters,
   serializeAdvancedFiltersForServer,
@@ -153,6 +154,33 @@ export const AdvancedFiltersModal = ({
     onReset()
   }, [onAdvancedFiltersChange, onReset])
 
+  /*
+   * §1 — CATEGORY MULTI-SELECT.
+   *
+   * `viewOptions` is the same canonical list the header rail offers, so no
+   * category is invented here and none can drift out of step. Selection is
+   * stored on the advanced filter model, which means Apply, Clear, reopen and
+   * Saved Views all carry it through paths that already existed.
+   */
+  const selectedCategories = useMemo(
+    () => (Array.isArray(local.categories) ? local.categories : []),
+    [local.categories],
+  )
+
+  const toggleCategory = useCallback((value: string) => {
+    setLocal((current) => {
+      const currently = Array.isArray(current.categories) ? current.categories : []
+      const next = currently.includes(value)
+        ? currently.filter((entry) => entry !== value)
+        : [...currently, value]
+      // Drop the key entirely when empty: an empty array and "no constraint"
+      // must serialise the same way, or a Saved View round-trips as a filter
+      // that matches nothing.
+      const { categories: _drop, ...rest } = current
+      return next.length ? { ...rest, categories: next } : rest
+    })
+  }, [])
+
   const handleApply = useCallback(() => {
     onAdvancedFiltersChange(local)
     onApply({ view: viewFilter, stage: localStage, advanced: local })
@@ -285,6 +313,44 @@ export const AdvancedFiltersModal = ({
           </nav>
 
           <div className="nx-ifm-main">
+            <section className="nx-ifm-categories" aria-label="Inbox categories">
+              <div className="nx-ifm-categories__head">
+                <h4>Categories</h4>
+                {selectedCategories.length > 0 ? (
+                  <button
+                    type="button"
+                    className="nx-ifm-categories__clear"
+                    onClick={() => setLocal((current) => {
+                      const { categories: _drop, ...rest } = current
+                      return rest
+                    })}
+                  >
+                    Clear {selectedCategories.length}
+                  </button>
+                ) : (
+                  <span className="nx-ifm-categories__hint">Any</span>
+                )}
+              </div>
+              <div className="nx-ifm-categories__chips">
+                {viewOptions.map((option) => {
+                  const active = selectedCategories.includes(option.value)
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={active}
+                      className={`nx-ifm-cat-chip${active ? ' is-active' : ''}`}
+                      onClick={() => toggleCategory(option.value)}
+                    >
+                      {active ? <Icon name="check" /> : null}
+                      <span>{option.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+
             <div className="nx-ifm-search">
               <svg
                 className="nx-ifm-search-glyph"

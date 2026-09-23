@@ -22,6 +22,19 @@ import type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-typ
 export type { InboxSavedFilterPreset } from '../../domain/inbox/inbox-filter-types'
 
 export interface InboxAdvancedFilters {
+  /**
+   * §1 — INBOX CATEGORY MULTI-SELECT.
+   *
+   * The canonical category values from `viewOptions`, ORed within this
+   * dimension and ANDed with every other filter. It lives on the advanced
+   * filter model rather than beside `view` so Saved Views serialise it through
+   * the mechanism that already exists — nothing about Saved Views changes.
+   *
+   * Empty or absent means "no category constraint", which is NOT the same as
+   * selecting every category: the header's own `view` selection still applies.
+   */
+  categories?: string[]
+
   // A) WORKFLOW
   inboxStatus?: string
   sellerStage?: string
@@ -555,6 +568,21 @@ const matchesAdvancedFilters = (thread: InboxWorkflowThread, filters: InboxAdvan
   const bestContactWindow = toLower(getField(thread, 'bestContactWindow'))
   const persona = toLower(getField(thread, 'sellerPersona'))
   const assignedAgent = toLower(getField(thread, 'assignedAgent') || getField(thread, 'sms_agent_id'))
+
+  /*
+   * §1 — CATEGORIES ARE OR WITHIN THE DIMENSION, AND WITH EVERYTHING ELSE.
+   *
+   * Reuses matchesViewSelection, the same predicate the header category rail
+   * uses, so a category means exactly here what it means there. An unknown or
+   * empty selection imposes no constraint rather than matching nothing --
+   * otherwise a stale Saved View could silently empty the Inbox.
+   */
+  if (Array.isArray(filters.categories) && filters.categories.length > 0) {
+    const matchesAnyCategory = filters.categories.some((category) => (
+      matchesViewSelection(thread, category as InboxViewSelectValue)
+    ))
+    if (!matchesAnyCategory) return false
+  }
 
   if (filters.market && !market.includes(toLower(filters.market))) return false
   if (filters.state && !state.includes(toLower(filters.state))) return false

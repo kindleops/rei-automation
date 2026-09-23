@@ -24,8 +24,21 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const useCase = String(searchParams.get('use_case') || searchParams.get('useCase') || '').trim()
   const language = String(searchParams.get('language') || searchParams.get('lang') || '').trim()
+  /*
+   * A SEARCH MUST BE ABLE TO REACH TEMPLATES THE LIST DOES NOT LOAD.
+   *
+   * There are 8,782 active templates. Without a use_case the cap here is 500,
+   * so the mobile browser was showing 5.7% of them and filtering that subset
+   * client-side -- a search that reports "no templates match" while thousands
+   * of matches sit unloaded. Pulling all 8,782 full rows to a phone is not the
+   * answer either (select('*') on this table is heavy).
+   *
+   * So a search term is pushed down to the database and allowed a larger
+   * ceiling than the unfiltered browse. Narrow query, bounded result.
+   */
+  const q = String(searchParams.get('q') || searchParams.get('query') || '').trim()
   const defaultLimit = useCase ? 5000 : 200
-  const maxLimit = useCase ? 5000 : 500
+  const maxLimit = useCase ? 5000 : (q ? 2000 : 500)
   const limit = Math.max(1, Math.min(maxLimit, Number(searchParams.get('limit') || defaultLimit)))
   const includeInactive = ['1', 'true', 'yes'].includes(String(searchParams.get('includeInactive') || searchParams.get('include_inactive') || '').toLowerCase())
 
@@ -38,6 +51,26 @@ export async function GET(request) {
       if (!includeInactive) query = query.eq('is_active', true)
       if (useCase) query = query.eq('use_case', useCase)
       if (language) query = query.eq('language', language)
+      if (q) {
+        // Escape PostgREST's or() delimiters before interpolation.
+        const safe = q.replace(/[(),*]/g, ' ').trim()
+        if (safe) {
+          // Column names verified against information_schema: the body column
+          // is `template_body`. An earlier draft said `template_text`, which
+          // does not exist -- and one unknown column makes PostgREST reject the
+          // WHOLE query, so every search silently returned zero results.
+          // Values are quoted because they contain spaces.
+          query = query.or(
+            [
+              `use_case.ilike."*${safe}*"`,
+              `stage_code.ilike."*${safe}*"`,
+              `stage_label.ilike."*${safe}*"`,
+              `template_name.ilike."*${safe}*"`,
+              `template_body.ilike."*${safe}*"`,
+            ].join(','),
+          )
+        }
+      }
       return query
     }
 

@@ -792,12 +792,15 @@ export function fetchSmsTemplatesFromApi(params?: {
   includeInactive?: boolean
   useCase?: string
   language?: string
+  /** Pushed down to the database — the browse list is capped well below the corpus. */
+  query?: string
 }): Promise<BackendResult<{ templates: unknown[] }>> {
   const qs = new URLSearchParams()
   if (params?.limit) qs.set('limit', String(params.limit))
   if (params?.includeInactive) qs.set('includeInactive', 'true')
   if (params?.useCase) qs.set('use_case', params.useCase)
   if (params?.language) qs.set('language', params.language)
+  if (params?.query) qs.set('q', params.query)
   const suffix = qs.toString()
   return callBackend(`/api/cockpit/templates/list${suffix ? `?${suffix}` : ''}`)
 }

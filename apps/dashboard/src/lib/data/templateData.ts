@@ -206,7 +206,8 @@ export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Pr
   const limit = Math.max(1, params.limit ?? 200)
   const useCase = params.useCase && params.useCase !== 'all' ? params.useCase : ''
   const language = params.language && params.language !== 'all' ? params.language : ''
-  const cacheKey = `${limit}:${params.includeInactive ? 'all' : 'active'}:${useCase}:${language}`
+  const query = (params.query ?? '').trim()
+  const cacheKey = `${limit}:${params.includeInactive ? 'all' : 'active'}:${useCase}:${language}:${query}`
   const now = Date.now()
   if (_templatesCache && _templatesCache.key === cacheKey && _templatesCache.expiresAt > now) {
     return applyFilters(_templatesCache.templates, params)
@@ -217,6 +218,7 @@ export const fetchSmsTemplates = async (params: SmsTemplateFetchParams = {}): Pr
     includeInactive: params.includeInactive,
     useCase: useCase || undefined,
     language: language || undefined,
+    query: query || undefined,
   })
   if (!apiResult.ok) {
     const err = apiResult as { message?: string; error?: string }
