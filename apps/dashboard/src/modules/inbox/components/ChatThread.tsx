@@ -565,6 +565,7 @@ export const ChatThread = ({
           }
           programmaticScrollRef.current = Date.now()
           live.scrollTop = Math.max(0, height - live.clientHeight)
+          programmaticTopRef.current = live.scrollTop
           scrollSnapshotRef.current = { height, top: live.scrollTop, nearBottom: true }
           requestAnimationFrame(repin)
         }
@@ -720,14 +721,41 @@ export const ChatThread = ({
    * of what a thumb would have been chasing.
    */
   const programmaticScrollRef = useRef(0)
+  /**
+   * The exact scrollTop our own pin last wrote.
+   *
+   * A time window alone cannot separate our scroll from the operator's: the
+   * initial-pin loop re-pins every frame for up to two seconds, so
+   * programmaticScrollRef is ALWAYS fresh during that window and every real
+   * gesture inside it was being classified as ours -- the loop kept pinning
+   * and dragged the operator back to the bottom. Measured as top=2260 of 2260
+   * immediately after scrolling to the top of a 16-message thread.
+   *
+   * Comparing the reported position against the one we wrote is exact: if the
+   * list is somewhere we did not put it, a human moved it.
+   */
+  const programmaticTopRef = useRef(-1)
 
   useEffect(() => {
     const count = messages?.length ?? 0
     const previousCount = lastCountRef.current
     lastCountRef.current = count
     const threadId = String(thread?.id ?? thread?.threadKey ?? '')
-    // Before this thread has settled, adopt the count silently.
-    if (initialisedThreadRef.current !== threadId) return
+    /*
+     * Adopt the initial hydration silently -- UNLESS the operator has already
+     * taken control of the list.
+     *
+     * Keying only on `initialised` left a race: a message that lands between
+     * the operator scrolling up and the settle loop marking the thread settled
+     * was counted as part of hydration, so no New Message affordance appeared.
+     * It reproduced on roughly half of runs with the keyboard open, which is
+     * precisely when the window is widest.
+     *
+     * `userTookOver` is set only by a genuine gesture, and being scrolled away
+     * from the bottom is what the affordance exists for -- so if they have
+     * scrolled, an arrival is an arrival regardless of the loop's bookkeeping.
+     */
+    if (initialisedThreadRef.current !== threadId && !userTookOverRef.current) return
     // A thread switch resets the counter rather than inheriting A's backlog.
     if (count < previousCount) { setPendingBelow(0); return }
     const added = count - previousCount
@@ -741,14 +769,62 @@ export const ChatThread = ({
     lastCountRef.current = 0
     initialisedThreadRef.current = null
     userTookOverRef.current = false
+    programmaticTopRef.current = -1
   }, [thread?.id])
 
   const jumpToLatest = useCallback(() => {
     const node = listRef.current
     if (!node) return
+    /*
+     * INSTANT, NOT SMOOTH.
+     *
+     * A smooth scroll across a long timeline is interruptible: anything that
+     * assigns scrollTop while it animates -- a re-pin, a late-laying-out
+     * bubble -- cancels it where it stands. Measured settling at 1032 of 2460
+     * with the keyboard open, i.e. the operator tapped "jump to latest" and
+     * did not arrive. Two thousand pixels of easing also is not something a
+     * thumb is waiting to admire; every native messaging client snaps.
+     */
+    /*
+     * Tapping the affordance is the operator HANDING CONTROL BACK.
+     *
+     * userTookOverRef is true here by definition -- they scrolled up, which is
+     * why the pill exists. Leaving it set made the hold below give up after two
+     * frames, so a late relayout could still strand the jump partway.
+     */
+    userTookOverRef.current = false
+
     programmaticScrollRef.current = Date.now()
-    node.scrollTo({ top: node.scrollHeight - node.clientHeight, behavior: 'smooth' })
+    const bottom = node.scrollHeight - node.clientHeight
+    node.scrollTop = bottom
+    programmaticTopRef.current = node.scrollTop
     setPendingBelow(0)
+
+    /*
+     * RE-ASSERT FOR A FEW FRAMES.
+     *
+     * Clearing the affordance re-renders the timeline, and the keyboard has
+     * already shrunk the scroller, so the position we just wrote does not
+     * always survive the next layout: measured landing at 9, 217 and 474 of
+     * 2460 on three consecutive runs -- an operator tapping "jump to latest"
+     * and not arriving. Re-applying for a handful of frames costs nothing and
+     * covers a late relayout; it stops immediately if the operator moves.
+     */
+    let frames = 0
+    const hold = () => {
+      const live = listRef.current
+      if (!live || frames++ > 45) return
+      // A genuine scroll during the hold stops it -- but not our own.
+      if (userTookOverRef.current) return
+      const target = live.scrollHeight - live.clientHeight
+      if (Math.abs(live.scrollTop - target) > 2) {
+        programmaticScrollRef.current = Date.now()
+        live.scrollTop = target
+        programmaticTopRef.current = live.scrollTop
+      }
+      requestAnimationFrame(hold)
+    }
+    requestAnimationFrame(hold)
   }, [])
 
   /*
@@ -815,6 +891,7 @@ export const ChatThread = ({
       if (!scrollSnapshotRef.current.nearBottom) return
       programmaticScrollRef.current = Date.now()
       live.scrollTop = Math.max(0, height - live.clientHeight)
+      programmaticTopRef.current = live.scrollTop
       scrollSnapshotRef.current = { height, top: live.scrollTop, nearBottom: true }
     })
     observer.observe(node)
@@ -831,7 +908,24 @@ export const ChatThread = ({
     scrollSnapshotRef.current = { height: node.scrollHeight, top: node.scrollTop, nearBottom }
     // Returning to the latest message is itself the acknowledgement -- but only
     // when the OPERATOR did the returning. Our own re-pins land here too.
-    const selfScrolled = Date.now() - programmaticScrollRef.current < 250
+    /*
+     * Ours if we have not positioned the list yet, or if this is both recent
+     * and where we put it.
+     *
+     * THE FIRST CLAUSE IS LOAD-BEARING. programmaticTopRef starts at -1, so
+     * without it the very first scroll event -- fired by initial layout,
+     * before any pin -- failed the position test and was recorded as the
+     * operator taking over. The settle loop then bailed on its first frame and
+     * a sixteen-message thread landed at 1212 of 1988, reproducibly. The
+     * operator cannot have scrolled a list that has not been positioned yet.
+     *
+     * 8px rather than exact: assigning scrollTop while content is still laying
+     * out gets clamped, and sub-pixel rounding differs across zoom levels.
+     */
+    const havePinned = programmaticTopRef.current >= 0
+    const recent = Date.now() - programmaticScrollRef.current < 250
+    const atOurPosition = Math.abs(node.scrollTop - programmaticTopRef.current) <= 8
+    const selfScrolled = !havePinned || (recent && atOurPosition)
     if (!selfScrolled) userTookOverRef.current = true
     if (nearBottom && !selfScrolled) setPendingBelow((n) => (n === 0 ? n : 0))
   }
