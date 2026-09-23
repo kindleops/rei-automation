@@ -1651,7 +1651,28 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     [selectedMessages],
   )
 
+  /*
+   * §5B — A PROSPECT WITH NO CONVERSATION SHOWS NO CONVERSATION.
+   *
+   * Selecting a linked person whose number has never been messaged used to
+   * leave the PREVIOUS person's timeline onscreen under the new name -- the
+   * operator reads Jose's history believing it is Maria's. Recording that the
+   * active selection has no thread lets the Conversation render its truthful
+   * empty state while property and prospect context stay put.
+   */
+  const [participantWithoutThread, setParticipantWithoutThread] = useState<
+    { name: string; phone: string } | null
+  >(null)
+
   const displayedMessagesWithTranslation = useMemo(() => {
+    /*
+     * §5B — the selected person has no conversation, so show none.
+     *
+     * `displayedMessages` still holds the PREVIOUS thread's timeline until a
+     * new one is selected. Rendering it under the new person's name is how a
+     * Jose conversation ended up presented as Maria's.
+     */
+    if (participantWithoutThread) return []
     if (threadViewMode !== 'translated') return displayedMessages
     return displayedMessages.map((message: ThreadMessage) => {
       if (message.direction !== 'inbound') return message
@@ -1662,7 +1683,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         body: translated,
       }
     })
-  }, [displayedMessages, threadTranslations, threadViewMode])
+  }, [displayedMessages, threadTranslations, threadViewMode, participantWithoutThread])
 
   const applySavedPreset = useCallback((preset: InboxSavedFilterPreset) => {
     console.log('[BUCKET_CLICK]', preset)
@@ -4069,6 +4090,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       return candidates.includes(phone)
     })
     if (match) {
+      setParticipantWithoutThread(null)
       handleSelect(match.id)
       return
     }
@@ -4104,10 +4126,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const resolvedKey = String(payload?.thread?.thread_key ?? '').trim()
 
       if (!resolvedKey) {
-        emitNotification({
-          title: 'No conversation yet',
-          detail: `${participant.display_name || phone} has a number on this property but has never been messaged.`,
-          severity: 'info',
+        setParticipantWithoutThread({
+          name: String(participant.display_name || phone),
+          phone,
         })
         return
       }
@@ -4119,7 +4140,26 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           .map((value) => String(value ?? '').trim())
           .includes(resolvedKey)
       ))
-      handleSelect(arrived?.id ?? resolvedKey)
+
+      /*
+       * §5A — ONLY SELECT SOMETHING THAT EXISTS.
+       *
+       * This passed `resolvedKey` (a phone) to handleSelect when no loaded row
+       * matched. handleSelect resolves an id against the loaded list, so the
+       * call silently did nothing and the PREVIOUS conversation stayed on
+       * screen beneath the new person's name -- the exact "swapped the label,
+       * left the timeline" defect. If the row is not loaded, the honest answer
+       * is the empty state, not somebody else's history.
+       */
+      if (arrived?.id) {
+        setParticipantWithoutThread(null)
+        handleSelect(arrived.id)
+        return
+      }
+      setParticipantWithoutThread({
+        name: String(participant.display_name || phone),
+        phone,
+      })
     })()
   }, [activeContext, handleSelect, setActiveContext, threads])
 

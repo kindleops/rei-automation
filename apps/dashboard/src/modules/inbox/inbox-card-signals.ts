@@ -417,19 +417,54 @@ export function buildPropertySignalTileModel(input: {
  * purpose: they have their own places on the card, and repeating them as
  * motivation tags is what made the chip row unreadable.
  */
+/*
+ * §8A — ONE PRIORITY, MEASURED AGAINST THE REAL TAG VOCABULARY.
+ *
+ * This list and DISTRESS_PROPERTY_FLAG_ORDER in InboxSidebar were two
+ * different orders over the same concept, and this one won: it ranked "High
+ * Equity" sixth, so the generic tag that sits on 988 of 1,000 sampled
+ * properties led almost every card while "Vacant" and "Tired Landlord" were
+ * pushed behind it.
+ *
+ * Sampled frequencies (public.properties.podio_tags, 1,000 rows):
+ *   High Equity 988 · Absentee Owner 972 · Heavily Dated 879 · Tired
+ *   Landlord 555 · Senior Owner 448 · Tax Delinquent 245 · Vacant Home 138 ·
+ *   Probate 42 · Active Lien 39 · Foreclosure 8 · Preforeclosure 3
+ *
+ * Frequency is inverse to usefulness here, so: urgency, then motivation, then
+ * ownership context, then the broad traits almost every row carries.
+ */
 const SIGNAL_PRIORITY = [
+  // Urgent distress.
   'Preforeclosure',
+  'Pre-Foreclosure',
   'Foreclosure',
+  'Zombie Property',
+  'Active Lien',
+  // Strong motivation.
   'Tax Delinquent',
   'Probate',
+  'Vacant Home',
   'Vacant',
-  'High Equity',
   'Tired Landlord',
-  'Absentee',
-  'Absentee Owner',
-  'Senior Owner',
-  'Off Market',
+  'Likely To Move',
   'Distressed',
+  // Ownership context.
+  'Out Of State Owner',
+  'Absentee Owner',
+  'Absentee',
+  'Senior Owner',
+  'Corporate Owner',
+  'Empty Nester',
+  // Broad traits — true of most rows, so last.
+  'Low Equity',
+  'Free And Clear',
+  'High Equity',
+  'Heavily Dated',
+  'Off Market',
+  'Adjustable Loan',
+  'Cash Buyer',
+  'Mid-Term Owner',
   'Long Term Owner',
 ]
 

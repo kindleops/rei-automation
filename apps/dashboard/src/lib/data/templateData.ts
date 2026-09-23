@@ -3,6 +3,11 @@ import type { ThreadContext } from './inboxData'
 import { fetchSmsTemplatesFromApi } from '../api/backendClient'
 import { asBoolean, asString, normalizeStatus, safeArray, type AnyRecord } from './shared'
 import { safeHumanName } from '../identity/entityDetection'
+import { resolveThreadStage } from '../../modules/inbox/status-visuals'
+import {
+  LIFECYCLE_STAGE_META,
+  LIFECYCLE_STAGE_ORDER,
+} from '../../domain/lead-state/universal-lead-state-registry'
 
 export interface SmsTemplate {
   id: string
@@ -431,6 +436,50 @@ const inferThreadLanguage = (thread: InboxThread, threadContext: ThreadContext |
   return 'English'
 }
 
+/*
+ * §3A — THE CANONICAL STAGE, AS A STAGE CODE.
+ *
+ * Templates carry stage_code ('S3'); the thread carries a lifecycle stage
+ * ('asking_price'). The scorer compared the two directly, so the stage bonus
+ * could never once fire -- normalizeStatus('S3') is never
+ * normalizeStatus('asking_price'). Resolving the thread's stage to its
+ * canonical short code is what makes "S3-relevant templates are prominent"
+ * actually true.
+ */
+const threadStageCode = (thread: InboxThread): string => {
+  const stage = resolveThreadStage(thread as Parameters<typeof resolveThreadStage>[0])
+  return String(LIFECYCLE_STAGE_META[stage]?.shortLabel ?? '').toUpperCase()
+}
+
+/** The stage the lifecycle would move to next, for §3A's "next stage" case. */
+const nextStageCode = (thread: InboxThread): string => {
+  const stage = resolveThreadStage(thread as Parameters<typeof resolveThreadStage>[0])
+  const index = LIFECYCLE_STAGE_ORDER.indexOf(stage)
+  const next = index >= 0 ? LIFECYCLE_STAGE_ORDER[index + 1] : undefined
+  return next ? String(LIFECYCLE_STAGE_META[next]?.shortLabel ?? '').toUpperCase() : ''
+}
+
+/*
+ * §3B — THE CANONICAL PROPERTY TYPE, NOT THE ADDRESS.
+ *
+ * This read `thread.propertyAddress ?? thread.subject` and substring-matched
+ * the template's scope against it, so "123 Commercial Street" scored as a
+ * commercial property and a genuine multifamily whose address says nothing
+ * scored as neither. The row carries property_type; that is what decides.
+ */
+const threadPropertyType = (thread: InboxThread): string => {
+  const record = thread as unknown as Record<string, unknown>
+  const raw = asString(
+    record.propertyType ?? record.property_type ?? record.assetClass ?? record.asset_class,
+    '',
+  ).toLowerCase()
+  if (!raw) return ''
+  if (/multi|duplex|triplex|fourplex|apartment/.test(raw)) return 'multifamily'
+  if (/commercial|retail|office|industrial/.test(raw)) return 'commercial'
+  if (/land|lot|acre/.test(raw)) return 'land'
+  return 'sfr'
+}
+
 const scoreTemplate = (
   template: SmsTemplate,
   thread: InboxThread,
@@ -442,6 +491,30 @@ const scoreTemplate = (
   const workflowThread = thread as InboxThread & { inboxStage?: string; inboxStatus?: string }
   const threadStage = normalizeStatus(workflowThread.inboxStage ?? '')
   const threadStatus = normalizeStatus(workflowThread.inboxStatus ?? '')
+  const stageCode = threadStageCode(thread)
+  const templateStage = String(template.stageCode ?? '').toUpperCase()
+
+  // Current canonical stage dominates; the next stage is worth surfacing too.
+  if (stageCode && templateStage === stageCode) score += 60
+  else if (stageCode && templateStage === `${stageCode}F`) score += 30
+  else {
+    const next = nextStageCode(thread)
+    if (next && templateStage === next) score += 22
+  }
+
+  const canonicalType = threadPropertyType(thread)
+  const scope = String(template.propertyTypeScope ?? '').toLowerCase()
+  if (canonicalType && scope) {
+    const scopeType = /multi|apartment/.test(scope) ? 'multifamily'
+      : /commercial|retail|office|industrial/.test(scope) ? 'commercial'
+      : /land|lot/.test(scope) ? 'land'
+      : 'sfr'
+    if (scopeType === canonicalType) score += 28
+    // A template scoped to a different asset class is actively wrong here.
+    else score -= 24
+  }
+  // Multifamily stage codes (MF1..MF5) only belong on multifamily.
+  if (/^MF\d/.test(templateStage)) score += canonicalType === 'multifamily' ? 34 : -40
 
   if (normalizeStatus(template.language) === normalizeStatus(preferredLanguage)) score += 30
   if (normalizeStatus(template.language) === 'english') score += 8
@@ -453,8 +526,6 @@ const scoreTemplate = (
   if (intentSlugs.includes(template.useCaseSlug)) score += 35
   if (USE_CASE_STAGE_MAP[threadStage]?.includes(template.useCaseSlug)) score += 20
 
-  const propertyType = asString(thread.propertyAddress ?? thread.subject, '').toLowerCase()
-  if (template.propertyTypeScope && propertyType.includes(template.propertyTypeScope.toLowerCase())) score += 6
   if (threadContext?.queueContext?.items?.length && template.isFollowUp) score += 8
 
   return score

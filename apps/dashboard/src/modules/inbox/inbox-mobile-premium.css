@@ -282,16 +282,44 @@ html.is-mobile-layout .nx-cat-nav__toggle-caret {
 }
 html.is-mobile-layout .nx-cat-nav__toggle.is-collapsed .nx-cat-nav__toggle-caret { transform: rotate(-90deg); }
 
+/*
+ * §1A — A NATIVE HORIZONTAL TAB STRIP.
+ *
+ * Four things made this shift and bounce vertically while being swiped
+ * sideways:
+ *
+ *   - it ANIMATED ITS OWN margin-top (200ms), so any re-render during a swipe
+ *     slid the whole strip up or down under the thumb;
+ *   - overflow-y was unset, so the strip could be overscrolled vertically;
+ *   - no overscroll-behavior, so a horizontal swipe chained into the page and
+ *     moved the list behind it;
+ *   - no touch-action, so the browser was free to interpret a mostly-sideways
+ *     gesture as a vertical one.
+ *
+ * Fixed height and centred items give it a single stable baseline regardless
+ * of what any individual chip contains.
+ */
 html.is-mobile-layout .nx-cat-nav {
   display: flex;
+  align-items: center;
   gap: 5px;
   margin-top: 7px;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
   padding-bottom: 2px;
+  box-sizing: border-box;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: none;
+  touch-action: pan-x;
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   opacity: 1;
-  transition: opacity 180ms ease, margin-top 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* margin-top deliberately NOT transitioned — see above. */
+  transition: opacity 180ms ease;
 }
 html.is-mobile-layout .nx-cat-nav::-webkit-scrollbar { display: none; }
 html.is-mobile-layout .nx-cat-nav.is-collapsed {
@@ -300,8 +328,12 @@ html.is-mobile-layout .nx-cat-nav.is-collapsed {
 
 html.is-mobile-layout .nx-cat-nav__item {
   flex: 0 0 auto;
+  scroll-snap-align: start;
   display: inline-flex; align-items: center; gap: 5px;
-  height: 26px; padding: 0 9px;
+  /* One fixed height for every chip: the strip's baseline cannot depend on a
+     chip's label or count. The comfortable target comes from ::after. */
+  height: 26px; min-height: 26px; padding: 0 9px;
+  position: relative;
   border-radius: 8px;
   border: 1px solid transparent;
   background: rgba(255, 255, 255, 0.045);
@@ -310,6 +342,14 @@ html.is-mobile-layout .nx-cat-nav__item {
   white-space: nowrap;
   transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
+/* A 26px chip is a small target; the hit area is enlarged out of flow so the
+   strip keeps its fixed height. */
+html.is-mobile-layout .nx-cat-nav__item::after {
+  content: '';
+  position: absolute;
+  inset: -9px -4px;
+}
+
 /* Emoji icons removed — they were the loudest "AI slop" signal in the shell. */
 html.is-mobile-layout .nx-cat-nav__icon { display: none !important; }
 
@@ -2591,4 +2631,56 @@ html[data-nexus-theme="light"] .nx-mtb__search { background: rgba(15, 23, 42, 0.
   margin: var(--nx-s-2, 8px) var(--nx-s-4, 16px) 0;
   font-size: var(--nx-t-micro, 11px);
   opacity: 0.55;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   §1B — CATEGORIES COLLAPSE
+
+   Collapsed is the default: a label, what is selected, and a caret. Fourteen
+   chips permanently open pushed every other filter dimension below the fold.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-ifm-categories__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-s-2, 8px);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--nx-s-1, 4px);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.nx-ifm-categories__summary-label {
+  font-size: var(--nx-t-micro, 11px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.72;
+  flex: 0 0 auto;
+}
+.nx-ifm-categories__summary-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-size: var(--nx-t-body, 13px);
+  font-weight: 600;
+  color: var(--nx-accent, #64d2ff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nx-ifm-categories__summary svg {
+  flex: 0 0 auto;
+  transition: transform 160ms ease;
+}
+.nx-ifm-categories.is-open .nx-ifm-categories__summary svg { transform: rotate(180deg); }
+
+/* Everything below the summary is the expanded body. */
+.nx-ifm-categories .nx-ifm-categories__head,
+.nx-ifm-categories .nx-ifm-categories__chips { display: none; }
+.nx-ifm-categories.is-open .nx-ifm-categories__head { display: flex; }
+.nx-ifm-categories.is-open .nx-ifm-categories__chips { display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-ifm-categories__summary svg { transition: none; }
 }

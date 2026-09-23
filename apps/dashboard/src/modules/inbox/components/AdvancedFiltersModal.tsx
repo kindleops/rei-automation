@@ -167,6 +167,16 @@ export const AdvancedFiltersModal = ({
     [local.categories],
   )
 
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
+
+  /** "New Replies, Priority +2" — the first two, then a count. */
+  const categorySummary = useMemo(() => {
+    const labels = selectedCategories
+      .map((value) => viewOptions.find((option) => option.value === value)?.label ?? value)
+    if (labels.length <= 2) return labels.join(', ')
+    return `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`
+  }, [selectedCategories])
+
   const toggleCategory = useCallback((value: string) => {
     setLocal((current) => {
       const currently = Array.isArray(current.categories) ? current.categories : []
@@ -313,7 +323,33 @@ export const AdvancedFiltersModal = ({
           </nav>
 
           <div className="nx-ifm-main">
-            <section className="nx-ifm-categories" aria-label="Inbox categories">
+            <section
+              className={`nx-ifm-categories${categoriesOpen ? ' is-open' : ''}`}
+              aria-label="Inbox categories"
+            >
+              {/*
+                §1B — A COLLAPSIBLE DIMENSION, NOT A WALL.
+
+                Fourteen chips permanently expanded took most of the sheet on a
+                phone, pushing every other filter below the fold. Collapsed it
+                states what is selected and nothing more; the choices appear
+                when asked for.
+              */}
+              <button
+                type="button"
+                className="nx-ifm-categories__summary"
+                aria-expanded={categoriesOpen}
+                onClick={() => setCategoriesOpen((open) => !open)}
+              >
+                <span className="nx-ifm-categories__summary-label">Inbox Categories</span>
+                <span className="nx-ifm-categories__summary-value">
+                  {selectedCategories.length === 0
+                    ? 'Any'
+                    : categorySummary}
+                </span>
+                <Icon name="chevron-down" />
+              </button>
+
               <div className="nx-ifm-categories__head">
                 <h4>Categories</h4>
                 {selectedCategories.length > 0 ? (
@@ -370,7 +406,21 @@ export const AdvancedFiltersModal = ({
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <div className="nx-ifm-fields">{groupFields.map(renderField)}</div>
+            {/*
+              §1C — ONE CATEGORY CONCEPT ON THIS SHEET.
+
+              `inboxCategory` is a genuinely different dimension: the raw
+              `inbox_category` column on the row, shared with Map. But beside a
+              canonical multi-select labelled "Inbox Categories" it reads as a
+              second, contradictory category system, and an operator cannot be
+              expected to tell them apart from the labels alone.
+
+              It is therefore hidden FROM THIS SHEET only. The shared filter
+              catalog is untouched, so Map and the desktop popover keep it.
+            */}
+            <div className="nx-ifm-fields">
+              {groupFields.filter((field) => field.key !== 'inboxCategory').map(renderField)}
+            </div>
           </div>
 
           <aside className="nx-ifm-active">
