@@ -338,10 +338,40 @@ export const ThreadStateBar = ({
     setStageConfirm({ open: false, next: null })
   }
 
-  const persist = async (patch: Record<string, string>, executeNextAction = false) => {
+  const persist = async (
+    patch: Record<string, string>,
+    executeNextAction = false,
+    reason = '',
+  ) => {
     const result = await patchLeadStateFromView(sourceView, threadKey, patch, {
       execute_next_action: executeNextAction,
+      ...(reason ? { reason } : {}),
     })
+
+    /*
+     * A GUARDED-AWAY FIELD IS NOT A SUCCESSFUL WRITE.
+     *
+     * The server validates a manual stage move against the canonical
+     * opportunity: a backward or stage-skipping change, or any move out of a
+     * terminal stage, is refused unless a reason accompanies it. On refusal it
+     * DELETES lifecycle_stage from the patch, applies whatever else was in it,
+     * and answers ok -- so this control showed S3, stored nothing, and snapped
+     * back to S10 on the next visit. The operator was told the opposite of
+     * what happened.
+     *
+     * The refusal is reported in `stage_guards`, so it is read here and
+     * treated as the failure it is: the optimistic value is rolled back and
+     * the bar resyncs against what the server actually holds.
+     */
+    const guards = (result as { stageGuards?: string[]; stage_guards?: string[] } | null)
+    const stageGuards = guards?.stageGuards ?? guards?.stage_guards ?? []
+    const stageRefused = 'lifecycle_stage' in patch
+      && stageGuards.some((guard) => /stage|transition|reason/i.test(String(guard)))
+
+    if (stageRefused) {
+      onRefetch?.(threadKey)
+      return { ok: false, refusal: stageGuards[0] ?? 'stage_change_refused' }
+    }
     // Deliberately NOT refetching on success. useOptimisticField has already
     // committed the chosen value and the server has confirmed it, so the
     // control is correct. Refetching re-rendered this bar from the list row,
@@ -365,11 +395,11 @@ export const ThreadStateBar = ({
     setStageConfirm({ open: false, next: null })
   }
 
-  const handleStageConfirm = async (executeNextAction: boolean) => {
+  const handleStageConfirm = async (executeNextAction: boolean, reason = '') => {
     const next = stageConfirm.next
     if (!next) return
     setStageConfirm({ open: false, next: null })
-    await stage.commit(next, () => persist({ lifecycle_stage: next }, executeNextAction))
+    await stage.commit(next, () => persist({ lifecycle_stage: next }, executeNextAction, reason))
   }
 
   const anyPending = status.pending || stage.pending || temperature.pending || autopilot.pending
@@ -459,8 +489,8 @@ export const ThreadStateBar = ({
         toStage={stageConfirm.next as LifecycleStageCode | null}
         pending={stage.pending}
         onCancel={handleStageCancel}
-        onChangeStageOnly={() => void handleStageConfirm(false)}
-        onChangeStageAndRunAction={() => void handleStageConfirm(true)}
+        onChangeStageOnly={(reason) => void handleStageConfirm(false, reason)}
+        onChangeStageAndRunAction={(reason) => void handleStageConfirm(true, reason)}
       />
     </>
   )

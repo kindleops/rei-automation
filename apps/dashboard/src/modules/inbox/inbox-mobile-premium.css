@@ -1896,13 +1896,35 @@ html.is-mobile-layout .nx-active-prospect__relationship {
   white-space: nowrap;
 }
 
+/*
+ * §6 — COLLAPSED HEIGHT MUST NOT DEPEND ON HOW MANY PEOPLE ARE LINKED.
+ *
+ * Measured: 81px with one prospect, 105px with two or three. The sub-line
+ * wrapped once the "N linked" control joined the phone and the ownership
+ * badge, costing a whole line -- 24px, ~2.8% of a 390x844 viewport -- for
+ * nothing an operator asked for. Held to one line instead: the ownership badge
+ * is the element allowed to give up room, since the number and the linked
+ * count are both short and fixed.
+ */
 html.is-mobile-layout .nx-active-prospect__sub-line {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--nx-s-2, 8px);
   margin-top: 2px;
   min-width: 0;
 }
+
+html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__ownership {
+  min-width: 0;
+  overflow: hidden;
+}
+html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__ownership span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__phone { flex: 0 0 auto; }
 
 html.is-mobile-layout .nx-active-prospect__phone {
   font-size: var(--nx-t-micro, 11px);
@@ -1913,15 +1935,36 @@ html.is-mobile-layout .nx-active-prospect__phone {
 
 /* The linked control is the only thing here that is pressed, so it gets the
    touch target and it sits at the end where a thumb already is. */
+/*
+ * The linked control must not be TALLER than the line it sits on.
+ *
+ * Measured with the real stylesheet: sub-line 19px with one prospect, 44px
+ * with two, four or seven -- constant, so this was never wrapping. The button
+ * was simply a taller box, and it dragged the whole collapsed card from 88px
+ * to 113px whenever a second person existed.
+ *
+ * Its touch target comes from the ::after below, which is out of flow and
+ * costs no height, so the control can be line-sized and still comfortably
+ * pressable.
+ */
 html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__expand {
   margin-left: auto;
   position: relative;
-  min-height: 28px;
+  flex: 0 0 auto;
+  /* !important because the shell sets `padding: 4px 8px !important` on this
+     control and a blanket mobile rule gives buttons a 44px min-height -- both
+     beat an un-flagged override no matter how specific it is. */
+  min-height: 0 !important;
+  height: 18px !important;
+  padding: 0 6px !important;
+  line-height: 18px !important;
+  border-radius: 6px;
 }
 html.is-mobile-layout .nx-active-prospect__sub-line .nx-active-prospect__expand::after {
   content: '';
   position: absolute;
-  inset: -8px -6px;
+  /* ~44px tall and wider than the label, entirely out of flow. */
+  inset: -13px -10px;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1956,8 +1999,8 @@ html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__
      Ordered rather than reversed so the text block keeps its own alignment. */
   order: 2;
   flex: 0 0 auto;
-  width: 124px;
-  height: 80px;
+  width: 146px;
+  height: 94px;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.1));

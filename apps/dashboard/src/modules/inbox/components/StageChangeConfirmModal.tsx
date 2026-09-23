@@ -1,6 +1,11 @@
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
-import { LIFECYCLE_STAGE_META, type LifecycleStageCode } from '../../../domain/lead-state/universal-lead-state-registry'
+import {
+  LIFECYCLE_STAGE_META,
+  LIFECYCLE_STAGE_ORDER,
+  type LifecycleStageCode,
+} from '../../../domain/lead-state/universal-lead-state-registry'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -9,9 +14,36 @@ export interface StageChangeConfirmModalProps {
   fromStage: LifecycleStageCode | null
   toStage: LifecycleStageCode | null
   pending?: boolean
-  onChangeStageOnly: () => void
-  onChangeStageAndRunAction: () => void
+  onChangeStageOnly: (reason: string) => void
+  onChangeStageAndRunAction: (reason: string) => void
   onCancel: () => void
+}
+
+/**
+ * WHEN THE SERVER WILL DEMAND A REASON.
+ *
+ * validateStageTransition refuses a backward or stage-skipping move, and any
+ * move out of a terminal stage, unless a reason is supplied. It did so
+ * silently: the patch dropped `lifecycle_stage`, kept the rest, and answered
+ * ok -- so the pill showed the new stage, nothing was stored, and the old one
+ * returned on the next visit. Mirroring the rule here lets the operator supply
+ * what the write actually requires instead of discovering it by regression.
+ */
+const TERMINAL_STAGES = new Set<string>(['closed'])
+
+export function stageChangeNeedsReason(
+  from: LifecycleStageCode | null,
+  to: LifecycleStageCode | null,
+): boolean {
+  if (!from || !to || from === to) return false
+  if (TERMINAL_STAGES.has(from)) return true
+  const order = LIFECYCLE_STAGE_ORDER as readonly string[]
+  const fromIndex = order.indexOf(from)
+  const toIndex = order.indexOf(to)
+  if (fromIndex < 0 || toIndex < 0) return false
+  const backward = toIndex < fromIndex
+  const skipped = Math.abs(toIndex - fromIndex) - 1 > 0
+  return backward || skipped
 }
 
 function stageLabel(code: LifecycleStageCode | null): string {
@@ -29,6 +61,13 @@ export function StageChangeConfirmModal({
   onChangeStageAndRunAction,
   onCancel,
 }: StageChangeConfirmModalProps) {
+  const [reason, setReason] = useState('')
+  const needsReason = stageChangeNeedsReason(fromStage, toStage)
+  const reasonReady = !needsReason || reason.trim().length >= 3
+
+  // A reason must not survive into the next, unrelated stage change.
+  useEffect(() => { if (!open) setReason('') }, [open])
+
   if (!open || !toStage || typeof document === 'undefined') return null
 
   return createPortal(
@@ -60,6 +99,24 @@ export function StageChangeConfirmModal({
           <p className="nx-stage-change-modal__hint">
             Choose whether to update the stage only, or also run the next automatic action for the new stage.
           </p>
+
+          {needsReason ? (
+            <label className="nx-stage-change-modal__reason">
+              <span>
+                {TERMINAL_STAGES.has(String(fromStage))
+                  ? 'Reopening a closed stage needs a reason'
+                  : 'Moving backward or skipping stages needs a reason'}
+              </span>
+              <textarea
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="e.g. seller re-engaged after price drop"
+                rows={2}
+                disabled={pending}
+                autoFocus
+              />
+            </label>
+          ) : null}
         </div>
 
         <footer className="nx-stage-change-modal__actions">
@@ -74,16 +131,16 @@ export function StageChangeConfirmModal({
           <button
             type="button"
             className={cls('nx-btn', 'nx-btn--secondary', pending && 'is-busy')}
-            onClick={onChangeStageOnly}
-            disabled={pending}
+            onClick={() => onChangeStageOnly(reason.trim())}
+            disabled={pending || !reasonReady}
           >
             Change Stage Only
           </button>
           <button
             type="button"
             className={cls('nx-btn', 'nx-btn--primary', pending && 'is-busy')}
-            onClick={onChangeStageAndRunAction}
-            disabled={pending}
+            onClick={() => onChangeStageAndRunAction(reason.trim())}
+            disabled={pending || !reasonReady}
           >
             <Icon name="zap" size={14} />
             Change Stage + Run Next Action
@@ -115,6 +172,23 @@ export function StageChangeConfirmModal({
         .nx-stage-change-modal__hint {
           color: var(--nexus-muted, #9ba8c0);
           font-size: 12px;
+        }
+        .nx-stage-change-modal__reason {
+          display: grid;
+          gap: 6px;
+          font-size: 12px;
+          color: var(--nexus-muted, #9ba8c0);
+        }
+        .nx-stage-change-modal__reason textarea {
+          width: 100%;
+          resize: vertical;
+          min-height: 52px;
+          padding: 8px 10px;
+          border-radius: 8px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.05);
+          color: var(--nexus-text, #e8edf7);
+          font: inherit;
         }
         .nx-stage-change-modal__actions {
           display: flex;

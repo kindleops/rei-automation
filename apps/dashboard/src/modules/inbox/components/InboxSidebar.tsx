@@ -275,22 +275,67 @@ const formatEquityDisplay = (amount: number | null, percent: number | null): str
   return '—'
 }
 
+/*
+ * §8A — PRIORITY OVER THE ACTUAL TAG VOCABULARY.
+ *
+ * Sampled from public.properties.podio_tags (1,000 rows, 28 distinct tags).
+ * The frequencies are the whole argument for this order:
+ *
+ *   High Equity 988 · Absentee Owner 972 · Heavily Dated 879 · Tired
+ *   Landlord 555 · Senior Owner 448 · Tax Delinquent 245 · Vacant Home 138
+ *   · Probate 42 · Active Lien 39 · Foreclosure 8 · Zombie Property 4 ·
+ *   Preforeclosure 3
+ *
+ * The most COMMON tags carry the least information -- "High Equity" is on 99%
+ * of rows and tells an operator nothing about who to call first. The rare ones
+ * are the actionable ones. So urgency leads, motivation follows, ownership
+ * context after that, and broad profile traits last.
+ *
+ * The previous list recognised twelve labels and mapped everything else to
+ * null, which DISCARDED sixteen real tags -- Zombie Property, Free And Clear,
+ * Out Of State Owner and the rest never reached a card at all, and could not
+ * be counted in "+N" either. Unrecognised tokens now pass through at the end
+ * rather than vanishing.
+ */
 const DISTRESS_PROPERTY_FLAG_ORDER = [
-  'Tax Delinquent',
-  'Active Lien',
-  'Foreclosure',
+  // Urgent distress — a clock is running.
+  'Preforeclosure',
   'Pre-Foreclosure',
+  'Foreclosure',
+  'Zombie Property',
+  'Active Lien',
+  // Strong motivation.
+  'Tax Delinquent',
   'Probate',
-  'Tired Landlord',
-  'Senior Owner',
+  'Vacant Home',
   'Vacant',
-  'Absentee',
+  'Tired Landlord',
+  'Likely To Move',
   'Distressed',
-  'Heavily Dated',
-  'Multifamily',
-  'Land',
-  'Commercial',
+  // Ownership context.
+  'Out Of State Owner',
+  'Absentee Owner',
+  'Absentee',
+  'Senior Owner',
+  'Corporate Owner',
+  'Empty Nester',
+  'Landlocked',
+  // Asset / profile traits — true of most rows, so last.
+  'Low Equity',
+  'Free And Clear',
   'High Equity',
+  'Heavily Dated',
+  'No Updates',
+  'Adjustable Loan',
+  'Off Market',
+  'Cash Buyer',
+  'Mid-Term Owner',
+  'Long Term Owner',
+  'Corner Lot',
+  'Apartment Building 5+ Units',
+  'Multifamily',
+  'Commercial',
+  'Land',
 ] as const
 
 const MAX_SIDEBAR_PROPERTY_FLAGS = 3
@@ -333,6 +378,22 @@ const mapTagTokenToDistressFlag = (token: string): (typeof DISTRESS_PROPERTY_FLA
   if (hay === 'land' || hay.includes(' land')) return 'Land'
   if (hay.includes('commercial')) return 'Commercial'
   if (hay.includes('high equity') || hay.includes('high_equity')) return 'High Equity'
+  if (hay.includes('zombie')) return 'Zombie Property'
+  if (hay.includes('free and clear')) return 'Free And Clear'
+  if (hay.includes('out of state')) return 'Out Of State Owner'
+  if (hay.includes('empty nester')) return 'Empty Nester'
+  if (hay.includes('corporate owner')) return 'Corporate Owner'
+  if (hay.includes('likely to move')) return 'Likely To Move'
+  if (hay.includes('low equity')) return 'Low Equity'
+  if (hay.includes('adjustable loan')) return 'Adjustable Loan'
+  if (hay.includes('off market')) return 'Off Market'
+  if (hay.includes('cash buyer')) return 'Cash Buyer'
+  if (hay.includes('mid-term owner') || hay.includes('mid term owner')) return 'Mid-Term Owner'
+  if (hay.includes('long term owner')) return 'Long Term Owner'
+  if (hay.includes('corner lot')) return 'Corner Lot'
+  if (hay.includes('landlocked')) return 'Landlocked'
+  if (hay.includes('no updates')) return 'No Updates'
+  if (hay.includes('apartment building')) return 'Apartment Building 5+ Units'
   return null
 }
 
@@ -436,7 +497,18 @@ const resolvePropertyFlags = (
   if (typeText.includes('land')) flags.add('Land')
   if (typeText.includes('commercial')) flags.add('Commercial')
 
-  return DISTRESS_PROPERTY_FLAG_ORDER.filter((label) => flags.has(label)).slice(0, MAX_SIDEBAR_PROPERTY_FLAGS)
+  /*
+   * §8B — RETURN EVERYTHING, IN PRIORITY ORDER.
+   *
+   * This used to `.slice(0, 3)` here, which threw away the total before anyone
+   * could count it: the badge row then computed `overflow` against three
+   * items, so a property with seven tags advertised "+1". The caller decides
+   * how many to SHOW; only it can know how many are hidden.
+   */
+  const ordered = DISTRESS_PROPERTY_FLAG_ORDER.filter((label) => flags.has(label)) as string[]
+  // Anything the vocabulary does not name still counts, after the known ones.
+  const extras = Array.from(flags).filter((label) => !ordered.includes(label)).sort()
+  return [...ordered, ...extras]
 }
 
 const resolvePropertyTypeLabel = (propertyType: string): string => {
@@ -1111,8 +1183,16 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
    * delinquency ahead of "long term owner"), so the two that survive are the
    * two worth acting on. The full set still travels in the row's aria-label.
    */
-  const cardSignalChips = prioritizeCardSignals(rowDisplayFlags, 6)
-  const flagMaxVisible = 2
+  /*
+   * §8A/§8B — THREE VISIBLE, AND THE REST COUNTED HONESTLY.
+   *
+   * rowDisplayFlags now carries every tag in priority order rather than a
+   * pre-truncated three, so the badge row can slice to three and subtract for
+   * a truthful "+N". Seven tags reads "+4"; three or fewer reads no badge at
+   * all. The full set still travels in the row's aria-label.
+   */
+  const cardSignalChips = prioritizeCardSignals(rowDisplayFlags, rowDisplayFlags.length)
+  const flagMaxVisible = MAX_SIDEBAR_PROPERTY_FLAGS
   const flagDensity = inboxMode === 'full100' ? 'rich' : 'compact'
 
   return (
