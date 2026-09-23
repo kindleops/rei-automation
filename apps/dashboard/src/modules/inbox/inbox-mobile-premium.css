@@ -2281,11 +2281,17 @@ html.is-mobile-layout .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-
    glance and pressable with a thumb. Selection is OR within this dimension and
    composes with every other filter unchanged.
    ══════════════════════════════════════════════════════════════════════════ */
+/* §1D — collapsed, this is one row; it should not reserve the padding of the
+   expanded wall it replaced. */
 .nx-ifm-categories {
   display: block;
+  margin-bottom: var(--nx-s-2, 8px);
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.08));
+}
+.nx-ifm-categories.is-open {
   margin-bottom: var(--nx-s-3, 12px);
   padding-bottom: var(--nx-s-3, 12px);
-  border-bottom: 1px solid var(--nx-ambient-rim, rgba(255, 255, 255, 0.08));
 }
 
 .nx-ifm-categories__head {
@@ -2644,7 +2650,7 @@ html[data-nexus-theme="light"] .nx-mtb__search { background: rgba(15, 23, 42, 0.
   align-items: center;
   gap: var(--nx-s-2, 8px);
   width: 100%;
-  min-height: 44px;
+  min-height: 40px;
   padding: 0 var(--nx-s-1, 4px);
   border: 0;
   background: transparent;
