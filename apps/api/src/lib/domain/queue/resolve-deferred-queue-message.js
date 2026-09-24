@@ -15,6 +15,7 @@ import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import { prepareRenderedSmsForQueue } from "@/lib/sms/sanitize.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { selectVariant } from "@/lib/domain/messaging/adaptive-template-selection.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -221,15 +222,52 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
   );
   if (!use_case) return { ok: false, resolved: false, reason: "rotation_use_case_missing" };
 
-  const exclude = new Set(
-    (Array.isArray(deps.excludeTemplateIds) ? deps.excludeTemplateIds : [])
-      .map((id) => clean(id))
-      .filter(Boolean)
-  );
+  const exclude = (Array.isArray(deps.excludeTemplateIds) ? deps.excludeTemplateIds : [])
+    .map((id) => clean(id))
+    .filter(Boolean);
+
+  /*
+   * ROTATION IS SCOPED TO THE CONVERSATION, NOT JUST THE USE CASE.
+   *
+   * Three properties this query enforces that the previous one did not:
+   *
+   *   LANGUAGE IS ABSOLUTE. The old candidate fetch asked for
+   *   `[language, "English"]`, so a Spanish conversation whose first body was
+   *   content-filtered could legitimately rotate onto English copy. ~20% of
+   *   owners here are non-English; answering them in the wrong language is a
+   *   worse outcome than not sending.
+   *
+   *   STAGE IS PRESERVED. Filtering on use_case alone left stage implicit. It
+   *   is now explicit whenever the row knows its stage, so an S3 asking-price
+   *   follow-up can never be satisfied by an S1 ownership question -- the
+   *   "never ask for a fact the conversation already contains" rule.
+   *
+   *   QUARANTINED COPY IS UNREACHABLE. Demoted templates are excluded here,
+   *   which is what makes quarantine mean anything at dispatch time.
+   */
+  const rowLanguage = clean(queue_row.language) || "English";
+  const stage_code = clean(meta.stage_code || queue_row.current_stage_code || meta.current_stage_code);
+
+  let query = supabase
+    .from("sms_templates")
+    .select(
+      "template_id,template_body,use_case,language,stage_code,property_type_scope," +
+        "allowed_property_groups,prohibited_property_groups,is_active,safe_for_auto_reply," +
+        "minimal_fallback,fallback_rank,quarantine_state"
+    )
+    .eq("is_active", true)
+    .eq("safe_for_auto_reply", true)
+    .eq("quarantine_state", "active")
+    .eq("language", rowLanguage)
+    .eq("use_case", use_case)
+    .limit(100);
+  if (stage_code) query = query.eq("stage_code", stage_code);
 
   let templates = [];
   try {
-    templates = await fetchCandidateTemplates(supabase, [use_case], clean(queue_row.language));
+    const { data, error } = await query;
+    if (error) throw error;
+    templates = Array.isArray(data) ? data : [];
   } catch (error) {
     warn("[ROTATION_TEMPLATE_LOOKUP_FAILED]", {
       queue_row_id: queue_row.id || null,
@@ -239,21 +277,64 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
     return { ok: false, resolved: false, reason: "template_lookup_failed" };
   }
 
-  const rowLanguage = lower(queue_row.language) || "english";
-  const ordered = [
-    ...templates.filter((t) => lower(t.language) === rowLanguage),
-    ...templates.filter((t) => lower(t.language) !== rowLanguage),
-  ].filter((t) => !exclude.has(clean(t.template_id || t.id)));
+  if (templates.length === 0) {
+    return { ok: true, resolved: false, use_case, reason: "no_alternate_template" };
+  }
+
+  /*
+   * RANK BY MEASURED DELIVERABILITY, not by whatever order the database
+   * returned. Rotation previously took the first renderable candidate, which
+   * meant a content-filtered body could be replaced by one that is filtered
+   * MORE often. Production spread within a single group is 0%-100%, so the
+   * order is the whole value of rotating.
+   *
+   * Unavailable performance degrades to unproven-but-eligible rather than
+   * blocking: a worse-ordered rotation still beats no rotation.
+   */
+  let performanceByTemplateId = {};
+  try {
+    const ids = templates.map((t) => clean(t.template_id)).filter(Boolean);
+    const { data } = await supabase.from("v_template_performance").select("*").in("template_id", ids);
+    for (const row of data ?? []) performanceByTemplateId[clean(row.template_id)] = row;
+  } catch {
+    performanceByTemplateId = {};
+  }
 
   const personalization = buildRowPersonalization(queue_row);
 
+  const selection = selectVariant(
+    templates,
+    {
+      stage_code: stage_code || null,
+      use_case,
+      language: rowLanguage,
+      property_group: clean(meta.property_group) || null,
+      require_auto_reply_safe: true,
+      // Variable resolvability is judged by the renderer below, which is the
+      // authority on this row's personalization; the selector must not
+      // second-guess it with a partial view.
+      skip_variable_check: true,
+      attempted_template_ids: exclude,
+    },
+    { performanceByTemplateId },
+  );
+
+  // Walk best-first. A candidate that cannot render is skipped rather than
+  // failing the rotation -- the next-ranked body is still a valid answer.
+  const ordered = selection.ok
+    ? [selection.template, ...templates.filter((t) => t !== selection.template)]
+    : templates;
+  const excluded = new Set(exclude);
+
   for (const template of ordered) {
+    const template_id = clean(template.template_id);
+    if (!template_id || excluded.has(template_id)) continue;
     if (!clean(template.template_body)) continue;
     const rendered = personalizeTemplate(template.template_body, personalization);
     if (!rendered.ok || !clean(rendered.text)) continue;
     const prepared = prepareRenderedSmsForQueue({
       rendered_message_text: rendered.text,
-      template_id: template.template_id || template.id || null,
+      template_id,
       template_source: "sms_templates",
     });
     if (!prepared.ok || !clean(prepared.text)) continue;
@@ -261,16 +342,21 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
     info("[ROTATION_TEMPLATE_RESOLVED]", {
       queue_row_id: queue_row.id || null,
       use_case,
-      template_id: template.template_id || template.id || null,
-      excluded: exclude.size,
+      stage_code: stage_code || null,
+      language: rowLanguage,
+      template_id,
+      excluded: excluded.size,
+      selection_reason: selection.ok ? selection.selection_reason : "unranked_fallback",
     });
     return {
       ok: true,
       resolved: true,
       message_body: prepared.text,
-      template_id: clean(template.template_id || template.id) || null,
+      template_id,
       use_case: clean(template.use_case) || use_case,
-      language: clean(template.language) || null,
+      language: clean(template.language) || rowLanguage,
+      template_selection_reason: selection.ok ? selection.selection_reason : null,
+      variant_attempt_number: excluded.size + 1,
       reason: "rotation_template_resolved",
     };
   }

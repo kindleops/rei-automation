@@ -24,6 +24,7 @@ import {
 } from "@/lib/domain/inbox/classify-thread-from-chronology.js";
 import { buildThreadStatePatchFromClassification } from "@/lib/domain/inbox/resolve-inbox-state-from-classification.js";
 import { updateContactOutreachState } from "@/lib/domain/outreach/outreach-service.js";
+import { MAX_VARIANT_ATTEMPTS } from "@/lib/domain/messaging/template-fallback-authority.js";
 import {
   normalizeTextGridFailure,
   textGridFailureMetadata,
@@ -2262,15 +2263,47 @@ export async function finalizeSendQueueFailure(row, lock_token, error, options =
   //
   // The allowlist is the gate: exactly one failure class may rotate, and it is
   // the one where provider evidence proves the seller saw nothing.
-  const rotation_eligible =
-    next_retry_count <= normalized.max_retries &&
-    rotation_failure_class === "content_filter_blocked";
+  //
+  // ROTATION REQUIRES THAT THE ORIGINAL BODY WAS ITSELF A TEMPLATE (§22).
+  //
+  // An operator typing freeform prose into the composer has authored that
+  // message. There is no "same-intent approved variant" of words a human just
+  // wrote, so rotating would mean silently sending the seller something the
+  // operator never approved -- and doing it up to seven times. A row with no
+  // template_id is exactly that case, so it is excluded here rather than
+  // relying on its use_case happening to match no template, which is luck
+  // rather than a rule.
+  //
+  // The manual composer still classifies and reports the content-filter
+  // failure truthfully; it simply does not rewrite the operator.
+  const originating_template_id = clean(
+    normalized.template_id || normalized.selected_template_id
+  );
   const tried_template_ids = [
     ...(Array.isArray(normalized.metadata?.tried_template_ids)
       ? normalized.metadata.tried_template_ids
       : []),
-    clean(normalized.template_id || normalized.selected_template_id),
+    originating_template_id,
   ].filter(Boolean);
+
+  //
+  // A ROTATION IS NOT A RETRY, AND IS NOT BOUNDED BY THE RETRY BUDGET.
+  //
+  // This gate read `next_retry_count <= max_retries`, and max_retries is 3 --
+  // so a logical communication could only ever reach FOUR distinct bodies no
+  // matter how many approved variants its group held. The retry budget exists
+  // to stop the same body being hammered at a provider; the variant budget
+  // exists to stop a conversation being reworded indefinitely. They answer
+  // different questions and conflating them silently capped the chain.
+  //
+  // Bounded instead by DISTINCT BODIES ALREADY TRIED, which is the thing §3
+  // actually limits: one original plus up to seven approved alternates.
+  // `retry_count` still increments and still governs same-body behaviour
+  // everywhere else -- that semantic is untouched.
+  const rotation_eligible =
+    tried_template_ids.length < MAX_VARIANT_ATTEMPTS &&
+    rotation_failure_class === "content_filter_blocked" &&
+    Boolean(originating_template_id);
   let rotation = null;
   if (rotation_eligible) {
     try {
