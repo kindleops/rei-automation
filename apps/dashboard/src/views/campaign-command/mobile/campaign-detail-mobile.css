@@ -288,9 +288,18 @@
    Entity Graph's mobile shell already insets by exactly this. The fallback is
    deliberately generous: under-reserving hides content, over-reserving only
    costs a few pixels of padding. */
-.ccc.ccc--mobile-campaign-detail {
+/* `.ccc.is-mobile` (0,2,0) also sets a height and ties with a two-class
+   selector here, so source order decides and it won. Naming both classes takes
+   this to (0,3,0) and settles it without !important. */
+.ccc.is-mobile.ccc--mobile-campaign-detail {
   position: absolute;
   inset: var(--nx-mobile-chrome-top, 56px) 0 0 0;
+  /* `.ccc.is-mobile` sets `height: 100dvh`, which OVERRIDES the height the
+     inset would have produced: the box kept its full-viewport height while its
+     top moved down, so it finished 53px below the fold and the last rows of
+     the scroller became unreachable. Measured at 390x844: detail body bottom
+     897. The height has to be stated explicitly alongside the inset. */
+  height: calc(100dvh - var(--nx-mobile-chrome-top, 56px));
   display: flex;
   flex-direction: column;
   padding: 0;
