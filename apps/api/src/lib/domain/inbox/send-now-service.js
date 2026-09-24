@@ -1237,34 +1237,64 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
       input.campaign_target_id
   );
 
+  /*
+   * ONLY A ROW THAT DISPATCHES LATER ACTUALLY NEEDS THE ANCHOR PERSISTED.
+   *
+   * An immediate send resolves its own operator action further down this file,
+   * on the dispatch path, and never consults the queue row's metadata to do it.
+   * A scheduled row is the opposite: it is written here and collected minutes
+   * or hours later by a process that has nothing but the row.
+   *
+   * That asymmetry decides what a failure to record the action MEANS. For a
+   * scheduled row it is fatal -- writing it anyway produces exactly the
+   * stranded row this fixes. For an immediate row it is cosmetic, and refusing
+   * would take every operator send offline for the duration of an unrelated
+   * `seller_operator_actions` outage. The first version of this refused in both
+   * cases; that blast radius was wrong, and nine existing tests said so.
+   */
+  const scheduled_for_value = clean(input.scheduled_for || input.scheduled_for_utc);
+  const scheduled_ms = scheduled_for_value ? Date.parse(scheduled_for_value) : NaN;
+  const dispatches_later =
+    Number.isFinite(scheduled_ms) && scheduled_ms > Date.parse(now) + 1000;
+
   let operator_action_id = clean(input_metadata.operator_action_id) || null;
   if (!existing_anchor) {
     // An automated row names itself (decision_id / follow_up_id / campaign
     // target); stamping an operator action over one of those would relabel a
     // machine send as a human one, so this runs only when nothing else does.
     const resolve_action = deps.resolveOperatorAction || resolveOperatorAction;
-    const resolved = await resolve_action(
-      {
-        // One of the three values seller_operator_actions_type_valid permits.
-        // "manual_inbox_send_now" belongs to the immediate dispatch path below;
-        // a queue row an operator composed and scheduled is an operator_reply.
-        action_type: "operator_reply",
-        request_idempotency_key: clean(
-          input.client_send_id || input_metadata.client_send_id
-        ),
-        thread_key: normalized.thread_key,
-        to_phone_number: normalized.to_phone_number,
-        operator_email: clean(input.operator_email) || null,
-      },
-      { supabase }
-    );
+    let resolved = null;
+    try {
+      resolved = await resolve_action(
+        {
+          // One of the three values seller_operator_actions_type_valid permits.
+          // "manual_inbox_send_now" belongs to the immediate dispatch path
+          // below; a queue row an operator composed and scheduled is an
+          // operator_reply.
+          action_type: "operator_reply",
+          request_idempotency_key: clean(
+            input.client_send_id || input_metadata.client_send_id
+          ),
+          thread_key: normalized.thread_key,
+          to_phone_number: normalized.to_phone_number,
+          operator_email: clean(input.operator_email) || null,
+        },
+        { supabase }
+      );
+    } catch (action_error) {
+      // The store contract is {ok:false}, but a malformed client throws. Treat
+      // a throw as the failure it is rather than letting it escape and turn a
+      // recoverable bookkeeping problem into a failed send.
+      resolved = { ok: false, reason: action_error?.message || "operator_action_threw" };
+    }
 
-    if (!resolved?.ok) {
-      // Refuse loudly rather than write a row that provably cannot dispatch --
-      // the silent version of this is the defect above.
+    if (resolved?.ok) {
+      operator_action_id = resolved.operator_action_id;
+    } else if (dispatches_later) {
       logger.error("inbox_send_now.operator_action_not_durable", {
         ...request_log,
         reason: resolved?.reason || "operator_action_store_error",
+        scheduled_for: scheduled_for_value,
       });
       return {
         ok: false,
@@ -1275,8 +1305,14 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
         queue_created: false,
         queue_inserted: false,
       };
+    } else {
+      // Immediate send: proceed unanchored. The dispatch path will mint its own
+      // operator action, so this row loses observability, not deliverability.
+      logger.warn("inbox_send_now.operator_action_unavailable_immediate", {
+        ...request_log,
+        reason: resolved?.reason || "operator_action_store_error",
+      });
     }
-    operator_action_id = resolved.operator_action_id;
   }
 
   let queue_result;
