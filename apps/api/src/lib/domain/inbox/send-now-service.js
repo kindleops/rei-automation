@@ -1211,6 +1211,74 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
     // non-fatal; proceed if duplicate guard query is unavailable
   }
 
+  /*
+   * DURABLE IDENTITY FOR A ROW THAT DISPATCHES LATER.
+   *
+   * `resolveQueueRowIdentity` refuses to send any row whose action it cannot
+   * name, and it reads that name from metadata. An IMMEDIATE send gets one on
+   * the dispatch path (resolveOperatorAction, further down this file). A
+   * SCHEDULED row never reaches that path: it is written here and collected
+   * minutes or hours later by the queue processor, which has only the row.
+   *
+   * So every inbox-scheduled message parked at `queue_row_identity_underivable`
+   * and was claimed, refused and requeued on every cycle, indefinitely. 22 such
+   * rows were live on 2026-09-23; none could ever have sent.
+   *
+   * `client_send_id` was already persisted, but under a key the identity
+   * resolver does not read -- the value was present and carried no authority.
+   * It becomes the idempotency key here, so retries of one click collapse onto
+   * one action, which is the contract operator-action-store already documents.
+   */
+  const existing_anchor = clean(
+    input_metadata.decision_id ||
+      input_metadata.follow_up_id ||
+      input_metadata.operator_action_id ||
+      input_metadata.canary_run_id ||
+      input.campaign_target_id
+  );
+
+  let operator_action_id = clean(input_metadata.operator_action_id) || null;
+  if (!existing_anchor) {
+    // An automated row names itself (decision_id / follow_up_id / campaign
+    // target); stamping an operator action over one of those would relabel a
+    // machine send as a human one, so this runs only when nothing else does.
+    const resolve_action = deps.resolveOperatorAction || resolveOperatorAction;
+    const resolved = await resolve_action(
+      {
+        // One of the three values seller_operator_actions_type_valid permits.
+        // "manual_inbox_send_now" belongs to the immediate dispatch path below;
+        // a queue row an operator composed and scheduled is an operator_reply.
+        action_type: "operator_reply",
+        request_idempotency_key: clean(
+          input.client_send_id || input_metadata.client_send_id
+        ),
+        thread_key: normalized.thread_key,
+        to_phone_number: normalized.to_phone_number,
+        operator_email: clean(input.operator_email) || null,
+      },
+      { supabase }
+    );
+
+    if (!resolved?.ok) {
+      // Refuse loudly rather than write a row that provably cannot dispatch --
+      // the silent version of this is the defect above.
+      logger.error("inbox_send_now.operator_action_not_durable", {
+        ...request_log,
+        reason: resolved?.reason || "operator_action_store_error",
+      });
+      return {
+        ok: false,
+        status: 503,
+        error: "operator_action_not_durable",
+        reason: "operator_action_not_durable",
+        detail_reason: resolved?.reason || "operator_action_store_error",
+        queue_created: false,
+        queue_inserted: false,
+      };
+    }
+    operator_action_id = resolved.operator_action_id;
+  }
+
   let queue_result;
   try {
     queue_result = await insertImpl(
@@ -1269,6 +1337,8 @@ export async function createInboxSendNowQueueRow(input = {}, deps = {}) {
           transport_fingerprint,
           manual_send_warning_codes: warning_codes,
           client_send_id: clean(input.client_send_id || input.metadata?.client_send_id) || null,
+          // Read by resolveQueueRowIdentity; without it the row never dispatches.
+          ...(operator_action_id ? { operator_action_id } : {}),
           operator_override: operator_override ? true : false,
           ...(bypassed_queue_emergency_stop ? { bypassed_queue_emergency_stop: true } : {}),
         },

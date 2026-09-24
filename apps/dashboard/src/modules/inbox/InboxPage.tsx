@@ -6196,6 +6196,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             if (result.ok) {
               setDraftText('')
               setScheduledTemplatePayload(null)
+              /*
+               * The queue row exists the moment this resolves, so Scheduled is
+               * already wrong until the list and the counts are re-read. Every
+               * other state-changing path in this file refreshes; this one only
+               * cleared the composer, which read as "the schedule didn't take"
+               * -- the thread stayed where it was and the badge did not move
+               * until the next poll happened to come around.
+               *
+               * Counts and list are refreshed together because the Scheduled
+               * badge and the Scheduled row come from the same predicate; moving
+               * one without the other is the count-disagrees-with-its-own-list
+               * bug this codebase has already had once.
+               */
+              void refreshInboxCounts()
+              void refreshInbox()
             }
           })()
         }}
