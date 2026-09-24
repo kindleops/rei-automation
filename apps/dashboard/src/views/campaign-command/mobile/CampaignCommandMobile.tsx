@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
+import { CampaignCardMobile } from './CampaignCardMobile'
+import './campaign-card-mobile.css'
 import {
   getQueueControlSettings,
 } from '../../../lib/api/backendClient'
@@ -81,6 +83,53 @@ export function toneOf(c: CampaignSummary): Tone {
 }
 
 const nf = (n: number | null | undefined) => Number(n ?? 0).toLocaleString()
+
+/**
+ * The primary state selector (§8).
+ *
+ * These are the CANONICAL `CampaignListFilter` values. The previous chip row
+ * passed `'active'`, which is not one of them — `matchesListFilter` has no
+ * branch for it and falls through to `return true`, so the "Active" chip
+ * quietly showed every campaign in the book. The `as CampaignListFilter[]`
+ * cast on that array is what stopped the compiler from saying so.
+ */
+export const PRIMARY_FILTERS: Array<{ key: CampaignListFilter; label: string }> = [
+  { key: 'live', label: 'Active' },
+  { key: 'scheduled', label: 'Scheduled' },
+  { key: 'draft', label: 'Drafts' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'all', label: 'All' },
+]
+
+/** Narrower cuts, kept in the search sheet so the primary row stays short. */
+export const SECONDARY_FILTERS: Array<{ key: CampaignListFilter; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'needs_attention', label: 'Needs attention' },
+  { key: 'paused', label: 'Paused' },
+  { key: 'ready', label: 'Ready' },
+  { key: 'archived', label: 'Archived' },
+]
+
+/**
+ * The one line under the title.
+ *
+ * Says what is true and what needs a person, in that order, and says nothing
+ * when neither is interesting — an empty book should not announce "0 active".
+ * Sending posture is appended only when it is NOT the normal live state:
+ * "sending live" on every screen is wallpaper, "sending paused" is news.
+ */
+export function summaryLine(
+  roll: { running: number; attention: number; scheduled: number },
+  sendMode?: string | null,
+): string {
+  const bits: string[] = []
+  if (roll.running > 0) bits.push(`${roll.running} active`)
+  if (roll.scheduled > 0) bits.push(`${roll.scheduled} scheduled`)
+  if (roll.attention > 0) bits.push(`${roll.attention} ${roll.attention === 1 ? 'needs' : 'need'} attention`)
+  const mode = String(sendMode ?? '').toLowerCase()
+  if (mode && mode !== 'live' && mode !== 'normal') bits.push('sending paused')
+  return bits.join(' · ')
+}
 
 /**
  * Three materially different states, which the row used to collapse into one.
@@ -185,50 +234,6 @@ function attentionOf(c: CampaignSummary): string | null {
   return null
 }
 
-/** Canonical queue posture in operator language. Never invented. */
-function sendingLabel(raw: string | null | undefined): string {
-  const v = String(raw ?? '').trim().toLowerCase()
-  if (v === 'normal') return 'SENDING LIVE'
-  if (v === 'scoped_canary_only') return 'CANARY ONLY'
-  if (v === 'stopped' || v === 'paused' || v === 'pause') return 'SENDING STOPPED'
-  if (!v) return 'SENDING UNKNOWN'
-  return `SENDING ${v.replace(/_/g, ' ').toUpperCase()}`
-}
-
-function automationLabel(raw: string | null | undefined): string | null {
-  const v = String(raw ?? '').trim().toLowerCase()
-  if (!v) return null
-  if (v === 'live_limited') return 'AUTO-REPLY LIMITED'
-  if (v === 'internal_only') return 'AUTO-REPLY INTERNAL'
-  if (v === 'disabled' || v === 'off') return 'AUTO-REPLY OFF'
-  if (v === 'live' || v === 'enabled') return 'AUTO-REPLY LIVE'
-  return `AUTO-REPLY ${v.replace(/_/g, ' ').toUpperCase()}`
-}
-
-function paceOf(c: CampaignSummary): string {
-  const interval = Number(c.send_interval_seconds || 0)
-  return interval > 0 ? `${Math.max(1, Math.round(3600 / interval))}/hr` : '—'
-}
-
-/** What happens next, in a person's words. Never a bare status echo. */
-function nextOf(c: CampaignSummary, tone: Tone): string {
-  if (tone === 'running') return c.sent_count > 0 ? 'Sending' : 'Starting'
-  if (tone === 'scheduled') {
-    const at = c.next_send_at ? new Date(c.next_send_at) : null
-    if (at && Number.isFinite(at.getTime()) && at.getTime() > Date.now()) {
-      const mins = Math.round((at.getTime() - Date.now()) / 60000)
-      if (mins < 60) return `Starts in ${mins}m`
-      if (mins < 1440) return `Starts in ${Math.round(mins / 60)}h`
-      return `Starts ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-    }
-    return 'Awaiting start'
-  }
-  if (tone === 'paused') return c.ready_targets > 0 ? 'Resume to send' : 'Nothing to resume'
-  if (tone === 'test') return 'No SMS transmits'
-  if (tone === 'done') return 'Finished'
-  return c.total_targets === 0 ? 'Needs targeting' : 'Ready to schedule'
-}
-
 export function CampaignCommandMobile({
   model,
   campaigns,
@@ -266,7 +271,6 @@ export function CampaignCommandMobile({
    * source lands, this is the seam to restore.
    */
   const [sendMode, setSendMode] = useState<string | null>(null)
-  const [autoMode, setAutoMode] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
 
   // Canonical operating posture. Loaded alongside the list, never blocking it.
@@ -276,7 +280,6 @@ export function CampaignCommandMobile({
       if (dead || !res.ok) return
       const d = (res.data?.diagnostics ?? {}) as Record<string, unknown>
       setSendMode(d.queue_execution_mode ? String(d.queue_execution_mode) : null)
-      setAutoMode(d.auto_reply_mode ? String(d.auto_reply_mode) : null)
     })
     return () => { dead = true }
   }, [])
@@ -310,22 +313,40 @@ export function CampaignCommandMobile({
    * active 453 + paused 20 + draft 3 = 476 actionable, against a book-wide
    * canonical 540 that also counts 64 inside archived campaigns.
    */
-  const kpis: Array<{ label: string; value: string; tone?: 'live' | 'warn' | 'good' }> = [
-    { label: 'READY', value: compact(roll.readyLive), tone: roll.readyLive > 0 ? 'live' : undefined },
-    { label: 'SENT TODAY', value: compact(k?.sentToday ?? 0) },
-    { label: 'QUEUED', value: compact(k?.scheduledQueueRows ?? 0) },
-    { label: 'REPLIES', value: compact(roll.replies) },
-    { label: 'LEADS', value: compact(k?.positiveReplies ?? 0), tone: (k?.positiveReplies ?? 0) > 0 ? 'good' : undefined },
-    { label: 'ATTENTION', value: String(roll.attention), tone: roll.attention > 0 ? 'warn' : undefined },
+  /*
+   * THE BOOK-WIDE RAIL, REDUCED TO WHAT IS TRUE TODAY.
+   *
+   * This rendered six fixed cells, and on a normal day three of them read 0 —
+   * QUEUED, REPLIES, LEADS. Six numbers of which half are zero is not density;
+   * it teaches the operator to stop reading the rail. A zero is only worth a
+   * cell when its being zero is itself the news, which is true of ATTENTION
+   * (nothing needs you) and of nothing else here.
+   *
+   * ATTENTION is always shown for exactly that reason, and always last, so the
+   * rail ends on the only cell that can demand action.
+   */
+  const kpiCandidates: Array<{ label: string; value: number; tone?: 'live' | 'warn' | 'good'; always?: boolean }> = [
+    { label: 'Ready', value: roll.readyLive, tone: roll.readyLive > 0 ? 'live' : undefined },
+    { label: 'Sent today', value: k?.sentToday ?? 0 },
+    { label: 'Queued', value: k?.scheduledQueueRows ?? 0 },
+    { label: 'Replies', value: roll.replies },
+    { label: 'Qualified', value: k?.positiveReplies ?? 0, tone: (k?.positiveReplies ?? 0) > 0 ? 'good' : undefined },
+    { label: 'Attention', value: roll.attention, tone: roll.attention > 0 ? 'warn' : undefined, always: true },
   ]
+
+  const kpis = kpiCandidates
+    .filter((kpi) => kpi.always || kpi.value > 0)
+    .map((kpi) => ({ label: kpi.label, value: compact(kpi.value), tone: kpi.tone }))
 
   return (
     <div className="cmk">
       <header className="cmk__bar">
-        <div className="cmk__brand">
-          <span className="cmk__brand-a">CAMPAIGNS</span>
-          <span className="cmk__brand-slash">/</span>
-          <span className="cmk__brand-b">COMMAND</span>
+        <div className="cmk__title">
+          <h1 className="cmk__h1">Campaign Command</h1>
+          {/* One line of context, in words. The previous header shouted four
+              all-caps clauses that wrapped to two lines at 390pt and still did
+              not say what needed doing. */}
+          <p className="cmk__sub">{summaryLine(roll, sendMode)}</p>
         </div>
         <div className="cmk__bar-actions">
           <button
@@ -344,24 +365,22 @@ export function CampaignCommandMobile({
         </div>
       </header>
 
-      {/* Canonical operating posture — read from system_control, not invented. */}
-      <div className="cmk__posture">
-        <span className={`cmk__posture-mode is-${(sendMode ?? 'unknown').toLowerCase()}`}>
-          {sendingLabel(sendMode)}
-        </span>
-        <span className="cmk__posture-sep" aria-hidden="true">·</span>
-        <span>
-          {roll.running} RUNNING
-          {roll.runningTest > 0 ? ` (${roll.runningTest} TEST)` : ''}
-        </span>
-        <span className="cmk__posture-sep" aria-hidden="true">·</span>
-        <span>{roll.scheduled} SCHEDULED</span>
-        {automationLabel(autoMode) && (
-          <>
-            <span className="cmk__posture-sep" aria-hidden="true">·</span>
-            <span>{automationLabel(autoMode)}</span>
-          </>
-        )}
+      {/* Primary state selector. Always visible: every filter used to live
+          behind the search toggle, so the list offered no way to answer
+          "what is running?" without typing. */}
+      <div className="cmk__states" role="tablist" aria-label="Campaign state">
+        {PRIMARY_FILTERS.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={statusFilter === key}
+            className={`cmk__state-tab${statusFilter === key ? ' is-on' : ''}`}
+            onClick={() => onStatusFilterChange(key)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="cmk__scroll">
@@ -406,14 +425,14 @@ export function CampaignCommandMobile({
               />
             </div>
             <div className="cmk__find-chips">
-              {(['all', 'active', 'scheduled', 'paused', 'draft'] as CampaignListFilter[]).map((key) => (
+              {SECONDARY_FILTERS.map(({ key, label }) => (
                 <button
                   key={key}
                   type="button"
                   className={`cmk__find-chip${statusFilter === key ? ' is-on' : ''}`}
                   onClick={() => onStatusFilterChange(key)}
                 >
-                  {key === 'all' ? 'All' : key[0].toUpperCase() + key.slice(1)}
+                  {label}
                 </button>
               ))}
             </div>
@@ -423,76 +442,10 @@ export function CampaignCommandMobile({
         {/* ── Campaign rows ─────────────────────────────────────────────── */}
         <div className="cmk__list" role="list">
           {loading && campaigns.length === 0
-            ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="cmk__row is-skeleton" aria-hidden="true" />)
-            : campaigns.map((c) => {
-                const tone = toneOf(c)
-                const flag = attentionOf(c)
-                // A blocked campaign uses the quiet row: it must not present
-                // itself alongside running work as though it were operable.
-                const dormant = tone === 'draft' || tone === 'blocked'
-                if (dormant) {
-                  return (
-                    <button key={c.id} type="button" role="listitem" className="cmk__row is-dormant" onClick={() => onSelect(c)}>
-                      <span className="cmk__row-name">{c.campaign_name || 'Untitled campaign'}</span>
-                      <span className="cmk__row-quiet">
-                        {TONE_LABEL[tone]} · {targetingPhrase(c)}
-                        {targetModePhrase(c) ? ` · ${targetModePhrase(c)}` : ''}
-                      </span>
-                      {tone === 'blocked' && (
-                        <span className="cmk__row-blocked">
-                          Target integrity check failed — outreach disabled until targeting is rebuilt
-                        </span>
-                      )}
-                    </button>
-                  )
-                }
-                return (
-                  <button key={c.id} type="button" role="listitem" className={`cmk__row is-${tone}`} onClick={() => onSelect(c)}>
-                    <span className="cmk__row-top">
-                      {tone === 'running' && <span className="cmk__pulse" aria-hidden="true" />}
-                      <span className="cmk__row-name">{c.campaign_name || 'Untitled campaign'}</span>
-                      <span className={`cmk__row-state is-${tone}`}>{TONE_LABEL[tone]}</span>
-                    </span>
-
-                    <span className="cmk__row-geo">
-                      {/* Absent market is unavailable metadata, not a fault, and is
-                          never inferred from the campaign name. */}
-                      <span className={c.market_label ? 'cmk__geo' : 'cmk__geo is-absent'}>
-                        {c.market_label || 'No market set'}
-                      </span>
-                      <em>· {nf(c.total_targets)} targets</em>
-                      {targetModePhrase(c) && (
-                        <span className={`cmk__row-mode is-${c.target_mode}`}>{targetModePhrase(c)}</span>
-                      )}
-                      {c.auto_send_enabled && <span className="cmk__row-auto">AUTO</span>}
-                    </span>
-
-                    <span className="cmk__row-metrics">
-                      <span className={`cmk__m is-lead${c.ready_targets === 0 ? ' is-nil' : ''}`}>
-                        <strong>{compact(c.ready_targets)}</strong><em>ready</em>
-                      </span>
-                      <span className={`cmk__m${c.sent_count === 0 ? ' is-nil' : ''}`}>
-                        <strong>{compact(c.sent_count)}</strong><em>sent</em>
-                      </span>
-                      <span className={`cmk__m is-pace${paceOf(c) === '—' ? ' is-nil' : ''}`}>
-                        <strong>{paceOf(c)}</strong><em>pace</em>
-                      </span>
-                      <span className={`cmk__m${c.reply_count === 0 ? ' is-nil' : ''}`}>
-                        <strong>{compact(c.reply_count)}</strong><em>replies</em>
-                      </span>
-                      <span className={`cmk__m${c.positive_reply_count > 0 ? ' is-good' : ' is-nil'}`}>
-                        <strong>{compact(c.positive_reply_count)}</strong><em>leads</em>
-                      </span>
-                    </span>
-
-                    <span className="cmk__row-foot">
-                      {flag
-                        ? <span className="cmk__row-alert">{flag}</span>
-                        : <span className="cmk__row-next">{nextOf(c, tone)}</span>}
-                    </span>
-                  </button>
-                )
-              })}
+            ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="cmk__card-skeleton" aria-hidden="true" />)
+            : campaigns.map((c) => (
+                <CampaignCardMobile key={c.id} campaign={c} onOpen={onSelect} />
+              ))}
 
           {!loading && campaigns.length === 0 && (
             <p className="cmk__empty">{filterActive ? 'No campaigns match.' : 'No campaigns yet.'}</p>

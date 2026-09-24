@@ -598,3 +598,125 @@
   line-height: 1.35;
   color: color-mix(in srgb, var(--k-warn) 82%, var(--k-ink));
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CAMPAIGN COMMAND MOBILE — index header, state selector, card list.
+   Appended so it wins over the older `.cmk__brand` / `.cmk__row` rules that
+   the redesign supersedes, without editing them out from under anything that
+   still references them.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ── title ────────────────────────────────────────────────────────────── */
+
+.cmk__bar { height: auto; padding-top: 10px; padding-bottom: 10px; align-items: flex-start; }
+
+.cmk__title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+/* Sentence case at a real headline size. The previous header was
+   "CAMPAIGNS / COMMAND" at 12px/0.15em — small, shouted, and lower in the
+   hierarchy than the numbers beneath it, which is backwards. */
+.cmk__h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text-primary, #fff);
+}
+
+.cmk__sub {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text-tertiary, #6b7280);
+}
+
+.cmk__sub:empty { display: none; }
+
+/* ── primary state selector ───────────────────────────────────────────── */
+
+.cmk__states {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  /* Five states do not fit 390px at a legible size, so the rail scrolls — and
+     is masked at the trailing edge so it reads as "there is more" rather than
+     as a label sheared off by the viewport. The mask is the whole difference
+     between a scroller and a bug. */
+  padding: 2px var(--k-pad) 10px;
+  overflow-x: auto;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* Horizontal only. Without this a diagonal thumb drag on the rail steals the
+     gesture from the list underneath and the page feels stuck. */
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+}
+
+.cmk__states::-webkit-scrollbar { display: none; }
+
+.cmk__state-tab {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+  background: color-mix(in srgb, var(--bg-panel-solid) 60%, transparent);
+  color: var(--text-secondary, #9aa4b2);
+  font-size: 12.5px;
+  font-weight: 560;
+  white-space: nowrap;
+  cursor: pointer;
+  /* The rail is 34px tall by design; the touch target is extended below via
+     ::after rather than by inflating the control, which would push the list
+     down by a third of a card on every screen. */
+  position: relative;
+}
+
+.cmk__state-tab::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
+}
+
+.cmk__state-tab.is-on {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--text-primary, #fff);
+}
+
+/* ── card list ────────────────────────────────────────────────────────── */
+
+/* Spacing groups the list; the old 1px rule under every row made ten
+   campaigns read as a spreadsheet. */
+.cmk__list {
+  gap: 10px;
+  margin-top: 4px;
+  padding: 0 var(--k-pad) 16px;
+}
+
+.cmk__card-skeleton {
+  height: 132px;
+  border-radius: 16px;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--bg-panel-solid) 64%, transparent) 30%,
+    color-mix(in srgb, var(--border) 24%, transparent) 50%,
+    color-mix(in srgb, var(--bg-panel-solid) 64%, transparent) 70%
+  );
+  background-size: 220% 100%;
+  animation: cmk-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes cmk-shimmer {
+  from { background-position: 140% 0; }
+  to   { background-position: -40% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmk__card-skeleton { animation: none; }
+}

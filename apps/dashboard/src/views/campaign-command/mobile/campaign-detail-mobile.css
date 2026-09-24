@@ -278,9 +278,19 @@
    the top. Detail sat in normal flow and inherited a 50px shell strip above the
    stage content, showing as a band of empty blue over the campaign name. Same
    treatment, same result. */
+/* ...but inset:0 reserved NOTHING for the global top dock, so the campaign name
+   rendered underneath it. Measured at 390x844: `.cdx__name` spanned y 11-32px
+   while the dock's own bottom edge was at 57px — the screen's primary identity
+   was completely covered, and no bounding-box check notices that because the
+   name IS laid out, just behind a fixed z-150 element.
+
+   `--nx-mobile-chrome-top` is the canonical reservation (top rail + safe area);
+   Entity Graph's mobile shell already insets by exactly this. The fallback is
+   deliberately generous: under-reserving hides content, over-reserving only
+   costs a few pixels of padding. */
 .ccc.ccc--mobile-campaign-detail {
   position: absolute;
-  inset: 0;
+  inset: var(--nx-mobile-chrome-top, 56px) 0 0 0;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -305,3 +315,167 @@
   display: flex;
   flex-direction: column;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DETAIL HERO — health, progress, readings.
+   Replaces the posture strip + two metric rails + NEXT line, which between
+   them stated the campaign's condition four times and rendered nine figures,
+   most of them zero, with `sent` appearing in two of them.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ── health ───────────────────────────────────────────────────────────── */
+
+.chm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px var(--k-pad, 16px) 4px;
+  padding: 12px 13px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-panel-solid) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+/* Flagged states take a coloured edge, never a coloured fill: a full-bleed
+   amber panel makes a one-line warning read like an outage. */
+.chm.is-flagged { border-color: color-mix(in srgb, var(--warn, #f5a524) 48%, transparent); }
+.chm.is-blocked { border-color: color-mix(in srgb, var(--danger, #f87171) 48%, transparent); }
+
+.chm__mark { padding-top: 5px; }
+
+.chm__dot {
+  display: block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary, #6b7280);
+}
+
+.chm.is-live      .chm__dot { background: var(--ok, #34d399); }
+.chm.is-attention .chm__dot { background: var(--warn, #f5a524); }
+.chm.is-blocked   .chm__dot { background: var(--danger, #f87171); }
+.chm.is-scheduled .chm__dot { background: var(--accent); }
+.chm.is-test      .chm__dot { background: #c084fc; }
+
+.chm__dot.is-pulsing { animation: chm-pulse 2.6s ease-in-out infinite; }
+
+@keyframes chm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok, #34d399) 48%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ok, #34d399) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) { .chm__dot.is-pulsing { animation: none; } }
+
+.chm__body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.chm__headline {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  color: var(--text-primary, #fff);
+}
+
+.chm__detail {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary, #9aa4b2);
+}
+
+/* ── progress ─────────────────────────────────────────────────────────── */
+
+.cdx__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px var(--k-pad, 16px) 4px;
+}
+
+.cdx__progress-line { display: flex; align-items: baseline; gap: 7px; }
+
+.cdx__progress-line strong {
+  font-size: 30px;
+  font-weight: 690;
+  line-height: 1;
+  letter-spacing: -0.028em;
+  color: var(--text-primary, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.cdx__progress-line em {
+  font-style: normal;
+  font-size: 13px;
+  color: var(--text-tertiary, #6b7280);
+}
+
+.cdx__progress-line b {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--text-secondary, #9aa4b2);
+  font-variant-numeric: tabular-nums;
+}
+
+.cdx__progress-rail {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 48%, transparent);
+  overflow: hidden;
+}
+
+.cdx__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, transparent), var(--accent));
+  /* Animates from its previous width, so a realtime poll reads as advancing
+     rather than as the bar restarting from zero. */
+  transition: width 620ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) { .cdx__progress-fill { transition: none; } }
+
+/* ── hero readings ────────────────────────────────────────────────────── */
+
+/* Two-up rather than a five-across rail: at 390px five cells give each figure
+   ~62px, which forces 11px labels and makes every number look incidental. */
+.cdx__hero {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  margin: 14px var(--k-pad, 16px) 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border) 26%, transparent);
+}
+
+.cdx__hero-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 13px 14px;
+  background: var(--bg-panel-solid, #0d1117);
+}
+
+.cdx__hero-cell strong {
+  font-size: 21px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  color: var(--text-primary, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.cdx__hero-cell em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--text-tertiary, #6b7280);
+}
+
+/* A single trailing cell would sit in a half-width box; let it span instead. */
+.cdx__hero-cell:only-child { grid-column: 1 / -1; }
+
+.cdx__recency {
+  margin: 10px var(--k-pad, 16px) 0;
+  font-size: 12px;
+  color: var(--text-tertiary, #6b7280);
+}
+
+.cdx__recency:empty { display: none; }
