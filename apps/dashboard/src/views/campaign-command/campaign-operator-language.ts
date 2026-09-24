@@ -63,6 +63,9 @@ const BLOCKER_COPY: Record<string, string> = {
   no_targets: 'This campaign has no audience yet.',
   no_target_definition: 'This campaign has no audience yet.',
   quarantined: 'This campaign is on hold for a targeting problem.',
+  // The quarantine guard's code: the built audience holds sellers outside the
+  // explicit selection it was built from.
+  target_integrity_violation: 'Its audience reaches beyond the properties that were selected.',
   emergency_stop: 'Sending is stopped system-wide.',
   no_template: 'No approved message is ready for this audience.',
   no_template_after_fallback: 'No approved message is ready for this audience.',

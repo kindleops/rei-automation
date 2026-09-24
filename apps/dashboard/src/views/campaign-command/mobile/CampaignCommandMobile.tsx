@@ -1,330 +1,194 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+/**
+ * CAMPAIGN COMMAND — mobile index.
+ *
+ * Built to answer four questions in two seconds: what is running, what needs
+ * attention, what is coming next, what should I do. The composition, top down:
+ *
+ *   header      identity + one line of state + two actions (search, new)
+ *   segments    Active · Scheduled · Drafts · Completed, with live counts
+ *   today       sellers ready · sent today · the attention callout
+ *   cards       one anatomy per campaign state (see CampaignIndexCard)
+ *
+ * The previous screen spent its first 470px on a 30px title, a subtitle, a row
+ * of capsule filters and a three-column KPI table before the first campaign.
+ * This one reaches the first card at about half that.
+ *
+ * STATE THAT SURVIVES: the tab, the search and the scroll position are kept
+ * across a trip into a campaign and back — the index unmounts while Detail is
+ * open, so they live in a module store (and sessionStorage for the tab/search)
+ * rather than in component state.
+ */
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { CampaignCardMobile } from './CampaignCardMobile'
-import './campaign-card-mobile.css'
-import {
-  getCampaignSendsSinceBackend,
-  getQueueControlSettings,
-} from '../../../lib/api/backendClient'
+import { getCampaignSendsSinceBackend, getQueueControlSettings } from '../../../lib/api/backendClient'
 import type { CampaignModel, CampaignSummary } from '../campaigns.types'
 import type { CampaignListFilter } from '../campaign-health'
+import { formatWhen } from '../campaign-operator-language'
+import { CampaignCardSkeleton, CampaignIndexCard, CountUp } from './CampaignIndexCard'
+import { CampaignIndexMenu } from './CampaignIndexMenu'
+import {
+  EMPTY_STATE,
+  PRIMARY_FILTERS,
+  SECONDARY_FILTERS,
+  displayName,
+  matchesIndexFilter,
+  nextStart,
+  orderForIndex,
+  rollupCampaigns,
+  summaryLine,
+  tabCounts,
+} from './campaign-index-model'
+import './campaign-index.css'
 
-/**
- * Campaign Command — mobile, 393pt.
- *
- * An acquisition operations surface, not a consumer list. The previous attempt
- * failed by removing density: one giant unscoped number, sparse rows, and no
- * KPI / market / routing intelligence, so the screen looked calm but could not
- * be operated from.
- *
- * SCOPE IS THE SPINE. These are different universes and are never mixed:
- *   169,797  seller universe            (whole target graph)
- *   139,462  contact resolved
- *   117,785  SMS-eligible
- *   112,695  globally READY
- *      ~1.0k targeted inside campaigns
- *          READY inside ACTIVE campaigns   <- the KPI, labelled READY·ACTIVE
- * Showing "906" with no universe attached is what made the last version wrong.
- *
- * Zones C (KPI rail), D (inventory ladder) and E (markets) render as ONE
- * continuous command surface — a single panel with internal rules — rather than
- * three stacked cards.
- */
+export {
+  PRIMARY_FILTERS,
+  SECONDARY_FILTERS,
+  rollupCampaigns,
+  summaryLine,
+  targetModePhrase,
+  targetingPhrase,
+  toneOf,
+  TONE_LABEL,
+  type Tone,
+} from './campaign-index-model'
 
-export type Tone = 'blocked' | 'running' | 'scheduled' | 'paused' | 'test' | 'built' | 'previewed' | 'failed' | 'draft' | 'done'
-
-export const TONE_LABEL: Record<Tone, string> = {
-  blocked: 'BLOCKED',
-  running: 'RUNNING',
-  scheduled: 'SCHEDULED',
-  paused: 'PAUSED',
-  test: 'TEST',
-  built: 'BUILT',
-  previewed: 'PREVIEWED',
-  failed: 'FAILED',
-  draft: 'DRAFT',
-  done: 'COMPLETE',
-}
-
-/**
- * The row badge, from the canonical lifecycle status.
- *
- * `built`, `previewed` and `failed` used to fall through the bottom of this
- * function and render as DRAFT. That is a materially different claim: a built
- * campaign HAS resolved its targets, and "Entity Graph · 5 properties" — status
- * `built`, 2 resolved targets — announced itself as DRAFT, i.e. as though no
- * work had happened at all. `failed` reading as DRAFT is worse: it hides a
- * failure behind the most benign state there is.
- *
- * Test mode still wins over everything, because "no SMS will transmit" is the
- * most important thing about a campaign that has it.
- */
-export function toneOf(c: CampaignSummary): Tone {
-  const s = String(c.status ?? '').toLowerCase()
-  /**
-   * BLOCKED outranks everything, including test mode.
-   *
-   * Test mode is a SAFE state — "no SMS will transmit". A quarantined campaign
-   * is an UNSAFE one: campaign df0671fa holds 984 target rows for a
-   * 186-property explicit selection, 878 of them outside it. The launch path
-   * happens to refuse it today for an incidental reason ("no ready recipients
-   * in target snapshot"), which tells the operator nothing, so the badge has
-   * to carry the real reason.
-   */
-  if (c.quarantined) return 'blocked'
-  if (c.operator_state === 'test_mode') return 'test'
-  if (s === 'active' || s === 'activating' || s === 'live_limited') return 'running'
-  if (s === 'scheduled' || s === 'queued') return 'scheduled'
-  if (s === 'paused') return 'paused'
-  if (s === 'completed' || s === 'archived') return 'done'
-  if (s === 'failed') return 'failed'
-  if (s === 'built') return 'built'
-  if (s === 'previewed' || s === 'ready') return 'previewed'
-  return 'draft'
-}
-
-const nf = (n: number | null | undefined) => Number(n ?? 0).toLocaleString()
-
-/**
- * The primary state selector (§8).
- *
- * These are the CANONICAL `CampaignListFilter` values. The previous chip row
- * passed `'active'`, which is not one of them — `matchesListFilter` has no
- * branch for it and falls through to `return true`, so the "Active" chip
- * quietly showed every campaign in the book. The `as CampaignListFilter[]`
- * cast on that array is what stopped the compiler from saying so.
- */
-export const PRIMARY_FILTERS: Array<{ key: CampaignListFilter; label: string }> = [
-  { key: 'live', label: 'Active' },
-  { key: 'scheduled', label: 'Scheduled' },
-  { key: 'draft', label: 'Drafts' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'all', label: 'All' },
-]
-
-/** What an empty filter means, in words — "No campaigns match." said nothing. */
-const EMPTY_FOR_FILTER: Partial<Record<CampaignListFilter, string>> = {
-  live: 'Nothing is running right now.',
-  scheduled: 'Nothing is scheduled.',
-  draft: 'No drafts.',
-  completed: 'No completed campaigns yet.',
-  needs_attention: 'Nothing needs attention.',
-  paused: 'Nothing is paused.',
-  ready: 'Nothing is ready to launch.',
-  archived: 'Nothing is archived.',
-}
-
-/**
- * Narrower cuts, kept in the search sheet so the primary row stays short.
- * No "All" here: the state row directly above already has it, and two
- * controls for one filter is one too many.
- */
-export const SECONDARY_FILTERS: Array<{ key: CampaignListFilter; label: string }> = [
-  { key: 'needs_attention', label: 'Needs attention' },
-  { key: 'paused', label: 'Paused' },
-  { key: 'ready', label: 'Ready' },
-  { key: 'archived', label: 'Archived' },
-]
-
-/**
- * The one line under the title.
- *
- * Says what is true and what needs a person, in that order, and says nothing
- * when neither is interesting — an empty book should not announce "0 active".
- * Sending posture is appended only when it is NOT the normal live state:
- * "sending live" on every screen is wallpaper, "sending paused" is news.
- */
-export function summaryLine(
-  roll: { running: number; attention: number; scheduled: number },
-  sendMode?: string | null,
-): string {
-  const bits: string[] = []
-  if (roll.running > 0) bits.push(`${roll.running} active`)
-  if (roll.scheduled > 0) bits.push(`${roll.scheduled} scheduled`)
-  if (roll.attention > 0) bits.push(`${roll.attention} ${roll.attention === 1 ? 'needs' : 'need'} attention`)
-  const mode = String(sendMode ?? '').toLowerCase()
-  if (mode && mode !== 'live' && mode !== 'normal') bits.push('sending paused')
-  return bits.join(' · ')
-}
-
-/**
- * Three materially different states, which the row used to collapse into one.
- *
- * `total_targets === 0` was read as "no targeting", but 20 of the 23
- * zero-target campaigns on 2026-09-15 carried a real target definition —
- * including "Entity Graph · 5 properties" with five explicit property ids. An
- * operator told "no targeting" reconfigures targeting they already have; what
- * they actually need is a build.
- */
-/**
- * Book-wide rollup, extracted so the numbers on the strip are testable without
- * rendering. See the READY comment below for why terminal campaigns are split
- * out rather than summed in.
- */
-export function rollupCampaigns(all: CampaignSummary[]) {
-  let running = 0, runningTest = 0, scheduled = 0, attention = 0, replies = 0
-  let readyLive = 0, readyTerminal = 0
-  for (const c of all) {
-    const status = String(c.status ?? '').toLowerCase()
-    const isActive = status === 'active' || status === 'activating' || status === 'live_limited'
-    const isScheduled = status === 'scheduled' || status === 'queued'
-    const isTerminal = status === 'archived' || status === 'completed'
-    if (isActive) {
-      running += 1
-      if (c.operator_state === 'test_mode') runningTest += 1
-    }
-    if (isScheduled) scheduled += 1
-    if (attentionOf(c)) attention += 1
-    replies += c.reply_count ?? 0
-    if (isTerminal) readyTerminal += c.ready_targets
-    else readyLive += c.ready_targets
-  }
-  return { running, runningTest, scheduled, attention, replies, readyLive, readyTerminal }
-}
-
-/**
- * EXPLICIT TARGETS vs DYNAMIC COHORT — §3.
- *
- * The operator must never confuse the two, because they promise different
- * things: a pinned selection can only ever contain the ids that were picked,
- * while a dynamic cohort is re-resolved at build time and can pick up records
- * added later. Nothing in the mobile UI said which a campaign had.
- *
- * The selected count is shown alongside, because it is the number the operator
- * chose — and it is not the same number as the built target count.
- * campaign_targets is contact-grained, so five selected properties resolve to
- * two rows here and 186 resolve to 984. Showing only the built count is how a
- * widened cohort hides.
- */
-export function targetModePhrase(c: CampaignSummary): string | null {
-  switch (c.target_mode) {
-    case 'explicit':
-      return c.explicit_target_count != null
-        ? `Explicit · ${nf(c.explicit_target_count)} selected`
-        : 'Explicit targets'
-    case 'explicit_filtered':
-      return c.explicit_target_count != null
-        ? `Explicit ${nf(c.explicit_target_count)} + filters`
-        : 'Explicit targets + filters'
-    case 'dynamic':
-      return 'Dynamic cohort'
-    default:
-      return null
-  }
-}
-
-export function targetingPhrase(c: CampaignSummary): string {
-  if (c.total_targets > 0) return `${nf(c.total_targets)} target${c.total_targets === 1 ? '' : 's'}`
-  if (c.has_target_definition) return 'targeting set · not built'
-  return 'no targeting configured'
-}
+const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 10_000) return `${Math.round(n / 1000)}k`
-  if (n >= 1_000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
+  if (n >= 1_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  return n.toLocaleString()
 }
 
-/**
- * ATTENTION = needs an operator to act NOW.
- *
- * Explicitly NOT attention: being paused, being a draft, being in test mode, or
- * the global send containment. Those are deliberate operating postures, and
- * counting them turned the metric into a headcount of normal states.
- */
-function attentionOf(c: CampaignSummary): string | null {
-  const tone = toneOf(c)
-  if (tone === 'draft' || tone === 'done') return null
+// ── State that outlives the component ───────────────────────────────────────
 
-  if (c.launch_readiness === 'blocked') {
-    const first = c.launch_blockers?.[0]
-    return first ? String(first) : 'Blocked'
-  }
-  if (tone === 'running' && c.total_targets > 0 && c.ready_targets === 0) return 'Out of ready inventory'
-  if (tone === 'running' && c.sent_count === 0) return 'Live but nothing sent'
-  if (c.opt_out_rate > 5) return `${c.opt_out_rate.toFixed(1)}% opt-out`
-  if (c.sent_count > 0 && c.failed_count / c.sent_count > 0.05) {
-    return `${((c.failed_count / c.sent_count) * 100).toFixed(1)}% failing`
-  }
-  return null
+const STORE_KEY = 'campaign-command.index.v1'
+type IndexMemory = { filter: CampaignListFilter; search: string; searchOpen: boolean; scope: CampaignListFilter; scrollTop: number }
+
+function readMemory(): IndexMemory {
+  const base: IndexMemory = { filter: 'live', search: '', searchOpen: false, scope: 'all', scrollTop: 0 }
+  try {
+    const raw = sessionStorage.getItem(STORE_KEY)
+    if (raw) return { ...base, ...(JSON.parse(raw) as Partial<IndexMemory>), scrollTop: 0 }
+  } catch { /* private mode */ }
+  return base
 }
+
+let memory: IndexMemory | null = null
+export function getMemory(): IndexMemory {
+  if (!memory) memory = readMemory()
+  return memory
+}
+export function remember(patch: Partial<IndexMemory>) {
+  memory = { ...getMemory(), ...patch }
+  try {
+    const { filter, search, searchOpen, scope } = memory
+    sessionStorage.setItem(STORE_KEY, JSON.stringify({ filter, search, searchOpen, scope }))
+  } catch { /* private mode */ }
+}
+
+/** For tests: forget the in-memory copy so the next read comes from storage. */
+export function resetIndexMemoryForTest() { memory = null }
+
+/** Only the first paint of a session staggers in; returns never replay it. */
+let enteredOnce = false
+
+const POLL_MS = 45_000
 
 export function CampaignCommandMobile({
   model,
-  campaigns,
   loading,
-  search,
-  onSearchChange,
-  statusFilter,
-  onStatusFilterChange,
+  failed,
+  onRetry,
+  onRefresh,
   onSelect,
   onNew,
+  onContinueSetup,
+  onAction,
 }: {
   model: CampaignModel | null
-  campaigns: CampaignSummary[]
   loading: boolean
-  search: string
-  onSearchChange: (value: string) => void
-  statusFilter: CampaignListFilter
-  onStatusFilterChange: (value: CampaignListFilter) => void
+  failed: boolean
+  onRetry: () => void
+  onRefresh: () => void
   onSelect: (campaign: CampaignSummary) => void
   onNew: () => void
+  onContinueSetup: (campaign: CampaignSummary) => void
+  onAction: (action: string, campaign: CampaignSummary, payload?: Record<string, unknown>) => Promise<unknown> | void
 }) {
-  const [searchOpen, setSearchOpen] = useState(false)
-  /**
-   * THE MARKET INVENTORY FEED IS GONE, NOT HIDDEN.
-   *
-   * `/api/cockpit/campaigns/market-inventory` has no route and never did: the
-   * request fell through to `campaigns/[id]` and was correctly rejected as a
-   * non-UUID campaign id, so every single load of this screen fired a
-   * guaranteed 400. The INVENTORY ladder and MARKETS strip it fed were already
-   * withheld on failure, which meant the only thing the call still produced was
-   * a failing request and two components that could never render.
-   *
-   * Removed rather than left "temporarily unavailable" — a capability with no
-   * backend is not unavailable, it does not exist. When a canonical inventory
-   * source lands, this is the seam to restore.
-   */
+  const initial = getMemory()
+  const [filter, setFilterState] = useState<CampaignListFilter>(initial.filter)
+  const [search, setSearchState] = useState(initial.search)
+  const [searchOpen, setSearchOpenState] = useState(initial.searchOpen)
+  const [scope, setScopeState] = useState<CampaignListFilter>(initial.scope)
+  const [menuFor, setMenuFor] = useState<CampaignSummary | null>(null)
   const [sendMode, setSendMode] = useState<string | null>(null)
-  /**
-   * SENT TODAY, MEASURED.
-   *
-   * The cell read `kpis.sentToday`, which is every active campaign's LIFETIME
-   * sent_count added up — 363 on a day nothing sent (Miami, paused since
-   * Sep 23, contributed 354). This counts messages that went out since this
-   * device's midnight. Until it answers, the cell isn't shown.
-   */
   const [sentToday, setSentToday] = useState<number | null>(null)
+
+  const setFilter = (f: CampaignListFilter) => { setFilterState(f); remember({ filter: f }) }
+  const setSearch = (s: string) => { setSearchState(s); remember({ search: s }) }
+  const setScope = (s: CampaignListFilter) => { setScopeState(s); remember({ scope: s }) }
+  // Closing search ends it: query and scope both reset, so the next search
+  // starts across every campaign rather than inside whatever cut was last used.
+  const setSearchOpen = (open: boolean) => {
+    setSearchOpenState(open)
+    remember({ searchOpen: open, ...(open ? {} : { search: '', scope: 'all' }) })
+    if (!open) { setSearchState(''); setScopeState('all') }
+  }
+
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const chromeRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const segRef = useRef<HTMLDivElement | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
-  const statesRef = useRef<HTMLDivElement | null>(null)
+  const [indicator, setIndicator] = useState<{ x: number; w: number; dir: 'l' | 'r' } | null>(null)
 
-  // The rail scrolls and fades at its trailing edge, so the selected state —
-  // "All" is last — could sit half under the fade. Keep it in view.
+  const all = useMemo(() => model?.campaigns ?? [], [model])
+  const roll = useMemo(() => rollupCampaigns(all), [all])
+  const counts = useMemo(() => tabCounts(all), [all])
+  const upcoming = useMemo(() => nextStart(all), [all])
+
+  const activeFilter = searchOpen ? scope : filter
+  const query = searchOpen ? search.trim().toLowerCase() : ''
+  const list = useMemo(() => {
+    const scoped = all.filter((c) => matchesIndexFilter(c, activeFilter))
+    const found = query
+      ? scoped.filter((c) => {
+          const { title, subtitle } = displayName(c)
+          return [c.campaign_name, title, subtitle, c.market_label].some((v) => String(v ?? '').toLowerCase().includes(query))
+        })
+      : scoped
+    return orderForIndex(found)
+  }, [all, activeFilter, query])
+
+  // ── realtime: a quiet refresh while the index is on screen ────────────────
+  const refreshRef = useRef(onRefresh)
+  refreshRef.current = onRefresh
   useEffect(() => {
-    const rail = statesRef.current
-    const el = rail?.querySelector<HTMLElement>('.cmk__state-tab.is-on')
-    if (!rail || !el) return
-    // Measured against the rail itself; offsetLeft is relative to whichever
-    // ancestor is positioned, not the scroller.
-    const tab = el.getBoundingClientRect()
-    const box = rail.getBoundingClientRect()
-    const fade = 34 // the trailing mask
-    if (tab.right > box.right - fade) rail.scrollBy({ left: tab.right - (box.right - fade), behavior: 'smooth' })
-    else if (tab.left < box.left + 16) rail.scrollBy({ left: tab.left - (box.left + 16), behavior: 'smooth' })
-  }, [statusFilter])
+    let last = Date.now()
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      last = Date.now()
+      refreshRef.current()
+    }
+    const id = window.setInterval(tick, POLL_MS)
+    const onVis = () => { if (document.visibilityState === 'visible' && Date.now() - last > POLL_MS / 2) tick() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { window.clearInterval(id); document.removeEventListener('visibilitychange', onVis) }
+  }, [])
 
+  // Sent today: measured from the message log since this device's midnight.
   useEffect(() => {
     let dead = false
     const midnight = new Date()
     midnight.setHours(0, 0, 0, 0)
     void getCampaignSendsSinceBackend(midnight.toISOString()).then((res) => {
-      if (!dead) setSentToday(res.ok && res.data?.ok ? res.data.total : null)
+      if (!dead && res.ok && res.data?.ok) setSentToday(res.data.total)
     })
     return () => { dead = true }
   }, [model])
 
-  // Canonical operating posture. Loaded alongside the list, never blocking it.
   useEffect(() => {
     let dead = false
     void getQueueControlSettings().then((res) => {
@@ -335,200 +199,284 @@ export function CampaignCommandMobile({
     return () => { dead = true }
   }, [])
 
-  useEffect(() => { if (searchOpen) searchRef.current?.focus() }, [searchOpen])
+  useEffect(() => { if (searchOpen) searchRef.current?.focus({ preventScroll: true }) }, [searchOpen])
 
-  const all = model?.campaigns ?? []
+  // ── segmented control indicator ──────────────────────────────────────────
+  // The liquid selection: its leading edge travels faster than its trailing
+  // edge, so it stretches toward the new tab and settles — `dir` picks which
+  // edge leads.
+  useLayoutEffect(() => {
+    const rail = segRef.current
+    const el = rail?.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (!rail || !el) { setIndicator(null); return }
+    setIndicator((prev) => ({ x: el.offsetLeft, w: el.offsetWidth, dir: prev && el.offsetLeft < prev.x ? 'l' : 'r' }))
+  }, [filter, searchOpen, counts])
 
-  /**
-   * Book-wide rollup.
-   *
-   * `running` counts CANONICAL status, not tone. toneOf() returns 'test'
-   * before it ever checks `active`, which is right for a row badge — test mode
-   * is the more important fact about that campaign — but it made the posture
-   * line read "0 RUNNING" while /campaigns reported activeCampaigns: 3. The
-   * three were active AND in test mode. Counting status and reporting the test
-   * split separately says both true things instead of hiding one.
-   */
-  const roll = useMemo(() => rollupCampaigns(all), [all])
+  // The chrome floats over the list; the list reserves its height.
+  useLayoutEffect(() => {
+    const chrome = chromeRef.current, root = rootRef.current
+    if (!chrome || !root) return
+    // Reserve the EXPANDED chrome. The large title shrinks as the list
+    // scrolls; following that height would pull the list up under the
+    // operator's finger mid-scroll. Re-measure only at rest or when it grows
+    // (search opening, a wrap).
+    let reserved = 0
+    const apply = () => {
+      const h = chrome.offsetHeight
+      const atRest = (scrollRef.current?.scrollTop ?? 0) <= 2
+      if (!atRest && h <= reserved) return
+      reserved = h
+      root.style.setProperty('--cx-chrome-h', `${h}px`)
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(chrome)
+    return () => ro.disconnect()
+  }, [])
 
-  const k = model?.kpis
-  const filterActive = statusFilter !== 'all' || search.trim().length > 0
+  // Large-title collapse, driven by one CSS variable written straight to the
+  // root on scroll — no React render per frame.
+  const collapseFrame = useRef(0)
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    remember({ scrollTop: el.scrollTop })
+    if (collapseFrame.current) return
+    collapseFrame.current = requestAnimationFrame(() => {
+      collapseFrame.current = 0
+      const t = Math.max(0, Math.min(1, el.scrollTop / 64))
+      rootRef.current?.style.setProperty('--cx-collapse', t.toFixed(3))
+      rootRef.current?.classList.toggle('is-scrolled', el.scrollTop > 2)
+    })
+  }, [])
 
-  /**
-   * READY counts the canonical `ready_targets` of every non-terminal campaign.
-   *
-   * The old value added `ready_targets` only where tone was 'running', and
-   * toneOf() returns 'test' before it checks 'active' — so under the
-   * canary-only posture nothing qualified and the strip read "READY·ACTIVE 0"
-   * while the very first row showed 303 ready. Measured 2026-09-15:
-   * active 453 + paused 20 + draft 3 = 476 actionable, against a book-wide
-   * canonical 540 that also counts 64 inside archived campaigns.
-   */
-  /*
-   * THE BOOK-WIDE RAIL, REDUCED TO WHAT IS TRUE TODAY.
-   *
-   * This rendered six fixed cells, and on a normal day three of them read 0 —
-   * QUEUED, REPLIES, LEADS. Six numbers of which half are zero is not density;
-   * it teaches the operator to stop reading the rail. A zero is only worth a
-   * cell when its being zero is itself the news, which is true of ATTENTION
-   * (nothing needs you) and of nothing else here.
-   *
-   * ATTENTION is always shown for exactly that reason, and always last, so the
-   * rail ends on the only cell that can demand action.
-   */
-  const kpiCandidates: Array<{ label: string; value: number; tone?: 'live' | 'warn' | 'good'; always?: boolean }> = [
-    // Sellers, not campaigns: "Ready 1.5k" alone read as ready campaigns.
-    { label: 'Sellers ready', value: roll.readyLive, tone: roll.readyLive > 0 ? 'live' : undefined },
-    // Shown once measured: when anything sent, or when campaigns are running
-    // and nothing has — a quiet day for a live campaign is news.
-    ...(sentToday != null && (sentToday > 0 || roll.running > 0)
-      ? [{ label: 'Sent today', value: sentToday, always: true }]
-      : []),
-    { label: 'Queued', value: k?.scheduledQueueRows ?? 0 },
-    { label: 'Replies', value: roll.replies },
-    { label: 'Qualified', value: k?.positiveReplies ?? 0, tone: (k?.positiveReplies ?? 0) > 0 ? 'good' : undefined },
-    { label: 'Attention', value: roll.attention, tone: roll.attention > 0 ? 'warn' : undefined, always: true },
-  ]
 
-  const kpis = kpiCandidates
-    .filter((kpi) => kpi.always || kpi.value > 0)
-    .map((kpi) => ({ label: kpi.label, value: compact(kpi.value), tone: kpi.tone }))
+  // ── scroll position survives a trip into a campaign ──────────────────────
+  const restored = useRef(false)
+  useLayoutEffect(() => {
+    if (restored.current || !scrollRef.current || all.length === 0) return
+    restored.current = true
+    scrollRef.current.scrollTop = getMemory().scrollTop
+    onScroll()
+  }, [all.length, onScroll])
+  const changeFilter = (f: CampaignListFilter) => {
+    if (f === filter) {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    setFilter(f)
+    remember({ scrollTop: 0 })
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }
+
+  const openAttention = () => {
+    setSearchOpenState(true)
+    remember({ searchOpen: true })
+    setScope('needs_attention')
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }
+
+  const animate = !enteredOnce && list.length > 0
+  useEffect(() => { if (animate) enteredOnce = true }, [animate])
+
+  const subtitle = model ? summaryLine(roll, sendMode) || 'Nothing is running' : ''
+  const empty = EMPTY_STATE[activeFilter] ?? EMPTY_STATE.all
+  const showSkeleton = loading && !model
+  const showError = failed && !model
 
   return (
-    <div className="cmk">
-      <header className="cmk__bar">
-        <div className="cmk__title">
-          <h1 className="cmk__h1">Campaign Command</h1>
-          {/* One line of context, in words. The previous header shouted four
-              all-caps clauses that wrapped to two lines at 390pt and still did
-              not say what needed doing. */}
-          <p className="cmk__sub">{summaryLine(roll, sendMode)}</p>
-        </div>
-        <div className="cmk__bar-actions">
-          <button
-            type="button"
-            className={`cmk__ico${filterActive ? ' is-on' : ''}`}
-            aria-label="Search and filter"
-            onClick={() => setSearchOpen((v) => !v)}
-          >
-            <Icon name="search" size={16} />
-          </button>
-          <button type="button" className="cmk__ico" aria-label="New campaign" onClick={onNew}>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-              <path d="M9 3.4v11.2M3.4 9h11.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
-      {/* Primary state selector. Always visible: every filter used to live
-          behind the search toggle, so the list offered no way to answer
-          "what is running?" without typing. */}
-      <div className="cmk__states" role="tablist" aria-label="Campaign state" ref={statesRef}>
-        {PRIMARY_FILTERS.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === key}
-            className={`cmk__state-tab${statusFilter === key ? ' is-on' : ''}`}
-            onClick={() => onStatusFilterChange(key)}
-          >
-            {label}
-          </button>
-        ))}
+    <div className="cxi" ref={rootRef}>
+      {/* Ambient light: one composited layer, slow drift, behind the chrome only. */}
+      <div className="cxi__aurora" aria-hidden="true">
+        <span className="cxi__aurora-a" />
+        <span className="cxi__aurora-b" />
+        <span className="cxi__aurora-c" />
       </div>
 
-      <div className="cmk__scroll">
-        {/* ── One continuous command surface: KPI rail + inventory + markets ── */}
-        <section className="cmk__panel" aria-label="Operational intelligence">
-          <div className="cmk__kpis">
-            {kpis.map((kpi) => {
-              const idle = kpi.value === '0'
-              return (
-                <div key={kpi.label} className={`cmk__kpi${idle ? ' is-idle' : ''}`}>
-                  <span className="cmk__kpi-label">{kpi.label}</span>
-                  <span className={`cmk__kpi-value${kpi.tone ? ` is-${kpi.tone}` : ''}${idle ? ' is-zero' : ''}`}>
-                    {kpi.value}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-
-        </section>
-
-        {searchOpen && (
-          <div className="cmk__find">
-            {/* Search filters the loaded page, which is the whole corpus only
-                while the server did not cut it off. 40 campaigns today against
-                a 200 ceiling; if that ever flips, say so rather than quietly
-                searching a prefix. */}
-            {model?.truncated && (
-              <div className="cmk__find-note" role="status">
-                Showing the {nf(all.length)} most recent of more than {nf(model.listCap ?? all.length)} campaigns —
-                search covers only these.
-              </div>
-            )}
-            {/* A label, so a tap anywhere on the field focuses it — the input
-                itself is only 24px tall inside the 44px field. */}
-            <label className="cmk__find-field">
-              <Icon name="search" size={14} />
+      <div className="cxi__chrome" ref={chromeRef}>
+      <header className={cls('cxi__head', searchOpen && 'is-searching')}>
+        {searchOpen ? (
+          <div className="cxi__search">
+            <label className="cxi__search-field">
+              <Icon name="search" size={15} />
               <input
                 ref={searchRef}
                 type="search"
                 inputMode="search"
+                enterKeyHint="search"
                 value={search}
-                onChange={(e) => onSearchChange(e.target.value)}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search campaigns"
                 aria-label="Search campaigns"
               />
-            </label>
-            <div className="cmk__find-chips">
-              {SECONDARY_FILTERS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`cmk__find-chip${statusFilter === key ? ' is-on' : ''}`}
-                  onClick={() => onStatusFilterChange(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Campaign rows ─────────────────────────────────────────────── */}
-        <div className="cmk__list" role="list">
-          {loading && campaigns.length === 0
-            ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="cmk__card-skeleton" aria-hidden="true" />)
-            : campaigns.map((c) => (
-                <CampaignCardMobile key={c.id} campaign={c} onOpen={onSelect} />
-              ))}
-
-          {!loading && campaigns.length === 0 && (
-            <div className="cmk__empty">
-              <p>
-                {search.trim()
-                  ? `No campaigns match “${search.trim()}”.`
-                  : filterActive
-                    ? EMPTY_FOR_FILTER[statusFilter] ?? 'No campaigns here.'
-                    : 'No campaigns yet.'}
-              </p>
-              {filterActive && (
-                <button
-                  type="button"
-                  className="cmk__empty-all"
-                  onClick={() => { onSearchChange(''); onStatusFilterChange('all') }}
-                >
-                  Show all campaigns
+              {search && (
+                <button type="button" className="cxi__search-clear" aria-label="Clear search" onClick={() => setSearch('')}>
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                 </button>
               )}
+            </label>
+            <button type="button" className="cxi__search-done" onClick={() => setSearchOpen(false)}>Done</button>
+          </div>
+        ) : (
+          <>
+            <div className="cxi__id">
+              <h1 className="cxi__title">Campaigns</h1>
+              <p className={cls('cxi__state', roll.attention > 0 && 'has-attention')}>
+                {roll.running > 0 && <span className="cxi__state-dot" aria-hidden="true" />}
+                {subtitle}
+              </p>
             </div>
+            <div className="cxi__actions">
+              <button type="button" className="cxi__icon" aria-label="Search campaigns" onClick={() => setSearchOpen(true)}>
+                <Icon name="search" size={17} />
+              </button>
+              <button type="button" className="cxi__icon cxi__icon--new" aria-label="New campaign" onClick={onNew}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M8 2.75v10.5M2.75 8h10.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          </>
+        )}
+      </header>
+
+      {searchOpen ? (
+        <div className="cxi__scopes" role="tablist" aria-label="Search in">
+          {SECONDARY_FILTERS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={scope === key}
+              className={cls('cxi__scope', scope === key && 'is-on', key === 'needs_attention' && (counts[key] ?? 0) > 0 && 'is-alert')}
+              onClick={() => setScope(key)}
+            >
+              {label}
+              <span className="cxi__scope-count">{counts[key] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="cxi__seg" role="tablist" aria-label="Campaign state" ref={segRef}>
+          {PRIMARY_FILTERS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={filter === key}
+              className={cls('cxi__seg-tab', filter === key && 'is-on')}
+              onClick={() => changeFilter(key)}
+            >
+              {label}
+              {model && (counts[key] ?? 0) > 0 && <span className="cxi__seg-count">{counts[key]}</span>}
+            </button>
+          ))}
+          {indicator && (
+            <span
+              className={cls('cxi__seg-blob', `is-${indicator.dir}`)}
+              aria-hidden="true"
+              style={{ left: indicator.x, right: `calc(100% - ${indicator.x + indicator.w}px)` }}
+            />
           )}
         </div>
+      )}
       </div>
+
+      <div className="cxi__scroll" ref={scrollRef} onScroll={onScroll}>
+        {!searchOpen && model && (
+          <section className="cxi__today" aria-label="Today">
+            <span className="cxi__stat">
+              <CountUp className={cls('cxi__stat-value', roll.readyLive > 0 && 'is-ready')} value={roll.readyLive} format={compact} />
+              <span className="cxi__stat-label">sellers ready</span>
+            </span>
+            {sentToday != null && (
+              <span className="cxi__stat">
+                <CountUp className={cls('cxi__stat-value', sentToday === 0 && 'is-quiet')} value={sentToday} format={compact} />
+                <span className="cxi__stat-label">sent today</span>
+              </span>
+            )}
+            {roll.attention > 0 ? (
+              <button type="button" className="cxi__alert" onClick={openAttention}>
+                <span className="cxi__alert-count">{roll.attention}</span>
+                <span className="cxi__alert-label">{roll.attention === 1 ? 'needs attention' : 'need attention'}</span>
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+            ) : (
+              <span className="cxi__clear">
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.5 8.4 6.6 11.3 12.5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                All clear
+              </span>
+            )}
+            {upcoming && (
+              <span className="cxi__next">
+                Next start · <strong>{displayName(upcoming.campaign).title}</strong> {formatWhen(upcoming.campaign.next_send_at as string)}
+              </span>
+            )}
+          </section>
+        )}
+
+        {searchOpen && model && (
+          <p className="cxi__results" role="status">
+            {list.length === 0 ? '' : `${list.length} ${list.length === 1 ? 'campaign' : 'campaigns'}`}
+            {model.truncated && ` · the ${all.length} most recent`}
+          </p>
+        )}
+
+        {showError ? (
+          <div className="cxi__empty is-error" role="alert">
+            <p className="cxi__empty-title">Campaigns couldn’t be loaded.</p>
+            <p className="cxi__empty-body">Check your connection and try again.</p>
+            <button type="button" className="cxi__empty-action" onClick={onRetry}>Retry</button>
+          </div>
+        ) : showSkeleton ? (
+          <div className="cxi__list" aria-busy="true" aria-label="Loading campaigns">
+            {Array.from({ length: 4 }).map((_, i) => <CampaignCardSkeleton key={i} />)}
+          </div>
+        ) : list.length > 0 ? (
+          <div className="cxi__list" role="list" key={`${searchOpen ? 's' : 't'}:${activeFilter}`}>
+            {list.map((c, i) => (
+              <CampaignIndexCard
+                key={c.id}
+                campaign={c}
+                onOpen={onSelect}
+                onMenu={setMenuFor}
+                onContinueSetup={onContinueSetup}
+                enterIndex={animate ? i : undefined}
+              />
+            ))}
+          </div>
+        ) : model ? (
+          <div className="cxi__empty">
+            {query ? (
+              <>
+                <p className="cxi__empty-title">No campaigns match “{search.trim()}”</p>
+                <p className="cxi__empty-body">Search looks at campaign names and markets.</p>
+                {scope !== 'all' && (
+                  <button type="button" className="cxi__empty-action" onClick={() => setScope('all')}>Search all campaigns</button>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="cxi__empty-title">{empty.title}</p>
+                <p className="cxi__empty-body">{empty.body}</p>
+                {empty.action === 'new' && (
+                  <button type="button" className="cxi__empty-action" onClick={onNew}>New campaign</button>
+                )}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      {menuFor && (
+        <CampaignIndexMenu
+          campaign={menuFor}
+          onClose={() => setMenuFor(null)}
+          onOpen={onSelect}
+          onContinueSetup={onContinueSetup}
+          onAction={onAction}
+        />
+      )}
     </div>
   )
 }

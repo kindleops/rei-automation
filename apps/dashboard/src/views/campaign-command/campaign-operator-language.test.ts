@@ -8,7 +8,7 @@ import {
   describeCampaignStatus,
   RATE_MIN_SAMPLE,
 } from './campaign-operator-language'
-import { PRIMARY_FILTERS, SECONDARY_FILTERS, summaryLine } from './mobile/CampaignCommandMobile'
+import { PRIMARY_FILTERS, SECONDARY_FILTERS, summaryLine } from './mobile/campaign-index-model'
 import { matchesListFilter } from './campaign-health'
 import type { CampaignSummary } from './campaigns.types'
 

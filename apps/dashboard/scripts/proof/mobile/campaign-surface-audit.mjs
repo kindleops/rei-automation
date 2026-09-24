@@ -85,7 +85,7 @@ const run = async () => {
 
   console.log(`\n── campaign surface audit ${WIDTH}x${HEIGHT} / ${THEME} → ${OUT}`)
   await page.goto(`${BASE}/campaign-command`, { waitUntil: 'domcontentloaded', timeout: 180_000 })
-  await page.waitForSelector('.cmc__hit', { timeout: 120_000 }).catch(() => log('no campaign cards'))
+  await page.waitForSelector('.cxc__hit', { timeout: 120_000 }).catch(() => log('no campaign cards'))
   await page.waitForTimeout(2200)
 
   // ── INDEX ───────────────────────────────────────────────────────────────
@@ -159,14 +159,14 @@ const run = async () => {
   // ── DETAIL ──────────────────────────────────────────────────────────────
   if (wants('detail')) {
     await page.goto(`${BASE}/campaign-command`, { waitUntil: 'domcontentloaded', timeout: 180_000 })
-    await page.waitForSelector('.cmc__hit', { timeout: 120_000 })
+    await page.waitForSelector('.cxc__hit', { timeout: 120_000 })
     await page.waitForTimeout(1500)
 
     // Prefer a campaign that has actually sent, so sections have content.
     const pick = arg('campaign', '')
     const card = pick
-      ? page.locator('.cmc__hit').filter({ hasText: new RegExp(pick, 'i') }).first()
-      : page.locator('.cmc__hit').first()
+      ? page.locator('.cxc__hit').filter({ hasText: new RegExp(pick, 'i') }).first()
+      : page.locator('.cxc__hit').first()
     const name = (await card.locator('.cmc__name').textContent().catch(() => ''))?.trim()
     await card.click().catch(() => {})
     await page.waitForTimeout(3500)

@@ -52,13 +52,13 @@ async function audit(label, rootSel) {
 }
 
 await p.goto('http://localhost:5173/campaign-command', { waitUntil: 'domcontentloaded', timeout: 180000 })
-await p.waitForSelector('.cmc__hit', { timeout: 120000 }); await p.waitForTimeout(2000)
-await audit('index', '.cmk')
-await p.locator('.cmk__ico').first().click(); await p.waitForTimeout(600)
-await audit('index + search sheet', '.cmk__find')
-await p.locator('.cmk__ico').first().click(); await p.waitForTimeout(400)
+await p.waitForSelector('.cxc__hit', { timeout: 120000 }); await p.waitForTimeout(2000)
+await audit('index', '.cxi')
+await p.locator('[aria-label="Search campaigns"]').first().click(); await p.waitForTimeout(600)
+await audit('index + search sheet', '.cxi__search')
+await p.locator('[aria-label="Search campaigns"]').first().click(); await p.waitForTimeout(400)
 
-await p.locator('.cmc__hit').filter({ hasText: /Miami - Test Campaign/ }).first().click()
+await p.locator('.cxc__hit').filter({ hasText: /Miami - Test Campaign/ }).first().click()
 await p.waitForSelector('.cdm2', { timeout: 60000 }); await p.waitForTimeout(3500)
 await audit('detail: bar + hero + tabs', '.cdb2, .cdh, .cst')
 const tabs = (await p.locator('.cst__tab').allTextContents()).map((s) => s.trim())

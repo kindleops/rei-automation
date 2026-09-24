@@ -19,8 +19,8 @@ for (const width of WIDTHS) {
   })
 
   await p.goto('http://localhost:5173/campaign-command', { waitUntil: 'domcontentloaded', timeout: 180000 })
-  await p.waitForSelector('.cmk__ico[aria-label="New campaign"]', { timeout: 120000 })
-  await p.locator('.cmk__ico[aria-label="New campaign"]').click()
+  await p.waitForSelector('[aria-label="New campaign"]', { timeout: 120000 })
+  await p.locator('[aria-label="New campaign"]').click()
   await p.waitForSelector('.cbb-cat__head', { timeout: 60000 }); await p.waitForTimeout(1200)
   await p.locator('.cbb-cat__head').first().click(); await p.waitForTimeout(1200)
   await p.locator('.cmp-suggested-chip', { hasText: /^\+ Market$/ }).first().click()

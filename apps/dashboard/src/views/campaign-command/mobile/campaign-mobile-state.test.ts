@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TONE_LABEL, rollupCampaigns, targetModePhrase, targetingPhrase, toneOf } from './CampaignCommandMobile'
+import { TONE_LABEL, rollupCampaigns, targetModePhrase, targetingPhrase, toneOf } from './campaign-index-model'
 import type { CampaignSummary } from '../campaigns.types'
 
 /**

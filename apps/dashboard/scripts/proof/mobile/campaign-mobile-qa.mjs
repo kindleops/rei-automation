@@ -239,7 +239,7 @@ const PROBE = () => {
     })(),
     posture: text('.cmk__posture'),
     emptyState: text('.cmk__empty'),
-    searchNote: text('.cmk__find-note'),
+    searchNote: text('.cxi__search-note'),
     searchInputPresent: !!document.querySelector('input[aria-label="Search campaigns"]'),
     horizontalOverflowPx: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
     imgCount: document.querySelectorAll('img').length,

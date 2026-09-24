@@ -54,7 +54,7 @@ const run = async () => {
   await page.goto(`${BASE}/campaign-command`, { waitUntil: 'domcontentloaded', timeout: 180_000 })
 
   // Real rows, not the four aria-hidden skeletons.
-  await page.waitForSelector('.cmc__hit', { timeout: 120_000 }).catch(() => {
+  await page.waitForSelector('.cxc__hit', { timeout: 120_000 }).catch(() => {
     console.log('  (no campaign rows matched the expected selector — capturing whatever rendered)')
   })
   await page.waitForTimeout(2500)
@@ -71,7 +71,7 @@ const run = async () => {
   // as an empty screen and reads exactly like a blank-render bug. It is not one.
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.waitForTimeout(400)
-  const row = page.locator('.cmc__hit').first()
+  const row = page.locator('.cxc__hit').first()
   if (await row.count()) {
     await row.click({ timeout: 15_000 }).catch(() => {})
     await page.waitForTimeout(3000)

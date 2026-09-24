@@ -41,9 +41,9 @@ for (const W of WIDTHS) for (const T of THEMES) {
     if (o.length) { report.push(`${name}: ${o.join(', ')}`); problems += 1 }
   }
   await p.goto('http://localhost:5173/campaign-command', { waitUntil: 'domcontentloaded', timeout: 180000 })
-  await p.waitForSelector('.cmc__hit', { timeout: 120000 }); await p.waitForTimeout(1800)
-  await shot('01-index', '.cmk')
-  await p.locator('.cmc__hit').filter({ hasText: new RegExp(NAME) }).first().click()
+  await p.waitForSelector('.cxc__hit', { timeout: 120000 }); await p.waitForTimeout(1800)
+  await shot('01-index', '.cxi')
+  await p.locator('.cxc__hit').filter({ hasText: new RegExp(NAME) }).first().click()
   await p.waitForSelector('.cdm2', { timeout: 60000 }); await p.waitForTimeout(4500)
   await shot('02-detail', '.cdm2')
   for (const [label, slug] of [['Queue', '03-queue'], ['Replies', '04-replies'], ['Exceptions', '05-exceptions'], ['Audience', '06-audience'], ['Activity', '07-activity']]) {
@@ -56,7 +56,7 @@ for (const W of WIDTHS) for (const T of THEMES) {
   await shot('08-more-sheet', '.cad-sheet')
   await p.locator('.cad-sheet__cancel').click(); await p.waitForTimeout(400)
   await p.locator('.cdb2 button').first().click(); await p.waitForTimeout(900)
-  await p.locator('.cmk__ico[aria-label="New campaign"]').click()
+  await p.locator('[aria-label="New campaign"]').click()
   await p.waitForSelector('.cmp-studio--mobile', { timeout: 60000 }); await p.waitForTimeout(2200)
   await shot('09-builder', '.cmp-studio--mobile')
   console.log(`${String(W).padEnd(4)} ${T.padEnd(11)} ${report.length ? 'OVERFLOW → ' + report.join(' | ') : 'ok'}${errs.length ? '  ERRORS ' + errs.join(' ; ') : ''}`)

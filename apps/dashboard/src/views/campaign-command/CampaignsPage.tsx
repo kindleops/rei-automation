@@ -68,7 +68,6 @@ import { CampaignRepliesMobile } from './mobile/CampaignRepliesMobile'
 import './mobile/campaign-detail-bands.css'
 import './mobile/campaign-overview-mobile.css'
 import './mobile/campaign-detail-mobile.css'
-import './mobile/campaign-command-mobile.css'
 import './campaign-mission-hero.css'
 import './campaign-command-readout.css'
 import './campaign-list-card.css'
@@ -1537,6 +1536,7 @@ export const CampaignsPage = () => {
   const [model, setModel] = useState<CampaignModel | null>(() => lastCampaignModel)
   const [loading, setLoading] = useState(() => lastCampaignModel === null)
   const [refreshing, setRefreshing] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editCampaignId, setEditCampaignId] = useState<string | null>(null)
@@ -1585,17 +1585,22 @@ export const CampaignsPage = () => {
   const [sortKey] = useState<keyof CampaignSummary>('status')
   const [sortDir] = useState<'asc' | 'desc'>('asc')
 
-  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+  // `quiet`: the mobile index's background refresh. A failed poll leaves the
+  // last good list on screen and says nothing — one toast per 45s tick would
+  // be noise; a first load that fails shows the index's own error state.
+  const load = useCallback(async (opts: { silent?: boolean; quiet?: boolean } = {}) => {
     if (opts.silent) setRefreshing(true)
     else setLoading(true)
     try {
       const data = await loadCampaigns()
       lastCampaignModel = data
       setModel(data)
+      setLoadFailed(false)
       setLastRefreshedAt(new Date())
     } catch (err) {
       console.error('[CampaignsPage] load failed', err)
-      emitNotification({ title: 'Campaign load failed', detail: 'Could not fetch campaign data.', severity: 'critical' })
+      setLoadFailed(true)
+      if (!opts.quiet) emitNotification({ title: 'Campaign load failed', detail: 'Could not fetch campaign data.', severity: 'critical' })
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -1748,6 +1753,7 @@ export const CampaignsPage = () => {
   }
 
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const builderFromIndexRef = useRef(false)
 
   // On mobile the readout below owns portfolio state. This subtitle repeated it
   // 40px away AND disagreed with it — "4 active" here vs "4 paused" there, because
@@ -1768,30 +1774,43 @@ export const CampaignsPage = () => {
       <>
         <CampaignCommandMobile
           model={model}
-          campaigns={campaigns}
           loading={loading}
-          search={searchQuery}
-          onSearchChange={setSearchQuery}
-          statusFilter={statusFilter}
-          onStatusFilterChange={setStatusFilter}
+          failed={loadFailed}
+          onRetry={() => void load()}
+          onRefresh={() => void load({ silent: true, quiet: true })}
           onSelect={handleSelectCampaign}
           onNew={() => handleGlobalAction('create')}
+          onContinueSetup={(c) => {
+            // Straight into the builder; the index stays underneath, so
+            // closing it returns to the same list, tab and scroll.
+            builderFromIndexRef.current = true
+            setEditCampaignId(c.id)
+            setBuilderMode('edit')
+            setIsCreateModalOpen(true)
+          }}
+          onAction={(action, c, payload) => handleCampaignAction(action, c, payload)}
         />
         {isCreateModalOpen && (
           <CreateCampaignModal
             campaignId={editCampaignId ?? undefined}
             mode={builderMode}
             onClose={() => {
+              builderFromIndexRef.current = false
               setIsCreateModalOpen(false)
               setEditCampaignId(null)
               setBuilderMode('create')
             }}
             onSuccess={(newId) => {
+              // Edit mode reports its campaign as "saved" even on a plain close.
+              // Opened from an index card, that means back to the index — not a
+              // jump into a campaign the operator never asked to open.
+              const fromIndex = builderFromIndexRef.current
+              builderFromIndexRef.current = false
               setIsCreateModalOpen(false)
               setEditCampaignId(null)
               setBuilderMode('create')
               void load({ silent: true })
-              if (newId) handleSelectCampaign({ id: newId } as CampaignSummary)
+              if (newId && !fromIndex) handleSelectCampaign({ id: newId } as CampaignSummary)
             }}
           />
         )}

@@ -247,19 +247,22 @@ const contentSmoke = async () => {
   // ── §15 CAMPAIGN COMMAND
   const t0 = Date.now()
   await open('/campaign-command', 12_000)
-  const cmkRows = await count('.cmk__row:not(.is-skeleton)')
+  const cmkRows = await count('[data-campaign-card]')
   const campaignMs = Date.now() - t0
-  check('§15 Campaign Command: list loads', cmkRows > 0, `${cmkRows} rows`)
+  check('§15 Campaign Command: list loads', cmkRows > 0, `${cmkRows} cards`)
   check('§15 Campaign Command: latency is reasonable', campaignMs < 25_000, `${campaignMs}ms`)
-  console.log(`  campaign list render: ${campaignMs}ms, ${cmkRows} rows`)
+  console.log(`  campaign list render: ${campaignMs}ms, ${cmkRows} cards`)
+  // The quarantined campaign is pre-launch, so it lives under Drafts.
+  await page.locator('.cxi__seg-tab', { hasText: /^Drafts/ }).first().click().catch(() => {})
+  await page.waitForTimeout(600)
   const quarantineTone = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('.cmk__row')]
-    const hit = rows.find((r) => /186 properties/i.test(r.innerText))
+    const hit = [...document.querySelectorAll('[data-campaign-card][data-kind="hold"]')]
+      .find((r) => /186 selected propert/i.test(r.innerText))
     return hit ? hit.innerText.replace(/\s+/g, ' ').trim().slice(0, 160) : null
   })
   check('§15 the quarantined campaign is present and truthful',
-    Boolean(quarantineTone) && /blocked|quarantin/i.test(quarantineTone ?? ''),
-    `row text: ${quarantineTone}`)
+    Boolean(quarantineTone) && /on hold/i.test(quarantineTone ?? ''),
+    `card text: ${quarantineTone}`)
   console.log(`  df0671fa row: ${quarantineTone}`)
   await page.screenshot({ path: path.join(OUT, 'content-campaign.png') })
 
