@@ -1,6 +1,10 @@
 import { supabase } from '@/lib/supabase/client.js'
 import { chunk, unique } from '@/lib/utils/arrays.js'
 import {
+  canonicalMarketBucket,
+  loadCanonicalMarketDirectory,
+} from '@/lib/domain/geography/canonical-market.js'
+import {
   buildAttributionRates,
   buildPortfolioInsightRail,
   reconcileAttributionCounts,
@@ -9,6 +13,23 @@ import { kpiRowToMetrics } from './template-intelligence-contract.js'
 import { normalizeStageCode } from './template-stage-labels.js'
 
 const BATCH = 80
+
+// Transport rows keep the market label they were written with ("Clayton, GA",
+// "West Palm Beach, FL"); performance is segmented by the canonical market the
+// label resolves to, derived at read time — history is never rewritten.
+async function marketDirectoryOrNull() {
+  try {
+    return await loadCanonicalMarketDirectory({ supabase })
+  } catch (err) {
+    console.warn('[template-intelligence] canonical market directory unavailable:', err?.message ?? err)
+    return null
+  }
+}
+
+function marketsFor(directory, label) {
+  const bucket = canonicalMarketBucket(directory, label)
+  return bucket ? [bucket] : []
+}
 
 const OWNERSHIP_INTENTS = new Set(['ownership_confirmed'])
 const SELLING_INTEREST_INTENTS = new Set(['seller_interested', 'qualified_lead', 'latent_interest'])
@@ -247,7 +268,7 @@ export function buildAggregateFromKpiRow(kpiRow) {
   }
 }
 
-function patchFromInboundIntent(outbound, inbound) {
+function patchFromInboundIntent(outbound, inbound, marketDirectory = null) {
   const flags = intentFlags(inbound.detected_intent)
   const optOut = flags.opt_out || Boolean(inbound.is_opt_out)
   const wrong = flags.wrong || String(inbound.detected_intent ?? '').toLowerCase() === 'wrong_number'
@@ -272,7 +293,7 @@ function patchFromInboundIntent(outbound, inbound) {
     opt_outs: optOut ? 1 : 0,
     stage_advanced: stageAdvancedForIntent(outbound.current_stage, inbound.detected_intent) ? 1 : 0,
     senders: outbound.textgrid_number_key ? { [outbound.textgrid_number_key]: 1 } : {},
-    markets: outbound.market ? [outbound.market] : [],
+    markets: marketsFor(marketDirectory, outbound.market),
   }
 }
 
@@ -281,6 +302,7 @@ export async function fetchReplyIntentAggregates(templateKeys, timeWindow) {
   if (!templateKeys.length) return map
   const interval = windowToInterval(timeWindow)
   const since = interval ? new Date(Date.now() - parseIntervalMs(interval)).toISOString() : null
+  const marketDirectory = await marketDirectoryOrNull()
 
   try {
     for (const batch of chunk(unique(templateKeys), BATCH)) {
@@ -332,7 +354,7 @@ export async function fetchReplyIntentAggregates(templateKeys, timeWindow) {
           seen.add(dedupeKey)
           const templateKey = String(outbound.template_key ?? '')
           if (!templateKey) continue
-          bump(map, templateKey, patchFromInboundIntent(outbound, inbound))
+          bump(map, templateKey, patchFromInboundIntent(outbound, inbound, marketDirectory))
         }
       }
     }
@@ -393,6 +415,7 @@ export async function fetchQueueExecutionAggregates(templateKeys, timeWindow) {
   if (!templateKeys.length) return map
   const interval = windowToInterval(timeWindow)
   const since = interval ? new Date(Date.now() - parseIntervalMs(interval)).toISOString() : null
+  const marketDirectory = await marketDirectoryOrNull()
 
   try {
   for (const batch of chunk(unique(templateKeys), BATCH)) {
@@ -427,7 +450,7 @@ export async function fetchQueueExecutionAggregates(templateKeys, timeWindow) {
         cost: Number.isFinite(cost) ? cost : 0,
         cost_available: Number.isFinite(cost),
         senders: row.from_phone_number ? { [row.from_phone_number]: 1 } : {},
-        markets: row.market ? [row.market] : [],
+        markets: marketsFor(marketDirectory, row.market),
         campaigns: row.campaign_id ? [String(row.campaign_id)] : [],
         last_used: row.updated_at || row.created_at,
       })

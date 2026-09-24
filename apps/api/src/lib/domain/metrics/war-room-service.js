@@ -14,6 +14,10 @@
 
 import { supabase } from '@/lib/supabase/client.js'
 import { excludeInternalCanaryRows } from '@/lib/config/internal-phones.js'
+import {
+  canonicalMarketBucket,
+  loadCanonicalMarketDirectory,
+} from '@/lib/domain/geography/canonical-market.js'
 
 const SMS_COST_PER_MSG = 0.0079
 
@@ -193,7 +197,7 @@ export async function buildWarRoom(params = {}) {
   const window = resolveWindow(params.window)
   const channel = lower(params.channel || 'all') || 'all'
   const filterState = clean(params.state).toUpperCase()
-  const filterMarket = clean(params.market)
+  const filterMarketRaw = clean(params.market)
   const filterAgent = clean(params.agent)
   const startIso = window.start.toISOString()
   const endIso = window.end.toISOString()
@@ -222,10 +226,27 @@ export async function buildWarRoom(params = {}) {
     supabase.from('textgrid_numbers').select('id,phone_number,friendly_name,market,state,is_active,daily_cap').limit(500),
   ])
 
+  // send_queue keeps the label each row was written with ("Clayton, GA",
+  // "West Palm Beach, FL"); the war room reports canonical operating markets,
+  // derived per row at read time. A label the directory cannot place (or one
+  // naming another state than the row's property) stays its own bucket.
+  let marketDirectory = null
+  try {
+    marketDirectory = await loadCanonicalMarketDirectory({ supabase })
+  } catch (err) {
+    notes.push(`canonical market directory unavailable: ${err?.message || err}`)
+  }
+  const canonicalMarketOf = (r) => canonicalMarketBucket(marketDirectory, r.market, clean(r.property_address_state).toUpperCase() || null)
+  const filterMarket = filterMarketRaw ? (canonicalMarketBucket(marketDirectory, filterMarketRaw) || filterMarketRaw) : ''
+
   // Internal canary / proof traffic is quarantined from every KPI rollup:
   // one exclusion at the fact boundary covers sends, deliveries, replies,
   // template performance, and conversion metrics downstream.
-  const sqRows = excludeInternalCanaryRows(sqRes.data || []).filter((r) => {
+  const sqRows = excludeInternalCanaryRows(sqRes.data || []).map((r) => ({
+    ...r,
+    source_market_label: r.market ?? null,
+    market: canonicalMarketOf(r),
+  })).filter((r) => {
     if (filterState && deriveState(r) !== filterState) return false
     if (filterMarket && clean(r.market) !== filterMarket) return false
     return true
@@ -804,7 +825,7 @@ export async function buildWarRoom(params = {}) {
     properties_source: 'send_queue.property_address_state / market (state parsed from market "City, ST")',
     buyer_source: 'not wired',
     state_field_used: 'send_queue.property_address_state → fallback parse from send_queue.market',
-    market_field_used: 'send_queue.market',
+    market_field_used: 'send_queue.market → canonical market (canonical_markets / market_aliases, derived at read time)',
     agent_field_used: 'send_queue.agent_name|selected_agent_id|sms_agent_id → sms_templates.agent_persona → body parse',
     template_field_used: 'send_queue.template_id → sms_templates.template_id',
     email_template_field_used: 'public.email_templates.template_id',

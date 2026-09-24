@@ -2,6 +2,10 @@ import { supabase } from '@/lib/supabase/client.js'
 import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { chunk, unique } from '@/lib/utils/arrays.js'
 import {
+  canonicalMarketBucket,
+  loadCanonicalMarketDirectory,
+} from '@/lib/domain/geography/canonical-market.js'
+import {
   buildCanonicalDisplayName,
   deriveFollowUpNumber,
   deriveTouchNumber,
@@ -404,6 +408,18 @@ function sortTemplates(rows, { field, ascending }) {
   })
 }
 
+// Execution buckets are keyed by canonical market, so a filter written with a
+// legacy spelling ("Clayton, GA") is resolved the same way before matching.
+async function withCanonicalMarketFilter(filters = {}) {
+  if (!filters.market) return filters
+  try {
+    const directory = await loadCanonicalMarketDirectory({ supabase })
+    return { ...filters, market: canonicalMarketBucket(directory, filters.market) ?? filters.market }
+  } catch {
+    return filters
+  }
+}
+
 function filterByIntelligence(rows, filters = {}) {
   return rows.filter((row) => {
     if (filters.rotation_state && row.autopilot?.rotation_state !== filters.rotation_state) return false
@@ -548,7 +564,7 @@ async function loadTemplateIntelligence({
     return { ...row, autopilot }
   })
 
-  rows = filterByIntelligence(rows, filters)
+  rows = filterByIntelligence(rows, await withCanonicalMarketFilter(filters))
   rows = sortTemplates(rows, sortSpec)
 
   return {
@@ -795,12 +811,20 @@ export async function fetchTemplateDossier(templateId, params = {}) {
     .order('updated_at', { ascending: false })
     .limit(100)
 
+  let marketDirectory = null
+  try {
+    marketDirectory = await loadCanonicalMarketDirectory({ supabase })
+  } catch {
+    marketDirectory = null
+  }
+
   const executions = (queueRows ?? []).map((q) => ({
     queue_id: q.id,
     status: q.queue_status,
     rendered_body: q.message_body,
     provider: 'textgrid',
-    market: q.market,
+    market: canonicalMarketBucket(marketDirectory, q.market),
+    source_market_label: q.market ?? null,
     campaign: q.campaign_id,
     sender: q.from_phone_number,
     seller_id: q.seller_id,

@@ -1,4 +1,9 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import {
+  loadCanonicalMarketDirectory,
+  resolveMarketLabel,
+  searchCanonicalMarketIds,
+} from '@/lib/domain/geography/canonical-market.js'
 
 const DOMAIN_KEYS = ['properties', 'prospects', 'master_owners', 'phones', 'outreach', 'sender_coverage']
 
@@ -1274,15 +1279,29 @@ async function queryGraphFacetOptions({
     }
   }
 
+  // Markets are a closed, canonical set (one facet row per operating market),
+  // searched by name OR alias here so "Diamond Bar" finds Los Angeles, CA
+  // without the client carrying an alias table.
+  const isMarketField = facetKey === 'properties.market'
+  let marketDirectory = null
+  let marketWarning = null
+  if (isMarketField) {
+    try {
+      marketDirectory = await loadCanonicalMarketDirectory({ supabase })
+    } catch (error) {
+      marketWarning = `canonical_market_directory_unavailable:${error?.message || error}`
+    }
+  }
+
   let query = supabase
     .from(CAMPAIGN_TARGET_GRAPH_FACET_TABLE)
     .select('field_key,value,label,target_count,clean_count,queueable_count,sender_covered_count,sms_eligible_count,updated_at')
     .eq('field_key', facetKey)
     .order('target_count', { ascending: false })
     .order('label', { ascending: true })
-    .limit(requestedLimit)
+    .limit(isMarketField && marketDirectory ? 250 : requestedLimit)
 
-  if (normalizedSearch) query = query.ilike('label', `%${normalizedSearch}%`)
+  if (normalizedSearch && !(isMarketField && marketDirectory)) query = query.ilike('label', `%${normalizedSearch}%`)
 
   const { data, error } = await query
   if (error) {
@@ -1298,22 +1317,37 @@ async function queryGraphFacetOptions({
     }
   }
 
-  const options = (Array.isArray(data) ? data : []).map((row) => ({
-    value: row.value,
-    label: row.label || row.value,
-    count: Number(row.target_count || 0),
-    clean_count: Number(row.clean_count || 0),
-    queueable_count: Number(row.queueable_count || 0),
-    sender_covered_count: Number(row.sender_covered_count || 0),
-    sms_eligible_count: Number(row.sms_eligible_count || 0),
-    healthy_count: Number(row.sender_covered_count || 0),
-    count_source: 'campaign_target_graph',
-    sourceColumn: facetKey,
-  }))
+  let rows = Array.isArray(data) ? data : []
+  if (isMarketField && marketDirectory && normalizedSearch) {
+    const matchingIds = new Set(searchCanonicalMarketIds(marketDirectory, normalizedSearch))
+    rows = rows.filter((row) => matchingIds.has(resolveMarketLabel(marketDirectory, row.value)?.market_id))
+  }
+  if (isMarketField && marketDirectory) rows = rows.slice(0, requestedLimit)
+
+  const options = rows.map((row) => {
+    const market = isMarketField ? resolveMarketLabel(marketDirectory, row.value) : null
+    return {
+      value: row.value,
+      label: row.label || row.value,
+      ...(isMarketField ? {
+        market_id: market?.market_id ?? null,
+        market_name: market?.market_name ?? row.value,
+      } : {}),
+      count: Number(row.target_count || 0),
+      clean_count: Number(row.clean_count || 0),
+      queueable_count: Number(row.queueable_count || 0),
+      sender_covered_count: Number(row.sender_covered_count || 0),
+      sms_eligible_count: Number(row.sms_eligible_count || 0),
+      healthy_count: Number(row.sender_covered_count || 0),
+      count_source: 'campaign_target_graph',
+      sourceColumn: facetKey,
+    }
+  })
 
   return {
     ok: true,
     ...base,
+    ...(marketWarning ? { warnings: uniqueClean([...(base.warnings || []), marketWarning]) } : {}),
     options,
     sourceColumn: graphSourceColumnForField(field),
     queryMs: Date.now() - startedAt,

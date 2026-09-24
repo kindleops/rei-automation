@@ -60,6 +60,8 @@ export interface CampaignFieldOption {
   value: string
   label: string
   count?: number
+  /** Canonical operating-market id, present on properties.market options. */
+  marketId?: string
   degraded?: boolean
   degradedReason?: string
 }
@@ -1278,10 +1280,12 @@ function normalizeOptionsResponse(payload: unknown): CampaignFieldOption[] {
         const value = asText(item.value, label)
         if (!value || !label) return null
         const count = asOptionalNumber(item.count)
+        const marketId = asText(item.market_id)
         return {
           value,
           label,
           ...(count === undefined ? {} : { count }),
+          ...(marketId ? { marketId } : {}),
         }
       }
 
