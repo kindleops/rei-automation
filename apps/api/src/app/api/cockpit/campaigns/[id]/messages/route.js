@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server.js'
 import { corsHeaders, ensureMutationAuth } from '../../../_shared.js'
-import { fetchCampaignFailureRows } from '@/lib/domain/campaigns/campaign-failures.js'
+import { fetchCampaignMessages } from '@/lib/domain/campaigns/campaign-messages.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 30
 
 function withCors(request, payload, status = 200) {
   return NextResponse.json(payload, { status, headers: corsHeaders(request) })
@@ -19,6 +19,7 @@ export async function OPTIONS(request) {
   return new NextResponse(null, { status: 204, headers: corsHeaders(request) })
 }
 
+/** GET ?bucket=upcoming|sending|sent&limit=40 — read-only. */
 export async function GET(request, { params }) {
   const auth = ensureMutationAuth(request)
   if (!auth.ok) return auth.response
@@ -29,19 +30,18 @@ export async function GET(request, { params }) {
   }
 
   try {
-    // `?view=summary` — totals and groups only, without the row lists.
-    const view = new URL(request.url).searchParams.get('view')
-    const result = await fetchCampaignFailureRows(campaignId, { includeRows: view !== 'summary' })
+    const { searchParams } = new URL(request.url)
+    const result = await fetchCampaignMessages(campaignId, {
+      bucket: searchParams.get('bucket'),
+      limit: searchParams.get('limit'),
+    })
     return withCors(request, result, 200)
   } catch (error) {
-    console.error('campaigns.failures_failed', error)
+    console.error('campaigns.messages_failed', error)
     return withCors(request, {
       ok: false,
-      error: 'campaign_failures_failed',
+      error: 'campaign_messages_failed',
       message: error?.message || String(error),
-      failures: [],
-      groups: [],
-      total: 0,
     }, 500)
   }
 }

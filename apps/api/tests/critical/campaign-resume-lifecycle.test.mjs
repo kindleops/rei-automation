@@ -6,13 +6,22 @@ import { buildCampaignCommandSummary } from "@/lib/domain/campaigns/campaign-com
 
 const CAMPAIGN_ID = "320c798a-84c9-45b8-a7c9-d166ddd7bd46";
 
+// send_queue has no failure_category column: selecting it fails the whole
+// query. Reading the metadata key (`alias:metadata->>failure_category`) is fine.
+function selectsBareColumn(columns, name) {
+  return String(columns)
+    .split(",")
+    .map((part) => part.trim().split(":").pop().trim())
+    .includes(name);
+}
+
 function makeChain(table, selectedColumns, terminalResult) {
   const chain = {
     select(columns) {
       selectedColumns.push({ table, columns });
       if (table === "send_queue") {
         assert.ok(
-          !String(columns).includes("failure_category"),
+          !selectsBareColumn(columns, "failure_category"),
           "must not query missing send_queue.failure_category"
         );
       }
@@ -109,7 +118,7 @@ test("fetchCampaignFailureRows does not query send_queue.failure_category", asyn
   assert.equal(result.ok, true);
   const queueSelect = supabase.selectedColumns.find((entry) => entry.table === "send_queue");
   assert.ok(queueSelect);
-  assert.ok(!queueSelect.columns.includes("failure_category"));
+  assert.ok(!selectsBareColumn(queueSelect.columns, "failure_category"));
 });
 
 test("buildCampaignCommandSummary does not query send_queue.failure_category", async () => {
@@ -127,5 +136,5 @@ test("buildCampaignCommandSummary does not query send_queue.failure_category", a
   assert.equal(summary.ok, true);
   const queueSelect = supabase.selectedColumns.find((entry) => entry.table === "send_queue");
   assert.ok(queueSelect);
-  assert.ok(!queueSelect.columns.includes("failure_category"));
+  assert.ok(!selectsBareColumn(queueSelect.columns, "failure_category"));
 });
