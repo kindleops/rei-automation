@@ -1743,8 +1743,121 @@ export interface CampaignFailuresResponse {
 
 export function getCampaignFailuresBackend(
   campaignId: string,
+  options: { view?: 'summary' } = {},
 ): Promise<BackendResult<CampaignFailuresResponse>> {
-  return callBackend<CampaignFailuresResponse>(`/api/cockpit/campaigns/${campaignId}/failures`)
+  // `summary` returns totals and groups without the row lists (Miami: 1.8 KB
+  // instead of 857 KB). The dashboard reads only groups and totals.
+  const query = options.view ? `?view=${options.view}` : ''
+  return callBackend<CampaignFailuresResponse>(`/api/cockpit/campaigns/${campaignId}/failures${query}`)
+}
+
+export type CampaignMessageBucket = 'upcoming' | 'sending' | 'sent'
+
+export interface CampaignMessageRow {
+  id: string
+  status: string
+  scheduled_for: string | null
+  sent_at: string | null
+  delivered_at: string | null
+  updated_at: string | null
+  seller_name: string | null
+  property_address: string | null
+  market: string | null
+  to_phone_number: string | null
+  from_phone_number: string | null
+  failed_reason: string | null
+  thread_key: string | null
+  test_only: boolean
+}
+
+export interface CampaignMessagesResponse {
+  ok: boolean
+  campaign_id: string
+  bucket: CampaignMessageBucket
+  counts: { upcoming: number; sending: number; sent: number; delivered: number; not_sent: number }
+  messages: CampaignMessageRow[]
+  has_more: boolean
+}
+
+/** A campaign's messages from send_queue: what's waiting, and what went out. Read-only. */
+export function getCampaignMessagesBackend(
+  campaignId: string,
+  options: { bucket?: CampaignMessageBucket; limit?: number } = {},
+): Promise<BackendResult<CampaignMessagesResponse>> {
+  const query = new URLSearchParams()
+  if (options.bucket) query.set('bucket', options.bucket)
+  if (options.limit) query.set('limit', String(options.limit))
+  const qs = query.toString()
+  return callBackend<CampaignMessagesResponse>(`/api/cockpit/campaigns/${campaignId}/messages${qs ? `?${qs}` : ''}`)
+}
+
+export interface CampaignActivityEvent {
+  id: string
+  campaign_id: string
+  event_type: string
+  severity: string | null
+  title: string | null
+  description: string | null
+  created_at: string
+}
+
+export interface CampaignActivityResponse {
+  ok: boolean
+  campaign_id: string
+  events: CampaignActivityEvent[]
+  /** Scheduler planning ticks: how many exist, and how many of them are in `events`. */
+  planning_ticks: { total: number | null; shown: number }
+}
+
+/** Campaign events with the scheduler's planning ticks kept from crowding out the rest. Read-only. */
+export function getCampaignActivityBackend(campaignId: string): Promise<BackendResult<CampaignActivityResponse>> {
+  return callBackend<CampaignActivityResponse>(`/api/cockpit/campaigns/${campaignId}/activity`)
+}
+
+export interface CampaignLatestReply {
+  seller_phone: string
+  seller_name: string | null
+  message: string | null
+  intent: string | null
+  asked_to_stop: boolean
+  thread_key: string | null
+  at: string
+}
+
+export interface CampaignResponsesResponse {
+  ok: boolean
+  campaign_id: string
+  /** Distinct sellers this campaign's messages went to. */
+  sellers_messaged: number
+  /** Sellers who texted back to the number that messaged them, after it did. */
+  sellers_replied: number
+  reply_messages: number
+  sellers_asked_to_stop: number
+  latest_reply_at: string | null
+  /** A message page filled up: counts are a floor. */
+  truncated: boolean
+  /** Sellers by the classifier's reading of their latest reply. */
+  intents: Record<string, number>
+  latest: CampaignLatestReply[]
+}
+
+/** How sellers answered this campaign, from the message log. Read-only. */
+export function getCampaignResponsesBackend(campaignId: string): Promise<BackendResult<CampaignResponsesResponse>> {
+  return callBackend<CampaignResponsesResponse>(`/api/cockpit/campaigns/${campaignId}/responses`)
+}
+
+export interface CampaignSendsSinceResponse {
+  ok: boolean
+  since: string
+  /** Campaign messages that went out (sent or delivered) since `since`. */
+  total: number
+  by_campaign: Record<string, number>
+  truncated: boolean
+}
+
+/** Campaign sends since a moment — pass local midnight for "sent today". Read-only. */
+export function getCampaignSendsSinceBackend(sinceIso: string): Promise<BackendResult<CampaignSendsSinceResponse>> {
+  return callBackend<CampaignSendsSinceResponse>(`/api/cockpit/campaigns/sends-since?since=${encodeURIComponent(sinceIso)}`)
 }
 
 export function patchCampaignBackend(campaignId: string, payload: Record<string, unknown>): Promise<BackendResult<CampaignCreateResponse>> {

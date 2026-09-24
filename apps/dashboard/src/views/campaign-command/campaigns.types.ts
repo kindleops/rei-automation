@@ -165,6 +165,10 @@ export interface CampaignReply {
   reply_type: 'positive' | 'negative' | 'neutral' | 'opt_out' | 'question'
   next_action: string | null
   created_at: string
+  /** Opens the conversation in the Inbox. */
+  thread_key?: string | null
+  /** The classifier's reading of the reply, when one exists. */
+  reply_intent?: string | null
 }
 
 export interface CampaignFailureGroup {
@@ -174,6 +178,8 @@ export interface CampaignFailureGroup {
   severity: 'critical' | 'warning' | 'info'
   sample_numbers: string[]
   sample_reasons: string[]
+  /** When a row in this group last changed. Absent from older API responses. */
+  latest_at?: string | null
 }
 
 export interface CampaignTemplateStats {

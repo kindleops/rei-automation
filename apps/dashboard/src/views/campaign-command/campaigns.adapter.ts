@@ -610,7 +610,11 @@ export const fetchCampaignQueue = async (campaignId: string): Promise<CampaignQu
   }))
 }
 
-export const fetchCampaignReplies = async (campaignId: string): Promise<CampaignReply[]> => {
+/** `strict` rethrows a failed fetch, so a caller can tell "no replies" from "couldn't load". */
+export const fetchCampaignReplies = async (
+  campaignId: string,
+  options: { strict?: boolean } = {},
+): Promise<CampaignReply[]> => {
   try {
     const { rows } = await getDealContextList({
       campaign_id: campaignId,
@@ -619,48 +623,30 @@ export const fetchCampaignReplies = async (campaignId: string): Promise<Campaign
     })
 
     const replies = rows.filter((row) => row.latestMessageDirection === 'inbound')
-    if (replies.length > 0) {
-      return replies.map((row, index) => ({
-        id: `reply-${row.id}-${index}`,
-        campaign_id: campaignId,
-        campaign_target_id: row.campaignTargetId || row.id,
-        seller_full_name: row.ownerName,
-        property_address_full: row.propertyAddress,
-        inbound_message: row.latestMessageBody,
-        detected_intent: asString(row.threadState.reply_intent) || row.status,
-        sentiment: row.threadState.lead_temperature as CampaignReply['sentiment'] || 'warm',
-        reply_type: row.status === 'seller_replied' ? 'positive' : 'neutral',
-        next_action: row.bucket === 'needs_review' ? 'Review' : 'Reply',
-        created_at: asString(row.raw.latest_message_at || row.raw.updated_at),
-      }))
-    }
+    return replies.map((row, index) => ({
+      id: `reply-${row.id}-${index}`,
+      campaign_id: campaignId,
+      campaign_target_id: row.campaignTargetId || row.id,
+      seller_full_name: row.ownerName,
+      property_address_full: row.propertyAddress,
+      inbound_message: row.latestMessageBody,
+      detected_intent: asString(row.threadState.reply_intent) || row.status,
+      sentiment: row.threadState.lead_temperature as CampaignReply['sentiment'] || 'warm',
+      reply_type: row.status === 'seller_replied' ? 'positive' : 'neutral',
+      next_action: row.bucket === 'needs_review' ? 'Review' : 'Reply',
+      created_at: asString(row.raw.latest_message_at || row.raw.updated_at),
+      thread_key: row.threadKey,
+      reply_intent: asString(row.threadState.reply_intent) || null,
+    }))
   } catch (error) {
-    if (isDev) console.warn('[campaigns.adapter] deal-context replies fallback', error)
+    if (options.strict) throw error
+    if (isDev) console.warn('[campaigns.adapter] deal-context replies failed', error)
   }
-
-  const client = getSupabaseClient()
-  const { data, error } = await client
-    .from('sms_campaign_targets')
-    .select('*')
-    .eq('campaign_id', campaignId)
-    .not('reply_status', 'is', null)
-    .limit(50)
-
-  if (error) return []
-
-  return (data ?? []).map((row: any, i: number) => ({
-    id: `reply-${row.target_id}-${i}`,
-    campaign_id: row.campaign_id,
-    campaign_target_id: row.target_id,
-    seller_full_name: row.owner_name,
-    property_address_full: row.property_address,
-    inbound_message: 'Sample reply (requires message_events join)',
-    detected_intent: row.reply_status,
-    sentiment: row.reply_status === 'positive' ? 'hot' : row.reply_status === 'negative' ? 'cold' : 'warm',
-    reply_type: row.reply_status as any,
-    next_action: 'Review',
-    created_at: new Date().toISOString(),
-  }))
+  // There was a fallback here that read sms_campaign_targets.reply_status — a
+  // column that doesn't exist — and would have shown "Sample reply (requires
+  // message_events join)" as a seller's message if it ever had. No replies is
+  // an honest answer; an invented one is not.
+  return []
 }
 
 export type CampaignFailuresResult = {
@@ -668,21 +654,29 @@ export type CampaignFailuresResult = {
   execution: CampaignFailureGroup[]
   targetTotal: number
   executionTotal: number
+  /** The count stopped at the backend's scan limit; totals are a floor. */
+  targetTruncated?: boolean
+  executionTruncated?: boolean
+  /** Where the numbers came from. The fallback path reads a 200-row sample. */
+  source?: 'failures_api' | 'deal_context_sample' | 'none'
 }
 
 export const fetchCampaignFailures = async (campaignId: string): Promise<CampaignFailuresResult> => {
   try {
-    const backend = await getCampaignFailuresBackend(campaignId)
+    const backend = await getCampaignFailuresBackend(campaignId, { view: 'summary' })
     if (backend.ok && backend.data) {
       const data = backend.data as {
-        target_preparation?: { groups?: CampaignFailureGroup[]; total?: number }
-        execution?: { groups?: CampaignFailureGroup[]; total?: number }
+        target_preparation?: { groups?: CampaignFailureGroup[]; total?: number; truncated?: boolean }
+        execution?: { groups?: CampaignFailureGroup[]; total?: number; truncated?: boolean }
       }
       return {
         targetPreparation: data.target_preparation?.groups ?? [],
         execution: data.execution?.groups ?? [],
         targetTotal: data.target_preparation?.total ?? 0,
         executionTotal: data.execution?.total ?? 0,
+        targetTruncated: data.target_preparation?.truncated === true,
+        executionTruncated: data.execution?.truncated === true,
+        source: 'failures_api',
       }
     }
   } catch (error) {
@@ -724,13 +718,21 @@ export const fetchCampaignFailures = async (campaignId: string): Promise<Campaig
         sample_reasons: group.sample_reasons.slice(0, 5),
       }))
       const total = executionGroups.reduce((sum, g) => sum + g.count, 0)
-      return { targetPreparation: [], execution: executionGroups, targetTotal: 0, executionTotal: total }
+      return {
+        targetPreparation: [],
+        execution: executionGroups,
+        targetTotal: 0,
+        executionTotal: total,
+        // 200 rows at most: a floor, not a count.
+        executionTruncated: rows.length >= 200,
+        source: 'deal_context_sample',
+      }
     }
   } catch (error) {
     if (isDev) console.warn('[campaigns.adapter] deal-context failures fallback', error)
   }
 
-  return { targetPreparation: [], execution: [], targetTotal: 0, executionTotal: 0 }
+  return { targetPreparation: [], execution: [], targetTotal: 0, executionTotal: 0, source: 'none' }
 }
 
 function geoPerformance(replyRate: number, optoutRate: number): CampaignGeographyEntry['performance'] {

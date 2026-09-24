@@ -11,6 +11,16 @@
  */
 
 .cmk {
+  /* The index renders OUTSIDE .ccc, where --border, --bg-panel-solid and
+     --accent are defined. Every rule here and in campaign-card-mobile.css that
+     used one without a fallback was invalid at computed-value time and dropped
+     without a trace: the filter pills had no fill or edge, cards had no edge,
+     the progress fill on a non-live card was invisible, the attention card had
+     no tint. Mapped onto the theme contract, so every theme supplies them. */
+  --border: var(--nx-border, rgba(148, 163, 184, 0.16));
+  --bg-panel-solid: var(--nx-card-bg, #0b0f16);
+  --accent: var(--nexus-accent, var(--nx-accent, #38bdf8));
+
   /* Four explicit levels. The previous ramp bottomed out at 0.30, so labels,
      units and no-data all collapsed into the same unreadable grey. */
   --k-ink:     var(--nx-text, #f6f8fc);   /* L1 identity / live numbers        */
@@ -346,12 +356,15 @@
 .cmk__find { padding: 12px var(--k-pad) 2px; display: flex; flex-direction: column; gap: 9px; }
 
 .cmk__find-field {
-  display: flex; align-items: center; gap: 7px;
-  height: 34px; padding: 0 10px;
-  border-radius: 9px;
+  display: flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 12px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.07);
   color: var(--k-ink-3);
+  cursor: text;
 }
+
+html[data-nexus-theme='light'] .cmk__find-field { background: rgba(15, 23, 42, 0.06); }
 
 .cmk__find-field input {
   flex: 1; min-width: 0;
@@ -545,8 +558,26 @@
 }
 
 .cmk__empty {
-  margin: 0; padding: 36px var(--k-pad);
-  text-align: center; font-size: 14px; color: var(--k-ink-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 0; padding: 40px var(--k-pad);
+  text-align: center; font-size: 15px; color: var(--k-ink-2);
+}
+
+.cmk__empty p { margin: 0; }
+
+.cmk__empty-all {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-panel-solid) 70%, transparent);
+  color: var(--k-ink);
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -657,6 +688,10 @@
 
 .cmk__states::-webkit-scrollbar { display: none; }
 
+/* Room past the last state so it can scroll clear of the 26px fade — with only
+   the 16px inline padding, "All" could never be fully seen, even when chosen. */
+.cmk__states::after { content: ''; flex: 0 0 18px; }
+
 .cmk__state-tab {
   flex: none;
   padding: 7px 12px;
@@ -719,4 +754,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   .cmk__card-skeleton { animation: none; }
+}
+
+/* Light: the live/hold/warn inks double as large numerals and text. The
+   dark-theme values sit near 2:1 on white. */
+html[data-nexus-theme='light'] .cmk {
+  --k-live: #15803d;
+  --k-hold: #b45309;
+  --k-warn: #dc2626;
 }

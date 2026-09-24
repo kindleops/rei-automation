@@ -22,6 +22,46 @@ export type CampaignActionCallbacks = {
 
 const pendingActions = new Set<string>()
 
+/**
+ * What a lifecycle action did, in words.
+ *
+ * The toast used to read `"Miami - Test Campaign" → paused` — the lifecycle
+ * enum, printed verbatim — and a failure read `Action failed: resume` followed
+ * by the raw error. Neither says what happened to the campaign or what to do.
+ */
+const OUTCOME_COPY: Record<string, { done: string; verb: string; stillTrue: string }> = {
+  pause:      { done: 'Paused. No new messages will be sent.', verb: 'pause', stillTrue: 'It’s still sending.' },
+  resume:     { done: 'Resumed. Sending has restarted.', verb: 'resume', stillTrue: 'It’s still paused.' },
+  activate:   { done: 'Live. Messages are going out.', verb: 'launch', stillTrue: 'Nothing has been sent.' },
+  schedule:   { done: 'Scheduled.', verb: 'schedule', stillTrue: 'The schedule hasn’t changed.' },
+  unschedule: { done: 'Schedule cancelled.', verb: 'cancel the schedule for', stillTrue: 'It’s still scheduled.' },
+  archive:    { done: 'Archived. You can restore it any time.', verb: 'archive', stillTrue: 'It hasn’t been archived.' },
+  complete:   { done: 'Marked complete.', verb: 'complete', stillTrue: 'It hasn’t changed.' },
+  restore:    { done: 'Restored to draft.', verb: 'restore', stillTrue: 'It hasn’t changed.' },
+}
+
+const ACTION_VERB: Record<string, string> = {
+  convert_to_live: 'switch to live', 'convert-to-live': 'switch to live',
+  queue_batch: 'queue the next batch', queue_batch_live: 'send the live batch', queue_batch_test: 'prepare the test batch',
+  build_targets: 'build the audience', 'build-targets': 'build the audience', targets: 'build the audience',
+  duplicate: 'duplicate', clone: 'duplicate', delete: 'delete', delete_draft: 'delete',
+  sync_metrics: 'refresh the numbers for', 'sync-metrics': 'refresh the numbers for',
+}
+
+function verbFor(action: string): string {
+  const lifecycle = LIFECYCLE_MAP[action]
+  if (lifecycle && OUTCOME_COPY[lifecycle]) return OUTCOME_COPY[lifecycle].verb
+  return ACTION_VERB[action] ?? 'update'
+}
+
+/** A backend message only reaches the operator if it is a sentence, not a code. */
+function humanDetail(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '')
+  const text = raw.trim()
+  if (!text || /^[a-z0-9_:.\-]+$/i.test(text) || /status \d{3}/i.test(text) || text.length > 180) return fallback
+  return text
+}
+
 function actionKey(action: string, campaignId: string): string {
   return `${action}:${campaignId}`
 }
@@ -104,6 +144,15 @@ export async function executeCampaignAction(
       return true
     }
 
+    // Was unhandled: it fell through to the catch-all below, which toasted the
+    // raw string "review_blockers" and returned success. It is the dock's
+    // PRIMARY action for a blocked campaign. Blockers are listed first in
+    // Overview, so that is where it goes.
+    if (action === 'review_blockers' || action === 'review-blockers') {
+      callbacks.onSelectTab?.(campaign.id, 'overview')
+      return true
+    }
+
     if (action === 'view_targets') {
       callbacks.onSelectTab?.(campaign.id, 'targets')
       return true
@@ -124,7 +173,10 @@ export async function executeCampaignAction(
         })
         return false
       }
-      if (action === 'queue_batch_live') {
+      // A caller that has already shown its own confirmation (the mobile
+      // confirmation sheet) passes `confirmed: true`; anything else still gets
+      // the native prompt. Either way nothing live happens unconfirmed.
+      if (action === 'queue_batch_live' && payload.confirmed !== true) {
         const confirmed = window.confirm(
           'Prepare a controlled LIVE batch? This will create executable send_queue rows subject to all readiness gates.',
         )
@@ -168,9 +220,10 @@ export async function executeCampaignAction(
       pendingActions.add(key)
       const lifecycleAction = LIFECYCLE_MAP[action]
       const result = await campaignLifecycle(campaign.id, lifecycleAction, payload)
-      const label = lifecycleAction === 'restore' ? 'restored to draft' : (result.to ?? lifecycleAction)
+      void result
       emitNotification({
-        title: `"${campaign.campaign_name}" → ${label}`,
+        title: campaign.campaign_name || 'Campaign',
+        detail: OUTCOME_COPY[lifecycleAction]?.done ?? 'Updated.',
         severity: ['pause', 'cancel', 'archive', 'unschedule'].includes(action) ? 'warning' : 'success',
       })
       await callbacks.onRefresh()
@@ -190,7 +243,7 @@ export async function executeCampaignAction(
     }
 
     if (action === 'convert_to_live' || action === 'convert-to-live') {
-      const confirmed = window.confirm(
+      const confirmed = payload.confirmed === true || window.confirm(
         `Convert "${campaign.campaign_name}" to a LIVE campaign?\n\nThis will purge test queue rows, hydrate the real send path, and schedule the next valid sending window. Targets, pacing, caps, and templates are preserved.`,
       )
       if (!confirmed) return false
@@ -247,12 +300,20 @@ export async function executeCampaignAction(
       return true
     }
 
-    emitNotification({ title: action, severity: 'info' })
-    return true
-  } catch (err) {
+    // An action with no handler must not report success. This branch used to
+    // toast the raw action id and return true.
     emitNotification({
-      title: action === 'activate' ? 'Activation failed' : `Action failed: ${action}`,
-      detail: err instanceof Error ? err.message : String(err),
+      title: 'That action isn’t available here',
+      detail: 'Nothing was changed.',
+      severity: 'warning',
+    })
+    return false
+  } catch (err) {
+    const lifecycle = LIFECYCLE_MAP[action]
+    const stillTrue = lifecycle ? OUTCOME_COPY[lifecycle]?.stillTrue : null
+    emitNotification({
+      title: `Couldn’t ${verbFor(action)} ${campaign.campaign_name || 'this campaign'}`,
+      detail: humanDetail(err, [stillTrue, 'Try again.'].filter(Boolean).join(' ')),
       severity: 'critical',
     })
     return false

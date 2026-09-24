@@ -22,10 +22,21 @@
   --cb-ink: var(--text-primary, #eef2f8);
   --cb-ink-2: var(--text-secondary, #a4adbb);
   --cb-ink-3: var(--text-tertiary, #6b7483);
-  --cb-accent: var(--accent, #38bdf8);
+  /* The theme accent when --accent isn't set here (every dark theme): the
+     bare fallback left the builder sky-blue in Red Ops and a different blue
+     from the rest of the app in Dark. */
+  --cb-accent: var(--accent, var(--nexus-accent, var(--nx-accent, #38bdf8)));
   --cb-ok: var(--ok, #34d399);
   --cb-warn: var(--warn, #f5a524);
   --cb-bad: var(--danger, #f87171);
+}
+
+/* Status colors double as text. The dark-theme values sit near 2:1 on white,
+   so light mode takes the 700-weight of each hue (≥4.5:1 on white). */
+html[data-nexus-theme='light'] .cmp-studio--mobile {
+  --cb-ok: #047857;
+  --cb-warn: #b45309;
+  --cb-bad: #dc2626;
 }
 
 /* ── top bar ──────────────────────────────────────────────────────────── */
@@ -153,7 +164,7 @@
 .cbt__step.is-done .cbt__node {
   background: var(--cb-accent);
   border-color: var(--cb-accent);
-  color: var(--bg-main, #06080d);
+  color: #04131a;
 }
 .cbt__step.is-done .cbt__label { color: var(--cb-ink-2); }
 
@@ -249,7 +260,8 @@
   background: linear-gradient(180deg,
     color-mix(in srgb, var(--cb-accent) 88%, #fff 12%),
     var(--cb-accent));
-  color: var(--bg-main, #051016);
+  /* Dark ink on the accent in every theme; `--bg-main` went pale in light mode. */
+  color: #04131a;
   box-shadow:
     0 8px 22px color-mix(in srgb, var(--cb-accent) 26%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.28);
@@ -519,7 +531,7 @@
   padding: 0 7px;
   border-radius: 999px;
   background: var(--cb-accent);
-  color: var(--bg-main, #06080d);
+  color: #04131a;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -1011,7 +1023,7 @@
   border: 0;
   border-radius: 15px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--cb-accent) 88%, #fff 12%), var(--cb-accent));
-  color: var(--bg-main, #051016);
+  color: #04131a;
   font-size: 15.5px;
   font-weight: 650;
   box-shadow: 0 8px 22px color-mix(in srgb, var(--cb-accent) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);

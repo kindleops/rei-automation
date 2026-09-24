@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
-import { activateCampaignWithReview } from '../campaigns.adapter'
+import { activateCampaignWithReview, fetchCampaignDetail } from '../campaigns.adapter'
 import { computeCampaignReadiness } from '../campaign-health'
+import { mergeCampaignDetail } from '../campaign-detail-merge'
 import type { CampaignSummary } from '../campaigns.types'
 
 type ActivationStep =
@@ -33,14 +34,21 @@ interface CampaignActivationModalProps {
   }) => void
 }
 
+/**
+ * Operator language throughout (2026-09-24). This read as an engineering
+ * console — "hydrates proof rows (`no_send`)", "Hydrating Queue", "global brakes"
+ * — and asked for the live launch in a native window.confirm. The steps, gates,
+ * payload and idempotency key are unchanged; the live launch now confirms
+ * inside the sheet, stating how many sellers it prepares messages for.
+ */
 const PROGRESS_STEPS: Array<{ id: ActivationStep; label: string }> = [
-  { id: 'validating_recipients', label: 'Validating recipients' },
-  { id: 'resolving_templates', label: 'Resolving templates' },
-  { id: 'resolving_senders', label: 'Resolving sender routes' },
-  { id: 'applying_compliance', label: 'Applying compliance guards' },
-  { id: 'hydrating_queue', label: 'Hydrating Queue' },
-  { id: 'activating_campaign', label: 'Activating campaign' },
-  { id: 'complete', label: 'Complete' },
+  { id: 'validating_recipients', label: 'Checking sellers' },
+  { id: 'resolving_templates', label: 'Choosing messages' },
+  { id: 'resolving_senders', label: 'Assigning sender numbers' },
+  { id: 'applying_compliance', label: 'Applying compliance checks' },
+  { id: 'hydrating_queue', label: 'Preparing messages' },
+  { id: 'activating_campaign', label: 'Starting the campaign' },
+  { id: 'complete', label: 'Done' },
 ]
 
 function stepIndex(step: ActivationStep): number {
@@ -58,21 +66,46 @@ export const CampaignActivationModal = ({
   const [blockers, setBlockers] = useState<string[]>([])
   const [pending, setPending] = useState(false)
   const [completionMode, setCompletionMode] = useState<ActivationMode | null>(null)
+  const [confirmingLive, setConfirmingLive] = useState(false)
   const idempotencyKeyRef = useRef(`activate-${campaign.id}-${Date.now()}`)
   const abortRef = useRef<AbortController | null>(null)
   const busy = pending
 
-  const readiness = useMemo(() => computeCampaignReadiness(campaign), [campaign])
+  /**
+   * CHECK AGAINST THE CAMPAIGN AS IT IS NOW.
+   *
+   * The campaign handed in may be the list row, taken before the detail had
+   * loaded — without launch_blockers. Opened that way, this sheet computed
+   * "Launch checks: Passing" and enabled Launch live on a campaign whose real
+   * checks were blocked (the backend still refused; the sheet shouldn't have
+   * claimed otherwise). It reads the campaign fresh on open, says "Checking…"
+   * until it has, and keeps a live launch off until the checks are read.
+   */
+  const [fresh, setFresh] = useState<CampaignSummary | null>(null)
+  const [checkFailed, setCheckFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetchCampaignDetail(campaign.id)
+      .then((detail) => {
+        if (!alive) return
+        if (detail) setFresh(mergeCampaignDetail(campaign, detail))
+        else setCheckFailed(true)
+      })
+      .catch(() => { if (alive) setCheckFailed(true) })
+    return () => { alive = false }
+    // Once per open: a refreshed parent row must not restart the check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign.id])
+  const current = fresh ?? campaign
+  const checking = !fresh && !checkFailed
+  const readiness = useMemo(() => computeCampaignReadiness(current), [current])
 
   const runActivation = useCallback(async (activationMode: ActivationMode) => {
     if (pending) return
     const isTest = activationMode === 'test'
-    if (!isTest) {
-      const confirmed = window.confirm(
-        'Activate LIVE queue rows? This hydrates executable send_queue rows subject to global brakes and campaign gates. No SMS sends until brakes are cleared and rows are due.',
-      )
-      if (!confirmed) return
-    }
+    // A live launch is only reachable through the in-sheet confirmation step
+    // (confirmingLive), which states its scope before this runs.
+    setConfirmingLive(false)
     setError(null)
     setBlockers([])
     setPending(true)
@@ -114,7 +147,7 @@ export const CampaignActivationModal = ({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const isAbort = err instanceof Error && err.name === 'AbortError'
-      setError(isAbort ? 'Activation timed out — check campaign run status and retry.' : msg)
+      setError(isAbort ? 'This took too long to confirm. Check the campaign’s status before trying again.' : msg)
       setStep('failed')
       setCompletionMode(null)
     } finally {
@@ -131,15 +164,17 @@ export const CampaignActivationModal = ({
     return () => document.removeEventListener('keydown', onKey)
   }, [busy, onClose])
 
-  const reviewBlockers = [...readiness.blockers, ...blockers]
-  const canTestActivate = campaign.ready_targets > 0
-  const canLiveActivate = readiness.level !== 'blocked' && campaign.ready_targets > 0 && campaign.launch_readiness !== 'blocked'
+  const reviewBlockers = fresh ? [...readiness.blockers, ...blockers] : blockers
+  const canTestActivate = current.ready_targets > 0
+  const canLiveActivate = Boolean(fresh)
+    && readiness.level !== 'blocked' && current.ready_targets > 0 && current.launch_readiness !== 'blocked'
 
   const completionCopy = completionMode === 'test'
-    ? 'Test hydration complete — proof rows created, no SMS will transmit'
+    ? 'Test launch done — messages were prepared, and none will be sent.'
     : completionMode === 'live'
-      ? 'Live activation complete — executable rows hydrated; sends wait for brakes + schedule'
+      ? 'Launched — messages are prepared and go out on schedule while sending is on.'
       : null
+  const firstBatch = Math.min(current.ready_targets || 0, 5)
 
   const modal = (
     <div className="ccm-glass-overlay" onClick={onClose}>
@@ -149,7 +184,7 @@ export const CampaignActivationModal = ({
             <Icon name="zap" size={18} />
           </div>
           <div>
-            <h3>Activation Review</h3>
+            <h3>{confirmingLive ? 'Launch live?' : 'Launch campaign'}</h3>
             <p>{campaign.campaign_name}</p>
           </div>
           <button type="button" className="ccm-glass-modal__close" onClick={onClose} aria-label="Close">
@@ -157,45 +192,61 @@ export const CampaignActivationModal = ({
           </button>
         </div>
 
-        {step === 'review' && (
+        {step === 'review' && confirmingLive && (
+          <div className="ccm-schedule-body">
+            <div className="ccm-schedule-hint">
+              Real messages are prepared for the first {firstBatch.toLocaleString()} of {campaign.ready_targets.toLocaleString()} ready
+              {campaign.ready_targets === 1 ? ' seller' : ' sellers'}. They go out only while system-wide sending is on,
+              inside texting hours, and after every suppression and sender check.
+            </div>
+          </div>
+        )}
+
+        {step === 'review' && !confirmingLive && (
           <>
             <div className="ccm-activation-grid">
               <div className="ccm-activation-stat">
-                <span>Ready targets</span>
-                <strong>{campaign.ready_targets.toLocaleString()}</strong>
+                <span>Sellers ready</span>
+                <strong>{current.ready_targets.toLocaleString()}</strong>
               </div>
               <div className="ccm-activation-stat">
-                <span>Initial batch</span>
-                <strong>{Math.min(campaign.ready_targets || 0, 5).toLocaleString()}</strong>
+                <span>First batch</span>
+                <strong>{firstBatch.toLocaleString()}</strong>
               </div>
               <div className="ccm-activation-stat">
-                <span>Total snapshot</span>
-                <strong>{campaign.total_targets.toLocaleString()}</strong>
+                <span>Audience</span>
+                <strong>{current.total_targets.toLocaleString()}</strong>
               </div>
               <div className="ccm-activation-stat">
-                <span>Compliance</span>
-                <strong className={readiness.level === 'blocked' ? 'is-bad' : 'is-good'}>
-                  {readiness.level === 'blocked' ? 'Blocked' : 'Clear'}
-                </strong>
+                <span>Launch checks</span>
+                {checking ? (
+                  <strong>Checking…</strong>
+                ) : !fresh ? (
+                  <strong className="is-bad">Couldn’t check</strong>
+                ) : (
+                  <strong className={readiness.level === 'blocked' || current.launch_readiness === 'blocked' ? 'is-bad' : 'is-good'}>
+                    {readiness.level === 'blocked' || current.launch_readiness === 'blocked' ? 'Blocked' : 'Passing'}
+                  </strong>
+                )}
               </div>
               <div className="ccm-activation-stat">
-                <span>Pacing</span>
-                <strong>{campaign.send_interval_seconds}s spacing</strong>
+                <span>Pace</span>
+                <strong>One every {campaign.send_interval_seconds}s</strong>
               </div>
               <div className="ccm-activation-stat">
-                <span>First execution</span>
-                <strong>{campaign.next_send_at ? new Date(campaign.next_send_at).toLocaleString() : 'On activation'}</strong>
+                <span>First message</span>
+                <strong>{campaign.next_send_at ? new Date(campaign.next_send_at).toLocaleString() : 'When it starts'}</strong>
               </div>
             </div>
 
             <div className="ccm-activation-warnings">
               <div className="ccm-activation-warn-item">
                 <Icon name="alert-circle" size={12} />
-                Test Activation hydrates proof rows (`no_send`) for pipeline validation only.
+                A test launch prepares messages that are never sent, to check everything end to end.
               </div>
               <div className="ccm-activation-warn-item">
                 <Icon name="zap" size={12} />
-                Live Activation hydrates executable rows (`no_send: false`) but global brakes still block transmission until cleared.
+                A live launch prepares real messages. They send only while system-wide sending is on.
               </div>
             </div>
 
@@ -212,7 +263,7 @@ export const CampaignActivationModal = ({
 
             {reviewBlockers.length > 0 && (
               <div className="ccm-activation-blockers">
-                <div className="ccm-activation-blockers__title">Blockers</div>
+                <div className="ccm-activation-blockers__title">Before this can launch live</div>
                 {reviewBlockers.map((b) => (
                   <div key={b} className="ccm-activation-blocker-item">{b}</div>
                 ))}
@@ -265,14 +316,27 @@ export const CampaignActivationModal = ({
           <div className="ccm-activation-error">
             <Icon name="alert" size={16} />
             <div>
-              <strong>Activation failed</strong>
+              <strong>Launch didn’t complete</strong>
               <p>{error}</p>
             </div>
           </div>
         )}
 
         <div className="ccm-glass-modal__footer">
-          {step === 'review' && (
+          {step === 'review' && confirmingLive && (
+            <>
+              <button type="button" className="ccc-btn" onClick={() => setConfirmingLive(false)} disabled={busy}>Back</button>
+              <button
+                type="button"
+                className="ccc-btn is-primary"
+                disabled={!canLiveActivate || busy}
+                onClick={() => void runActivation('live')}
+              >
+                Launch live
+              </button>
+            </>
+          )}
+          {step === 'review' && !confirmingLive && (
             <>
               <button type="button" className="ccc-btn" onClick={onClose}>Cancel</button>
               <button
@@ -281,15 +345,15 @@ export const CampaignActivationModal = ({
                 disabled={!canTestActivate || busy}
                 onClick={() => void runActivation('test')}
               >
-                Test Activation
+                Test launch
               </button>
               <button
                 type="button"
                 className="ccc-btn is-primary"
                 disabled={!canLiveActivate || busy}
-                onClick={() => void runActivation('live')}
+                onClick={() => setConfirmingLive(true)}
               >
-                Live Activation
+                Launch live…
               </button>
             </>
           )}
@@ -300,7 +364,7 @@ export const CampaignActivationModal = ({
             <>
               <button type="button" className="ccc-btn" onClick={onClose}>Close</button>
               <button type="button" className="ccc-btn is-primary" onClick={() => { setStep('review'); setError(null) }}>
-                Back to Review
+                Back
               </button>
             </>
           )}

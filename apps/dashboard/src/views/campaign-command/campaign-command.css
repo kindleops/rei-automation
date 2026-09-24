@@ -599,3 +599,144 @@
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
+/* ══════════════════════════════════════════════════════════════════════════
+   GLASS MODALS — tokens, and a sheet on phones.
+
+   The Schedule and Activation modals portal to <body>, outside .ccc, which is
+   where --bg-panel-solid, --border, --border-strong, --accent, --accent-soft
+   and --text-0/1/2 are defined. Every declaration above that used one was
+   invalid and silently dropped: the modal had no surface of its own, and
+   `.ccc-btn.is-primary` had no fill — "Confirm Schedule" rendered as bare text
+   beside a filled "Cancel". Mapped onto the theme contract here, so both the
+   desktop and phone modals, in every theme, get them.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ccm-glass-overlay {
+  --bg-main: var(--nx-bg, #06080d);
+  --bg-panel: var(--nx-panel-bg, rgba(10, 14, 23, 0.82));
+  --bg-panel-solid: var(--nx-card-bg, #0a0e17);
+  --border: var(--nx-border, rgba(255, 255, 255, 0.08));
+  --border-strong: var(--nx-border-strong, color-mix(in srgb, var(--nx-border, rgba(255, 255, 255, 0.08)) 100%, rgba(255, 255, 255, 0.06)));
+  --accent: var(--nexus-accent, var(--nx-accent, #3ecf8e));
+  --accent-soft: color-mix(in srgb, var(--nexus-accent, var(--nx-accent, #3ecf8e)) 12%, transparent);
+  --accent-blue: var(--nexus-accent, #007aff);
+  --accent-blue-soft: color-mix(in srgb, var(--nexus-accent, #007aff) 10%, transparent);
+  --text-0: var(--nx-text, #f4f4f5);
+  --text-1: var(--nx-text-muted, #a1a1aa);
+  --text-2: var(--nx-text-muted, #8b8b94);
+  --danger: var(--nx-danger, #f87171);
+  --warning: var(--nx-warning, #f5b849);
+  --success: var(--nx-success, #3ecf8e);
+}
+
+/* ── phone: a bottom sheet, thumb-reachable, sentence case ─────────────── */
+
+html.is-mobile-layout .ccm-glass-overlay {
+  align-items: flex-end;
+  padding: 0;
+}
+
+html.is-mobile-layout .ccm-glass-modal {
+  width: 100%;
+  max-height: calc(100dvh - var(--nx-mobile-chrome-top, 56px) - 8px);
+  border-radius: 22px 22px 0 0;
+  border-bottom: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--bg-panel-solid);
+  animation: ccm-sheet-enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes ccm-sheet-enter {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout .ccm-glass-modal { animation: none; }
+}
+
+html.is-mobile-layout .ccm-glass-modal__header { align-items: center; padding: 18px 18px 14px; }
+html.is-mobile-layout .ccm-glass-modal__header h3 { font-size: 18px; letter-spacing: -0.01em; }
+html.is-mobile-layout .ccm-glass-modal__header p { font-size: 13.5px; margin-top: 3px; }
+
+html.is-mobile-layout .ccm-glass-modal__close {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+html.is-mobile-layout .ccm-schedule-body { padding: 16px 18px; gap: 16px; }
+
+html.is-mobile-layout .ccm-schedule-field > span {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-1);
+}
+
+html.is-mobile-layout .ccm-schedule-field input,
+html.is-mobile-layout .ccm-schedule-field select {
+  min-height: 50px;
+  padding: 0 14px;
+  border-radius: 13px;
+  font-size: 16px; /* 16px: iOS does not zoom into the field */
+  width: 100%;
+  min-width: 0;
+}
+
+html.is-mobile-layout .ccm-schedule-summary-item {
+  padding: 11px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+}
+
+html.is-mobile-layout .ccm-schedule-summary-item strong { font-size: 15px; }
+html.is-mobile-layout .ccm-schedule-hint { font-size: 13px; line-height: 1.45; border-radius: 12px; }
+
+html.is-mobile-layout .ccm-glass-modal__footer {
+  flex-direction: column-reverse;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 18px 18px;
+}
+
+html.is-mobile-layout .ccm-glass-modal__footer .ccc-btn {
+  min-height: 52px;
+  justify-content: center;
+  border-radius: 15px;
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+html.is-mobile-layout .ccm-glass-modal__footer .ccc-btn.is-primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff 12%), var(--accent));
+  border-color: transparent;
+  color: #04131a; /* dark ink on the accent in every theme */
+}
+
+html.is-mobile-layout .ccm-glass-modal__footer .ccc-btn:not(.is-primary) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-1);
+}
+
+html.is-mobile-layout .ccm-activation-stat span,
+html.is-mobile-layout .ccm-activation-blockers__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.is-mobile-layout .ccm-glass-modal__footer .ccc-btn.is-warn {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 36%, transparent);
+  color: var(--warning);
+}
+
+html.is-mobile-layout .ccm-glass-modal__footer .ccc-btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}

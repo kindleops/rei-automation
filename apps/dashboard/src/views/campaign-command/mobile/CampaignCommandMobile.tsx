@@ -3,6 +3,7 @@ import { Icon } from '../../../shared/icons'
 import { CampaignCardMobile } from './CampaignCardMobile'
 import './campaign-card-mobile.css'
 import {
+  getCampaignSendsSinceBackend,
   getQueueControlSettings,
 } from '../../../lib/api/backendClient'
 import type { CampaignModel, CampaignSummary } from '../campaigns.types'
@@ -101,9 +102,24 @@ export const PRIMARY_FILTERS: Array<{ key: CampaignListFilter; label: string }> 
   { key: 'all', label: 'All' },
 ]
 
-/** Narrower cuts, kept in the search sheet so the primary row stays short. */
+/** What an empty filter means, in words — "No campaigns match." said nothing. */
+const EMPTY_FOR_FILTER: Partial<Record<CampaignListFilter, string>> = {
+  live: 'Nothing is running right now.',
+  scheduled: 'Nothing is scheduled.',
+  draft: 'No drafts.',
+  completed: 'No completed campaigns yet.',
+  needs_attention: 'Nothing needs attention.',
+  paused: 'Nothing is paused.',
+  ready: 'Nothing is ready to launch.',
+  archived: 'Nothing is archived.',
+}
+
+/**
+ * Narrower cuts, kept in the search sheet so the primary row stays short.
+ * No "All" here: the state row directly above already has it, and two
+ * controls for one filter is one too many.
+ */
 export const SECONDARY_FILTERS: Array<{ key: CampaignListFilter; label: string }> = [
-  { key: 'all', label: 'All' },
   { key: 'needs_attention', label: 'Needs attention' },
   { key: 'paused', label: 'Paused' },
   { key: 'ready', label: 'Ready' },
@@ -271,7 +287,42 @@ export function CampaignCommandMobile({
    * source lands, this is the seam to restore.
    */
   const [sendMode, setSendMode] = useState<string | null>(null)
+  /**
+   * SENT TODAY, MEASURED.
+   *
+   * The cell read `kpis.sentToday`, which is every active campaign's LIFETIME
+   * sent_count added up — 363 on a day nothing sent (Miami, paused since
+   * Sep 23, contributed 354). This counts messages that went out since this
+   * device's midnight. Until it answers, the cell isn't shown.
+   */
+  const [sentToday, setSentToday] = useState<number | null>(null)
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const statesRef = useRef<HTMLDivElement | null>(null)
+
+  // The rail scrolls and fades at its trailing edge, so the selected state —
+  // "All" is last — could sit half under the fade. Keep it in view.
+  useEffect(() => {
+    const rail = statesRef.current
+    const el = rail?.querySelector<HTMLElement>('.cmk__state-tab.is-on')
+    if (!rail || !el) return
+    // Measured against the rail itself; offsetLeft is relative to whichever
+    // ancestor is positioned, not the scroller.
+    const tab = el.getBoundingClientRect()
+    const box = rail.getBoundingClientRect()
+    const fade = 34 // the trailing mask
+    if (tab.right > box.right - fade) rail.scrollBy({ left: tab.right - (box.right - fade), behavior: 'smooth' })
+    else if (tab.left < box.left + 16) rail.scrollBy({ left: tab.left - (box.left + 16), behavior: 'smooth' })
+  }, [statusFilter])
+
+  useEffect(() => {
+    let dead = false
+    const midnight = new Date()
+    midnight.setHours(0, 0, 0, 0)
+    void getCampaignSendsSinceBackend(midnight.toISOString()).then((res) => {
+      if (!dead) setSentToday(res.ok && res.data?.ok ? res.data.total : null)
+    })
+    return () => { dead = true }
+  }, [model])
 
   // Canonical operating posture. Loaded alongside the list, never blocking it.
   useEffect(() => {
@@ -326,8 +377,13 @@ export function CampaignCommandMobile({
    * rail ends on the only cell that can demand action.
    */
   const kpiCandidates: Array<{ label: string; value: number; tone?: 'live' | 'warn' | 'good'; always?: boolean }> = [
-    { label: 'Ready', value: roll.readyLive, tone: roll.readyLive > 0 ? 'live' : undefined },
-    { label: 'Sent today', value: k?.sentToday ?? 0 },
+    // Sellers, not campaigns: "Ready 1.5k" alone read as ready campaigns.
+    { label: 'Sellers ready', value: roll.readyLive, tone: roll.readyLive > 0 ? 'live' : undefined },
+    // Shown once measured: when anything sent, or when campaigns are running
+    // and nothing has — a quiet day for a live campaign is news.
+    ...(sentToday != null && (sentToday > 0 || roll.running > 0)
+      ? [{ label: 'Sent today', value: sentToday, always: true }]
+      : []),
     { label: 'Queued', value: k?.scheduledQueueRows ?? 0 },
     { label: 'Replies', value: roll.replies },
     { label: 'Qualified', value: k?.positiveReplies ?? 0, tone: (k?.positiveReplies ?? 0) > 0 ? 'good' : undefined },
@@ -368,7 +424,7 @@ export function CampaignCommandMobile({
       {/* Primary state selector. Always visible: every filter used to live
           behind the search toggle, so the list offered no way to answer
           "what is running?" without typing. */}
-      <div className="cmk__states" role="tablist" aria-label="Campaign state">
+      <div className="cmk__states" role="tablist" aria-label="Campaign state" ref={statesRef}>
         {PRIMARY_FILTERS.map(({ key, label }) => (
           <button
             key={key}
@@ -414,16 +470,20 @@ export function CampaignCommandMobile({
                 search covers only these.
               </div>
             )}
-            <div className="cmk__find-field">
+            {/* A label, so a tap anywhere on the field focuses it — the input
+                itself is only 24px tall inside the 44px field. */}
+            <label className="cmk__find-field">
               <Icon name="search" size={14} />
               <input
                 ref={searchRef}
+                type="search"
+                inputMode="search"
                 value={search}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search campaigns"
                 aria-label="Search campaigns"
               />
-            </div>
+            </label>
             <div className="cmk__find-chips">
               {SECONDARY_FILTERS.map(({ key, label }) => (
                 <button
@@ -448,7 +508,24 @@ export function CampaignCommandMobile({
               ))}
 
           {!loading && campaigns.length === 0 && (
-            <p className="cmk__empty">{filterActive ? 'No campaigns match.' : 'No campaigns yet.'}</p>
+            <div className="cmk__empty">
+              <p>
+                {search.trim()
+                  ? `No campaigns match “${search.trim()}”.`
+                  : filterActive
+                    ? EMPTY_FOR_FILTER[statusFilter] ?? 'No campaigns here.'
+                    : 'No campaigns yet.'}
+              </p>
+              {filterActive && (
+                <button
+                  type="button"
+                  className="cmk__empty-all"
+                  onClick={() => { onSearchChange(''); onStatusFilterChange('all') }}
+                >
+                  Show all campaigns
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

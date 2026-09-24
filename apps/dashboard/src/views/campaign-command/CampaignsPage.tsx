@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Icon } from '../../shared/icons'
 import { emitNotification } from '../../shared/NotificationToast'
 import {
@@ -53,7 +53,13 @@ import { CampaignStatusBadge } from './components/CampaignStatusBadge'
 import { CampaignListCard } from './components/CampaignListCard'
 import { CampaignCommandReadout } from './components/CampaignCommandReadout'
 import { CampaignCommandMobile } from './mobile/CampaignCommandMobile'
-import { CampaignDetailMobile } from './mobile/CampaignDetailMobile'
+import { CampaignDetailBar, CampaignDetailHero } from './mobile/CampaignDetailMobile'
+import { CampaignSectionTabs } from './mobile/CampaignSectionTabs'
+import { CampaignExecutionMobile } from './mobile/CampaignExecutionMobile'
+import { CampaignExceptionsMobile } from './mobile/CampaignExceptionsMobile'
+import { CampaignTemplatesMobile } from './mobile/CampaignTemplatesMobile'
+import { CampaignActivityMobile } from './mobile/CampaignActivityMobile'
+import './mobile/campaign-detail-v2.css'
 import { mergeCampaignDetail } from './campaign-detail-merge'
 import { CampaignOverviewMobile } from './mobile/CampaignOverviewMobile'
 import { CampaignQueueMobile } from './mobile/CampaignQueueMobile'
@@ -1062,6 +1068,26 @@ const LogsTab = ({ campaign }: { campaign: CampaignSummary }) => {
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
 
+/**
+ * Mobile section names. Ids are unchanged — only what the operator reads:
+ * Targets → Audience, Failures → Exceptions, Logs → Activity.
+ *
+ * No Geography on mobile. Its data source, v_sms_campaign_market_metrics, does
+ * not exist, so it always fell back to bucketing the first 50 targets and
+ * counting sends from target statuses no target ever holds: every market read
+ * "0 sent · 0 dlv" and was graded "AVERAGE". Showing nothing beats showing that.
+ */
+const MOBILE_SECTION_TABS: Array<{ id: CampaignDetailTab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'execution', label: 'Execution' },
+  { id: 'targets', label: 'Audience' },
+  { id: 'queue', label: 'Queue' },
+  { id: 'replies', label: 'Replies' },
+  { id: 'failures', label: 'Exceptions' },
+  { id: 'templates', label: 'Templates' },
+  { id: 'logs', label: 'Activity' },
+]
+
 
 
 export const DetailPanel = ({
@@ -1071,17 +1097,40 @@ export const DetailPanel = ({
   onAction,
   initialTab,
   isMobileLayout = false,
+  onTabChange,
 }: {
   campaign: CampaignSummary | null
   commandState: CampaignCommandState
   onClose: () => void
-  onAction: (action: string, campaign: CampaignSummary) => void
+  onAction: (action: string, campaign: CampaignSummary, payload?: Record<string, unknown>) => void | Promise<unknown>
   initialTab?: CampaignDetailTab
   isMobileLayout?: boolean
+  /** Reports the open section, so the page can keep it in the URL. */
+  onTabChange?: (tab: CampaignDetailTab) => void
 }) => {
   const [activeTab, setActiveTab] = useState<CampaignDetailTab>(initialTab ?? 'overview')
+  const mobileScrollRef = useRef<HTMLDivElement | null>(null)
+  const mobileSectionRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => { setActiveTab(initialTab ?? 'overview') }, [campaign?.id, initialTab])
+  useEffect(() => { onTabChange?.(activeTab) }, [activeTab, onTabChange])
+
+  /**
+   * Switching sections from deep in a long one used to leave the new section
+   * scrolled to wherever the old one was. A new section starts at its top —
+   * unless the operator is still up at the hero, which stays put.
+   */
+  const selectMobileSection = useCallback((id: CampaignDetailTab) => {
+    setActiveTab(id)
+    requestAnimationFrame(() => {
+      const scroller = mobileScrollRef.current
+      const section = mobileSectionRef.current
+      if (!scroller || !section) return
+      const tabs = scroller.querySelector<HTMLElement>('.cst')
+      const top = section.offsetTop - (tabs?.offsetHeight ?? 0)
+      if (scroller.scrollTop > top) scroller.scrollTop = top
+    })
+  }, [])
 
   const TABS = [
     { id: 'overview' as const, label: 'Overview', group: 'primary' as const },
@@ -1110,28 +1159,66 @@ export const DetailPanel = ({
   const detailActions = getDetailActions(campaign)
 
 
+  /*
+   * MOBILE: a sticky bar, then ONE scroll area that holds the hero, the section
+   * tabs (sticky once reached) and the section itself, then the dock.
+   *
+   * The hero used to live in the sticky chrome with the tab trigger, which pinned
+   * ~517px of header on an 844pt screen and left the section ~300px. See
+   * CampaignDetailMobile.tsx for the measurement.
+   */
+  if (isMobileLayout) {
+    return (
+      <div className={cls('ccc__detail-panel', 'ccc-glass-workspace', 'ccc__detail-panel--glass', 'is-mobile-detail', 'cdm2')}>
+        <CampaignDetailBar campaign={campaign} onClose={onClose} />
+
+        <div
+          ref={mobileScrollRef}
+          className={cls('ccc__detail-body', 'ccc__detail-body--glass', 'ccc__detail-body--mobile-dock', 'cdm2__scroll')}
+        >
+          <CampaignDetailHero campaign={campaign} />
+
+          {/* No reply badge: campaign.reply_count is counted from target
+              statuses that never occur and is always 0. The hero carries the
+              real number, from the message log. */}
+          <CampaignSectionTabs
+            tabs={MOBILE_SECTION_TABS}
+            active={activeTab}
+            onChange={selectMobileSection}
+          />
+
+          <div className="cdm2__section" key={activeTab} ref={mobileSectionRef}>
+            {activeTab === 'overview'  && <CampaignOverviewMobile campaign={campaign} />}
+            {activeTab === 'execution' && <CampaignExecutionMobile campaign={campaign} />}
+            {activeTab === 'targets'   && <CampaignTargetsMobile campaign={campaign} />}
+            {activeTab === 'queue'     && <CampaignQueueMobile campaign={campaign} onOpenSection={selectMobileSection} />}
+            {activeTab === 'replies'   && <CampaignRepliesMobile campaign={campaign} />}
+            {activeTab === 'failures'  && <CampaignExceptionsMobile campaign={campaign} />}
+            {activeTab === 'templates' && <CampaignTemplatesMobile campaign={campaign} />}
+            {activeTab === 'logs'      && <CampaignActivityMobile campaign={campaign} />}
+          </div>
+        </div>
+
+        <CampaignMobileActionDock
+          campaign={campaign}
+          detailActions={detailActions}
+          onAction={onAction}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className={cls('ccc__detail-panel', 'ccc-glass-workspace', 'ccc__detail-panel--glass', isMobileLayout && 'is-mobile-detail')}>
       <div className={cls('ccc-mobile-detail-chrome', isMobileLayout && 'is-sticky')}>
-        {/* Mobile Detail is its own composition (zones A–F of the approved IA).
-            It replaces the desktop header + mission hero + test banner, which
-            stacked three bordered blocks saying overlapping things. The tab bar,
-            tab content and action dock below are unchanged. */}
-        {isMobileLayout ? (
-          <CampaignDetailMobile
-            campaign={campaign}
-            onClose={onClose}
-          />
-        ) : (
-          <CampaignDetailHeader
-            campaign={campaign}
-            commandState={commandState}
-            detailActions={detailActions}
-            isMobileLayout={isMobileLayout}
-            onClose={onClose}
-            onAction={onAction}
-          />
-        )}
+        <CampaignDetailHeader
+          campaign={campaign}
+          commandState={commandState}
+          detailActions={detailActions}
+          isMobileLayout={false}
+          onClose={onClose}
+          onAction={onAction}
+        />
         <CampaignDetailTabBar
           tabs={TABS}
           activeTab={activeTab}
@@ -1141,9 +1228,7 @@ export const DetailPanel = ({
       </div>
 
       <div className={cls('ccc__detail-body', 'ccc__detail-body--glass', isMobileLayout && 'ccc__detail-body--mobile-dock')}>
-        {activeTab === 'overview'  && (isMobileLayout
-          ? <CampaignOverviewMobile campaign={campaign} />
-          : <OverviewTab campaign={campaign} isMobileLayout={isMobileLayout} />)}
+        {activeTab === 'overview'  && <OverviewTab campaign={campaign} isMobileLayout={false} />}
         {activeTab === 'execution' && (
           <CampaignControlCenter
             campaignId={campaign.id}
@@ -1151,28 +1236,15 @@ export const DetailPanel = ({
             onLifecycleChange={() => onAction('refresh', campaign)}
           />
         )}
-        {activeTab === 'targets'   && (isMobileLayout
-          ? <CampaignTargetsMobile campaignId={campaign.id} />
-          : <TargetsTab campaignId={campaign.id} isMobileLayout={isMobileLayout} />)}
-        {activeTab === 'queue'     && (isMobileLayout
-          ? <CampaignQueueMobile campaign={campaign} />
-          : <QueueTab campaign={campaign} isMobileLayout={isMobileLayout} />)}
-        {activeTab === 'replies'   && (isMobileLayout
-          ? <CampaignRepliesMobile campaign={campaign} />
-          : <RepliesTab campaign={campaign} isMobileLayout={isMobileLayout} />)}
+        {activeTab === 'targets'   && <TargetsTab campaignId={campaign.id} isMobileLayout={false} />}
+        {activeTab === 'queue'     && <QueueTab campaign={campaign} isMobileLayout={false} />}
+        {activeTab === 'replies'   && <RepliesTab campaign={campaign} isMobileLayout={false} />}
         {activeTab === 'failures'  && <FailuresTab campaign={campaign} />}
         {activeTab === 'geography' && <GeographyTab campaign={campaign} />}
         {activeTab === 'templates' && <TemplatesTab campaign={campaign} />}
         {activeTab === 'logs'      && <LogsTab campaign={campaign} />}
       </div>
 
-      {isMobileLayout && (
-        <CampaignMobileActionDock
-          campaign={campaign}
-          detailActions={detailActions}
-          onAction={onAction}
-        />
-      )}
     </div>
   )
 }
@@ -1431,10 +1503,39 @@ export const CampaignListPanel = ({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+const DETAIL_TAB_IDS = new Set<string>([
+  'overview', 'execution', 'targets', 'queue', 'replies', 'failures', 'geography', 'templates', 'logs',
+])
+
+/**
+ * DEEP LINK — `?campaign=<id>&section=<tab>`, read once on arrival.
+ *
+ * Notifications already linked to /campaign-command?campaign=<id> and nothing
+ * read it, so those taps landed on the list. The open campaign and section are
+ * also written back (below), so Back from a seller's conversation — opened
+ * from Queue, Replies or Audience — returns to the same campaign and section.
+ */
+function readCampaignDeepLink(): { campaignId: string | null; section: CampaignDetailTab | undefined } {
+  if (typeof window === 'undefined') return { campaignId: null, section: undefined }
+  const params = new URLSearchParams(window.location.search)
+  const campaignId = params.get('campaign')?.trim() || null
+  const section = params.get('section')?.trim() || ''
+  return { campaignId, section: DETAIL_TAB_IDS.has(section) ? (section as CampaignDetailTab) : undefined }
+}
+
+/**
+ * The last campaign list this page loaded, kept across mounts. Opening a
+ * seller's conversation from Queue or Replies and pressing Back used to reload
+ * every campaign from scratch — 7.5 s locally, with the index flashing in
+ * before the campaign reopened. The page now comes back to what it showed and
+ * refreshes quietly behind it.
+ */
+let lastCampaignModel: CampaignModel | null = null
+
 export const CampaignsPage = () => {
   const { isMobile } = useBreakpoint()
-  const [model, setModel] = useState<CampaignModel | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [model, setModel] = useState<CampaignModel | null>(() => lastCampaignModel)
+  const [loading, setLoading] = useState(() => lastCampaignModel === null)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -1443,13 +1544,41 @@ export const CampaignsPage = () => {
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
   const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule')
   const [activationCampaign, setActivationCampaign] = useState<CampaignSummary | null>(null)
-  const [detailTab, setDetailTab] = useState<CampaignDetailTab | undefined>(undefined)
+  const [deepLink] = useState(readCampaignDeepLink)
+  const [detailTab, setDetailTab] = useState<CampaignDetailTab | undefined>(deepLink.section)
   
   const [commandState, setCommandState] = useState<CampaignCommandState>({
-    activeCampaignId: null,
+    activeCampaignId: deepLink.campaignId,
     activeCampaignContext: null,
     displayScope: 'campaign'
   })
+
+  // replaceState: no history entry per tap, and the router (which listens for
+  // popstate) is not disturbed.
+  const writeDetailUrl = useCallback((campaignId: string | null, section: CampaignDetailTab | null) => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (campaignId) url.searchParams.set('campaign', campaignId)
+    else url.searchParams.delete('campaign')
+    if (campaignId && section && section !== 'overview') url.searchParams.set('section', section)
+    else url.searchParams.delete('section')
+    const next = `${url.pathname}${url.search}${url.hash}`
+    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+      window.history.replaceState(window.history.state, '', next)
+    }
+  }, [])
+
+  const openSectionRef = useRef<CampaignDetailTab | null>(deepLink.section ?? null)
+
+  useEffect(() => {
+    if (!commandState.activeCampaignId) openSectionRef.current = null
+    writeDetailUrl(commandState.activeCampaignId, openSectionRef.current)
+  }, [commandState.activeCampaignId, writeDetailUrl])
+
+  const handleDetailTabChange = useCallback((tab: CampaignDetailTab) => {
+    openSectionRef.current = tab
+    writeDetailUrl(commandState.activeCampaignId, tab)
+  }, [commandState.activeCampaignId, writeDetailUrl])
   
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<CampaignListFilter>('all')
@@ -1461,6 +1590,7 @@ export const CampaignsPage = () => {
     else setLoading(true)
     try {
       const data = await loadCampaigns()
+      lastCampaignModel = data
       setModel(data)
       setLastRefreshedAt(new Date())
     } catch (err) {
@@ -1472,7 +1602,7 @@ export const CampaignsPage = () => {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load({ silent: lastCampaignModel !== null }) }, [load])
 
   const campaigns = useMemo(() => {
     if (!model) return []
@@ -1515,13 +1645,25 @@ export const CampaignsPage = () => {
   }, [commandState.activeCampaignId])
 
   const selectedCampaign = useMemo(() => {
-    const base = campaigns.find((c) => c.id === commandState.activeCampaignId) || null
+    // From every campaign, not the filtered list: a campaign opened by link (or
+    // left open while the list filter changes) is still the open campaign.
+    const base = (model?.campaigns ?? campaigns).find((c) => c.id === commandState.activeCampaignId) || null
     if (!base) return null
     // Never `{ ...base, ...enriched }`: the detail payload's summary reports
     // sent 0 for a campaign the list (and the queue) show sending, and omits
     // operator_state. See campaign-detail-merge.ts for the measured case.
     return mergeCampaignDetail(base, enrichedCampaign)
-  }, [campaigns, commandState.activeCampaignId, enrichedCampaign])
+  }, [model, campaigns, commandState.activeCampaignId, enrichedCampaign])
+
+  // A linked campaign that doesn't exist (deleted, mistyped) closes rather than
+  // leaving the page stuck on a detail that can never load.
+  useEffect(() => {
+    const id = commandState.activeCampaignId
+    if (!model || !id) return
+    if (!model.campaigns.some((c) => c.id === id)) {
+      setCommandState((prev) => ({ ...prev, activeCampaignId: null }))
+    }
+  }, [model, commandState.activeCampaignId])
 
   const actionCallbacks = useMemo(() => ({
     onRefresh: () => load({ silent: true }),
@@ -1545,7 +1687,7 @@ export const CampaignsPage = () => {
   }), [load])
 
   const handleCampaignAction = useCallback(
-    async (action: string, campaign: CampaignSummary) => {
+    async (action: string, campaign: CampaignSummary, payload?: Record<string, unknown>) => {
       if (action === 'open') {
         setCommandState((prev) => ({ ...prev, activeCampaignId: campaign.id, displayScope: 'campaign' }))
         return
@@ -1557,7 +1699,9 @@ export const CampaignsPage = () => {
         await load({ silent: true })
         return
       }
-      await executeCampaignAction(action, campaign, actionCallbacks)
+      // `payload` carries `confirmed: true` from the mobile confirmation sheet,
+      // so a confirmed action is not asked a second time by window.confirm.
+      await executeCampaignAction(action, campaign, actionCallbacks, payload ?? {})
     },
     [actionCallbacks, load],
   )
@@ -1591,6 +1735,10 @@ export const CampaignsPage = () => {
   }
 
   const handleSelectCampaign = (c: CampaignSummary | null) => {
+    // A campaign opened from the list starts on Overview, not on whatever
+    // section a previous link or action left behind.
+    setDetailTab(undefined)
+    openSectionRef.current = null
     setCommandState((prev) => ({
       ...prev,
       activeCampaignId: c?.id ?? null,
@@ -1809,6 +1957,7 @@ export const CampaignsPage = () => {
           onAction={handleCampaignAction}
           initialTab={detailTab}
           isMobileLayout={isMobile}
+          onTabChange={handleDetailTabChange}
         />
 
         <CampaignIntelligenceRail campaign={selectedCampaign} />

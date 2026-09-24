@@ -4,6 +4,7 @@ import { Icon } from '../../shared/icons'
 import { emitNotification } from '../../shared/NotificationToast'
 import { campaignLifecycle } from './campaigns.adapter'
 import type { CampaignSummary } from './campaigns.types'
+import { friendlyTimezone } from './campaign-launch-plan'
 
 interface CampaignScheduleModalProps {
   campaign: CampaignSummary
@@ -88,7 +89,7 @@ export const CampaignScheduleModal = ({
             <Icon name="calendar" size={18} />
           </div>
           <div>
-            <h3>{mode === 'reschedule' ? 'Reschedule Campaign' : 'Schedule Campaign'}</h3>
+            <h3>{mode === 'reschedule' ? 'Reschedule campaign' : 'Schedule campaign'}</h3>
             <p>{campaign.campaign_name}</p>
           </div>
           <button type="button" className="ccm-glass-modal__close" onClick={onClose} disabled={busy} aria-label="Close">
@@ -98,7 +99,7 @@ export const CampaignScheduleModal = ({
 
         <div className="ccm-schedule-body">
           <label className="ccm-schedule-field">
-            <span>First send date &amp; time</span>
+            <span>First message</span>
             <input
               type="datetime-local"
               value={scheduledAt}
@@ -107,43 +108,52 @@ export const CampaignScheduleModal = ({
           </label>
 
           <label className="ccm-schedule-field">
-            <span>Timezone behavior</span>
+            <span>Send by</span>
             <select
               value={timezoneMode}
               onChange={(e) => setTimezoneMode(e.target.value as 'operator' | 'recipient_local')}
             >
-              <option value="operator">Absolute operator timezone ({tz})</option>
-              <option value="recipient_local">Each recipient&apos;s local market time</option>
+              {/* The old labels ("Absolute operator timezone (America/Chicago)")
+                  were clipped mid-word in the select on a phone. */}
+              <option value="operator">Your time ({friendlyTimezone(tz)})</option>
+              <option value="recipient_local">Each seller&apos;s local time</option>
             </select>
           </label>
 
           <div className="ccm-schedule-summary">
             <div className="ccm-schedule-summary-item">
-              <span>Ready targets</span>
+              <span>Sellers ready</span>
               <strong>{campaign.ready_targets.toLocaleString()}</strong>
             </div>
             <div className="ccm-schedule-summary-item">
-              <span>Send spacing</span>
-              <strong>{campaign.send_interval_seconds}s</strong>
+              <span>Pace</span>
+              <strong>One every {campaign.send_interval_seconds}s</strong>
             </div>
+            {campaign.send_window_start ? (
+              <div className="ccm-schedule-summary-item">
+                <span>Texting hours</span>
+                <strong>{campaign.send_window_start} – {campaign.send_window_end ?? '—'}</strong>
+              </div>
+            ) : (
+              <div className="ccm-schedule-summary-item">
+                <span>Daily cap</span>
+                <strong>As set</strong>
+              </div>
+            )}
             <div className="ccm-schedule-summary-item">
-              <span>Pacing</span>
-              <strong>Preserved from config</strong>
-            </div>
-            <div className="ccm-schedule-summary-item">
-              <span>Queue hydration</span>
-              <strong>On activation</strong>
+              <span>Messages prepared</span>
+              <strong>When it starts</strong>
             </div>
           </div>
 
           {campaign.ready_targets === 0 && (
             <div className="ccm-schedule-hint" style={{ borderColor: 'var(--warning)', color: 'var(--text-0)' }}>
-              Warning: zero ready targets — build targets before scheduling sends.
+              Nobody is ready to message yet — build the audience before scheduling.
             </div>
           )}
 
           <div className="ccm-schedule-hint">
-            Pacing and daily cap from campaign configuration are preserved. Queue hydration occurs on activation.
+            It sends at this campaign’s pace and daily cap, and only inside texting hours.
           </div>
         </div>
 
@@ -152,7 +162,7 @@ export const CampaignScheduleModal = ({
             Cancel
           </button>
           <button type="button" className="ccc-btn is-primary" onClick={handleSubmit} disabled={busy}>
-            {busy ? 'Saving…' : mode === 'reschedule' ? 'Confirm Reschedule' : 'Confirm Schedule'}
+            {busy ? 'Saving…' : mode === 'reschedule' ? 'Confirm reschedule' : 'Confirm schedule'}
           </button>
         </div>
       </div>

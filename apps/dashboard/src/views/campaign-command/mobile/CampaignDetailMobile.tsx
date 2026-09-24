@@ -1,69 +1,59 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { CampaignHealthMobile } from './CampaignHealthMobile'
-import { campaignContextLine, campaignProgress } from '../campaign-operator-language'
+import {
+  campaignContextLine,
+  campaignProgress,
+  compactNumber,
+  describeCampaignStatus,
+  formatRatePct,
+  RATE_MIN_SAMPLE,
+} from '../campaign-operator-language'
 import { getQueueControlSettings } from '../../../lib/api/backendClient'
 import type { CampaignSummary } from '../campaigns.types'
+import { useCampaignResponses } from './useCampaignResponses'
 
 /**
- * Campaign Detail — mobile, 393pt.
+ * Campaign Detail — mobile.
  *
- * Zones A–F of the approved IA, in the frozen Command grammar: one gutter,
- * hairline-separated bands, no nested cards, no vanity number. The section
- * switcher and tab content below are unchanged and stay authoritative for
- * detail; this replaces the old header + mission-hero + test-banner stack.
+ * TWO PIECES, BECAUSE ONLY ONE OF THEM SHOULD STAY ON SCREEN.
  *
- * Every figure here is CAMPAIGN-scoped and labelled as such, so it can never be
- * read as the 112,695 global inventory shown on Command.
+ * The whole header — name, status, health, progress, metrics and the section
+ * trigger — used to live inside a sticky container. Measured at 390x844 the
+ * section trigger sat at y≈517, so while the campaign stayed pinned, the
+ * content it was supposed to introduce got the ~300px left between that and the
+ * action dock. That is why the detail felt cramped and why rows slid under
+ * things.
+ *
+ *   CampaignDetailBar   sticky: back, name, state. Always there, never large.
+ *   CampaignDetailHero  scrolls: health, progress, outcomes. Read once, then
+ *                       out of the way.
  */
 
-type Tone = 'running' | 'scheduled' | 'paused' | 'test' | 'draft' | 'done'
-
-function toneOf(c: CampaignSummary): Tone {
-  const s = String(c.status ?? '').toLowerCase()
-  if (c.operator_state === 'test_mode') return 'test'
-  if (s === 'active' || s === 'activating' || s === 'live_limited') return 'running'
-  if (s === 'scheduled' || s === 'queued') return 'scheduled'
-  if (s === 'paused') return 'paused'
-  if (s === 'completed' || s === 'archived') return 'done'
-  return 'draft'
-}
-
+const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const nf = (n: number | null | undefined) => Number(n ?? 0).toLocaleString()
-
-function compact(n: number): string {
-  if (n >= 10_000) return `${Math.round(n / 1000)}k`
-  if (n >= 1_000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
-}
 
 /**
  * Recency, or silence.
  *
- * `last_send_at` is null on campaigns that HAVE sent — this screen rendered
- * "lifetime · No sends yet" directly above "9 sent · 9 delivered". Absent
- * timestamp means we do not know WHEN, not that it never happened, so the
- * honest answer when sends exist is to say nothing about recency at all.
+ * `last_send_at` is null on campaigns that HAVE sent — this screen once
+ * rendered "lifetime · No sends yet" directly above "9 sent · 9 delivered".
+ * An absent timestamp means we do not know WHEN, not that it never happened.
  */
 function lastActivity(c: CampaignSummary): string {
-  if (!c.last_send_at) return c.sent_count > 0 ? '' : 'No sends yet'
+  if (!c.last_send_at) return c.sent_count > 0 ? '' : 'No messages sent yet'
   const t = new Date(c.last_send_at).getTime()
-  if (!Number.isFinite(t)) return c.sent_count > 0 ? '' : 'No sends yet'
+  if (!Number.isFinite(t)) return c.sent_count > 0 ? '' : 'No messages sent yet'
   const mins = Math.round((Date.now() - t) / 60000)
-  if (mins < 60) return `Last sent ${mins}m ago`
-  if (mins < 1440) return `Last sent ${Math.round(mins / 60)}h ago`
-  return `Last sent ${Math.round(mins / 1440)}d ago`
+  if (mins < 1) return 'Last message sent just now'
+  if (mins < 60) return `Last message sent ${mins} min ago`
+  if (mins < 1440) return `Last message sent ${Math.round(mins / 60)} hr ago`
+  return `Last message sent ${Math.round(mins / 1440)} days ago`
 }
 
-export function CampaignDetailMobile({
-  campaign,
-  onClose,
-}: {
-  campaign: CampaignSummary
-  onClose: () => void
-}) {
+/** Global send posture, only when it would actually hold THIS campaign. */
+function useContainment(campaign: CampaignSummary): string | null {
   const [queueMode, setQueueMode] = useState<string | null>(null)
-
   useEffect(() => {
     let dead = false
     void getQueueControlSettings().then((res) => {
@@ -74,107 +64,132 @@ export function CampaignDetailMobile({
     return () => { dead = true }
   }, [])
 
-  const tone = toneOf(campaign)
-
-  // Containment is surfaced only when it materially constrains THIS campaign —
-  // i.e. the campaign would otherwise be sending. On a draft or a finished
-  // campaign the global posture is wallpaper, not a constraint.
-  const wouldSend = tone === 'running' || tone === 'scheduled'
+  const status = String(campaign.status ?? '').toLowerCase()
+  const wouldSend = ['active', 'activating', 'live_limited', 'scheduled', 'queued'].includes(status)
   const mode = String(queueMode ?? '').toLowerCase()
-  const containment = wouldSend && mode && mode !== 'normal'
-    ? (mode === 'scoped_canary_only' ? 'Sending is limited to canary traffic.' : 'Sending is stopped system-wide.')
-    : null
-  const ready = campaign.ready_targets
+  if (!wouldSend || !mode || mode === 'normal') return null
+  return mode === 'scoped_canary_only'
+    ? 'Sending is limited to test traffic system-wide right now.'
+    : 'Sending is stopped system-wide right now.'
+}
 
-  // Rates need a real denominator. Below 20 sends we show counts only rather
-  // than a confident 0.0%.
-  const rated = campaign.sent_count >= 20
+export function CampaignDetailBar({
+  campaign,
+  onClose,
+}: {
+  campaign: CampaignSummary
+  onClose: () => void
+}) {
+  const status = describeCampaignStatus(campaign)
+  return (
+    <header className="cdb2">
+      <button type="button" className="cdb2__back" onClick={onClose} aria-label="Back to campaigns">
+        <Icon name="chevron-left" size={20} />
+      </button>
+      <h1 className="cdb2__name">{campaign.campaign_name || 'Untitled campaign'}</h1>
+      <span className={cls('cdb2__state', `is-${status.state}`)}>
+        {status.isLive && <span className="cdb2__dot" aria-hidden="true" />}
+        {status.label}
+      </span>
+    </header>
+  )
+}
+
+export function CampaignDetailHero({ campaign }: { campaign: CampaignSummary }) {
+  const containment = useContainment(campaign)
   const progress = campaignProgress(campaign)
+  const context = [
+    campaignContextLine(campaign),
+    campaign.auto_send_enabled ? 'Auto-send on' : null,
+  ].filter(Boolean).join(' · ')
   const recency = lastActivity(campaign)
-  const context = campaignContextLine(campaign)
+  const sent = Number(campaign.sent_count ?? 0)
+  const rated = sent >= RATE_MIN_SAMPLE
 
   /*
-   * The hero readings, in the order an operator asks for them: how many people,
-   * did it arrive, did they answer, is any of it worth money. Zero-valued cells
-   * are dropped rather than rendered grey — a column of zeros is how the old
-   * rail taught people to stop reading it.
+   * THE OUTCOMES, ONCE.
+   *
+   * Did it arrive, did they answer, did anyone ask us to stop.
+   *
+   * Replies used to read `reply_count`, and "Qualified" `positive_reply_count`
+   * — both counted from target statuses no target has ever held, so every
+   * campaign showed 0 and 0. Miami showed "0 replies" after 41 of the 350
+   * sellers it messaged had texted back. Both now come from the message log
+   * (/responses, shared with Overview and Replies). "Qualified" is gone: nothing
+   * in the data says what qualified means, and a number nobody can check is
+   * worse than no number.
+   *
+   * "Sent" is not repeated: the progress line directly above already says it.
+   * "Failed" is not here either — it lives in Exceptions, with its reasons.
    */
-  const heroMetrics: Array<{ key: string; value: string; label: string }> = []
-  if (campaign.sent_count > 0) {
-    heroMetrics.push({ key: 'sent', value: compact(campaign.sent_count), label: 'Sent' })
-    heroMetrics.push({
-      key: 'delivered',
-      value: rated ? `${campaign.delivery_rate.toFixed(0)}%` : compact(campaign.delivered_count),
-      label: rated ? 'Delivered' : 'Delivered',
-    })
-  } else if (ready > 0) {
-    heroMetrics.push({ key: 'ready', value: compact(ready), label: 'Ready to send' })
-  }
-  if (campaign.reply_count > 0) heroMetrics.push({ key: 'replies', value: compact(campaign.reply_count), label: 'Replies' })
-  if (campaign.positive_reply_count > 0) heroMetrics.push({ key: 'qualified', value: compact(campaign.positive_reply_count), label: 'Qualified' })
-  if (campaign.failed_count > 0 && heroMetrics.length < 4) {
-    heroMetrics.push({ key: 'failed', value: compact(campaign.failed_count), label: 'Failed' })
-  }
+  const responses = useCampaignResponses(campaign.id)
+  const answer = (n: number | undefined) =>
+    responses.data ? compactNumber(n ?? 0) : responses.loading ? '…' : '—'
+  const reached = responses.data && progress
+    ? {
+        messaged: responses.data.sellers_messaged,
+        pct: Math.max(0, Math.min(100, Math.round((responses.data.sellers_messaged / progress.total) * 100))),
+      }
+    : null
+  const outcomes = sent > 0
+    ? [
+        {
+          key: 'delivered',
+          value: rated ? formatRatePct(campaign.delivery_rate) : compactNumber(campaign.delivered_count),
+          label: 'Delivered',
+        },
+        { key: 'replied', value: answer(responses.data?.sellers_replied), label: 'Replied' },
+        { key: 'stopped', value: answer(responses.data?.sellers_asked_to_stop), label: 'Asked to stop' },
+      ]
+    : []
 
   return (
-    <div className="cdx">
-      {/* A · Identity */}
-      <header className="cdx__nav">
-        <button type="button" className="cdx__back" onClick={onClose} aria-label="Back to campaigns">
-          <Icon name="chevron-left" size={18} />
-        </button>
-        <h1 className="cdx__name">{campaign.campaign_name || 'Untitled campaign'}</h1>
-      </header>
+    <div className="cdh">
+      {context ? <p className="cdh__context">{context}</p> : null}
 
-      {/* B · Placement.
-             The state badge that used to sit here is gone: the health block
-             immediately below states the same thing in words, and an all-caps
-             "TEST" beside "Test mode — no messages will be sent" is the screen
-             saying one fact twice. Market and audience are omitted entirely
-             when absent rather than rendered as "No market set · 0 targets",
-             which is our schema talking, not the campaign's situation. */}
-      {context && (
-        <div className="cdx__place">
-          <span className="cdx__place-main">{context}</span>
-          {campaign.auto_send_enabled && <span className="cdx__auto">Auto</span>}
-        </div>
-      )}
-
-      {/* One status object, not four competing restatements of it. */}
       <CampaignHealthMobile campaign={campaign} containment={containment} />
 
-      {/* Progress owns the hero once there is an audience to measure against.
-          A campaign with no targets has no denominator, so it gets no rail
-          rather than an empty one reading "0 of 0". */}
-      {progress && (
-        <section className="cdx__progress" aria-label="Progress">
-          <div className="cdx__progress-line">
-            <strong>{nf(progress.sent)}</strong>
-            <em>of {nf(progress.total)} sent</em>
-            <b>{progress.pct}%</b>
+      {sent > 0 && progress ? (
+        // Sellers reached, not messages sent: a follow-up is a second message
+        // to the same seller, and "messages of sellers" can pass 100%. It also
+        // has to agree with Replies' "41 of 350 sellers replied".
+        <section className={cls('cdh__progress', !reached && 'is-loading')} aria-label="Progress">
+          <div className="cdh__progress-line">
+            <strong>{reached ? nf(reached.messaged) : responses.loading ? '…' : nf(progress.sent)}</strong>
+            <em>
+              {reached || responses.loading
+                ? `of ${nf(progress.total)} sellers messaged`
+                : `messages sent · ${nf(progress.total)} sellers`}
+            </em>
+            {reached && <b>{reached.pct}%</b>}
           </div>
-          <div className="cdx__progress-rail" aria-hidden="true">
-            <span className="cdx__progress-fill" style={{ width: `${progress.pct}%` }} />
+          <div className="cdh__rail" aria-hidden="true">
+            <span className="cdh__fill" style={{ width: `${reached ? reached.pct : 0}%` }} />
           </div>
         </section>
-      )}
+      ) : campaign.ready_targets > 0 ? (
+        <section className="cdh__progress" aria-label="Audience">
+          <div className="cdh__progress-line">
+            <strong>{nf(campaign.ready_targets)}</strong>
+            <em>{campaign.ready_targets === 1 ? 'seller' : 'sellers'} ready to message</em>
+          </div>
+        </section>
+      ) : null}
 
-      {/* At most four readings, and only ones that carry information. This was
-          two separate rails of five and four — nine numbers, most of them zero,
-          with `sent` appearing in both. */}
-      {heroMetrics.length > 0 && (
-        <section className="cdx__hero" aria-label="Delivery">
-          {heroMetrics.map((m) => (
-            <div key={m.key} className="cdx__hero-cell">
-              <strong>{m.value}</strong>
-              <em>{m.label}</em>
+      {outcomes.length > 0 && (
+        <section className="cdh__outcomes" aria-label="Outcomes">
+          {outcomes.map((o) => (
+            <div key={o.key} className="cdh__outcome">
+              <strong>{o.value}</strong>
+              <span>{o.label}</span>
             </div>
           ))}
         </section>
       )}
 
-      {recency && <p className="cdx__recency">{recency}</p>}
-
+      {recency ? <p className="cdh__recency">{recency}</p> : null}
     </div>
   )
 }
+
+export default CampaignDetailHero
