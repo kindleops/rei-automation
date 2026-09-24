@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatRatePct,
   campaignContextLine,
   campaignMetrics,
   campaignProgress,
@@ -99,19 +100,22 @@ describe('metric honesty', () => {
     const thin = campaignMetrics(campaign({ sent_count: 9, delivered_count: 9, delivery_rate: 1 }))
     expect(thin[0]).toMatchObject({ label: 'Delivered', value: '9' })
 
-    const fat = campaignMetrics(campaign({ sent_count: RATE_MIN_SAMPLE, delivered_count: 19, delivery_rate: 0.95 }))
+    // delivery_rate is ALREADY A PERCENTAGE. This fixture previously used 0.95,
+    // which encoded the same wrong assumption as the code and so passed while
+    // production rendered Miami's 99.2 as "9920% Delivered".
+    const fat = campaignMetrics(campaign({ sent_count: RATE_MIN_SAMPLE, delivered_count: 19, delivery_rate: 95 }))
     expect(fat[0]).toMatchObject({ label: 'Delivered', value: '95%' })
   })
 
   it('K. zero-valued metrics are dropped, never rendered as grey zeros', () => {
-    const m = campaignMetrics(campaign({ sent_count: 40, delivered_count: 38, delivery_rate: 0.95 }))
+    const m = campaignMetrics(campaign({ sent_count: 40, delivered_count: 38, delivery_rate: 95 }))
     expect(m.map((x) => x.key)).not.toContain('replies')
     expect(m.map((x) => x.key)).not.toContain('qualified')
   })
 
   it('never renders more than three metrics', () => {
     const m = campaignMetrics(campaign({
-      sent_count: 500, delivered_count: 480, delivery_rate: 0.96, reply_count: 40, positive_reply_count: 9,
+      sent_count: 500, delivered_count: 480, delivery_rate: 96, reply_count: 40, positive_reply_count: 9,
     }))
     expect(m.length).toBeLessThanOrEqual(3)
   })
@@ -174,5 +178,41 @@ describe('index summary line', () => {
     expect(summaryLine({ running: 1, attention: 0, scheduled: 0 }, 'normal')).toBe('1 active')
     expect(summaryLine({ running: 1, attention: 0, scheduled: 0 }, 'scoped_canary_only'))
       .toBe('1 active · sending paused')
+  })
+})
+
+// ── the shipped 9920% bug, pinned to the real production row ──────────────
+describe('rate scale', () => {
+  it('Miami (sent 354, delivery_rate 99.2) reads 99%, not 9920%', () => {
+    const miami = campaign({
+      campaign_name: 'Miami - Test Campaign', status: 'paused', operator_state: 'test_mode',
+      total_targets: 802, sent_count: 354, delivered_count: 351, failed_count: 30, delivery_rate: 99.2,
+    })
+    const m = campaignMetrics(miami)
+    expect(m[0]).toMatchObject({ key: 'delivery', value: '99%' })
+    for (const metric of m) expect(metric.value).not.toMatch(/\d{3,}%/)
+  })
+
+  it('formatRatePct never rounds a near-perfect rate up to 100%', () => {
+    expect(formatRatePct(99.6)).toBe('99%')
+    expect(formatRatePct(100)).toBe('100%')
+    expect(formatRatePct(77.8)).toBe('78%')
+    expect(formatRatePct(null)).toBe('—')
+    expect(formatRatePct(140)).toBe('100%')
+  })
+})
+
+describe('paused vs test mode', () => {
+  it('a paused campaign in test mode headlines as Paused, not Test', () => {
+    const s = describeCampaignStatus(campaign({ status: 'paused', operator_state: 'test_mode', sent_count: 354 }))
+    expect(s.label).toBe('Paused')
+    expect(s.detail).toMatch(/test mode/i)
+  })
+
+  it('test-mode copy is forward-looking, never a blanket claim history can falsify', () => {
+    const s = describeCampaignStatus(campaign({ status: 'active', operator_state: 'test_mode', sent_count: 9 }))
+    expect(s.state).toBe('test')
+    expect(s.detail).not.toMatch(/^No messages will be sent/)
+    expect(s.detail).toMatch(/new messages/i)
   })
 })

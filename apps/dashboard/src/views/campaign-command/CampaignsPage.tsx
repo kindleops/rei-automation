@@ -54,6 +54,7 @@ import { CampaignListCard } from './components/CampaignListCard'
 import { CampaignCommandReadout } from './components/CampaignCommandReadout'
 import { CampaignCommandMobile } from './mobile/CampaignCommandMobile'
 import { CampaignDetailMobile } from './mobile/CampaignDetailMobile'
+import { mergeCampaignDetail } from './campaign-detail-merge'
 import { CampaignOverviewMobile } from './mobile/CampaignOverviewMobile'
 import { CampaignQueueMobile } from './mobile/CampaignQueueMobile'
 import { CampaignTargetsMobile } from './mobile/CampaignTargetsMobile'
@@ -1516,8 +1517,10 @@ export const CampaignsPage = () => {
   const selectedCampaign = useMemo(() => {
     const base = campaigns.find((c) => c.id === commandState.activeCampaignId) || null
     if (!base) return null
-    if (enrichedCampaign?.id === base.id) return { ...base, ...enrichedCampaign }
-    return base
+    // Never `{ ...base, ...enriched }`: the detail payload's summary reports
+    // sent 0 for a campaign the list (and the queue) show sending, and omits
+    // operator_state. See campaign-detail-merge.ts for the measured case.
+    return mergeCampaignDetail(base, enrichedCampaign)
   }, [campaigns, commandState.activeCampaignId, enrichedCampaign])
 
   const actionCallbacks = useMemo(() => ({

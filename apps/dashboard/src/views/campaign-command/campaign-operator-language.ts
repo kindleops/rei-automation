@@ -100,11 +100,26 @@ export function describeCampaignStatus(campaign: CampaignSummary): OperatorStatu
     }
   }
 
-  if (campaign.operator_state === 'test_mode') {
+  /*
+   * TEST MODE IS AN ATTRIBUTE, NOT ALWAYS THE HEADLINE.
+   *
+   * `operator_state` reads 'test_mode' on campaigns whose lifecycle status is
+   * 'paused' — Miami is paused, in test mode, and has sent 354. Letting test
+   * mode win outright rendered "Test mode · No messages will be sent to
+   * sellers" directly above "354 of 802 sent", which reads as a contradiction
+   * and hides the fact that actually governs the campaign: it is paused.
+   *
+   * So: paused and terminal states keep their headline and carry test mode in
+   * the detail. The copy is forward-looking ("new messages won't reach
+   * sellers") because a blanket "no messages will be sent" is falsified by the
+   * campaign's own history.
+   */
+  const inTestMode = campaign.operator_state === 'test_mode'
+  if (inTestMode && status !== 'paused' && !TERMINAL_STATUSES.includes(status)) {
     return {
       state: 'test',
       label: 'Test',
-      detail: 'No messages will be sent to sellers.',
+      detail: 'Test mode is on. New messages won’t reach sellers.',
       isLive: false,
       needsOperator: false,
     }
@@ -118,7 +133,9 @@ export function describeCampaignStatus(campaign: CampaignSummary): OperatorStatu
     return {
       state: 'paused',
       label: 'Paused',
-      detail: 'No new messages are being sent.',
+      detail: inTestMode
+        ? 'No new messages are being sent. Test mode is on.'
+        : 'No new messages are being sent.',
       isLive: false,
       needsOperator: false,
     }
@@ -233,7 +250,7 @@ export function campaignMetrics(campaign: CampaignSummary): CampaignMetric[] {
   const sent = Number(campaign.sent_count ?? 0)
 
   if (sent >= RATE_MIN_SAMPLE && Number.isFinite(campaign.delivery_rate)) {
-    out.push({ key: 'delivery', value: `${Math.round(campaign.delivery_rate * 100)}%`, label: 'Delivered' })
+    out.push({ key: 'delivery', value: formatRatePct(campaign.delivery_rate), label: 'Delivered' })
   } else if (sent > 0) {
     out.push({ key: 'delivered', value: compactNumber(campaign.delivered_count ?? 0), label: 'Delivered' })
   }
@@ -251,6 +268,26 @@ export function campaignMetrics(campaign: CampaignSummary): CampaignMetric[] {
   }
 
   return out.slice(0, 3)
+}
+
+/**
+ * A campaign rate, as the API sends it: ALREADY A PERCENTAGE (0-100).
+ *
+ * This file shipped `delivery_rate * 100`, which rendered Miami's 99.2 as
+ * "9920% Delivered" on its index card. The contract is the same one the Inbox
+ * KPIs rely on (`delivery_rate.toFixed(1) + '%'`, compared `> 95`). One helper,
+ * so the scale is decided in exactly one place.
+ */
+export function formatRatePct(ratePct: number | null | undefined): string {
+  // Checked BEFORE Number(): Number(null) is 0, which would turn "not measured"
+  // into a confident "0%" — a fabricated metric, not a missing one.
+  if (ratePct === null || ratePct === undefined) return '—'
+  const v = Number(ratePct)
+  if (!Number.isFinite(v)) return '—'
+  const clamped = Math.max(0, Math.min(100, v))
+  // 99.2 → "99%", but 99.6 must not round up to a perfect score it hasn't earned.
+  if (clamped > 99 && clamped < 100) return '99%'
+  return `${Math.round(clamped)}%`
 }
 
 export function compactNumber(n: number | null | undefined): string {

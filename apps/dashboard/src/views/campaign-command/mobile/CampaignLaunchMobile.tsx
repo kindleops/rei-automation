@@ -1,59 +1,46 @@
-import { useEffect, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { getQueueControlSettings } from '../../../lib/api/backendClient'
+import {
+  describeAutoReplyMode,
+  describeQueueHold,
+  formatLaunchWhen,
+  friendlyTimezone,
+  type BuilderStep,
+  type LaunchIssue,
+  type LaunchPlan,
+} from '../campaign-launch-plan'
 
 /**
- * Campaign Creator — LAUNCH, mobile 393pt.
+ * Campaign Creator — LAUNCH, mobile.
  *
- * One question: exactly what happens if the operator presses the button?
+ * One question: if I press the button, what happens?
  *
- * The answer is the top line, then a compact execution plan (START / PACE /
- * LIMIT / DURATION), then routing as operational confirmation, then the system
- * automation state, then blockers and warnings kept structurally distinct, then
- * a final action derived from the campaign's actual state.
+ * What it replaced, from the rendered screen: a headline reading "SCHEDULABLE"
+ * over a campaign with 0 ready contacts; five blockers under "5 must clear"
+ * that were two causes stated five ways; the developer string "Campaign not
+ * persisted yet" printed twice — once as a blocker and once AS THE PRIMARY
+ * BUTTON; raw enums ("live limited", "America/Chicago"); and a "Save draft"
+ * control sheared off behind the footer.
  *
- * No launch semantics are invented here. The READY count is the same canonical
- * figure REACH reads; pacing, caps and duration come from computeLaunchEstimates;
- * blockers/warnings are supplied by the modal; queue and auto-reply modes are read
- * from system_control. Nothing on this screen implies an action the state cannot
- * actually perform.
+ * The numbers are not re-derived here. `plan` and `issues` come from
+ * campaign-launch-plan, computed once by the modal, so this screen and the
+ * builder footer's button can never describe two different launches. The
+ * canonical gate (canActivate / canSchedule) stays in the modal and decides.
  */
 
 const nf = (n: number) => n.toLocaleString()
+const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
-/** Canonical queue execution modes. Legacy `paused` normalizes to stopped. */
-const QUEUE_MODE_LABEL: Record<string, string> = {
-  normal: 'Normal',
-  stopped: 'Stopped',
-  paused: 'Stopped',
-  scoped_canary_only: 'Canary only',
-}
-
-/** A queue mode that will not drain this campaign is a launch-relevant fact. */
-const queueHolds = (mode: string | null) => mode != null && mode !== 'normal'
-
-const formatWhen = (value: string): string => {
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-  })
-}
-
-/** "Now" means the scheduled instant has effectively already arrived. */
-const startsNow = (value: string): boolean => {
-  if (!value.trim()) return true
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return true
-  return d.getTime() <= Date.now() + 120_000
-}
-
-export interface LaunchPlan {
-  effectiveSends: number
+export interface LaunchPlanDisplay {
   dailyVolume: number
   spacingSeconds: number
-  durationLabel: string
-  spanDays: number
+  maxTargets: number
+  runLimit: number | null
+}
+
+const NOT_SCHEDULABLE_COPY: Record<string, string> = {
+  TEMPLATE_RENDER_LINT_FAILURE: 'Message personalization incomplete',
+  NO_TEMPLATE: 'No approved message for this audience',
+  MISSING_FIRST_NAME: 'Seller first name missing',
 }
 
 export function CampaignLaunchMobile({
@@ -61,377 +48,245 @@ export function CampaignLaunchMobile({
   schedulable,
   schedulableLoading,
   schedulableBlockers,
-  firstScheduledAt,
-  lastScheduledAt,
-  maxTargets,
   plan,
+  display,
   scheduledAt,
   routing,
-  savedCampaignId,
   campaignTimezone,
   insideContactWindow,
-  blockers,
+  issues,
   warnings,
-  previewLoading,
-  activationProgress,
-  isLaunching,
-  isSaving,
-  isPersisting,
-  canActivate,
-  canSchedule,
-  canSaveDraft,
-  onActivate,
-  onSchedule,
-  onSaveDraft,
+  queueMode,
+  autoMode,
   onEditSchedule,
   onEditPacing,
   onEditLimit,
-  onResolveBlocker,
+  onGoToStep,
 }: {
   ready: number | null
   /** Exact audience Schedule can hand off, after template render + lint. */
   schedulable: number | null
   schedulableLoading: boolean
   schedulableBlockers: Record<string, number> | null
-  firstScheduledAt: string | null
-  lastScheduledAt: string | null
-  maxTargets: number
   plan: LaunchPlan
+  display: LaunchPlanDisplay
   scheduledAt: string
   routing: { covered: number; crossState: number; unrouted: number } | null
-  savedCampaignId: string | null
   campaignTimezone: string
   insideContactWindow: boolean
-  blockers: string[]
+  issues: LaunchIssue[]
   warnings: string[]
-  previewLoading: boolean
-  activationProgress: string | null
-  isLaunching: boolean
-  isSaving: boolean
-  isPersisting: boolean
-  canActivate: boolean
-  canSchedule: boolean
-  canSaveDraft: boolean
-  onActivate: () => void
-  onSchedule: () => void
-  onSaveDraft: () => void
+  queueMode: string | null
+  autoMode: string | null
   onEditSchedule: () => void
   onEditPacing: () => void
   onEditLimit: () => void
-  onResolveBlocker: () => void
+  onGoToStep: (step: BuilderStep) => void
 }) {
-  const [queueMode, setQueueMode] = useState<string | null>(null)
-  const [autoMode, setAutoMode] = useState<string | null>(null)
-  // The system per-run cap actually bounds how many rows reach the queue.
-  const [runLimit, setRunLimit] = useState<number | null>(null)
+  const blocked = issues.length > 0
+  const zeroSchedulable = plan.schedulableKnown && schedulable === 0
+  const personalizationGap = plan.schedulableKnown && ready != null && (schedulable ?? 0) < ready
+  const queueHold = describeQueueHold(queueMode)
+  const autoReply = describeAutoReplyMode(autoMode)
+  const tz = friendlyTimezone(campaignTimezone)
 
-  // System state is read-only context, and never blocks this screen rendering.
-  useEffect(() => {
-    let dead = false
-    void getQueueControlSettings().then((res) => {
-      if (dead || !res.ok) return
-      const d = (res.data?.diagnostics ?? {}) as Record<string, unknown>
-      setQueueMode(d.queue_execution_mode ? String(d.queue_execution_mode) : null)
-      setAutoMode(d.auto_reply_mode ? String(d.auto_reply_mode) : null)
-      const lim = Number(d.queue_run_limit)
-      setRunLimit(Number.isFinite(lim) && lim > 0 ? lim : null)
-    })
-    return () => { dead = true }
-  }, [])
-
-  const now = startsNow(scheduledAt)
-  const blocked = blockers.length > 0
-  // The cap binds when it lands below what is actually ready — that is the
-  // difference between "8,975 will send" and "1,000 will send".
-  // SCHEDULABLE is the preflight's planned_target_count — the audience that
-  // survives template selection, render and lint. It is NOT the graph READY
-  // count: Miami Commercial is 5 READY / 0 schedulable, every one blocked on the
-  // blank-greeting lint. Until the preflight answers we show READY and say so,
-  // rather than promising a number Schedule cannot honour.
-  const schedulableKnown = schedulable != null
-  // What will ACTUALLY be handed to the queue.
-  //
-  // The LIMIT row previously showed only the campaign's max-target cap, so a
-  // campaign reading "1,000 of 14,147 ready" queued 50 rows — the system
-  // per-run cap (queue_run_limit) binds below the campaign cap and the operator
-  // was never told. Show the binding constraint, and name which one it is.
-  const systemBound = runLimit != null && runLimit < plan.effectiveSends
-  const capBound = systemBound ? runLimit! : plan.effectiveSends
-  // The binding constraint is whichever is smallest: the campaign cap, the
-  // system per-run cap, or what can actually render.
-  const willQueue = schedulableKnown ? Math.min(capBound, schedulable!) : capBound
-  const capBinds = ready != null && ready > 0 && willQueue < ready
-  // Duration is only meaningful once there is a real volume and a real pace.
-  /**
-   * Duration from the number this launch will actually queue.
+  /*
+   * THE HEADLINE IS THE STATE, NOT A NOUN.
    *
-   * plan.durationLabel is computed from effectiveSends (the campaign cap), so a
-   * launch showing "LIMIT 50 · PACE 750/day · DURATION ~2 days" was describing
-   * the discarded 1,000 cap: 50 messages at 45s apart is ~37 minutes, not two
-   * days. When the preflight returns a real window we use it verbatim; otherwise
-   * we recompute from willQueue, the real spacing and the daily volume.
+   * "SCHEDULABLE" was printed regardless of whether anything was — above a
+   * campaign with 0 ready contacts. Each branch below states something the
+   * operator can act on, and none of them promises a number Schedule cannot
+   * honour: until the preflight answers, READY is labelled as READY.
    */
-  const preflightWindowMinutes = firstScheduledAt && lastScheduledAt
-    ? Math.max(0, (new Date(lastScheduledAt).getTime() - new Date(firstScheduledAt).getTime()) / 60000)
-    : null
-
-  const realDurationLabel = (() => {
-    if (willQueue <= 0) return '—'
-    if (preflightWindowMinutes != null && Number.isFinite(preflightWindowMinutes)) {
-      if (preflightWindowMinutes < 1) return 'under a minute'
-      if (preflightWindowMinutes < 90) return `~${Math.round(preflightWindowMinutes)} min`
-      const hours = preflightWindowMinutes / 60
-      if (hours < 24) return `~${hours.toFixed(hours < 10 ? 1 : 0)} hr`
-      return `~${Math.ceil(hours / 24)} days`
-    }
-    const perDay = Math.max(1, plan.dailyVolume)
-    const days = Math.ceil(willQueue / perDay)
-    if (days > 1) return `~${days} days`
-    const seconds = Math.max(0, willQueue - 1) * Math.max(1, plan.spacingSeconds)
-    if (seconds < 60) return 'under a minute'
-    const mins = Math.round(seconds / 60)
-    return mins < 90 ? `~${mins} min` : `~${(mins / 60).toFixed(1)} hr`
-  })()
-
-  const durationKnown = willQueue > 0 && realDurationLabel !== '—'
-
-  /**
-   * The final action is derived from state. When the campaign cannot launch the
-   * primary control states the next required step instead of offering a launch
-   * that would fail.
-   */
-  const action = blocked
-    ? { label: blockers[0], kind: 'blocked' as const, run: onResolveBlocker }
-    : !schedulableKnown && !schedulableLoading && savedCampaignId
-      ? { label: 'Unable to verify schedulable audience — retry', kind: 'blocked' as const, run: onResolveBlocker }
-    : schedulableKnown && schedulable === 0
-      ? { label: 'Nothing schedulable — fix message personalization', kind: 'blocked' as const, run: onResolveBlocker }
-    : isLaunching || isPersisting || previewLoading || schedulableLoading
-      ? {
-          label: isLaunching
-            ? (activationProgress ?? 'Working…')
-            : isPersisting ? 'Saving campaign…'
-              : schedulableLoading ? 'Checking message readiness…' : 'Counting targets…',
-          kind: 'busy' as const,
-          run: () => {},
-        }
-      : now
-        ? canActivate
-          ? { label: `Activate now · ${nf(willQueue)}`, kind: 'go' as const, run: onActivate }
-          : { label: 'Save draft', kind: 'draft' as const, run: onSaveDraft }
-        : canSchedule
-          ? { label: `Schedule · ${formatWhen(scheduledAt)}`, kind: 'go' as const, run: onSchedule }
-          : { label: 'Save draft', kind: 'draft' as const, run: onSaveDraft }
+  const hero = blocked
+    ? {
+        tone: 'blocked' as const,
+        title: issues.length === 1 ? '1 thing to finish' : `${issues.length} things to finish`,
+        sub: issues.length === 1 ? 'Sort this out and the campaign is ready to launch.' : 'Sort these out and the campaign is ready to launch.',
+      }
+    : schedulableLoading && !plan.schedulableKnown
+      ? { tone: 'checking' as const, title: 'Checking your messages', sub: 'Rendering a message for every seller to confirm it can send.' }
+      : zeroSchedulable
+        ? { tone: 'blocked' as const, title: 'Messages need attention', sub: 'None of the audience has a message that renders cleanly.' }
+        : plan.schedulableKnown
+          ? {
+              tone: 'ready' as const,
+              title: 'Ready to launch',
+              sub: plan.now
+                ? `${nf(plan.willQueue)} ${plan.willQueue === 1 ? 'seller' : 'sellers'} will be messaged, starting now.`
+                : `${nf(plan.willQueue)} ${plan.willQueue === 1 ? 'seller' : 'sellers'} will be messaged from ${formatLaunchWhen(scheduledAt)}.`,
+            }
+          : ready != null
+            ? { tone: 'checking' as const, title: `${nf(ready)} ready`, sub: 'Messages are verified when the draft saves.' }
+            : { tone: 'checking' as const, title: 'Counting your audience', sub: 'This takes a few seconds.' }
 
   return (
-    <div className="clx">
-      {/* The answer, scoped so it cannot be read as a global figure.
-          When renderability differs from graph READY the two are shown
-          separately — a single number would be a promise Schedule cannot keep. */}
-      <section className={`clx__answer${blocked || (schedulableKnown && schedulable === 0) ? ' is-blocked' : ''}`}>
-        {/* Never present READY as the schedulable answer. Until the preflight
-            resolves, the headline is explicitly unresolved — substituting the
-            contact-ready figure would be the exact lie this screen exists to
-            stop (Miami reads 5 contact ready and 0 schedulable). */}
-        <span className="clx__answer-value">
-          {schedulableKnown ? nf(schedulable!) : '—'}
+    <div className="clv">
+      {/* ── readiness ───────────────────────────────────────────────── */}
+      <section className={cls('clv-hero', `is-${hero.tone}`)} aria-live="polite">
+        <span className="clv-hero__mark" aria-hidden="true">
+          {hero.tone === 'ready' ? <Icon name="check" size={16} />
+            : hero.tone === 'blocked' ? <Icon name="alert-circle" size={16} />
+              : <span className="clv-hero__spin" />}
         </span>
-        <span className="clx__answer-unit">
-          {schedulableKnown ? 'SCHEDULABLE' : 'SCHEDULABLE'}
-        </span>
-        <span className="clx__answer-scope">
-          {savedCampaignId ? 'this campaign · saved' : 'this campaign · draft'}
-        </span>
-        {schedulableLoading && !schedulableKnown && (
-          <span className="clx__answer-sub">Checking message readiness…</span>
-        )}
-        {!schedulableLoading && !schedulableKnown && savedCampaignId && (
-          <span className="clx__answer-sub">Unable to verify schedulable audience — retry</span>
-        )}
-        {schedulableKnown && ready != null && schedulable! < ready && (
-          <span className="clx__answer-sub">
-            {nf(ready)} contact ready · {nf(ready - schedulable!)} blocked by message personalization
+        <div className="clv-hero__text">
+          <h3>{hero.title}</h3>
+          <p>{hero.sub}</p>
+        </div>
+      </section>
+
+      {/* The checklist is part of the readiness answer, so it lives in the same
+          card rather than as a second box beneath it. */}
+      {blocked && (
+        <ol className="clv-todo is-attached" aria-label="To finish before launch">
+          {issues.map((issue) => {
+            const Tag = issue.step ? 'button' : 'div'
+            return (
+              <li key={issue.key}>
+                <Tag
+                  {...(issue.step ? { type: 'button' as const, onClick: () => onGoToStep(issue.step as BuilderStep) } : {})}
+                  className={cls('clv-todo__item', issue.step && 'is-actionable')}
+                >
+                  <span className="clv-todo__dot" aria-hidden="true" />
+                  <span className="clv-todo__text">
+                    <strong>{issue.title}</strong>
+                    {issue.detail ? <em>{issue.detail}</em> : null}
+                  </span>
+                  {issue.step && (
+                    <span className="clv-todo__go">
+                      {issue.step === 'build' ? 'Build' : issue.step === 'reach' ? 'Reach' : 'Launch'}
+                      <Icon name="chevron-right" size={13} />
+                    </span>
+                  )}
+                </Tag>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+
+      {/* ── the plan ────────────────────────────────────────────────── */}
+      <section className="clv-card" aria-label="Launch plan">
+        <h4 className="clv-card__h">Plan</h4>
+        <button type="button" className="clv-row" onClick={onEditSchedule}>
+          <span className="clv-row__label">Starts</span>
+          <span className="clv-row__value">{plan.now ? 'Right away' : formatLaunchWhen(scheduledAt)}</span>
+          <Icon name="chevron-right" size={14} />
+        </button>
+        <button type="button" className="clv-row" onClick={onEditPacing}>
+          <span className="clv-row__label">Pace</span>
+          <span className="clv-row__value">
+            {nf(display.dailyVolume)} a day
+            <small>one every {display.spacingSeconds}s</small>
           </span>
-        )}
-        {!schedulableKnown && ready != null && (
-          <span className="clx__answer-scope">{nf(ready)} contact ready — schedulable not yet verified</span>
-        )}
-      </section>
-
-      <section className="cdb__band">
-        <div className="cdb__key">
-          EXECUTION PLAN
-          <em>{now ? 'starts immediately' : 'scheduled'}</em>
-        </div>
-        <div className="cdb__rows">
-          <button type="button" className="cdb__row clx__row" onClick={onEditSchedule}>
-            <span className="cdb__row-label">START</span>
-            <span className="cdb__row-value is-text">{now ? 'Now' : formatWhen(scheduledAt)}</span>
-            <Icon name="chevron-right" size={14} />
-          </button>
-          <button type="button" className="cdb__row clx__row" onClick={onEditPacing}>
-            <span className="cdb__row-label">PACE</span>
-            <span className="cdb__row-value is-text">
-              {nf(plan.dailyVolume)}/day · {plan.spacingSeconds}s apart
-            </span>
-            <Icon name="chevron-right" size={14} />
-          </button>
-          <button type="button" className={`cdb__row clx__row${capBinds ? ' is-capped' : ''}`} onClick={onEditLimit}>
-            <span className="cdb__row-label">LIMIT</span>
-            <span className="cdb__row-value is-text">
-              {nf(willQueue)} of {ready != null ? nf(ready) : '—'} ready
-            </span>
-            <Icon name="chevron-right" size={14} />
-          </button>
-          {durationKnown && (
-            <div className="cdb__row">
-              <span className="cdb__row-label">DURATION</span>
-              <span className="cdb__row-value is-text">{realDurationLabel}</span>
-            </div>
-          )}
-        </div>
-        {capBinds && (
-          <p className="clx__note is-capped">
-            {systemBound
-              ? `System per-run cap of ${nf(runLimit ?? 0)} binds below the campaign cap of ${nf(maxTargets)} — only ${nf(willQueue)} of ${nf(ready ?? 0)} ready will be queued by this launch.`
-              : `Max-target cap of ${nf(maxTargets)} binds below the ${nf(ready ?? 0)} ready — the rest will not be queued by this launch.`}
-          </p>
-        )}
-        {!insideContactWindow && (
-          <p className="clx__note">
-            Outside the {campaignTimezone} contact window — sending begins at the next window opening.
-          </p>
-        )}
-      </section>
-
-      {/* Routing as operational confirmation, not a second funnel. */}
-      {routing && (
-        <section className="cdb__band">
-          <div className="cdb__key">
-            SENDER ROUTING
-            <em>targeted audience · {routing.unrouted === 0 ? 'all routes live' : 'partial coverage'}</em>
+          <Icon name="chevron-right" size={14} />
+        </button>
+        <button type="button" className={cls('clv-row', plan.capBinds && 'is-capped')} onClick={onEditLimit}>
+          <span className="clv-row__label">Sending to</span>
+          <span className="clv-row__value">
+            {nf(plan.willQueue)} {plan.willQueue === 1 ? 'seller' : 'sellers'}
+            {ready != null && ready > 0 && <small>of {nf(ready)} ready</small>}
+          </span>
+          <Icon name="chevron-right" size={14} />
+        </button>
+        {plan.durationKnown && (
+          <div className="clv-row is-static">
+            <span className="clv-row__label">Takes</span>
+            <span className="clv-row__value">{plan.durationLabel}</span>
           </div>
-          <div className="clx__routes">
-            <div className="clx__route">
-              <span className="clx__route-value">{nf(routing.covered)}</span>
-              <span className="clx__route-label">LOCAL</span>
+        )}
+
+        {plan.capBinds && (
+          <p className="clv-card__note is-warn">
+            {plan.systemBound
+              ? `A system limit of ${nf(display.runLimit ?? 0)} per run applies, so this launch sends to ${nf(plan.willQueue)} of the ${nf(ready ?? 0)} ready. The rest can go in a later launch.`
+              : `This campaign is capped at ${nf(display.maxTargets)}, so ${nf((ready ?? 0) - plan.willQueue)} ready sellers won’t be included. Raise the limit to reach them.`}
+          </p>
+        )}
+        {/* Only relevant to a launch that starts now: a campaign scheduled for
+            9 AM tomorrow is not delayed by it being 11 PM today. */}
+        {plan.now && !insideContactWindow && (
+          <p className="clv-card__note">
+            It’s outside {tz} texting hours right now, so sending begins when the window next opens.
+          </p>
+        )}
+      </section>
+
+      {/* ── sender coverage, as confirmation rather than a second funnel ── */}
+      {routing && (routing.covered + routing.crossState + routing.unrouted) > 0 && (
+        <section className="clv-card" aria-label="Sender coverage">
+          <h4 className="clv-card__h">
+            Sender coverage
+            <span className={cls('clv-card__badge', routing.unrouted === 0 ? 'is-good' : 'is-warn')}>
+              {routing.unrouted === 0 ? 'All covered' : `${nf(routing.unrouted)} without a number`}
+            </span>
+          </h4>
+          <div className="clv-cover">
+            <div className="clv-cover__cell">
+              <strong>{nf(routing.covered)}</strong>
+              <span>Local number</span>
             </div>
-            <div className={`clx__route${routing.crossState === 0 ? ' is-nil' : ''}`}>
-              <span className="clx__route-value">{nf(routing.crossState)}</span>
-              <span className="clx__route-label">CROSS-STATE</span>
+            <div className={cls('clv-cover__cell', routing.crossState === 0 && 'is-nil')}>
+              <strong>{nf(routing.crossState)}</strong>
+              <span>Out of state</span>
             </div>
-            <div className={`clx__route${routing.unrouted === 0 ? ' is-nil' : ' is-bad'}`}>
-              <span className="clx__route-value">{nf(routing.unrouted)}</span>
-              <span className="clx__route-label">NO ROUTE</span>
+            <div className={cls('clv-cover__cell', routing.unrouted === 0 ? 'is-nil' : 'is-bad')}>
+              <strong>{nf(routing.unrouted)}</strong>
+              <span>No number</span>
             </div>
           </div>
         </section>
       )}
 
-      {/* System automation state — shown only when it constrains this launch. */}
-      {(queueHolds(queueMode) || (autoMode && autoMode !== 'disabled')) && (
-        <section className="cdb__band">
-          <div className="cdb__key">AUTOMATION</div>
-          <div className="cdb__rows">
-            {queueHolds(queueMode) && (
-              <div className="cdb__row">
-                <span className="cdb__row-label">Send queue</span>
-                <span className="cdb__row-value is-text clx__hold">
-                  {QUEUE_MODE_LABEL[queueMode ?? ''] ?? queueMode}
+      {/* ── why some ready sellers won't be scheduled ──────────────────── */}
+      {personalizationGap && schedulableBlockers && (
+        <section className="clv-card" aria-label="Not scheduled">
+          <h4 className="clv-card__h">Won’t be scheduled</h4>
+          {Object.entries(schedulableBlockers)
+            .filter(([, n]) => Number(n) > 0)
+            .sort((a, b) => Number(b[1]) - Number(a[1]))
+            .slice(0, 5)
+            .map(([reason, n]) => (
+              <div key={reason} className="clv-row is-static">
+                <span className="clv-row__label is-wide">
+                  {NOT_SCHEDULABLE_COPY[reason] ?? reason.toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())}
                 </span>
+                <span className="clv-row__value">{nf(Number(n))}</span>
               </div>
-            )}
-            {autoMode && autoMode !== 'disabled' && (
-              <div className="cdb__row">
-                <span className="cdb__row-label">Auto-reply</span>
-                <span className="cdb__row-value is-text">{autoMode.replace(/_/g, ' ')}</span>
-              </div>
-            )}
-          </div>
-          {queueHolds(queueMode) && (
-            <p className="clx__note is-hold">
-              Queue is {String(QUEUE_MODE_LABEL[queueMode ?? ''] ?? queueMode).toLowerCase()} system-wide — rows will be created but nothing sends until it returns to normal.
+            ))}
+        </section>
+      )}
+
+      {/* ── automation: only what constrains or accompanies this launch ── */}
+      {(queueHold || autoReply) && (
+        <section className="clv-card" aria-label="Automation">
+          <h4 className="clv-card__h">Automation</h4>
+          {autoReply && (
+            <div className="clv-row is-static">
+              <span className="clv-row__label">Auto-replies</span>
+              <span className="clv-row__value">{autoReply}</span>
+            </div>
+          )}
+          {queueHold && (
+            <p className="clv-card__note is-warn">
+              {queueHold}. The campaign will be set up, but nothing sends until it’s lifted.
             </p>
           )}
         </section>
       )}
 
-      {/* Blocker: cannot launch. Warning: may launch, operator should know. */}
-      {blockers.length > 0 && (
-        <section className="cdb__band clx__stop">
-          <div className="cdb__key">
-            BLOCKERS
-            <span className="cdb__count">{blockers.length} must clear</span>
-          </div>
-          <div className="cdb__rows">
-            {blockers.map((b) => (
-              <div key={b} className="cdb__row">
-                <span className="cdb__row-label clx__reason">{b}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {schedulableKnown && ready != null && schedulable! < ready && schedulableBlockers && (
-        <section className="cdb__band">
-          <div className="cdb__key">
-            NOT SCHEDULABLE
-            <em>blocked before queue handoff</em>
-          </div>
-          <div className="cdb__rows">
-            {Object.entries(schedulableBlockers)
-              .filter(([, n]) => Number(n) > 0)
-              .sort((a, b) => Number(b[1]) - Number(a[1]))
-              .slice(0, 5)
-              .map(([reason, n]) => (
-                <div key={reason} className="cdb__row">
-                  <span className="cdb__row-label clx__reason">
-                    {reason === 'TEMPLATE_RENDER_LINT_FAILURE' ? 'Message personalization incomplete' : reason.replace(/_/g, ' ')}
-                  </span>
-                  <span className="cdb__row-value">{nf(Number(n))}</span>
-                </div>
-              ))}
-          </div>
-        </section>
-      )}
-
+      {/* ── warnings: launch is allowed, the operator should know ───────── */}
       {warnings.length > 0 && (
-        <section className="cdb__band">
-          <div className="cdb__key">
-            WARNINGS
-            <em>launch is allowed</em>
-          </div>
-          <div className="cdb__rows">
-            {warnings.map((w) => (
-              <div key={w} className="cdb__row">
-                <span className="cdb__row-label clx__reason">{w}</span>
-              </div>
-            ))}
-          </div>
+        <section className="clv-card is-warn" aria-label="Before you launch">
+          <h4 className="clv-card__h">
+            Worth knowing
+            <span className="clv-card__badge is-quiet">You can still launch</span>
+          </h4>
+          {warnings.map((w) => (
+            <p key={w} className="clv-card__note">{w}</p>
+          ))}
         </section>
       )}
-
-      <div className="clx__actions">
-        <button
-          type="button"
-          className={`clx__primary is-${action.kind}`}
-          onClick={action.run}
-          disabled={action.kind === 'busy'}
-        >
-          {action.label}
-        </button>
-        {action.kind !== 'draft' && (
-          <button
-            type="button"
-            className="clx__secondary"
-            onClick={onSaveDraft}
-            disabled={isSaving || isPersisting || !canSaveDraft}
-          >
-            {isSaving ? 'Saving…' : 'Save draft'}
-          </button>
-        )}
-      </div>
     </div>
   )
 }

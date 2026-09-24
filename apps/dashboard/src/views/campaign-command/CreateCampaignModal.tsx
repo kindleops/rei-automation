@@ -4,9 +4,17 @@ import type { CampaignLaunchMode, CampaignLaunchPayload, CampaignLaunchResult, C
 import { CampaignFunnel } from './components/CampaignFunnel'
 import { funnelCountsFromPreview, universeGapFromPreview } from './campaign-funnel.model'
 import './campaign-funnel.css'
-import { CampaignBuildMobile } from './mobile/CampaignBuildMobile'
+import { CampaignBuildMobile, CATEGORY_META } from './mobile/CampaignBuildMobile'
 import { CampaignReachMobile } from './mobile/CampaignReachMobile'
-import { CampaignStageRail } from './mobile/CampaignStageRail'
+import { BuilderFooter, BuilderTop, type FooterAction, type StepState } from './mobile/builder/BuilderChrome'
+import './mobile/builder/campaign-builder-v2.css'
+import {
+  deriveLaunchAction,
+  deriveLaunchPlan,
+  formatLaunchWhen,
+  groupLaunchBlockers,
+  type BuilderStep,
+} from './campaign-launch-plan'
 import { CampaignCategorySheet } from './mobile/CampaignCategorySheet'
 import { CampaignLaunchMobile } from './mobile/CampaignLaunchMobile'
 import './mobile/campaign-creator-mobile.css'
@@ -25,7 +33,7 @@ import {
   isInsideContactWindow,
   resolveCampaignTimezone,
 } from './campaign-builder-launch'
-import { getCampaignBackend, queueCampaignPlan, type CampaignLaunchPreflight } from '../../lib/api/backendClient'
+import { getCampaignBackend, getQueueControlSettings, queueCampaignPlan, type CampaignLaunchPreflight } from '../../lib/api/backendClient'
 import {
   CAMPAIGN_FIELD_KEY_ALIASES,
   createEmptyFilterGroups,
@@ -111,7 +119,10 @@ interface OptionLoadState {
 
 interface PreviewMeta {
   ms: number
+  /** Display string for desktop. Not parseable — mobile reads `at`. */
   ts: string
+  /** ISO instant of the count, so mobile can say "counted 3 min ago". */
+  at?: string
   requestId: string
   resultHash?: string | null
   previousTotalMatched?: number | null
@@ -434,6 +445,20 @@ const computeLaunchReadiness = (
  *
  * Desktop keeps the full labels — this only shortens the mobile strip.
  */
+/** Message and touch choices — the same values the setup <select>s offered. */
+const MOBILE_SCENARIO_OPTIONS = [
+  { value: 'ownership_check', label: 'Ownership check' },
+  { value: 'consider_selling', label: 'Consider selling' },
+  { value: 'seller_asking_price', label: 'Asking price' },
+]
+const MOBILE_STAGE_OPTIONS = [
+  { value: 'first_touch', label: 'First touch', short: 'First' },
+  { value: 'second_touch', label: 'Second touch', short: 'Second' },
+  // "Re-engagement" broke at its hyphen inside a third-width cell. The control
+  // sits under a "Touch" heading, so the short form loses nothing.
+  { value: 'reengagement', label: 'Re-engagement', short: 'Re-engage' },
+]
+
 const MOBILE_DOMAIN_TAB_LABELS: Record<string, string> = {
   properties: 'Property',
   prospects: 'Prospect',
@@ -791,7 +816,6 @@ export const CreateCampaignModal = ({
   const previewResultRef = useRef<CampaignPreviewResult | null>(null)
   const { isMobile } = useBreakpoint()
   const [mobilePhase, setMobilePhase] = useState<CampaignBuilderPhase>('build')
-  const [setupExpanded, setSetupExpanded] = useState(false)
   const [isPersistingLaunch, setIsPersistingLaunch] = useState(false)
   const [persistLaunchError, setPersistLaunchError] = useState<string | null>(null)
   const [activationProgress, setActivationProgress] = useState<string | null>(null)
@@ -810,6 +834,30 @@ export const CreateCampaignModal = ({
       stage_code: activeFilterDraft.stage_code,
     })
   }, [activeFilterDraft])
+
+  /*
+   * Queue posture, read once here rather than inside the LAUNCH screen, because
+   * the builder footer now needs the same per-run limit to label its button:
+   * "Launch · 50 sellers" and the plan card must agree on the 50.
+   */
+  const [queuePosture, setQueuePosture] = useState<{ queueMode: string | null; autoMode: string | null; runLimit: number | null }>(
+    { queueMode: null, autoMode: null, runLimit: null },
+  )
+  useEffect(() => {
+    if (!isMobile) return
+    let dead = false
+    void getQueueControlSettings().then((res) => {
+      if (dead || !res.ok) return
+      const d = (res.data?.diagnostics ?? {}) as Record<string, unknown>
+      const lim = Number(d.queue_run_limit)
+      setQueuePosture({
+        queueMode: d.queue_execution_mode ? String(d.queue_execution_mode) : null,
+        autoMode: d.auto_reply_mode ? String(d.auto_reply_mode) : null,
+        runLimit: Number.isFinite(lim) && lim > 0 ? lim : null,
+      })
+    })
+    return () => { dead = true }
+  }, [isMobile])
 
   const launchPersistRef = useRef<string | null>(null)
   useEffect(() => {
@@ -932,6 +980,7 @@ export const CreateCampaignModal = ({
         setPreviewMeta({
           ms: result.query_ms ?? Date.now() - t0,
           ts: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          at: new Date().toISOString(),
           requestId: result.request_id ?? requestId,
           resultHash: result.result_hash ?? null,
           previousTotalMatched: previousTotal,
@@ -1981,11 +2030,99 @@ export const CreateCampaignModal = ({
     : canRunLaunch && !isPreviewLoading && preview !== null && !backendDegraded
   const canActivateNow = canScheduleNow && !isLaunching && mobileHardBlockers.length === 0
 
-  const setupSummary = [
-    draft.name.trim() || 'Untitled campaign',
-    formatLabel(draft.template_use_case),
-    formatLabel(draft.stage_code),
-  ].join(' · ')
+  /*
+   * MOBILE BUILDER — one derivation shared by the LAUNCH screen and the footer.
+   *
+   * The gate above (canScheduleNow / canActivateNow) is untouched and is the
+   * only thing that can produce a "go" action. What changes is presentation:
+   * blocker strings are grouped by cause and by the step that fixes them, and
+   * the footer's primary button names the fix instead of reading an error.
+   */
+  const mobileLaunchPlan = deriveLaunchPlan({
+    ready: canonicalReady ?? null,
+    schedulable: launchPreflight?.planned_target_count != null ? Number(launchPreflight.planned_target_count) : null,
+    schedulableLoading: launchPreflightLoading,
+    firstScheduledAt: launchPreflight?.first_scheduled_at ?? null,
+    lastScheduledAt: launchPreflight?.last_scheduled_at ?? null,
+    effectiveSends: launchEstimates.effectiveSends,
+    dailyVolume: launchEstimates.dailyVolume,
+    spacingSeconds: launchEstimates.spacingSeconds,
+    runLimit: queuePosture.runLimit,
+    scheduledAt: launchSettings.first_scheduled_at,
+  })
+  const mobileLaunchIssues = groupLaunchBlockers(mobileActivationBlockers, { hasName: Boolean(draft.name.trim()) })
+  const mobileLaunchAction = deriveLaunchAction({
+    issues: mobileLaunchIssues,
+    plan: mobileLaunchPlan,
+    schedulable: launchPreflight?.planned_target_count != null ? Number(launchPreflight.planned_target_count) : null,
+    schedulableLoading: launchPreflightLoading,
+    savedCampaignId,
+    isLaunching,
+    isPersisting: isPersistingLaunch,
+    previewLoading: isPreviewLoading,
+    activationProgress,
+    canActivate: canActivateNow,
+    canSchedule: canScheduleNow,
+    scheduledAtLabel: formatLaunchWhen(launchSettings.first_scheduled_at),
+  })
+
+  const mobileHasName = Boolean(draft.name.trim())
+  const mobileReachReady = preview !== null && !previewStale && (canonicalReady ?? 0) > 0
+  const mobileStepStates: Record<BuilderStep, StepState> = {
+    // Build is complete once the campaign is named: with no filters the
+    // audience is the whole book, which is a valid (if broad) audience.
+    build: mobilePhase === 'build' ? 'current' : mobileHasName ? 'done' : 'attention',
+    reach: mobilePhase === 'reach' ? 'current' : mobileReachReady ? 'done' : 'upcoming',
+    launch: mobilePhase === 'launch' ? 'current' : 'upcoming',
+  }
+
+  const mobileFooter: {
+    meta: { value: string; label: string; tone?: 'quiet' | 'stale' | 'live' } | null
+    secondary: { label: string; onClick: () => void; disabled?: boolean } | null
+    primary: FooterAction
+  } = (() => {
+    if (mobilePhase === 'build') {
+      const counted = preview !== null && !previewStale
+      return {
+        // "not counted" was printed here before anything had been asked to
+        // count. Counting happens on Reach, so the button says so instead.
+        meta: isPreviewLoading
+          ? { value: '…', label: 'counting', tone: 'quiet' as const }
+          : counted
+            ? { value: Number(preview.total_matched ?? 0).toLocaleString(), label: 'sellers match', tone: 'live' as const }
+            : null,
+        secondary: null,
+        primary: { label: counted ? 'Continue' : 'Count audience', kind: 'next' as const, onClick: () => setMobilePhase('reach') },
+      }
+    }
+    if (mobilePhase === 'reach') {
+      return {
+        meta: isPreviewLoading
+          ? { value: '…', label: 'counting', tone: 'quiet' as const }
+          : preview && !previewStale && canonicalReady != null
+            ? { value: Number(canonicalReady).toLocaleString(), label: 'ready to message', tone: 'live' as const }
+            : null,
+        secondary: previewStale && !isPreviewLoading ? { label: 'Recount', onClick: () => runPreview('manual') } : null,
+        primary: { label: 'Continue', kind: 'next' as const, onClick: () => setMobilePhase('launch') },
+      }
+    }
+    const a = mobileLaunchAction
+    const run = a.intent === 'activate' ? requestActivate
+      : a.intent === 'schedule' ? requestSchedule
+        : a.intent === 'save' ? saveCampaign
+          : a.intent === 'resolve' && a.step ? () => setMobilePhase(a.step as BuilderStep)
+            : () => {}
+    return {
+      meta: null,
+      secondary: a.kind === 'draft' ? null : {
+        label: isSaving ? 'Saving…' : 'Save draft',
+        onClick: saveCampaign,
+        disabled: isSaving || isPersistingLaunch || !canSaveDraft,
+      },
+      primary: { label: a.label, kind: a.kind, onClick: run },
+    }
+  })()
+
 
   /**
    * Domain heading + category stack.
@@ -2113,6 +2250,19 @@ export const CreateCampaignModal = ({
     <div className={`cmp-studio-overlay${isMobile ? ' cmp-studio-overlay--mobile' : ''}`}>
       <div className={`cmp-studio cmp-studio--catalog${isMobile ? ' cmp-studio--mobile' : ''}`}>
         <div className="cmp-studio-workspace">
+          {isMobile ? (
+            <BuilderTop
+              title={draft.name.trim() || (campaignId ? 'Untitled campaign' : 'New campaign')}
+              subtitle={[
+                MOBILE_SCENARIO_OPTIONS.find((o) => o.value === draft.template_use_case)?.label,
+                MOBILE_STAGE_OPTIONS.find((o) => o.value === draft.stage_code)?.label,
+              ].filter(Boolean).join(' · ') || null}
+              step={mobilePhase as BuilderStep}
+              states={mobileStepStates}
+              onStep={(step) => setMobilePhase(step)}
+              onClose={closeModal}
+            />
+          ) : (
           <div className="cmp-studio-header">
             <div>
               {/* Was the literal "New Campaign" in every mode, so editing an
@@ -2127,60 +2277,11 @@ export const CreateCampaignModal = ({
               <Icon name="x" size={16} />
             </button>
           </div>
-
-          {isMobile && mobilePhase === 'build' && (
-            <div className="cmp-mobile-setup">
-              <button
-                type="button"
-                className="cmp-mobile-setup__trigger"
-                onClick={() => setSetupExpanded((value) => !value)}
-                aria-expanded={setupExpanded}
-              >
-                <div>
-                  <strong>Campaign setup</strong>
-                  <span>{setupSummary}</span>
-                </div>
-                <Icon name={setupExpanded ? 'chevron-up' : 'chevron-down'} size={14} />
-              </button>
-              {setupExpanded && (
-                <div className="cmp-mobile-setup__body">
-                  <label className="cmp-mobile-setup__full">
-                    <span>Campaign Name</span>
-                    <input
-                      value={draft.name}
-                      onChange={(event) => updateDraftRoot('name', event.target.value)}
-                      placeholder="e.g. Dallas high-equity first touch"
-                    />
-                  </label>
-                  <label>
-                    <span>Scenario</span>
-                    <select value={draft.template_use_case} onChange={(event) => updateDraftRoot('template_use_case', event.target.value)}>
-                      <option value="ownership_check">Ownership Check</option>
-                      <option value="consider_selling">Consider Selling</option>
-                      <option value="seller_asking_price">Asking Price</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>Stage</span>
-                    <select value={draft.stage_code} onChange={(event) => updateDraftRoot('stage_code', event.target.value)}>
-                      <option value="first_touch">First Touch</option>
-                      <option value="second_touch">Second Touch</option>
-                      <option value="reengagement">Reengagement</option>
-                    </select>
-                  </label>
-                  <label className="cmp-mobile-setup__full">
-                    <span>Description</span>
-                    <input
-                      value={draft.description}
-                      onChange={(event) => updateDraftRoot('description', event.target.value)}
-                      placeholder="Optional"
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
           )}
 
+          {/* The collapsible "Campaign setup" panel that sat here duplicated the
+              BUILD name field (two inputs bound to one value, on one screen) and
+              used native OS selects. Its fields now live in BUILD's identity card. */}
           {!isMobile && (
           <div className="cmp-mission-strip">
             <label>
@@ -2232,6 +2333,14 @@ export const CreateCampaignModal = ({
             <CampaignBuildMobile
               name={draft.name}
               onNameChange={(value) => updateDraftRoot('name', value)}
+              scenario={draft.template_use_case}
+              scenarioOptions={MOBILE_SCENARIO_OPTIONS}
+              onScenarioChange={(value) => updateDraftRoot('template_use_case', value)}
+              stage={draft.stage_code}
+              stageOptions={MOBILE_STAGE_OPTIONS}
+              onStageChange={(value) => updateDraftRoot('stage_code', value)}
+              description={draft.description}
+              onDescriptionChange={(value) => updateDraftRoot('description', value)}
               categories={buildCategories}
               appliedFilters={buildAppliedFilters}
               candidateCount={preview ? Number(preview.total_matched ?? 0) : null}
@@ -2512,39 +2621,25 @@ export const CreateCampaignModal = ({
               }
               schedulableLoading={launchPreflightLoading}
               schedulableBlockers={launchPreflight?.skipped_counts_by_reason ?? null}
-              firstScheduledAt={launchPreflight?.first_scheduled_at ?? null}
-              lastScheduledAt={launchPreflight?.last_scheduled_at ?? null}
-              maxTargets={parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS)}
-              plan={{
-                effectiveSends: launchEstimates.effectiveSends,
+              plan={mobileLaunchPlan}
+              display={{
                 dailyVolume: launchEstimates.dailyVolume,
                 spacingSeconds: launchEstimates.spacingSeconds,
-                durationLabel: launchEstimates.durationLabel,
-                spanDays: launchEstimates.spanDays,
+                maxTargets: parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS),
+                runLimit: queuePosture.runLimit,
               }}
               scheduledAt={launchSettings.first_scheduled_at}
               routing={previewCanonicalRouting}
-              savedCampaignId={savedCampaignId}
               campaignTimezone={campaignTimezone}
               insideContactWindow={insideContactWindow}
-              blockers={mobileActivationBlockers}
+              issues={mobileLaunchIssues}
               warnings={mobileActivationWarnings}
-              previewLoading={isPreviewLoading}
-              activationProgress={activationProgress}
-              isLaunching={isLaunching}
-              isSaving={isSaving}
-              isPersisting={isPersistingLaunch}
-              canActivate={canActivateNow}
-              canSchedule={canScheduleNow}
-              canSaveDraft={canSaveDraft}
-              onActivate={requestActivate}
-              onSchedule={requestSchedule}
-              onSaveDraft={saveCampaign}
+              queueMode={queuePosture.queueMode}
+              autoMode={queuePosture.autoMode}
               onEditSchedule={() => setLaunchSheet('schedule')}
               onEditPacing={() => setLaunchSheet('pacing')}
               onEditLimit={() => setLaunchSheet('limit')}
-              /* A blocker is resolved where it was created, not here. */
-              onResolveBlocker={() => setMobilePhase(preview ? 'build' : 'reach')}
+              onGoToStep={(step) => setMobilePhase(step)}
             />
           )}
 
@@ -2634,7 +2729,10 @@ export const CreateCampaignModal = ({
           {isMobile && mobilePhase === 'build' && categorySheetOpen && (
             <CampaignCategorySheet
               title={BUILD_CATEGORY_LABELS[activeDomain] ?? activeDomainDefinition?.tabLabel ?? 'Targeting'}
-              subtitle={activeDomainDefinition?.sourceOfTruth ?? null}
+              /* Was the catalog's internal description ("Asset source of truth and
+                 campaign anchor") — which the sheet body then printed a second
+                 time as a badge that ran off the left edge of the screen. */
+              subtitle={CATEGORY_META[activeDomain]?.blurb ?? null}
               appliedCount={activeFilterDraft.target_filters[activeDomain]?.length ?? 0}
               onClose={() => { setCategorySheetOpen(false); setFieldPickerState(null) }}
             >
@@ -2676,8 +2774,9 @@ export const CreateCampaignModal = ({
               preview={preview}
               loading={isPreviewLoading}
               stale={previewStale}
-              updatedAt={previewMeta?.ts ?? null}
+              updatedAt={previewMeta?.at ?? null}
               onRefresh={() => runPreview('manual')}
+              readyFallback={canonicalReady}
             />
           )}
 
@@ -2745,15 +2844,10 @@ export const CreateCampaignModal = ({
             the sheet's Done button switched stages instead of dismissing the
             sheet. The sheet is modal — the rail belongs to the screen beneath it. */}
         {isMobile && !categorySheetOpen && !launchSheet && (
-          <CampaignStageRail
-            phase={mobilePhase}
-            onPhaseChange={setMobilePhase}
-            count={preview
-              ? Number(mobilePhase === 'build' ? (preview.total_matched ?? 0) : (canonicalReady ?? 0))
-              : null}
-            stale={previewStale}
-            loading={isPreviewLoading}
-            scopeLabel={mobilePhase === 'build' ? 'match' : 'ready'}
+          <BuilderFooter
+            meta={mobileFooter.meta}
+            secondary={mobileFooter.secondary}
+            primary={mobileFooter.primary}
           />
         )}
 

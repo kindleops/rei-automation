@@ -129,15 +129,23 @@ export function CampaignReachMobile({
   stale,
   updatedAt,
   onRefresh,
+  readyFallback = null,
 }: {
   preview: CampaignPreviewResult | null
   loading: boolean
   stale: boolean
   updatedAt: string | null
   onRefresh: () => void
+  /**
+   * The ready figure the rest of the builder uses (exclusive partition, else
+   * `ready_to_queue`). Some previews arrive without the exclusive partition, and
+   * this screen then showed "— READY · counting targeted audience" over an empty
+   * funnel indefinitely, while the footer beneath it already read "105,430 ready
+   * to message". The count had finished; only this screen didn't say so.
+   */
+  readyFallback?: number | null
 }) {
   const [openLosses, setOpenLosses] = useState(false)
-  const [openReady, setOpenReady] = useState(false)
   const [animate, setAnimate] = useState(false)
 
   const blocks = preview?.exclusive_block_reasons?.counts ?? null
@@ -226,17 +234,35 @@ export function CampaignReachMobile({
   const readyHalf = (readyWidth / 100) * (VB_W / 2)
 
   const routing = canonical && [
-    { key: 'local', label: 'LOCAL', value: n(canonical.exact_market_match), bad: false },
-    { key: 'cross', label: 'CROSS-STATE', value: n(canonical.approved_state_fallback), bad: false },
-    { key: 'none', label: 'NO ROUTE', value: n(canonical.no_sender_route), bad: true },
+    { key: 'local', label: 'Local number', value: n(canonical.exact_market_match), bad: false },
+    { key: 'cross', label: 'Out of state', value: n(canonical.approved_state_fallback), bad: false },
+    { key: 'none', label: 'No number', value: n(canonical.no_sender_route), bad: true },
   ]
+
+  /*
+   * THREE honest states for the answer, where there used to be two. "Counting"
+   * is only said while a count is actually running; a finished preview without
+   * the partition shows the ready figure it does have.
+   */
+  const counted = Boolean(preview) && !loading
+  const partitionMissing = counted && !model
+  const shownReady = model ? (ready ?? 0) : (counted && readyFallback != null ? readyFallback : null)
+  const countedAgo = (() => {
+    if (!updatedAt) return null
+    const t = new Date(updatedAt).getTime()
+    if (!Number.isFinite(t)) return null
+    const mins = Math.round((Date.now() - t) / 60000)
+    if (mins < 1) return 'Counted just now'
+    if (mins < 60) return `Counted ${mins} min ago`
+    return `Counted ${Math.round(mins / 60)} hr ago`
+  })()
   const routeTotal = routing ? routing.reduce((s, r) => s + r.value, 0) : 0
 
   return (
     <div className="crx">
       <div className="crx__head">
         <span className={`crx__state${stale ? ' is-stale' : ''}`}>
-          {loading ? 'Counting…' : stale ? 'Stale — targeting changed' : updatedAt ? `Updated ${updatedAt}` : 'Not counted'}
+          {loading ? 'Counting…' : stale ? 'Audience changed — recount to update' : countedAgo ?? (preview ? 'Counted' : 'Counting…')}
         </span>
         <button type="button" className="crx__refresh" onClick={onRefresh} disabled={loading}>
           <Icon name="refresh-cw" size={13} />
@@ -245,27 +271,39 @@ export function CampaignReachMobile({
       </div>
 
       {/* The answer, before the shape is inspected. */}
-      <section className={`crx__summary${stale ? ' is-stale' : ''}${model ? '' : ' is-skeleton'}`}>
+      <section className={`crx__summary${stale ? ' is-stale' : ''}${shownReady != null ? '' : ' is-skeleton'}`}>
         <span className="crx__summary-value">
-          {model ? <StageValue value={ready ?? 0} animate={animate} /> : '—'}
+          {shownReady != null ? <StageValue value={shownReady} animate={animate} /> : '—'}
         </span>
-        <span className="crx__summary-unit">READY</span>
+        <span className="crx__summary-unit">ready to message</span>
         <span className="crx__summary-sub">
-          {model && readyPct != null ? `${readyPct.toFixed(1)}% of targeted audience` : 'counting targeted audience'}
+          {model && readyPct != null
+            ? `${readyPct.toFixed(1)}% of the ${nf(matched)} sellers targeted`
+            : loading
+              ? 'Counting your audience…'
+              : partitionMissing && shownReady != null && matched > 0
+                ? `${((shownReady / matched) * 100).toFixed(1)}% of the ${nf(matched)} sellers targeted`
+                : partitionMissing ? 'Counted across your whole audience' : 'Counting your audience…'}
         </span>
       </section>
 
       {gap > 0 && (
         <section className="cdb__band">
-          <div className="cdb__key">DATA COVERAGE</div>
+          <div className="cdb__key">Data coverage</div>
           <p className="crx__gap">{nf(gap)} properties awaiting graph refresh</p>
         </section>
       )}
 
       <section className={`cdb__band crx__funnel${stale ? ' is-stale' : ''}${model ? '' : ' is-counting'}`}>
-        <div className="cdb__key">CONTRACTION<em>canonical</em></div>
+        <div className="cdb__key">How the audience narrows</div>
 
-        <div className="crx__shape" style={{ height }}>
+        {partitionMissing && (
+          <p className="crx__no-partition">
+            A step-by-step breakdown isn’t available for this audience. The ready figure above is final.
+          </p>
+        )}
+
+        {!partitionMissing && <div className="crx__shape" style={{ height }}>
           <svg
             className="crx__silhouette"
             viewBox={`0 0 ${VB_W} ${height}`}
@@ -309,27 +347,18 @@ export function CampaignReachMobile({
             {rows.map((r) => (
               r.kind === 'stage' ? (
                 r.key === 'ready' ? (
-                  // READY is the drill-in point for real targets. The sample view
-                  // is not built yet, so the affordance is present and says so
-                  // rather than opening an empty modal.
+                  // This row used to be a button whose only effect was revealing
+                  // "Target-level sampling opens at LAUNCH." — and LAUNCH shows no
+                  // sample. A control that points at nothing is removed.
                   <li
                     key={r.key}
                     className="crx__row is-ready"
                     style={{ height: r.height, paddingLeft: inset(r.width), paddingRight: inset(r.width) }}
                   >
-                    <button
-                      type="button"
-                      className="crx__row-btn"
-                      aria-expanded={openReady}
-                      onClick={() => setOpenReady((v) => !v)}
-                      disabled={!model}
-                    >
-                      <span className="crx__row-label">{model ? r.label : ''}</span>
-                      <span className="crx__row-value">
-                        {model ? <StageValue value={r.value} animate={animate} /> : ''}
-                      </span>
-                      {model && <Icon name="chevron-right" size={15} />}
-                    </button>
+                    <span className="crx__row-label">{model ? 'Ready' : ''}</span>
+                    <span className="crx__row-value">
+                      {model ? <StageValue value={r.value} animate={animate} /> : ''}
+                    </span>
                   </li>
                 ) : (
                   <li
@@ -360,11 +389,7 @@ export function CampaignReachMobile({
               )
             ))}
           </ol>
-        </div>
-
-        {model && openReady && (
-          <p className="crx__ready-note">Target-level sampling opens at LAUNCH.</p>
-        )}
+        </div>}
 
         {model && (
           <button type="button" className="crx__drill" onClick={() => setOpenLosses((v) => !v)}>
@@ -379,17 +404,21 @@ export function CampaignReachMobile({
         {/* Scope is explicit: routing is evaluated across the whole targeted
             audience, so LOCAL 11,756 is not the funnel's Sender-routed 8,975. */}
         <div className="cdb__key">
-          SENDER ROUTING
+          Sender coverage
           <em>
-            targeted audience
-            {routing ? ` · ${routing[2].value === 0 ? 'all routes live' : 'partial coverage'}` : ''}
+            {routing ? (routing[2].value === 0 ? 'Every seller has a number' : 'Some sellers have no number') : ''}
           </em>
         </div>
+        {counted && !routing ? (
+          <p className="crx__no-partition">
+            Coverage by sender number isn’t available for this audience. A number is assigned to each seller when the campaign is scheduled, and checked again before every send.
+          </p>
+        ) : (
         <div className="crx__routes">
           {(routing ?? [
-            { key: 'local', label: 'LOCAL', value: null, bad: false },
-            { key: 'cross', label: 'CROSS-STATE', value: null, bad: false },
-            { key: 'none', label: 'NO ROUTE', value: null, bad: true },
+            { key: 'local', label: 'Local number', value: null, bad: false },
+            { key: 'cross', label: 'Out of state', value: null, bad: false },
+            { key: 'none', label: 'No number', value: null, bad: true },
           ]).map((r) => (
             <div
               key={r.key}
@@ -403,13 +432,14 @@ export function CampaignReachMobile({
             </div>
           ))}
         </div>
+        )}
       </section>
 
       {openLosses && losses.length > 0 && (
         <section className="cdb__band is-last">
           <div className="cdb__key">
-            EXCLUDED
-            <span className="cdb__count">{nf(lossTotal)} total</span>
+            Excluded
+            <span className="cdb__count">{nf(lossTotal)} sellers</span>
           </div>
           <div className="cdb__rows">
             {losses.map((l) => (

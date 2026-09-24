@@ -1,0 +1,1140 @@
+/* ════════════════════════════════════════════════════════════════════════
+   CAMPAIGN BUILDER — mobile.
+
+   One material system for Build, Reach chrome, Launch and the sheet:
+     base         the page, quiet and stable
+     card         grouped content — opaque panel, hairline edge, 18px radius
+     glass        ONLY the surfaces that float: the top bar and the footer
+
+   Theme tokens only (--accent, --bg-*, --text-*, --border, --ok/--warn/
+   --danger), so Light / Red Ops / True Black inherit. Sentence case
+   throughout: the previous builder spoke in 10px letter-spaced capitals
+   ("NAME", "TARGETING", "BLOCKERS"), which reads as a terminal, not a
+   product, and is harder to read at small sizes, not easier.
+   ════════════════════════════════════════════════════════════════════════ */
+
+.cmp-studio--mobile {
+  --cb-pad: 16px;
+  --cb-radius: 18px;
+  --cb-card: var(--bg-panel-solid, #0b0f16);
+  --cb-edge: color-mix(in srgb, var(--border, rgba(148, 163, 184, 0.2)) 58%, transparent);
+  --cb-hair: color-mix(in srgb, var(--border, rgba(148, 163, 184, 0.2)) 38%, transparent);
+  --cb-ink: var(--text-primary, #eef2f8);
+  --cb-ink-2: var(--text-secondary, #a4adbb);
+  --cb-ink-3: var(--text-tertiary, #6b7483);
+  --cb-accent: var(--accent, #38bdf8);
+  --cb-ok: var(--ok, #34d399);
+  --cb-warn: var(--warn, #f5a524);
+  --cb-bad: var(--danger, #f87171);
+}
+
+/* ── top bar ──────────────────────────────────────────────────────────── */
+
+.cbt {
+  flex: none;
+  position: relative;
+  z-index: 3;
+  padding: max(12px, env(safe-area-inset-top, 0px)) var(--cb-pad) 12px;
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--cb-accent) 9%, transparent), transparent 60%),
+    color-mix(in srgb, var(--bg-main, #06080d) 78%, transparent);
+  -webkit-backdrop-filter: saturate(160%) blur(22px);
+  backdrop-filter: saturate(160%) blur(22px);
+  border-bottom: 1px solid var(--cb-hair);
+}
+
+.cbt__row { display: flex; align-items: flex-start; gap: 12px; }
+
+.cbt__title { flex: 1; min-width: 0; padding-top: 2px; }
+
+.cbt__h {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 680;
+  line-height: 1.2;
+  letter-spacing: -0.022em;
+  color: var(--cb-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cbt__sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--cb-ink-3);
+}
+
+.cbt__close {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cb-ink) 8%, transparent);
+  color: var(--cb-ink-2);
+  cursor: pointer;
+}
+
+/* 36px visual, 44px target — without inflating the bar. */
+.cbt__close::after { content: ''; position: absolute; inset: -4px; }
+.cbt__close:active { background: color-mix(in srgb, var(--cb-ink) 14%, transparent); }
+
+/* ── step indicator ─────────────────────────────────────────────────── */
+
+.cbt__steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 14px;
+}
+
+/* The track runs node-centre to node-centre: 1/6 in from each edge of a
+   three-column grid. It fills to the current step so progress reads before
+   any label does. */
+.cbt__track {
+  position: absolute;
+  top: 11px;
+  left: calc(100% / 6);
+  right: calc(100% / 6);
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cb-hair);
+  overflow: hidden;
+}
+
+.cbt__track-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--cb-accent) 60%, transparent), var(--cb-accent));
+  transition: width 420ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.cbt__step {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--cb-ink-3);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cbt__node {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-main, #06080d);
+  border: 1.5px solid var(--cb-edge);
+  color: var(--cb-ink-3);
+  transition: background 220ms ease, border-color 220ms ease, color 220ms ease, box-shadow 220ms ease;
+}
+
+.cbt__label {
+  font-size: 12.5px;
+  font-weight: 580;
+  letter-spacing: -0.005em;
+}
+
+.cbt__step.is-done .cbt__node {
+  background: var(--cb-accent);
+  border-color: var(--cb-accent);
+  color: var(--bg-main, #06080d);
+}
+.cbt__step.is-done .cbt__label { color: var(--cb-ink-2); }
+
+.cbt__step.is-here .cbt__node {
+  border-color: var(--cb-accent);
+  color: var(--cb-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--cb-accent) 18%, transparent);
+}
+.cbt__step.is-here .cbt__label { color: var(--cb-ink); font-weight: 650; }
+
+.cbt__step.is-attention .cbt__node { border-color: var(--cb-warn); color: var(--cb-warn); }
+.cbt__step.is-attention .cbt__label { color: var(--cb-warn); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cbt__track-fill, .cbt__node { transition: none; }
+}
+
+/* ── footer ──────────────────────────────────────────────────────────── */
+
+.cbf {
+  flex: none;
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px var(--cb-pad) calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--cb-hair);
+  background: color-mix(in srgb, var(--bg-main, #06080d) 80%, transparent);
+  -webkit-backdrop-filter: saturate(160%) blur(22px);
+  backdrop-filter: saturate(160%) blur(22px);
+}
+
+.cbf__left { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; }
+.cbf__left:empty { display: none; }
+
+.cbf__meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.cbf__meta strong {
+  font-size: 19px;
+  font-weight: 690;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--cb-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cbf__meta span { font-size: 11.5px; color: var(--cb-ink-3); }
+.cbf__meta.is-quiet strong { color: var(--cb-ink-3); }
+.cbf__meta.is-live strong { color: var(--cb-ink); }
+
+.cbf__secondary {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--cb-ink-2);
+  font-size: 14.5px;
+  font-weight: 580;
+  cursor: pointer;
+}
+.cbf__secondary:disabled { opacity: 0.45; cursor: default; }
+
+.cbf__primary {
+  flex: 0 0 auto;
+  margin-left: auto;
+  max-width: 100%;
+  min-width: 132px;
+  height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 15px;
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: transform 120ms ease, filter 160ms ease, background 200ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cbf__primary:active:not(:disabled) { transform: scale(0.98); }
+
+.cbf__primary-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Forward motion and launch share one material, so the eye learns one thing:
+   the bright button moves the campaign forward. */
+.cbf__primary.is-next,
+.cbf__primary.is-go {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--cb-accent) 88%, #fff 12%),
+    var(--cb-accent));
+  color: var(--bg-main, #051016);
+  box-shadow:
+    0 8px 22px color-mix(in srgb, var(--cb-accent) 26%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.cbf__primary.is-go {
+  box-shadow:
+    0 10px 28px color-mix(in srgb, var(--cb-accent) 38%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+/* A blocked launch is a signpost, not a failure: it names the fix and takes
+   you to it. Tinted, never alarm-red. */
+/* A step with nothing else to say gets a full-width action; so does a blocked
+   launch, whose label names a fix and must be read in full. */
+.cbf__left:empty + .cbf__primary,
+.cbf__primary.is-blocked { flex: 1 1 auto; }
+
+.cbf__primary.is-blocked {
+  justify-content: space-between;
+  background: color-mix(in srgb, var(--cb-warn) 13%, var(--cb-card));
+  color: var(--cb-warn);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cb-warn) 36%, transparent);
+}
+
+.cbf__primary.is-draft,
+.cbf__primary.is-busy {
+  background: color-mix(in srgb, var(--cb-ink) 10%, var(--cb-card));
+  color: var(--cb-ink);
+  box-shadow: inset 0 0 0 1px var(--cb-edge);
+}
+
+.cbf__primary:disabled { cursor: default; }
+.cbf__primary.is-busy { color: var(--cb-ink-2); }
+
+.cbf__spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 26%, transparent);
+  border-top-color: currentColor;
+  animation: cb-spin 800ms linear infinite;
+}
+
+@keyframes cb-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .cbf__spinner { animation: none; }
+  .cbf__primary { transition: none; }
+}
+
+/* ── BUILD ───────────────────────────────────────────────────────────── */
+
+.cbb {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px var(--cb-pad) 28px;
+  color: var(--cb-ink);
+}
+
+.cbb-eyebrow {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cb-ink-3);
+  letter-spacing: 0;
+}
+
+/* Identity — the one place the campaign is named. */
+.cbb-id {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border-radius: var(--cb-radius);
+  background:
+    radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--cb-accent) 7%, transparent), transparent 55%),
+    var(--cb-card);
+  border: 1px solid var(--cb-edge);
+}
+
+.cbb-id__name { display: flex; flex-direction: column; gap: 4px; }
+
+.cbb-id__name input,
+.cbb-id__note input {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--cb-edge);
+  border-radius: 0;
+  outline: 0;
+  background: none;
+  color: var(--cb-ink);
+  font: inherit;
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+  transition: border-color 160ms ease;
+}
+
+.cbb-id__note input { font-size: 15px; font-weight: 500; }
+
+.cbb-id__name input::placeholder,
+.cbb-id__note input::placeholder { color: var(--cb-ink-3); font-weight: 450; }
+
+.cbb-id__name input:focus,
+.cbb-id__note input:focus { border-bottom-color: var(--cb-accent); }
+
+.cbb-id__choice { display: flex; flex-direction: column; gap: 8px; }
+
+/* Direct choices instead of OS <select> menus: three options, visible at once,
+   one tap to change. An even three-column grid, not wrapping pills — wrapped
+   pills left "Asking price" and "Re-engagement" orphaned on a second row, which
+   reads as overflow rather than as a set. Labels may break onto two lines
+   inside their cell; the cells stay aligned. */
+.cbb-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--cb-ink) 5%, transparent);
+}
+
+.cbb-seg__opt {
+  position: relative;
+  min-height: 48px;
+  padding: 6px 6px;
+  border-radius: 10px;
+  line-height: 1.2;
+  text-align: center;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--cb-ink-2);
+  font-size: 13.5px;
+  font-weight: 580;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+/* The selected cell rises out of the track — the segmented-control idiom. */
+.cbb-seg__opt.is-on {
+  background: var(--cb-card);
+  color: var(--cb-ink);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px color-mix(in srgb, var(--cb-accent) 48%, transparent);
+}
+
+.cbb-id__add-note {
+  align-self: flex-start;
+  min-height: 44px;
+  margin: -6px 0 -8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cb-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cbb-id__note { display: flex; flex-direction: column; gap: 4px; }
+
+/* Audience */
+.cbb-aud { margin-top: 26px; }
+
+.cbb-aud__head { padding: 0 2px 12px; }
+
+.cbb-aud__head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.018em;
+  color: var(--cb-ink);
+}
+
+.cbb-aud__head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--cb-ink-2);
+}
+
+.cbb-aud__list { display: flex; flex-direction: column; gap: 10px; }
+
+.cbb-cat {
+  border-radius: 16px;
+  background: var(--cb-card);
+  border: 1px solid var(--cb-edge);
+  overflow: hidden;
+  transition: border-color 200ms ease;
+}
+
+.cbb-cat.is-set { border-color: color-mix(in srgb, var(--cb-accent) 36%, transparent); }
+
+.cbb-cat__head {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--cb-ink-3);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cbb-cat__head:active { background: color-mix(in srgb, var(--cb-ink) 4%, transparent); }
+.cbb-cat__head.is-static { cursor: default; grid-template-columns: 38px minmax(0, 1fr) auto; }
+.cbb-cat__head.is-static:active { background: none; }
+
+.cbb-cat__icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--cb-ink) 7%, transparent);
+  color: var(--cb-ink-2);
+}
+
+.cbb-cat.is-set .cbb-cat__icon {
+  background: color-mix(in srgb, var(--cb-accent) 16%, transparent);
+  color: var(--cb-accent);
+}
+
+.cbb-cat__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+.cbb-cat__text strong {
+  font-size: 15.5px;
+  font-weight: 640;
+  letter-spacing: -0.012em;
+  color: var(--cb-ink);
+}
+
+.cbb-cat__text em {
+  font-style: normal;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--cb-ink-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cbb-cat__state {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--cb-accent);
+}
+
+.cbb-cat.is-set .cbb-cat__state {
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--cb-accent);
+  color: var(--bg-main, #06080d);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Applied filters live INSIDE the card they belong to — one row each, full
+   width, so long values read and every control is a real 44px target. */
+.cbb-cat__filters {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cbb-chip {
+  display: flex;
+  align-items: stretch;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cb-accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cb-accent) 20%, transparent);
+}
+
+.cbb-chip.is-pending {
+  background: color-mix(in srgb, var(--cb-warn) 8%, transparent);
+  border-color: color-mix(in srgb, var(--cb-warn) 34%, transparent);
+}
+
+.cbb-chip__main {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  padding: 11px 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 13.5px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.cbb-chip__field { color: var(--cb-ink); font-weight: 600; }
+.cbb-chip__op { color: var(--cb-ink-3); }
+.cbb-chip__value { color: var(--cb-ink); font-weight: 500; overflow-wrap: anywhere; }
+
+.cbb-chip__flag {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--cb-warn);
+}
+
+.cbb-chip.is-unsupported .cbb-chip__flag { color: var(--cb-ink-3); }
+
+.cbb-chip__remove {
+  flex: none;
+  width: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--cb-accent) 16%, transparent);
+  background: none;
+  color: var(--cb-ink-3);
+  cursor: pointer;
+  border-radius: 0 12px 12px 0;
+}
+
+.cbb-chip__remove:active { background: color-mix(in srgb, var(--cb-bad) 12%, transparent); color: var(--cb-bad); }
+
+/* Notes — only when something is genuinely unresolved. */
+.cbb-notes { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+
+.cbb-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--cb-ink) 5%, transparent);
+  color: var(--cb-ink-2);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.cbb-note svg { flex: none; margin-top: 1px; color: var(--cb-ink-3); }
+.cbb-note.is-warn { background: color-mix(in srgb, var(--cb-warn) 10%, transparent); color: var(--cb-ink); }
+.cbb-note.is-warn svg { color: var(--cb-warn); }
+
+/* ── LAUNCH ──────────────────────────────────────────────────────────── */
+
+.clv {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px var(--cb-pad) 28px;
+  color: var(--cb-ink);
+}
+
+.clv-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 16px;
+  border-radius: var(--cb-radius);
+  background: var(--cb-card);
+  border: 1px solid var(--cb-edge);
+}
+
+.clv-hero.is-ready {
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--cb-ok) 12%, transparent), transparent 60%),
+    var(--cb-card);
+  border-color: color-mix(in srgb, var(--cb-ok) 38%, transparent);
+}
+
+.clv-hero.is-blocked {
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--cb-warn) 11%, transparent), transparent 60%),
+    var(--cb-card);
+  border-color: color-mix(in srgb, var(--cb-warn) 36%, transparent);
+}
+
+.clv-hero__mark {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cb-ink) 9%, transparent);
+  color: var(--cb-ink-2);
+}
+
+.clv-hero.is-ready .clv-hero__mark { background: color-mix(in srgb, var(--cb-ok) 20%, transparent); color: var(--cb-ok); }
+.clv-hero.is-blocked .clv-hero__mark { background: color-mix(in srgb, var(--cb-warn) 20%, transparent); color: var(--cb-warn); }
+
+.clv-hero__spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-top-color: currentColor;
+  animation: cb-spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) { .clv-hero__spin { animation: none; } }
+
+.clv-hero__text h3 {
+  margin: 2px 0 0;
+  font-size: 19px;
+  font-weight: 690;
+  letter-spacing: -0.02em;
+  color: var(--cb-ink);
+}
+
+.clv-hero__text p {
+  margin: 5px 0 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--cb-ink-2);
+}
+
+/* When attached, the checklist continues the hero card: square the seam. */
+.clv-hero:has(+ .clv-todo.is-attached) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+
+.clv-todo.is-attached {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 1px solid color-mix(in srgb, var(--cb-warn) 22%, transparent);
+  border-color: color-mix(in srgb, var(--cb-warn) 36%, transparent);
+}
+
+/* The to-do list: each item names the fix and, where it has one, the step. */
+.clv-todo {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 4px;
+  border-radius: var(--cb-radius);
+  background: var(--cb-card);
+  border: 1px solid var(--cb-edge);
+}
+
+.clv-todo li + li { border-top: 1px solid var(--cb-hair); }
+
+.clv-todo__item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 10px 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.clv-todo__item.is-actionable { cursor: pointer; border-radius: 14px; }
+.clv-todo__item.is-actionable:active { background: color-mix(in srgb, var(--cb-ink) 5%, transparent); }
+
+.clv-todo__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cb-warn); }
+
+.clv-todo__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.clv-todo__text strong { font-size: 15px; font-weight: 620; color: var(--cb-ink); }
+.clv-todo__text em { font-style: normal; font-size: 12.5px; line-height: 1.4; color: var(--cb-ink-3); }
+
+.clv-todo__go {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--cb-accent);
+}
+
+/* Cards */
+.clv-card {
+  margin-top: 14px;
+  padding: 4px 16px;
+  border-radius: var(--cb-radius);
+  background: var(--cb-card);
+  border: 1px solid var(--cb-edge);
+}
+
+.clv-card.is-warn { border-color: color-mix(in srgb, var(--cb-warn) 30%, transparent); }
+
+.clv-card__h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 640;
+  color: var(--cb-ink-2);
+}
+
+.clv-card__badge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 620;
+}
+.clv-card__badge.is-good { background: color-mix(in srgb, var(--cb-ok) 15%, transparent); color: var(--cb-ok); }
+.clv-card__badge.is-warn { background: color-mix(in srgb, var(--cb-warn) 15%, transparent); color: var(--cb-warn); }
+.clv-card__badge.is-quiet { background: color-mix(in srgb, var(--cb-ink) 8%, transparent); color: var(--cb-ink-3); }
+
+.clv-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--cb-hair);
+  background: none;
+  text-align: left;
+  color: var(--cb-ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.clv-card__h + .clv-row { border-top: 0; }
+.clv-row.is-static { cursor: default; grid-template-columns: minmax(0, auto) minmax(0, 1fr); }
+.clv-row:not(.is-static):active { background: color-mix(in srgb, var(--cb-ink) 3%, transparent); }
+
+.clv-row__label { font-size: 14.5px; color: var(--cb-ink-2); }
+.clv-row__label.is-wide { white-space: normal; }
+
+.clv-row__value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 15px;
+  font-weight: 620;
+  color: var(--cb-ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.clv-row__value small { font-size: 12px; font-weight: 500; color: var(--cb-ink-3); }
+.clv-row.is-capped .clv-row__value { color: var(--cb-warn); }
+
+.clv-card__note {
+  margin: 0;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--cb-hair);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--cb-ink-2);
+}
+
+.clv-card__h + .clv-card__note { border-top: 0; padding-top: 2px; }
+.clv-card__note.is-warn { color: var(--cb-warn); }
+
+.clv-cover {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px 0 14px;
+}
+
+.clv-cover__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 12px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--cb-ink) 5%, transparent);
+}
+
+.clv-cover__cell strong {
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--cb-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.clv-cover__cell span { font-size: 11.5px; color: var(--cb-ink-3); }
+.clv-cover__cell.is-nil strong { color: var(--cb-ink-3); }
+.clv-cover__cell.is-bad strong { color: var(--cb-bad); }
+
+/* ── category sheet (mobile) ─────────────────────────────────────────── */
+/* The field editor body is shared with desktop, so everything here is scoped
+   to `.ccs`, which exists only in the mobile sheet. Prefixed with the studio
+   class because `.cmp-studio--mobile .cmp-filter-category` (same specificity,
+   later in the cascade) otherwise strips the card back to bare padding. */
+
+.cmp-studio--mobile .ccs .ccs__sub {
+  padding: 4px var(--cb-pad, 16px) 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--cb-ink-2, #a4adbb);
+}
+
+/* The sheet already has a title bar. This heading restated it twice (kicker +
+   h3) and printed the catalog's internal description as a badge that ran off
+   the left edge of the screen. */
+.cmp-studio--mobile .ccs .cmp-domain-heading { display: none; }
+
+/* Catalog size is not progress. */
+.cmp-studio--mobile .ccs .cmp-filter-category-header strong { display: none; }
+
+.cmp-studio--mobile .ccs .cmp-category-stack { padding: 6px var(--cb-pad, 16px) 0; gap: 10px; display: flex; flex-direction: column; }
+
+.cmp-studio--mobile .ccs .cmp-filter-category {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--cb-card, #0b0f16);
+  border: 1px solid var(--cb-edge, rgba(148, 163, 184, 0.14));
+}
+
+.cmp-studio--mobile .ccs .cmp-filter-category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.cmp-studio--mobile .ccs .cmp-filter-category-header > div > span {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  color: var(--cb-ink, #eef2f8);
+}
+
+/* "Add Filter" appeared as a boxed button on every group. It is the group's one
+   action, so it stays — as a light accent action rather than a wall of boxes. */
+.cmp-studio--mobile .ccs .cmp-filter-category-header > button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 0 2px 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  box-shadow: none;
+  color: var(--cb-accent, #38bdf8);
+  font-size: 13.5px;
+  font-weight: 620;
+}
+
+.cmp-studio--mobile .ccs .cmp-filter-category-header > button::after { content: ''; position: absolute; inset: -4px 0; }
+.cmp-studio--mobile .ccs .cmp-filter-category-header > button.is-active { color: var(--cb-ink, #eef2f8); }
+
+/* Content inside a group aligns with its heading — the suggestion block had
+   its own inset, so chips sat ~28px right of the title they belong to. */
+.cmp-studio--mobile .ccs .cmp-empty-category,
+.cmp-studio--mobile .ccs .cmp-filter-row-stack {
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* Groups without suggestions rendered an empty container and left a void. */
+.cmp-studio--mobile .ccs .cmp-empty-category:empty { display: none; }
+
+.cmp-studio--mobile .ccs .cmp-suggested-label {
+  margin: 2px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cb-ink-3, #6b7483);
+}
+
+.cmp-studio--mobile .ccs .cmp-suggested-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.cmp-studio--mobile .ccs .cmp-suggested-chip {
+  min-height: 38px;
+  padding: 0 13px;
+  border-radius: 11px;
+  font-size: 13.5px;
+  font-weight: 560;
+}
+
+/* Sheet chrome: the same material and primary as the rest of the builder. */
+.cmp-studio--mobile .ccs__bar {
+  min-height: 58px;
+  padding: max(8px, env(safe-area-inset-top, 0px)) 16px 8px 8px;
+  gap: 6px;
+  border-bottom: 1px solid var(--cb-hair);
+  background: color-mix(in srgb, var(--bg-main, #06080d) 82%, transparent);
+  -webkit-backdrop-filter: saturate(160%) blur(22px);
+  backdrop-filter: saturate(160%) blur(22px);
+}
+
+.cmp-studio--mobile .ccs__close {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--cb-ink-2);
+}
+
+.cmp-studio--mobile .ccs__title {
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: -0.018em;
+  color: var(--cb-ink);
+}
+
+.cmp-studio--mobile .ccs__count {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cb-ink-3);
+}
+
+.cmp-studio--mobile .ccs .ccs__sub {
+  padding: 12px 18px 4px;
+}
+
+.cmp-studio--mobile .ccs__foot {
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--cb-hair);
+  background: color-mix(in srgb, var(--bg-main, #06080d) 82%, transparent);
+  -webkit-backdrop-filter: saturate(160%) blur(22px);
+  backdrop-filter: saturate(160%) blur(22px);
+}
+
+.cmp-studio--mobile .ccs__done {
+  width: 100%;
+  height: 50px;
+  border: 0;
+  border-radius: 15px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cb-accent) 88%, #fff 12%), var(--cb-accent));
+  color: var(--bg-main, #051016);
+  font-size: 15.5px;
+  font-weight: 650;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--cb-accent) 26%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+/* ── REACH ───────────────────────────────────────────────────────────── */
+/* The funnel's geometry and math are untouched. This only moves Reach off the
+   old hairline bands and 9.5px letter-spaced headings onto the same cards as
+   Build and Launch. */
+
+.cmp-studio--mobile .crx {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px var(--cb-pad) 28px;
+  background: none;
+}
+
+.cmp-studio--mobile .crx__head {
+  padding: 0 2px 10px;
+  border-bottom: 0;
+}
+
+.cmp-studio--mobile .crx__state { font-size: 13px; color: var(--cb-ink-3); }
+
+.cmp-studio--mobile .crx__refresh {
+  position: relative;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--cb-ink) 7%, transparent);
+  color: var(--cb-ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cmp-studio--mobile .crx__refresh::after { content: ''; position: absolute; inset: -5px 0; }
+
+.cmp-studio--mobile .crx__summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 18px 16px;
+  border: 1px solid color-mix(in srgb, var(--cb-accent) 34%, transparent);
+  border-radius: var(--cb-radius);
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--cb-accent) 14%, transparent), transparent 62%),
+    var(--cb-card);
+}
+
+.cmp-studio--mobile .crx__summary-value {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--cb-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-studio--mobile .crx__summary-unit {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--cb-ink-2);
+}
+
+.cmp-studio--mobile .crx__summary-sub {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--cb-ink-3);
+}
+
+.cmp-studio--mobile .crx .cdb__band {
+  margin-top: 14px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--cb-edge);
+  border-radius: var(--cb-radius);
+  background: var(--cb-card);
+}
+
+.cmp-studio--mobile .crx .cdb__key {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--cb-ink);
+}
+
+.cmp-studio--mobile .crx .cdb__key em {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0;
+  color: var(--cb-ink-3);
+}
+
+.cmp-studio--mobile .crx__no-partition {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--cb-ink-2);
+}
+
+.cmp-studio--mobile .crx__route-label {
+  font-size: 11.5px;
+  font-weight: 560;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cmp-studio--mobile .crx__drill {
+  min-height: 44px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--cb-accent);
+}
