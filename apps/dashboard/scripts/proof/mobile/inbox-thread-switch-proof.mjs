@@ -224,7 +224,7 @@ for (let cycle = 0; cycle < CYCLES; cycle += 1) {
     // Type first. Operator Polish and Translate Draft act ON the draft, so with
     // an empty composer they are correctly disabled -- auditing before typing
     // reports working controls as dead.
-    await page.locator('.nx-composer-input, textarea').first().fill('Checking in on the property.').catch(() => {})
+    await page.locator('.nx-composer-dock__input-wrap textarea, textarea').first().fill('Checking in on the property.').catch(() => {})
     await page.waitForTimeout(400)
     await trigger.click({ timeout: 30_000 })
     await page.waitForTimeout(1200)

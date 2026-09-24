@@ -282,6 +282,9 @@ import './conversation-live.css'
 // the legacy sheets on specificity alone.
 import './inbox-mobile-premium.css'
 import './inbox-scheduled-panel.css'
+// Mobile elite layer: material, type and motion for the phone Inbox,
+// Conversation, Composer and their sheets. Scoped html.is-mobile-layout.
+import './inbox-mobile-elite.css'
 // RISK-013: nx-ui-foundation-final.css MUST remain the LAST css import.
 import '../../styles/nx-ui-foundation-final.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'

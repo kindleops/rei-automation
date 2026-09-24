@@ -1147,6 +1147,15 @@ const ConversationRowOps75 = memo(({ thread, selected, decision, onSelect, selec
 ConversationRowOps75.displayName = 'ConversationRowOps75'
 
 // Elite inbox row — rail25 / review50 / ops75 / full100 (one component, mode CSS)
+/** Two initials from a seller name; a phone number or blank gets a glyph. */
+function monogramOf(name: string | null | undefined): string {
+  const words = String(name ?? '').replace(/[^\p{L}\s'-]/gu, ' ').trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return '#'
+  const first = words[0][0] ?? ''
+  const last = words.length > 1 ? words[words.length - 1][0] ?? '' : ''
+  return `${first}${last}`.toUpperCase()
+}
+
 const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = 'review50' }: {
   thread: InboxWorkflowThread
   selected: boolean
@@ -1213,6 +1222,9 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
       onClick={() => onSelect(thread.id)}
       onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onSelect(thread.id) }}
     >
+      <span className={cls('nx-row25__avatar', decision.unread && 'is-unread')} aria-hidden="true">
+        {monogramOf(name)}
+      </span>
       <div className="nx-row25__zone nx-row25__zone--media" aria-hidden>
         <PropertySignalTile model={tileModel} size="rail" />
         <div className="nx-row25__media-veil" />
@@ -1458,6 +1470,9 @@ export const InboxSidebar = ({
       return typeof window !== 'undefined' && window.innerWidth <= 820
     } catch { return false }
   })
+  // On a phone the rail IS the primary navigation — always visible, one
+  // horizontal row with live counts. The collapse toggle stays for desktop.
+  const railCollapsed = isMobile ? false : catRailCollapsed
   const toggleCatRail = useCallback(() => {
     setCatRailCollapsed((v) => {
       const next = !v
@@ -1800,16 +1815,18 @@ export const InboxSidebar = ({
       <div className="nx-sidebar-rebuilt__search-top">
         {/* Inbox selector lives IN the control row: selector + search + filter +
             reset on one line, instead of spending a second row on the selector. */}
-        <button
-          type="button"
-          className={cls('nx-cat-nav__toggle', catRailCollapsed && 'is-collapsed')}
-          onClick={toggleCatRail}
-          aria-expanded={!catRailCollapsed}
-          aria-label={catRailCollapsed ? 'Show inbox categories' : 'Hide inbox categories'}
-        >
-          <span className="nx-cat-nav__toggle-active">{activeBucketConfig.shortLabel}</span>
-          <span className="nx-cat-nav__toggle-caret" aria-hidden="true" />
-        </button>
+        {!isMobile && (
+          <button
+            type="button"
+            className={cls('nx-cat-nav__toggle', catRailCollapsed && 'is-collapsed')}
+            onClick={toggleCatRail}
+            aria-expanded={!catRailCollapsed}
+            aria-label={catRailCollapsed ? 'Show inbox categories' : 'Hide inbox categories'}
+          >
+            <span className="nx-cat-nav__toggle-active">{activeBucketConfig.shortLabel}</span>
+            <span className="nx-cat-nav__toggle-caret" aria-hidden="true" />
+          </button>
+        )}
         <div className="nx-sidebar-rebuilt__search-input-wrap">
           <Icon name="search" className="nx-sidebar-rebuilt__search-icon" />
           <input value={searchQuery} onChange={(e) => onSearchQueryChange?.(e.target.value)} placeholder="Search" aria-label="Search inbox threads: name, address, phone or message text" />
@@ -1820,7 +1837,11 @@ export const InboxSidebar = ({
             <Icon name="filter" />
             {activeFilterCount > 0 && <span className="nx-sidebar__filter-badge">{activeFilterCount}</span>}
           </button>
-          <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={handleClearFilters}><Icon name="close" /></button>
+          {/* Only when there is something to clear — a permanent ✕ beside an
+              empty filter reads as a control that does nothing. */}
+          {(activeFilterCount > 0 || activeFilterChips.length > 0) && (
+            <button type="button" className="nx-sidebar__icon-button" title="Clear filters" onClick={handleClearFilters}><Icon name="close" /></button>
+          )}
         </div>
       </div>
       {activeFilterChips.length > 0 && (
@@ -1836,13 +1857,19 @@ export const InboxSidebar = ({
         </div>
       )}
       <div
-        className={cls('nx-cat-nav', catRailCollapsed && 'is-collapsed')}
+        className={cls('nx-cat-nav', railCollapsed && 'is-collapsed')}
         ref={catNavRef}
         role="tablist"
         aria-label="Inbox categories"
-        aria-hidden={catRailCollapsed || undefined}
+        aria-hidden={railCollapsed || undefined}
       >
-        {VISIBLE_INBOX_CHIPS.map((item) => {
+        {/* Phone: lead with All — the default — so the urgent buckets beside it
+            are on screen when the Inbox opens instead of scrolled off to the
+            left of an eighth-position selection. Order only; buckets unchanged. */}
+        {(isMobile
+          ? [...VISIBLE_INBOX_CHIPS.filter((c) => c.bucket === 'all_messages'), ...VISIBLE_INBOX_CHIPS.filter((c) => c.bucket !== 'all_messages')]
+          : VISIBLE_INBOX_CHIPS
+        ).map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
           const isActive = activeBucketConfig.view === item.view
           const showUnread = item.bucket === 'new_replies' && Number(countValue ?? 0) > 0

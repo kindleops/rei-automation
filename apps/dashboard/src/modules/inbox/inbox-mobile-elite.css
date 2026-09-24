@@ -1,0 +1,1657 @@
+/*
+ * INBOX · CONVERSATION · COMPOSER — mobile elite layer.
+ *
+ * The last word on the phone Inbox's MATERIAL: surfaces, type, colour, depth
+ * and motion. Structure and behaviour stay with the components; nothing here
+ * changes what a control does, only how it reads.
+ *
+ * Why `!important` appears: inbox-mobile-premium.css (the previous authority)
+ * forces ~100 declarations with it. Where this layer supersedes one of those,
+ * it has to use the same weight; elsewhere it doesn't.
+ *
+ * In-page rules anchor on #nx-inbox-root: the legacy sheets stack up to five
+ * classes plus !important (the receipt pill in conversation-live.css), and an
+ * ID outranks every one of them without an arms race of extra classes.
+ *
+ * Tokens sit on <html> (namespaced --ix-*) so the portaled sheets — Quick
+ * Actions, Templates, Schedule, Filters, the stage dropdowns — inherit them.
+ */
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+html.is-mobile-layout {
+  --ix-font: -apple-system, 'SF Pro Text', 'SF Pro Display', 'Inter', system-ui, sans-serif;
+  --ix-bg: #05070b;
+  --ix-ink-base: #f2f4f8;
+  --ix-ink: var(--ix-ink-base);
+  --ix-ink-2: color-mix(in srgb, var(--ix-ink-base) 72%, transparent);
+  --ix-ink-3: color-mix(in srgb, var(--ix-ink-base) 56%, transparent);
+  --ix-ink-4: color-mix(in srgb, var(--ix-ink-base) 30%, transparent);
+  --ix-rule: rgba(255, 255, 255, 0.07);
+  --ix-accent: var(--nexus-accent, var(--nx-accent, #22d3ee));
+  --ix-accent-ink: #041018;
+  --ix-glass: rgba(14, 17, 24, 0.72);
+  --ix-glass-hi: rgba(255, 255, 255, 0.08);
+  --ix-glass-lo: rgba(255, 255, 255, 0.02);
+  --ix-glass-edge: rgba(255, 255, 255, 0.1);
+  --ix-blur: blur(26px) saturate(180%);
+  --ix-field: rgba(255, 255, 255, 0.06);
+  --ix-field-edge: rgba(255, 255, 255, 0.09);
+  --ix-plate: #0d1016;
+  --ix-press: rgba(255, 255, 255, 0.05);
+  --ix-out-a: color-mix(in srgb, var(--ix-accent) 88%, #fff 12%);
+  --ix-out-b: color-mix(in srgb, var(--ix-accent) 78%, #000 22%);
+  --ix-out-ink: #041018;
+  --ix-in: rgba(255, 255, 255, 0.075);
+  --ix-in-edge: rgba(255, 255, 255, 0.07);
+  --ix-live: #30d158;
+  --ix-warn: #ff9f0a;
+  --ix-bad: #ff453a;
+  --ix-unread: var(--ix-accent);
+  --ix-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --ix-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html.is-mobile-layout[data-nexus-theme='true_black'] {
+  --ix-bg: #000;
+  --ix-plate: #09090a;
+  --ix-glass: rgba(0, 0, 0, 0.78);
+  --ix-in: rgba(255, 255, 255, 0.085);
+}
+
+/* Red Ops: red marks the operator's own voice and the controls — as a deep,
+   considered red, never a saturated wash — while surfaces stay neutral. */
+html.is-mobile-layout[data-nexus-theme='red_ops'] {
+  --ix-bg: #060505;
+  --ix-ink-base: #f3f1f1;
+  --ix-accent: #ff3b30;
+  --ix-accent-ink: #fff;
+  --ix-plate: #0e0c0c;
+  --ix-glass: rgba(10, 9, 9, 0.8);
+  --ix-out-a: #c8262c;
+  --ix-out-b: #8f1419;
+  --ix-out-ink: #fff5f5;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] {
+  --ix-bg: #f2f4f8;
+  --ix-ink-base: #0b1220;
+  --ix-ink-2: color-mix(in srgb, var(--ix-ink-base) 74%, transparent);
+  --ix-ink-3: color-mix(in srgb, var(--ix-ink-base) 60%, transparent);
+  --ix-ink-4: color-mix(in srgb, var(--ix-ink-base) 32%, transparent);
+  --ix-rule: rgba(11, 18, 32, 0.08);
+  --ix-accent-ink: #fff;
+  --ix-glass: rgba(247, 248, 252, 0.82);
+  --ix-glass-hi: rgba(255, 255, 255, 0.9);
+  --ix-glass-lo: rgba(255, 255, 255, 0.5);
+  --ix-glass-edge: rgba(11, 18, 32, 0.08);
+  --ix-field: rgba(11, 18, 32, 0.05);
+  --ix-field-edge: rgba(11, 18, 32, 0.07);
+  --ix-plate: #fff;
+  --ix-press: rgba(11, 18, 32, 0.045);
+  --ix-out-ink: #fff;
+  --ix-out-a: color-mix(in srgb, var(--ix-accent) 92%, #fff 8%);
+  --ix-out-b: color-mix(in srgb, var(--ix-accent) 82%, #000 18%);
+  --ix-in: #fff;
+  --ix-in-edge: rgba(11, 18, 32, 0.08);
+  --ix-live: #15803d;
+  --ix-warn: #b45309;
+  --ix-bad: #c81e1e;
+}
+
+/* The shell's accent bloom competes with a message list; keep a trace. */
+html.is-mobile-layout:has(.nx-inbox-shell.is-mobile-inbox) body::before { animation: none; opacity: 0.22; }
+html.is-mobile-layout:has(.nx-inbox-shell.is-mobile-inbox) body::after { animation: none; opacity: 0.08; }
+html.is-mobile-layout[data-nexus-theme='red_ops']:has(.nx-inbox-shell.is-mobile-inbox) body::before { opacity: 0.12; }
+html.is-mobile-layout[data-nexus-theme='red_ops']:has(.nx-inbox-shell.is-mobile-inbox) body::after { opacity: 0.04; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox {
+  font-family: var(--ix-font);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INBOX LIST
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt {
+  background: var(--ix-bg) !important;
+}
+
+/* Header: a frosted strip — search capsule + filter orb, then the rail. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-inbox-header-shell {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-inbox-header-shell__inner {
+  background: linear-gradient(180deg, var(--ix-glass-hi), transparent 70%), var(--ix-glass) !important;
+  -webkit-backdrop-filter: var(--ix-blur);
+  backdrop-filter: var(--ix-blur);
+  border: 0 !important;
+  border-bottom: 1px solid var(--ix-rule) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 10px 28px -22px rgba(0, 0, 0, 0.8) !important;
+  padding: 8px 0 8px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-inbox-header-shell__inner::before,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-inbox-header-shell__inner::after { display: none !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-top {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 0 14px !important;
+  margin: 0 !important;
+  background: none !important;
+  border: 0 !important;
+}
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-input-wrap {
+  flex: 1 !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 12px 0 13px !important;
+  border-radius: 14px !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge), inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  transition: box-shadow 0.25s var(--ix-ease);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-input-wrap:focus-within {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ix-accent) 60%, transparent), 0 0 22px -6px color-mix(in srgb, var(--ix-accent) 50%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-input-wrap svg {
+  width: 16px !important;
+  height: 16px !important;
+  color: var(--ix-ink-3) !important;
+  position: static !important;
+  flex: none;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-input-wrap input {
+  flex: 1 !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--ix-ink) !important;
+  font-family: var(--ix-font) !important;
+  font-size: 16px !important;
+  font-weight: 450 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-input-wrap input::placeholder { color: var(--ix-ink-3) !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__top-actions {
+  display: flex !important;
+  gap: 8px !important;
+  flex: none;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button {
+  position: relative !important;
+  width: 42px !important;
+  height: 42px !important;
+  min-width: 42px !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  color: var(--ix-ink) !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo)), var(--ix-field) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent), inset 0 0 0 1px var(--ix-field-edge) !important;
+  transition: transform 0.4s var(--ix-spring);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button:active { transform: scale(0.9); transition-duration: 0.12s; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button svg { width: 17px !important; height: 17px !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar__filter-badge {
+  position: absolute !important;
+  top: -2px !important;
+  right: -2px !important;
+  min-width: 18px !important;
+  height: 18px !important;
+  padding: 0 5px !important;
+  border-radius: 9px !important;
+  display: grid !important;
+  place-items: center !important;
+  background: var(--ix-accent) !important;
+  color: var(--ix-accent-ink) !important;
+  font-size: 11px !important;
+  font-weight: 750 !important;
+  box-shadow: 0 0 0 2px var(--ix-bg) !important;
+}
+
+/* Category rail — one scrolling row of glass segments with live counts. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none;
+  margin: 10px 0 0 !important;
+  padding: 2px 14px 2px !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  opacity: 1 !important;
+  background: none !important;
+  border: 0 !important;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav::-webkit-scrollbar { display: none; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item {
+  position: relative !important;
+  flex: none !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  min-width: 0 !important;
+  width: auto !important;
+  padding: 0 12px !important;
+  border-radius: 11px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 5%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 7%, transparent) !important;
+  color: var(--ix-ink-2) !important;
+  font-family: var(--ix-font) !important;
+  transition: background-color 0.3s var(--ix-ease), box-shadow 0.3s var(--ix-ease), color 0.3s var(--ix-ease), transform 0.4s var(--ix-spring);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item::before,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item::after { display: none !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item:active { transform: scale(0.95); transition-duration: 0.12s; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__icon { display: none !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__label {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  max-width: none !important;
+  color: inherit !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__count {
+  font-size: 12px !important;
+  font-weight: 650 !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--ix-ink-3) !important;
+  background: none !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+  border: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__unread {
+  position: static !important;
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: var(--ix-accent) !important;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ix-accent) 80%, transparent) !important;
+  order: -1;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item.is-active {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 14%, transparent), color-mix(in srgb, #fff 4%, transparent)),
+    color-mix(in srgb, var(--ix-accent) 18%, var(--ix-plate)) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 45%, transparent),
+    0 4px 16px -6px color-mix(in srgb, var(--ix-accent) 55%, transparent) !important;
+  color: var(--ix-ink) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item.is-active .nx-cat-nav__count { color: var(--ix-ink-2) !important; }
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item.is-active {
+  background: #fff !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 45%, transparent), 0 4px 12px -6px rgba(11, 18, 32, 0.25) !important;
+}
+
+/* Active filter chips under the search. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar__active-filters {
+  display: flex !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+  padding: 10px 14px 0 !important;
+  scrollbar-width: none;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar__filter-chip {
+  flex: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  height: 28px !important;
+  padding: 0 4px 0 10px !important;
+  border-radius: 9px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-accent) 14%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 35%, transparent) !important;
+  color: var(--ix-ink) !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+}
+
+/* ── Thread rows — a messaging list, not a table ───────────────────────── */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll {
+  background: var(--ix-bg) !important;
+  padding-bottom: calc(var(--nx-mobile-chrome-bottom, 68px) + 16px) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  padding: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row-pick {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: 46px minmax(0, 1fr) !important;
+  column-gap: 13px !important;
+  align-items: start !important;
+  min-height: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 14px 16px 14px 16px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none;
+  transition: background-color 0.25s var(--ix-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 { grid-template-areas: none !important; grid-template-rows: auto !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 > .nx-row25__avatar { grid-column: 1 !important; grid-row: 1 !important; grid-area: auto; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 > .nx-row25__zone--conversation { grid-column: 2 !important; grid-row: 1 !important; grid-area: 1 / 2 / 2 / 3 !important; width: auto !important; max-width: none !important; }
+
+/* Inset hairline, starting at the text — the Messages separator. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25::after {
+  content: '' !important;
+  display: block !important;
+  position: absolute !important;
+  left: 75px !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  top: auto !important;
+  height: 1px !important;
+  width: auto !important;
+  background: var(--ix-rule) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25::before { display: none !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25:active { background: var(--ix-press) !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row-pick.is-picked .nx-row25 {
+  background: color-mix(in srgb, var(--ix-accent) 12%, transparent) !important;
+}
+
+/* The avatar: a lit glass disc with initials. Unread rings it in the accent. */
+.nx-row25__avatar { display: none; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__avatar {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-top: 1px;
+  border-radius: 50%;
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--ix-ink-2);
+  background:
+    radial-gradient(120% 120% at 30% 18%, color-mix(in srgb, #fff 16%, transparent), transparent 55%),
+    linear-gradient(160deg, color-mix(in srgb, var(--ix-ink-base) 14%, var(--ix-plate)), color-mix(in srgb, var(--ix-ink-base) 5%, var(--ix-plate)));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 9%, transparent);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25.is-inbound .nx-row25__avatar {
+  color: var(--ix-ink);
+  background:
+    radial-gradient(120% 120% at 30% 18%, color-mix(in srgb, #fff 22%, transparent), transparent 55%),
+    linear-gradient(160deg, color-mix(in srgb, var(--ix-accent) 34%, var(--ix-plate)), color-mix(in srgb, var(--ix-accent) 12%, var(--ix-plate)));
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__avatar.is-unread {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent),
+    0 0 0 2px var(--ix-bg),
+    0 0 0 3.5px var(--ix-unread),
+    0 0 14px color-mix(in srgb, var(--ix-unread) 55%, transparent);
+}
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__zone--media,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__context,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__zone--metrics { display: none !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__zone--conversation {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  border: 0 !important;
+}
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__head {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 10px !important;
+  margin: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__name-wrap {
+  flex: 1 !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__unread-dot { display: none !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__name {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-family: var(--ix-font) !important;
+  font-size: 16.5px !important;
+  line-height: 1.25 !important;
+  font-weight: 620 !important;
+  letter-spacing: -0.018em !important;
+  color: var(--ix-ink) !important;
+  text-transform: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25.is-unread .nx-row25__name { font-weight: 720 !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__time {
+  flex: none !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  color: var(--ix-ink-3) !important;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25.is-unread .nx-row25__time { color: var(--ix-unread) !important; font-weight: 650 !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__preview {
+  order: 1;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  white-space: normal !important;
+  margin: 1px 0 0 !important;
+  font-size: 14.5px !important;
+  line-height: 1.36 !important;
+  font-weight: 450 !important;
+  color: var(--ix-ink-2) !important;
+  letter-spacing: -0.005em !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25.is-unread .nx-row25__preview { color: var(--ix-ink) !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__addr {
+  order: 0;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: 12.5px !important;
+  line-height: 1.3 !important;
+  font-weight: 500 !important;
+  color: var(--ix-ink-3) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+/* Signals: delivery state · asset · stage on one quiet line. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-row25__footer {
+  order: 2;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-width: 0 !important;
+  margin: 7px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-state {
+  flex: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-state__arrow { font-size: 11px !important; opacity: 0.85; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-assetline {
+  flex: 1 !important;
+  min-width: 0 !important;
+  display: flex !important;
+  gap: 6px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  font-size: 12px !important;
+  color: var(--ix-ink-3) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-assetline > * {
+  font-size: 12px !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-assetline__value { color: var(--ix-ink-2) !important; font-weight: 650 !important; }
+/* The last fact yields first — an ellipsis, never a word cut in half. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-assetline > :last-child {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-card-stage {
+  flex: none !important;
+  margin-left: auto !important;
+  min-width: 0 !important;
+  height: 22px !important;
+  padding: 0 8px !important;
+  border-radius: 7px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  font-size: 11.5px !important;
+  font-weight: 750 !important;
+  letter-spacing: 0.02em !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 7%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 10%, transparent) !important;
+  color: var(--ix-ink-2) !important;
+}
+
+/* Property flags read as a quiet dot-separated line, not a wall of chips. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags {
+  order: 3;
+  margin: 4px 0 0 !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__visible {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  min-width: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__badge,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__overflow {
+  flex: none !important;
+  height: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__badge + .nx-prop-flags__badge::before,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__badge + .nx-prop-flags__overflow::before {
+  content: '·';
+  margin: 0 6px;
+  color: var(--ix-ink-4);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__overflow { color: var(--ix-ink-4) !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-row25.is-mode-rail25 .nx-prop-flags__popover { display: none !important; }
+
+/* List states. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__load-more .nx-load-more-btn {
+  height: 44px !important;
+  margin: 14px 16px !important;
+  border-radius: 14px !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+  color: var(--ix-ink-2) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CONVERSATION
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane-surface--sms-thread,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-chat-container {
+  background: var(--ix-bg) !important;
+}
+
+/* Header: compact identity on frosted glass. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header {
+  position: relative !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), transparent 80%), var(--ix-glass) !important;
+  -webkit-backdrop-filter: var(--ix-blur);
+  backdrop-filter: var(--ix-blur);
+  border: 0 !important;
+  border-bottom: 1px solid var(--ix-rule) !important;
+  box-shadow: 0 12px 30px -24px rgba(0, 0, 0, 0.8) !important;
+  padding: 10px 14px 10px 16px !important;
+  min-height: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__atmosphere,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__glow { display: none !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-hero {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: row-reverse !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+}
+/* The shell dock already carries "‹ Inbox"; a second back arrow a few
+   pixels below it was the same control twice. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-back--tl { display: none !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-controls {
+  position: static !important;
+  flex: none !important;
+  display: flex !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  inset: auto !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-mobile-header-actions-trigger {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  color: var(--ix-ink) !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo)), var(--ix-field) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent), inset 0 0 0 1px var(--ix-field-edge) !important;
+}
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-mobile-header-actions-trigger .nx-conv-back__glyph {
+  width: auto !important;
+  height: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  display: grid !important;
+  place-items: center !important;
+}
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity {
+  flex: 1 !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__sv {
+  order: -1 !important;
+  flex: none !important;
+  width: 54px !important;
+  height: 54px !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  aspect-ratio: auto !important;
+  border-radius: 15px !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 18px -10px rgba(0, 0, 0, 0.8) !important;
+  margin: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__sv img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__text {
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  padding: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-seller-name--mobile {
+  margin: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-family: var(--ix-font) !important;
+  font-size: 17.5px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.022em !important;
+  color: var(--ix-ink) !important;
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-identity-address--mobile {
+  margin: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: 13px !important;
+  line-height: 1.3 !important;
+  font-weight: 500 !important;
+  color: var(--ix-ink-3) !important;
+}
+
+/* Property facts: small glass tags under the identity. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-layer-b--mobile {
+  margin: 10px 0 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  border: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+  scrollbar-width: none;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: none !important;
+  border: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip .nx-intel-cell {
+  flex: none !important;
+  height: 26px !important;
+  min-height: 0 !important;
+  padding: 0 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  border-radius: 8px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 6%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 8%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip .nx-intel-cell__value {
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ix-ink-2) !important;
+}
+
+/* Thread controls: one row of glass selectors. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-command-strip.is-compact {
+  background: color-mix(in srgb, var(--ix-bg) 80%, transparent) !important;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 0 !important;
+  border-bottom: 1px solid var(--ix-rule) !important;
+  box-shadow: none !important;
+  padding: 8px 14px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-command-strip.is-compact .nx-conv-glass-btn {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 11px !important;
+  border-radius: 10px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 6%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 9%, transparent) !important;
+  color: var(--ix-ink) !important;
+  font-family: var(--ix-font) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em !important;
+  text-transform: none !important;
+}
+
+/* ── Messages ─────────────────────────────────────────────────────────── */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-message-list {
+  background: none !important;
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__tail { display: none !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__bubble {
+  font-family: var(--ix-font) !important;
+  font-size: 16px !important;
+  line-height: 1.4 !important;
+  font-weight: 450 !important;
+  letter-spacing: -0.008em !important;
+  padding: 10px 14px 11px !important;
+  border: 0 !important;
+  max-width: 100% !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-outbound .nx-msg__bubble {
+  color: var(--ix-out-ink) !important;
+  background:
+    radial-gradient(140% 120% at 20% 0%, color-mix(in srgb, #fff 20%, transparent), transparent 55%),
+    linear-gradient(170deg, var(--ix-out-a), var(--ix-out-b)) !important;
+  border-radius: 21px 21px 7px 21px !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent),
+    0 10px 24px -16px color-mix(in srgb, var(--ix-out-b) 90%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-inbound .nx-msg__bubble {
+  color: var(--ix-ink) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 3%, transparent), transparent), var(--ix-in) !important;
+  border-radius: 21px 21px 21px 7px !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent), inset 0 0 0 1px var(--ix-in-edge), 0 8px 20px -16px rgba(0, 0, 0, 0.7) !important;
+}
+/* Light — frosted white: the dark field/glass recipes read grey here. */
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__search-input-wrap,
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap {
+  background: #fff !important;
+  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), 0 1px 2px rgba(11, 18, 32, 0.05) !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-cat-nav__item:not(.is-active),
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip .nx-intel-cell,
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-command-strip.is-compact .nx-conv-glass-btn {
+  background: #fff !important;
+  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), 0 1px 2px rgba(11, 18, 32, 0.04) !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__top-actions .nx-sidebar__icon-button,
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-mobile-header-actions-trigger,
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn {
+  background: #fff !important;
+  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), 0 4px 12px -6px rgba(11, 18, 32, 0.25) !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__meta,
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__rank,
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__relationship {
+  background: none !important;
+}
+
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-inbound .nx-msg__bubble {
+  box-shadow: inset 0 0 0 1px var(--ix-in-edge), 0 6px 16px -12px rgba(11, 18, 32, 0.3) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-failed .nx-msg__bubble {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ix-bad) 70%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-scheduled .nx-msg__bubble {
+  background: color-mix(in srgb, var(--ix-accent) 10%, transparent) !important;
+  color: var(--ix-ink) !important;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ix-accent) 45%, transparent) !important;
+  border-style: dashed !important;
+}
+
+/* Meta under a bubble: time, then the receipt as plain words with a tick. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__meta {
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  gap: 8px !important;
+  margin-top: 5px !important;
+  padding: 0 6px !important;
+  font-size: 11.5px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__time {
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
+  color: var(--ix-ink-3) !important;
+  letter-spacing: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt {
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  gap: 3px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt.is-delivered > span:first-child { color: var(--ix-live) !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt.is-failed,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt.is-undelivered { color: var(--ix-bad) !important; }
+
+/* Day separator: a quiet centred label. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-day {
+  display: flex !important;
+  justify-content: center !important;
+  margin: 18px 0 10px !important;
+  background: none !important;
+  border: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-day::before,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-day::after { display: none !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-day > span {
+  padding: 4px 10px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 5%, transparent) !important;
+  box-shadow: none !important;
+  font-size: 11.5px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: var(--ix-ink-3) !important;
+}
+
+/* New-message affordance: a small glass pill. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-new-message-pill {
+  border: 0 !important;
+  border-radius: 999px !important;
+  padding: 0 14px !important;
+  height: 34px !important;
+  color: var(--ix-accent-ink) !important;
+  background: radial-gradient(130% 140% at 25% 0%, color-mix(in srgb, #fff 30%, var(--ix-accent)), var(--ix-accent) 60%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent), 0 10px 24px -10px color-mix(in srgb, var(--ix-accent) 80%, transparent) !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+  animation: ix-pop 0.45s var(--ix-spring) both;
+}
+
+/* ── Active prospect: a slim glass strip over the composer ─────────────── */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect {
+  margin: 0 !important;
+  padding: 8px 12px 0 !important;
+  background: var(--ix-bg) !important;
+  border: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__card {
+  padding: 10px 12px !important;
+  border-radius: 16px !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo)), color-mix(in srgb, var(--ix-ink-base) 3%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 8%, transparent) !important;
+  gap: 4px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__identity-line {
+  font-size: 14.5px !important;
+  gap: 6px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__name { font-size: 14.5px !important; font-weight: 650 !important; color: var(--ix-ink) !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__rank,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__relationship { background: none !important; box-shadow: none !important; border: 0 !important; padding: 0 !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__rank,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__relationship,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__dot {
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__sub-line {
+  gap: 8px !important;
+  font-size: 12.5px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__phone { font-size: 12.5px !important; color: var(--ix-ink-2) !important; font-variant-numeric: tabular-nums; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__ownership {
+  height: 22px !important;
+  padding: 0 8px !important;
+  border-radius: 7px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 6%, transparent) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__expand {
+  margin-left: auto !important;
+  height: 26px !important;
+  padding: 0 8px 0 10px !important;
+  border-radius: 8px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-accent) 12%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 32%, transparent) !important;
+  color: var(--ix-ink) !important;
+  font-size: 12.5px !important;
+  font-weight: 650 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__expand svg { width: 13px !important; height: 13px !important; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__menu {
+  border-radius: 16px !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo)), color-mix(in srgb, var(--ix-plate) 94%, transparent) !important;
+  -webkit-backdrop-filter: var(--ix-blur);
+  backdrop-filter: var(--ix-blur);
+  box-shadow: inset 0 0 0 1px var(--ix-glass-edge), 0 20px 40px -18px rgba(0, 0, 0, 0.75) !important;
+  padding: 6px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect__option {
+  border-radius: 11px !important;
+  min-height: 44px !important;
+}
+
+/* ── Composer: a frosted dock, capsule field, lit send orb ──────────────── */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer {
+  background: var(--ix-bg) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock {
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 8px !important;
+  padding: 10px 12px 10px !important;
+  background: none !important;
+  border: 0 !important;
+  border-top: 0 !important;
+  box-shadow: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn {
+  width: 42px !important;
+  height: 42px !important;
+  min-width: 42px !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  color: var(--ix-ink-2) !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo)), var(--ix-field) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent), inset 0 0 0 1px var(--ix-field-edge) !important;
+  transition: transform 0.4s var(--ix-spring);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn:active { transform: scale(0.9); transition-duration: 0.12s; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-tool-btn.is-active {
+  color: var(--ix-accent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 55%, transparent), 0 0 16px -4px color-mix(in srgb, var(--ix-accent) 60%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__main {
+  flex: 1 !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap {
+  min-height: 42px !important;
+  padding: 0 !important;
+  border-radius: 21px !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge), inset 0 1px 2px rgba(0, 0, 0, 0.18) !important;
+  outline: 0 !important;
+  transition: box-shadow 0.25s var(--ix-ease);
+}
+/* Focus is one accent edge and a soft light — not a second ring. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap:focus-within {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ix-accent) 60%, transparent), 0 0 22px -6px color-mix(in srgb, var(--ix-accent) 50%, transparent) !important;
+}
+/* The field owns the focus treatment; the textarea's own ring was a square
+   inside the capsule. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea:focus,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea:focus-visible {
+  width: 100% !important;
+  min-height: 42px !important;
+  padding: 11px 16px !important;
+  border: 0 !important;
+  border-radius: 21px !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: none !important;
+  color: var(--ix-ink) !important;
+  font-family: var(--ix-font) !important;
+  font-size: 16px !important;
+  line-height: 1.35 !important;
+  resize: none !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock__input-wrap textarea::placeholder { color: var(--ix-ink-3) !important; }
+
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button {
+  width: 42px !important;
+  height: 42px !important;
+  min-width: 42px !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  color: var(--ix-ink-4) !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+  transition: transform 0.45s var(--ix-spring), background 0.25s var(--ix-ease), color 0.25s var(--ix-ease), box-shadow 0.25s var(--ix-ease);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:not(:disabled),
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button.is-ready {
+  color: var(--ix-accent-ink) !important;
+  background: radial-gradient(120% 120% at 28% 18%, color-mix(in srgb, #fff 38%, var(--ix-accent)), var(--ix-accent) 50%, color-mix(in srgb, #000 20%, var(--ix-accent))) !important;
+  box-shadow: inset 0 1px 1px color-mix(in srgb, #fff 50%, transparent), 0 10px 24px -10px color-mix(in srgb, var(--ix-accent) 85%, transparent) !important;
+  animation: ix-pop 0.4s var(--ix-spring);
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:active { transform: scale(0.88); transition-duration: 0.12s; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button svg { width: 18px !important; height: 18px !important; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SHEETS — portaled to <body>; tokens come from <html>.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Quick Actions */
+html.is-mobile-layout .nx-qap-backdrop {
+  background: rgba(0, 0, 0, 0.42) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  backdrop-filter: blur(8px) !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-backdrop { background: rgba(11, 18, 32, 0.2) !important; }
+html.is-mobile-layout .nx-qap-anchor.nx-quick-actions-popover {
+  font-family: var(--ix-font) !important;
+  left: 8px !important;
+  right: 8px !important;
+  bottom: calc(var(--nx-mobile-safe-bottom, 0px) + 8px) !important;
+  width: auto !important;
+  max-height: min(78vh, 680px) !important;
+  border-radius: 28px !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo) 40%), var(--ix-glass) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  backdrop-filter: blur(32px) saturate(190%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px var(--ix-glass-edge), 0 30px 60px -20px rgba(0, 0, 0, 0.7) !important;
+  padding: 6px 10px 12px !important;
+  color: var(--ix-ink) !important;
+  animation: ix-rise 0.46s var(--ix-spring) both;
+}
+/* The title row stays pinned while the sheet scrolls, so it carries the
+   sheet's own glass — sections slide under it, never through it. */
+html.is-mobile-layout .nx-qap-header {
+  position: sticky !important;
+  top: -6px !important;
+  z-index: 2 !important;
+  margin: -6px -10px 0 !important;
+  padding: 16px 18px 10px !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ix-plate) 96%, transparent) 70%, color-mix(in srgb, var(--ix-plate) 0%, transparent)) !important;
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+html.is-mobile-layout .nx-qap-title {
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  text-transform: none !important;
+  color: var(--ix-ink) !important;
+}
+html.is-mobile-layout .nx-qap-close {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  color: var(--ix-ink-2) !important;
+}
+html.is-mobile-layout .nx-qap-section {
+  margin: 10px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+html.is-mobile-layout .nx-qap-section-label {
+  padding: 0 10px 6px !important;
+  font-size: 12px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: var(--ix-ink-3) !important;
+}
+/* Each section is an inset group: rounded, hairline-divided rows. */
+html.is-mobile-layout .nx-qap-section > :not(.nx-qap-section-label) {
+  background: color-mix(in srgb, var(--ix-ink-base) 4%, transparent) !important;
+}
+html.is-mobile-layout .nx-qap-action-btn,
+html.is-mobile-layout .nx-qap-template-btn {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-height: 50px !important;
+  padding: 0 14px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-top: 1px solid var(--ix-rule) !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 4%, transparent) !important;
+  color: var(--ix-ink) !important;
+  font-family: var(--ix-font) !important;
+  font-size: 16px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.01em !important;
+  text-align: left !important;
+  text-transform: none !important;
+  box-shadow: none !important;
+}
+html.is-mobile-layout .nx-qap-section-label + .nx-qap-action-btn,
+html.is-mobile-layout .nx-qap-section-label + .nx-qap-template-btn,
+html.is-mobile-layout .nx-qap-section-label + * > .nx-qap-action-btn:first-child,
+html.is-mobile-layout .nx-qap-section-label + * > .nx-qap-template-btn:first-child {
+  border-top: 0 !important;
+  border-top-left-radius: 16px !important;
+  border-top-right-radius: 16px !important;
+}
+html.is-mobile-layout .nx-qap-action-btn:last-child,
+html.is-mobile-layout .nx-qap-template-btn:last-child {
+  border-bottom-left-radius: 16px !important;
+  border-bottom-right-radius: 16px !important;
+}
+html.is-mobile-layout .nx-qap-action-btn:active,
+html.is-mobile-layout .nx-qap-template-btn:active { background: var(--ix-press) !important; }
+/* Icons sit in small lit tiles, like a settings list. */
+html.is-mobile-layout .nx-qap-action-btn > svg,
+html.is-mobile-layout .nx-qap-template-btn > svg {
+  flex: none !important;
+  width: 30px !important;
+  height: 30px !important;
+  padding: 7px !important;
+  border-radius: 9px !important;
+  color: var(--ix-accent) !important;
+  background: color-mix(in srgb, var(--ix-accent) 14%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 22%, transparent) !important;
+}
+html.is-mobile-layout .nx-qap-action-btn.is-danger { color: var(--ix-bad) !important; }
+html.is-mobile-layout .nx-qap-action-btn.is-danger > svg { color: var(--ix-bad) !important; background: color-mix(in srgb, var(--ix-bad) 14%, transparent) !important; box-shadow: none !important; }
+html.is-mobile-layout .nx-qap-action-btn.is-armed { background: color-mix(in srgb, var(--ix-bad) 14%, transparent) !important; }
+html.is-mobile-layout .nx-qap-template-btn.is-staged {
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  min-height: 58px !important;
+  padding: 9px 14px 9px 56px !important;
+  position: relative !important;
+}
+html.is-mobile-layout .nx-qap-template-btn.is-staged > svg { position: absolute !important; left: 14px !important; top: 50% !important; margin-top: -15px !important; }
+html.is-mobile-layout .nx-qap-template-btn__name { order: 1; font-size: 16px !important; font-weight: 550 !important; color: var(--ix-ink) !important; }
+html.is-mobile-layout .nx-qap-template-btn.is-staged .nx-qap-template-btn__stage {
+  order: 2;
+  height: auto !important;
+  padding: 0 !important;
+  display: block !important;
+  background: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout .nx-qap-template-btn__stage {
+  flex: none !important;
+  height: 22px !important;
+  padding: 0 7px !important;
+  border-radius: 7px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  font-size: 11.5px !important;
+  font-weight: 750 !important;
+  color: var(--ix-accent) !important;
+  background: color-mix(in srgb, var(--ix-accent) 14%, transparent) !important;
+}
+
+/* Template library */
+html.is-mobile-layout .nx-mtb-overlay {
+  background: rgba(0, 0, 0, 0.42) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  backdrop-filter: blur(8px) !important;
+}
+html.is-mobile-layout .nx-mtb {
+  font-family: var(--ix-font) !important;
+  border-radius: 28px 28px 0 0 !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo) 30%), var(--ix-glass) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  backdrop-filter: blur(32px) saturate(190%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px var(--ix-glass-edge) !important;
+  color: var(--ix-ink) !important;
+  animation: ix-rise 0.46s var(--ix-spring) both;
+}
+html.is-mobile-layout .nx-mtb__header { background: none !important; border: 0 !important; }
+html.is-mobile-layout .nx-mtb__close {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 50% !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  color: var(--ix-ink-2) !important;
+}
+html.is-mobile-layout .nx-mtb__search {
+  border-radius: 14px !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+}
+html.is-mobile-layout .nx-mtb__search input { font-size: 16px !important; background: none !important; border: 0 !important; color: var(--ix-ink) !important; }
+html.is-mobile-layout .nx-mtb__group-head {
+  background: none !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.05em !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout .nx-mtb__group-head.is-current { color: var(--ix-accent) !important; }
+html.is-mobile-layout .nx-mtb__item {
+  border-radius: 16px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 4.5%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 7%, transparent) !important;
+  transition: transform 0.4s var(--ix-spring), box-shadow 0.25s var(--ix-ease);
+}
+html.is-mobile-layout .nx-mtb__item:active { transform: scale(0.985); }
+html.is-mobile-layout .nx-mtb__item.is-selected {
+  background: color-mix(in srgb, var(--ix-accent) 12%, transparent) !important;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ix-accent) 55%, transparent) !important;
+}
+html.is-mobile-layout .nx-mtb__footer {
+  background: linear-gradient(180deg, transparent, var(--ix-glass) 30%) !important;
+  border: 0 !important;
+}
+html.is-mobile-layout .nx-mtb__insert {
+  border: 0 !important;
+  border-radius: 14px !important;
+  color: var(--ix-accent-ink) !important;
+  background: radial-gradient(130% 140% at 25% 0%, color-mix(in srgb, #fff 30%, var(--ix-accent)), var(--ix-accent) 60%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent), 0 10px 24px -12px color-mix(in srgb, var(--ix-accent) 85%, transparent) !important;
+  font-weight: 700 !important;
+}
+html.is-mobile-layout .nx-mtb__cancel {
+  border: 0 !important;
+  border-radius: 14px !important;
+  background: var(--ix-field) !important;
+  color: var(--ix-ink) !important;
+}
+
+/* Schedule — a bottom sheet on the phone, not a floating desktop modal. */
+html.is-mobile-layout .nx-sp-overlay {
+  align-items: flex-end !important;
+  justify-content: stretch !important;
+  padding: 0 8px calc(var(--nx-mobile-safe-bottom, 0px) + 8px) !important;
+  background: rgba(0, 0, 0, 0.42) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  backdrop-filter: blur(8px) !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-sp-overlay { background: rgba(11, 18, 32, 0.2) !important; }
+html.is-mobile-layout .nx-sp {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  border-radius: 28px !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo) 40%), var(--ix-glass) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  backdrop-filter: blur(32px) saturate(190%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px var(--ix-glass-edge), 0 30px 60px -20px rgba(0, 0, 0, 0.7) !important;
+  font-family: var(--ix-font) !important;
+  color: var(--ix-ink) !important;
+  overflow: hidden !important;
+  animation: ix-rise 0.46s var(--ix-spring) both;
+}
+html.is-mobile-layout .nx-sp * { font-family: var(--ix-font) !important; }
+html.is-mobile-layout .nx-sp__head { background: none !important; border-bottom: 1px solid var(--ix-rule) !important; padding: 16px 18px 12px !important; }
+html.is-mobile-layout .nx-sp__title {
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  text-transform: none !important;
+  color: var(--ix-ink) !important;
+}
+/* "Esc" is the panel's close control (it carries onClose), but there is no
+   Esc key on a phone — so it keeps its job and becomes a round ✕. */
+html.is-mobile-layout .nx-sp__head { display: flex !important; align-items: center !important; justify-content: space-between !important; }
+html.is-mobile-layout .nx-sp__esc {
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+  font-size: 0 !important;
+  color: var(--ix-ink-2) !important;
+  cursor: pointer;
+  position: relative;
+}
+html.is-mobile-layout .nx-sp__esc::before { content: '✕'; font-size: 13px; font-weight: 600; line-height: 1; }
+html.is-mobile-layout .nx-sp__esc::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+html.is-mobile-layout .nx-sp__reason {
+  margin: 0 !important;
+  padding: 10px 18px 12px !important;
+  font-style: normal !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  color: var(--ix-ink-3) !important;
+  border: 0 !important;
+  background: none !important;
+}
+html.is-mobile-layout .nx-sp__item-desc { white-space: nowrap !important; font-weight: 500 !important; }
+html.is-mobile-layout .nx-sp__item-time { white-space: nowrap !important; }
+html.is-mobile-layout .nx-sp__item--custom { gap: 12px !important; }
+html.is-mobile-layout .nx-sp__item--custom .nx-sp__custom-input { min-width: 0 !important; flex: 1 1 auto !important; max-width: 210px !important; height: 38px !important; }
+html.is-mobile-layout .nx-sp__item {
+  min-height: 52px !important;
+  padding: 0 18px !important;
+  background: none !important;
+  border: 0 !important;
+  border-top: 1px solid var(--ix-rule) !important;
+  color: var(--ix-ink) !important;
+  font-size: 16px !important;
+}
+html.is-mobile-layout .nx-sp__item.is-active { background: color-mix(in srgb, var(--ix-accent) 12%, transparent) !important; }
+html.is-mobile-layout .nx-sp__item [class*='time'],
+html.is-mobile-layout .nx-sp__item time {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout .nx-sp__item.is-active [class*='time'],
+html.is-mobile-layout .nx-sp__item.is-active time { color: var(--ix-accent) !important; }
+html.is-mobile-layout .nx-sp__custom-input {
+  border-radius: 12px !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+  color: var(--ix-ink) !important;
+  font-size: 15px !important;
+}
+
+/* Stage / status dropdowns */
+html.is-mobile-layout .nx-conv-dropdown-portal {
+  font-family: var(--ix-font) !important;
+  border-radius: 18px !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo) 40%), color-mix(in srgb, var(--ix-plate) 94%, transparent) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(190%) !important;
+  backdrop-filter: blur(30px) saturate(190%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px var(--ix-glass-edge), 0 24px 50px -18px rgba(0, 0, 0, 0.75) !important;
+  padding: 6px !important;
+  animation: ix-drop 0.3s var(--ix-spring) both;
+}
+html.is-mobile-layout .nx-conv-dropdown-option {
+  min-height: 46px !important;
+  border-radius: 12px !important;
+  font-size: 15.5px !important;
+  font-weight: 500 !important;
+  color: var(--ix-ink) !important;
+  background: none !important;
+}
+html.is-mobile-layout .nx-conv-dropdown-option[aria-selected='true'],
+html.is-mobile-layout .nx-conv-dropdown-option.is-selected,
+html.is-mobile-layout .nx-conv-dropdown-option.is-active {
+  background: color-mix(in srgb, var(--ix-accent) 14%, transparent) !important;
+}
+
+/* Advanced filters */
+html.is-mobile-layout .nx-ifm-modal {
+  font-family: var(--ix-font) !important;
+  border-radius: 28px 28px 0 0 !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, var(--ix-glass-hi), var(--ix-glass-lo) 30%), var(--ix-glass) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  backdrop-filter: blur(32px) saturate(190%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px var(--ix-glass-edge) !important;
+  color: var(--ix-ink) !important;
+  animation: ix-rise 0.46s var(--ix-spring) both;
+}
+html.is-mobile-layout .nx-ifm-header { background: none !important; border-bottom: 1px solid var(--ix-rule) !important; }
+html.is-mobile-layout .nx-ifm-rail {
+  display: flex !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+  scrollbar-width: none;
+  padding: 10px 16px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--ix-rule) !important;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+html.is-mobile-layout .nx-ifm-rail::-webkit-scrollbar { display: none; }
+html.is-mobile-layout .nx-ifm-rail-item {
+  flex: none !important;
+  height: 34px !important;
+  padding: 0 13px !important;
+  border-radius: 11px !important;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--ix-ink-base) 5%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-ink-base) 7%, transparent) !important;
+  color: var(--ix-ink-2) !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+}
+html.is-mobile-layout .nx-ifm-rail-item.is-active {
+  background: color-mix(in srgb, var(--ix-accent) 18%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 50%, transparent) !important;
+  color: var(--ix-ink) !important;
+}
+/* "Active Filters" sat flush against the sheet's left edge. */
+html.is-mobile-layout .nx-ifm-active {
+  padding: 12px 18px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-top: 1px solid var(--ix-rule) !important;
+  background: none !important;
+}
+html.is-mobile-layout .nx-ifm-active > h3,
+html.is-mobile-layout .nx-ifm-active > h4,
+html.is-mobile-layout .nx-ifm-active > header,
+html.is-mobile-layout .nx-ifm-active > [class*='title'] {
+  margin: 0 0 8px !important;
+  padding: 0 !important;
+  font-size: 12px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout .nx-ifm-search {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  height: 42px !important;
+  padding: 0 12px !important;
+  border-radius: 14px !important;
+  border: 0 !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+}
+html.is-mobile-layout .nx-ifm-search-glyph {
+  position: static !important;
+  transform: none !important;
+  flex: none !important;
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--ix-ink-3) !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html.is-mobile-layout .nx-ifm-search-input,
+html.is-mobile-layout .nx-ifm-search-input:focus {
+  flex: 1 !important;
+  height: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: none !important;
+  color: var(--ix-ink) !important;
+  font-size: 16px !important;
+}
+
+html.is-mobile-layout .nx-ifm-footer {
+  background: linear-gradient(180deg, transparent, var(--ix-glass) 30%) !important;
+  border-top: 1px solid var(--ix-rule) !important;
+}
+html.is-mobile-layout .nx-ifm-btn-primary {
+  border: 0 !important;
+  border-radius: 14px !important;
+  color: var(--ix-accent-ink) !important;
+  background: radial-gradient(130% 140% at 25% 0%, color-mix(in srgb, #fff 30%, var(--ix-accent)), var(--ix-accent) 60%) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent), 0 10px 24px -12px color-mix(in srgb, var(--ix-accent) 85%, transparent) !important;
+}
+html.is-mobile-layout .nx-ifm-btn-secondary {
+  border: 0 !important;
+  border-radius: 14px !important;
+  background: var(--ix-field) !important;
+  box-shadow: inset 0 0 0 1px var(--ix-field-edge) !important;
+  color: var(--ix-ink) !important;
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────── */
+@keyframes ix-rise { from { transform: translateY(105%); } to { transform: none; } }
+@keyframes ix-drop { from { opacity: 0; transform: translateY(-6px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes ix-pop { 0% { transform: scale(0.82); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
+
+/* A new bubble arrives in motion; history paints still. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-lane:last-child .nx-msg {
+  animation: ix-bubble-in 0.42s var(--ix-spring) both;
+}
+@keyframes ix-bubble-in { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox *,
+  html.is-mobile-layout .nx-qap-anchor,
+  html.is-mobile-layout .nx-mtb,
+  html.is-mobile-layout .nx-sp,
+  html.is-mobile-layout .nx-ifm-modal,
+  html.is-mobile-layout .nx-conv-dropdown-portal {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Light sheets: inset groups are white plates on the frosted sheet. */
+html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-action-btn,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-template-btn,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mtb__item {
+  background: #fff !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-action-btn:active,
+html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-template-btn:active { background: #f1f3f7 !important; }
+html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt { background: none !important; }

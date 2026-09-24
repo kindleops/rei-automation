@@ -219,7 +219,7 @@ const openThread = async (page) => {
 }
 
 const focusComposer = async (page) => {
-  const input = page.locator('.nx-composer textarea, .nx-composer-input').first()
+  const input = page.locator('.nx-composer-dock__input-wrap textarea, .nx-composer textarea').first()
   await input.click({ timeout: 15_000 }).catch(() => {})
   return input
 }
@@ -349,7 +349,7 @@ try {
       await page.waitForTimeout(600)
       const one = await readState(page)
 
-      const input = page.locator('.nx-composer textarea, .nx-composer-input').first()
+      const input = page.locator('.nx-composer-dock__input-wrap textarea, .nx-composer textarea').first()
       await input.fill('Checking in about the property. '.repeat(6))
       await page.waitForTimeout(900)
       const many = await readState(page)
@@ -364,7 +364,7 @@ try {
         many.composerBottom <= many.innerH - KEYBOARD_PX + 8,
         `composerBottom=${many.composerBottom} innerH=${many.innerH}`)
 
-      const sendBox = await page.locator('.nx-composer [aria-label*="Send" i], .nx-composer-send')
+      const sendBox = await page.locator('.nx-send-button[aria-label="Send message"], .nx-composer [aria-label*="Send" i]')
         .first().boundingBox().catch(() => null)
       check('D. send control is reachable',
         Boolean(sendBox && sendBox.y + sendBox.height <= many.innerH - KEYBOARD_PX + 8),
@@ -480,7 +480,7 @@ try {
       check('F. conversation available', false, 'no suitable thread')
     } else {
       const draft = 'Draft that must survive rotation.'
-      const input = page.locator('.nx-composer textarea, .nx-composer-input').first()
+      const input = page.locator('.nx-composer-dock__input-wrap textarea, .nx-composer textarea').first()
       await input.fill(draft)
       await page.waitForTimeout(600)
       const before = await readState(page)
@@ -490,7 +490,7 @@ try {
       await page.setViewportSize({ width: 844, height: 390 })
       await page.waitForTimeout(1600)
       const land = await page.evaluate(() => ({
-        draft: document.querySelector('.nx-composer textarea, .nx-composer-input')?.value ?? '',
+        draft: document.querySelector('.nx-composer-dock__input-wrap textarea, .nx-composer textarea')?.value ?? '',
         mobile: document.documentElement.classList.contains('is-mobile-layout'),
         msgs: document.querySelectorAll('.nx-message-list .nx-msg').length,
         name: document.querySelector('.nx-conv-seller-name--mobile')?.textContent?.trim() ?? '',
@@ -499,7 +499,7 @@ try {
       await page.setViewportSize({ width: 390, height: 844 })
       await page.waitForTimeout(1600)
       const back = await page.evaluate(() => ({
-        draft: document.querySelector('.nx-composer textarea, .nx-composer-input')?.value ?? '',
+        draft: document.querySelector('.nx-composer-dock__input-wrap textarea, .nx-composer textarea')?.value ?? '',
         mobile: document.documentElement.classList.contains('is-mobile-layout'),
         msgs: document.querySelectorAll('.nx-message-list .nx-msg').length,
         name: document.querySelector('.nx-conv-seller-name--mobile')?.textContent?.trim() ?? '',
