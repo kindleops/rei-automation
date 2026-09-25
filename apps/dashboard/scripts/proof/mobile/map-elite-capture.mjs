@@ -51,7 +51,7 @@ const pinPoint = (page, layers) => page.evaluate((layers) => {
     const p = m.project(g.coordinates)
     const x = canvas.left + p.x, y = canvas.top + p.y
     // inside the map, clear of the top chrome and the bottom dock
-    if (x > 40 && x < window.innerWidth - 40 && y > 190 && y < H - 200) return { x, y, layer: f.layer.id }
+    if (x > 60 && x < window.innerWidth - 90 && y > 230 && y < H * 0.5) return { x, y, layer: f.layer.id }
   }
   return null
 }, layers)

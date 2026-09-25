@@ -204,6 +204,13 @@ export interface MarkerState {
 
 export const MARKER_EMPHASIS = { selected: 1, live: 1, staged: 0.9, quiet: 0.4 } as const
 
+/**
+ * The map writes a default grey ring ('#7A8FA8') and a priority_tier onto
+ * almost every property, so neither alone means "worked". A stage ring is a
+ * ring colour OTHER than the default; live is real motion or a breakout.
+ */
+export const DEFAULT_RING = '#7A8FA8'
+
 /** MapLibre expression — must stay in lockstep with markerEmphasis() below. */
 export function buildMarkerEmphasisExpr(): unknown[] {
   return [
@@ -211,10 +218,9 @@ export function buildMarkerEmphasisExpr(): unknown[] {
     ['==', ['coalesce', ['feature-state', 'pin_selected'], 0], 1], MARKER_EMPHASIS.selected,
     ['any',
       ['!=', ['coalesce', ['feature-state', 'motion'], 'static'], 'static'],
-      ['>', ['coalesce', ['feature-state', 'priority_tier'], 0], 0],
       ['>', ['coalesce', ['feature-state', 'breakout'], 0], 0],
     ], MARKER_EMPHASIS.live,
-    ['!=', ['coalesce', ['feature-state', 'ring_color'], '__none'], '__none'], MARKER_EMPHASIS.staged,
+    ['!=', ['coalesce', ['feature-state', 'ring_color'], DEFAULT_RING], DEFAULT_RING], MARKER_EMPHASIS.staged,
     MARKER_EMPHASIS.quiet,
   ]
 }
@@ -222,8 +228,8 @@ export function buildMarkerEmphasisExpr(): unknown[] {
 /** The same rule, evaluated in JS (tests, diagnostics). */
 export function markerEmphasis(state: MarkerState = {}): number {
   if ((state.pin_selected ?? 0) === 1) return MARKER_EMPHASIS.selected
-  if ((state.motion ?? 'static') !== 'static' || (state.priority_tier ?? 0) > 0 || (state.breakout ?? 0) > 0) return MARKER_EMPHASIS.live
-  if (state.ring_color) return MARKER_EMPHASIS.staged
+  if ((state.motion ?? 'static') !== 'static' || (state.breakout ?? 0) > 0) return MARKER_EMPHASIS.live
+  if (state.ring_color && state.ring_color.toUpperCase() !== DEFAULT_RING.toUpperCase()) return MARKER_EMPHASIS.staged
   return MARKER_EMPHASIS.quiet
 }
 

@@ -45,7 +45,9 @@ describe('marker hierarchy (A, B)', () => {
     const live = markerEmphasis({ motion: 'reply_ripple' })
     expect(quiet).toBeLessThan(staged)
     expect(staged).toBeLessThanOrEqual(live)
-    expect(markerEmphasis({ priority_tier: 2 })).toBe(MARKER_EMPHASIS.live)
+    // the map's defaults (grey ring, a priority_tier on nearly everything) are NOT "worked"
+    expect(markerEmphasis({ ring_color: '#7A8FA8', priority_tier: 50, motion: 'static' })).toBe(MARKER_EMPHASIS.quiet)
+    expect(markerEmphasis({ breakout: 1 })).toBe(MARKER_EMPHASIS.live)
   })
   it('the GL expression encodes the same four tiers', () => {
     const expr = JSON.stringify(buildMarkerEmphasisExpr())

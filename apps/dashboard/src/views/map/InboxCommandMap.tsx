@@ -2849,7 +2849,10 @@ const MapEntityCard = ({
     // 'peek' presentation keeps a selected property at peek height — see
     // MapCardState.presentation. Intent still says 'selected', so everything that
     // reads the canonical selection is unaffected.
-    const mode = card.presentation === 'peek'
+    // Phones open a tapped property as the compact preview; the record opens
+    // when the operator taps it (presentation → 'detail').
+    const phone = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+    const mode = card.presentation === 'peek' || (phone && card.presentation !== 'detail')
       ? 'peek'
       : card.intent === 'selected' ? 'focus' : 'peek'
     return (
@@ -4746,11 +4749,13 @@ export function InboxCommandMap({
     return count ? [[w, so], [e, n]] : null
   }, [allPins])
 
-  // Mobile Live Activity reads both channels of the same feed, one row per id.
+  // Mobile Live Activity reads the feed's live channel, one row per id.
   const mobileActivityEvents = useMemo(() => {
     const seen = new Set<string>()
     const out: typeof liveActivityFeed.live = []
-    for (const e of [...liveActivityFeed.live, ...liveActivityFeed.context, ...liveActivityFeed.visible]) {
+    // Live channel only: the context channel carries derived rows ("Selected
+    // opportunity") that describe the screen, not something that happened.
+    for (const e of liveActivityFeed.live) {
       if (!e?.id || seen.has(e.id)) continue
       seen.add(e.id)
       out.push(e)
@@ -9541,11 +9546,27 @@ export function InboxCommandMap({
 
     // Mirrors the property-tile tap: fly first so the card anchors over the pin
     // rather than over wherever the camera happened to be.
-    map.easeTo({
-      center: coordinates,
-      zoom: Math.max(map.getZoom(), 14.2),
-      duration: 620,
-    })
+    if (isMobileRef.current) {
+      // Phone: a property the operator just tapped is already on screen — the
+      // camera stays. One arriving from elsewhere (deep link, another app) is
+      // brought into the upper map at neighbourhood zoom, not street level.
+      const pp = map.project(coordinates)
+      const box = map.getContainer()
+      if (selectionNeedsNudge(pp, { width: box.clientWidth, height: box.clientHeight })) {
+        map.easeTo({
+          center: coordinates,
+          zoom: Math.max(map.getZoom(), 12),
+          offset: [0, -Math.round(box.clientHeight * 0.18)],
+          duration: 620,
+        })
+      }
+    } else {
+      map.easeTo({
+        center: coordinates,
+        zoom: Math.max(map.getZoom(), 14.2),
+        duration: 620,
+      })
+    }
 
     const { anchor: cardAnchor, containerSize } = buildMapCardContainerContext(
       map,
@@ -10487,7 +10508,8 @@ export function InboxCommandMap({
         </aside>
       )}
 
-      {emptyStateMessage && (
+      {/* Phones state an empty view in the context pill. */}
+      {emptyStateMessage && !isMobile && (
         <div className="nx-icm__no-pins-toast">
           <div className="nx-icm__no-pins-toast-body">
             <span className="nx-icm__no-pins-toast-title">No visible pins</span>
@@ -10556,7 +10578,12 @@ export function InboxCommandMap({
           performance={performanceSettings}
           onPerformance={patchPerformanceSettings}
           cardOpen={Boolean(activeSellerMapCard && propertySheetVisible)}
-          selectedLngLat={selectedPin && isMappableCoord(selectedPin.lat, selectedPin.lng) ? [selectedPin.lng, selectedPin.lat] : null}
+          selectedLngLat={
+            activeSellerMapCard && propertySheetVisible
+              && isMappableCoord(activeSellerMapCard.coordinates[1], activeSellerMapCard.coordinates[0])
+              ? activeSellerMapCard.coordinates
+              : selectedPin && isMappableCoord(selectedPin.lat, selectedPin.lng) ? [selectedPin.lng, selectedPin.lat] : null
+          }
           reducedMotion={prefersReducedMotion || performanceSettings.animation === 'off'}
           loading={baseStyleLoading || sellerPinsLoading}
           homeBounds={mobileHomeBounds}
@@ -10626,6 +10653,7 @@ export function InboxCommandMap({
             setSelectedMapCard({
               ...activeSellerMapCard,
               intent: 'selected',
+              presentation: 'detail',
             })
             setHoveredMapCard(null)
           }}

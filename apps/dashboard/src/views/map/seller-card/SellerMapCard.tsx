@@ -49,7 +49,7 @@ const SELLER_SHEET_SNAP_HEIGHTS = {
    * 213px. At 186px the property facts line was clipped mid-sentence, which is the
    * failure a fixed peek height exists to avoid.
    */
-  collapsed: '236px',
+  collapsed: '380px',
   half: '56dvh',
   /**
    * Full stops BELOW the map toolbar rather than at 92dvh.
@@ -471,37 +471,66 @@ export const SellerMapCard = ({
   const canLookAround = heroState === 'available' && !heroFailed && Number.isFinite(recordLat) && Number.isFinite(recordLng)
   const mobilePeekBody = (
     <div className="smc-body smc-body--peek smc-mpeek">
-      <div className="smc-mpeek__row">
-        <span className={cls('smc-mpeek__thumb', heroReady && 'is-ready')}>
-          {heroUrl ? (
-            <img key={heroUrl} src={heroUrl} alt="" loading="eager" decoding="async" onError={() => { if (!usingFallback) setHeroFailed(true) }} />
-          ) : null}
-          {!heroReady && (
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <div className={cls('smc-mpeek__hero', heroReady && 'is-ready', !heroUrl && 'is-empty')}>
+        {heroUrl ? (
+          <img
+            key={heroUrl}
+            src={heroUrl}
+            alt={`Street View of ${viewModel.property.address}`}
+            loading="eager"
+            decoding="async"
+            onError={() => { if (!usingFallback) setHeroFailed(true) }}
+          />
+        ) : null}
+        {!heroReady && (
+          <span className="smc-mpeek__placeholder" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
               <path d="M3 11.2 12 4l9 7.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M5.6 10.2V19h12.8v-8.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-          )}
-        </span>
-        <div className="smc-mpeek__copy">
+            <em>{heroState === 'loading' && !heroFailed ? 'Loading Street View' : 'No Street View here'}</em>
+          </span>
+        )}
+        <span className="smc-mpeek__scrim" aria-hidden="true" />
+        {viewModel.headerBadges.length > 0 ? (
+          <div className="smc-mpeek__chips" aria-label="Lead state">
+            {viewModel.headerBadges.filter((b) => b.tone === 'stage' || b.tone === 'status').slice(0, 2).map((b) => (
+              <span key={b.key} className={cls('smc-mpeek__chip', `is-${b.tone}`)}>{b.label}</span>
+            ))}
+          </div>
+        ) : null}
+        {canLookAround ? (
+          <button
+            type="button"
+            className="smc-mpeek__look"
+            data-look-around
+            onClick={(event) => { event.stopPropagation(); setLookAroundOpen(true) }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M3.5 12h17M12 3.5c2.6 2.4 3.6 5.2 3.6 8.5s-1 6.1-3.6 8.5c-2.6-2.4-3.6-5.2-3.6-8.5s1-6.1 3.6-8.5Z" fill="none" stroke="currentColor" strokeWidth="1.7" /></svg>
+            Look Around
+          </button>
+        ) : null}
+        <div className="smc-mpeek__over">
           <strong className="smc-mpeek__address" title={viewModel.property.address}>{viewModel.property.address}</strong>
           <span className="smc-mpeek__owner">{viewModel.headerDisplayName}</span>
-          <span className="smc-mpeek__asset">{viewModel.assetSummaryLine}</span>
         </div>
       </div>
-      <SellerMapCardBadgeRail badges={viewModel.headerBadges} />
-      {metricsBlock('peek')}
-      {canLookAround ? (
-        <button
-          type="button"
-          className="smc-mpeek__look"
-          data-look-around
-          onClick={(event) => { event.stopPropagation(); setLookAroundOpen(true) }}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M3.5 12h17M12 3.5c2.6 2.4 3.6 5.2 3.6 8.5s-1 6.1-3.6 8.5c-2.6-2.4-3.6-5.2-3.6-8.5s1-6.1 3.6-8.5Z" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
-          Look Around
-        </button>
-      ) : null}
+      <div className="smc-mpeek__below">
+        {viewModel.peekMetrics.length > 0 ? (
+          <div className="smc-mpeek__metrics" aria-label="Key metrics">
+            {viewModel.peekMetrics.slice(0, 2).map((m) => (
+              <span key={m.label} className={cls('smc-mpeek__metric', m.emphasis === 'primary' && 'is-primary')}>
+                <strong>{m.value}</strong>
+                <em>{m.label}</em>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {(() => {
+          const extra = viewModel.headerBadges.filter((b) => b.tone === 'score' || b.tone === 'units').slice(0, 1)
+          return extra.length ? <span className="smc-mpeek__asset">{[viewModel.assetSummaryLine, ...extra.map((b) => b.label)].filter(Boolean).join(' · ')}</span> : <span className="smc-mpeek__asset">{viewModel.assetSummaryLine}</span>
+        })()}
+      </div>
     </div>
   )
 

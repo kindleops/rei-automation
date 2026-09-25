@@ -196,10 +196,15 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         } catch { /* style reloading */ }
       })
     }
-    map.on('idle', count)
+    // The map's own pulse animation keeps it from ever going 'idle', so count
+    // on camera stops and when property data finishes arriving.
+    const onData = (e: { sourceId?: string; isSourceLoaded?: boolean }) => {
+      if (e?.isSourceLoaded && (e.sourceId === 'property-map-tiles' || e.sourceId === 'command-pins-raw')) count()
+    }
     map.on('moveend', count)
+    map.on('sourcedata', onData)
     count()
-    return () => { map.off('idle', count); map.off('moveend', count); cancelAnimationFrame(raf) }
+    return () => { map.off('moveend', count); map.off('sourcedata', onData); cancelAnimationFrame(raf) }
   }, [map, mapEpoch])
 
   // ── Marker hierarchy (mobile) ──────────────────────────────────────────────
@@ -232,10 +237,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         if (map.getLayer('prop-tiles-pulse')) map.setPaintProperty('prop-tiles-pulse', 'circle-opacity', 0)
       } catch { /* layer mid-reload */ }
     }
+    const onTiles = (e: { sourceId?: string; isSourceLoaded?: boolean }) => { if (e?.sourceId === 'property-map-tiles') apply() }
     apply()
     map.on('styledata', apply)
-    map.on('idle', apply)
-    return () => { map.off('styledata', apply); map.off('idle', apply) }
+    map.on('sourcedata', onTiles)
+    return () => { map.off('styledata', apply); map.off('sourcedata', onTiles) }
   }, [map, mapEpoch])
 
   const now = useMemo(() => new Date(clock), [clock])
@@ -277,7 +283,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         })
       }
     }
-    try { if (map.isStyleLoaded()) ensure(); else map.once('idle', ensure) } catch { /* ignore */ }
+    try { if (map.isStyleLoaded()) ensure(); else map.once('styledata', ensure) } catch { /* ignore */ }
     const reapply = () => { try { ensure() } catch { /* ignore */ } }
     map.on('styledata', reapply)
     return () => { map.off('styledata', reapply) }
@@ -361,6 +367,52 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     if (framedRef.current || userMovedRef.current || selectedLngLat || !homeBounds || !map) return
     framedRef.current = fitHome(false)
   }, [map, homeBounds, selectedLngLat, fitHome])
+
+  // ── Selected marker: unmistakable, calm ───────────────────────────────────
+  // An accent ring + soft glow above every property marker, scaled in once on
+  // selection. No continuous pulse.
+  const SEL = 'nx-mx-selected'
+  useEffect(() => {
+    if (!map) return
+    const ensure = () => {
+      try {
+        if (!map.getSource(SEL)) {
+          map.addSource(SEL, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+          const accent = getComputedStyle(document.documentElement).getPropertyValue('--nexus-accent').trim() || '#38bdf8'
+          map.addLayer({ id: `${SEL}-glow`, type: 'circle', source: SEL, paint: { 'circle-radius': 26, 'circle-color': accent, 'circle-opacity': 0.18, 'circle-blur': 0.6 } })
+          map.addLayer({ id: `${SEL}-ring`, type: 'circle', source: SEL, paint: { 'circle-radius': 15, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': accent, 'circle-stroke-width': 3, 'circle-stroke-opacity': 1 } })
+          map.addLayer({ id: `${SEL}-dot`, type: 'circle', source: SEL, paint: { 'circle-radius': 4.5, 'circle-color': '#ffffff', 'circle-stroke-color': accent, 'circle-stroke-width': 2 } })
+        }
+      } catch { /* style reloading */ }
+    }
+    ensure()
+    map.on('styledata', ensure)
+    return () => { map.off('styledata', ensure) }
+  }, [map, mapEpoch])
+  useEffect(() => {
+    if (!map) return
+    const src = map.getSource(SEL) as maplibregl.GeoJSONSource | undefined
+    if (!src) return
+    src.setData({
+      type: 'FeatureCollection',
+      features: selectedLngLat ? [{ type: 'Feature', geometry: { type: 'Point', coordinates: selectedLngLat }, properties: {} }] : [],
+    })
+    if (!selectedLngLat || reducedMotion) return
+    // One arrival: the ring settles from a little larger, once.
+    let frame = 0
+    const start = window.performance.now()
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - start) / 420)
+      const e = 1 - Math.pow(1 - k, 3)
+      try {
+        map.setPaintProperty(`${SEL}-ring`, 'circle-radius', 15 + (1 - e) * 10)
+        map.setPaintProperty(`${SEL}-glow`, 'circle-opacity', 0.18 + (1 - e) * 0.2)
+      } catch { return }
+      if (k < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [map, mapEpoch, selectedLngLat?.[0], selectedLngLat?.[1], reducedMotion])
 
   const recenter = () => {
     if (!map) return
