@@ -33,8 +33,15 @@ export function queueTemplateIdOf(row = {}) {
 /** The property's canonical classification, or null. */
 export async function loadPropertyAssetRecord(supabase, property_id) {
   if (!supabase || !clean(property_id)) return null
-  const { data } = await supabase.from('properties').select(PROPERTY_ASSET_COLUMNS).eq('property_id', property_id).maybeSingle()
-  return data || null
+  // Never throws: an unreadable record degrades to the row's own snapshot and
+  // the rendered-words check — a lookup failure must not be filed as a
+  // transport failure on a send that never reached the provider.
+  try {
+    const { data } = await supabase.from('properties').select(PROPERTY_ASSET_COLUMNS).eq('property_id', property_id).maybeSingle()
+    return data || null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -55,8 +62,12 @@ export async function evaluateTemplateAssetGuard({ supabase, queue_row, body }) 
 
   let template = null
   if (supabase && templateId) {
-    const { data } = await supabase.from('sms_templates').select(TEMPLATE_COLUMNS).eq('template_id', templateId).maybeSingle()
-    template = data || null
+    try {
+      const { data } = await supabase.from('sms_templates').select(TEMPLATE_COLUMNS).eq('template_id', templateId).maybeSingle()
+      template = data || null
+    } catch {
+      template = null
+    }
   }
 
   const checks = []
