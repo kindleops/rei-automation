@@ -1135,6 +1135,27 @@ export const CLARIFIER_INTENTS = new Set([
 // would be the wrong response.
 const CLARIFIER_MAX_MESSAGE_WORDS = 60;
 
+/**
+ * HARD INVARIANT — the classifier's own automation verdict binds.
+ *
+ * When the classifier says auto_reply_allowed=false OR human_review_required=
+ * true, no automatic seller-response may be queued. Production, 2026-09-25:
+ * "Do you want to tour the house? We can meet at it." classified unclear
+ * (confidence 0.6, auto_reply_allowed=false, human_review_required=true), the
+ * decision correctly routed to review — and the safe-fallback clarifier then
+ * converted that review into `safe_clarifier_intent_asking_price` ("Got it. Do
+ * you have a ballpark number in mind for it?"). Only the sender-health guard
+ * stopped it. No documented exception authorizes overriding a classifier
+ * human-review verdict, so none is honoured here.
+ */
+export function classifierForbidsAutoReply(classification = null) {
+  const authority = classification?.automation_decision;
+  if (!authority || typeof authority !== "object") return { forbidden: false, reason: null };
+  if (authority.human_review_required === true) return { forbidden: true, reason: "classifier_human_review_required" };
+  if (authority.auto_reply_allowed === false) return { forbidden: true, reason: "classifier_auto_reply_not_allowed" };
+  return { forbidden: false, reason: null };
+}
+
 export function resolveSafeFallbackClarifierDispatch({
   decision = null,
   classification = null,
@@ -1142,6 +1163,9 @@ export function resolveSafeFallbackClarifierDispatch({
   message = null,
 } = {}) {
   if (!decision || decision.should_queue_reply) return null;
+  // The clarifier replaces silence only where the classifier permits a reply;
+  // it never overrides a classifier human-review verdict.
+  if (classifierForbidsAutoReply(classification).forbidden) return null;
   if (decision.should_mark_human_review !== true) return null;
   if (decision.should_suppress_contact) return null;
 
@@ -2540,6 +2564,32 @@ export async function executeInboundAutomationDecision({
         required_template_use_case: null,
         audit_reason: "safe_fallback_clarifier",
         clarifier_dispatch,
+      };
+    }
+  }
+
+  // Final gate for the invariant above: whichever path set should_queue_reply,
+  // a classifier that forbids an auto-reply wins. The row is never created.
+  {
+    const authority = classifierForbidsAutoReply(classification);
+    if (base_decision.should_queue_reply && authority.forbidden) {
+      warn("[AUTO_REPLY_INVARIANT_BLOCK]", {
+        thread_key: threadKey || null,
+        primary_intent: classification?.primary_intent || null,
+        attempted_reply_mode: base_decision.reply_mode || null,
+        attempted_next_action: base_decision.next_action || null,
+        reason: authority.reason,
+      });
+      base_decision = {
+        ...base_decision,
+        should_queue_reply: false,
+        should_mark_human_review: true,
+        reply_mode: "manual_review",
+        next_action: "mark_human_review",
+        route_hint: base_decision.route_hint === "safe_clarifier" ? null : base_decision.route_hint,
+        clarifier_dispatch: null,
+        human_review_reason: base_decision.human_review_reason || authority.reason,
+        audit_reason: authority.reason,
       };
     }
   }

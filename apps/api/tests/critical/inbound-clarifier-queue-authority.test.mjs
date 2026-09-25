@@ -129,7 +129,11 @@ afterEach(() => {
   __resetSellerInboundOrchestratorDeps();
 });
 
-test("POSITIVE: ambiguous unclear inbound queues exactly one stage-aware clarifier row", async () => {
+test("INVARIANT: an ambiguous unclear turn whose classifier requires human review queues NOTHING", async () => {
+  // This used to assert ONE clarifier row for exactly this fixture — the
+  // classifier said unclear/0.6/auto_reply_allowed=false/human_review_required
+  // =true and the clarifier converted it anyway. That was the production
+  // contradiction of 2026-09-25 ("tour the house" → asking-price clarifier).
   const supabase = makeInboundRealPathSupabase({
     send_queue: [sentS1Row()],
     sms_templates: [],
@@ -138,23 +142,30 @@ test("POSITIVE: ambiguous unclear inbound queues exactly one stage-aware clarifi
 
   const result = await runInbound(supabase, { classification: unclearClassification() });
 
+  assert.equal(supabase.inserted.send_queue.length, 0, "no clarifier row may be created");
+  assert.notEqual(result.execution?.queued, true);
+});
+
+test("the clarifier still renders the PERSISTED-stage question where a reply is authorized", async () => {
+  const supabase = makeInboundRealPathSupabase({
+    send_queue: [sentS1Row()],
+    sms_templates: [],
+  });
+  __setSellerInboundOrchestratorDeps(baseStubs(supabase));
+
+  const result = await runInbound(supabase, {
+    classification: unclearClassification({
+      automation_decision: { auto_reply_allowed: true, queue_action: "queue_auto_reply", suppression_action: "none", human_review_required: false, risk_level: "low" },
+    }),
+  });
+
   const rows = supabase.inserted.send_queue;
   assert.equal(rows.length, 1, `exactly one clarifier row (got ${rows.length})`);
   assert.equal(rows[0].use_case_template, "safe_clarifier");
-  assert.equal(rows[0].type, "auto_reply");
-  // Stage-awareness: the thread is at S3 (asking_price) — the clarifier must
-  // ask the S3 question, NOT the classifier stage_hint's S1 ownership default.
-  // prepareRenderedSmsForQueue normalizes to GSM-7 (em-dash → hyphen), so
-  // compare with the same normalization.
   const gsm = (t) => String(t).replace(/\u2014/g, "-").replace(/\u2019/g, "'");
   const expected = buildSafeFallback({ stage: "asking_price", uncertainty_type: "intent" });
   assert.equal(gsm(rows[0].message_body), gsm(expected.suggested_text));
-  assert.notEqual(
-    gsm(rows[0].message_body),
-    gsm(buildSafeFallback({ stage: "ownership_confirmation", uncertainty_type: "intent" }).suggested_text),
-    "must not fall back to the S1 clarifier"
-  );
-  assert.equal(result.execution?.queued, true, "executor must report queued");
+  assert.equal(result.execution?.queued, true);
 });
 
 test("NEGATIVE: probate-objection unclear stays human review — no clarifier row", async () => {
