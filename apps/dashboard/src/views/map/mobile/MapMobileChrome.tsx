@@ -254,6 +254,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   useEffect(() => {
     if (!map) return
     const ensure = () => {
+      if (!map.style) return
       if (!map.getSource(SRC)) {
         map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
         map.addLayer({
@@ -291,8 +292,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
   const places = useMemo(() => (activityOn ? groupByPlace(events, precisionForZoom(zoom)) : []), [activityOn, events, zoom])
   useEffect(() => {
-    if (!map) return
-    const src = map.getSource(SRC) as maplibregl.GeoJSONSource | undefined
+    if (!map || !map.style) return
+    let src: maplibregl.GeoJSONSource | undefined
+    try { src = map.getSource(SRC) as maplibregl.GeoJSONSource | undefined } catch { return }
     if (!src) return
     src.setData({
       type: 'FeatureCollection',
@@ -303,7 +305,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       })),
     })
     const vis = activityOn ? 'visible' : 'none'
-    for (const l of [`${SRC}-halo`, `${SRC}-core`, `${SRC}-count`]) if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', vis)
+    try {
+      for (const l of [`${SRC}-halo`, `${SRC}-core`, `${SRC}-count`]) if (map.getLayer(l)) map.setLayoutProperty(l, 'visibility', vis)
+    } catch { /* map replaced */ }
   }, [map, places, activityOn, mapEpoch])
 
   // Tap an activity marker → its event (or the feed, scoped to that place).
@@ -390,8 +394,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     return () => { map.off('styledata', ensure) }
   }, [map, mapEpoch])
   useEffect(() => {
-    if (!map) return
-    const src = map.getSource(SEL) as maplibregl.GeoJSONSource | undefined
+    if (!map || !map.style) return
+    let src: maplibregl.GeoJSONSource | undefined
+    try { src = map.getSource(SEL) as maplibregl.GeoJSONSource | undefined } catch { return }
     if (!src) return
     src.setData({
       type: 'FeatureCollection',

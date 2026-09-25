@@ -356,5 +356,8 @@ export function threadStubFromActiveContext(
     universal_status: dc?.universal_status || dc?.status || undefined,
     lat: dc?.lat || dc?.latitude || undefined,
     lng: dc?.lng || dc?.longitude || undefined,
-  } as InboxWorkflowThread
+    // A stand-in for "what the operator selected", not a conversation. It has
+    // no messages, so nothing may derive activity (a "reply") from it.
+    isContextStub: true,
+  } as unknown as InboxWorkflowThread
 }

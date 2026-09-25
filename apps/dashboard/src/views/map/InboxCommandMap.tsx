@@ -4753,15 +4753,20 @@ export function InboxCommandMap({
   const mobileActivityEvents = useMemo(() => {
     const seen = new Set<string>()
     const out: typeof liveActivityFeed.live = []
-    // Live channel only: the context channel carries derived rows ("Selected
-    // opportunity") that describe the screen, not something that happened.
+    // Live channel only: the context channel carries derived rows that
+    // describe the screen, not something that happened. A selection stub
+    // (no messages) gets "now" stamped on its pin and would read as a fresh
+    // seller reply — it is never activity.
+    const stub = (selectedHydratedThread as unknown as { isContextStub?: boolean; id?: string } | null)
+    const stubIds = new Set(stub?.isContextStub ? [String(stub.id ?? ''), String(selectedPropertyId ?? '')].filter(Boolean) : [])
     for (const e of liveActivityFeed.live) {
       if (!e?.id || seen.has(e.id)) continue
+      if (stubIds.size && (stubIds.has(String(e.targetId ?? '')) || stubIds.has(String(e.propertyId ?? '')))) continue
       seen.add(e.id)
       out.push(e)
     }
     return out
-  }, [liveActivityFeed])
+  }, [liveActivityFeed, selectedHydratedThread, selectedPropertyId])
   const debugStats = useMemo(() => ({
     allPinsCount: allPins.length,
     filteredPinsCount: filteredPins.length,
