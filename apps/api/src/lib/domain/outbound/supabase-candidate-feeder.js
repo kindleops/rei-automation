@@ -29,6 +29,7 @@ import {
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isLanguagePolicyToken, resolveLanguage } from "@/lib/sms/language_aliases.js";
 import { normalizeCampaignStageCode } from "@/lib/domain/campaigns/campaign-stage-code.js";
+import { canonicalPropertyGroupOf, filterTemplatesForProperty } from "@/lib/domain/templates/template-asset-compatibility.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
 const TEXTGRID_NUMBERS_TABLE = "textgrid_numbers";
@@ -3292,10 +3293,25 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   }
 
   // ── Phase B: Property group filtering with 5-level fallback cascade ─────────
-  const candidate_group = candidate.canonical_property_group || "other_commercial";
   const property_type = clean(
     pick(candidate.property_type, candidate.raw?.property_type, candidate.raw?.property_class)
   );
+  // The asset group, from the canonical classification. The launch path passed
+  // a LABEL here ("Residential"), which matched no template's slug list and
+  // sent the cascade to a level with no property filter at all.
+  const asset_property = {
+    ...(candidate.raw || {}),
+    canonical_property_group: candidate.canonical_property_group,
+    property_type: pick(candidate.property_type, candidate.raw?.property_type),
+    property_class: pick(candidate.property_class, candidate.raw?.property_class),
+    units_count: pick(candidate.units_count, candidate.raw?.units_count),
+  };
+  const asset_group = canonicalPropertyGroupOf(asset_property);
+  const candidate_group =
+    asset_group === "residential" ? "sfr" : asset_group === "unknown" ? "other_commercial" : asset_group;
+  // HARD ASSET ELIGIBILITY — applied before every fallback level. The levels
+  // below may relax the allowed-group slug list; they can never relax this.
+  const assetEligible = (list) => filterTemplatesForProperty(list, { property: asset_property, propertyGroup: asset_group }).kept;
 
   // Reusable property group filter (same logic for all levels)
   const filterByPropertyGroup = (tmplList) => tmplList.filter((t) => {
@@ -3311,12 +3327,12 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
 
   // Standard (non-relationship-probe) templates from the language-filtered set
   const use_case_lower = lower(selector.use_case);
-  const all_standard_templates = language_filtered.templates.filter(
+  const all_standard_templates = assetEligible(language_filtered.templates.filter(
     (t) => lower(t.use_case || "") === use_case_lower && !isRelationshipProbeTemplate(t)
-  );
+  ));
 
   // Prospect-routed templates (the specific subset returned by prospect flag routing)
-  const prospect_routed_templates = prospect_template_routing.templates;
+  const prospect_routed_templates = assetEligible(prospect_template_routing.templates);
 
   // Build fallback levels — stop at the first non-empty set
   let template_fallback_level = 0;
@@ -3346,11 +3362,11 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       fallback_routing_reason = "standard_ownership_fallback";
     } else {
       // Level 5: universal English ownership fallback (language-agnostic)
-      const english_standard = all_fetched_templates.filter(
+      const english_standard = assetEligible(all_fetched_templates.filter(
         (t) => lower(t.use_case || "") === use_case_lower &&
                !isRelationshipProbeTemplate(t) &&
                lower(t.language || "") === "english"
-      );
+      ));
       const lvl5 = filterByPropertyGroup(english_standard);
       templates = lvl5.length ? lvl5 : english_standard;
       template_fallback_level = 5;
@@ -3360,6 +3376,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
 
   template_routing_details.template_routing_reason = fallback_routing_reason;
   template_routing_details.template_fallback_level = template_fallback_level;
+  template_routing_details.asset_property_group = asset_group;
 
   if (!templates.length) {
     logTemplateRenderFailure(candidate, "no_template_after_fallback", {

@@ -69,6 +69,7 @@ import {
   resolveDeferredQueueMessage,
 } from "@/lib/domain/queue/resolve-deferred-queue-message.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
+import { evaluateTemplateAssetGuard } from "@/lib/domain/queue/template-asset-guard.js";
 import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
 
 const QUEUE_TABLE = "send_queue";
@@ -2033,6 +2034,66 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         queue_row_id,
         queue_item_id: queue_row_id,
       };
+    }
+
+    // ── Template ↔ asset guard ──────────────────────────────────────────
+    // The final boundary: a template-backed body must describe the property's
+    // asset type. A single-family owner never receives storage, retail or
+    // "how many units" language, whichever path chose the template.
+    if (!manual_inbox_send) {
+      const asset_guard = await evaluateTemplateAssetGuard({
+        supabase: getSupabase(deps),
+        queue_row,
+        body: message_fields.body,
+      });
+      if (!asset_guard.allowed) {
+        const supabase_client = getSupabase(deps);
+        await supabase_client
+          .from(QUEUE_TABLE)
+          .update({
+            queue_status: "blocked",
+            guard_status: "blocked",
+            guard_reason: "template_asset_incompatible",
+            blocked_reason: "template_asset_incompatible",
+            is_locked: false,
+            locked_at: null,
+            lock_token: null,
+            updated_at: now,
+            metadata: {
+              ...(queue_row.metadata ?? {}),
+              skip_reason: "template_asset_incompatible",
+              final_queue_status: "blocked",
+              blocked_by: "process_send_queue_template_asset_guard",
+              template_asset_guard: {
+                reason: asset_guard.reason,
+                property_group: asset_guard.property_group,
+                template_id: asset_guard.template_id,
+                checks: asset_guard.checks,
+              },
+              finalized_at: now,
+              blocked_at: now,
+            },
+          })
+          .eq("id", queue_row_id);
+
+        warn("send.blocked_template_asset_incompatible", {
+          queue_row_id,
+          property_id: queue_row.property_id,
+          template_id: asset_guard.template_id,
+          property_group: asset_guard.property_group,
+          reason: asset_guard.reason,
+        });
+
+        return {
+          ok: false,
+          skipped: true,
+          reason: "template_asset_incompatible",
+          queue_status: "blocked",
+          final_queue_status: "blocked",
+          queue_row_id,
+          queue_item_id: queue_row_id,
+        };
+      }
     }
 
     const sms_health_guard = evaluateSmsHealthGuard({

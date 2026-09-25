@@ -16,6 +16,8 @@ import { personalizeTemplate } from "@/lib/sms/personalize_template.js";
 import { prepareRenderedSmsForQueue } from "@/lib/sms/sanitize.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { selectVariant } from "@/lib/domain/messaging/adaptive-template-selection.js";
+import { filterTemplatesForProperty, isTemplateCompatibleWithProperty, canonicalPropertyGroupOf } from "@/lib/domain/templates/template-asset-compatibility.js";
+import { loadPropertyAssetRecord } from "@/lib/domain/queue/template-asset-guard.js";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -277,6 +279,21 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
     return { ok: false, resolved: false, reason: "template_lookup_failed" };
   }
 
+  /*
+   * ASSET ELIGIBILITY BEFORE RANKING. The ranker's `property_group` came from
+   * metadata nothing writes, so rotation could swap a filtered body for one
+   * written about a different kind of property. Candidates are judged against
+   * the property's canonical classification first; ranking never sees the rest.
+   */
+  let asset_property = null;
+  try {
+    asset_property = await loadPropertyAssetRecord(supabase, queue_row.property_id);
+  } catch {
+    asset_property = null;
+  }
+  const asset_group = canonicalPropertyGroupOf(asset_property || { property_type: queue_row.property_type });
+  templates = filterTemplatesForProperty(templates, { propertyGroup: asset_group }).kept;
+
   if (templates.length === 0) {
     return { ok: true, resolved: false, use_case, reason: "no_alternate_template" };
   }
@@ -308,7 +325,7 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
       stage_code: stage_code || null,
       use_case,
       language: rowLanguage,
-      property_group: clean(meta.property_group) || null,
+      property_group: asset_group,
       require_auto_reply_safe: true,
       // Variable resolvability is judged by the renderer below, which is the
       // authority on this row's personalization; the selector must not
@@ -338,6 +355,8 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
       template_source: "sms_templates",
     });
     if (!prepared.ok || !clean(prepared.text)) continue;
+    // The rendered words are what the seller reads; judge them too.
+    if (!isTemplateCompatibleWithProperty({ template: { template_body: prepared.text }, propertyGroup: asset_group }).compatible) continue;
 
     info("[ROTATION_TEMPLATE_RESOLVED]", {
       queue_row_id: queue_row.id || null,
