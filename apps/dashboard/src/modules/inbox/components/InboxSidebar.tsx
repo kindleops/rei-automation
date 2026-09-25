@@ -1789,9 +1789,14 @@ export const InboxSidebar = ({
   }, [activeBucketConfig.bucket])
 
   // Keep the active category tab centered / visible in the horizontal rail (25% and narrow headers).
+  // On a phone the rail opens at its start (the urgent buckets) even though the
+  // default selection, All Threads, sits last; it follows the selection only
+  // once the operator changes tab.
+  const railFollowArmedRef = useRef(false)
   useEffect(() => {
     const nav = catNavRef.current
     if (!nav) return
+    if (isMobile && !railFollowArmedRef.current) { railFollowArmedRef.current = true; return }
     const activeTab = nav.querySelector<HTMLElement>('.nx-cat-nav__item.is-active')
     if (!activeTab) return
     activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
@@ -1863,11 +1868,10 @@ export const InboxSidebar = ({
         aria-label="Inbox categories"
         aria-hidden={railCollapsed || undefined}
       >
-        {/* Phone: lead with All — the default — so the urgent buckets beside it
-            are on screen when the Inbox opens instead of scrolled off to the
-            left of an eighth-position selection. Order only; buckets unchanged. */}
+        {/* Phone: All Threads goes last — the urgent buckets lead the rail.
+            Order only; buckets unchanged. */}
         {(isMobile
-          ? [...VISIBLE_INBOX_CHIPS.filter((c) => c.bucket === 'all_messages'), ...VISIBLE_INBOX_CHIPS.filter((c) => c.bucket !== 'all_messages')]
+          ? [...VISIBLE_INBOX_CHIPS.filter((c) => c.bucket !== 'all_messages'), ...VISIBLE_INBOX_CHIPS.filter((c) => c.bucket === 'all_messages')]
           : VISIBLE_INBOX_CHIPS
         ).map((item) => {
           const countValue = numberOrNull(viewCounts[item.countKey])
