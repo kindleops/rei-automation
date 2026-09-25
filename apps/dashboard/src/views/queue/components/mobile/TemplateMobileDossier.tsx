@@ -145,10 +145,16 @@ export function TemplateMobileDossier({
     <MobileBottomSheet open snap="expanded" onClose={onClose} className="qm-tpl-sheet">
       <header className="qms-chrome">
         <div className="qms-chrome__lead">
-          <span className="qms-chrome__eyebrow">{stage} · {name}</span>
-          <strong className="qms-chrome__name">
-            {[row.identity.touch_number != null ? `Touch ${row.identity.touch_number}` : null, language].filter(Boolean).join(' · ')}
-          </strong>
+          {/* The name already carries stage and language; the eyebrow only adds
+              what it doesn't say. */}
+          <span className="qms-chrome__eyebrow">
+            {[
+              stage && !String(name).toLowerCase().includes(String(stage).toLowerCase()) ? stage : null,
+              row.identity.touch_number != null ? `Touch ${row.identity.touch_number}` : null,
+              language && !String(name).toLowerCase().includes(String(language).toLowerCase()) ? language : null,
+            ].filter(Boolean).join(' · ') || 'Template'}
+          </span>
+          <strong className="qms-chrome__name">{name}</strong>
         </div>
         <div className="qms-chrome__nav">
           <button type="button" className="qms-chrome__btn" disabled={idx <= 0} onClick={() => idx > 0 && onNavigate(rows[idx - 1].identity.template_id)} aria-label="Previous template">

@@ -6,7 +6,7 @@ const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean
 
 const OPT_TONE: Record<string, string> = {
   'Performing well': 'green',
-  'Gathering data': 'cyan',
+  'Gathering data': 'blue',
   Testing: 'cyan',
   'Needs review': 'amber',
   Paused: 'amber',
@@ -27,15 +27,35 @@ interface TemplatesMobileListProps {
  * IDs live in the dossier, not the list.
  */
 export function TemplatesMobileList({ rows, loading, selectedId, onSelect }: TemplatesMobileListProps) {
-  if (loading && rows.length === 0) return <div className="qm-empty">Loading templates…</div>
-  if (rows.length === 0) return <div className="qm-empty">No templates match current filters.</div>
+  if (loading && rows.length === 0) {
+    return (
+      <div className="qx-list qx-tpl-list">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="qx-card is-skeleton" aria-hidden="true">
+            <span className="qx-skel" style={{ width: '52%' }} />
+            <span className="qx-skel" style={{ width: '30%' }} />
+            <span className="qx-skel is-tall" style={{ width: '94%' }} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="qx-empty">
+        <Icon name="file-text" size={18} />
+        <strong>No templates</strong>
+        <span>Nothing matches the current filters.</span>
+      </div>
+    )
+  }
 
   return (
-    <div className={cls('qm-tpl__list', loading && 'is-loading')}>
+    <div className={cls('qx-list', 'qx-tpl-list', loading && 'is-loading')}>
       {rows.map((row) => {
         const id = row.identity.template_id
         const name = row.identity.canonical_display_name || row.identity.template_name
-        const stage = row.identity.stage_code ?? '—'
+        const stage = row.identity.stage_code ?? null
         const touch = row.identity.touch_number != null ? `Touch ${row.identity.touch_number}` : null
         const language = LANGUAGE_LABEL[row.identity.language] ?? row.identity.language
         const optState = formatOptimizationState(String((row.autopilot as Record<string, unknown> | null)?.rotation_state ?? ''))
@@ -45,40 +65,38 @@ export function TemplatesMobileList({ rows, loading, selectedId, onSelect }: Tem
         const rates = row.metrics.comparison.rates as Record<string, { current?: { value?: number | null; numerator?: number; denominator?: number } }>
         const delivery = formatRateDisplay(rates.delivery?.current, sends)
         const reply = formatRateDisplay(rates.reply?.current, sends)
+        const deliveryPct = typeof rates.delivery?.current?.value === 'number' ? Math.round(rates.delivery.current.value * (rates.delivery.current.value <= 1 ? 100 : 1)) : null
 
         return (
           <article
             key={id}
-            className={cls('qm-tplrow', selectedId === id && 'is-open')}
+            className={cls('qx-card', `tone-${optTone}`, selectedId === id && 'is-open')}
+            data-section-row
             role="button"
             tabIndex={0}
             aria-pressed={selectedId === id}
             onClick={() => onSelect(id)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(id) } }}
           >
-            <span className="qm-tplrow__accent" aria-hidden="true" />
-            <div className="qm-tplrow__body">
-              <div className="qm-tplrow__lead">
-                <strong className="qm-tplrow__name">{name}</strong>
-                <span className={cls('qm-tplrow__state', `is-${optTone}`)}>{optState}</span>
-              </div>
-              <p className="qm-tplrow__ident">
-                {[stage, touch, language].filter(Boolean).join(' · ')}
-              </p>
-              {preview && <p className="qm-tplrow__preview">{preview}</p>}
-              <p className="qm-tplrow__perf">
-                {sends === 0 ? (
-                  <span className="is-quiet">0 sends</span>
-                ) : (
-                  <>
-                    <span>{sends.toLocaleString()} send{sends === 1 ? '' : 's'}</span>
-                    {delivery.primary !== '—' && (<><em>·</em><span className="is-green">{delivery.primary} delivered</span></>)}
-                    {reply.primary !== '—' && (<><em>·</em><span className="is-cyan">{reply.primary} reply</span></>)}
-                  </>
-                )}
-              </p>
+            <div className="qx-card__top">
+              <strong className="qx-card__name">{name}</strong>
+              <span className={cls('qx-pill', `tone-${optTone}`)}>{optState}</span>
             </div>
-            <Icon name="chevron-right" size={14} />
+            {(() => {
+              // Only what the name doesn't already say.
+              const lowerName = String(name ?? '').toLowerCase()
+              const extra = [stage, touch, language].filter((p): p is string => Boolean(p) && !lowerName.includes(String(p).toLowerCase()))
+              return extra.length ? <p className="qx-card__addr">{extra.join(' · ')}</p> : null
+            })()}
+            {preview && <p className="qx-card__msg"><span>{preview}</span></p>}
+            <div className="qx-trio">
+              <span><strong>{sends.toLocaleString()}</strong><em>sends</em></span>
+              <span className="tone-green-soft"><strong>{delivery.primary}</strong><em>delivered</em></span>
+              <span><strong>{reply.primary}</strong><em>reply</em></span>
+            </div>
+            {deliveryPct != null && sends > 0 && (
+              <span className="qx-meter tone-green" aria-hidden="true"><span style={{ width: `${Math.max(2, Math.min(100, deliveryPct))}%` }} /></span>
+            )}
           </article>
         )
       })}

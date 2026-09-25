@@ -72,9 +72,18 @@ export function deriveFailureCause(item: QueueItem): string | null {
   const failed = isFailed(item.status)
   const blocked = BLOCKED_STATUSES.has(item.status)
   if (!failed && !blocked) return null
-  if (isManualMessage(item) && (item.failureCategory === 'missing_template' || item.diagnosticFlags.includes('MISSING_TEMPLATE'))) return null
   if (isDelivered(item.status) && item.failureCategory === 'missing_template') return null
-  if (item.failureCategory) return item.failureCategory
+  const raw = String(item.queueStatusRaw ?? '').toLowerCase()
+  // A manual (operator-typed) send has no template by design, so its
+  // 'missing_template' category is an artifact. It used to drop the row from
+  // Failures entirely — 45 failed sends in a 7-day window vanished while the
+  // queue's own Attention count still held them. Classify from what happened.
+  const manualArtifact = isManualMessage(item) && (item.failureCategory === 'missing_template' || item.diagnosticFlags.includes('MISSING_TEMPLATE'))
+  const category = manualArtifact ? null : item.failureCategory
+  if (category && category !== 'unknown') return category
+  if (raw === 'blocked_by_health_guard' || raw === 'blocked_sender_ineligible') return 'blocked_sender_ineligible'
+  if (raw === 'failed_transport' || (failed && (item.failedReason || '').trim())) return 'carrier_failure'
+  if (category) return category
   if (item.status === 'paused_name_missing') return 'paused_name_missing'
   if (item.status === 'blocked_sender_ineligible') return 'blocked_sender_ineligible'
   if (item.status === 'paused_sender_eligibility_unavailable') return 'paused_sender_eligibility_unavailable'

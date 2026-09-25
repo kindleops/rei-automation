@@ -34,7 +34,6 @@ import {
 import { CommandIntelligenceDock } from './components/CommandIntelligenceDock'
 import { FailureIntelligenceModule } from './components/failures/FailureIntelligenceModule'
 import { EventIntelligenceModule } from './components/events/EventIntelligenceModule'
-import { buildEventTimelineItems } from './event-timeline-stats'
 import {
   buildFailureStats,
   deriveFailureCause,
@@ -49,21 +48,6 @@ import { QueueExceptionBadges } from './components/QueueExceptionBadges'
 import { QueueInlineFlow } from './components/QueueInlineFlow'
 import { SenderIntelligenceModule } from './components/senders/SenderIntelligenceModule'
 import { buildSenderStats, type SenderStat } from './sender-fleet-stats'
-import { OccQueueFilterMenu } from './components/OccQueueFilterMenu'
-import { QueueMobileHeader, type QueueMobileStat } from './components/mobile/QueueMobileHeader'
-import { QueueMobileControlBar } from './components/mobile/QueueMobileControlBar'
-import { QueueMobileRow } from './components/mobile/QueueMobileRow'
-import { QueueMobileSelectionBar } from './components/mobile/QueueMobileSelectionBar'
-import { QueueMobilePager } from './components/mobile/QueueMobilePager'
-import { QueueMobileItemSheet } from './components/mobile/QueueMobileItemSheet'
-import { EventsMobileFeed } from './components/mobile/EventsMobileFeed'
-import { FailuresMobileList } from './components/mobile/FailuresMobileList'
-import { MarketsMobileList, SendersMobileList } from './components/mobile/FleetMobileList'
-import {
-  resolveQueueCapability,
-  resolveQueueStateMap,
-  summarizeQueueAttention,
-} from './queue-mobile-semantics'
 import { TemplateIntelligenceModule } from './components/templates/TemplateIntelligenceModule'
 import './components/templates/template-intelligence.css'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
@@ -97,6 +81,8 @@ import '../../modules/inbox/queue-ops.css'
 import './queue-mobile.css'
 import { QueueDispatchMobile } from './dispatch/QueueDispatchMobile'
 import { QueueDispatchSheet, QueueDispatchPicker } from './dispatch/QueueDispatchSheet'
+import { QueueShell, type QueueView } from './dispatch/QueueShell'
+import { QueueEventsView, QueueFailuresView, QueueMarketsView, QueueSendersView } from './dispatch/QueueSections'
 import './dispatch/queue-dispatch.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -151,18 +137,6 @@ const MOBILE_RANGE_TOKEN: Record<DatePreset, string> = {
   today: 'Today', '24h': '24h', '7d': '7d', '14d': '14d', '30d': '30d',
   '60d': '60d', '90d': '90d', all: 'All', custom: 'Custom',
 }
-
-const MOBILE_SECTION_LABEL: Record<QueueSection, string> = {
-  queue: 'Queue',
-  events: 'Events',
-  failures: 'Failures',
-  market: 'Markets',
-  senders: 'Senders',
-  templates: 'Templates',
-}
-
-/** Module rail order — operate first, analyze second. */
-const MOBILE_SECTION_ORDER: QueueSection[] = ['queue', 'events', 'failures', 'market', 'senders', 'templates']
 
 function getPresetRange(preset: Exclude<DatePreset, 'custom' | 'all'>): { from: string; to: string } {
   const now = new Date()
@@ -1197,14 +1171,17 @@ export const QueuePage = ({
   const [timelineDensity, setTimelineDensity] = useState<'comfortable' | 'compact'>('compact')
   const [exceptionsOpen, setExceptionsOpen] = useState(false)
   // Mobile-only: deliberate selection mode and the filter sheet.
-  const [selectionMode, setSelectionMode] = useState(false)
+  const [, setSelectionMode] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   // Mobile dispatch: server segment, server search, growing page, views sheet.
   const [mobileSegment, setMobileSegment] = useState<QueueSegment>('ready')
   const [mobileSearch, setMobileSearch] = useState('')
   const [mobilePageSize, setMobilePageSize] = useState(25)
-  const [viewsOpen, setViewsOpen] = useState(false)
-  const dispatchMode = isMobileLayout && section === 'queue'
+  // A row opened from Events / Failures, with the list it was opened from.
+  const [sheet, setSheet] = useState<{ id: string; list: QueueItem[] } | null>(null)
+  // Mobile always fetches the dispatch page (with segment counts) — the
+  // header's summary and badges need it on every view.
+  const dispatchMode = isMobileLayout
 
   const [templateSearchParams, setTemplateSearchParams] = useState(
     () => new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''),
@@ -1335,8 +1312,11 @@ export const QueuePage = ({
     }
   }, [datePreset, customFrom, customTo, dateBasis])
 
+  // Events everywhere; on mobile, Failures / Markets / Senders read the same
+  // full-range rows (never the 25 on screen).
+  const wantsRangeRows = section === 'events' || (isMobileLayout && ['failures', 'market', 'senders'].includes(section))
   useEffect(() => {
-    if (section !== 'events') return
+    if (!wantsRangeRows) return
     let cancelled = false
     setEventItemsLoading(true)
     void (async () => {
@@ -1354,7 +1334,7 @@ export const QueuePage = ({
       }
     })()
     return () => { cancelled = true }
-  }, [section, eventFetchOpts, model?.items])
+  }, [wantsRangeRows, eventFetchOpts, model?.items])
 
   const items = model?.items ?? []
 
@@ -1529,10 +1509,6 @@ export const QueuePage = ({
     if (nextIdx >= 0 && nextIdx < list.length) select(list[nextIdx])
   }, [])
 
-  const eventTimelineItems = useMemo(
-    () => buildEventTimelineItems(section === 'events' && eventItems.length > 0 ? eventItems : items),
-    [section, eventItems, items],
-  )
 
   // ── Pagination controls ──────────────────────────────────────────────────
   const handlePageChange = useCallback((page: number) => {
@@ -1591,7 +1567,8 @@ export const QueuePage = ({
       return
     }
 
-    const item = model?.items.find(i => i.id === id)
+    // Rows opened from Events / Failures may not be on the current page.
+    const item = model?.items.find(i => i.id === id) ?? eventItems.find(i => i.id === id)
     if (!item) return
 
     let resultPromise: Promise<any> | null = null
@@ -1620,7 +1597,7 @@ export const QueuePage = ({
         emitNotification({ title: 'Action Failed', detail: err instanceof Error ? err.message : 'Error', severity: 'critical' })
       }
     }
-  }, [model, refreshData, currentPage])
+  }, [model, eventItems, refreshData, currentPage])
 
   // ── Filter tabs ──────────────────────────────────────────────────────────
   const templateStatsMemo = useMemo(() => buildTemplateStats(items), [items])
@@ -1806,44 +1783,8 @@ export const QueuePage = ({
   ]
 
   // ── Mobile derived state ─────────────────────────────────────────────────
-  const mobileSummary = useMemo(() => summarizeQueueAttention(kpi), [kpi])
-
-  // The queue list is exactly `filteredItems`. The health tiles set the same
-  // server-backed status bucket the desktop KPI cards use, so a tile's count and
-  // the list it opens always agree.
+  // The dispatch list is exactly `filteredItems` for the server segment.
   const mobileItems = filteredItems
-
-  const mobileActiveStat: QueueMobileStat | null =
-    statusFilter === 'queued' || statusFilter === 'sending' || statusFilter === 'failed'
-    || statusFilter === 'scheduled' || statusFilter === 'blocked' || statusFilter === 'approval'
-      ? statusFilter
-      : null
-
-  const mobileSections = useMemo(() => MOBILE_SECTION_ORDER.map(key => {
-    const def = QUEUE_SECTIONS.find(s => s.key === key)!
-    // The Failures badge must count the same universe the Failures surface
-    // reports (failed + blocked), not failed alone.
-    const badge = key === 'failures' ? kpi.failed + kpi.blocked
-      : key === 'templates' ? templateStatsMemo.length
-      : key === 'senders' ? senderFleetCount
-      : key === 'events' ? items.filter(i => i.lastEventAt).length
-      : key === 'market' ? marketConfiguredCount
-      : 0
-    return { key, label: MOBILE_SECTION_LABEL[key], icon: def.icon, badge }
-  }), [kpi.failed, kpi.blocked, templateStatsMemo.length, senderFleetCount, items, marketConfiguredCount])
-
-  // Only actions the current selection can actually perform are enabled.
-  const mobileSelectionCapability = useMemo(() => {
-    const caps = selectedRows.map(i => resolveQueueCapability(i, resolveQueueStateMap(i)))
-    return {
-      retry: caps.filter(c => c.canRetry).length,
-      reschedule: caps.filter(c => c.canReschedule).length,
-      pause: caps.filter(c => c.canPause).length,
-      cancel: selectedRows.filter(i => !['cancelled', 'delivered'].includes(i.status)).length,
-      suppress: selectedRows.filter(i => !['cancelled', 'delivered'].includes(i.status)).length,
-      excluded: bulkNonRetryable,
-    }
-  }, [selectedRows, bulkNonRetryable])
 
   const changeSection = useCallback((next: QueueSection) => {
     setSection(next)
@@ -1878,344 +1819,194 @@ export const QueuePage = ({
   // A separate tree so desktop chrome (KPI strip, section bar, pagination
   // block, density chooser) is never shrunk onto a phone.
   if (isMobileLayout) {
-    const activeFilters = [
-      statusFilter !== 'all',
-      marketFilter !== 'all',
-      templateFilter !== 'all',
-      senderFilter !== 'all',
-      Boolean(searchQuery.trim()),
-      Boolean(causeFilter),
-      datePreset !== '7d',
-    ].filter(Boolean).length
-    const statusLabel = statusFilter === 'all'
-      ? 'All rows'
-      : (filterTabs.find(t => t.key === statusFilter)?.label ?? 'All rows')
     const openItem = selectedItem && dossierOpen ? selectedItem : null
-
-    if (dispatchMode) {
-      // Rows from a previous segment/search are never shown under a new one.
-      const loadedFor = model?.fetchOptions
-      const current = loadedFor?.status === mobileSegment && (loadedFor?.q ?? '') === mobileSearch.trim()
-      const dispatchItems = current ? mobileItems : []
-      const dispatchTotal = current ? totalCount : 0
-      const dispatchFilters = [marketFilter !== 'all', senderFilter !== 'all', datePreset !== '7d'].filter(Boolean).length
-      const openIndex = openItem ? dispatchItems.findIndex(i => i.id === openItem.id) : -1
-      const VIEWS: Array<{ key: QueueSection; label: string; sub: string; icon: string }> = [
-        { key: 'events', label: 'Events', sub: 'Every send and receipt as it happened', icon: 'activity' },
-        { key: 'failures', label: 'Failures', sub: 'Why sends failed, grouped by cause', icon: 'alert-circle' },
-        { key: 'market', label: 'Markets', sub: 'Volume and health by market', icon: 'map' },
-        { key: 'senders', label: 'Senders', sub: 'Sending numbers and their health', icon: 'phone' },
-        { key: 'templates', label: 'Templates', sub: 'Template performance', icon: 'file-text' },
-      ]
-      const RANGES: DatePreset[] = ['today', '24h', '7d', '30d', '90d', 'all']
-      return (
-        <div ref={rootRef} className={cls('occ-root', 'is-mobile-layout', 'is-dispatch', `is-layout-${layoutMode}`)}>
-          <QueueDispatchMobile
-            items={dispatchItems}
-            segment={mobileSegment}
-            counts={model?.segmentCounts}
-            totalCount={dispatchTotal}
-            loading={loading || !current}
-            search={mobileSearch}
-            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
-            activeFilters={dispatchFilters}
-            openId={openItem?.id ?? null}
-            hasMore={current && dispatchTotal > dispatchItems.length && mobilePageSize < 100}
-            loadingMore={loading && current && dispatchItems.length > 0}
-            onSegment={(seg) => { if (seg !== mobileSegment) { setMobilePageSize(25); setMobileSegment(seg) } }}
-            onSearch={(q) => { setMobilePageSize(25); setMobileSearch(q) }}
-            onOpen={handleSelectRow}
-            onOpenFilters={() => setFiltersOpen(true)}
-            onOpenViews={() => setViewsOpen(true)}
-            onRefresh={() => { setLoading(true); refreshData(0) }}
-            onLoadMore={() => setMobilePageSize(n => Math.min(100, n + 25))}
-          />
-
-          {openItem && openIndex >= 0 && (
-            <QueueDispatchSheet
-              item={openItem}
-              index={openIndex}
-              total={dispatchItems.length}
-              onClose={() => { dismissedContextRef.current = openItem.id; setSelectedId(null); setDossierOpen(false) }}
-              onPrev={() => navigateMobileDossier('prev', dispatchItems, openItem.id, handleSelectRow)}
-              onNext={() => navigateMobileDossier('next', dispatchItems, openItem.id, handleSelectRow)}
-              onAction={handleAction}
-            />
-          )}
-
-          {filtersOpen && (
-            <QueueDispatchPicker
-              title="Filters"
-              className="qx-filter-sheet"
-              onClose={() => setFiltersOpen(false)}
-              footer={(
-                <>
-                  <button type="button" className="qx-act is-secondary" onClick={() => { setDatePreset('7d'); setMarketFilter('all'); setSenderFilter('all') }}>Reset</button>
-                  <button type="button" className="qx-act is-primary" onClick={() => setFiltersOpen(false)}>Done</button>
-                </>
-              )}
-            >
-              <section className="qx-block">
-                <h3 className="qx-block__title">Range<em>Attention &amp; History · live rows always show</em></h3>
-                <div className="qx-choices">
-                  {RANGES.map(r => (
-                    <button key={r} type="button" className={cls('qx-choice', datePreset === r && 'is-active')} onClick={() => setDatePreset(r)} aria-pressed={datePreset === r}>
-                      {DATE_PRESET_LABELS[r]}
-                    </button>
-                  ))}
-                </div>
-              </section>
-              {marketOptions.length > 1 && (
-                <section className="qx-block">
-                  <h3 className="qx-block__title">Market</h3>
-                  <div className="qx-choices">
-                    {marketOptions.map(m => (
-                      <button key={m} type="button" className={cls('qx-choice', marketFilter === m && 'is-active')} onClick={() => setMarketFilter(m)} aria-pressed={marketFilter === m}>
-                        {m === 'all' ? 'All markets' : m}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-              {senderOptions.length > 1 && (
-                <section className="qx-block">
-                  <h3 className="qx-block__title">Sending number</h3>
-                  <div className="qx-choices">
-                    {senderOptions.map(n => (
-                      <button key={n} type="button" className={cls('qx-choice', 'is-mono', senderFilter === n && 'is-active')} onClick={() => setSenderFilter(n)} aria-pressed={senderFilter === n}>
-                        {n === 'all' ? 'All numbers' : n.replace(/^\+?1?(\d{3})(\d{3})(\d{4})$/, '($1) $2-$3')}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </QueueDispatchPicker>
-          )}
-
-          {viewsOpen && (
-            <QueueDispatchPicker title="Queue views" className="qx-views-sheet" onClose={() => setViewsOpen(false)}>
-              <div className="qx-views">
-                {VIEWS.map(v => (
-                  <button key={v.key} type="button" className="qx-view" onClick={() => { setViewsOpen(false); changeSection(v.key) }}>
-                    <span className="qx-view__icon"><Icon name={v.icon as never} size={16} /></span>
-                    <span className="qx-view__copy"><strong>{v.label}</strong><span>{v.sub}</span></span>
-                    <Icon name="chevron-right" size={14} />
-                  </button>
-                ))}
-              </div>
-            </QueueDispatchPicker>
-          )}
-        </div>
-      )
+    // Rows from a previous segment/search are never shown under a new one.
+    const loadedFor = model?.fetchOptions
+    const current = loadedFor?.status === mobileSegment && (loadedFor?.q ?? '') === mobileSearch.trim()
+    const dispatchItems = current ? mobileItems : []
+    const dispatchTotal = current ? totalCount : 0
+    const dispatchFilters = [marketFilter !== 'all', senderFilter !== 'all', datePreset !== '7d'].filter(Boolean).length
+    const openIndex = openItem ? dispatchItems.findIndex(i => i.id === openItem.id) : -1
+    const RANGES: DatePreset[] = ['today', '24h', '7d', '30d', '90d', 'all']
+    const view: QueueView = section === 'queue' ? 'dispatch' : section
+    const counts = model?.segmentCounts
+    const attention = typeof counts?.attention === 'number' ? counts.attention : 0
+    const rangeLabel = MOBILE_RANGE_TOKEN[datePreset]
+    const shell = {
+      onView: (v: QueueView) => { setSheet(null); changeSection(v === 'dispatch' ? 'queue' : v) },
+      counts,
+      badges: { failures: { value: attention, tone: 'amber' as const } },
+      loading,
+      onRefresh: () => { setLoading(true); refreshData(0) },
     }
+    const rangeRows = eventItems
+    const rangeLoading = eventItemsLoading
+    const filterNote = causeFilter
+      ? `Cause · ${FAILURE_CAUSE_LABEL[causeFilter] ?? causeFilter.replace(/_/g, ' ')}`
+      : marketFilter !== 'all'
+        ? `Market · ${marketFilter}`
+        : senderFilter !== 'all'
+          ? `Number · ··${senderFilter.replace(/\D/g, '').slice(-4)}`
+          : null
+    const openFromSection = (item: QueueItem, list: QueueItem[]) => setSheet({ id: item.id, list })
+    const sheetIndex = sheet ? sheet.list.findIndex(i => i.id === sheet.id) : -1
+    const sheetItem = sheetIndex >= 0 ? sheet!.list[sheetIndex] : null
 
-    return (
-      <div
-        ref={rootRef}
-        className={cls('occ-root', 'is-recovery', 'is-mobile-layout', `is-layout-${layoutMode}`)}
-      >
-        <QueueConfirmModal
-          preview={confirmPreview}
-          busy={busyAction !== null}
-          onConfirm={() => { if (confirmPreview) void executeConfirmedAction() }}
-          onCancel={() => setConfirmPreview(null)}
+    let body: React.ReactNode
+    if (view === 'dispatch') {
+      body = (
+        <QueueDispatchMobile
+          items={dispatchItems}
+          segment={mobileSegment}
+          counts={counts}
+          totalCount={dispatchTotal}
+          loading={loading || !current}
+          search={mobileSearch}
+          rangeLabel={rangeLabel}
+          activeFilters={dispatchFilters}
+          openId={openItem?.id ?? null}
+          hasMore={current && dispatchTotal > dispatchItems.length && mobilePageSize < 100}
+          loadingMore={loading && current && dispatchItems.length > 0}
+          onSegment={(seg) => { if (seg !== mobileSegment) { setMobilePageSize(25); setMobileSegment(seg) } }}
+          onSearch={(q) => { setMobilePageSize(25); setMobileSearch(q) }}
+          onOpen={handleSelectRow}
+          onOpenFilters={() => setFiltersOpen(true)}
+          onView={shell.onView}
+          badges={shell.badges}
+          filterNote={filterNote}
+          onClearNote={() => { setCauseFilter(null); setMarketFilter('all'); setSenderFilter('all') }}
+          onRefresh={shell.onRefresh}
+          onLoadMore={() => setMobilePageSize(n => Math.min(100, n + 25))}
         />
-
-        <QueueMobileHeader
-          section={section}
-          sections={mobileSections}
-          title={MOBILE_SECTION_LABEL[section]}
-          meta={section === 'queue'
-            ? `${totalCount.toLocaleString()} rows · ${MOBILE_RANGE_TOKEN[datePreset]}`
-            : MOBILE_RANGE_TOKEN[datePreset]}
-          showHealth={section === 'queue'}
-          summary={mobileSummary}
-          activeStat={mobileActiveStat}
-          loading={loading}
-          onSection={changeSection}
-          onStat={(stat) => {
-            setStatusFilter(prev => (prev === stat ? 'all' : stat))
-            if (section !== 'queue') changeSection('queue')
-          }}
-          onRefresh={() => { setLoading(true); refreshData(currentPage) }}
+      )
+    } else if (view === 'events') {
+      body = <QueueEventsView shell={shell} items={rangeRows} loading={rangeLoading} rangeLabel={rangeLabel} openId={sheet?.id ?? null} onOpen={openFromSection} />
+    } else if (view === 'failures') {
+      body = (
+        <QueueFailuresView
+          shell={shell}
+          items={rangeRows}
+          loading={rangeLoading}
+          rangeLabel={rangeLabel}
+          onOpenItem={openFromSection}
+          onViewRows={(cause) => { setMarketFilter('all'); setSenderFilter('all'); setCauseFilter(cause); setMobilePageSize(100); setMobileSegment('attention'); changeSection('queue') }}
         />
-
-        {section === 'queue' && (
-          <>
-            <QueueMobileControlBar
-              rangeToken={MOBILE_RANGE_TOKEN[datePreset]}
-              statusLabel={statusLabel}
-              activeFilters={activeFilters}
-              searchActive={Boolean(searchQuery.trim())}
-              selectionMode={selectionMode}
-              selectableCount={mobileItems.length}
-              onOpenFilters={() => setFiltersOpen(true)}
-              onToggleSelectionMode={() => {
-                setSelectionMode(v => {
-                  if (v) setSelectedIds(new Set())
-                  return !v
-                })
-              }}
-            />
-
-            <div className="qm-rows">
-              {mobileItems.map(item => (
-                <QueueMobileRow
-                  key={item.id}
-                  item={item}
-                  isOpen={selectedId === item.id}
-                  isChecked={selectedIds.has(item.id)}
-                  selectionMode={selectionMode}
-                  onOpen={() => handleSelectRow(item)}
-                  onToggleCheck={toggleSelect}
-                />
-              ))}
-              {mobileItems.length === 0 && (
-                <div className="qm-empty">
-                  {items.length === 0
-                    ? 'No queue rows for this range.'
-                    : 'No rows match the current filter.'}
-                </div>
-              )}
-            </div>
-
-            <QueueMobilePager
-              rowStart={rowStart}
-              rowEnd={rowEnd}
-              totalCount={totalCount}
-              hasPrev={currentPage > 0}
-              hasNext={currentPage < totalPages - 1}
-              onPrev={() => handlePageChange(currentPage - 1)}
-              onNext={() => handlePageChange(currentPage + 1)}
-            />
-
-            <QueueMobileSelectionBar
-              selectedCount={selectedIds.size}
-              capability={mobileSelectionCapability}
-              onRetry={() => requestBulkAction('bulk-retry')}
-              onReschedule={() => requestBulkAction('bulk-reschedule')}
-              onPause={() => requestBulkAction('bulk-pause')}
-              onCancel={() => requestBulkAction('bulk-cancel')}
-              onSuppress={() => requestBulkAction('bulk-suppress')}
-              onOpenFailures={() => { changeSection('failures'); setStatusFilter('failed') }}
-              onClear={() => { clearSelection(); setSelectionMode(false) }}
-            />
-
-            {openItem && (
-              <QueueMobileItemSheet
-                item={openItem}
-                mode="queue"
-                index={Math.max(0, mobileItems.findIndex(i => i.id === openItem.id))}
-                total={mobileItems.length}
-                onClose={() => { dismissedContextRef.current = openItem.id; setSelectedId(null); setDossierOpen(false) }}
-                onPrev={() => navigateMobileDossier('prev', mobileItems, openItem.id, handleSelectRow)}
-                onNext={() => navigateMobileDossier('next', mobileItems, openItem.id, handleSelectRow)}
-                onAction={handleAction}
-              />
-            )}
-          </>
-        )}
-
-        {section === 'events' && (
-          <>
-            <EventsMobileFeed
-              items={eventItems.length > 0 ? eventItems : items}
-              loading={eventItemsLoading}
-              rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
-              selectedEventId={selectedEventItem?.id ?? null}
-              onSelectEvent={setSelectedEventItem}
-            />
-            {selectedEventItem && (
-              <QueueMobileItemSheet
-                item={selectedEventItem}
-                mode="event"
-                index={Math.max(0, eventTimelineItems.findIndex(i => i.id === selectedEventItem.id))}
-                total={eventTimelineItems.length}
-                onClose={() => setSelectedEventItem(null)}
-                onPrev={() => navigateMobileDossier('prev', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
-                onNext={() => navigateMobileDossier('next', eventTimelineItems, selectedEventItem.id, setSelectedEventItem)}
-                onAction={handleAction}
-              />
-            )}
-          </>
-        )}
-
-        {section === 'failures' && (
-          <FailuresMobileList
-            items={items}
-            loadedRowCount={items.length}
-            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
-            selectedCause={selectedFailureCause}
-            onSelectCause={setSelectedFailureCause}
-            onViewRows={c => { setCauseFilter(c); setStatusFilter('failed'); changeSection('queue') }}
-          />
-        )}
-
-        {section === 'market' && (
-          <MarketsMobileList
-            items={items}
-            directory={model?.marketDirectory ?? []}
-            fleet={model?.textgridFleet ?? []}
-            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
-            selectedMarket={selectedMarketName}
-            onSelectMarket={setSelectedMarketName}
-            onViewRows={m => { setMarketFilter(m); changeSection('queue') }}
-          />
-        )}
-
-        {section === 'senders' && (
-          <SendersMobileList
-            items={items}
-            fleet={model?.textgridFleet ?? []}
-            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
-            selectedPhone={selectedSenderPhone}
-            onSelectPhone={setSelectedSenderPhone}
-          />
-        )}
-
-        {section === 'templates' && (
+      )
+    } else if (view === 'market') {
+      body = (
+        <QueueMarketsView
+          shell={shell}
+          items={rangeRows}
+          directory={model?.marketDirectory ?? []}
+          fleet={model?.textgridFleet ?? []}
+          loading={rangeLoading}
+          rangeLabel={rangeLabel}
+          onViewRows={(m) => { setCauseFilter(null); setSenderFilter('all'); setMarketFilter(m); changeSection('queue') }}
+        />
+      )
+    } else if (view === 'senders') {
+      body = (
+        <QueueSendersView
+          shell={shell}
+          items={rangeRows}
+          fleet={model?.textgridFleet ?? []}
+          loading={rangeLoading}
+          rangeLabel={rangeLabel}
+          onViewRows={(phone) => { setCauseFilter(null); setMarketFilter('all'); setSenderFilter(phone); changeSection('queue') }}
+        />
+      )
+    } else {
+      body = (
+        <QueueShell {...shell} view="templates">
           <TemplateIntelligenceModule
             searchParams={templateSearchParams}
             setSearchParams={syncTemplateSearchParams}
-            globalRangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+            globalRangeLabel={rangeLabel}
             isMobileLayout
             onViewQueueRows={(templateId) => {
               setTemplateFilter(templateId)
               changeSection('queue')
             }}
           />
+        </QueueShell>
+      )
+    }
+
+    return (
+      <div ref={rootRef} className={cls('occ-root', 'is-mobile-layout', 'is-dispatch', `is-layout-${layoutMode}`)}>
+        {body}
+
+        {view === 'dispatch' && openItem && openIndex >= 0 && (
+          <QueueDispatchSheet
+            item={openItem}
+            index={openIndex}
+            total={dispatchItems.length}
+            onClose={() => { dismissedContextRef.current = openItem.id; setSelectedId(null); setDossierOpen(false) }}
+            onPrev={() => navigateMobileDossier('prev', dispatchItems, openItem.id, handleSelectRow)}
+            onNext={() => navigateMobileDossier('next', dispatchItems, openItem.id, handleSelectRow)}
+            onAction={handleAction}
+          />
+        )}
+
+        {view !== 'dispatch' && sheetItem && (
+          <QueueDispatchSheet
+            item={sheetItem}
+            index={sheetIndex}
+            total={sheet!.list.length}
+            onClose={() => setSheet(null)}
+            onPrev={() => { if (sheetIndex > 0) setSheet({ id: sheet!.list[sheetIndex - 1].id, list: sheet!.list }) }}
+            onNext={() => { if (sheetIndex < sheet!.list.length - 1) setSheet({ id: sheet!.list[sheetIndex + 1].id, list: sheet!.list }) }}
+            onAction={handleAction}
+          />
         )}
 
         {filtersOpen && (
-          <OccQueueFilterMenu
-            open
-            datePreset={datePreset}
-            dateBasis={dateBasis}
-            customFrom={customFrom}
-            customTo={customTo}
-            statusFilter={statusFilter}
-            marketFilter={marketFilter}
-            templateFilter={templateFilter}
-            senderFilter={senderFilter}
-            searchQuery={searchQuery}
-            filterTabs={filterTabs}
-            marketOptions={marketOptions}
-            templateOptions={templateOptions}
-            senderOptions={senderOptions}
-            causeFilter={causeFilter}
-            causeLabel={causeFilter ? (FAILURE_CAUSE_LABEL[causeFilter] ?? causeFilter.replace(/_/g, ' ')) : undefined}
+          <QueueDispatchPicker
+            title="Filters"
+            className="qx-filter-sheet"
             onClose={() => setFiltersOpen(false)}
-            onDatePreset={setDatePreset}
-            onDateBasis={setDateBasis}
-            onCustomFrom={setCustomFrom}
-            onCustomTo={setCustomTo}
-            onStatusFilter={setStatusFilter}
-            onMarketFilter={setMarketFilter}
-            onTemplateFilter={setTemplateFilter}
-            onSenderFilter={setSenderFilter}
-            onSearchQuery={setSearchQuery}
-            onClearCause={() => setCauseFilter(null)}
-          />
+            footer={(
+              <>
+                <button type="button" className="qx-act is-secondary" onClick={() => { setDatePreset('7d'); setMarketFilter('all'); setSenderFilter('all'); setCauseFilter(null) }}>Reset</button>
+                <button type="button" className="qx-act is-primary" onClick={() => setFiltersOpen(false)}>Done</button>
+              </>
+            )}
+          >
+            <section className="qx-block">
+              <h3 className="qx-block__title">Range<em>Attention &amp; History · live rows always show</em></h3>
+              <div className="qx-choices">
+                {RANGES.map(r => (
+                  <button key={r} type="button" className={cls('qx-choice', datePreset === r && 'is-active')} onClick={() => setDatePreset(r)} aria-pressed={datePreset === r}>
+                    {DATE_PRESET_LABELS[r]}
+                  </button>
+                ))}
+              </div>
+            </section>
+            {marketOptions.length > 1 && (
+              <section className="qx-block">
+                <h3 className="qx-block__title">Market</h3>
+                <div className="qx-choices">
+                  {marketOptions.map(m => (
+                    <button key={m} type="button" className={cls('qx-choice', marketFilter === m && 'is-active')} onClick={() => setMarketFilter(m)} aria-pressed={marketFilter === m}>
+                      {m === 'all' ? 'All markets' : m}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+            {senderOptions.length > 1 && (
+              <section className="qx-block">
+                <h3 className="qx-block__title">Sending number</h3>
+                <div className="qx-choices">
+                  {senderOptions.map(n => (
+                    <button key={n} type="button" className={cls('qx-choice', 'is-mono', senderFilter === n && 'is-active')} onClick={() => setSenderFilter(n)} aria-pressed={senderFilter === n}>
+                      {n === 'all' ? 'All numbers' : n.replace(/^\+?1?(\d{3})(\d{3})(\d{4})$/, '($1) $2-$3')}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          </QueueDispatchPicker>
         )}
       </div>
     )

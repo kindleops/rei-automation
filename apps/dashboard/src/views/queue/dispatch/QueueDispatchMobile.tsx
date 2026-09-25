@@ -22,9 +22,9 @@ import {
   dispatchStatus,
   dispatchWhen,
   phoneTail,
-  summarySentence,
   type QueueSegment,
 } from './queue-dispatch-model'
+import { QueueShell, type QueueShellProps, type QueueView } from './QueueShell'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const fmtCount = (n: number | null | undefined) =>
@@ -175,7 +175,11 @@ export interface QueueDispatchMobileProps {
   onSearch: (q: string) => void
   onOpen: (item: QueueItem) => void
   onOpenFilters: () => void
-  onOpenViews: () => void
+  onView: (view: QueueView) => void
+  badges?: QueueShellProps['badges']
+  /** A cross-view filter in force ("Market: Houston"), with a clear control. */
+  filterNote?: string | null
+  onClearNote?: () => void
   onRefresh: () => void
   onLoadMore: () => void
 }
@@ -183,7 +187,7 @@ export interface QueueDispatchMobileProps {
 export function QueueDispatchMobile(props: QueueDispatchMobileProps) {
   const {
     items, segment, counts, totalCount, loading, search, rangeLabel, activeFilters, openId,
-    hasMore, loadingMore, onSegment, onSearch, onOpen, onOpenFilters, onOpenViews, onRefresh, onLoadMore,
+    hasMore, loadingMore, onSegment, onSearch, onOpen, onOpenFilters, onView, badges, filterNote, onClearNote, onRefresh, onLoadMore,
   } = props
   const [draft, setDraft] = useState(search)
   const timer = useRef<number | null>(null)
@@ -195,34 +199,10 @@ export function QueueDispatchMobile(props: QueueDispatchMobileProps) {
   }
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
 
-  const rootRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => { rootRef.current?.scrollTo({ top: 0 }) }, [segment])
-
-  const sentence = summarySentence(counts)
   const showSkeleton = loading && items.length === 0
 
-  return (
-    <div className="qx-root" ref={rootRef}>
-      <span className="qx-aurora" aria-hidden="true" />
-      <header className="qx-head">
-        <div className="qx-head__top">
-          <div className="qx-head__id">
-            <h1 className="qx-head__title">
-              Queue
-              <span className={cls('qx-live', loading && 'is-syncing')} aria-label={loading ? 'Syncing' : 'Live'} />
-            </h1>
-            <p className="qx-head__sum">{sentence ?? 'Reading the queue…'}</p>
-          </div>
-          <div className="qx-head__tools">
-            <button type="button" className={cls('qx-icon', loading && 'is-busy')} onClick={onRefresh} aria-label="Refresh queue">
-              <Icon name="refresh-cw" size={15} />
-            </button>
-            <button type="button" className="qx-icon" onClick={onOpenViews} aria-label="Queue views" data-queue-views>
-              <Icon name="grid" size={15} />
-            </button>
-          </div>
-        </div>
-
+  const controls = (
+    <>
         <div className="qx-search-row">
           <label className="qx-search" data-queue-search>
             <Icon name="search" size={14} />
@@ -269,8 +249,26 @@ export function QueueDispatchMobile(props: QueueDispatchMobileProps) {
             )
           })}
         </nav>
-      </header>
+        {filterNote && (
+          <div className="qx-scope">
+            <span>{filterNote}</span>
+            <button type="button" onClick={onClearNote} aria-label="Clear filter"><Icon name="close" size={11} /></button>
+          </div>
+        )}
+    </>
+  )
 
+  return (
+    <QueueShell
+      view="dispatch"
+      onView={onView}
+      counts={counts}
+      badges={badges}
+      loading={loading}
+      onRefresh={onRefresh}
+      controls={controls}
+      scrollKey={segment}
+    >
       <div className="qx-list" aria-busy={loading}>
         {showSkeleton && [0, 1, 2].map((i) => <CardSkeleton key={i} />)}
         {!showSkeleton && items.map((item) => (
@@ -290,6 +288,6 @@ export function QueueDispatchMobile(props: QueueDispatchMobileProps) {
           </footer>
         )}
       </div>
-    </div>
+    </QueueShell>
   )
 }

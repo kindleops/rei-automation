@@ -137,3 +137,46 @@ describe('render', () => {
     expect(html).toContain('34 scheduled')
   })
 })
+
+// ── Analytics views ──────────────────────────────────────────────────────────
+import { deriveFailureCause, buildFailureStats } from '../failure-taxonomy-stats'
+import { QueueFailuresView, QueueEventsView } from './QueueSections'
+import { QueueShell } from './QueueShell'
+
+const shell = { onView: () => {}, counts: { ready: 0, scheduled: 34, sending: 0, attention: 3, history: 1 }, loading: false, onRefresh: () => {} }
+const failedManual = row({ id: 'm1', status: 'failed', queueStatusRaw: 'failed_transport', failureCategory: 'missing_template', diagnosticFlags: [], failedReason: 'timeout', metadata: { manual_inbox_send: true }, templateId: null } as any)
+const heldHealth = row({ id: 'h1', status: 'blocked', queueStatusRaw: 'blocked_by_health_guard', failureCategory: null, diagnosticFlags: [] } as any)
+const failedPlain = row({ id: 'f1', status: 'failed', queueStatusRaw: 'failed', failureCategory: 'textgrid_content_filter', diagnosticFlags: [] } as any)
+
+describe('failures count every failed or held row', () => {
+  it('a failed manual send is classified from what happened, not dropped as "missing template"', () => {
+    expect(deriveFailureCause(failedManual)).toBe('carrier_failure')
+    expect(deriveFailureCause(heldHealth)).toBe('blocked_sender_ineligible')
+    expect(deriveFailureCause(failedPlain)).toBe('textgrid_content_filter')
+  })
+  it('the Failures total equals the failed + held rows it was given', () => {
+    const stats = buildFailureStats([failedManual, heldHealth, failedPlain, row()])
+    expect(stats.reduce((n, s) => n + s.count, 0)).toBe(3)
+    const html = renderToStaticMarkup(
+      <QueueFailuresView shell={shell} items={[failedManual, heldHealth, failedPlain, row()]} loading={false} rangeLabel="7d" onOpenItem={() => {}} onViewRows={() => {}} />,
+    )
+    expect(html).toContain('Failed or held')
+    expect(html).toContain('Across 4 queue rows · 7d')
+  })
+})
+
+describe('one shell for every Queue view', () => {
+  it('renders the six views on the rail and marks the active one', () => {
+    const html = renderToStaticMarkup(<QueueShell {...shell} view="events"><div /></QueueShell>)
+    for (const v of ['dispatch', 'events', 'failures', 'market', 'senders', 'templates']) expect(html).toContain(`data-queue-view="${v}"`)
+    expect(html).toMatch(/aria-selected="true"[^>]*data-queue-view="events"/)
+    expect(html).toContain('34 scheduled · 3 attention')
+  })
+  it('events read the rows handed to them, not a page', () => {
+    const html = renderToStaticMarkup(
+      <QueueEventsView shell={shell} items={[failedPlain, heldHealth, row({ id: 'd1', status: 'delivered', queueStatusRaw: 'delivered', deliveredAt: '2026-09-25T07:00:00Z' } as any)]} loading={false} rangeLabel="7d" openId={null} onOpen={() => {}} />,
+    )
+    expect(html).toContain('3 events · 7d')
+    expect(html).toContain('data-section-row')
+  })
+})

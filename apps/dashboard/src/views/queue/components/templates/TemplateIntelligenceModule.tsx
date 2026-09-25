@@ -142,18 +142,25 @@ export function TemplateIntelligenceModule({
   if (isMobileLayout) {
     const activeFilters = templateFilterCount(filters, preset)
     return (
-      <div className="qm-tpl">
-        <div className="qm-bar">
-          <button type="button" className="qm-bar__filters" onClick={() => setMobileFiltersOpen(true)}>
-            <Icon name="filter" size={13} />
-            <span className="qm-bar__filters-label">
-              {filters.stage ? `${filters.stage} templates` : 'All templates'}
-            </span>
-            {activeFilters > 0 && <span className="qm-bar__badge">{activeFilters}</span>}
-            <Icon name="chevron-down" size={12} />
+      <div className="qm-tpl is-qx">
+        <div className="qx-search-row qx-tpl-controls">
+          <button type="button" className={cls('qx-filter', 'is-wide', activeFilters > 0 && 'is-active')} onClick={() => setMobileFiltersOpen(true)} data-template-filters>
+            <Icon name="filter" size={14} />
+            <span>{filters.stage ? `${filters.stage} templates` : 'All templates'}</span>
+            {activeFilters > 0 && <span className="qx-filter__badge">{activeFilters}</span>}
           </button>
-          <span className="qm-bar__range">{filters.range}</span>
+          <span className="qx-filter is-static">{filters.range}</span>
         </div>
+
+        {!loading && rows.length > 0 && (
+          <section className="qx-panel qx-tpl-panel" aria-label="Template summary">
+            <div className="qx-kpis">
+              <div className="qx-kpi"><strong className="qx-kpi__value">{matchingCount.toLocaleString()}</strong><span className="qx-kpi__label">Templates</span></div>
+              <div className="qx-kpi tone-cyan"><strong className="qx-kpi__value">{trackedCount.toLocaleString()}</strong><span className="qx-kpi__label">With sends</span></div>
+              <div className="qx-kpi tone-muted"><strong className="qx-kpi__value">{page + 1}/{totalPages}</strong><span className="qx-kpi__label">Page</span></div>
+            </div>
+          </section>
+        )}
 
         <TemplatesMobileList
           rows={rows}
@@ -163,19 +170,13 @@ export function TemplateIntelligenceModule({
         />
 
         {(matchingCount > pageSize) && (
-          <div className="qm-pager">
-            <span className="qm-pager__count">
-              {matchingCount.toLocaleString()} templates · page {page + 1} of {totalPages}
-            </span>
-            <div className="qm-pager__nav">
-              {page > 0 && (
-                <button type="button" className="qm-pager__btn" onClick={() => setPage(p => p - 1)}>Prev</button>
-              )}
-              {page < totalPages - 1 && (
-                <button type="button" className="qm-pager__btn is-next" onClick={() => setPage(p => p + 1)}>Next</button>
-              )}
+          <footer className="qx-more qx-tpl-pager">
+            <span>{matchingCount.toLocaleString()} templates · page {page + 1} of {totalPages}</span>
+            <div className="qx-tpl-pager__nav">
+              <button type="button" className="qx-more__btn" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</button>
+              <button type="button" className="qx-more__btn" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</button>
             </div>
-          </div>
+          </footer>
         )}
 
         {selectedRow && (
