@@ -1146,7 +1146,11 @@ const CLARIFIER_MAX_MESSAGE_WORDS = 60;
  * converted that review into `safe_clarifier_intent_asking_price` ("Got it. Do
  * you have a ballpark number in mind for it?"). Only the sender-health guard
  * stopped it. No documented exception authorizes overriding a classifier
- * human-review verdict, so none is honoured here.
+ * human-review verdict, so none is honoured here. The one documented exception
+ * to auto_reply_allowed=false is an immediate-send negotiation strategy
+ * directive (send_authority = negotiation_strategy_directive): a proactive
+ * send (e.g. OCCUPANCY_DISCOVERY after "yes I own it") the intent alone would
+ * not call for.
  */
 export function classifierForbidsAutoReply(classification = null) {
   const authority = classification?.automation_decision;
@@ -2330,6 +2334,11 @@ export async function executeInboundAutomationDecision({
               should_mark_human_review: false,
               reply_mode: "auto",
               next_action: "queue_auto_reply",
+              // The documented exception to the classifier-verdict invariant
+              // (see classifierForbidsAutoReply): a proactive strategy send the
+              // intent itself doesn't call for. It may proceed past
+              // auto_reply_allowed=false — never past human_review_required.
+              send_authority: "negotiation_strategy_directive",
             }
           : {}),
       };
@@ -2572,7 +2581,10 @@ export async function executeInboundAutomationDecision({
   // a classifier that forbids an auto-reply wins. The row is never created.
   {
     const authority = classifierForbidsAutoReply(classification);
-    if (base_decision.should_queue_reply && authority.forbidden) {
+    const directive_exception =
+      base_decision.send_authority === "negotiation_strategy_directive" &&
+      authority.reason === "classifier_auto_reply_not_allowed";
+    if (base_decision.should_queue_reply && authority.forbidden && !directive_exception) {
       warn("[AUTO_REPLY_INVARIANT_BLOCK]", {
         thread_key: threadKey || null,
         primary_intent: classification?.primary_intent || null,

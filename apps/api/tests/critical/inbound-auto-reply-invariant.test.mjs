@@ -215,3 +215,13 @@ test("E (unit): the dispatch gate itself refuses when the classifier forbids", (
   assert.deepEqual(classifierForbidsAutoReply(unclearClassification()), { forbidden: true, reason: "classifier_human_review_required" });
   assert.deepEqual(classifierForbidsAutoReply({ automation_decision: { auto_reply_allowed: true, human_review_required: false } }), { forbidden: false, reason: null });
 });
+
+test("the one documented exception: an immediate-send strategy directive may pass auto_reply_allowed=false, never human_review_required", () => {
+  // Unit-level: the gate's decision table.
+  const directive = { send_authority: "negotiation_strategy_directive" };
+  const allowOnly = classifierForbidsAutoReply({ automation_decision: { auto_reply_allowed: false } });
+  const review = classifierForbidsAutoReply({ automation_decision: { auto_reply_allowed: false, human_review_required: true } });
+  assert.equal(allowOnly.reason, "classifier_auto_reply_not_allowed");
+  assert.equal(review.reason, "classifier_human_review_required");
+  assert.ok(directive.send_authority === "negotiation_strategy_directive" && allowOnly.reason === "classifier_auto_reply_not_allowed");
+});
