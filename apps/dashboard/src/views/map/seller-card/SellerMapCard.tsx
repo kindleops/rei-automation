@@ -5,6 +5,7 @@ import type { ThreadContext } from '../../../lib/data/inboxData'
 import { useStreetViewAvailability } from './use-street-view-availability'
 import { Composer } from '../../../modules/inbox/components/Composer'
 import { MobileBottomSheet, type BottomSheetSnap } from '../../../modules/mobile/MobileBottomSheet'
+import { InteractiveStreetViewPanorama } from '../../../modules/deal-intelligence/InteractiveStreetViewPanorama'
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import {
   LIFECYCLE_STAGE_META,
@@ -48,7 +49,7 @@ const SELLER_SHEET_SNAP_HEIGHTS = {
    * 213px. At 186px the property facts line was clipped mid-sentence, which is the
    * failure a fixed peek height exists to avoid.
    */
-  collapsed: '216px',
+  collapsed: '236px',
   half: '56dvh',
   /**
    * Full stops BELOW the map toolbar rather than at 92dvh.
@@ -241,6 +242,7 @@ export const SellerMapCard = ({
   }
 
   const heroState = useStreetViewAvailability(viewModel.property.imageUrl)
+  const [lookAroundOpen, setLookAroundOpen] = useState(false)
   // The image endpoint returns an HTTP-200 apology JPEG when there is no panorama,
   // so the hero renders only after the metadata endpoint confirms real imagery.
   const closeButton = !isPeek && onClose ? (
@@ -457,7 +459,53 @@ export const SellerMapCard = ({
    * and it is what the operator opens the sheet FOR, not what they need while reading
    * the map. Dropping it is most of the difference between a 420px peek and a 186px one.
    */
-  const peekBody = (
+  /**
+   * PHONE PEEK — the property first, then its owner. A 64px Street View
+   * thumbnail (never a hero: the map stays the surface), address as the
+   * primary line, owner + asset as context, two triage metrics. Look Around
+   * opens the interactive panorama full-screen, and only when Street View
+   * imagery actually exists for this location.
+   */
+  const recordLat = Number(record.lat ?? record.latitude ?? record.property_lat ?? NaN)
+  const recordLng = Number(record.lng ?? record.longitude ?? record.property_lng ?? NaN)
+  const canLookAround = heroState === 'available' && !heroFailed && Number.isFinite(recordLat) && Number.isFinite(recordLng)
+  const mobilePeekBody = (
+    <div className="smc-body smc-body--peek smc-mpeek">
+      <div className="smc-mpeek__row">
+        <span className={cls('smc-mpeek__thumb', heroReady && 'is-ready')}>
+          {heroUrl ? (
+            <img key={heroUrl} src={heroUrl} alt="" loading="eager" decoding="async" onError={() => { if (!usingFallback) setHeroFailed(true) }} />
+          ) : null}
+          {!heroReady && (
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3 11.2 12 4l9 7.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M5.6 10.2V19h12.8v-8.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </span>
+        <div className="smc-mpeek__copy">
+          <strong className="smc-mpeek__address" title={viewModel.property.address}>{viewModel.property.address}</strong>
+          <span className="smc-mpeek__owner">{viewModel.headerDisplayName}</span>
+          <span className="smc-mpeek__asset">{viewModel.assetSummaryLine}</span>
+        </div>
+      </div>
+      <SellerMapCardBadgeRail badges={viewModel.headerBadges} />
+      {metricsBlock('peek')}
+      {canLookAround ? (
+        <button
+          type="button"
+          className="smc-mpeek__look"
+          data-look-around
+          onClick={(event) => { event.stopPropagation(); setLookAroundOpen(true) }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M3.5 12h17M12 3.5c2.6 2.4 3.6 5.2 3.6 8.5s-1 6.1-3.6 8.5c-2.6-2.4-3.6-5.2-3.6-8.5s1-6.1 3.6-8.5Z" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
+          Look Around
+        </button>
+      ) : null}
+    </div>
+  )
+
+  const peekBody = isMobile ? mobilePeekBody : (
     <>
       <div className="smc-body smc-body--peek smc-body--peek-dense">
         {stickySummary}
@@ -473,6 +521,23 @@ export const SellerMapCard = ({
       {!isMobile ? actionFooter : null}
     </>
   )
+
+  const lookAroundOverlay = lookAroundOpen && typeof document !== 'undefined' ? createPortal(
+    <div className="smc-look" role="dialog" aria-label={`Look Around — ${viewModel.property.address}`}>
+      <InteractiveStreetViewPanorama
+        address={viewModel.property.address}
+        lat={Number.isFinite(recordLat) ? recordLat : null}
+        lng={Number.isFinite(recordLng) ? recordLng : null}
+        visible
+        onFailure={() => setLookAroundOpen(false)}
+      />
+      <div className="smc-look__bar">
+        <span className="smc-look__addr">{viewModel.property.address}</span>
+        <button type="button" className="smc-look__done" onClick={() => setLookAroundOpen(false)} data-look-around-close>Done</button>
+      </div>
+    </div>,
+    document.body,
+  ) : null
 
   const focusBody = (
     <>
@@ -673,6 +738,7 @@ export const SellerMapCard = ({
         >
           {shellInner}
         </article>
+        {lookAroundOverlay}
       </MobileBottomSheet>,
       document.body,
     )

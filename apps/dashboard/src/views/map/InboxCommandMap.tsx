@@ -42,6 +42,9 @@ import {
 import type { LiveActivityEvent } from './live-activity-engine'
 import { useCommandMapLiveActivitySettings } from './useCommandMapLiveActivitySettings'
 import { useCommandMapPerformanceMode } from './useCommandMapPerformanceMode'
+import { MapMobileChrome } from './mobile/MapMobileChrome'
+import { selectionNeedsNudge } from './mobile/map-mobile-model'
+import './mobile/map-mobile.css'
 import { CommandMapLiveActivityRail } from './components/CommandMapLiveActivityRail'
 import {
   buildOverlayGeoJson,
@@ -4732,6 +4735,28 @@ export function InboxCommandMap({
       selectedPropertyId,
     })
   ), [visiblePins, hydratedThreadsById, filteredBuyerPurchases, soldComps, liveActivitySettings, filters.market, viewportBounds, selectedHydratedThread, selectedPin?.market, selectedPropertyId])
+  // Where the operator's live sellers are — the phone's home view. Real pins
+  // only; null until there are any.
+  const mobileHomeBounds = useMemo<[[number, number], [number, number]] | null>(() => {
+    let w = 180, e = -180, so = 90, n = -90, count = 0
+    for (const pin of allPins) {
+      if (!isMappableCoord(pin.lat, pin.lng)) continue
+      w = Math.min(w, pin.lng); e = Math.max(e, pin.lng); so = Math.min(so, pin.lat); n = Math.max(n, pin.lat); count += 1
+    }
+    return count ? [[w, so], [e, n]] : null
+  }, [allPins])
+
+  // Mobile Live Activity reads both channels of the same feed, one row per id.
+  const mobileActivityEvents = useMemo(() => {
+    const seen = new Set<string>()
+    const out: typeof liveActivityFeed.live = []
+    for (const e of [...liveActivityFeed.live, ...liveActivityFeed.context, ...liveActivityFeed.visible]) {
+      if (!e?.id || seen.has(e.id)) continue
+      seen.add(e.id)
+      out.push(e)
+    }
+    return out
+  }, [liveActivityFeed])
   const debugStats = useMemo(() => ({
     allPinsCount: allPins.length,
     filteredPinsCount: filteredPins.length,
@@ -7080,7 +7105,12 @@ export function InboxCommandMap({
           container: containerEl,
           style: resolveStyle(mapStyleModeRef.current),
           center,
-          zoom: zoomedIn ? 10.5 : 4.4,
+          // A phone with nothing selected opens on the whole country; the old
+          // default (zoom 10.5 on the continental centroid) was an empty field
+          // in Kansas with 0 properties in view.
+          zoom: !selectedPin && typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+            ? 3.6
+            : (zoomedIn ? 10.5 : 4.4),
           minZoom: 2,
           maxZoom: 18,
           attributionControl: false,
@@ -7114,6 +7144,10 @@ export function InboxCommandMap({
 
       const mapInstance = map
       mapRef.current = mapInstance
+      // Dev-only handle for the mobile proof scripts (never in a production build).
+      if (import.meta.env.DEV && typeof window !== 'undefined') {
+        ;(window as unknown as { __nxMap?: maplibregl.Map }).__nxMap = mapInstance
+      }
       /**
        * DEV-ONLY map handle.
        *
@@ -9425,13 +9459,30 @@ export function InboxCommandMap({
     ].join(':')
     if (lastAutoNavSelectionRef.current === selectionKey) return
     lastAutoNavSelectionRef.current = selectionKey
+    if (isMobile) {
+      // Phone: the map keeps its zoom. Move only when the pin would be hidden
+      // by the property card (lower ~45% of the canvas) or off-screen, and then
+      // just far enough to sit in the upper third.
+      const m = mapRef.current
+      const p = m.project([focusPin.lng, focusPin.lat])
+      const h = m.getContainer().clientHeight
+      const w = m.getContainer().clientWidth
+      if (selectionNeedsNudge(p, { width: w, height: h })) {
+        m.easeTo({
+          center: [focusPin.lng, focusPin.lat],
+          offset: [0, -Math.round(h * 0.18)],
+          duration: prefersReducedMotion ? 0 : 520,
+        })
+      }
+      return
+    }
     mapRef.current.easeTo({
       center: [focusPin.lng, focusPin.lat],
       zoom: Math.max(mapRef.current.getZoom(), zoomedIn ? 13 : 11.25),
       duration: 680,
       offset: dockTier === 'full' ? [150, 0] : [0, 0],
     })
-  }, [dockTier, focusPin?.conversation_id, focusPin?.lat, focusPin?.lng, selectedThread?.id, zoomedIn])
+  }, [dockTier, focusPin?.conversation_id, focusPin?.lat, focusPin?.lng, selectedThread?.id, zoomedIn, isMobile, prefersReducedMotion])
 
   const selectedUnmapped = useMemo(
     () => selectedHydratedThread ? buildMapPin(selectedHydratedThread).unmapped : null,
@@ -9708,7 +9759,7 @@ export function InboxCommandMap({
         isMobile && 'is-mobile-map',
       )}
     >
-      {!commandMode && <div ref={controlsRef} className="nx-icm__toolbar">
+      {!commandMode && !isMobile && <div ref={controlsRef} className="nx-icm__toolbar">
         <div className="nx-icm__header">
           <div className="nx-icm__header-badge">
             <span>Live Map</span>
@@ -10259,9 +10310,11 @@ export function InboxCommandMap({
         visible={isMapDiagnosticsDebugEnabled() && Boolean(mapPropertyDiagnostics)}
       />
 
-      {(baseStyleLoading || sellerPinsLoading || styleFallbackWarning || appliedMapFilterToken || mapFilterStatusMessage) && (
+      {/* Phones state loading in the context pill and filters on the filter
+          chip; only a genuine warning surfaces here. */}
+      {(isMobile ? Boolean(styleFallbackWarning) : (baseStyleLoading || sellerPinsLoading || styleFallbackWarning || appliedMapFilterToken || mapFilterStatusMessage)) && (
         <div className="nx-icm__map-status" aria-live="polite">
-          {mapFilterStatusMessage && (
+          {mapFilterStatusMessage && !isMobile && (
             <span className="nx-icm__map-status-pill is-filter-active">
               {mapFilterStatusMessage}
             </span>
@@ -10480,7 +10533,37 @@ export function InboxCommandMap({
         ))}
       </div>}
 
-      {!commandMode && (
+      {!commandMode && isMobile && (
+        <MapMobileChrome
+          map={mapRef.current}
+          mapEpoch={mapInstanceEpoch}
+          modes={MAP_MODES}
+          mode={mapMode}
+          onMode={(key) => setMapMode(key as MapModeKey)}
+          themes={COMMAND_MAP_THEME_OPTIONS}
+          styleMode={mapStyleMode}
+          onStyle={(id) => setMapStyleMode(id as MapStyleMode)}
+          dimension={mapDimension}
+          onDimension={setMapDimension}
+          filterCount={activeFilterCount}
+          onOpenFilters={openMapAdvancedFilters}
+          activityEvents={mobileActivityEvents}
+          onSelectEvent={handleActivitySelect}
+          showMapKey={showLegendPanel}
+          onShowMapKey={setShowLegendPanel}
+          showCensusDock={showCensusDock}
+          onShowCensusDock={setShowCensusDock}
+          performance={performanceSettings}
+          onPerformance={patchPerformanceSettings}
+          cardOpen={Boolean(activeSellerMapCard && propertySheetVisible)}
+          selectedLngLat={selectedPin && isMappableCoord(selectedPin.lat, selectedPin.lng) ? [selectedPin.lng, selectedPin.lat] : null}
+          reducedMotion={prefersReducedMotion || performanceSettings.animation === 'off'}
+          loading={baseStyleLoading || sellerPinsLoading}
+          homeBounds={mobileHomeBounds}
+        />
+      )}
+
+      {!commandMode && !isMobile && (
         <CommandMapLiveActivityRail
           feed={liveActivityFeed}
           settings={liveActivitySettings}
