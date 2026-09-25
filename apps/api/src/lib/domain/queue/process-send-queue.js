@@ -70,6 +70,7 @@ import {
 } from "@/lib/domain/queue/resolve-deferred-queue-message.js";
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
 import { evaluateTemplateAssetGuard } from "@/lib/domain/queue/template-asset-guard.js";
+import { reselectTemplateForAsset, applyAssetReselection } from "@/lib/domain/queue/template-asset-reselection.js";
 import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
 
 const QUEUE_TABLE = "send_queue";
@@ -1799,6 +1800,54 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
           queue_row_id,
           reason: deferred.reason || "deferred_message_unresolved",
         };
+      }
+    }
+
+    // ── Template ↔ asset reselection ────────────────────────────────────
+    // A pending row whose template does not describe its property is moved to
+    // an asset-eligible template of the same use case, stage and language
+    // BEFORE the body guards below run, so the replacement passes every one
+    // of them. Same row, schedule, sender and keys. Nothing eligible → the
+    // final asset guard further down blocks it.
+    if (!manual_inbox_send && clean(queue_row.message_body || queue_row.message_text)) {
+      const pre_guard = await evaluateTemplateAssetGuard({
+        supabase: getSupabase(deps),
+        queue_row,
+        body: sanitizeSmsTextValue(queue_row.message_body || queue_row.message_text),
+      });
+      if (!pre_guard.allowed) {
+        const reselection = await reselectTemplateForAsset({
+          supabase: getSupabase(deps),
+          queue_row,
+          body: queue_row.message_body || queue_row.message_text,
+        }).catch((error) => ({ resolved: false, reason: error?.message || "reselection_failed" }));
+        if (reselection.resolved) {
+          const applied = await applyAssetReselection({
+            supabase: getSupabase(deps),
+            queue_row,
+            reselection,
+            now,
+            guard: pre_guard,
+          });
+          if (applied.ok) {
+            queue_row = normalizeSendQueueRow(applied.row);
+            info("send.template_reselected_asset_type_incompatible", {
+              queue_row_id,
+              property_id: queue_row.property_id,
+              from_template_id: reselection.previous_template_id,
+              to_template_id: reselection.template_id,
+              property_group: reselection.property_group,
+            });
+          }
+        } else {
+          warn("send.template_reselection_unavailable", {
+            queue_row_id,
+            property_id: queue_row.property_id,
+            template_id: pre_guard.template_id,
+            property_group: pre_guard.property_group,
+            reason: reselection.reason,
+          });
+        }
       }
     }
 

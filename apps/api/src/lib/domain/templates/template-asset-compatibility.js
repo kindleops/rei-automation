@@ -16,9 +16,11 @@
  * ~1,100 "5+ Units" templates ("the units at …", "the building …") reached
  * single-family owners the same way.
  *
- * The rule judges a template by its declared scope AND by the words the
- * seller will actually read, because template metadata has proven
- * unreliable (5+-Units templates list "sfr" as an allowed group). It judges
+ * The rule judges a template by its declared scope (property_type_scope ∩
+ * allowed_property_groups — genericity is never inferred from copy) AND by
+ * the words the seller will actually read, which can only narrow: a
+ * "5+ Units" template that says "the units at …" never reaches a house
+ * even if its allowed list says 'sfr'. It judges
  * a property from the canonical classification, most specific first:
  * storage flags → asset_subclass → property_type (+ units) → property_class.
  *
@@ -71,6 +73,16 @@ function groupFromLabel(label, units) {
   return null
 }
 
+// A structure on record: square footage, bedrooms or a build year. A "land"
+// label on such a property contradicts the record (production: 501 rows are
+// property_type "Single Family" + asset_subclass "Vacant Land", every one
+// with a building, a year built and a residential land-use code) and is
+// skipped — the classification is read, never rewritten.
+const num = (v) => Number(String(v ?? '').replace(/[^0-9.-]/g, ''))
+function hasStructure(p) {
+  return num(p.building_square_feet) > 0 || num(p.total_bedrooms) > 0 || num(p.year_built) > 0
+}
+
 /**
  * The canonical property group for template matching. Returns one of the
  * groups above, 'residential' (residential, unit count unknown), or 'unknown'.
@@ -95,6 +107,13 @@ export function canonicalPropertyGroupOf(property = {}) {
     p.commercial_property_type,
   ]) {
     const g = groupFromLabel(label, units)
+    if (g === 'land' && hasStructure(p)) continue
+    // The feeder's normalizer writes 'other_commercial' into
+    // canonical_property_group when a property has NO type at all — an
+    // unknown, not a commercial building. Only the record itself (type,
+    // class, flags) can say commercial.
+    if (g === 'other_commercial' && lower(label) === 'other_commercial' &&
+      (label === p.canonical_property_group || label === p.property_group)) continue
     if (g) return g
   }
   const byUnits = groupFromUnits(units)
@@ -103,7 +122,7 @@ export function canonicalPropertyGroupOf(property = {}) {
     return byUnits || 'residential'
   }
   if (/commercial|industrial|exempt|agricult/.test(cls)) return 'other_commercial'
-  if (/vacant|land/.test(cls)) return 'land'
+  if (/vacant|land/.test(cls)) return hasStructure(p) ? byUnits || 'residential' : 'land'
   return byUnits || 'unknown'
 }
 
@@ -162,37 +181,80 @@ export function templateAssetRequirement(template = {}) {
 }
 
 /**
- * The one compatibility decision.
- * @returns {{ compatible: boolean, reason: string, propertyGroup: string, templateScope: string, requirement: object }}
+ * The groups a template's METADATA permits: the declared scope intersected
+ * with allowed_property_groups when present. Genericity is never inferred
+ * from copy — a template is generic only because its metadata says so.
  */
-export function isTemplateCompatibleWithProperty({ template, property, propertyGroup } = {}) {
+export function templateAllowedGroups(template = {}) {
+  const scope = lower(template?.property_type_scope)
+  let fromScope = null
+  if (/storage/.test(scope)) fromScope = ['self_storage']
+  else if (/(retail|strip)/.test(scope)) fromScope = ['retail']
+  else if (/(commercial|office|industrial|warehouse|hotel|motel)/.test(scope)) fromScope = [...COMMERCIAL_GROUPS]
+  else if (/(\bland\b|vacant)/.test(scope)) fromScope = ['land']
+  else if (/(5\+|five\s*\+)/.test(scope)) fromScope = ['small_multifamily', 'multifamily_5_plus']
+  else if (/^duplex$/.test(scope)) fromScope = ['duplex']
+  else if (/^triplex$/.test(scope)) fromScope = ['triplex']
+  else if (/^(fourplex|quadplex)$/.test(scope)) fromScope = ['fourplex']
+  else if (/(multifamily|landlord)/.test(scope)) fromScope = null // a landlord may own a house: the allowed list decides, unit words narrow
+  else fromScope = [...RESIDENTIAL_GROUPS] // residential / any residential / probate / follow-up / missing
+
+  const listed = Array.isArray(template?.allowed_property_groups) && template.allowed_property_groups.length
+    ? template.allowed_property_groups.map(lower)
+    : null
+  if (fromScope && listed) return fromScope.filter((g) => listed.includes(g))
+  return fromScope || listed || [...RESIDENTIAL_GROUPS]
+}
+
+/**
+ * The one compatibility decision.
+ *
+ *   1. prohibited groups always bind
+ *   2. the property group must be in the template's metadata-allowed set
+ *   3. the words may only NARROW: commercial wording needs a commercial
+ *      group, unit wording a multi-unit group, "house" wording a residential
+ *      group — they never make a template eligible where metadata does not
+ *
+ * A residential property whose unit count is unknown, or a property with no
+ * classification at all, is treated as a single-family home: it only takes
+ * templates whose metadata admits 'sfr' and whose words fit one.
+ *
+ * `wordsOnly` judges text with no metadata behind it (a rendered body whose
+ * template row is unknown); it can only narrow, never admit.
+ *
+ * @returns {{ compatible: boolean, reason: string, propertyGroup: string, templateScope: string, requirement: object, allowedGroups: string[] }}
+ */
+export function isTemplateCompatibleWithProperty({ template, property, propertyGroup, wordsOnly = false } = {}) {
   const group = propertyGroup && KNOWN_GROUPS.has(propertyGroup) ? propertyGroup : canonicalPropertyGroupOf(property)
+  const effective = group === 'residential' || group === 'unknown' ? 'sfr' : group
   const req = templateAssetRequirement(template)
+  const allowedGroups = templateAllowedGroups(template)
   const templateScope = String(template?.property_type_scope ?? '') || req.basis
-  const out = (compatible, reason) => ({ compatible, reason, propertyGroup: group, templateScope, requirement: req })
+  const out = (compatible, reason) => ({ compatible, reason, propertyGroup: group, templateScope, requirement: req, allowedGroups })
 
   const prohibited = Array.isArray(template?.prohibited_property_groups) ? template.prohibited_property_groups.map(lower) : []
-  if (prohibited.includes(group)) return out(false, 'property_group_prohibited_by_template')
+  if (prohibited.includes(effective)) return out(false, `template_prohibits_${effective}`)
 
+  // Words narrow first, so the reason names what the seller would have read.
   switch (req.kind) {
     case 'commercial':
-      return req.groups.includes(group)
-        ? out(true, 'commercial_template_matches_property')
-        : out(false, `commercial_template_${req.basis}_on_${group}_property`)
+      if (!req.groups.includes(effective)) return out(false, `commercial_template_${req.basis}_on_${group}_property`)
+      break
     case 'land':
-      return group === 'land' ? out(true, 'land_template_matches_property') : out(false, `land_template_on_${group}_property`)
+      if (effective !== 'land') return out(false, `land_template_on_${group}_property`)
+      break
     case 'multi_unit':
-      return req.groups.includes(group)
-        ? out(true, 'multi_unit_template_matches_property')
-        : out(false, `multi_unit_template_${req.basis}_on_${group}_property`)
+      if (!req.groups.includes(effective)) return out(false, `multi_unit_template_${req.basis}_on_${group}_property`)
+      break
     case 'residential':
-      if (RESIDENTIAL_GROUPS.includes(group) || group === 'residential') return out(true, 'residential_template_on_residential_property')
-      if (group === 'unknown') return out(true, 'residential_template_property_group_unknown')
-      return out(false, `residential_template_on_${group}_property`)
+      if (!RESIDENTIAL_GROUPS.includes(effective)) return out(false, `residential_template_on_${group}_property`)
+      break
     default:
-      // No asset-specific words: true of any property.
-      return out(true, 'generic_template')
+      break
   }
+
+  if (!wordsOnly && !allowedGroups.includes(effective)) return out(false, `template_scope_excludes_${group}_property`)
+  return out(true, group === 'unknown' ? 'compatible_property_group_unknown' : 'compatible')
 }
 
 /** Filter a candidate list; the reasons travel with it for diagnostics. */

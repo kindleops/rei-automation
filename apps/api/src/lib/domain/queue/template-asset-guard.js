@@ -19,10 +19,10 @@ const PROPERTY_ASSET_COLUMNS = [
   'property_id', 'property_type', 'property_class', 'units_count', 'asset_class', 'asset_subclass',
   'normalized_asset_subclass', 'property_group', 'original_property_type', 'commercial_property_type',
   'is_self_storage', 'is_storage', 'is_mini_storage', 'is_storage_facility', 'is_self_storage_facility',
-  'is_mini_storage_facility', 'is_commercial_retail',
+  'is_mini_storage_facility', 'is_commercial_retail', 'building_square_feet', 'total_bedrooms', 'year_built',
 ].join(',')
 
-const TEMPLATE_COLUMNS = 'template_id,property_type_scope,stage_code,use_case,template_body,prohibited_property_groups'
+const TEMPLATE_COLUMNS = 'template_id,property_type_scope,stage_code,use_case,language,template_body,allowed_property_groups,prohibited_property_groups'
 
 const clean = (v) => String(v ?? '').trim()
 
@@ -67,7 +67,7 @@ export async function evaluateTemplateAssetGuard({ supabase, queue_row, body }) 
   // and deferred/rotated rows can carry a body from a different template.
   const text = clean(body)
   if (text) {
-    checks.push({ source: 'rendered_body', ...isTemplateCompatibleWithProperty({ template: { template_body: text }, propertyGroup }) })
+    checks.push({ source: 'rendered_body', ...isTemplateCompatibleWithProperty({ template: { template_body: text }, propertyGroup, wordsOnly: true }) })
   }
 
   const failed = checks.find((c) => !c.compatible)

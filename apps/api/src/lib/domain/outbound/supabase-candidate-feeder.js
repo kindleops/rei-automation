@@ -3308,7 +3308,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   };
   const asset_group = canonicalPropertyGroupOf(asset_property);
   const candidate_group =
-    asset_group === "residential" ? "sfr" : asset_group === "unknown" ? "other_commercial" : asset_group;
+    asset_group === "residential" || asset_group === "unknown" ? "sfr" : asset_group;
   // HARD ASSET ELIGIBILITY — applied before every fallback level. The levels
   // below may relax the allowed-group slug list; they can never relax this.
   const assetEligible = (list) => filterTemplatesForProperty(list, { property: asset_property, propertyGroup: asset_group }).kept;

@@ -139,6 +139,17 @@ export async function resolveDeferredQueueMessage(queue_row = {}, deps = {}) {
     return { ok: false, resolved: false, reason: "template_lookup_failed" };
   }
 
+  // Asset eligibility before any ordering: a nurture follow-up about a
+  // single-family home never resolves to copy written for another asset.
+  let asset_record = null;
+  try {
+    asset_record = await loadPropertyAssetRecord(supabase, queue_row.property_id);
+  } catch {
+    asset_record = null;
+  }
+  const asset_group = canonicalPropertyGroupOf(asset_record || { property_type: queue_row.property_type });
+  templates = filterTemplatesForProperty(templates, { propertyGroup: asset_group }).kept;
+
   // Preserve candidate priority order, then language preference.
   const rowLanguage = lower(queue_row.language) || "english";
   const ordered = candidates
@@ -356,7 +367,7 @@ export async function resolveRotationTemplate(queue_row = {}, deps = {}) {
     });
     if (!prepared.ok || !clean(prepared.text)) continue;
     // The rendered words are what the seller reads; judge them too.
-    if (!isTemplateCompatibleWithProperty({ template: { template_body: prepared.text }, propertyGroup: asset_group }).compatible) continue;
+    if (!isTemplateCompatibleWithProperty({ template: { template_body: prepared.text }, propertyGroup: asset_group, wordsOnly: true }).compatible) continue;
 
     info("[ROTATION_TEMPLATE_RESOLVED]", {
       queue_row_id: queue_row.id || null,
