@@ -142,7 +142,7 @@ export function QueueDispatchSheet({
         <span className="qx-sheet__grip" aria-hidden="true" />
         <header className="qx-sheet__head">
           <div className="qx-sheet__id">
-            <span className={cls('qx-pill', `is-${status.tone}`)}>
+            <span className={cls('qx-pill', `tone-${status.tone}`)}>
               {status.tone === 'cyan' && <span className="qx-pill__pulse" aria-hidden="true" />}
               {status.label}
             </span>
@@ -190,7 +190,7 @@ export function QueueDispatchSheet({
           </div>
 
           {reason && (
-            <div className={cls('qx-note', `is-${reason.tone}`)} role="status">
+            <div className={cls('qx-note', `tone-${reason.tone}`)} role="status">
               <Icon name={reason.tone === 'red' ? 'alert-circle' : 'alert'} size={15} />
               <div>
                 <strong>{reason.title}</strong>
@@ -199,7 +199,7 @@ export function QueueDispatchSheet({
             </div>
           )}
           {recovery && (
-            <div className={cls('qx-note', recovery.kind === 'recovering' ? 'is-cyan' : 'is-green')}>
+            <div className={cls('qx-note', recovery.kind === 'recovering' ? 'tone-cyan' : 'tone-green')}>
               <Icon name={recovery.kind === 'recovering' ? 'refresh-cw' : 'check'} size={15} />
               <div>
                 <strong>{recovery.title}</strong>

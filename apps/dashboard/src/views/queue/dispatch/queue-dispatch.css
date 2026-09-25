@@ -166,7 +166,8 @@ html[data-nexus-theme='light'] .qx-sheet {
   top: 0;
   z-index: 3;
   padding: 10px 0 10px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--qx-bg) 55%, transparent), var(--qx-glass));
+  /* dense enough that list text never reads through it */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--qx-bg) 62%, transparent), color-mix(in srgb, var(--qx-bg) 90%, transparent));
   -webkit-backdrop-filter: var(--qx-blur);
   backdrop-filter: var(--qx-blur);
   border-bottom: 1px solid var(--qx-rule);
@@ -269,6 +270,12 @@ html[data-nexus-theme='light'] .qx-sheet {
   transition: box-shadow 0.25s var(--qx-ease);
 }
 .qx-search:focus-within { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--qx-accent) 60%, transparent); }
+.qx-root .qx-search input[type='search'] {
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
 .qx-search input {
   flex: 1;
   min-width: 0;
@@ -452,14 +459,14 @@ html[data-nexus-theme='light'] .qx-seg { box-shadow: inset 0 1px 2px rgba(11, 18
 .qx-card:nth-child(n + 5) { animation-delay: 110ms; }
 @keyframes qx-card-in { from { opacity: 0; transform: translateY(6px); } }
 
-.qx-card.is-green { --k: var(--qx-green); --k-light: 9%; }
-.qx-card.is-blue { --k: var(--qx-blue); --k-light: 9%; }
-.qx-card.is-cyan { --k: var(--qx-cyan); --k-light: 11%; }
-.qx-card.is-amber { --k: var(--qx-amber); --k-light: 10%; }
-.qx-card.is-red { --k: var(--qx-red); --k-light: 11%; }
+.qx-card.tone-green { --k: var(--qx-green); --k-light: 9%; }
+.qx-card.tone-blue { --k: var(--qx-blue); --k-light: 9%; }
+.qx-card.tone-cyan { --k: var(--qx-cyan); --k-light: 11%; }
+.qx-card.tone-amber { --k: var(--qx-amber); --k-light: 10%; }
+.qx-card.tone-red { --k: var(--qx-red); --k-light: 11%; }
 html[data-nexus-theme='light'] .qx-card { --k-light: 0% !important; }
-html[data-nexus-theme='true_black'] .qx-card.is-blue,
-html[data-nexus-theme='true_black'] .qx-card.is-green { --k-light: 6%; }
+html[data-nexus-theme='true_black'] .qx-card.tone-blue,
+html[data-nexus-theme='true_black'] .qx-card.tone-green { --k-light: 6%; }
 
 .qx-card__glow { display: none; }
 
@@ -513,12 +520,12 @@ html[data-nexus-theme='true_black'] .qx-card.is-green { --k-light: 6%; }
   color: var(--qx-ink-2);
 }
 .qx-card__why strong { font-weight: 640; }
-.qx-card__why.is-red { color: var(--qx-red); }
-.qx-card__why.is-amber { color: var(--qx-amber); }
-.qx-card__why.is-blue { color: var(--qx-blue); }
-.qx-card__why.is-green { color: var(--qx-green); }
-.qx-card__why.is-cyan { color: var(--qx-cyan); }
-.qx-card__why.is-muted { color: var(--qx-ink-3); }
+.qx-card__why.tone-red { color: var(--qx-red); }
+.qx-card__why.tone-amber { color: var(--qx-amber); }
+.qx-card__why.tone-blue { color: var(--qx-blue); }
+.qx-card__why.tone-green { color: var(--qx-green); }
+.qx-card__why.tone-cyan { color: var(--qx-cyan); }
+.qx-card__why.tone-muted { color: var(--qx-ink-3); }
 
 .qx-card__foot {
   display: flex;
@@ -582,12 +589,12 @@ html[data-nexus-theme='true_black'] .qx-card.is-green { --k-light: 6%; }
   color: var(--p);
   white-space: nowrap;
 }
-.qx-pill.is-green { --p: var(--qx-green); }
-.qx-pill.is-blue { --p: var(--qx-blue); }
-.qx-pill.is-cyan { --p: var(--qx-cyan); }
-.qx-pill.is-amber { --p: var(--qx-amber); }
-.qx-pill.is-red { --p: var(--qx-red); }
-.qx-pill.is-muted { --p: var(--qx-ink-3); }
+.qx-pill.tone-green { --p: var(--qx-green); }
+.qx-pill.tone-blue { --p: var(--qx-blue); }
+.qx-pill.tone-cyan { --p: var(--qx-cyan); }
+.qx-pill.tone-amber { --p: var(--qx-amber); }
+.qx-pill.tone-red { --p: var(--qx-red); }
+.qx-pill.tone-muted { --p: var(--qx-ink-3); }
 .qx-pill__pulse {
   width: 6px;
   height: 6px;
@@ -858,11 +865,11 @@ html[data-nexus-theme='light'] .qx-sheet__panel { box-shadow: inset 0 1px 0 #fff
 .qx-note svg { flex-shrink: 0; margin-top: 2px; }
 .qx-note strong { display: block; font-size: 15px; font-weight: 680; letter-spacing: -0.015em; }
 .qx-note p { margin: 3px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--qx-ink-2); }
-.qx-note.is-red { --n: var(--qx-red); }
-.qx-note.is-amber { --n: var(--qx-amber); }
-.qx-note.is-blue { --n: var(--qx-blue); }
-.qx-note.is-green { --n: var(--qx-green); }
-.qx-note.is-cyan { --n: var(--qx-cyan); }
+.qx-note.tone-red { --n: var(--qx-red); }
+.qx-note.tone-amber { --n: var(--qx-amber); }
+.qx-note.tone-blue { --n: var(--qx-blue); }
+.qx-note.tone-green { --n: var(--qx-green); }
+.qx-note.tone-cyan { --n: var(--qx-cyan); }
 
 .qx-block { display: flex; flex-direction: column; gap: 9px; }
 .qx-block__title {
@@ -1093,3 +1100,10 @@ html[data-nexus-theme='light'] .qx-sheet__panel { box-shadow: inset 0 1px 0 #fff
   .qx-root *, .qx-sheet * { animation: none !important; transition: none !important; }
   .qx-aurora { animation: none; }
 }
+
+/* The shell's own bloom is dimmed here: this surface brings its own light,
+   and in Red Ops red is the accent, not the room. */
+html.is-mobile-layout:has(.qx-root) body::before { animation: none; opacity: 0.16; }
+html.is-mobile-layout:has(.qx-root) body::after { animation: none; opacity: 0.08; }
+html.is-mobile-layout[data-nexus-theme='red_ops']:has(.qx-root) body::before { opacity: 0.06; }
+html.is-mobile-layout[data-nexus-theme='red_ops']:has(.qx-root) body::after { opacity: 0.03; }

@@ -54,7 +54,7 @@ export const QueueDispatchCard = memo(function QueueDispatchCard({
 
   return (
     <article
-      className={cls('qx-card', `is-${status.tone}`, isOpen && 'is-open', recovery?.kind === 'recovered' && 'is-recovered')}
+      className={cls('qx-card', `tone-${status.tone}`, isOpen && 'is-open', recovery?.kind === 'recovered' && 'is-recovered')}
       data-queue-id={item.id}
       data-recovery={recovery?.kind}
       role="button"
@@ -65,7 +65,7 @@ export const QueueDispatchCard = memo(function QueueDispatchCard({
       <span className="qx-card__glow" aria-hidden="true" />
       <div className="qx-card__top">
         <strong className="qx-card__name">{identity.primary}</strong>
-        <span className={cls('qx-pill', `is-${status.tone}`)}>
+        <span className={cls('qx-pill', `tone-${status.tone}`)}>
           {status.tone === 'cyan' && <span className="qx-pill__pulse" aria-hidden="true" />}
           {status.label}
         </span>
@@ -73,13 +73,13 @@ export const QueueDispatchCard = memo(function QueueDispatchCard({
       {address && <p className="qx-card__addr">{address}</p>}
       {body && <p className="qx-card__msg"><span>{body}</span></p>}
       {reason && (
-        <p className={cls('qx-card__why', `is-${reason.tone}`)}>
+        <p className={cls('qx-card__why', `tone-${reason.tone}`)}>
           <Icon name={reason.tone === 'red' ? 'alert-circle' : reason.tone === 'blue' ? 'clock' : 'alert'} size={12} />
           <strong>{reason.title}</strong>
         </p>
       )}
       {recovery && (
-        <p className={cls('qx-card__why', recovery.kind === 'recovering' ? 'is-cyan' : 'is-green')}>
+        <p className={cls('qx-card__why', recovery.kind === 'recovering' ? 'tone-cyan' : 'tone-green')}>
           <Icon name={recovery.kind === 'recovering' ? 'refresh-cw' : 'check'} size={12} />
           <strong>{recovery.title}</strong>
         </p>
