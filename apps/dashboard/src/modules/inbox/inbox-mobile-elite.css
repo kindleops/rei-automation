@@ -1655,3 +1655,122 @@ html.is-mobile-layout[data-nexus-theme='light'] .nx-mtb__item {
 html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-action-btn:active,
 html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-template-btn:active { background: #f1f3f7 !important; }
 html.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt { background: none !important; }
+
+/* ── Spacing corrections (measured on device, 2026-09-24) ────────────────
+   The shell already reserves the dock AND the home indicator once, as
+   padding-bottom on .nx-premium-inbox. The composer re-added the inset
+   (max(8px, safe-bottom) = 34pt on an iPhone) and the thread list re-added
+   the whole dock band — two dead bands a notched phone shows and a
+   zero-inset harness never does. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer {
+  padding-bottom: 6px !important;
+  margin-bottom: 0 !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock {
+  padding: 8px 12px 4px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll {
+  padding-bottom: 12px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-message-list {
+  padding-bottom: 8px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-prospect {
+  padding-top: 4px !important;
+}
+
+/* Load More: sized by its margins, not 100% plus margins (which overflowed
+   the right edge). */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__load-more {
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 14px 16px 4px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__load-more .nx-load-more-btn {
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+/* Street View: a real photo, not a thumbnail. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity__sv {
+  width: 96px !important;
+  height: 72px !important;
+  border-radius: 16px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-mobile-identity { gap: 14px !important; }
+
+/* The property row carries more facts now; it wraps to a second line
+   instead of scrolling them out of sight. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip {
+  flex-wrap: wrap !important;
+  overflow: visible !important;
+  row-gap: 6px !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip .nx-intel-cell.is-flag .nx-intel-cell__value {
+  color: var(--ix-ink-3) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip .nx-intel-cell.is-status {
+  background: color-mix(in srgb, var(--ix-bad) 14%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-bad) 40%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-conv-property-strip .nx-intel-cell.is-status .nx-intel-cell__value { color: var(--ix-bad) !important; }
+
+/* Thread actions menu: right-anchored (set inline), glass, roomy rows. */
+html.is-mobile-layout .nx-mobile-header-actions-portal {
+  position: fixed !important;
+  z-index: 10080 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+html.is-mobile-layout .nx-mobile-header-actions-portal .nx-chat-action-icon {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-height: 46px !important;
+  padding: 0 14px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: none !important;
+  color: var(--ix-ink) !important;
+  font-family: var(--ix-font) !important;
+  font-size: 15.5px !important;
+  font-weight: 500 !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+}
+html.is-mobile-layout .nx-mobile-header-actions-portal .nx-chat-action-icon:active { background: var(--ix-press) !important; }
+html.is-mobile-layout .nx-mobile-header-actions-portal .nx-chat-action-icon svg { width: 18px !important; height: 18px !important; color: var(--ix-ink-2) !important; flex: none; }
+
+/* Full-bleed list. Each wrapper between the screen and the rows trimmed a few
+   pixels (393 → 389 → 385 → 384 → 383 → 382 → 378), so the list stopped 15px
+   short of the right edge and anything centred in it sat off-centre. */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-inbox-center,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-workspace-split-grid,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane-surface,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__list-container,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  box-sizing: border-box !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll { scrollbar-width: none; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll::-webkit-scrollbar { display: none; }
+/* Two wrappers reserved a desktop scrollbar lane (scrollbar-gutter: stable).
+   Phones scroll with overlay bars; the lane only pushed content off-centre. */
+html.is-mobile-layout #nx-inbox-root.nx-premium-inbox,
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox { scrollbar-gutter: auto !important; }

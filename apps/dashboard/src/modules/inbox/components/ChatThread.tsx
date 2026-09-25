@@ -20,7 +20,7 @@ const cls = (...tokens: Array<string | false | null | undefined>) =>
 
 function MobileHeaderActionsMenu({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number } | null>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; minWidth: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
 
   useLayoutEffect(() => {
@@ -31,7 +31,10 @@ function MobileHeaderActionsMenu({ children }: { children: ReactNode }) {
     const update = () => {
       const rect = btnRef.current?.getBoundingClientRect()
       if (!rect) return
-      setMenuPos({ top: rect.bottom + 4, left: rect.left, minWidth: 156 })
+      // The trigger sits at the right edge of the header, so the menu hangs
+      // from its RIGHT edge — anchoring the left edge pushed it off-screen.
+      const right = Math.max(8, window.innerWidth - rect.right)
+      setMenuPos({ top: rect.bottom + 6, right, minWidth: 196 })
     }
     update()
     window.addEventListener('resize', update)
@@ -65,7 +68,7 @@ function MobileHeaderActionsMenu({ children }: { children: ReactNode }) {
         className="nx-conv-dropdown-portal nx-mobile-header-actions-portal"
         role="menu"
         data-mobile-header-actions-menu
-        style={{ top: menuPos.top, left: menuPos.left, minWidth: menuPos.minWidth }}
+        style={{ top: menuPos.top, right: menuPos.right, left: 'auto', minWidth: menuPos.minWidth, maxWidth: 'calc(100vw - 16px)' }}
         onClick={() => setOpen(false)}
       >
         {children}
@@ -1034,11 +1037,31 @@ export const ChatThread = ({
    * whether they may send at all. The rest stays on the desktop strip, which
    * has the room.
    */
-  const MOBILE_CELL_PRIORITY = ['suppressed', 'sync', 'market', 'type', 'equity']
+  /*
+   * The phone strip carries no labels, so every number has to say what it
+   * is: "97%" alone read as nothing — it is "97% equity". Units, value and
+   * condition ride along (they change how the operator negotiates), plus the
+   * top two flags; the strip wraps to a second line rather than scrolling
+   * facts out of sight. Status (Suppressed / Syncing) always leads.
+   */
+  const MOBILE_CELL_PRIORITY = ['suppressed', 'sync', 'market', 'type', 'units', 'value', 'equity', 'condition']
+  const MOBILE_SUFFIX: Record<string, (v: string) => string> = {
+    units: (v) => `${v} units`,
+    value: (v) => `${v} value`,
+    equity: (v) => (/equity/i.test(v) ? v : `${v} equity`),
+    condition: (v) => (/condition/i.test(v) ? v : `${v} condition`),
+  }
   const mobilePropertyCells = onBack
-    ? MOBILE_CELL_PRIORITY
-      .map((key) => propertyCells.find((cell) => cell.key === key))
-      .filter((cell): cell is PropertyIntelCell => Boolean(cell))
+    ? [
+      ...MOBILE_CELL_PRIORITY
+        .map((key) => propertyCells.find((cell) => cell.key === key))
+        .filter((cell): cell is PropertyIntelCell => Boolean(cell))
+        .map((cell) => (MOBILE_SUFFIX[cell.key] ? { ...cell, value: MOBILE_SUFFIX[cell.key](cell.value) } : cell)),
+      // A flag that repeats a fact already shown ("Multifamily" as type AND
+      // flag) is dropped — each fact once.
+      ...propertyCells.filter((cell) => cell.key.startsWith('flag') && !propertyCells.some((other) =>
+        !other.key.startsWith('flag') && other.value.trim().toLowerCase() === cell.value.trim().toLowerCase())),
+    ]
     : propertyCells
 
   const externalLinks = buildPropertyExternalLinks(propertyAddress || null)
