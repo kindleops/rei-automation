@@ -227,6 +227,7 @@ export function QueueDispatchMobile(props: QueueDispatchMobileProps) {
           <label className="qx-search" data-queue-search>
             <Icon name="search" size={14} />
             <input
+              className="qx-search__input"
               type="search"
               inputMode="search"
               enterKeyHint="search"
