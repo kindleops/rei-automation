@@ -101,15 +101,20 @@ test("template fallback level 1: exact prospect route + property group filter", 
   assert.ok(result.selected_template_id || result.template_routing_details?.selected_template_id || result.template?.template_id);
 });
 
-// ── Test 2: Level 2 — prospect route, relax property group filter ─────────────
+// ── Test 2: Level 2 may relax the legacy slug filter, never asset eligibility ──
+//
+// This used to assert the opposite: an sfr-only template reaching a
+// Multi-Family property through the relaxed level. That relaxation is how
+// storage / retail / "the units at …" copy reached single-family owners in
+// production (2026-09-25). Asset eligibility (template-asset-compatibility.js)
+// now binds at every cascade level.
 
-test("template fallback level 2: prospect route, property group relaxed", async () => {
+test("template fallback level 2: an sfr-only template never reaches a Multi-Family property through the relaxed level", async () => {
   const candidate = makeCandidate({
     matching_flags: "Likely Owner",
     canonical_property_group: "other_commercial",
     property_type: "Multi-Family",
   });
-  // Template only allows 'sfr', so lvl1 fails → falls back to lvl2 (no property filter)
   const template = {
     ...BASE_TEMPLATE,
     id: "tpl-sfr-only",
@@ -121,8 +126,29 @@ test("template fallback level 2: prospect route, property group relaxed", async 
     { template_use_case: "ownership_check", within_contact_window_now: false, now: new Date().toISOString() },
     { supabase: makeSupabaseWithTemplates([template]) }
   );
-  assert.equal(result.ok, true, `Expected ok=true at fallback level 2, got: ${result.reason}`);
-  assert.equal(result.template_fallback_level, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "no_template_after_fallback");
+});
+
+test("template fallback: a Multi-Family property still gets a template its scope admits", async () => {
+  const candidate = makeCandidate({
+    matching_flags: "Likely Owner",
+    canonical_property_group: "other_commercial",
+    property_type: "Multi-Family",
+  });
+  const template = {
+    ...BASE_TEMPLATE,
+    id: "tpl-mf",
+    template_id: "tpl-mf",
+    allowed_property_groups: ["sfr", "duplex", "triplex", "fourplex", "small_multifamily", "multifamily_5_plus"],
+  };
+  const result = await renderOutboundTemplate(
+    candidate,
+    { template_use_case: "ownership_check", within_contact_window_now: false, now: new Date().toISOString() },
+    { supabase: makeSupabaseWithTemplates([template]) }
+  );
+  assert.equal(result.ok, true, `Expected ok=true, got: ${result.reason}`);
+  assert.equal(result.template?.template_id ?? result.selected_template_id, "tpl-mf");
 });
 
 // ── Test 3: Level 3/4 — standard ownership fallback ──────────────────────────
