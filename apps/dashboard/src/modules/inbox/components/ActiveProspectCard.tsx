@@ -97,6 +97,8 @@ const ActiveProspectCardComponent = ({
    * to, and is ownership settled -- and the full card returns on blur. Rendered
    * from the same `selected` participant, so no context is lost or refetched.
    */
+  const estimatedValue = estimatedValueLabel(thread)
+
   if (compact) {
     return (
       <section className="nx-active-prospect is-compact" ref={rootRef} aria-label="Active prospect">
@@ -110,6 +112,11 @@ const ActiveProspectCardComponent = ({
           />
           {switcherList.length > 1 && (
             <span className="nx-active-prospect__strip-count">{switcherList.length} linked</span>
+          )}
+          {estimatedValue && (
+            <span className="nx-active-prospect__value" title="Estimated property value">
+              {estimatedValue}<em> est.</em>
+            </span>
           )}
         </div>
       </section>
@@ -144,6 +151,11 @@ const ActiveProspectCardComponent = ({
               <span className="nx-active-prospect__relationship">{relationshipLabel}</span>
             </>
           ) : null}
+          {estimatedValue && (
+            <span className="nx-active-prospect__value" title="Estimated property value">
+              {estimatedValue}<em> est. value</em>
+            </span>
+          )}
         </div>
         <div className="nx-active-prospect__sub-line">
           {phone ? <span className="nx-active-prospect__phone">{formatPhone(phone)}</span> : null}
@@ -243,5 +255,19 @@ const ActiveProspectCardComponent = ({
     </section>
   )
 }
+/** The property's estimated value, from the thread record ("$292K"); null when absent. */
+function estimatedValueLabel(thread: Record<string, unknown> | null | undefined): string | null {
+  if (!thread) return null
+  for (const key of ['estimatedValue', 'estimated_value']) {
+    const n = Number(thread[key])
+    if (Number.isFinite(n) && n > 0) {
+      if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+      if (n >= 1_000) return `$${Math.round(n / 1_000)}K`
+      return `$${Math.round(n)}`
+    }
+  }
+  return null
+}
+
 export const ActiveProspectCard = memo(ActiveProspectCardComponent)
 ActiveProspectCard.displayName = 'ActiveProspectCard'
