@@ -160,6 +160,14 @@ export interface QueueItem {
   dispatchBlocker?: string | null
   nextEligibleSendAt?: string | null
 
+  /** send_queue.queue_status exactly as stored (status is normalized). */
+  queueStatusRaw?: string | null
+  /** The row's language as stored ("English", "Spanish", …); `language` is en/es only. */
+  languageName?: string | null
+  /** The property's asset type from the canonical record ("Single Family", "Apartment Building", "Storage Facility"). */
+  assetLabel?: string | null
+  unitsCount?: number | null
+
   // Origin / routing identifiers surfaced in the inspector
   automationSource: string | null
   workflowId: string | null
@@ -206,7 +214,14 @@ export interface QueueFetchOptions {
   template?: string
   sender?: string
   search?: string
+  /** Server-side search (address, message text, recipient digits). */
+  q?: string
+  /** Ask the page API for per-segment counts (mobile dispatch header). */
+  segmentCounts?: boolean
 }
+
+/** Mobile dispatch segments — server buckets in queue-page-service.js. */
+export type QueueSegment = 'ready' | 'scheduled' | 'sending' | 'attention' | 'history'
 
 export interface QueueModel {
   items: QueueItem[]
@@ -235,6 +250,8 @@ export interface QueueModel {
   // Range-accurate status counts across the whole filtered date range
   // (independent of the visible page) so the KPI strip reflects the range.
   rangeCounts?: QueueRangeCounts
+  /** Per-segment counts; null for a segment whose count query failed. */
+  segmentCounts?: Partial<Record<QueueSegment, number | null>>
   // Every configured market (from textgrid_numbers), independent of whether the
   // current page has rows for it — so Market Health can show zero-row markets.
   marketDirectory?: ConfiguredMarket[]

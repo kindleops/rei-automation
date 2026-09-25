@@ -204,7 +204,7 @@ export function resolveQueueAttention(item: QueueItem, state?: QueueStateMap): Q
     const headline = s.dispatch.category === 'globally_blocked'
       ? 'Global send brakes engaged'
       : s.dispatch.category === 'paused_campaign'
-        ? 'Campaign is not live'
+        ? 'Campaign is paused'
         : 'Proof / test row — no SMS will transmit'
     return { needsAttention: true, headline, detail: s.dispatch.blocker, tone: dispatchTone }
   }

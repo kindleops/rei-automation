@@ -61,5 +61,14 @@ export const loadQueue = async (): Promise<QueueModel> => {
   if (!shouldUseSupabase()) {
     throw new Error('Queue unavailable: Supabase is not configured for this build.')
   }
-  return fetchQueueModel()
+  // The page opens on "Last 7d" (created_at); the first paint must be that
+  // window too. An unwindowed load rendered the whole table (18,254 rows)
+  // under a "7d" label until the operator touched a filter.
+  const now = Date.now()
+  return fetchQueueModel({
+    dateFrom: new Date(now - 7 * 86400000).toISOString(),
+    dateTo: new Date(now).toISOString(),
+    dateBasis: 'created_at',
+    pageSize: 25,
+  })
 }

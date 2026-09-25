@@ -21,48 +21,110 @@ const QUEUE_PAGE_COLUMNS = [
    * hand — which is exactly what the Queue is supposed to make unnecessary.
    */
   'campaign_id', 'campaign_target_id',
+  // The asset the message is about, and the language it is written in —
+  // shown in the mobile detail so a template/asset mismatch is visible.
+  'property_type', 'language', 'selected_template_id', 'timezone', 'next_retry_at',
 ].join(',')
 
 const OWNER_SELECT = 'master_owner_id,display_name,owner_type_guess,priority_score'
 const PROSPECT_SELECT = 'prospect_id,master_owner_id,full_name,first_name'
 
+/**
+ * Status vocabulary → buckets. Built from what production actually writes
+ * (2026-09-25: failed_transport 2,065, blocked_by_health_guard 250,
+ * paused_operator_review 84, expired 3,754, cancelled 2,530 … none of which
+ * any bucket counted, so the Queue under-reported failures ~7×).
+ */
+const FAILED_VALUES = ['failed', 'failed_transport', 'retry', 'retrying']
+const BLOCKED_VALUES = [
+  'blocked', 'blocked_by_health_guard', 'blocked_sender_ineligible', 'paused_sender_eligibility_unavailable',
+  'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries', 'paused_duplicate',
+  'paused_global_lock', 'paused_operator_review', 'paused_deferred_unresolved', 'duplicate_blocked',
+  'incident_quarantine',
+]
+const APPROVAL_VALUES = ['approval', 'awaiting_approval']
+
 const STATUS_BUCKET_VALUES = {
   scheduled: ['scheduled'],
   queued: ['queued', 'ready', 'pending'],
-  sending: ['sending'],
-  sent: ['sent', 'delivered', 'failed', 'retry', 'retrying'],
+  sending: ['sending', 'processing'],
+  sent: ['sent', 'delivered', ...FAILED_VALUES],
   delivered: ['delivered'],
-  failed: ['failed', 'retry', 'retrying'],
-  blocked: [
-    'blocked', 'paused_invalid_queue_row', 'paused_name_missing', 'paused_max_retries',
-    'paused_duplicate', 'paused_global_lock', 'duplicate_blocked', 'incident_quarantine',
-  ],
-  approval: ['approval', 'awaiting_approval'],
+  failed: FAILED_VALUES,
+  blocked: BLOCKED_VALUES,
+  approval: APPROVAL_VALUES,
+  // Mobile dispatch segments.
+  ready: ['queued', 'ready', 'pending', 'approved'],
+  attention: [...FAILED_VALUES, ...BLOCKED_VALUES, ...APPROVAL_VALUES],
+  history: ['sent', 'delivered', 'cancelled', 'expired', 'replied_before_send'],
+}
+
+/**
+ * Live work is shown whenever it was created: a row scheduled for tomorrow
+ * that was materialized nine days ago is still tomorrow's send. Only
+ * attention and history are windowed by the date range.
+ */
+const LIVE_BUCKETS = new Set(['ready', 'scheduled', 'sending'])
+const SEGMENTS = ['ready', 'scheduled', 'sending', 'attention', 'history']
+
+/** Soonest-first for work that has not gone out; most recent first otherwise. */
+const BUCKET_ORDER = {
+  ready: ['scheduled_for', true],
+  scheduled: ['scheduled_for', true],
+  sending: ['updated_at', false],
+  attention: ['updated_at', false],
+  history: ['sent_at', false],
+}
+
+/** Search text → a PostgREST-safe ilike term, or null. */
+function searchTerm(q) {
+  const t = clean(q).replace(/[^\p{L}\p{N}\s#'-]/gu, ' ').replace(/\s+/g, ' ').trim()
+  return t.length >= 2 ? t.slice(0, 60) : null
+}
+
+function applySearch(query, q) {
+  const term = searchTerm(q)
+  if (!term) return query
+  const digits = term.replace(/\D/g, '')
+  const ors = [`property_address.ilike.*${term}*`, `message_body.ilike.*${term}*`]
+  if (digits.length >= 3) ors.push(`to_phone_number.ilike.*${digits}*`)
+  return query.or(ors.join(','))
 }
 
 function clean(value) {
   return String(value ?? '').trim()
 }
 
-function applyRangeFilters(query, opts = {}) {
+function applyRangeFilters(query, opts = {}, { live = false } = {}) {
   let out = query
   const dateBasis = ['created_at', 'scheduled_for', 'updated_at'].includes(opts.dateBasis)
     ? opts.dateBasis
     : 'created_at'
-  if (opts.dateFrom) out = out.gte(dateBasis, opts.dateFrom)
-  if (opts.dateTo) out = out.lte(dateBasis, opts.dateTo)
+  if (!live && opts.dateFrom) out = out.gte(dateBasis, opts.dateFrom)
+  if (!live && opts.dateTo) out = out.lte(dateBasis, opts.dateTo)
   if (opts.market && opts.market !== 'all') out = out.eq('market', opts.market)
   if (opts.sender && opts.sender !== 'all') out = out.eq('from_phone_number', opts.sender)
   return out
 }
 
-async function bucketCount(opts, values) {
-  const res = await applyRangeFilters(
+async function bucketCount(opts, values, { live = false, search = false } = {}) {
+  let query = applyRangeFilters(
     supabase.from('send_queue').select('id', { count: 'exact', head: true }),
     opts,
+    { live },
   ).in('queue_status', values)
+  if (search) query = applySearch(query, opts.q)
+  const res = await query
   if (res.error) throw res.error
   return Number(res.count || 0)
+}
+
+/** One count per mobile segment, with the same windowing and search as its list. */
+async function fetchSegmentCounts(opts = {}) {
+  const counts = await Promise.all(SEGMENTS.map((key) => (
+    bucketCount(opts, STATUS_BUCKET_VALUES[key], { live: LIVE_BUCKETS.has(key), search: true }).catch(() => null)
+  )))
+  return Object.fromEntries(SEGMENTS.map((key, i) => [key, counts[i]]))
 }
 
 async function fetchRangeCounts(opts = {}) {
@@ -119,6 +181,8 @@ function queuePageCacheKey(opts = {}) {
     opts.dateTo ?? '',
     opts.market ?? 'all',
     opts.sender ?? 'all',
+    searchTerm(opts.q) ?? '',
+    opts.segmentCounts ? 'seg' : '',
   ].join(':')
 }
 
@@ -135,14 +199,19 @@ async function loadQueuePage(opts = {}) {
   let tableQuery = applyRangeFilters(
     supabase.from('send_queue').select(QUEUE_PAGE_COLUMNS, { count: 'exact' }),
     opts,
+    { live: LIVE_BUCKETS.has(statusBucket) },
   )
   if (statusValues) tableQuery = tableQuery.in('queue_status', statusValues)
+  tableQuery = applySearch(tableQuery, opts.q)
+  const [orderColumn, ascending] = BUCKET_ORDER[statusBucket] ?? [dateBasis, false]
 
-  const [queueResult, rangeCounts] = await Promise.all([
+  const [queueResult, rangeCounts, segmentCounts] = await Promise.all([
     tableQuery
-      .order(dateBasis, { ascending: false, nullsFirst: false })
+      .order(orderColumn, { ascending, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(page * pageSize, page * pageSize + pageSize - 1),
     fetchRangeCounts(opts),
+    opts.segmentCounts ? fetchSegmentCounts(opts) : Promise.resolve(null),
   ])
   timer.mark('supabase_queries')
 
@@ -184,7 +253,7 @@ async function loadQueuePage(opts = {}) {
     propertyIds.length
       ? supabase
         .from('properties')
-        .select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market')
+        .select('property_id,owner_id,master_owner_id,property_address,property_address_city,property_address_state,property_address_zip,market,property_type,units_count,asset_subclass')
         .in('property_id', propertyIds.slice(0, 100))
       : Promise.resolve({ data: [], error: null }),
     ownerIds.length
@@ -233,6 +302,7 @@ async function loadQueuePage(opts = {}) {
       ...rangeCounts,
       total: rangeCounts.total > 0 ? rangeCounts.total : totalCount,
     },
+    segmentCounts,
     fetchOptions: opts,
     queryMs: timer.summary().totalMs,
     sourceUsed: 'api:queue-page',

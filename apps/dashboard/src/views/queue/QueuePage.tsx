@@ -14,7 +14,7 @@ import {
 } from '../../lib/data/queueData'
 import { shouldUseSupabase } from '../../lib/data/shared'
 import { emptyQueueModel } from './queue.adapter'
-import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis } from '../../domain/queue/queue.types'
+import type { QueueModel, QueueItem, QueueFetchOptions, QueueDateBasis, QueueSegment } from '../../domain/queue/queue.types'
 import { STAGE_LABELS } from '../../domain/queue/queue.types'
 import { FAILURE_LABEL } from '../../domain/queue/classifyFailure'
 import {
@@ -95,6 +95,9 @@ import {
 import '../../modules/inbox/queue-ops.css'
 // Mobile authority sheet — imported last so it wins over queue-ops.css on phones.
 import './queue-mobile.css'
+import { QueueDispatchMobile } from './dispatch/QueueDispatchMobile'
+import { QueueDispatchSheet, QueueDispatchPicker } from './dispatch/QueueDispatchSheet'
+import './dispatch/queue-dispatch.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1196,11 +1199,22 @@ export const QueuePage = ({
   // Mobile-only: deliberate selection mode and the filter sheet.
   const [selectionMode, setSelectionMode] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // Mobile dispatch: server segment, server search, growing page, views sheet.
+  const [mobileSegment, setMobileSegment] = useState<QueueSegment>('ready')
+  const [mobileSearch, setMobileSearch] = useState('')
+  const [mobilePageSize, setMobilePageSize] = useState(25)
+  const [viewsOpen, setViewsOpen] = useState(false)
+  const dispatchMode = isMobileLayout && section === 'queue'
 
   const [templateSearchParams, setTemplateSearchParams] = useState(
     () => new URLSearchParams(typeof window !== 'undefined' ? window.location.search : ''),
   )
   const realtimeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fetchSeqRef = useRef(0)
+  // The realtime channel subscribes once; it must refresh with the CURRENT
+  // filters, not the ones captured at subscribe time.
+  const refreshRef = useRef<(page?: number) => Promise<void>>(async () => {})
+  const currentPageRef = useRef(0)
   const dateFilterMounted = useRef(false)
 
   const syncTemplateSearchParams = useCallback((next: URLSearchParams) => {
@@ -1216,10 +1230,24 @@ export const QueuePage = ({
   }, [])
 
   const buildOpts = useCallback(
-    (page: number) => buildFetchOptions({
-      preset: datePreset, customFrom, customTo, dateBasis, status: statusFilter, page, pageSize,
-    }),
-    [datePreset, customFrom, customTo, dateBasis, statusFilter, pageSize]
+    (page: number): QueueFetchOptions => {
+      if (dispatchMode) {
+        // The dispatch surface asks the server for exactly one segment, with
+        // its own count per segment, searched and filtered server-side.
+        return {
+          ...buildFetchOptions({ preset: datePreset, customFrom, customTo, dateBasis, status: 'all', page: 0, pageSize: mobilePageSize }),
+          status: mobileSegment,
+          q: mobileSearch.trim() || undefined,
+          market: marketFilter !== 'all' ? marketFilter : undefined,
+          sender: senderFilter !== 'all' ? senderFilter : undefined,
+          segmentCounts: true,
+        }
+      }
+      return buildFetchOptions({
+        preset: datePreset, customFrom, customTo, dateBasis, status: statusFilter, page, pageSize,
+      })
+    },
+    [datePreset, customFrom, customTo, dateBasis, statusFilter, pageSize, dispatchMode, mobileSegment, mobileSearch, mobilePageSize, marketFilter, senderFilter]
   )
 
   const refreshData = useCallback(async (page = currentPage) => {
@@ -1237,8 +1265,11 @@ export const QueuePage = ({
       }
       // Race Supabase against a 6s timeout — if it hangs, keep existing model and clear loading
       const timeout = new Promise<null>(res => setTimeout(() => res(null), 6000))
+      // Only the newest request may land: a slow response for the segment the
+      // operator just left must not overwrite the one they switched to.
+      const seq = ++fetchSeqRef.current
       const result = await Promise.race([fetchQueueModel(buildOpts(page)), timeout])
-      if (result) setModel(result)
+      if (result && seq === fetchSeqRef.current) setModel(result)
     } catch (err) {
       emitNotification({
         title: 'Queue Load Failed',
@@ -1250,14 +1281,17 @@ export const QueuePage = ({
     }
   }, [buildOpts, currentPage])
 
+  refreshRef.current = refreshData
+  currentPageRef.current = currentPage
+
   // Debounce realtime refreshes to avoid stampede
   const debouncedRefresh = useCallback(() => {
     if (realtimeRef.current) clearTimeout(realtimeRef.current)
-    realtimeRef.current = setTimeout(() => refreshData(currentPage), 2500)
-  }, [refreshData, currentPage])
+    realtimeRef.current = setTimeout(() => { void refreshRef.current(currentPageRef.current) }, 2500)
+  }, [])
 
   useEffect(() => {
-    if (!initialData) refreshData(0)
+    if (!initialData || dispatchMode) refreshData(0)
     // getSupabaseClient() throws when the env vars are absent. Every other data
     // path already degrades to the generated model, so the realtime channel must
     // degrade too rather than crash the whole surface.
@@ -1282,7 +1316,7 @@ export const QueuePage = ({
     setLoading(true)
     refreshData(0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datePreset, customFrom, customTo, dateBasis, statusFilter, pageSize])
+  }, [datePreset, customFrom, customTo, dateBasis, statusFilter, pageSize, dispatchMode, mobileSegment, mobileSearch, mobilePageSize, dispatchMode ? marketFilter : 'all', dispatchMode ? senderFilter : 'all'])
 
   const eventFetchOpts = useMemo((): Omit<QueueFetchOptions, 'page'> => {
     const range = datePreset === 'all'
@@ -1857,6 +1891,123 @@ export const QueuePage = ({
       ? 'All rows'
       : (filterTabs.find(t => t.key === statusFilter)?.label ?? 'All rows')
     const openItem = selectedItem && dossierOpen ? selectedItem : null
+
+    if (dispatchMode) {
+      // Rows from a previous segment/search are never shown under a new one.
+      const loadedFor = model?.fetchOptions
+      const current = loadedFor?.status === mobileSegment && (loadedFor?.q ?? '') === mobileSearch.trim()
+      const dispatchItems = current ? mobileItems : []
+      const dispatchTotal = current ? totalCount : 0
+      const dispatchFilters = [marketFilter !== 'all', senderFilter !== 'all', datePreset !== '7d'].filter(Boolean).length
+      const openIndex = openItem ? dispatchItems.findIndex(i => i.id === openItem.id) : -1
+      const VIEWS: Array<{ key: QueueSection; label: string; sub: string; icon: string }> = [
+        { key: 'events', label: 'Events', sub: 'Every send and receipt as it happened', icon: 'activity' },
+        { key: 'failures', label: 'Failures', sub: 'Why sends failed, grouped by cause', icon: 'alert-circle' },
+        { key: 'market', label: 'Markets', sub: 'Volume and health by market', icon: 'map' },
+        { key: 'senders', label: 'Senders', sub: 'Sending numbers and their health', icon: 'phone' },
+        { key: 'templates', label: 'Templates', sub: 'Template performance', icon: 'file-text' },
+      ]
+      const RANGES: DatePreset[] = ['today', '24h', '7d', '30d', '90d', 'all']
+      return (
+        <div ref={rootRef} className={cls('occ-root', 'is-mobile-layout', 'is-dispatch', `is-layout-${layoutMode}`)}>
+          <QueueDispatchMobile
+            items={dispatchItems}
+            segment={mobileSegment}
+            counts={model?.segmentCounts}
+            totalCount={dispatchTotal}
+            loading={loading || !current}
+            search={mobileSearch}
+            rangeLabel={MOBILE_RANGE_TOKEN[datePreset]}
+            activeFilters={dispatchFilters}
+            openId={openItem?.id ?? null}
+            hasMore={current && dispatchTotal > dispatchItems.length && mobilePageSize < 100}
+            loadingMore={loading && current && dispatchItems.length > 0}
+            onSegment={(seg) => { if (seg !== mobileSegment) { setMobilePageSize(25); setMobileSegment(seg) } }}
+            onSearch={(q) => { setMobilePageSize(25); setMobileSearch(q) }}
+            onOpen={handleSelectRow}
+            onOpenFilters={() => setFiltersOpen(true)}
+            onOpenViews={() => setViewsOpen(true)}
+            onRefresh={() => { setLoading(true); refreshData(0) }}
+            onLoadMore={() => setMobilePageSize(n => Math.min(100, n + 25))}
+          />
+
+          {openItem && openIndex >= 0 && (
+            <QueueDispatchSheet
+              item={openItem}
+              index={openIndex}
+              total={dispatchItems.length}
+              onClose={() => { dismissedContextRef.current = openItem.id; setSelectedId(null); setDossierOpen(false) }}
+              onPrev={() => navigateMobileDossier('prev', dispatchItems, openItem.id, handleSelectRow)}
+              onNext={() => navigateMobileDossier('next', dispatchItems, openItem.id, handleSelectRow)}
+              onAction={handleAction}
+            />
+          )}
+
+          {filtersOpen && (
+            <QueueDispatchPicker
+              title="Filters"
+              className="qx-filter-sheet"
+              onClose={() => setFiltersOpen(false)}
+              footer={(
+                <>
+                  <button type="button" className="qx-act is-secondary" onClick={() => { setDatePreset('7d'); setMarketFilter('all'); setSenderFilter('all') }}>Reset</button>
+                  <button type="button" className="qx-act is-primary" onClick={() => setFiltersOpen(false)}>Done</button>
+                </>
+              )}
+            >
+              <section className="qx-block">
+                <h3 className="qx-block__title">Range<em>Attention &amp; History · live rows always show</em></h3>
+                <div className="qx-choices">
+                  {RANGES.map(r => (
+                    <button key={r} type="button" className={cls('qx-choice', datePreset === r && 'is-active')} onClick={() => setDatePreset(r)} aria-pressed={datePreset === r}>
+                      {DATE_PRESET_LABELS[r]}
+                    </button>
+                  ))}
+                </div>
+              </section>
+              {marketOptions.length > 1 && (
+                <section className="qx-block">
+                  <h3 className="qx-block__title">Market</h3>
+                  <div className="qx-choices">
+                    {marketOptions.map(m => (
+                      <button key={m} type="button" className={cls('qx-choice', marketFilter === m && 'is-active')} onClick={() => setMarketFilter(m)} aria-pressed={marketFilter === m}>
+                        {m === 'all' ? 'All markets' : m}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+              {senderOptions.length > 1 && (
+                <section className="qx-block">
+                  <h3 className="qx-block__title">Sending number</h3>
+                  <div className="qx-choices">
+                    {senderOptions.map(n => (
+                      <button key={n} type="button" className={cls('qx-choice', 'is-mono', senderFilter === n && 'is-active')} onClick={() => setSenderFilter(n)} aria-pressed={senderFilter === n}>
+                        {n === 'all' ? 'All numbers' : n.replace(/^\+?1?(\d{3})(\d{3})(\d{4})$/, '($1) $2-$3')}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </QueueDispatchPicker>
+          )}
+
+          {viewsOpen && (
+            <QueueDispatchPicker title="Queue views" className="qx-views-sheet" onClose={() => setViewsOpen(false)}>
+              <div className="qx-views">
+                {VIEWS.map(v => (
+                  <button key={v.key} type="button" className="qx-view" onClick={() => { setViewsOpen(false); changeSection(v.key) }}>
+                    <span className="qx-view__icon"><Icon name={v.icon as never} size={16} /></span>
+                    <span className="qx-view__copy"><strong>{v.label}</strong><span>{v.sub}</span></span>
+                    <Icon name="chevron-right" size={14} />
+                  </button>
+                ))}
+              </div>
+            </QueueDispatchPicker>
+          )}
+        </div>
+      )
+    }
 
     return (
       <div

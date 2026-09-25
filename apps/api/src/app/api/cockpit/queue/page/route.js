@@ -30,6 +30,8 @@ export async function GET(request) {
       dateTo: searchParams.get('dateTo') || searchParams.get('date_to') || null,
       market: searchParams.get('market') || 'all',
       sender: searchParams.get('sender') || 'all',
+      q: searchParams.get('q') || null,
+      segmentCounts: searchParams.get('segmentCounts') === '1',
     })
     return NextResponse.json({ ok: true, action: 'queue-page', ...data }, { status: 200, headers: cors })
   } catch (error) {

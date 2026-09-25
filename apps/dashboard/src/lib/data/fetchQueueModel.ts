@@ -112,6 +112,15 @@ const toQueueStatus = (value: unknown): QueueItemStatus => {
   // still going out, when dispatch has explicitly refused to send it.
   if (status === 'blocked_sender_ineligible') return 'blocked_sender_ineligible'
   if (status === 'paused_sender_eligibility_unavailable') return 'paused_sender_eligibility_unavailable'
+  // Production writes these (2026-09-25: failed_transport 2,065 rows,
+  // blocked_by_health_guard 250, paused_operator_review 84, …). Every one of
+  // them used to fall through to 'scheduled' — a failed send rendered as a
+  // message still going out. queueStatusRaw keeps the exact code.
+  if (status === 'failed_transport') return 'failed'
+  if (['blocked_by_health_guard', 'paused_operator_review', 'paused_deferred_unresolved', 'incident_quarantine'].includes(status)) return 'blocked'
+  if (status === 'processing') return 'sending'
+  if (status === 'pending' || status === 'approved') return 'queued'
+  if (['expired', 'duplicate_blocked'].includes(status)) return status as QueueItemStatus
   return 'scheduled'
 }
 
@@ -169,6 +178,8 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     dateTo: opts.dateTo,
     market: opts.market,
     sender: opts.sender,
+    q: opts.q?.trim() || undefined,
+    segmentCounts: opts.segmentCounts ? 1 : undefined,
   })
   if (!apiResult.ok) {
     const err = apiResult as { message?: string; error?: string }
@@ -466,7 +477,7 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       messageText,
       scheduledForLocal: localScheduledIso,
       scheduledForUtc: scheduledIso,
-      timezone: asString(getFirst(row, ['timezone']), 'America/Chicago'),
+      timezone: asString(getFirst(row, ['timezone']), '') || asString(asRecord(md.candidate_snapshot).timezone, '') || 'America/Chicago',
       contactWindow: 'flexible',
       status,
       statusLabel: dispatchTruth.label || statusLabelFor(status),
@@ -499,6 +510,18 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
       linkedPropertyId: basePropId || null,
       linkedOwnerId: baseOwnerId || null,
       propertyType: asString(getFirst(row, ['property_type']), '') || asString(md.property_type, '') || null,
+      queueStatusRaw: asString(getFirst(row, ['queue_status', 'status']), '') || null,
+      languageName: asString(getFirst(row, ['language']), '') || asString(asRecord(md.template_snapshot).language, '') || null,
+      // asset_subclass is the most specific label, except "Vacant Land" on a
+      // record whose property_type names a building (501 such rows; the API's
+      // asset rule treats them as the building too).
+      assetLabel: (() => {
+        const sub = asString(getFirst(property || {}, ['asset_subclass']), '')
+        const type = asString(getFirst(property || {}, ['property_type']), '') || asString(getFirst(row, ['property_type']), '')
+        if (sub && !(/vacant|land/i.test(sub) && type && !/vacant|land/i.test(type))) return sub
+        return type || null
+      })(),
+      unitsCount: Number(getFirst(property || {}, ['units_count'])) || null,
       safetyStatus: asString(getFirst(row, ['safety_status']), asString(md.safety_status, '')) || null,
       routingAllowed: asBoolean(getFirst(row, ['routing_allowed']), asBoolean(md.routing_allowed, false)),
       smsEligible: asBoolean(getFirst(row, ['sms_eligible']), asBoolean(md.sms_eligible, false)),
@@ -590,6 +613,9 @@ export const fetchQueueModel = async (opts: QueueFetchOptions = {}): Promise<Que
     // Only surface range counts when the aggregation actually succeeded; the
     // page falls back to page-scoped counts when this is undefined.
     rangeCounts: rangeOk ? rangeKpis : undefined,
+    segmentCounts: payload.segmentCounts && typeof payload.segmentCounts === 'object'
+      ? payload.segmentCounts as QueueModel['segmentCounts']
+      : undefined,
     marketDirectory,
     textgridFleet,
   }

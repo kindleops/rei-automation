@@ -30,7 +30,14 @@ export interface QueueDispatchTruthInput {
   now?: string | number | Date
 }
 
-const LIVE_CAMPAIGN_STATUSES = new Set(['active', 'activating', 'live_limited'])
+/**
+ * Mirrors the processor's campaign gate (apps/api campaign-execution-authority
+ * .js BLOCKING_CAMPAIGN_STATUSES): only a PAUSED campaign holds its rows. A
+ * `scheduled` campaign's rows dispatch at their scheduled time — labelling them
+ * "Campaign not live" (the previous allow-list) told the operator 34 real
+ * sends were gated when they were about to go out.
+ */
+const BLOCKING_CAMPAIGN_STATUSES = new Set(['paused'])
 
 function clean(value: unknown): string {
   return String(value ?? '').trim()
@@ -97,11 +104,11 @@ export function resolveQueueDispatchTruth(input: QueueDispatchTruthInput): Queue
     }
   }
 
-  if (input.campaignId && input.campaignStatus && !LIVE_CAMPAIGN_STATUSES.has(clean(input.campaignStatus).toLowerCase())) {
+  if (input.campaignId && input.campaignStatus && BLOCKING_CAMPAIGN_STATUSES.has(clean(input.campaignStatus).toLowerCase())) {
     return {
       category: 'paused_campaign',
-      label: 'Campaign Not Live',
-      blocker: `Campaign is ${input.campaignStatus} — sends gate until active`,
+      label: 'Campaign Paused',
+      blocker: 'Campaign is paused — its rows hold until it resumes',
       nextEligibleSendAt: nextEligibleSendAt,
     }
   }
