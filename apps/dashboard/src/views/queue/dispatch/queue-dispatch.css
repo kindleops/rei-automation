@@ -1133,8 +1133,13 @@ html.is-mobile-layout[data-nexus-theme='red_ops']:has(.qx-root) body::after { op
   display: flex;
   gap: 6px;
   margin: 12px 0 0;
-  padding: 2px 12px;
+  padding: 4px 12px;
   overflow-x: auto;
+  /* Horizontal only. The tabs' hit areas reach past the track; with
+     overflow-y left to auto that became a few px of vertical scroll, and on
+     iOS the whole rail slid up and down under a finger. */
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 18px), transparent);
   mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 18px), transparent);
@@ -1161,7 +1166,7 @@ html.is-mobile-layout[data-nexus-theme='red_ops']:has(.qx-root) body::after { op
   -webkit-tap-highlight-color: transparent;
   transition: color 0.25s var(--qx-ease), background-color 0.25s var(--qx-ease), transform 0.35s var(--qx-spring);
 }
-.qx-rail__tab::after { content: ''; position: absolute; inset: -4px 0; }
+.qx-rail__tab::after { content: ''; position: absolute; inset: -4px -3px; }
 .qx-rail__tab:active { transform: scale(0.95); transition-duration: 0.1s; }
 .qx-rail__tab svg { opacity: 0.8; }
 .qx-rail__tab.is-active {
@@ -1220,9 +1225,11 @@ html.is-mobile-layout[data-nexus-theme='red_ops']:has(.qx-root) body::after { op
 .qx-chips {
   display: flex;
   gap: 7px;
-  margin: 12px 0 0;
-  padding: 0 12px;
+  margin: 8px 0 0;
+  padding: 4px 12px;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
 .qx-chips::-webkit-scrollbar { display: none; }
