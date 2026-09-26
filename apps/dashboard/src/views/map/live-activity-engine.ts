@@ -63,6 +63,7 @@ const LIVE_EVENT_TYPES = new Set<CommandMapActivityType>([
   'automation_block',
   'missing_message_event',
   'provider_id_missing',
+  'stage_change',
 ])
 
 const CONTEXT_EVENT_TYPES = new Set<CommandMapActivityType>([

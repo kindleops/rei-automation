@@ -21,12 +21,12 @@ describe('lens catalogue', () => {
       expect(LENS_FAMILIES.some((f) => f.key === l.family)).toBe(true)
       if (l.source) expect(l.domain).toBeDefined()
     }
-    expect(lensById('radar').source).toBeNull()
+    expect(lensById('radar').ambient).toBe(true)
     expect(lensById('nope').id).toBe('radar')
   })
   it('no heat lens drives a legacy mode that paints its own heat underneath', () => {
     for (const l of MAP_LENSES) {
-      if (l.source) expect(['opportunity_heat', 'buyer_demand', 'census']).not.toContain(l.legacyMode)
+      expect(['opportunity_heat', 'buyer_demand', 'census']).not.toContain(l.legacyMode)
     }
   })
   it('normalises into 0..1 with clamping, and inverts where older is hotter', () => {
@@ -96,5 +96,36 @@ describe('relative time', () => {
     expect(agoLabel(t - 10_000, t)).toBe('now')
     expect(agoLabel(t - 5 * 60_000, t)).toBe('5m ago')
     expect(agoLabel(0, t)).toBe('')
+  })
+})
+
+import { eventFromMessage, eventFromStage } from './useRealtimeActivity'
+import { mergeActivity } from './map-mobile-model'
+
+describe('realtime Live Activity', () => {
+  const base = { id: 'm1', property_id: 'p1', thread_key: 't1', created_at: '2026-09-26T10:00:00Z', message_body: 'Maybe, what is your offer?' }
+  it('maps message rows to one event per row + state', () => {
+    expect(eventFromMessage({ ...base, direction: 'inbound' })?.type).toBe('new_reply')
+    expect(eventFromMessage({ ...base, direction: 'inbound', is_opt_out: true })?.type).toBe('opt_out')
+    expect(eventFromMessage({ ...base, direction: 'outbound', delivery_status: 'delivered' })?.id).toBe('me:m1:delivered')
+    expect(eventFromMessage({ ...base, direction: 'outbound', delivery_status: 'failed' })?.severity).toBe('blocked')
+    expect(eventFromMessage({ ...base, direction: 'outbound' })?.type).toBe('message_sent')
+    expect(eventFromMessage({ ...base, direction: 'inbound', stage_before: 'ownership_check', stage_after: 'asking_price' })?.title).toBe('Seller replied · Asking Price')
+    expect(eventFromMessage({ direction: 'inbound' })).toBeNull()
+  })
+  it('a stage event needs a real change from a stage already seen', () => {
+    const row = { thread_key: 't1', stage: 'offer_sent', updated_at: '2026-09-26T10:00:00Z', property_id: 'p1' }
+    expect(eventFromStage(row, undefined)).toBeNull()
+    expect(eventFromStage(row, 'offer_sent')).toBeNull()
+    expect(eventFromStage(row, 'asking_price')?.type).toBe('offer')
+    expect(eventFromStage({ ...row, stage: 'negotiating' }, 'asking_price')?.type).toBe('stage_change')
+  })
+  it('the live stream is the record in its window: a derived "now" reply never doubles a real one', () => {
+    const now = Date.parse('2026-09-26T12:00:00Z')
+    const real = eventFromMessage({ ...base, direction: 'inbound', created_at: '2026-09-26T05:00:00Z' })!
+    const derivedNow = { ...real, id: 'pin:p1:reply', occurredAt: '2026-09-26T12:00:00Z', createdAt: '2026-09-26T12:00:00Z' }
+    const derivedOld = { ...real, id: 'pin:p9:reply', propertyId: 'p9', occurredAt: '2026-09-20T12:00:00Z', createdAt: '2026-09-20T12:00:00Z' }
+    const merged = mergeActivity([real], [derivedNow, derivedOld], now - 24 * 3600_000)
+    expect(merged.map((e) => e.id)).toEqual([real.id, 'pin:p9:reply'])
   })
 })

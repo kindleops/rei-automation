@@ -28,6 +28,7 @@ import {
   eventTime,
   filterActivity,
   groupByPlace,
+  mergeActivity,
   newEventIds,
   precisionForZoom,
   scopeCounts,
@@ -41,6 +42,7 @@ import { LENS_FAMILIES, MAP_LENSES, formatLensValue, lensById, type MapLens } fr
 import { lensValueAt, useMapLens } from './useMapLens'
 import { HYBRID_THEMES, useMapImagery } from './useMapImagery'
 import { LensLegend, MarketPanel, rampGradient } from './MapIntelCards'
+import { useRealtimeActivity } from './useRealtimeActivity'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -101,7 +103,7 @@ export const agoLabel = (ms: number, now: number) => {
 }
 
 const STAGE_SWATCH = ['#29E68B', '#FF893D', '#FF4C55']
-const lensSwatch = (lens: MapLens) => (lens.source ? undefined : STAGE_SWATCH)
+const lensSwatch = (lens: MapLens) => (lens.source && !lens.ambient ? undefined : STAGE_SWATCH)
 
 const TIER_LABEL: Record<ActivityTier, string> = { critical: 'Needs attention', important: 'Important', normal: 'Activity', background: 'Background' }
 
@@ -221,7 +223,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     let start: { x: number; y: number } | null = null
     const read = (point: { x: number; y: number }) => {
       const l = lensRef.current
-      if (!l.source) return false
+      if (!l.source || l.ambient) return false
       const hit = lensValueAt(map, point)
       if (!hit) return false
       const sub = l.id === 'territory'
@@ -233,7 +235,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       return true
     }
     const onClick = (e: maplibregl.MapMouseEvent) => {
-      if (!lensRef.current.source) return
+      if (!lensRef.current.source || lensRef.current.ambient) return
       try {
         const hitLayers = ['prop-tiles-hit', 'command-pin-core-raw', 'nx-mx-activity-core', 'map-market-aggregates-core'].filter((id) => map.getLayer(id))
         if (hitLayers.length && map.queryRenderedFeatures(e.point, { layers: hitLayers }).length) return
@@ -242,7 +244,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     }
     const onTouchStart = (e: maplibregl.MapTouchEvent) => {
       window.clearTimeout(hold)
-      if (!lensRef.current.source || e.points.length !== 1) { start = null; return }
+      if (!lensRef.current.source || lensRef.current.ambient || e.points.length !== 1) { start = null; return }
       start = { x: e.point.x, y: e.point.y }
       hold = window.setTimeout(() => {
         if (start && read(start)) { try { navigator.vibrate?.(8) } catch { /* unsupported */ } }
@@ -281,7 +283,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
   // Relative times tick once a minute; nothing else animates on a timer.
   useEffect(() => {
-    const t = window.setInterval(() => setClock(Date.now()), 60_000)
+    const t = window.setInterval(() => setClock(Date.now()), 30_000)
     return () => window.clearInterval(t)
   }, [])
 
@@ -316,6 +318,39 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     return () => { map.off('moveend', count); map.off('sourcedata', onData); cancelAnimationFrame(raf) }
   }, [map, mapEpoch])
 
+  // ── Market bubbles (below property zoom): the biggest markets keep their
+  // labels, smaller neighbours yield instead of stacking numbers on a phone.
+  useEffect(() => {
+    if (!map) return
+    const COUNT = ['coalesce', ['get', 'property_count'], ['get', 'point_count'], 1]
+    const apply = () => {
+      try {
+        if (map.getLayer('map-agg-cluster-count')) {
+          if (map.getLayoutProperty('map-agg-cluster-count', 'text-allow-overlap') !== false) {
+            map.setLayoutProperty('map-agg-cluster-count', 'text-allow-overlap', false)
+            map.setLayoutProperty('map-agg-cluster-count', 'text-padding', 5)
+            map.setLayoutProperty('map-agg-cluster-count', 'symbol-sort-key', ['-', 0, COUNT] as never)
+          }
+        }
+        if (map.getLayer('map-agg-cluster-icon') && map.getLayoutProperty('map-agg-cluster-icon', 'icon-allow-overlap') !== false) {
+          map.setLayoutProperty('map-agg-cluster-icon', 'icon-allow-overlap', false)
+          map.setLayoutProperty('map-agg-cluster-icon', 'symbol-sort-key', ['-', 0, COUNT] as never)
+        }
+        // The dark halo under each bubble would black out the density glow beneath.
+        if (map.getLayer('map-agg-cluster-halo') && map.getPaintProperty('map-agg-cluster-halo', 'circle-opacity') !== 0.18) {
+          map.setPaintProperty('map-agg-cluster-halo', 'circle-opacity', 0.18)
+        }
+        // Bigger markets draw on top.
+        for (const id of ['map-agg-cluster-halo', 'map-agg-cluster-core', 'map-agg-cluster-ring']) {
+          if (map.getLayer(id) && map.getLayoutProperty(id, 'circle-sort-key') === undefined) map.setLayoutProperty(id, 'circle-sort-key', COUNT as never)
+        }
+      } catch { /* style mid-swap */ }
+    }
+    apply()
+    map.on('styledata', apply)
+    return () => { map.off('styledata', apply) }
+  }, [map, mapEpoch])
+
   // ── Marker hierarchy (mobile) ──────────────────────────────────────────────
   // Selected and live properties keep full strength; properties with a stage
   // ring (a real conversation) stay clear; the untouched universe goes quiet.
@@ -323,7 +358,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   // constant pulse is switched off: new activity pulses once, from the overlay.
   // Under a heat lens the markers step back so the colour field reads; at
   // street zoom they return (each property then glows its own value).
-  const markerDim = !lens.source ? 1 : zoom >= 13 ? 0.92 : lens.areal ? 0.22 : 0.14
+  const markerDim = !lens.source || lens.ambient ? 1 : zoom >= 13 ? 0.92 : lens.areal ? 0.22 : 0.14
   const originalsRef = useRef(new Map<string, unknown>())
   const appliedRef = useRef(new Map<string, string>())
   useEffect(() => { originalsRef.current = new Map(); appliedRef.current = new Map() }, [map, mapEpoch])
@@ -360,9 +395,12 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     return () => { map.off('styledata', apply); map.off('sourcedata', onTiles) }
   }, [map, mapEpoch, markerDim])
 
+  // Live stream (Supabase realtime + the last day) merged over the map's derived feed.
+  const realtime = useRealtimeActivity(activityOn || sheet === 'activity')
+  const allEvents = useMemo(() => mergeActivity(realtime.events, activityEvents, realtime.coveredSince), [realtime.events, activityEvents, realtime.coveredSince])
   const now = useMemo(() => new Date(clock), [clock])
-  const events = useMemo(() => filterActivity(activityEvents, { scope, window: window_, now }), [activityEvents, scope, window_, now])
-  const counts = useMemo(() => scopeCounts(activityEvents, window_, now), [activityEvents, window_, now])
+  const events = useMemo(() => filterActivity(allEvents, { scope, window: window_, now }), [allEvents, scope, window_, now])
+  const counts = useMemo(() => scopeCounts(allEvents, window_, now), [allEvents, window_, now])
   const latest = events[0] ?? null
 
   // ── Activity overlay on the map ────────────────────────────────────────────
@@ -609,10 +647,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       {activityOn && !cardOpen && (
         <button type="button" className="mx-peek" data-map-control="activity-feed" onClick={() => setSheet('activity')}>
           <span className={cls('mx-peek__dot', latest && `tier-${tierOf(latest)}`)} aria-hidden="true" />
-          <span className="mx-peek__copy">
+          <span className="mx-peek__copy" key={latest?.id ?? 'none'}>
             <strong>{latest ? latest.title : 'Live Activity'}</strong>
-            <span>{latest ? [latest.address || latest.market, timeAgo(eventTime(latest), clock)].filter(Boolean).join(' · ') : `No activity · ${ACTIVITY_WINDOWS.find((w) => w.key === window_)?.label}`}</span>
+            <span>{latest ? [latest.address || latest.market, agoLabel(eventTime(latest), clock)].filter(Boolean).join(' · ') : `No activity · ${ACTIVITY_WINDOWS.find((w) => w.key === window_)?.label}`}</span>
           </span>
+          {realtime.live && <span className="mx-peek__live">Live</span>}
           <span className="mx-peek__count">{events.length}</span>
         </button>
       )}
@@ -742,12 +781,13 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         <MapSheet
           title="Live Activity"
           onClose={() => setSheet(null)}
-          className="mx-activity-sheet"
-          header={(
+          className={cls('mx-activity-sheet', realtime.live && 'is-streaming')}
+          header={(<>
+            {realtime.live && <span className="mx-streaming" title="Streaming from the database">Live</span>}
             <button type="button" className={cls('mx-switch', 'is-inline', activityOn && 'is-on')} role="switch" aria-checked={activityOn} aria-label="Show activity on the map" onClick={() => setActivityOn((v) => !v)}>
               <span />
             </button>
-          )}
+          </>)}
         >
           <Segmented<ActivityWindow> value={window_} onChange={setWindow} label="Time window" options={ACTIVITY_WINDOWS} />
           <div className="mx-chips">
@@ -773,7 +813,8 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
                       <span className="mx-feedrow__dot" aria-hidden="true" />
                       <span className="mx-row__copy">
                         <strong>{e.title}</strong>
-                        <span>{[e.address || e.market || e.subtitle, action ? null : 'No location'].filter(Boolean).join(' · ')}</span>
+                        <span>{[e.subtitle, e.address || e.market, action ? null : 'No location'].filter(Boolean).join(' · ')}</span>
+                        {e.detail && <em className="mx-feedrow__detail">{e.detail}</em>}
                       </span>
                       <span className="mx-feedrow__time">{timeAgo(eventTime(e), clock)}</span>
                     </button>

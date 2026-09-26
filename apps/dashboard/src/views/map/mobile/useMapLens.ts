@@ -71,12 +71,12 @@ function ensureLayers(map: maplibregl.Map) {
 
 function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number) {
   const ramp = lens.ramp ?? 'heat'
-  const density = DENSITY_LENSES.has(lens.id)
+  const density = DENSITY_LENSES.has(lens.id) || Boolean(lens.ambient)
   const vis = (on: boolean) => (on ? 'visible' : 'none')
   try {
     map.setLayoutProperty(L_FIELD, 'visibility', vis(!density))
     map.setLayoutProperty(L_HEAT, 'visibility', vis(density))
-    map.setLayoutProperty(L_DOTS, 'visibility', vis(!lens.areal))
+    map.setLayoutProperty(L_DOTS, 'visibility', vis(!lens.areal && !lens.ambient))
 
     // Value field: big soft discs, colour by value.
     // Property cells: a disc a little larger than its grid cell, so neighbouring
@@ -105,10 +105,14 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number) {
 
     // Density heatmap.
     map.setPaintProperty(L_HEAT, 'heatmap-weight', ['interpolate', ['linear'], ['get', 't'], 0, 0.05, 1, 1] as never)
-    map.setPaintProperty(L_HEAT, 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 3, 0.7, 9, 1.2, 14, 2] as never)
-    map.setPaintProperty(L_HEAT, 'heatmap-radius', ['interpolate', ['linear'], ['zoom'], 3, 10, 7, 16, 10, 22, 13, 28, 16, 40] as never)
+    map.setPaintProperty(L_HEAT, 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 3, 1.4, 9, 2, 14, 3] as never)
+    map.setPaintProperty(L_HEAT, 'heatmap-radius', (lens.ambient
+      ? ['interpolate', ['linear'], ['zoom'], 3, 42, 6, 56, 9, 64]
+      : ['interpolate', ['linear'], ['zoom'], 3, 14, 7, 22, 10, 30, 13, 36, 16, 48]) as never)
     map.setPaintProperty(L_HEAT, 'heatmap-color', rampExpression(ramp, ['heatmap-density'], true) as never)
-    map.setPaintProperty(L_HEAT, 'heatmap-opacity', ['interpolate', ['linear'], ['zoom'], 3, 0.85, 15, 0.7, 17, 0.35] as never)
+    map.setPaintProperty(L_HEAT, 'heatmap-opacity', (lens.ambient
+      ? ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 0.5, 9.5, 0]
+      : ['interpolate', ['linear'], ['zoom'], 3, 0.85, 15, 0.7, 17, 0.35]) as never)
 
     // Street level: every property glows its own value — a soft coloured
     // aura under its marker, so the marker still reads and taps as normal.
@@ -157,6 +161,12 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       const id = ++seq.current
       const b = map.getBounds()
       const zoom = map.getZoom()
+      // The ambient glow is gone by z9.5 — don't fetch what can't be seen.
+      if (lens.ambient && zoom >= 10) {
+        try { (map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] }) } catch { /* ignore */ }
+        setState({ loading: false, error: null, count: 0, inView: null, lensId: lens.id })
+        return
+      }
       // A little beyond the edges so a pan doesn't reveal an empty border.
       const padLat = (b.getNorth() - b.getSouth()) * 0.15
       const padLng = (b.getEast() - b.getWest()) * 0.15
@@ -182,7 +192,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
         if (!Number.isFinite(v) || !Number.isFinite(r.lat) || !Number.isFinite(r.lng)) continue
         if ((lens.id === 'comps_price' || lens.id === 'comps_ppsf' || lens.id === 'value') && v <= 0) continue
         values.push(v)
-        const t = lens.id === 'territory'
+        const t = lens.id === 'territory' || lens.ambient
           ? Math.min(1, Math.log10((Number(r.n) || 1) + 1) / Math.log10(maxN + 1))
           : normalize(lens, v)
         features.push({

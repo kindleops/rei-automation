@@ -33,7 +33,7 @@ const STAGE_KEY: Array<[string, string]> = [
 ]
 
 export function LensLegend({ lens, state, zoom }: { lens: MapLens; state: LensState; zoom: number }) {
-  if (!lens.source) {
+  if (!lens.source || lens.ambient) {
     return (
       <div className="mx-legend mx-glass" data-map-card="legend">
         <div className="mx-legend__head"><strong>{lens.label}</strong><span>Ring = stage</span></div>

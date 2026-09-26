@@ -24,6 +24,7 @@ export const ACTIVITY_SCOPES: ReadonlyArray<{ key: ActivityScope; label: string 
 
 const SCOPE_OF: Record<CommandMapActivityType, Exclude<ActivityScope, 'all'>> = {
   new_reply: 'sellers',
+  stage_change: 'sellers',
   positive_reply: 'sellers',
   hot_lead: 'sellers',
   follow_up_due: 'sellers',
@@ -242,4 +243,30 @@ export function markerEmphasis(state: MarkerState = {}): number {
  */
 export function selectionNeedsNudge(point: { x: number; y: number }, size: { width: number; height: number }): boolean {
   return point.y > size.height * 0.52 || point.y < 70 || point.x < 16 || point.x > size.width - 16
+}
+
+/**
+ * Realtime rows first, then the map's derived feed. Once the live stream has
+ * backfilled from message_events, it is the record for sellers + outreach in
+ * its window: derived events of those scopes inside the window are dropped
+ * (the pin-derived feed guesses times — a 7h-old reply read "now"). Outside
+ * the window, a derived event describing the same moment (same property or
+ * thread, same scope, within two minutes) is still dropped.
+ */
+export function mergeActivity(
+  realtime: LiveActivityEvent[],
+  derived: LiveActivityEvent[],
+  coveredSince: number | null = null,
+): LiveActivityEvent[] {
+  const key = (e: LiveActivityEvent) => e.propertyId || e.threadKey || ''
+  const seen = realtime.map((e) => ({ k: key(e), scope: scopeOf(e), t: eventTime(e) })).filter((x) => x.k)
+  const rest = derived.filter((d) => {
+    const scope = scopeOf(d)
+    const t = eventTime(d)
+    if (coveredSince !== null && (scope === 'sellers' || scope === 'outreach') && t >= coveredSince) return false
+    const k = key(d)
+    if (!k) return true
+    return !seen.some((r) => r.k === k && r.scope === scope && Math.abs(r.t - t) < 120_000)
+  })
+  return dedupeEvents([...realtime, ...rest])
 }

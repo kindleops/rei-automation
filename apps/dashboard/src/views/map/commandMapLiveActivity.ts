@@ -31,6 +31,7 @@ export type CommandMapActivityType =
   | 'automation_block'
   | 'missing_message_event'
   | 'provider_id_missing'
+  | 'stage_change'
 
 export type CommandMapActivityPriority = 'critical' | 'hot' | 'normal' | 'info' | 'muted'
 
@@ -182,6 +183,7 @@ const DEFAULT_EVENT_FILTERS: LiveActivityEventTypeFilters = {
   automation_block: true,
   missing_message_event: true,
   provider_id_missing: true,
+  stage_change: true,
 }
 
 const text = (value: unknown): string => String(value ?? '').trim()

@@ -29,11 +29,13 @@ export interface MapLens {
   attribution?: string
   /** Market lenses: one point per area — larger, softer radius. */
   areal?: boolean
+  /** Decorative: a density glow that fades out once properties draw (z9.5). Markers keep full strength. */
+  ambient?: boolean
 }
 
 export const MAP_LENSES: ReadonlyArray<MapLens> = [
   // ── Pipeline ──────────────────────────────────────────────────────────
-  { id: 'radar', label: 'Acquisition Radar', sub: 'Every property, coloured by conversation stage', family: 'pipeline', source: null, legacyMode: 'acquisition' },
+  { id: 'radar', label: 'Acquisition Radar', sub: 'Every property, coloured by conversation stage', family: 'pipeline', source: 'properties', ambient: true, legacyMode: 'acquisition', domain: [0, 1], ramp: 'signal' },
   { id: 'command', label: 'Command', sub: 'Your live conversations and hottest leads', family: 'pipeline', source: 'motivation', legacyMode: 'command', domain: [55, 85], ramp: 'signal', format: 'score', attribution: 'Motivation score' },
   { id: 'execution', label: 'Execution Live', sub: 'Outreach in the last 14 days · delivered is brightest', family: 'pipeline', source: 'outreach', legacyMode: 'execution', domain: [0, 1], ramp: 'signal', format: 'share', attribution: 'send_queue' },
   { id: 'territory', label: 'Territory Scan', sub: 'Where your property universe is densest', family: 'pipeline', source: 'properties', legacyMode: 'territory', domain: [0, 1], ramp: 'spectrum', format: 'count', attribution: 'properties' },
