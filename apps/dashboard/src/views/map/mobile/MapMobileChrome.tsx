@@ -37,6 +37,10 @@ import {
   type ActivityWindow,
   type ActivityTier,
 } from './map-mobile-model'
+import { LENS_FAMILIES, MAP_LENSES, formatLensValue, lensById, type MapLens } from './map-lenses'
+import { lensValueAt, useMapLens } from './useMapLens'
+import { HYBRID_THEMES, useMapImagery } from './useMapImagery'
+import { LensLegend, MarketPanel, rampGradient } from './MapIntelCards'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -81,6 +85,23 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
     return { on: Boolean(v.on), scope: v.scope || 'all', window: v.window || 'today' }
   } catch { return { on: false, scope: 'all', window: 'today' } }
 }
+
+/** Phone-only map preferences: the active lens and what floats on the map. */
+const LENS_STORE = 'nexus.map.mobileLens'
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true }
+const readLensPrefs = (): LensPrefs => {
+  try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
+}
+
+/** "now" stays "now"; everything else reads "5m ago". */
+export const agoLabel = (ms: number, now: number) => {
+  const t = timeAgo(ms, now)
+  return !t ? '' : t === 'now' ? 'now' : `${t} ago`
+}
+
+const STAGE_SWATCH = ['#29E68B', '#FF893D', '#FF4C55']
+const lensSwatch = (lens: MapLens) => (lens.source ? undefined : STAGE_SWATCH)
 
 const TIER_LABEL: Record<ActivityTier, string> = { critical: 'Needs attention', important: 'Important', normal: 'Activity', background: 'Background' }
 
@@ -150,9 +171,9 @@ function Toggle({ label, sub, on, onChange }: { label: string; sub?: string; on:
 
 export function MapMobileChrome(props: MapMobileChromeProps) {
   const {
-    map, mapEpoch, modes, mode, onMode, themes, styleMode, onStyle, dimension, onDimension,
-    filterCount, onOpenFilters, activityEvents, onSelectEvent, showMapKey, onShowMapKey,
-    showCensusDock, onShowCensusDock, performance, onPerformance, cardOpen, selectedLngLat, reducedMotion, loading, homeBounds,
+    map, mapEpoch, mode, onMode, themes, styleMode, onStyle, dimension, onDimension,
+    filterCount, onOpenFilters, activityEvents, onSelectEvent,
+    performance, onPerformance, cardOpen, selectedLngLat, reducedMotion, loading, homeBounds,
   } = props
 
   const [sheet, setSheet] = useState<SheetKey>(null)
@@ -165,6 +186,94 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const [inView, setInView] = useState<number | null>(null)
   const [zoom, setZoom] = useState(() => map?.getZoom() ?? 4)
   const [clock, setClock] = useState(() => Date.now())
+  const [prefs, setPrefs] = useState<LensPrefs>(readLensPrefs)
+  const setPref = useCallback(<K extends keyof LensPrefs>(k: K, v: LensPrefs[K]) => setPrefs((p) => ({ ...p, [k]: v })), [])
+  useEffect(() => { try { localStorage.setItem(LENS_STORE, JSON.stringify(prefs)) } catch { /* private mode */ } }, [prefs])
+
+  // ── Intelligence lens ──────────────────────────────────────────────────────
+  const lens = lensById(prefs.lens)
+  const lensState = useMapLens(map, mapEpoch, lens)
+  useMapImagery(map, mapEpoch, { labels: prefs.labels, trueColor: prefs.trueColor, relief: prefs.relief, tilted: dimension === '3d', theme: styleMode, reducedMotion })
+  // The Command Map's own mode follows the lens (marker styling, overlays).
+  const modeSynced = useRef(false)
+  useEffect(() => {
+    if (modeSynced.current) return
+    modeSynced.current = true
+    if (lens.legacyMode !== mode) onMode(lens.legacyMode)
+  }, [lens.legacyMode, mode, onMode])
+  const [scanKey, setScanKey] = useState(0)
+  const chooseLens = (next: MapLens) => {
+    setPref('lens', next.id)
+    if (next.legacyMode !== mode) onMode(next.legacyMode)
+    setScanKey((k) => k + 1)
+    setSheet(null)
+  }
+
+  // Read the heat under a finger: press-and-hold anywhere (a property marker
+  // is almost always under a plain tap), or a plain tap on open heat.
+  const [readout, setReadout] = useState<{ x: number; y: number; text: string; sub: string; key: number } | null>(null)
+  const lensRef = useRef(lens)
+  lensRef.current = lens
+  useEffect(() => {
+    if (!map) return
+    let timer = 0
+    let hold = 0
+    let start: { x: number; y: number } | null = null
+    const read = (point: { x: number; y: number }) => {
+      const l = lensRef.current
+      if (!l.source) return false
+      const hit = lensValueAt(map, point)
+      if (!hit) return false
+      const sub = l.id === 'territory'
+        ? 'properties here'
+        : l.areal ? l.attribution ?? l.label : hit.n > 1 ? `${l.label} · avg of ${hit.n.toLocaleString()}` : l.label
+      setReadout({ x: point.x, y: point.y, text: l.id === 'territory' ? hit.n.toLocaleString() : formatLensValue(l, hit.v), sub, key: Date.now() })
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => setReadout(null), 2800)
+      return true
+    }
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      if (!lensRef.current.source) return
+      try {
+        const hitLayers = ['prop-tiles-hit', 'command-pin-core-raw', 'nx-mx-activity-core', 'map-market-aggregates-core'].filter((id) => map.getLayer(id))
+        if (hitLayers.length && map.queryRenderedFeatures(e.point, { layers: hitLayers }).length) return
+      } catch { return }
+      read(e.point)
+    }
+    const onTouchStart = (e: maplibregl.MapTouchEvent) => {
+      window.clearTimeout(hold)
+      if (!lensRef.current.source || e.points.length !== 1) { start = null; return }
+      start = { x: e.point.x, y: e.point.y }
+      hold = window.setTimeout(() => {
+        if (start && read(start)) { try { navigator.vibrate?.(8) } catch { /* unsupported */ } }
+        start = null
+      }, 420)
+    }
+    const onTouchMove = (e: maplibregl.MapTouchEvent) => {
+      if (start && (Math.abs(e.point.x - start.x) > 8 || Math.abs(e.point.y - start.y) > 8)) { start = null; window.clearTimeout(hold) }
+    }
+    const onTouchEnd = () => { start = null; window.clearTimeout(hold) }
+    const onContext = (e: maplibregl.MapMouseEvent) => { read(e.point) }
+    const clear = () => setReadout(null)
+    map.on('click', onClick)
+    map.on('touchstart', onTouchStart)
+    map.on('touchmove', onTouchMove)
+    map.on('touchend', onTouchEnd)
+    map.on('touchcancel', onTouchEnd)
+    map.on('contextmenu', onContext)
+    map.on('movestart', clear)
+    return () => {
+      map.off('click', onClick)
+      map.off('touchstart', onTouchStart)
+      map.off('touchmove', onTouchMove)
+      map.off('touchend', onTouchEnd)
+      map.off('touchcancel', onTouchEnd)
+      map.off('contextmenu', onContext)
+      map.off('movestart', clear)
+      window.clearTimeout(timer)
+      window.clearTimeout(hold)
+    }
+  }, [map, mapEpoch])
 
   useEffect(() => {
     try { localStorage.setItem(ACTIVITY_STORE, JSON.stringify({ on: activityOn, scope, window: window_ })) } catch { /* private mode */ }
@@ -212,11 +321,18 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   // ring (a real conversation) stay clear; the untouched universe goes quiet.
   // Uses only the feature-state the map already writes — no new scoring. The
   // constant pulse is switched off: new activity pulses once, from the overlay.
+  // Under a heat lens the markers step back so the colour field reads; at
+  // street zoom they return (each property then glows its own value).
+  const markerDim = !lens.source ? 1 : zoom >= 13 ? 0.92 : lens.areal ? 0.22 : 0.14
+  const originalsRef = useRef(new Map<string, unknown>())
+  const appliedRef = useRef(new Map<string, string>())
+  useEffect(() => { originalsRef.current = new Map(); appliedRef.current = new Map() }, [map, mapEpoch])
   useEffect(() => {
     if (!map) return
-    const originals = new Map<string, unknown>()
-    const applied = new Map<string, string>()
-    const QUIET = buildMarkerEmphasisExpr()
+    const originals = originalsRef.current
+    const applied = appliedRef.current
+    applied.clear()
+    const QUIET = markerDim === 1 ? buildMarkerEmphasisExpr() : ['*', buildMarkerEmphasisExpr(), markerDim]
     const TARGETS: Array<[string, string]> = [
       ['prop-tiles-glass', 'circle-opacity'],
       ['prop-tiles-ring', 'circle-stroke-opacity'],
@@ -242,7 +358,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map.on('styledata', apply)
     map.on('sourcedata', onTiles)
     return () => { map.off('styledata', apply); map.off('sourcedata', onTiles) }
-  }, [map, mapEpoch])
+  }, [map, mapEpoch, markerDim])
 
   const now = useMemo(() => new Date(clock), [clock])
   const events = useMemo(() => filterActivity(activityEvents, { scope, window: window_, now }), [activityEvents, scope, window_, now])
@@ -426,18 +542,19 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map.easeTo({ center: [-96, 37.5], zoom: 3.6, duration: reducedMotion ? 0 : 900 })
   }
 
-  const activeMode = modes.find((m) => m.key === mode)
   const activeTheme = themes.find((t) => t.id === styleMode)
+  const pillSwatch = lensSwatch(lens)
 
   return (
     <div className={cls('mx', cardOpen && 'has-card', activityOn && 'is-activity')}>
       <div className="mx-top">
+        {prefs.modePill && (
         <button type="button" className="mx-context" data-map-control="mode" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
-          <span className="mx-context__swatch" aria-hidden="true">
-            {(activeMode?.swatches ?? []).slice(0, 3).map((c) => <i key={c} style={{ background: c }} />)}
+          <span className={cls('mx-context__swatch', !pillSwatch && 'is-ramp')} aria-hidden="true" style={pillSwatch ? undefined : { backgroundImage: rampGradient(lens, '0deg') }}>
+            {pillSwatch?.map((c) => <i key={c} style={{ background: c }} />)}
           </span>
           <span className="mx-context__copy">
-            <strong>{activeMode?.label ?? 'Map'}</strong>
+            <strong>{lens.label}</strong>
             <span>
               {inView === null
                 ? 'Loading properties…'
@@ -448,6 +565,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           </span>
           <Icon name="chevron-down" size={13} />
         </button>
+        )}
         {filterCount > 0 && (
           <button type="button" className="mx-chip" onClick={onOpenFilters} data-map-control="filter-summary">
             <Icon name="filter" size={12} /> Filters · {filterCount}
@@ -472,6 +590,22 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         </button>
       </div>
 
+      {scanKey > 0 && !reducedMotion && <span key={scanKey} className="mx-scan" aria-hidden="true" style={{ backgroundImage: rampGradient(lens, '180deg') }} />}
+
+      {readout && (
+        <div key={readout.key} className="mx-readout" style={{ left: readout.x, top: readout.y }} role="status">
+          <strong>{readout.text}</strong>
+          <span>{readout.sub}</span>
+        </div>
+      )}
+
+      {!cardOpen && (prefs.market || prefs.mapKey) && (
+        <div className={cls('mx-cards', activityOn && 'has-peek')}>
+          {prefs.market && <MarketPanel map={map} epoch={mapEpoch} onClose={() => setPref('market', false)} />}
+          {prefs.mapKey && <LensLegend lens={lens} state={lensState} zoom={zoom} />}
+        </div>
+      )}
+
       {activityOn && !cardOpen && (
         <button type="button" className="mx-peek" data-map-control="activity-feed" onClick={() => setSheet('activity')}>
           <span className={cls('mx-peek__dot', latest && `tier-${tierOf(latest)}`)} aria-hidden="true" />
@@ -491,7 +625,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           </div>
           <strong className="mx-event__title">{openEvent.title}</strong>
           {(openEvent.detail || openEvent.subtitle) && <p className="mx-event__detail">{openEvent.detail || openEvent.subtitle}</p>}
-          <p className="mx-event__meta">{[openEvent.address || openEvent.market, timeAgo(eventTime(openEvent), clock) && `${timeAgo(eventTime(openEvent), clock)} ago`].filter(Boolean).join(' · ')}</p>
+          <p className="mx-event__meta">{[openEvent.address || openEvent.market, agoLabel(eventTime(openEvent), clock)].filter(Boolean).join(' · ')}</p>
           {eventAction(openEvent) && (
             <button type="button" className="mx-act is-primary" onClick={() => { const e = openEvent; setOpenEvent(null); onSelectEvent(e) }}>
               {eventAction(openEvent)!.label}
@@ -508,17 +642,31 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
             label="Map settings"
             options={[{ key: 'mode', label: 'Mode' }, { key: 'appearance', label: 'Appearance' }, { key: 'intel', label: 'Intel' }, { key: 'advanced', label: 'Advanced' }]}
           />
-          {layersTab === 'mode' && (
-            <div className="mx-list">
-              {modes.map((m) => (
-                <button key={m.key} type="button" className={cls('mx-mode', m.key === mode && 'is-active')} aria-pressed={m.key === mode} onClick={() => { onMode(m.key); setSheet(null) }}>
-                  <span className="mx-mode__swatch" aria-hidden="true">{m.swatches.slice(0, 3).map((c) => <i key={c} style={{ background: c }} />)}</span>
-                  <span className="mx-row__copy"><strong>{m.label}</strong><span>{m.description}</span></span>
-                  {m.key === mode && <Icon name="check" size={16} />}
-                </button>
-              ))}
-            </div>
-          )}
+          {layersTab === 'mode' && LENS_FAMILIES.map((f) => (
+            <section key={f.key} className="mx-block">
+              <h3>{f.label}</h3>
+              <div className="mx-lenses">
+                {MAP_LENSES.filter((l) => l.family === f.key).map((l, i) => {
+                  const sw = lensSwatch(l)
+                  return (
+                    <button
+                      key={l.id}
+                      type="button"
+                      className={cls('mx-lens', l.id === lens.id && 'is-active')}
+                      aria-pressed={l.id === lens.id}
+                      data-lens-id={l.id}
+                      style={{ animationDelay: `${i * 22}ms` }}
+                      onClick={() => chooseLens(l)}
+                    >
+                      <span className="mx-lens__ramp" aria-hidden="true" style={sw ? { backgroundImage: `linear-gradient(90deg, ${sw.join(', ')})` } : { backgroundImage: rampGradient(l) }} />
+                      <strong>{l.label}</strong>
+                      <span>{l.sub}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          ))}
           {layersTab === 'appearance' && (
             <>
               {APPEARANCE_GROUPS.map((g) => {
@@ -542,17 +690,31 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
                 <h3>Perspective</h3>
                 <Segmented<'2d' | '3d'> value={dimension} onChange={onDimension} label="Perspective" options={[{ key: '2d', label: 'Flat' }, { key: '3d', label: 'Tilted' }]} />
               </section>
+              <div className="mx-list">
+                {styleMode === 'satellite' && (
+                  <section className="mx-block">
+                    <h3>Imagery</h3>
+                    <Segmented<'true' | 'tactical'> value={prefs.trueColor ? 'true' : 'tactical'} onChange={(v) => setPref('trueColor', v === 'true')} label="Imagery colour" options={[{ key: 'true', label: 'True colour' }, { key: 'tactical', label: 'Tactical' }]} />
+                  </section>
+                )}
+                {HYBRID_THEMES.has(styleMode) && (
+                  <Toggle label="Roads & places" sub="Street names, highways and towns over the imagery" on={prefs.labels} onChange={(v) => setPref('labels', v)} />
+                )}
+                <Toggle label="Terrain relief" sub={dimension === '3d' ? 'Shaded hills, lifted into 3D while tilted' : 'Shaded hills and valleys · tilt for true 3D'} on={prefs.relief} onChange={(v) => setPref('relief', v)} />
+              </div>
             </>
           )}
           {layersTab === 'intel' && (
             <div className="mx-list">
-              <Toggle label="Map key" sub="What marker colours and icons mean" on={showMapKey} onChange={onShowMapKey} />
-              <Toggle label="Census panel" sub="Demographics for the area in view" on={showCensusDock} onChange={onShowCensusDock} />
+              <Toggle label="Map key" sub="What the colour on the map means, with real values" on={prefs.mapKey} onChange={(v) => setPref('mapKey', v)} />
+              <Toggle label="Market panel" sub="Census, HUD rent, price growth and flood for the ZIP at the map centre" on={prefs.market} onChange={(v) => setPref('market', v)} />
+              <Toggle label="Mode pill" sub="The mode and properties-in-view pill, top left" on={prefs.modePill} onChange={(v) => setPref('modePill', v)} />
+              <Toggle label="Live Activity on map" sub="Replies, stage changes and sends as they happen" on={activityOn} onChange={setActivityOn} />
             </div>
           )}
           {layersTab === 'advanced' && (
             <>
-              <p className="mx-note">Rendering controls for slower phones. Defaults are tuned for this device.</p>
+              <p className="mx-note">Density decides how many properties draw before you zoom all the way in; Everything shows every property from zoom 11.5.</p>
               <section className="mx-block">
                 <h3>Marker density</h3>
                 <Segmented value={performance.markerDensity} onChange={(v) => onPerformance({ markerDensity: v })} label="Marker density" options={[{ key: 'low', label: 'Sparse' }, { key: 'medium', label: 'Balanced' }, { key: 'high', label: 'Everything' }]} />
@@ -564,6 +726,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
               <section className="mx-block">
                 <h3>Grouping</h3>
                 <Segmented value={performance.clusterAggressiveness} onChange={(v) => onPerformance({ clusterAggressiveness: v })} label="Grouping" options={[{ key: 'low', label: 'Less' }, { key: 'medium', label: 'Balanced' }, { key: 'high', label: 'More' }]} />
+                <p className="mx-note">Properties replace market bubbles from zoom {performance.clusterAggressiveness === 'high' ? 11 : performance.clusterAggressiveness === 'low' ? 9 : 10}.</p>
               </section>
               <section className="mx-block">
                 <h3>Rendering</h3>
@@ -571,7 +734,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
               </section>
             </>
           )}
-          <p className="mx-foot">{activeTheme ? `${activeTheme.label} · ` : ''}{activeMode?.label}</p>
+          <p className="mx-foot">{activeTheme ? `${activeTheme.label} · ` : ''}{lens.label}</p>
         </MapSheet>
       )}
 

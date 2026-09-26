@@ -25,6 +25,7 @@ import type { InboxAdvancedFilters } from '../../../modules/inbox/inbox-ui-helpe
 import { Icon } from '../../../shared/icons'
 import { createMapFilterToken, fetchMapFilterOptions, previewMapFilter } from '../master-filters/api'
 import { CANONICAL_PROPERTY_BASELINE } from '../master-filters/constants'
+import { usePropertyUniverseCount } from '../master-filters/usePropertyUniverseCount'
 import type { MapStatusValue } from '../../../domain/map/inbox-to-map-filter-expression'
 import {
   isMapExcludedFilterGroup,
@@ -97,6 +98,7 @@ export function MapAdvancedFiltersModal({
   const [mapStatus, setMapStatus] = useState<MapStatusValue>('all')
   const [search, setSearch] = useState('')
   const [previewCount, setPreviewCount] = useState<number | null>(null)
+  const universeCount = usePropertyUniverseCount() ?? CANONICAL_PROPERTY_BASELINE
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const optionsCacheRef = useRef<Record<string, FilterOption[]>>({})
@@ -255,7 +257,7 @@ export function MapAdvancedFiltersModal({
         onApply({
           token: null,
           activeRuleCount: 0,
-          matchingProperties: CANONICAL_PROPERTY_BASELINE,
+          matchingProperties: universeCount,
           draft,
         })
         onClose()
@@ -269,14 +271,14 @@ export function MapAdvancedFiltersModal({
       onApply({
         token: tokenResult.data.filterToken,
         activeRuleCount: activeCount,
-        matchingProperties: previewCount ?? CANONICAL_PROPERTY_BASELINE,
+        matchingProperties: previewCount ?? universeCount,
         draft,
       })
       onClose()
     } finally {
       setApplying(false)
     }
-  }, [activeCount, canApply, hasActiveFilters, local, mapStatus, onApply, onClose, previewCount, previewPayload])
+  }, [activeCount, canApply, hasActiveFilters, local, mapStatus, onApply, onClose, previewCount, previewPayload, universeCount])
 
   const handleSave = useCallback(async () => {
     if (!saveName.trim()) return
@@ -289,10 +291,11 @@ export function MapAdvancedFiltersModal({
   const headerCountLabel = useMemo(() => {
     if (previewLoading) return 'Updating matching properties…'
     if (previewError && hasActiveFilters) return 'Unable to calculate matching properties'
+    // No filter active: every property matches, whatever the preview said.
+    if (!hasActiveFilters) return `${universeCount.toLocaleString()} properties · all`
     if (previewCount != null) return `${previewCount.toLocaleString()} matching properties`
-    if (!hasActiveFilters) return `${CANONICAL_PROPERTY_BASELINE.toLocaleString()} matching properties`
     return '—'
-  }, [hasActiveFilters, previewCount, previewError, previewLoading])
+  }, [hasActiveFilters, previewCount, previewError, previewLoading, universeCount])
 
   const renderField = (field: FilterCatalogField) => {
     const key = field.key as keyof InboxAdvancedFilters

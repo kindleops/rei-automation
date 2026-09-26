@@ -3419,3 +3419,32 @@ html.is-mobile-layout .nx-filter-chip {
   background: rgba(var(--nexus-accent-rgb, 94, 234, 212), 0.13);
   color: var(--tone-primary, inherit);
 }
+
+/* ── Left nav group: Back (when there is somewhere to go) + the launcher,
+      which is always present. ───────────────────────────────────────── */
+.nx-mobile-command-dock__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.nx-mobile-command-dock__nav .nx-mobile-command-dock__btn--back {
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  padding: 0;
+  justify-content: center;
+}
+/* With Back present, or with a selection chip, the launcher shows its icon only. */
+.nx-mobile-command-dock__nav.has-back .nx-mobile-command-dock__identity,
+.nx-mobile-command-dock__nav:has(~ .nx-mobile-command-dock__context) .nx-mobile-command-dock__identity {
+  display: none;
+}
+.nx-mobile-command-dock__nav.has-back .nx-mobile-command-dock__btn--workspace,
+.nx-mobile-command-dock__nav:has(~ .nx-mobile-command-dock__context) .nx-mobile-command-dock__btn--workspace {
+  width: 44px;
+  max-width: 44px;
+  padding: 0;
+  justify-content: center;
+}

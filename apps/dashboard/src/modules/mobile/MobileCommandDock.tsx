@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import { useRoutePath, useRouteLocation } from '../../app/router'
 import { resolveAppForRoute } from '../../domain/app-registry/app-registry'
-import { clearActiveContext, readActiveContext, type ActiveContext } from '../../domain/locator/active-context'
+import { clearActiveContext, readSelectedContext, type ActiveContext } from '../../domain/locator/active-context'
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { goBack } from '../../domain/navigation/back-stack'
 import { useBackTarget } from '../../domain/navigation/useBackHandler'
@@ -102,10 +102,14 @@ export const MobileCommandDock = ({
   const [overflowOpen, setOverflowOpen] = useState(false)
   const [context, setContext] = useState<ActiveContext | null>(null)
   useEffect(() => {
-    const sync = () => setContext(readActiveContext())
+    const sync = () => setContext(readSelectedContext())
     sync()
     window.addEventListener(PROPERTY_LOCATOR_EVENT, sync)
-    return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync)
+    window.addEventListener('nexus:selection-cleared', sync)
+    return () => {
+      window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync)
+      window.removeEventListener('nexus:selection-cleared', sync)
+    }
     // `routeLocation`, not `routePath`: clearing a context changes only the
     // query, and the path-only hook reports no change for that.
   }, [routeLocation])
@@ -158,19 +162,25 @@ export const MobileCommandDock = ({
           then our own route history. When there is genuinely nowhere back, the
           slot returns to identity-and-launcher, so the control is never dead.
         */}
-        {backTarget.kind !== 'none' ? (
-          <button
-            type="button"
-            className={cls('nx-mobile-command-dock__btn', 'nx-mobile-command-dock__btn--back')}
-            aria-label={`Back to ${backTarget.label}`}
-            onClick={() => { if (!goBack()) toggle('workspace') }}
-          >
-            <DockGlyph hub>
-              <Icon name="chevron-left" size={DOCK_ICON_HUB} strokeWidth={1.9} />
-            </DockGlyph>
-            <span className="nx-mobile-command-dock__identity">{backTarget.label}</span>
-          </button>
-        ) : (
+        {/*
+          The launcher is ALWAYS reachable. When there is somewhere to go back
+          to, a compact chevron joins the identity control as a split button —
+          Back never replaces the menu (it used to, and once the operator had
+          followed one link the app list was unreachable from the top bar).
+        */}
+        <div className={cls('nx-mobile-command-dock__nav', backTarget.kind !== 'none' && 'has-back')}>
+          {backTarget.kind !== 'none' ? (
+            <button
+              type="button"
+              className={cls('nx-mobile-command-dock__btn', 'nx-mobile-command-dock__btn--back')}
+              aria-label={`Back to ${backTarget.label}`}
+              onClick={() => { if (!goBack()) toggle('workspace') }}
+            >
+              <DockGlyph>
+                <Icon name="chevron-left" size={DOCK_ICON} strokeWidth={1.9} />
+              </DockGlyph>
+            </button>
+          ) : null}
           <button
             type="button"
             className={cls(
@@ -187,7 +197,7 @@ export const MobileCommandDock = ({
             </DockGlyph>
             <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
           </button>
-        )}
+        </div>
 
         {/*
           THE CONTEXT CHIP.

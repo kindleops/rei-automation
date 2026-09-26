@@ -24,6 +24,8 @@
  */
 import { pushRoutePath } from '../../app/router'
 import { clearPropertyLocator, readPropertyLocator } from './property-locator'
+import { setUniversalEntityContextSnapshot } from '../entity-graph/universal-entity-context-store'
+import { EMPTY_UNIVERSAL_ENTITY_CONTEXT, parseEntityGraphDeepLink } from '../entity-graph/universal-entity-context'
 
 /** Every parameter that scopes a surface to one entity. */
 export const CONTEXT_PARAMS = ['property_id', 'opp', 'opportunity_id', 'thread', 'thread_key', 'owner_id', 'master_owner_id'] as const
@@ -109,6 +111,37 @@ export function readActiveContext(search?: string): ActiveContext | null {
 }
 
 /**
+ * What the operator currently has selected, wherever it came from.
+ *
+ * The URL context first; then an Entity Graph path deep link; then a property
+ * the operator selected (the locator) that apps like Map, Comps and Inbox seed
+ * from without putting it in the URL. Every one of these makes the app "about"
+ * one property, so every one must be visible and clearable from the global bar.
+ */
+export function readSelectedContext(search?: string, pathname?: string): ActiveContext | null {
+  const fromUrl = readActiveContext(search)
+  if (fromUrl) return fromUrl
+  const path = pathname ?? (typeof window !== 'undefined' ? window.location.pathname : '')
+  const deep = path ? parseEntityGraphDeepLink(path) : null
+  if (deep?.entityId) {
+    const locator = readPropertyLocator()
+    const address = locator && (locator.propertyId === deep.propertyId || locator.propertyId === deep.entityId) ? clean(locator.address) : null
+    return { kind: 'property', id: String(deep.propertyId ?? deep.entityId), label: address ? shortAddress(address) : 'Selected', detail: address ?? 'Selected record' }
+  }
+  const locator = readPropertyLocator()
+  if (locator && (locator.propertyId || locator.threadKey)) {
+    const address = clean(locator.address)
+    return {
+      kind: locator.propertyId ? 'property' : 'thread',
+      id: String(locator.propertyId ?? locator.threadKey),
+      label: address ? shortAddress(address) : 'Selected',
+      detail: address ?? 'Selected property',
+    }
+  }
+  return null
+}
+
+/**
  * Drop the context and stay where you are.
  *
  * §3 is explicit that clearing must NOT bounce the operator back to the Inbox:
@@ -122,8 +155,17 @@ export function readActiveContext(search?: string): ActiveContext | null {
  */
 export function clearActiveContext(): void {
   clearPropertyLocator()
+  // The cross-app entity snapshot is released too, or Comps / Entity Graph /
+  // Deal Intelligence re-open the cleared property on their next render.
+  try { setUniversalEntityContextSnapshot(EMPTY_UNIVERSAL_ENTITY_CONTEXT) } catch { /* no store */ }
+  try { window.dispatchEvent(new CustomEvent('nexus:selection-cleared')) } catch { /* non-DOM */ }
 
   if (typeof window === 'undefined') return
+  // An Entity Graph record deep link IS the context: return to the graph itself.
+  if (parseEntityGraphDeepLink(window.location.pathname)?.entityId) {
+    pushRoutePath('/entity-graph')
+    return
+  }
   const url = new URL(window.location.href)
   let removed = false
   for (const param of CONTEXT_PARAMS) {

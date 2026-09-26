@@ -34,10 +34,24 @@ export const getMapPropertyFetchMode = (zoom: number): MapPropertyFetchMode => {
   return 'street'
 }
 
-export const shouldUseAggregateSource = (zoom: number): boolean => zoom < MAP_ZOOM_BANDS.cityMin
+/**
+ * Grouping (Advanced → Grouping): how long the map shows area bubbles before
+ * handing over to individual properties. Tiles start at cityMin (9), so the
+ * handoff can only move later, never earlier.
+ */
+let groupingHandoffZoom: number = MAP_ZOOM_BANDS.cityMin
+export const setGroupingHandoffZoom = (zoom: number): boolean => {
+  const next = Math.max(MAP_ZOOM_BANDS.cityMin, zoom)
+  if (next === groupingHandoffZoom) return false
+  groupingHandoffZoom = next
+  return true
+}
+export const getGroupingHandoffZoom = (): number => groupingHandoffZoom
+
+export const shouldUseAggregateSource = (zoom: number): boolean => zoom < groupingHandoffZoom
 
 /** Zoom 9+ uses PostGIS MVT tiles — complete property universe, no row caps */
-export const shouldUseVectorTileSource = (zoom: number): boolean => zoom >= MAP_ZOOM_BANDS.cityMin
+export const shouldUseVectorTileSource = (zoom: number): boolean => zoom >= groupingHandoffZoom
 
 /** Legacy bounded GeoJSON path — diagnostics only when tiles are active */
 export const shouldUsePropertySource = (zoom: number): boolean => zoom >= MAP_ZOOM_BANDS.cityMin

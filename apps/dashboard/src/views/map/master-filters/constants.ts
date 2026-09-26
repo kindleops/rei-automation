@@ -1,5 +1,8 @@
-/** Verified production baseline — reconciles with public.properties. */
-export const CANONICAL_PROPERTY_BASELINE = 124_046
+/**
+ * Last-resort fallback only, shown while the live count (usePropertyUniverseCount)
+ * loads. Components must prefer the live number.
+ */
+export const CANONICAL_PROPERTY_BASELINE = 169_802
 
 /** Verified quick-filter preset keys — must match backend VERIFIED_QUICK_PRESET_KEYS. */
 export const CANONICAL_QUICK_FILTER_KEYS = [

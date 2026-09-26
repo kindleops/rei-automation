@@ -1,3 +1,5 @@
+import { installTileRetry } from './map-tile-retry'
+import { PROPERTY_TILES_SOURCE_ID } from './map-property-tile-source'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import maplibregl from 'maplibre-gl'
@@ -96,6 +98,7 @@ import {
   shouldUseAggregateSource,
   shouldUseVectorTileSource,
   MAP_ZOOM_BANDS,
+  setGroupingHandoffZoom,
 } from './map-property-source'
 import {
   applyPropertyTileEnrichmentStates,
@@ -115,6 +118,7 @@ import {
   densityBandForZoom,
   getDensityBand,
   getDensitySelection,
+  setPropertyDensityMode,
 } from './map-marker-density'
 import { MapPropertyDiagnosticsOverlay, type MapPropertyDiagnostics } from './components/MapPropertyDiagnosticsOverlay'
 import { isMapDiagnosticsDebugEnabled, isMapVerificationMode } from './map-property-diagnostics-debug'
@@ -5245,6 +5249,14 @@ export function InboxCommandMap({
     // frozen while the map moves.
   }, [mapInstanceEpoch])
 
+  // A property tile that failed (tile RPC timeout under load) is retried
+  // instead of leaving a permanent hole in the map.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    return installTileRetry(map, [PROPERTY_TILES_SOURCE_ID])
+  }, [mapInstanceEpoch])
+
   useEffect(() => {
     if (!containerRef.current) return
     if (mapRef.current) return
@@ -8271,6 +8283,35 @@ export function InboxCommandMap({
     if (mapContextLostRef.current || !isStyleSafe(map) || !map) return
     applyPropertyDensity(map, text(selectedPropertyId))
   }, [mapInstanceEpoch, selectedPropertyId, selectedMapCard, sellerPinLayers.sellerPins])
+
+  /**
+   * ADVANCED SETTINGS, applied to what is actually drawn.
+   *   Marker density → how many properties the tile layers admit per zoom band
+   *   Grouping       → the zoom at which area bubbles hand over to properties
+   *   Rendering      → the canvas pixel ratio (sharpness vs frame rate)
+   * These used to change pin caps on a pin family that is hidden on the tile
+   * path, so every option looked identical.
+   */
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || mapContextLostRef.current || !isStyleSafe(map)) return
+    const densityChanged = setPropertyDensityMode(performanceSettings.markerDensity)
+    const handoff = performanceSettings.clusterAggressiveness === 'high' ? 11 : performanceSettings.clusterAggressiveness === 'medium' ? 10 : MAP_ZOOM_BANDS.cityMin
+    const groupingChanged = setGroupingHandoffZoom(handoff)
+    if (densityChanged) applyPropertyDensity(map, getDensitySelection())
+    if (groupingChanged) {
+      applyGenericInventoryOwner(map, {
+        zoom: map.getZoom(),
+        propertyFieldEnabled: sellerPinLayers.sellerPins,
+        masterFilterActive: Boolean(appliedMapFilterTokenRef.current),
+      })
+    }
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+    const ratio = performanceSettings.performanceMode === 'speed' ? 1
+      : performanceSettings.performanceMode === 'balanced' ? Math.min(dpr, 1.5)
+        : dpr
+    try { if (map.getPixelRatio() !== ratio) map.setPixelRatio(ratio) } catch { /* older maplibre */ }
+  }, [mapInstanceEpoch, performanceSettings.markerDensity, performanceSettings.clusterAggressiveness, performanceSettings.performanceMode, sellerPinLayers.sellerPins])
 
   /**
    * THE SUBJECT KNOCKOUT, command-pin half.

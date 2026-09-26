@@ -135,7 +135,33 @@ const TIEBREAK_EXPR: unknown[] = [
  * filter has no zoom term, so it means one thing. The cost is that it has to be
  * re-applied when the zoom band changes, which applyPropertyDensity now does.
  */
-export const scoreFloorForZoom = (zoom: number): number => {
+/**
+ * The operator's Marker density setting (Advanced → Marker density), which used
+ * to be read by nothing on the tile path:
+ *   high   "Everything" — every property from district zoom (11.5) in
+ *   medium "Balanced"   — the progressive-disclosure bands below
+ *   low    "Sparse"     — only the strongest signal until street level
+ */
+export type PropertyDensityMode = 'low' | 'medium' | 'high'
+let densityMode: PropertyDensityMode = 'high'
+export const setPropertyDensityMode = (mode: PropertyDensityMode): boolean => {
+  if (mode === densityMode) return false
+  densityMode = mode
+  currentDensityBand = null
+  return true
+}
+export const getPropertyDensityMode = (): PropertyDensityMode => densityMode
+
+export const scoreFloorForZoom = (zoom: number, mode: PropertyDensityMode = densityMode): number => {
+  if (mode === 'high') {
+    if (zoom >= 11.5) return 0
+    return zoom < 9.5 ? 60 : 30
+  }
+  if (mode === 'low') {
+    if (zoom < 13) return 75
+    if (zoom < 15) return 45
+    return 0
+  }
   if (zoom < 11) return 70    // metro       — roughly the top 1% of scored properties
   if (zoom < 13) return 45    // district    — roughly the top 10%
   if (zoom < 14.5) return 20  // neighborhood
@@ -143,12 +169,25 @@ export const scoreFloorForZoom = (zoom: number): number => {
 }
 
 /** Share of the 0-99 bucket space admitted regardless of score, by the same bands. */
-export const sampleQuotaForZoom = (zoom: number): number => {
+export const sampleQuotaForZoom = (zoom: number, mode: PropertyDensityMode = densityMode): number => {
+  if (mode === 'high') {
+    if (zoom >= 11.5) return 100
+    return zoom < 9.5 ? 12 : 40
+  }
+  if (mode === 'low') {
+    if (zoom < 13) return 1
+    if (zoom < 15) return 10
+    return 100
+  }
   if (zoom < 11) return 2     // ~2% of unscored inventory, enough to read a market
   if (zoom < 13) return 8
   if (zoom < 14.5) return 30
   return 100                  // all of it
 }
+
+/** Zoom from which icons may overlap (every glyph drawn), by density. */
+export const iconOverlapZoom = (mode: PropertyDensityMode = densityMode): number =>
+  mode === 'high' ? 12.5 : mode === 'low' ? 15.5 : 14.5
 
 /**
  * The one filter, applied identically to every marker layer.
@@ -244,7 +283,7 @@ export const getDensitySelection = (): string | null => currentDensitySelection
 let currentDensityBand: string | null = null
 
 export const densityBandForZoom = (zoom: number): string =>
-  `${scoreFloorForZoom(zoom)}:${sampleQuotaForZoom(zoom)}`
+  `${densityMode}:${scoreFloorForZoom(zoom)}:${sampleQuotaForZoom(zoom)}`
 
 export const getDensityBand = (): string | null => currentDensityBand
 
@@ -289,6 +328,11 @@ export const applyPropertyDensity = (
   }
 
   if (map.getLayer('prop-tiles-icon')) {
+    try {
+      map.setLayoutProperty('prop-tiles-icon', 'icon-allow-overlap', ['step', ['zoom'], false, iconOverlapZoom(), true] as unknown as boolean)
+    } catch {
+      /* ignore */
+    }
     try {
       map.setLayoutProperty('prop-tiles-icon', 'symbol-sort-key', buildPropertySortKeyExpr(selectedPropertyId))
     } catch {
