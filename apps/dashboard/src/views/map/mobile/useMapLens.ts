@@ -54,9 +54,12 @@ function beforeLayer(map: maplibregl.Map): string | undefined {
   return undefined
 }
 
+/** Last data drawn per map, so a style swap (which drops custom sources) restores it. */
+const LAST_DATA = new WeakMap<maplibregl.Map, GeoJSON.FeatureCollection>()
+
 function ensureLayers(map: maplibregl.Map) {
   if (!map.style) return
-  if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+  if (!map.getSource(SRC)) map.addSource(SRC, { type: 'geojson', data: LAST_DATA.get(map) ?? { type: 'FeatureCollection', features: [] } })
   const before = beforeLayer(map)
   if (!map.getLayer(L_FIELD)) {
     map.addLayer({ id: L_FIELD, type: 'circle', source: SRC, layout: { visibility: 'none' }, paint: {} }, before)
@@ -147,8 +150,10 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
   useEffect(() => {
     if (!map) return
     setState({ loading: Boolean(lens.source), error: null, count: 0, inView: null, lensId: lens.id })
+    LAST_DATA.delete(map)
     if (!lens.source) {
       hideAll(map)
+      LAST_DATA.delete(map)
       try { (map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] }) } catch { /* ignore */ }
       setState({ loading: false, error: null, count: 0, inView: null, lensId: lens.id })
       return
@@ -163,6 +168,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       const zoom = map.getZoom()
       // The ambient glow is gone by z9.5 — don't fetch what can't be seen.
       if (lens.ambient && zoom >= 10) {
+        LAST_DATA.delete(map)
         try { (map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] }) } catch { /* ignore */ }
         setState({ loading: false, error: null, count: 0, inView: null, lensId: lens.id })
         return
@@ -204,7 +210,9 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       try {
         ensureLayers(map)
         styleFor(map, lens, zoom)
-        ;(map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features })
+        const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features }
+        LAST_DATA.set(map, fc)
+        ;(map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData(fc)
       } catch { /* style mid-swap */ }
       values.sort((a, b) => a - b)
       const q = (p: number) => values[Math.min(values.length - 1, Math.max(0, Math.round(p * (values.length - 1))))]

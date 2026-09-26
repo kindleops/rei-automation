@@ -375,26 +375,34 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       ['prop-tiles-ring', 'circle-stroke-opacity'],
       ['prop-tiles-icon', 'icon-opacity'],
     ]
+    // Our own wrapping: ['*', original, emphasis]. Anything else is the map's
+    // (a theme swap re-sets paint) and becomes the new original.
+    const isOurs = (v: unknown) => Array.isArray(v) && v[0] === '*' && v.length === 3 && typeof v[2] === 'object' && JSON.stringify(v[2]).includes('pin_selected')
     const apply = () => {
       try {
         for (const [layer, prop] of TARGETS) {
           if (!map.getLayer(layer)) continue
           const current = map.getPaintProperty(layer, prop as never)
           const key = `${layer}:${prop}`
-          if (applied.get(key) === JSON.stringify(current)) continue
-          if (!originals.has(key)) originals.set(key, current ?? 1)
+          const currentJson = JSON.stringify(current)
+          if (applied.get(key) === currentJson) continue
+          if (!isOurs(current)) originals.set(key, current ?? 1)
           const next = ['*', originals.get(key) ?? 1, QUIET]
+          if (JSON.stringify(next) === currentJson) { applied.set(key, currentJson); continue }
           map.setPaintProperty(layer, prop as never, next as never)
           applied.set(key, JSON.stringify(map.getPaintProperty(layer, prop as never)))
         }
-        if (map.getLayer('prop-tiles-pulse')) map.setPaintProperty('prop-tiles-pulse', 'circle-opacity', 0)
+        if (map.getLayer('prop-tiles-pulse') && map.getPaintProperty('prop-tiles-pulse', 'circle-opacity') !== 0) map.setPaintProperty('prop-tiles-pulse', 'circle-opacity', 0)
       } catch { /* layer mid-reload */ }
     }
     const onTiles = (e: { sourceId?: string; isSourceLoaded?: boolean }) => { if (e?.sourceId === 'property-map-tiles') apply() }
     apply()
     map.on('styledata', apply)
     map.on('sourcedata', onTiles)
-    return () => { map.off('styledata', apply); map.off('sourcedata', onTiles) }
+    // Theme presentation can re-set marker paint without an event we see; a
+    // cheap check keeps the hierarchy (and lens dimming) in force.
+    const tick = window.setInterval(apply, 1500)
+    return () => { map.off('styledata', apply); map.off('sourcedata', onTiles); window.clearInterval(tick) }
   }, [map, mapEpoch, markerDim])
 
   // Live stream (Supabase realtime + the last day) merged over the map's derived feed.
