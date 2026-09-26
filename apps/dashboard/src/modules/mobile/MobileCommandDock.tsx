@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../shared/icons'
 import { useRoutePath, useRouteLocation } from '../../app/router'
 import { resolveAppForRoute } from '../../domain/app-registry/app-registry'
-import { clearActiveContext, readSelectedContext, type ActiveContext } from '../../domain/locator/active-context'
+import { clearActiveContext, readSelectedContext, resolvePropertyAddress, shortAddress, type ActiveContext } from '../../domain/locator/active-context'
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { goBack } from '../../domain/navigation/back-stack'
 import { useBackTarget } from '../../domain/navigation/useBackHandler'
@@ -102,11 +102,23 @@ export const MobileCommandDock = ({
   const [overflowOpen, setOverflowOpen] = useState(false)
   const [context, setContext] = useState<ActiveContext | null>(null)
   useEffect(() => {
-    const sync = () => setContext(readSelectedContext())
+    let alive = true
+    const sync = () => {
+      const next = readSelectedContext()
+      setContext(next)
+      // A pin tap publishes only the id: fill the chip with the real address.
+      if (next?.kind === 'property' && next.label === 'Selected') {
+        void resolvePropertyAddress(next.id).then((address) => {
+          if (!alive || !address) return
+          setContext((cur) => (cur?.id === next.id ? { ...cur, label: shortAddress(address), detail: address } : cur))
+        })
+      }
+    }
     sync()
     window.addEventListener(PROPERTY_LOCATOR_EVENT, sync)
     window.addEventListener('nexus:selection-cleared', sync)
     return () => {
+      alive = false
       window.removeEventListener(PROPERTY_LOCATOR_EVENT, sync)
       window.removeEventListener('nexus:selection-cleared', sync)
     }

@@ -1,3 +1,4 @@
+import { clearActiveContext } from '../../domain/locator/active-context'
 import { installTileRetry } from './map-tile-retry'
 import { PROPERTY_TILES_SOURCE_ID } from './map-property-tile-source'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -4935,6 +4936,19 @@ export function InboxCommandMap({
     document.addEventListener('keydown', handleEscapeComp)
     return () => document.removeEventListener('keydown', handleEscapeComp)
   }, [selectedSoldComp])
+
+  // A selection cleared anywhere (the dock's context chip, another app) closes
+  // the property here too.
+  useEffect(() => {
+    const onCleared = () => {
+      setSelectedMapCard(null)
+      setHoveredMapCard(null)
+      setSelectedPinId(null)
+      onBackgroundClickRef.current?.()
+    }
+    window.addEventListener('nexus:selection-cleared', onCleared)
+    return () => window.removeEventListener('nexus:selection-cleared', onCleared)
+  }, [])
 
   useEffect(() => {
     if (!selectedMapCard) return
@@ -10693,6 +10707,10 @@ export function InboxCommandMap({
             setSelectedMapCard(null)
             setHoveredMapCard(null)
             onBackgroundClickRef.current?.()
+            // Closing the card deselects the property everywhere — URL, locator
+            // and the cross-app snapshot — so it doesn't follow the operator
+            // into Comps, Entity Graph or Deal Intelligence.
+            clearActiveContext()
           }}
           onCenterMap={(lng, lat) => mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.max(mapRef.current?.getZoom() ?? 11.8, 11.8), duration: 560 })}
           onPeekToFocus={() => {

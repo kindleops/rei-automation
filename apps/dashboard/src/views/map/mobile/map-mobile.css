@@ -827,3 +827,103 @@ html[data-nexus-theme='red_ops'] .smc-mpeek__metric strong { color: #fff; }
 @media (prefers-reduced-motion: reduce) {
   .mx-peek__live::before, .mx-streaming::before, .mx-peek__copy, .mx-feed > li { animation: none; }
 }
+
+/* ── Draw an area ────────────────────────────────────────────────────────── */
+.mx-draw-surface {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+  cursor: crosshair;
+  background: radial-gradient(120% 80% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.28));
+  animation: mx-fade 0.3s ease-out both;
+}
+.mx-draw-bar {
+  position: fixed;
+  z-index: 5;
+  top: calc(var(--nx-mobile-chrome-top, 57px) + 8px);
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 7px 6px 7px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--mx-glass-hi), var(--mx-glass-lo) 60%), var(--mx-glass-strong);
+  -webkit-backdrop-filter: var(--mx-blur);
+  backdrop-filter: var(--mx-blur);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mx-accent) 55%, transparent), 0 0 28px -8px color-mix(in srgb, var(--mx-accent) 70%, transparent), var(--mx-shadow);
+  animation: mx-drop 0.4s var(--mx-spring) both;
+}
+.mx-draw-bar__modes { display: flex; gap: 3px; padding: 3px; border-radius: 13px; background: var(--mx-well); }
+.mx-draw-bar__mode { min-height: 34px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--mx-ink-2); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; transition: background 0.2s, color 0.2s; }
+.mx-draw-bar__mode.is-active { background: var(--mx-accent); color: var(--mx-accent-ink); }
+.mx-draw-bar__hint { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--mx-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+
+.mx-area-chip {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--nx-mobile-chrome-top, 57px) + 64px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--mx-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  animation: mx-drop 0.4s var(--mx-spring) both;
+}
+.mx-area-chip__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mx-accent); box-shadow: 0 0 10px var(--mx-accent); }
+
+.mx-sheet__backdrop.is-clear { background: transparent; }
+.mx-area__label { padding: 3px 8px; border-radius: 8px; background: var(--mx-well); color: var(--mx-ink-2); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.mx-area__hero { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mx-area__hero > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 12px 11px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--mx-accent) 16%, transparent), transparent 70%), var(--mx-well);
+  box-shadow: inset 0 0 0 1px var(--mx-rule);
+  animation: mx-rise 0.45s var(--mx-spring) both;
+}
+.mx-area__hero strong { font-size: 22px; font-weight: 760; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.mx-area__hero span { font-size: 11.5px; color: var(--mx-ink-3); }
+.mx-area__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 8px; padding: 4px 2px; }
+.mx-area__cell { display: flex; flex-direction: column; gap: 1px; animation: mx-rise 0.4s var(--mx-spring) both; }
+.mx-area__cell span { font-size: 11px; font-weight: 600; color: var(--mx-ink-3); }
+.mx-area__cell strong { font-size: 16px; font-weight: 720; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.mx-area__bars { display: flex; flex-direction: column; gap: 7px; }
+.mx-area__bar { display: grid; grid-template-columns: 104px 1fr auto; align-items: center; gap: 10px; font-size: 12.5px; }
+.mx-area__bar span { color: var(--mx-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-area__bar i { display: block; height: 8px; border-radius: 5px; background: linear-gradient(90deg, var(--mx-accent), color-mix(in srgb, var(--mx-accent) 45%, #fff)); transform-origin: left; animation: mx-grow 0.7s var(--mx-spring) both; }
+.mx-area__bar em { font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+@keyframes mx-grow { from { transform: scaleX(0); } }
+.mx-area__actions { display: flex; flex-direction: column; gap: 8px; }
+.mx-area__row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mx-act.is-quiet { color: var(--mx-ink-3); }
+.mx-area__loading { display: flex; gap: 8px; }
+.mx-area__loading span { flex: 1; height: 74px; border-radius: 16px; background: linear-gradient(90deg, var(--mx-well), var(--mx-glass-hi), var(--mx-well)); background-size: 200% 100%; animation: mx-shimmer 1.2s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .mx-area__hero > div, .mx-area__cell, .mx-area__bar i, .mx-draw-bar, .mx-area-chip { animation: none; }
+}
+.mx-area__row .mx-act { min-height: 42px; padding: 0 8px; background: var(--mx-well); color: var(--mx-ink); box-shadow: inset 0 0 0 1px var(--mx-rule); font-size: 13.5px; }
+.mx-area__row .mx-act.is-quiet { color: var(--mx-ink-3); }
+.mx-area__row.is-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mx-area__row.is-two .mx-act.is-primary { background: linear-gradient(180deg, color-mix(in srgb, #fff 14%, var(--mx-accent)), var(--mx-accent)); color: var(--mx-accent-ink); box-shadow: none; }
+.mx-area__confirm { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 16px; background: color-mix(in srgb, var(--mx-accent) 9%, var(--mx-well)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mx-accent) 35%, transparent); animation: mx-rise 0.35s var(--mx-spring) both; }
+.mx-area__confirm p { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--mx-ink-2); }
+.mx-area__confirm strong { color: var(--mx-ink); }
+.mx-note.is-error { color: var(--mx-critical); }
+.mx-link { border: 0; padding: 0; background: none; color: var(--mx-accent); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
+.mx-area-chip { white-space: nowrap; max-width: calc(100vw - 150px); }
+.mx.is-drawing .mx-stack > :not([data-map-control="draw"]) { opacity: 0.35; pointer-events: none; transition: opacity 0.25s; }

@@ -1514,12 +1514,16 @@ const DETAIL_TAB_IDS = new Set<string>([
  * also written back (below), so Back from a seller's conversation — opened
  * from Queue, Replies or Audience — returns to the same campaign and section.
  */
-function readCampaignDeepLink(): { campaignId: string | null; section: CampaignDetailTab | undefined } {
-  if (typeof window === 'undefined') return { campaignId: null, section: undefined }
+function readCampaignDeepLink(): { campaignId: string | null; section: CampaignDetailTab | undefined; builder: boolean } {
+  if (typeof window === 'undefined') return { campaignId: null, section: undefined, builder: false }
   const params = new URLSearchParams(window.location.search)
   const campaignId = params.get('campaign')?.trim() || null
   const section = params.get('section')?.trim() || ''
-  return { campaignId, section: DETAIL_TAB_IDS.has(section) ? (section as CampaignDetailTab) : undefined }
+  // `&builder=edit`: a draft handed off from elsewhere (the Map's drawn area)
+  // opens straight in the builder for review. The builder only edits; launch
+  // still runs through the campaign's own lifecycle actions.
+  const builder = Boolean(campaignId) && params.get('builder') === 'edit'
+  return { campaignId, section: DETAIL_TAB_IDS.has(section) ? (section as CampaignDetailTab) : undefined, builder }
 }
 
 /**
@@ -1538,9 +1542,10 @@ export const CampaignsPage = () => {
   const [refreshing, setRefreshing] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [editCampaignId, setEditCampaignId] = useState<string | null>(null)
-  const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'build'>('create')
+  const [builderLink] = useState(readCampaignDeepLink)
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(builderLink.builder)
+  const [editCampaignId, setEditCampaignId] = useState<string | null>(builderLink.builder ? builderLink.campaignId : null)
+  const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'build'>(builderLink.builder ? 'edit' : 'create')
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
   const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule')
   const [activationCampaign, setActivationCampaign] = useState<CampaignSummary | null>(null)

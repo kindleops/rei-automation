@@ -129,3 +129,23 @@ describe('realtime Live Activity', () => {
     expect(merged.map((e) => e.id)).toEqual([real.id, 'pin:p9:reply'])
   })
 })
+
+import { circleMiles, circleRing, simplifyPath } from './MapAreaTool'
+import { areaCampaignName, areaTargetFilters } from './map-area-campaign'
+
+describe('draw an area', () => {
+  it('a finger path is thinned, a circle is a closed 64-gon of the right size', () => {
+    const path = Array.from({ length: 100 }, (_, i) => ({ x: i, y: 0 }))
+    expect(simplifyPath(path, 6).length).toBe(17)
+    const ring = circleRing([-95.4, 29.75], [-95.38, 29.75])
+    expect(ring.length).toBe(65)
+    expect(ring[0][0]).toBeCloseTo(ring[64][0], 9)
+    expect(circleMiles([-95.4, 29.75], [-95.38, 29.75])).toBeGreaterThan(1.1)
+    expect(circleMiles([-95.4, 29.75], [-95.38, 29.75])).toBeLessThan(1.3)
+  })
+  it('the handoff is a draft targeting exactly the ids inside the shape', () => {
+    const summary = { count: 32, property_ids: ['a', 'b'], markets: [{ market: 'Houston, TX', n: 32 }] } as any
+    expect(areaTargetFilters(summary)).toEqual({ properties: [{ field_key: 'properties.property_id', operator: 'in', value: ['a', 'b'] }] })
+    expect(areaCampaignName(summary, '1.2 mi radius')).toBe('Map area · Houston, TX · 32 properties · 1.2 mi radius')
+  })
+})

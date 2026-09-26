@@ -43,6 +43,7 @@ import { lensValueAt, useMapLens } from './useMapLens'
 import { HYBRID_THEMES, useMapImagery } from './useMapImagery'
 import { LensLegend, MarketPanel, rampGradient } from './MapIntelCards'
 import { useRealtimeActivity } from './useRealtimeActivity'
+import { MapAreaTool } from './MapAreaTool'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -189,6 +190,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const [zoom, setZoom] = useState(() => map?.getZoom() ?? 4)
   const [clock, setClock] = useState(() => Date.now())
   const [prefs, setPrefs] = useState<LensPrefs>(readLensPrefs)
+  const [drawing, setDrawing] = useState(false)
   const setPref = useCallback(<K extends keyof LensPrefs>(k: K, v: LensPrefs[K]) => setPrefs((p) => ({ ...p, [k]: v })), [])
   useEffect(() => { try { localStorage.setItem(LENS_STORE, JSON.stringify(prefs)) } catch { /* private mode */ } }, [prefs])
 
@@ -584,8 +586,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const pillSwatch = lensSwatch(lens)
 
   return (
-    <div className={cls('mx', cardOpen && 'has-card', activityOn && 'is-activity')}>
-      <div className="mx-top">
+    <div className={cls('mx', cardOpen && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing')}>
+      <MapAreaTool map={map} epoch={mapEpoch} drawing={drawing} onDrawingChange={setDrawing} reducedMotion={reducedMotion} />
+      {!drawing && <div className="mx-top">
         {prefs.modePill && (
         <button type="button" className="mx-context" data-map-control="mode" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
           <span className={cls('mx-context__swatch', !pillSwatch && 'is-ramp')} aria-hidden="true" style={pillSwatch ? undefined : { backgroundImage: rampGradient(lens, '0deg') }}>
@@ -609,7 +612,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
             <Icon name="filter" size={12} /> Filters · {filterCount}
           </button>
         )}
-      </div>
+      </div>}
 
       <div className="mx-stack" role="toolbar" aria-label="Map controls">
         <button type="button" className="mx-btn" aria-label="Layers and map mode" data-map-control="layers" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
@@ -622,6 +625,13 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         <button type="button" className={cls('mx-btn', activityOn && 'is-lit')} aria-label={activityOn ? 'Live Activity on' : 'Live Activity'} aria-pressed={activityOn} data-map-control="activity" onClick={() => { if (!activityOn) { setActivityOn(true) } else { setSheet('activity') } }}>
           <Icon name="activity" size={18} />
           {activityOn && <span className="mx-live" aria-hidden="true" />}
+        </button>
+        <button type="button" className={cls('mx-btn', drawing && 'is-lit')} aria-label="Draw an area" aria-pressed={drawing} data-map-control="draw" onClick={() => { setSheet(null); setOpenEvent(null); setDrawing((v) => !v) }}>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M7 18.5c-2.6-1.2-4-3.2-4-5.5C3 8.6 7 5 12 5s9 3.6 9 8c0 4.1-3.6 7.3-8.4 7.9" strokeDasharray="0.1 3.6" />
+            <path d="M7 18.5c0 1.6 1.2 2.5 2.6 2.5 1.2 0 2-.7 2-1.7 0-1.4-1.6-2-3.1-1.6-.6.2-1.1.5-1.5.8Z" />
+            <path d="M9.6 21c-.3 1-.9 1.6-1.8 2" />
+          </svg>
         </button>
         <button type="button" className="mx-btn" aria-label={selectedLngLat ? 'Center on selected property' : homeBounds ? 'Show your active sellers' : 'Show the whole country'} data-map-control="recenter" onClick={recenter}>
           <Icon name="target" size={17} />

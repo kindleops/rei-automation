@@ -47,7 +47,7 @@ const clean = (value: string | null | undefined): string | null => {
 }
 
 /** "1115 Nw 64th St, Miami, Fl 33150" -> "1115 Nw 64th St" */
-const shortAddress = (address: string): string => {
+export const shortAddress = (address: string): string => {
   const head = address.split(',')[0]?.trim()
   return head && head.length > 0 ? head : address
 }
@@ -190,4 +190,28 @@ export function withContext(path: string, context: Partial<Record<'property_id' 
   }
   const query = params.toString()
   return query ? `${base}?${query}` : base
+}
+
+const labelCache = new Map<string, string | null>()
+
+/**
+ * The address for a property context that arrived without one (a map pin tap
+ * publishes only the id). One read, cached; null when unknown.
+ */
+export async function resolvePropertyAddress(propertyId: string): Promise<string | null> {
+  if (labelCache.has(propertyId)) return labelCache.get(propertyId) ?? null
+  try {
+    const { getSupabaseClient } = await import('../../lib/supabaseClient')
+    const { data } = await getSupabaseClient()
+      .from('properties')
+      .select('property_address_full, property_address')
+      .eq('property_id', propertyId)
+      .maybeSingle()
+    const row = (data ?? {}) as { property_address_full?: string | null; property_address?: string | null }
+    const address = clean(row.property_address_full) ?? clean(row.property_address) ?? null
+    labelCache.set(propertyId, address)
+    return address
+  } catch {
+    return null
+  }
 }
