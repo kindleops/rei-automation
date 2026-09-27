@@ -244,6 +244,34 @@ function getCacheTtlForPath(path: string): number | null {
   return null
 }
 
+
+/**
+ * SYNCHRONOUS session token, for requests that cannot await — MapLibre's
+ * transformRequest (vector tiles) is sync. The Worker only forwards a browser
+ * API call that carries `Authorization: Bearer <session>`; tiles that sent the
+ * retired x-ops-dashboard-secret were stripped and 401'd, so production drew
+ * no property pins at all. Kept warm by onAuthStateChange (token refreshes).
+ */
+let liveSessionToken: string | null = null
+let liveSessionWired: Promise<void> | null = null
+export function primeLiveSessionToken(): Promise<void> {
+  if (liveSessionWired) return liveSessionWired
+  if (!hasSupabaseEnv) return (liveSessionWired = Promise.resolve())
+  liveSessionWired = (async () => {
+    try {
+      const sb = getSupabaseClient()
+      sb.auth.onAuthStateChange((_event, session) => { liveSessionToken = session?.access_token ?? null })
+      const { data } = await sb.auth.getSession()
+      liveSessionToken = data.session?.access_token ?? liveSessionToken
+    } catch { /* no session: tiles 401 and the retry picks them up after sign-in */ }
+  })()
+  return liveSessionWired
+}
+export function getLiveSessionToken(): string | null {
+  void primeLiveSessionToken()
+  return liveSessionToken ?? cachedSessionToken
+}
+
 let cachedSessionToken: string | null = null
 let cachedSessionExpiresAt = 0
 let sessionTokenPromise: Promise<string | null> | null = null

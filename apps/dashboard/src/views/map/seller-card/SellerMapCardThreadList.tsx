@@ -74,7 +74,7 @@ export const SellerMapCardThreadList = ({
             className="smc-thread__empty-action"
             onClick={emptyState.onInsertOwnershipCheck}
           >
-            Insert Ownership Check
+            Send Ownership Check
           </button>
         ) : null}
       </div>

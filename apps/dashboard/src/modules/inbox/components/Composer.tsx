@@ -13,7 +13,9 @@ import {
   renderTemplate,
   type SmsTemplate,
 } from '../../../lib/data/templateData'
-import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
+import { callBackend } from '../../../lib/api/backendClient'
+import { cleanDictation } from './dictation-cleanup'
+import './voice-stage.css'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { useMobileKeyboardInset, isKeyboardInsetOpen } from '../../mobile/useMobileKeyboardInset'
@@ -138,7 +140,12 @@ export const Composer = ({
     return threadStageVisuals[stage]?.shortLabel ?? null
   }, [thread])
   const [voiceLevel, setVoiceLevel] = useState(0)
-  const [transcription, setTranscription] = useState('')
+  const [voiceBars, setVoiceBars] = useState<number[]>(() => Array(28).fill(0))
+  const [voiceStage, setVoiceStage] = useState<'polishing' | 'translating' | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const voiceCancelledRef = useRef(false)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const [, setTranscription] = useState('')
   const [recommendedTemplates, setRecommendedTemplates] = useState<SmsTemplate[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
   const [polishPreview, setPolishPreview] = useState<PolishPreview | null>(null)
@@ -172,16 +179,12 @@ export const Composer = ({
     setIsPolishing(true)
     setPolishError(null)
     try {
-      const res = await fetch(`${getBackendBaseUrl()}/api/cockpit/inbox/polish-draft`, {
+      const res = await callBackend<{ ok: boolean; polishedText: string }>('/api/cockpit/inbox/polish-draft', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-ops-dashboard-secret': getBackendSecret(),
-        },
         body: JSON.stringify({ text }),
       })
-      const data: { ok: boolean; polishedText: string } = await res.json()
-      if (data.ok && data.polishedText?.trim()) {
+      const data = res.ok ? res.data : null
+      if (data?.ok && data.polishedText?.trim()) {
         return data.polishedText.trim()
       }
       setPolishError('Polish unavailable — using original draft.')
@@ -237,7 +240,9 @@ export const Composer = ({
 
   useEffect(() => {
     if (!quickActionsOpen || !thread) {
-      setRecommendedTemplates([])
+      // Same reference when already empty: a fresh [] re-rendered the host,
+      // and a host that rebuilds `thread` per render (the Map card) looped.
+      setRecommendedTemplates((cur) => (cur.length ? [] : cur))
       return
     }
     let cancelled = false
@@ -280,13 +285,22 @@ export const Composer = ({
       animationFrameRef.current = undefined
     }
     analyserRef.current = null
+    // Release the microphone: the level meter held its own stream open, so the
+    // phone's mic indicator stayed on after the recording ended.
+    try { mediaStreamRef.current?.getTracks().forEach((t) => t.stop()) } catch { /* ignore */ }
+    mediaStreamRef.current = null
+    try { void audioCtxRef.current?.close() } catch { /* ignore */ }
+    audioCtxRef.current = null
     setVoiceLevel(0)
+    setVoiceBars(Array(28).fill(0))
   }
 
   const startVoiceAnalysis = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
       const audioContext = new AudioContext()
+      audioCtxRef.current = audioContext
       const analyser = audioContext.createAnalyser()
       const microphone = audioContext.createMediaStreamSource(stream)
       analyser.fftSize = 256
@@ -294,11 +308,26 @@ export const Composer = ({
       microphone.connect(analyser)
       analyserRef.current = analyser
       const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      let frame = 0
       const updateVoiceLevel = () => {
         if (!analyserRef.current) return
         analyserRef.current.getByteFrequencyData(dataArray)
         const average = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length
         setVoiceLevel(Math.min(average / 128, 1))
+        // Spectrum for the recording stage: 28 bands over the voice range, ~30fps.
+        if ((frame++ & 1) === 0) {
+          const bands = 28
+          const span = Math.floor(dataArray.length * 0.7)
+          const next: number[] = []
+          for (let b = 0; b < bands; b++) {
+            const from = Math.floor((b / bands) * span)
+            const to = Math.max(from + 1, Math.floor(((b + 1) / bands) * span))
+            let sum = 0
+            for (let i = from; i < to; i++) sum += dataArray[i]
+            next.push(Math.min(1, sum / (to - from) / 200))
+          }
+          setVoiceBars(next)
+        }
         animationFrameRef.current = requestAnimationFrame(updateVoiceLevel)
       }
       updateVoiceLevel()
@@ -316,6 +345,7 @@ export const Composer = ({
   }
 
   const stopVoice = (cancelTranscript = false) => {
+    voiceCancelledRef.current = cancelTranscript
     recognitionRef.current?.stop()
     recognitionRef.current = null
     setMicState('idle')
@@ -333,6 +363,8 @@ export const Composer = ({
     if (!Recognition) { setVoiceUnsupported(true); return }
 
     const recognition = new Recognition()
+    voiceCancelledRef.current = false
+    setVoiceStage(null)
     baseDraftRef.current = localDraft.trim()
     recognition.continuous = true
     recognition.interimResults = true
@@ -342,12 +374,8 @@ export const Composer = ({
       for (let i = 0; i < event.results.length; i++) parts.push(event.results[i][0].transcript.trim())
       const current = parts.join(' ').trim()
       setTranscription(current)
-      const cleaned = current
-        .replace(/\bi\b/g, 'I')
-        .replace(/(\w)\s*([.!?])/g, '$1$2')
-        .replace(/([.!?])\s*(\w)/g, '$1 $2')
-        .replace(/\s+/g, ' ')
-        .trim()
+      // Live: capitals, spoken punctuation, no filler — while they speak.
+      const cleaned = cleanDictation(current, { terminate: false })
       const nextDraft = [baseDraftRef.current, cleaned].filter(Boolean).join(' ').trim()
       setLocalDraft(nextDraft)
       latestDraftRef.current = nextDraft
@@ -366,12 +394,37 @@ export const Composer = ({
       clearRecordingTimer()
       setTranscription('')
 
-      const finalDraft = latestDraftRef.current.trim()
-      if (!isSellerLanguageEnglish && finalDraft && onTranslateDraft) {
-        window.setTimeout(() => onTranslateDraft(finalDraft), 120)
+      /*
+       * A VOICE MESSAGE COMES OUT READY TO SEND: finished sentences locally,
+       * then the server polish (grammar/punctuation; a model when configured),
+       * then — for a seller who does not read English — their language. Each
+       * step only replaces the draft if the operator has not edited it since.
+       */
+      if (voiceCancelledRef.current) {
+        voiceCancelledRef.current = false
+        setLocalDraft(baseDraftRef.current)
+        latestDraftRef.current = baseDraftRef.current
+        setMicState('idle')
+        return
       }
-
-      window.setTimeout(() => setMicState('idle'), 500)
+      const spoken = latestDraftRef.current.trim()
+      if (!spoken || spoken === baseDraftRef.current) { window.setTimeout(() => setMicState('idle'), 300); return }
+      const finished = cleanDictation(spoken, { terminate: true })
+      setLocalDraft(finished)
+      latestDraftRef.current = finished
+      void (async () => {
+        setVoiceStage('polishing')
+        const polished = await polishDraftText(finished)
+        let current = latestDraftRef.current.trim()
+        if (polished && current === finished) {
+          setLocalDraft(polished)
+          latestDraftRef.current = polished
+          current = polished
+        }
+        setVoiceStage(null)
+        if (!isSellerLanguageEnglish && current && onTranslateDraft) onTranslateDraft(current)
+        setMicState('idle')
+      })()
     }
 
     recognitionRef.current = recognition
@@ -728,21 +781,47 @@ export const Composer = ({
       )}
 
       {isListening && (
-        <div className="nx-voice-recording-panel" role="status" aria-live="polite">
-          <div className="nx-voice-recording-ring" aria-hidden="true">
-            <Icon name="mic" />
+        <div className="nx-voice-stage" role="status" aria-live="polite" style={{ ['--lvl' as string]: voiceLevel.toFixed(3) }}>
+          <div className="nx-voice-stage__aura" aria-hidden="true" />
+          <div className="nx-voice-stage__head">
+            <span className="nx-voice-stage__rec"><i aria-hidden="true" />REC</span>
+            <span className="nx-voice-stage__time">{formatRecordingDuration(recordingElapsed)}</span>
+            {!isSellerLanguageEnglish && sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? (
+              <span className="nx-voice-stage__lang">→ {sellerLanguageLabel}</span>
+            ) : null}
           </div>
-          <div className="nx-voice-recording-meta">
-            <strong>Recording</strong>
-            <span>{formatRecordingDuration(recordingElapsed)}</span>
-            {transcription && <span>{transcription}</span>}
+          <div className="nx-voice-stage__core">
+            <div className="nx-voice-stage__orb" aria-hidden="true">
+              <span className="nx-voice-stage__ring is-1" />
+              <span className="nx-voice-stage__ring is-2" />
+              <span className="nx-voice-stage__ring is-3" />
+              <span className="nx-voice-stage__glass"><Icon name="mic" /></span>
+            </div>
+            <div className="nx-voice-stage__spectrum" aria-hidden="true">
+              {voiceBars.map((v, i) => (
+                <span key={i} style={{ transform: `scaleY(${Math.max(0.08, v).toFixed(3)})`, animationDelay: `${(i % 7) * 70}ms` }} />
+              ))}
+            </div>
           </div>
-          <div className="nx-voice-recording-actions">
-            <button type="button" onClick={() => stopVoice(false)}>Stop</button>
-            <button type="button" onClick={() => stopVoice(true)}>Cancel</button>
+          <p className={cls('nx-voice-stage__words', !localDraft.trim() && 'is-empty')}>
+            {localDraft.trim() || 'Listening… speak naturally — punctuation and capitals are handled.'}
+          </p>
+          <div className="nx-voice-stage__actions">
+            <button type="button" className="nx-voice-stage__btn is-cancel" onClick={() => stopVoice(true)} aria-label="Cancel recording">
+              <Icon name="close" />
+            </button>
+            <button type="button" className="nx-voice-stage__btn is-done" onClick={() => { recognitionRef.current?.stop() }} aria-label="Finish recording">
+              <Icon name="check" /><span>Done</span>
+            </button>
           </div>
         </div>
       )}
+      {(voiceStage || (isTranslatingDraft && micState !== 'idle')) && !isListening ? (
+        <div className="nx-voice-status" role="status" aria-live="polite">
+          <span className="nx-voice-status__dot" aria-hidden="true" />
+          {voiceStage === 'polishing' ? 'Polishing your message…' : `Translating to ${sellerLanguageLabel}…`}
+        </div>
+      ) : null}
 
       <div className="nx-composer-dock" ref={dockRef}>
         <div className="nx-composer-dock__side">
@@ -866,6 +945,20 @@ export const Composer = ({
           </div>
         </div>
 
+        {isMobile ? (
+          <button
+            type="button"
+            className={cls('nx-voice-mic', isListening && 'is-live', isProcessing && 'is-working')}
+            onClick={toggleVoice}
+            disabled={composerDisabled || voiceUnsupported}
+            aria-pressed={isListening}
+            aria-label={isListening ? 'Stop recording' : 'Voice message'}
+            title={voiceUnsupported ? 'Voice dictation is not supported in this browser' : 'Voice message'}
+            data-composer-action="voice"
+          >
+            <Icon name="mic" />
+          </button>
+        ) : null}
         <button
           type="button"
           className={cls('nx-send-button', hasDraft && !composerDisabled && 'is-ready', isSending && 'is-sending')}

@@ -3,20 +3,27 @@ import type { CommandMapThemeId } from './commandMapThemes'
 import { buildMarkerKeyIconColorExpr, buildMarkerKeyIconImageExpr } from './canonical-map-asset-marker'
 import { getMapPinThemeTokens } from './map-pin-theme-tokens'
 import { PIN_HIT_RADIUS_EXPR, PIN_ICON_SCALE_EXPR, PIN_RING_STROKE_EXPR, PIN_RING_WIDTH_EXPR } from './acquisition-radar-pin-renderer'
-import { getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
+import { getBackendBaseUrl, getBackendSecret, getLiveSessionToken, primeLiveSessionToken } from '../../lib/api/backendClient'
 
 const PROPERTY_TILE_URL_FRAGMENT = '/api/internal/dashboard/ops/map/tiles/'
 
-/** Inject ops auth for MapLibre MVT fetches (no custom headers by default). */
+/**
+ * Inject the operator's SESSION for MapLibre MVT fetches (no custom headers by
+ * default). In production the Worker gates /api/internal/dashboard/* on
+ * `Authorization: Bearer <session>` and strips the legacy secret header, so a
+ * tile without the bearer is a 401 — the map drew no property pins. The legacy
+ * secret is still sent for local dev servers that read it.
+ */
 export const buildPropertyTileTransformRequest = (): maplibregl.RequestTransformFunction => {
   const secret = getBackendSecret()
+  void primeLiveSessionToken()
   return (url, resourceType) => {
     if (resourceType === 'Tile' && url.includes(PROPERTY_TILE_URL_FRAGMENT)) {
-      return {
-        url,
-        credentials: 'include',
-        ...(secret ? { headers: { 'x-ops-dashboard-secret': secret } } : {}),
-      }
+      const token = getLiveSessionToken()
+      const headers: Record<string, string> = {}
+      if (token) headers.Authorization = `Bearer ${token}`
+      if (secret) headers['x-ops-dashboard-secret'] = secret
+      return { url, credentials: 'include', headers }
     }
     return { url }
   }

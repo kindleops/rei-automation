@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { InboxThread } from '../../../domain/inbox/inbox-model-types'
 import type { ThreadContext, ThreadMessage } from '../../../lib/data/inboxData'
 import {
@@ -253,7 +253,8 @@ export const useSellerMapCardActions = ({
   const [isSending, setIsSending] = useState(false)
   const [isTranslatingDraft, setIsTranslatingDraft] = useState(false)
 
-  const thread = buildThreadFromViewModel(viewModel, record)
+  // Stable per record: consumers key effects on it (the Composer's templates).
+  const thread = useMemo(() => buildThreadFromViewModel(viewModel, record), [viewModel, record])
 
   const executeFollowUp = useCallback(async () => {
     if (followUpState === 'sending') return
@@ -530,15 +531,16 @@ export const useSellerMapCardActions = ({
     })
   }, [thread, threadContext, viewModel.messagingBlocked])
 
-  const translateDraft = useCallback(async (draft: string) => {
+  // Into the SELLER's language (was hard-wired to Spanish).
+  const translateDraft = useCallback(async (draft: string, targetLanguage: string = 'es') => {
     const trimmed = draft.trim()
     if (!trimmed) return null
     setIsTranslatingDraft(true)
     try {
       const result = await translateText({
         text: trimmed,
-        sourceLanguage: 'en',
-        targetLanguage: 'es',
+        sourceLanguage: 'auto',
+        targetLanguage,
         mode: 'draft',
       })
       return result.translatedText

@@ -12,6 +12,7 @@ import type maplibregl from 'maplibre-gl'
 import { buildPropertyTilesUrlTemplate } from '../map-property-tile-source'
 import { FORCE_ALL_PIN_ZOOM, applyPropertyDensity, getDensitySelection, setForceAllProperties } from '../map-marker-density'
 import { getGroupingHandoffZoom } from '../map-property-source'
+import { installTileRetry } from '../map-tile-retry'
 
 const SRC = 'nx-dots'
 const L_GLOW = 'nx-dots-glow'
@@ -70,6 +71,7 @@ function ensure(map: maplibregl.Map, fadeFrom: number) {
     }, before)
   }
   if (!map.getLayer(L_CORE)) {
+    LAST_EMPHASIS.delete(map) // fresh layer (style swap): paint is back to defaults
     map.addLayer({
       id: L_CORE, type: 'circle', source: SRC, 'source-layer': 'dots', maxzoom: fadeFrom + 1,
       paint: {
@@ -113,10 +115,29 @@ function quietAggregates(map: maplibregl.Map, quiet: boolean) {
   }
 }
 
+const WORKED = ['any', ['>', ['get', 'hot'], 0], ['>', ['get', 'contacted'], 0]]
+const LAST_EMPHASIS = new WeakMap<maplibregl.Map, boolean>()
+
+/**
+ * Acquisition Radar: the properties you have worked (and the hot ones) light
+ * up and grow; untouched inventory recedes. Off = every dot at equal weight.
+ */
+function applyEmphasis(map: maplibregl.Map, fadeFrom: number, on: boolean) {
+  if (!map.getLayer(L_CORE) || !map.getLayer(L_GLOW)) return
+  if (LAST_EMPHASIS.get(map) === on) return
+  LAST_EMPHASIS.set(map, on)
+  const k = (worked: number, rest: number) => (on ? ['case', WORKED, worked, rest] : 1)
+  const nRadius = (base: number, f: number) => ['*', k(1.9, 0.8), ['+', base, ['*', f, ['ln', ['max', 1, ['get', 'n']]]]]]
+  map.setPaintProperty(L_CORE, 'circle-radius', ['interpolate', ['linear'], ['zoom'], 3, nRadius(0.9, 0.35), 7, nRadius(1.8, 0.5), fadeFrom, nRadius(3, 0.6)] as never)
+  map.setPaintProperty(L_CORE, 'circle-opacity', ['interpolate', ['linear'], ['zoom'], 3, on ? ['case', WORKED, 1, 0.38] : 0.9, fadeFrom - 0.4, on ? ['case', WORKED, 1, 0.34] : 0.95, fadeFrom + 0.6, 0] as never)
+  map.setPaintProperty(L_GLOW, 'circle-opacity', ['interpolate', ['linear'], ['zoom'], 3, on ? ['case', WORKED, 0.7, 0.12] : 0.32, fadeFrom - 0.4, on ? ['case', WORKED, 0.6, 0.1] : 0.28, fadeFrom + 0.6, 0] as never)
+  map.setPaintProperty(L_GLOW, 'circle-radius', ['interpolate', ['linear'], ['zoom'], 3, nRadius(2.5, 1.2), 7, nRadius(5, 1.6), fadeFrom, nRadius(8, 2)] as never)
+}
+
 export type DotOpen = (hit: { propertyId: string; lng: number; lat: number; label: string }) => void
 
 /** `quietBubbles`: count bubbles step aside (dots on, or a heat lens is showing). */
-export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean, quietBubbles: boolean = on, onOpen?: DotOpen, reducedMotion = false) {
+export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean, quietBubbles: boolean = on, onOpen?: DotOpen, reducedMotion = false, stageEmphasis = false) {
   // Tap a dot → that property's preview; a dot that stands for several → fly in.
   useEffect(() => {
     if (!map || !on) return
@@ -140,12 +161,19 @@ export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: b
     return () => { map.off('click', L_HIT, onClick) }
   }, [map, epoch, on, onOpen, reducedMotion])
 
+  // A dot tile that failed (session not yet resolved, RPC timeout) is retried.
+  useEffect(() => {
+    if (!map || !on) return
+    return installTileRetry(map, [SRC])
+  }, [map, epoch, on])
+
   useEffect(() => {
     if (!map) return
     const fadeFrom = Math.max(getGroupingHandoffZoom(), FORCE_ALL_PIN_ZOOM)
     const apply = () => {
       try {
         ensure(map, fadeFrom)
+        applyEmphasis(map, fadeFrom, stageEmphasis)
         setVisible(map, on)
         quietAggregates(map, quietBubbles)
       } catch { /* style mid-swap */ }
@@ -161,7 +189,7 @@ export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: b
       map.off('styledata', apply)
       if (tick) window.clearInterval(tick)
     }
-  }, [map, epoch, on, quietBubbles])
+  }, [map, epoch, on, quietBubbles, stageEmphasis])
 }
 
 /** Properties represented by the dots rendered in view (sum of per-pixel counts). */

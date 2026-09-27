@@ -14,6 +14,7 @@
  * layers it draws on the map.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { clearActiveContext } from '../../../domain/locator/active-context'
 import { createPortal } from 'react-dom'
 import maplibregl from 'maplibre-gl'
 import { Icon } from '../../../shared/icons'
@@ -209,15 +210,30 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const lens = lensById(prefs.lens)
   const lensLook = useMemo(() => ({ style: prefs.lensStyle, blend: prefs.lensBlend }), [prefs.lensStyle, prefs.lensBlend])
   const lensState = useMapLens(map, mapEpoch, lens, lensLook)
-  usePropertyDots(map, mapEpoch, prefs.pins && prefs.everyProperty, (prefs.pins && prefs.everyProperty) || (Boolean(lens.source) && !lens.ambient), openSearchProperty, reducedMotion)
+  usePropertyDots(map, mapEpoch, prefs.pins && prefs.everyProperty, (prefs.pins && prefs.everyProperty) || (Boolean(lens.source) && !lens.ambient), openSearchProperty, reducedMotion, lens.id === 'radar')
   // Property pins on/off: every property layer, over any lens.
   useEffect(() => {
     if (!map) return
-    const PIN_LAYERS = ['prop-tiles-hit', 'prop-tiles-halo', 'prop-tiles-glass', 'prop-tiles-ring', 'prop-tiles-pulse', 'prop-tiles-icon']
+    // EVERY property marker family, not just the vector tiles: the seller-thread
+    // pins, the property universe and the count bubbles are separate layers, and
+    // a toggle that left them up looked like it did nothing. The gold star (the
+    // selected subject) is deliberately not in the list.
+    const PIN_PREFIXES = ['prop-tiles-', 'prop-univ-', 'seller-pins-', 'command-pin-', 'map-agg-cluster-']
+    const hidden = new Set<string>()
     const apply = () => {
-      const vis = prefs.pins ? 'visible' : 'none'
-      for (const id of PIN_LAYERS) {
-        try { if (map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== vis) map.setLayoutProperty(id, 'visibility', vis) } catch { /* ignore */ }
+      let layers: Array<{ id: string }> = []
+      try { layers = map.getStyle().layers ?? [] } catch { return }
+      for (const { id } of layers) {
+        if (!PIN_PREFIXES.some((p) => id.startsWith(p))) continue
+        try {
+          const cur = map.getLayoutProperty(id, 'visibility')
+          if (!prefs.pins) {
+            if (cur !== 'none') { map.setLayoutProperty(id, 'visibility', 'none'); hidden.add(id) }
+          } else if (hidden.has(id) || id.startsWith('prop-tiles-')) {
+            if (cur === 'none') map.setLayoutProperty(id, 'visibility', 'visible')
+            hidden.delete(id)
+          }
+        } catch { /* ignore */ }
       }
     }
     apply()
@@ -261,6 +277,28 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map.on('click', COMP_LAYERS.cluster, onCluster)
     return () => { map.off('click', COMP_LAYERS.point, onPoint); map.off('click', COMP_LAYERS.cluster, onCluster) }
   }, [map, mapEpoch, reducedMotion])
+  // Tap open map → the property card closes (and its star with it). Runs after
+  // every layer handler has had its turn; anything tappable under the finger
+  // (a pin, dot, comp, activity marker) wins.
+  const cardOpenRef = useRef(cardOpen)
+  cardOpenRef.current = cardOpen
+  useEffect(() => {
+    if (!map) return
+    const TAPPABLE = /^(prop-tiles-hit|prop-univ-marker-hit|seller-pins-hit|seller-pins-core|command-pin-core|command-pin-cluster-core|nx-dots-hit|nx-comps-|nx-mx-activity|nx-search-area-fill|map-agg-cluster-core)/
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      if (!cardOpenRef.current) return
+      window.setTimeout(() => {
+        if ((e as { _clickHandled?: boolean })._clickHandled || !cardOpenRef.current) return
+        try {
+          const layers = (map.getStyle().layers ?? []).map((l) => l.id).filter((id) => TAPPABLE.test(id) && map.getLayoutProperty(id, 'visibility') !== 'none')
+          if (layers.length && map.queryRenderedFeatures([[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]], { layers }).length) return
+        } catch { return }
+        clearActiveContext()
+      }, 0)
+    }
+    map.on('click', onClick)
+    return () => { map.off('click', onClick) }
+  }, [map, mapEpoch])
   useMapImagery(map, mapEpoch, { labels: prefs.labels, trueColor: prefs.trueColor, relief: prefs.relief, tilted: dimension === '3d', theme: styleMode, reducedMotion })
   // The Command Map's own mode follows the lens (marker styling, overlays).
   const modeSynced = useRef(false)
@@ -270,7 +308,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     if (lens.legacyMode !== mode) onMode(lens.legacyMode)
   }, [lens.legacyMode, mode, onMode])
   const [scanKey, setScanKey] = useState(0)
-  const chooseLens = (next: MapLens) => {
+  const chooseLens = (picked: MapLens) => {
+    // Tapping the active mode again turns modes off: just the properties.
+    const next = picked.id === lens.id && picked.id !== 'none' ? lensById('none') : picked
     setPref('lens', next.id)
     if (next.legacyMode !== mode) onMode(next.legacyMode)
     setScanKey((k) => k + 1)
@@ -684,7 +724,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const pillSwatch = lensSwatch(lens)
 
   return (
-    <div className={cls('mx', cardOpen && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing')}>
+    <div className={cls('mx', (cardOpen || compId || compList) && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing')}>
       <MapAreaTool map={map} epoch={mapEpoch} drawing={drawing} onDrawingChange={setDrawing} reducedMotion={reducedMotion} />
       {!drawing && (
         <div className="mx-searchrow">

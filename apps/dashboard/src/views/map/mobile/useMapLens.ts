@@ -48,7 +48,7 @@ export function lensGridForZoom(zoom: number): number {
 const degToPx = (deg: number, zoom: number, lat: number) =>
   (deg / 360) * 512 * Math.pow(2, zoom) * Math.max(0.35, Math.cos((lat * Math.PI) / 180) ** 0.5)
 
-const isDensity = (lens: MapLens) => Boolean(lens.density) || lens.id === 'territory' || lens.id === 'execution'
+const isDensity = (lens: MapLens) => (Boolean(lens.density) || lens.id === 'territory') && lens.id !== 'execution'
 const OWN_PREFIX = /^(nx-|prop-|command-|map-agg|inbox-|seller-|buyer-)/
 
 /**
@@ -105,6 +105,30 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
   const b = look.style === 'dots' ? 0 : Math.min(1, Math.max(0, look.blend))
   const vis = (on: boolean) => (on ? 'visible' : 'none')
   try {
+    // Execution Live: every send is its own marker, coloured by what happened
+    // to it. As a density heat, ~600 sends a fortnight read as nothing at all.
+    if (lens.id === 'execution' && !areas) {
+      // Its own branch, never a restyle on top of the generic one: flipping
+      // visibility/paint twice per styledata re-fired styledata forever and
+      // the source never drew.
+      map.setLayoutProperty(L_AREA_FILL, 'visibility', 'none')
+      map.setLayoutProperty(L_AREA_LINE, 'visibility', 'none')
+      map.setLayoutProperty(L_HEAT, 'visibility', 'none')
+      map.setLayoutProperty(L_DOTS, 'visibility', 'none')
+      map.setLayoutProperty(L_FIELD, 'visibility', 'visible')
+      map.setPaintProperty(L_FIELD, 'circle-radius', ['interpolate', ['linear'], ['zoom'], 3, 3.5, 8, 5.5, 12, 7.5, 16, 11] as never)
+      map.setPaintProperty(L_FIELD, 'circle-color', ['case',
+        ['>=', ['get', 'v'], 1], '#34e89e',
+        ['>=', ['get', 'v'], 0.6], '#22d3ee',
+        ['>=', ['get', 'v'], 0.3], '#7aa2ff',
+        '#ff5a64'] as never)
+      map.setPaintProperty(L_FIELD, 'circle-blur', 0.12)
+      map.setPaintProperty(L_FIELD, 'circle-opacity', 0.95)
+      map.setPaintProperty(L_FIELD, 'circle-stroke-width', ['interpolate', ['linear'], ['zoom'], 3, 0.6, 12, 1.4] as never)
+      map.setPaintProperty(L_FIELD, 'circle-stroke-color', 'rgba(255,255,255,0.75)')
+      map.setPaintProperty(L_FIELD, 'circle-pitch-alignment', 'map')
+      return
+    }
     map.setLayoutProperty(L_FIELD, 'visibility', vis(!density && !areas))
     map.setLayoutProperty(L_HEAT, 'visibility', vis(density && !areas))
     map.setLayoutProperty(L_DOTS, 'visibility', vis(!lens.areal && !lens.ambient && !areas))
@@ -163,6 +187,7 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
     map.setPaintProperty(L_DOTS, 'circle-blur', 0.55)
     map.setPaintProperty(L_DOTS, 'circle-opacity', ['interpolate', ['linear'], ['zoom'], 12.9, 0, 13.2, 0.85] as never)
     map.setPaintProperty(L_DOTS, 'circle-pitch-alignment', 'map')
+
   } catch { /* style mid-swap */ }
 }
 
@@ -172,7 +197,7 @@ function hideAll(map: maplibregl.Map) {
   }
 }
 
-const countLens = (lens: MapLens) => lens.id === 'territory' || Boolean(lens.ambient) || lens.id === 'investor_buys' || lens.id === 'institutional_buys'
+const countLens = (lens: MapLens) => lens.id === 'territory' || lens.id === 'execution' || Boolean(lens.ambient) || lens.id === 'investor_buys' || lens.id === 'institutional_buys'
 
 export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapLens, look: LensLook = DEFAULT_LOOK): LensState {
   const [state, setState] = useState<LensState>({ loading: false, error: null, count: 0, inView: null })

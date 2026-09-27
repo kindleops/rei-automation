@@ -38,8 +38,9 @@ export interface MapLens {
 
 export const MAP_LENSES: ReadonlyArray<MapLens> = [
   // ── Pipeline ──────────────────────────────────────────────────────────
-  { id: 'radar', label: 'Acquisition Radar', sub: 'Every property, coloured by conversation stage', family: 'pipeline', source: 'properties', ambient: true, legacyMode: 'acquisition', domain: [0, 1], ramp: 'signal' },
-  { id: 'execution', label: 'Execution Live', sub: 'Outreach in the last 14 days · delivered is brightest', family: 'pipeline', source: 'outreach', legacyMode: 'execution', domain: [0, 1], ramp: 'signal', format: 'share', attribution: 'send_queue', density: true },
+  { id: 'none', label: 'Just properties', sub: 'No overlay — every property pin, nothing on top', family: 'pipeline', source: null, legacyMode: 'acquisition' },
+  { id: 'radar', label: 'Acquisition Radar', sub: 'Worked and hot properties light up; untouched ones recede', family: 'pipeline', source: 'properties', ambient: true, legacyMode: 'acquisition', domain: [0, 1], ramp: 'signal' },
+  { id: 'execution', label: 'Execution Live', sub: 'Every send in the last 14 days · green delivered, red not delivered', family: 'pipeline', source: 'outreach', legacyMode: 'execution', domain: [0, 1], ramp: 'signal', format: 'share', attribution: 'send_queue', density: true },
   { id: 'territory', label: 'Territory Scan', sub: 'Where your property universe is densest', family: 'pipeline', source: 'properties', legacyMode: 'territory', domain: [0, 1], ramp: 'spectrum', format: 'count', attribution: 'properties', density: true },
 
   // ── Property intelligence ─────────────────────────────────────────────
@@ -68,12 +69,12 @@ export const MAP_LENSES: ReadonlyArray<MapLens> = [
   { id: 'flood', label: 'Flood Exposure', sub: 'Share in FEMA special flood hazard area', family: 'market', source: 'flood', legacyMode: 'acquisition', domain: [0, 0.38], ramp: 'water', format: 'pct', attribution: 'FEMA NFHL', areal: true },
 
   // ── Comps & dispositions (mv_map_sold_comps, last 24 months) ─────────
-  { id: 'investor_buys', label: 'Investor Buying', sub: 'Where investors bought · LLCs, portfolios, funds', family: 'comps', source: 'investor_buys', legacyMode: 'comps', domain: [0, 1], ramp: 'heat', format: 'count', attribution: 'Public record purchases', density: true },
-  { id: 'institutional_buys', label: 'Institutional Buying', sub: 'Hedge funds and institutional portfolios', family: 'comps', source: 'institutional_buys', legacyMode: 'comps', domain: [0, 1], ramp: 'age', format: 'count', attribution: 'Portfolio + institutional buyers', density: true },
-  { id: 'mls_price', label: 'MLS Sale Price', sub: 'Median retail sale price · MLS', family: 'comps', source: 'mls_price', legacyMode: 'comps', domain: [85000, 900000], ramp: 'money', format: 'usdk', attribution: 'MLS sold' },
-  { id: 'investor_price', label: 'Investor Price', sub: 'Median investor purchase, per door', family: 'comps', source: 'investor_price', legacyMode: 'comps', domain: [60000, 600000], ramp: 'heat', format: 'usdk', attribution: 'Public record purchases' },
-  { id: 'comps_price', label: 'All Sales', sub: 'Median sale price, every source', family: 'comps', source: 'comps_price', legacyMode: 'comps', domain: [80000, 900000], ramp: 'money', format: 'usdk', attribution: 'MLS + public record' },
-  { id: 'comps_ppsf', label: 'Price / Sq Ft', sub: 'Median sold $ per square foot', family: 'comps', source: 'comps_ppsf', legacyMode: 'comps', domain: [60, 400], ramp: 'heat', format: 'usd', attribution: 'MLS + public record' },
+  { id: 'investor_buys', label: 'Investor Buying', sub: 'Where investors bought · LLCs, portfolios, funds', family: 'comps', source: 'investor_buys', legacyMode: 'acquisition', domain: [0, 1], ramp: 'heat', format: 'count', attribution: 'Public record purchases', density: true },
+  { id: 'institutional_buys', label: 'Institutional Buying', sub: 'Hedge funds and institutional portfolios', family: 'comps', source: 'institutional_buys', legacyMode: 'acquisition', domain: [0, 1], ramp: 'age', format: 'count', attribution: 'Portfolio + institutional buyers', density: true },
+  { id: 'mls_price', label: 'MLS Sale Price', sub: 'Median retail sale price · MLS', family: 'comps', source: 'mls_price', legacyMode: 'acquisition', domain: [85000, 900000], ramp: 'money', format: 'usdk', attribution: 'MLS sold' },
+  { id: 'investor_price', label: 'Investor Price', sub: 'Median investor purchase, per door', family: 'comps', source: 'investor_price', legacyMode: 'acquisition', domain: [60000, 600000], ramp: 'heat', format: 'usdk', attribution: 'Public record purchases' },
+  { id: 'comps_price', label: 'All Sales', sub: 'Median sale price, every source', family: 'comps', source: 'comps_price', legacyMode: 'acquisition', domain: [80000, 900000], ramp: 'money', format: 'usdk', attribution: 'MLS + public record' },
+  { id: 'comps_ppsf', label: 'Price / Sq Ft', sub: 'Median sold $ per square foot', family: 'comps', source: 'comps_ppsf', legacyMode: 'acquisition', domain: [60, 400], ramp: 'heat', format: 'usd', attribution: 'MLS + public record' },
 ]
 
 export const LENS_FAMILIES: ReadonlyArray<{ key: LensFamily; label: string }> = [
@@ -84,7 +85,14 @@ export const LENS_FAMILIES: ReadonlyArray<{ key: LensFamily; label: string }> = 
 ]
 
 export const lensById = (id: string | null | undefined): MapLens =>
-  MAP_LENSES.find((l) => l.id === id) ?? MAP_LENSES[0]
+  MAP_LENSES.find((l) => l.id === id) ?? MAP_LENSES.find((l) => l.id === 'radar') ?? MAP_LENSES[0]
+
+/*
+ * Comps lenses drive marker styling as 'acquisition', not the legacy 'comps'
+ * mode: that mode switched on the Command Map's OLD sold-comp layer and card
+ * (no Street View, under Live Activity). The phone's own comp layer + red
+ * liquid-glass card are the only comps on the map now.
+ */
 
 /** Colour stops, cold → hot, each ramp starting transparent for heatmaps. */
 export const LENS_RAMPS: Record<LensRamp, string[]> = {
