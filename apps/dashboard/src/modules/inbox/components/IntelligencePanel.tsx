@@ -3,7 +3,8 @@ import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../../lib/data/dealContext'
-import { getBackendBaseUrl, getBackendSecret } from '../../../lib/api/backendClient'
+import { callBackend } from '../../../lib/api/backendClient'
+import { peekPendingInboxDealIntelligenceIdentity } from '../../mobile/mobile-inbox-bridge'
 import type { PanelMode } from '../../../domain/inbox/inbox-layout-state'
 import {
   normalizePropertySnapshot,
@@ -767,15 +768,10 @@ function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: Wo
     if (!thread.propertyId) return
     let cancelled = false
     setSnapshotUnavailable(false)
-    const base = getBackendBaseUrl()
-    const secret = getBackendSecret()
-    fetch(`${base}/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-ops-dashboard-secret': secret,
-      },
-    })
-      .then(res => res.json())
+    // Session-authenticated like every other read; the retired dashboard
+    // secret made this a guaranteed 401 in production.
+    callBackend<{ ok: boolean; data?: any; error?: string }>(`/api/cockpit/properties/${thread.propertyId}/valuation-snapshot`)
+      .then(r => (r.ok && r.data ? r.data : { ok: false, error: r.ok ? "empty" : r.error }) as { ok: boolean; data?: any; error?: string })
       .then(res => {
         if (cancelled) return
         if (res.ok && res.data) {
@@ -6059,6 +6055,29 @@ export const IntelligencePanel = ({
   const { data: phase3 } = usePhase3Intelligence(thread?.threadKey)
 
   if (!thread) {
+    /**
+     * A PROPERTY WITH NO LOADED CONVERSATION STILL HAS AN UNDERWRITING.
+     * /deal-intelligence?property_id=… (Pipeline, Map, Entity Graph, a shared
+     * link) parks the subject in the pending identity and opens this panel.
+     * When the Inbox list holds no matching thread — no conversation, or a
+     * suppressed one outside the loaded buckets — the phone renders that
+     * property's decision surface instead of "select a thread". Never another
+     * subject: only the identity the route explicitly named.
+     */
+    const pending = isMobileViewport && layoutMode === 'compact' ? peekPendingInboxDealIntelligenceIdentity() : null
+    if (pending?.propertyId || pending?.threadKey) {
+      return (
+        <aside className="nx-intelligence-panel nx-intelligence-panel--compact nx-intelligence-panel--mobile-detail">
+          <DealIntelligence25Panel
+            key={[pending.threadKey, pending.propertyId].filter(Boolean).join('|')}
+            threadKey={pending.threadKey || undefined}
+            propertyId={pending.propertyId || undefined}
+            prospectId={pending.prospectId || undefined}
+            masterOwnerId={pending.masterOwnerId || undefined}
+          />
+        </aside>
+      )
+    }
     return (
       <aside className="nx-intelligence-panel">
         <div className="nx-inbox-loading-state">

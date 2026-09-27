@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchDealIntelligenceDossier, getBackendBaseUrl, getBackendSecret } from '../../lib/api/backendClient'
+import { fetchDealIntelligenceDossier, getBackendAuthHeaders, getBackendBaseUrl } from '../../lib/api/backendClient'
 import { resolveThreadRouteKey } from '../inbox/canonical-thread-reference'
 import { resolveDealDeskThreadReference } from '../inbox/deal-desk-thread-reference'
 import type { DealIntelligenceDossier, EngineProgressStage } from './deal-intelligence.types'
@@ -261,7 +261,7 @@ export function useDealIntelligenceDossier(
     setEngineProgress(buildInitialEngineProgress())
 
     const base = getBackendBaseUrl()
-    const secret = getBackendSecret()
+    const authHeaders = await getBackendAuthHeaders()
     // Carry the full identity, not just the property: the route rebuilds the
     // dossier afterwards, and rebuilding from thread_key + property_id alone
     // resolves a different linked prospect and swaps the displayed seller.
@@ -276,7 +276,7 @@ export function useDealIntelligenceDossier(
         headers: {
           Accept: 'application/x-ndjson',
           'Content-Type': 'application/json',
-          'x-ops-dashboard-secret': secret,
+          ...authHeaders,
         },
         body: JSON.stringify({
           property_id: propertyId,

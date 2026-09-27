@@ -277,6 +277,17 @@ let cachedSessionExpiresAt = 0
 let sessionTokenPromise: Promise<string | null> | null = null
 const SESSION_TOKEN_CACHE_MS = 30_000
 
+/**
+ * Authorization for the few callers that must use raw `fetch` (NDJSON
+ * streams). The session is the only browser credential — the Worker rejects
+ * anything else — so a stream that sent the retired dashboard secret instead
+ * was a guaranteed 401 in production.
+ */
+export async function getBackendAuthHeaders(): Promise<Record<string, string>> {
+  const token = await resolveSessionToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function resolveSessionToken(): Promise<string | null> {
   const now = Date.now()
   if (cachedSessionExpiresAt > now) return cachedSessionToken
