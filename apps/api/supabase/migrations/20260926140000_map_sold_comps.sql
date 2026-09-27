@@ -86,7 +86,7 @@ REVOKE ALL ON public.mv_map_sold_comps FROM anon;
 GRANT SELECT ON public.mv_map_sold_comps TO authenticated, service_role;
 REFRESH MATERIALIZED VIEW public.mv_map_sold_comps;
 
--- Viewport comps: one row per sale from zoom 12.5, grid clusters below.
+-- Viewport comps: one row per sale from zoom 11, grid clusters below.
 -- p_filters: {sources:[mls|public_record|investor], classes:[...], min_price, max_price,
 --             since:'YYYY-MM-DD', portfolio_only:bool, types:[...], min_beds}
 -- Price filters and the returned price are PER-DOOR for portfolio sales.
@@ -98,7 +98,7 @@ RETURNS TABLE (comp_id text, lat double precision, lng double precision, price n
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
 AS $$
 DECLARE
-  g double precision := CASE WHEN p_zoom >= 12.5 THEN 0 WHEN p_zoom >= 11 THEN 0.003 WHEN p_zoom >= 9 THEN 0.012 WHEN p_zoom >= 7 THEN 0.04 WHEN p_zoom >= 5 THEN 0.15 ELSE 0.5 END;
+  g double precision := CASE WHEN p_zoom >= 11 THEN 0 WHEN p_zoom >= 10 THEN 0.003 WHEN p_zoom >= 9 THEN 0.012 WHEN p_zoom >= 7 THEN 0.04 WHEN p_zoom >= 5 THEN 0.15 ELSE 0.5 END;
   f_sources text[] := CASE WHEN jsonb_typeof(p_filters->'sources') = 'array' AND jsonb_array_length(p_filters->'sources') > 0 THEN ARRAY(SELECT jsonb_array_elements_text(p_filters->'sources')) END;
   f_classes text[] := CASE WHEN jsonb_typeof(p_filters->'classes') = 'array' AND jsonb_array_length(p_filters->'classes') > 0 THEN ARRAY(SELECT jsonb_array_elements_text(p_filters->'classes')) END;
   f_types text[] := CASE WHEN jsonb_typeof(p_filters->'types') = 'array' AND jsonb_array_length(p_filters->'types') > 0 THEN ARRAY(SELECT lower(jsonb_array_elements_text(p_filters->'types'))) END;
@@ -167,3 +167,7 @@ GRANT EXECUTE ON FUNCTION public.get_map_sold_comp(text) TO authenticated, servi
 -- 2026-09-26 (later): buyer_class gains 'builder' (above), buyer median price,
 -- and the source record's full detail on get_map_sold_comp. Applied via MCP
 -- migration map_sold_comp_details; see that migration for the function body.
+
+-- 2026-09-27: individual sales from z11 (was 12.5), and get_map_sold_comps_list
+-- (the sales inside a tapped cluster) — applied via MCP migrations
+-- map_sold_comps_individual_from_z11 and map_sold_comps_list.

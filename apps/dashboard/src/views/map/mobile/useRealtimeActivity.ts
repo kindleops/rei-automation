@@ -53,6 +53,7 @@ function make(
     propertyId,
     threadKey: str(row.thread_key) || undefined,
     messageEventId: type !== 'stage_change' ? str(row.id) || undefined : undefined,
+    queueId: str(row.queue_id) || undefined,
     // "Show on map" selects the property; the card hydrates from property_id.
     targetType: propertyId ? 'seller' : 'system',
     targetId: propertyId,
@@ -76,7 +77,7 @@ export function eventFromMessage(row: Row): LiveActivityEvent | null {
   const dir = str(row.direction).toLowerCase()
   const status = str(row.delivery_status).toLowerCase()
   const body = str(row.message_body)
-  const snippet = body.length > 140 ? `${body.slice(0, 137)}…` : body
+  const snippet = body.length > 600 ? `${body.slice(0, 597)}…` : body
   const before = str(row.stage_before)
   const after = str(row.stage_after)
   if (dir === 'inbound') {
@@ -108,7 +109,7 @@ export function eventFromStage(row: Row, previous: string | undefined): LiveActi
   return make(`its:${key}:${stage}:${at}`, type, hot ? 'urgent' : 'attention', hot ? 'hot' : 'normal', title, row, at, previous ? `from ${STAGE_LABEL(previous)}` : undefined)
 }
 
-const ME_COLUMNS = 'id, direction, event_type, delivery_status, message_body, created_at, sent_at, received_at, delivered_at, failed_at, updated_at, property_id, thread_key, seller_display_name, market, property_address, is_opt_out, stage_before, stage_after, failure_reason, error_message'
+const ME_COLUMNS = 'id, direction, event_type, delivery_status, message_body, created_at, sent_at, received_at, delivered_at, failed_at, updated_at, property_id, thread_key, seller_display_name, market, property_address, is_opt_out, stage_before, stage_after, failure_reason, error_message, queue_id'
 
 export function useRealtimeActivity(enabled: boolean): { events: LiveActivityEvent[]; live: boolean; coveredSince: number | null } {
   const [events, setEvents] = useState<LiveActivityEvent[]>([])

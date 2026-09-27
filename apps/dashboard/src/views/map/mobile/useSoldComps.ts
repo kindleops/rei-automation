@@ -228,3 +228,29 @@ export async function loadCompDetail(compId: string): Promise<CompDetail | null>
   if (error || !data) return null
   return data as CompDetail
 }
+
+export interface CompRow {
+  comp_id: string
+  address: string | null
+  price: number | null
+  per_door: number | null
+  sold_on: string | null
+  source: CompSource
+  buyer_class: BuyerClass
+  portfolio_size: number
+  property_type: string | null
+  buyer: string | null
+}
+
+/** The individual sales inside a small box (a tapped cluster), newest first. */
+export async function loadCompsInBox(
+  box: { minLat: number; maxLat: number; minLng: number; maxLng: number },
+  filters: CompFilters,
+): Promise<CompRow[]> {
+  const { data, error } = await getSupabaseClient().rpc('get_map_sold_comps_list', {
+    p_min_lat: box.minLat, p_min_lng: box.minLng, p_max_lat: box.maxLat, p_max_lng: box.maxLng,
+    p_filters: filtersToRpc(filters),
+  })
+  if (error || !Array.isArray(data)) return []
+  return data as CompRow[]
+}

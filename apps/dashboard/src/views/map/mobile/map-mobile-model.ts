@@ -171,6 +171,12 @@ export function timeAgo(ms: number, now: number = Date.now()): string {
   return `${Math.round(h / 24)}d`
 }
 
+/** "now" stays "now"; everything else reads "5m ago". */
+export const agoLabel = (ms: number, now: number) => {
+  const t = timeAgo(ms, now)
+  return !t ? '' : t === 'now' ? 'now' : `${t} ago`
+}
+
 /** What the operator can do with the event, only when the event carries the context. */
 export function eventAction(event: Pick<LiveActivityEvent, 'targetType' | 'targetId' | 'threadKey' | 'propertyId' | 'lat' | 'lng'>):
   | { kind: 'select_property'; label: string }

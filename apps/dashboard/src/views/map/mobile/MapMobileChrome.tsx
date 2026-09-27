@@ -34,9 +34,9 @@ import {
   scopeCounts,
   tierOf,
   timeAgo,
+  agoLabel,
   type ActivityScope,
   type ActivityWindow,
-  type ActivityTier,
 } from './map-mobile-model'
 import { LENS_FAMILIES, MAP_LENSES, formatLensValue, lensById, type LensStyle, type MapLens } from './map-lenses'
 import { lensValueAt, useMapLens } from './useMapLens'
@@ -46,9 +46,10 @@ import { useRealtimeActivity } from './useRealtimeActivity'
 import { MapAreaTool } from './MapAreaTool'
 import { dotsInView, usePropertyDots } from './usePropertyDots'
 import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
-import { COMP_LAYERS, DEFAULT_COMP_FILTERS, activeCompFilterCount, useSoldComps, type CompFilters } from './useSoldComps'
+import { BUYER_CLASS_LABEL, COMP_LAYERS, COMP_SOURCE_LABEL, DEFAULT_COMP_FILTERS, activeCompFilterCount, loadCompsInBox, useSoldComps, type CompFilters, type CompRow } from './useSoldComps'
 import { CompFiltersPanel, MapCompCard } from './MapCompCard'
 import { MapSearch } from './MapSearch'
+import { MapEventCard } from './MapEventCard'
 import { landEvent, useLiveOrbs } from './useLiveOrbs'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
@@ -97,22 +98,17 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 
 /** Phone-only map preferences: the active lens and what floats on the map. */
 const LENS_STORE = 'nexus.map.mobileLens'
-interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number; liveOrbs: boolean }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true }
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number; liveOrbs: boolean; pins: boolean }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true, pins: true }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }
 
-/** "now" stays "now"; everything else reads "5m ago". */
-export const agoLabel = (ms: number, now: number) => {
-  const t = timeAgo(ms, now)
-  return !t ? '' : t === 'now' ? 'now' : `${t} ago`
-}
+export { agoLabel } from './map-mobile-model'
 
 const STAGE_SWATCH = ['#29E68B', '#FF893D', '#FF4C55']
 const lensSwatch = (lens: MapLens) => (lens.source && !lens.ambient ? undefined : STAGE_SWATCH)
 
-const TIER_LABEL: Record<ActivityTier, string> = { critical: 'Needs attention', important: 'Important', normal: 'Activity', background: 'Background' }
 
 // ── Sheet ────────────────────────────────────────────────────────────────────
 
@@ -213,20 +209,53 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const lens = lensById(prefs.lens)
   const lensLook = useMemo(() => ({ style: prefs.lensStyle, blend: prefs.lensBlend }), [prefs.lensStyle, prefs.lensBlend])
   const lensState = useMapLens(map, mapEpoch, lens, lensLook)
-  usePropertyDots(map, mapEpoch, prefs.everyProperty, prefs.everyProperty || (Boolean(lens.source) && !lens.ambient))
+  usePropertyDots(map, mapEpoch, prefs.pins && prefs.everyProperty, (prefs.pins && prefs.everyProperty) || (Boolean(lens.source) && !lens.ambient), openSearchProperty, reducedMotion)
+  // Property pins on/off: every property layer, over any lens.
+  useEffect(() => {
+    if (!map) return
+    const PIN_LAYERS = ['prop-tiles-hit', 'prop-tiles-halo', 'prop-tiles-glass', 'prop-tiles-ring', 'prop-tiles-pulse', 'prop-tiles-icon']
+    const apply = () => {
+      const vis = prefs.pins ? 'visible' : 'none'
+      for (const id of PIN_LAYERS) {
+        try { if (map.getLayer(id) && map.getLayoutProperty(id, 'visibility') !== vis) map.setLayoutProperty(id, 'visibility', vis) } catch { /* ignore */ }
+      }
+    }
+    apply()
+    map.on('styledata', apply)
+    const t = window.setInterval(apply, 1500)
+    return () => { map.off('styledata', apply); window.clearInterval(t) }
+  }, [map, mapEpoch, prefs.pins])
   // Sold comps: on with the toggle, and always under a comps lens.
   const compsOn = prefs.comps
   const comps = useSoldComps(map, mapEpoch, compsOn, { ...DEFAULT_COMP_FILTERS, ...prefs.compFilters })
   const [compId, setCompId] = useState<string | null>(null)
+  const [compList, setCompList] = useState<{ rows: CompRow[]; loading: boolean; n: number } | null>(null)
+  const compFiltersRef = useRef(prefs.compFilters)
+  compFiltersRef.current = prefs.compFilters
   useEffect(() => {
     if (!map) return
     const onPoint = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      ;(e as { _clickHandled?: boolean })._clickHandled = true
       const id = e.features?.[0]?.properties?.comp_id
       if (id) { setCompId(String(id)); setOpenEvent(null) }
     }
     const onCluster = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
-      const g = e.features?.[0]?.geometry as { coordinates?: [number, number] } | undefined
-      if (g?.coordinates) map.easeTo({ center: g.coordinates, zoom: Math.min(16, map.getZoom() + 2.2), duration: reducedMotion ? 0 : 700 })
+      ;(e as { _clickHandled?: boolean })._clickHandled = true
+      const f = e.features?.[0]
+      const g = f?.geometry as { coordinates?: [number, number] } | undefined
+      if (!g?.coordinates) return
+      const n = Number(f?.properties?.n) || 0
+      // A handful of sales: list them right here. A crowd: fly in.
+      if (n > 0 && n <= 60) {
+        const z = map.getZoom()
+        const half = z >= 10 ? 0.003 : z >= 9 ? 0.012 : 0.04
+        const [lng, lat] = g.coordinates
+        setCompList({ rows: [], loading: true, n })
+        void loadCompsInBox({ minLat: lat - half, maxLat: lat + half, minLng: lng - half, maxLng: lng + half }, { ...DEFAULT_COMP_FILTERS, ...compFiltersRef.current })
+          .then((rows) => setCompList({ rows, loading: false, n }))
+        return
+      }
+      map.easeTo({ center: g.coordinates, zoom: Math.min(16, map.getZoom() + 2.2), duration: reducedMotion ? 0 : 700 })
     }
     map.on('click', COMP_LAYERS.point, onPoint)
     map.on('click', COMP_LAYERS.cluster, onCluster)
@@ -398,9 +427,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   // constant pulse is switched off: new activity pulses once, from the overlay.
   // Under a heat lens the markers step back so the colour field reads; at
   // street zoom they return (each property then glows its own value).
-  const lensDim = !lens.source || lens.ambient ? 1 : zoom >= 13 ? 0.92 : lens.areal ? 0.22 : 0.14
-  // Sold comps on: properties step back so the red sales read.
-  const markerDim = Math.min(lensDim, compsOn ? (zoom >= 14 ? 0.7 : 0.3) : 1)
+  // Pins stay clearly visible over any heat (the operator turns them off with
+  // the Property pins switch); they only soften enough for the colour to read.
+  const lensDim = !lens.source || lens.ambient ? 1 : zoom >= 13 ? 0.95 : lens.areal ? 0.85 : 0.78
+  // Sold comps on: properties soften so the red sales read.
+  const markerDim = Math.min(lensDim, compsOn ? (zoom >= 14 ? 0.8 : 0.6) : 1)
   const originalsRef = useRef(new Map<string, unknown>())
   const appliedRef = useRef(new Map<string, string>())
   useEffect(() => { originalsRef.current = new Map(); appliedRef.current = new Map() }, [map, mapEpoch])
@@ -561,8 +592,12 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     }
   }, [map, events, activityOn, reducedMotion])
 
+  // Camera moves the home framing makes itself don't count as "the operator moved".
+  const framingRef = useRef(false)
   const fitHome = useCallback((animate: boolean) => {
     if (!map || !homeBounds) return false
+    framingRef.current = true
+    map.once('moveend', () => { framingRef.current = false })
     const [[w, s], [e, n]] = homeBounds
     const top = 130
     map.fitBounds([[w, s], [e, n]], {
@@ -579,9 +614,12 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const userMovedRef = useRef(false)
   useEffect(() => {
     if (!map) return
-    const mark = (e: { originalEvent?: unknown }) => { if (e?.originalEvent) userMovedRef.current = true }
-    map.on('dragstart', mark); map.on('zoomstart', mark)
-    return () => { map.off('dragstart', mark); map.off('zoomstart', mark) }
+    // Any move we didn't make — a drag, a pinch, a search fly-to, a tap that
+    // centres a property — means the operator has taken the camera: a late
+    // home framing must never yank it back to the national view.
+    const mark = () => { if (!framingRef.current) userMovedRef.current = true }
+    map.on('movestart', mark)
+    return () => { map.off('movestart', mark) }
   }, [map, mapEpoch])
   useEffect(() => {
     if (framedRef.current || userMovedRef.current || selectedLngLat || !homeBounds || !map) return
@@ -747,20 +785,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       )}
 
       {openEvent && (
-        <div className="mx-event" role="dialog" aria-label={openEvent.title}>
-          <div className="mx-event__head">
-            <span className={cls('mx-tier', `tier-${tierOf(openEvent)}`)}>{TIER_LABEL[tierOf(openEvent)]}</span>
-            <button type="button" className="mx-btn is-sm" aria-label="Close" data-map-sheet-close onClick={() => setOpenEvent(null)}><Icon name="close" size={13} /></button>
-          </div>
-          <strong className="mx-event__title">{openEvent.title}</strong>
-          {(openEvent.detail || openEvent.subtitle) && <p className="mx-event__detail">{openEvent.detail || openEvent.subtitle}</p>}
-          <p className="mx-event__meta">{[openEvent.address || openEvent.market, agoLabel(eventTime(openEvent), clock)].filter(Boolean).join(' · ')}</p>
-          {eventAction(openEvent) && (
-            <button type="button" className="mx-act is-primary" onClick={() => { const e = openEvent; setOpenEvent(null); onSelectEvent(e) }}>
-              {eventAction(openEvent)!.label}
-            </button>
-          )}
-        </div>
+        <MapEventCard event={openEvent} onClose={() => setOpenEvent(null)} onShowProperty={(e) => { setOpenEvent(null); onSelectEvent(e) }} />
       )}
 
       {sheet === 'layers' && (
@@ -771,6 +796,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
             label="Map settings"
             options={[{ key: 'mode', label: 'Mode' }, { key: 'appearance', label: 'Appearance' }, { key: 'intel', label: 'Intel' }, { key: 'advanced', label: 'Advanced' }]}
           />
+          {layersTab === 'mode' && (
+            <div className="mx-list">
+              <Toggle label="Property pins" sub={prefs.pins ? 'On over every mode — tap any pin for its preview' : 'Off — heat and market data only'} on={prefs.pins} onChange={(v) => setPref('pins', v)} />
+            </div>
+          )}
           {layersTab === 'mode' && LENS_FAMILIES.map((f) => (
             <section key={f.key} className="mx-block">
               <h3>{f.label}</h3>
@@ -840,6 +870,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           {layersTab === 'intel' && (
             <div className="mx-list">
               <Toggle label="Living map" sub="Glowing orbs where replies, sends, deliveries and stage moves happened today; new ones land with a shockwave" on={prefs.liveOrbs} onChange={(v) => setPref('liveOrbs', v)} />
+              <Toggle label="Property pins" sub="Every property's pin — stage ring, asset shape, activity pulse — over any mode or heat map" on={prefs.pins} onChange={(v) => setPref('pins', v)} />
               <Toggle label="Every property" sub="A glowing dot for every property at any zoom, a real pin for each one up close" on={prefs.everyProperty} onChange={(v) => setPref('everyProperty', v)} />
               <Toggle label="Sold comps" sub="Every MLS, public-record and investor sale — buyer, portfolio and hedge-fund buys flagged" on={prefs.comps} onChange={(v) => setPref('comps', v)} />
               {compsOn && (
@@ -877,6 +908,33 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
             </>
           )}
           <p className="mx-foot">{activeTheme ? `${activeTheme.label} · ` : ''}{lens.label}</p>
+        </MapSheet>
+      )}
+
+      {compList && (
+        <MapSheet title={compList.loading ? 'Sales here…' : `${compList.rows.length} sale${compList.rows.length === 1 ? '' : 's'} here`} onClose={() => setCompList(null)} className="mx-comps-list">
+          {compList.loading && <div className="mx-area__loading"><span /><span /><span /></div>}
+          <ol className="mx-feed mx-complist">
+            {compList.rows.map((r) => {
+              const instit = r.buyer_class === 'institutional' || r.buyer_class === 'hedge_fund'
+              const price = r.portfolio_size >= 2 ? r.per_door : r.price
+              return (
+                <li key={r.comp_id}>
+                  <button type="button" className={cls('mx-feedrow', 'mx-comprow', instit && 'is-gold')} onClick={() => { setCompList(null); setCompId(r.comp_id) }} data-comp-row>
+                    <span className={cls('mx-comprow__dot', `src-${r.source}`)} aria-hidden="true" />
+                    <span className="mx-row__copy">
+                      <strong>{r.address ? r.address.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : 'Sold property'}</strong>
+                      <span>{[COMP_SOURCE_LABEL[r.source], r.buyer_class !== 'unknown' ? BUYER_CLASS_LABEL[r.buyer_class] : null, r.portfolio_size >= 2 ? `portfolio of ${r.portfolio_size}` : null].filter(Boolean).join(' · ')}</span>
+                    </span>
+                    <span className="mx-comprow__price">
+                      <strong>{price ? (price >= 1e6 ? `$${(price / 1e6).toFixed(1)}M` : `$${Math.round(price / 1000)}K`) : '—'}</strong>
+                      <em>{r.sold_on ? new Date(`${r.sold_on}T12:00:00Z`).toLocaleDateString(undefined, { month: 'short', year: '2-digit' }) : ''}</em>
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ol>
         </MapSheet>
       )}
 

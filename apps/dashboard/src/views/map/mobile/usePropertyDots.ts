@@ -16,6 +16,7 @@ import { getGroupingHandoffZoom } from '../map-property-source'
 const SRC = 'nx-dots'
 const L_GLOW = 'nx-dots-glow'
 const L_CORE = 'nx-dots-core'
+const L_HIT = 'nx-dots-hit'
 const AGG_LAYERS: Array<[string, string]> = [
   ['map-agg-cluster-halo', 'circle-opacity'],
   ['map-agg-cluster-core', 'circle-opacity'],
@@ -61,6 +62,13 @@ function ensure(map: maplibregl.Map, fadeFrom: number) {
       },
     }, before)
   }
+  if (!map.getLayer(L_HIT)) {
+    // A fat, invisible target: a dot is a few pixels, a finger is not.
+    map.addLayer({
+      id: L_HIT, type: 'circle', source: SRC, 'source-layer': 'dots', maxzoom: fadeFrom + 0.5,
+      paint: { 'circle-radius': 14, 'circle-color': '#000', 'circle-opacity': 0.01 },
+    }, before)
+  }
   if (!map.getLayer(L_CORE)) {
     map.addLayer({
       id: L_CORE, type: 'circle', source: SRC, 'source-layer': 'dots', maxzoom: fadeFrom + 1,
@@ -77,7 +85,7 @@ function ensure(map: maplibregl.Map, fadeFrom: number) {
 }
 
 function setVisible(map: maplibregl.Map, on: boolean) {
-  for (const id of [L_GLOW, L_CORE]) {
+  for (const id of [L_GLOW, L_CORE, L_HIT]) {
     try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none') } catch { /* ignore */ }
   }
 }
@@ -105,8 +113,33 @@ function quietAggregates(map: maplibregl.Map, quiet: boolean) {
   }
 }
 
+export type DotOpen = (hit: { propertyId: string; lng: number; lat: number; label: string }) => void
+
 /** `quietBubbles`: count bubbles step aside (dots on, or a heat lens is showing). */
-export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean, quietBubbles: boolean = on) {
+export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean, quietBubbles: boolean = on, onOpen?: DotOpen, reducedMotion = false) {
+  // Tap a dot → that property's preview; a dot that stands for several → fly in.
+  useEffect(() => {
+    if (!map || !on) return
+    const onClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      if ((e as { _clickHandled?: boolean })._clickHandled) return
+      const f = e.features?.[0]
+      if (!f) return
+      ;(e as { _clickHandled?: boolean })._clickHandled = true
+      const g = f.geometry as { coordinates?: [number, number] }
+      const [lng, lat] = g.coordinates ?? [e.lngLat.lng, e.lngLat.lat]
+      const pid = f.properties?.property_id
+      const n = Number(f.properties?.n) || 1
+      if (pid && n === 1 && onOpen) {
+        onOpen({ propertyId: String(pid), lng, lat, label: 'Property' })
+        map.easeTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 12.5), duration: reducedMotion ? 0 : 900 })
+      } else {
+        map.easeTo({ center: [lng, lat], zoom: Math.min(16, map.getZoom() + 2.5), duration: reducedMotion ? 0 : 800 })
+      }
+    }
+    map.on('click', L_HIT, onClick)
+    return () => { map.off('click', L_HIT, onClick) }
+  }, [map, epoch, on, onOpen, reducedMotion])
+
   useEffect(() => {
     if (!map) return
     const fadeFrom = Math.max(getGroupingHandoffZoom(), FORCE_ALL_PIN_ZOOM)

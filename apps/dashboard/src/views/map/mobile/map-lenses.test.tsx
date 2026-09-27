@@ -185,3 +185,21 @@ describe('living map', () => {
     expect(Number(fresh.properties?.fresh)).toBeGreaterThan(Number(old.properties?.fresh))
   })
 })
+
+import { eventWhy } from './MapEventCard'
+
+describe('event card says why', () => {
+  const m = (over: Record<string, unknown> = {}) => ({ direction: 'inbound', message_body: 'ok', delivery_status: null, failure_reason: null, error_message: null, failure_bucket: null, is_final_failure: null, queue_id: null, stage_before: null, stage_after: null, detected_intent: null, created_at: null, thread_key: 't', seller_display_name: null, property_address: null, ...over }) as any
+  it('a failed send gives the carrier reason and whether it can be retried', () => {
+    expect(eventWhy({ type: 'message_failed' } as any, m({ failure_reason: 'Carrier blocked', is_final_failure: false }), null)).toBe('Not delivered: Carrier blocked. It can be retried.')
+    expect(eventWhy({ type: 'message_failed' } as any, m({ is_final_failure: true }), null)).toContain('final')
+  })
+  it('a reply names the intent, the stage move and the next action', () => {
+    const why = eventWhy({ type: 'new_reply' } as any, m({ detected_intent: 'asking_price', stage_before: 'ownership_check', stage_after: 'asking_price' }), { next_action: 'send_offer' } as any)
+    expect(why).toContain('Asking Price')
+    expect(why).toContain('Next: Send Offer.')
+  })
+  it('an opt-out says outreach stopped', () => {
+    expect(eventWhy({ type: 'opt_out' } as any, null, null)).toContain('suppressed')
+  })
+})
