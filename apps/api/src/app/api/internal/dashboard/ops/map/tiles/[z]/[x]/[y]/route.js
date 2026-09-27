@@ -46,6 +46,19 @@ export async function GET(request, { params }) {
     };
     const emptyTile = () => new NextResponse(new Uint8Array(0), { status: 200, headers: emptyTileHeaders });
 
+    // Every property as a dot below pin zoom (the "Every property" map option).
+    if (new URL(request.url).searchParams.get("dots") === "1") {
+      if (z < 2 || z > 14) return emptyTile();
+      const { data, error } = await supabase.rpc("get_property_map_dot_tile", { z, x, y });
+      if (error) throw error;
+      const dotBytes = decodeSupabaseBytea(data);
+      if (!dotBytes.length) return emptyTile();
+      return new NextResponse(dotBytes, {
+        status: 200,
+        headers: { "Content-Type": "application/vnd.mapbox-vector-tile", "Cache-Control": "public, max-age=300" },
+      });
+    }
+
     if (z < 9 || z > 16) {
       return emptyTile();
     }

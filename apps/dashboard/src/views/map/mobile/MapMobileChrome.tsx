@@ -44,6 +44,8 @@ import { HYBRID_THEMES, useMapImagery } from './useMapImagery'
 import { LensLegend, MarketPanel, rampGradient } from './MapIntelCards'
 import { useRealtimeActivity } from './useRealtimeActivity'
 import { MapAreaTool } from './MapAreaTool'
+import { dotsInView, usePropertyDots } from './usePropertyDots'
+import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -91,8 +93,8 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 
 /** Phone-only map preferences: the active lens and what floats on the map. */
 const LENS_STORE = 'nexus.map.mobileLens'
-interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true }
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }
@@ -197,6 +199,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   // ── Intelligence lens ──────────────────────────────────────────────────────
   const lens = lensById(prefs.lens)
   const lensState = useMapLens(map, mapEpoch, lens)
+  usePropertyDots(map, mapEpoch, prefs.everyProperty)
   useMapImagery(map, mapEpoch, { labels: prefs.labels, trueColor: prefs.trueColor, relief: prefs.relief, tilted: dimension === '3d', theme: styleMode, reducedMotion })
   // The Command Map's own mode follows the lens (marker styling, overlays).
   const modeSynced = useRef(false)
@@ -297,6 +300,8 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
         try {
+          const dots = dotsInView(map)
+          if (dots !== null) { setInView(dots); setZoom(map.getZoom()); return }
           const layers = ['prop-tiles-hit', 'command-pin-core-raw'].filter((l) => map.getLayer(l))
           if (!layers.length) { setInView(null); return }
           const ids = new Set<string>()
@@ -312,7 +317,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     // The map's own pulse animation keeps it from ever going 'idle', so count
     // on camera stops and when property data finishes arriving.
     const onData = (e: { sourceId?: string; isSourceLoaded?: boolean }) => {
-      if (e?.isSourceLoaded && (e.sourceId === 'property-map-tiles' || e.sourceId === 'command-pins-raw')) count()
+      if (e?.isSourceLoaded && (e.sourceId === 'property-map-tiles' || e.sourceId === 'command-pins-raw' || e.sourceId === 'nx-dots')) count()
     }
     map.on('moveend', count)
     map.on('sourcedata', onData)
@@ -744,6 +749,10 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
                 )
               })}
               <section className="mx-block">
+                <h3>Liquid glass</h3>
+                <LiquidGlassControls />
+              </section>
+              <section className="mx-block">
                 <h3>Perspective</h3>
                 <Segmented<'2d' | '3d'> value={dimension} onChange={onDimension} label="Perspective" options={[{ key: '2d', label: 'Flat' }, { key: '3d', label: 'Tilted' }]} />
               </section>
@@ -763,6 +772,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           )}
           {layersTab === 'intel' && (
             <div className="mx-list">
+              <Toggle label="Every property" sub="A glowing dot for every property at any zoom, a real pin for each one up close" on={prefs.everyProperty} onChange={(v) => setPref('everyProperty', v)} />
               <Toggle label="Map key" sub="What the colour on the map means, with real values" on={prefs.mapKey} onChange={(v) => setPref('mapKey', v)} />
               <Toggle label="Market panel" sub="Census, HUD rent, price growth and flood for the ZIP at the map centre" on={prefs.market} onChange={(v) => setPref('market', v)} />
               <Toggle label="Mode pill" sub="The mode and properties-in-view pill, top left" on={prefs.modePill} onChange={(v) => setPref('modePill', v)} />

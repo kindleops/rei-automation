@@ -1,0 +1,79 @@
+/*
+ * LIQUID GLASS CONTROLS — operator-chosen glass, applied to every surface
+ * that reads the shared tokens. Written by applyThemeToDOM (shared/settings.ts)
+ * as data-liquid-glass + --lg-* on <html>. Absent attribute = theme default.
+ *
+ *   --lg-blur   backdrop blur          --lg-sat    backdrop saturation
+ *   --lg-alpha  fill opacity multiplier --lg-sheen  edge-light multiplier
+ *   --lg-fill   fill colour "r g b"
+ */
+
+html[data-liquid-glass] {
+  --nx-glass-blur: var(--lg-blur);
+  --nx-glass-saturate: var(--lg-sat);
+  --nx-shell-glass-blur: calc(var(--lg-blur) + 8px);
+  --nx-shell-glass-saturate: var(--lg-sat);
+
+  --nx-glass-fill-top: rgb(var(--lg-fill) / clamp(0.03, calc(0.42 * var(--lg-alpha)), 0.97));
+  --nx-glass-fill-bottom: rgb(var(--lg-fill) / clamp(0.03, calc(0.34 * var(--lg-alpha)), 0.97));
+  --nx-glass-fill-header: rgb(var(--lg-fill) / clamp(0.02, calc(0.22 * var(--lg-alpha)), 0.95));
+  --nx-glass-fill-footer: rgb(var(--lg-fill) / clamp(0.02, calc(0.28 * var(--lg-alpha)), 0.95));
+  --nx-shell-glass-fill-top: rgb(var(--lg-fill) / clamp(0.05, calc(0.72 * var(--lg-alpha)), 0.98));
+  --nx-shell-glass-fill-bottom: rgb(var(--lg-fill) / clamp(0.05, calc(0.68 * var(--lg-alpha)), 0.98));
+  --nx-shell-glass-header: rgb(var(--lg-fill) / clamp(0.03, calc(0.38 * var(--lg-alpha)), 0.95));
+  --nx-shell-glass-footer: rgb(var(--lg-fill) / clamp(0.03, calc(0.44 * var(--lg-alpha)), 0.95));
+  --nx-glass-inner-highlight: inset 0 1px 0 rgb(255 255 255 / calc(0.08 * var(--lg-sheen)));
+  --nx-shell-glass-border: rgb(190 205 230 / calc(0.15 * var(--lg-sheen)));
+  --nx-glass-border-strong: rgb(255 255 255 / calc(0.14 * var(--lg-sheen)));
+}
+
+html[data-liquid-glass][data-nexus-theme="light"] {
+  --nx-glass-fill-top: rgb(var(--lg-fill) / clamp(0.08, calc(0.62 * var(--lg-alpha)), 0.98));
+  --nx-glass-fill-bottom: rgb(var(--lg-fill) / clamp(0.08, calc(0.52 * var(--lg-alpha)), 0.98));
+  --nx-glass-tinted-top: rgb(var(--lg-fill) / clamp(0.1, calc(0.78 * var(--lg-alpha)), 0.99));
+  --nx-glass-tinted-bottom: rgb(var(--lg-fill) / clamp(0.1, calc(0.7 * var(--lg-alpha)), 0.99));
+  --nx-glass-inner-highlight: inset 0 1px 0 rgb(255 255 255 / clamp(0.2, calc(0.8 * var(--lg-sheen)), 1));
+  --nx-glass-border: rgb(15 23 42 / calc(0.1 + 0.04 * var(--lg-sheen)));
+}
+
+/* Frost: a milky veil on top of the fill. */
+html[data-liquid-glass="frosted"] {
+  --nx-glass-inner-highlight: inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 0 0 100vmax rgb(255 255 255 / 0.035);
+}
+
+/* ── Map chrome (.mx, and its body-portaled sheets) ─────────────────────── */
+html[data-liquid-glass][data-nexus-theme] .mx,
+html[data-liquid-glass][data-nexus-theme] .mx-sheet {
+  --mx-glass: rgb(var(--lg-fill) / clamp(0.04, calc(0.72 * var(--lg-alpha)), 0.97));
+  --mx-glass-strong: rgb(var(--lg-fill) / clamp(0.08, calc(0.86 * var(--lg-alpha)), 0.98));
+  --mx-glass-hi: rgb(255 255 255 / calc(0.08 * var(--lg-sheen)));
+  --mx-glass-lo: rgb(255 255 255 / calc(0.02 * var(--lg-sheen)));
+  --mx-edge: rgb(255 255 255 / calc(0.14 * var(--lg-sheen)));
+  --mx-spec: rgb(255 255 255 / calc(0.1 * var(--lg-sheen)));
+  --mx-blur: blur(var(--lg-blur)) saturate(var(--lg-sat));
+}
+html[data-liquid-glass][data-nexus-theme="light"] .mx,
+html[data-liquid-glass][data-nexus-theme="light"] .mx-sheet {
+  --mx-glass: rgb(var(--lg-fill) / clamp(0.1, calc(0.8 * var(--lg-alpha)), 0.99));
+  --mx-glass-strong: rgb(var(--lg-fill) / clamp(0.2, calc(0.94 * var(--lg-alpha)), 0.99));
+  --mx-glass-hi: rgb(255 255 255 / clamp(0.3, calc(0.95 * var(--lg-sheen)), 1));
+  --mx-edge: rgb(11 18 32 / calc(0.06 + 0.04 * var(--lg-sheen)));
+  --mx-spec: rgb(255 255 255 / 1);
+}
+html[data-liquid-glass][data-nexus-theme] .mx-sheet__panel {
+  -webkit-backdrop-filter: blur(calc(var(--lg-blur) + 10px)) saturate(var(--lg-sat));
+  backdrop-filter: blur(calc(var(--lg-blur) + 10px)) saturate(var(--lg-sat));
+}
+
+/* Crystal: a bright prism edge on every floating control. */
+html[data-liquid-glass="crystal"] .mx-btn,
+html[data-liquid-glass="crystal"] .mx-context,
+html[data-liquid-glass="crystal"] .mx-legend,
+html[data-liquid-glass="crystal"] .mx-market,
+html[data-liquid-glass="crystal"] .mx-peek {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -8px 16px -12px color-mix(in srgb, var(--mx-accent) 55%, transparent),
+    var(--mx-shadow);
+}

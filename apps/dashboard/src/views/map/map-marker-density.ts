@@ -152,7 +152,18 @@ export const setPropertyDensityMode = (mode: PropertyDensityMode): boolean => {
 }
 export const getPropertyDensityMode = (): PropertyDensityMode => densityMode
 
+/** "Every property": no score floor, no sampling, at any pin zoom. */
+let forceAllProperties = false
+export const setForceAllProperties = (on: boolean): boolean => {
+  if (on === forceAllProperties) return false
+  forceAllProperties = on
+  currentDensityBand = null
+  return true
+}
+export const getForceAllProperties = (): boolean => forceAllProperties
+
 export const scoreFloorForZoom = (zoom: number, mode: PropertyDensityMode = densityMode): number => {
+  if (forceAllProperties) return 0
   if (mode === 'high') {
     if (zoom >= 11.5) return 0
     return zoom < 9.5 ? 60 : 30
@@ -170,6 +181,7 @@ export const scoreFloorForZoom = (zoom: number, mode: PropertyDensityMode = dens
 
 /** Share of the 0-99 bucket space admitted regardless of score, by the same bands. */
 export const sampleQuotaForZoom = (zoom: number, mode: PropertyDensityMode = densityMode): number => {
+  if (forceAllProperties) return 100
   if (mode === 'high') {
     if (zoom >= 11.5) return 100
     return zoom < 9.5 ? 12 : 40
@@ -187,7 +199,7 @@ export const sampleQuotaForZoom = (zoom: number, mode: PropertyDensityMode = den
 
 /** Zoom from which icons may overlap (every glyph drawn), by density. */
 export const iconOverlapZoom = (mode: PropertyDensityMode = densityMode): number =>
-  mode === 'high' ? 12.5 : mode === 'low' ? 15.5 : 14.5
+  forceAllProperties ? 11 : mode === 'high' ? 12.5 : mode === 'low' ? 15.5 : 14.5
 
 /**
  * The one filter, applied identically to every marker layer.
@@ -283,7 +295,7 @@ export const getDensitySelection = (): string | null => currentDensitySelection
 let currentDensityBand: string | null = null
 
 export const densityBandForZoom = (zoom: number): string =>
-  `${densityMode}:${scoreFloorForZoom(zoom)}:${sampleQuotaForZoom(zoom)}`
+  `${densityMode}:${forceAllProperties ? 'all' : ''}:${scoreFloorForZoom(zoom)}:${sampleQuotaForZoom(zoom)}`
 
 export const getDensityBand = (): string | null => currentDensityBand
 

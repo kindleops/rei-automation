@@ -11,6 +11,7 @@ import {
   type AccentPalette,
 } from '../../shared/settings'
 import { NEXUS_GLOBAL_THEME_OPTIONS } from '../../domain/theme/nexusThemes'
+import { LiquidGlassControls } from '../../shared/LiquidGlassControls'
 import type { NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 
 /**
@@ -110,6 +111,9 @@ export const MobileAppearanceControls = () => {
           )
         })}
       </div>
+
+      <h4 className="nx-mobile-appearance__subhead">Liquid glass</h4>
+      <LiquidGlassControls compact />
     </section>
   )
 }

@@ -166,6 +166,9 @@ export interface NexusSettings {
   glowIntensity: number           // 0–1
   labelDensity: number            // 0–1
 
+  /** Liquid glass — see shared/liquid-glass.ts (optional: absent = theme default). */
+  liquidGlass?: { preset: 'theme' | 'clear' | 'frosted' | 'crystal' | 'smoke' | 'custom'; blur: number; transparency: number; sheen: number }
+
   /** Mobile pinned app dock — same layout on every app/route */
   pinnedAppDock: {
     pinnedIds: string[]
@@ -590,4 +593,30 @@ export function applyThemeToDOM(): void {
   for (const prop of INLINE_ACCENT_PROPS) {
     root.style.removeProperty(prop)
   }
+
+  // Liquid glass follows the theme (its fill colour differs in Light).
+  applyLiquidGlassVars(root, settings.liquidGlass)
+}
+
+/** Kept here (not imported) so settings stays dependency-free; mirrors shared/liquid-glass.ts. */
+function applyLiquidGlassVars(root: HTMLElement, lg: NexusSettings['liquidGlass']): void {
+  const vars = ['--lg-blur', '--lg-sat', '--lg-alpha', '--lg-sheen', '--lg-fill']
+  if (!lg || lg.preset === 'theme') {
+    root.removeAttribute('data-liquid-glass')
+    for (const v of vars) root.style.removeProperty(v)
+    return
+  }
+  const light = root.getAttribute('data-nexus-theme') === 'light'
+  const fill: Record<string, [string, string]> = {
+    clear: ['12 18 30', '255 255 255'], frosted: ['58 70 92', '246 248 252'], crystal: ['14 24 42', '255 255 255'],
+    smoke: ['4 6 10', '226 230 238'], custom: ['12 18 30', '255 255 255'],
+  }
+  const t = Math.min(100, Math.max(0, lg.transparency))
+  const sat = lg.preset === 'crystal' ? 2.3 : lg.preset === 'smoke' ? 1.15 : lg.preset === 'frosted' ? 1.35 : 1.6 + lg.sheen / 250
+  root.setAttribute('data-liquid-glass', lg.preset)
+  root.style.setProperty('--lg-blur', `${Math.round(Math.min(60, Math.max(0, lg.blur)))}px`)
+  root.style.setProperty('--lg-sat', String(sat))
+  root.style.setProperty('--lg-alpha', Math.max(0.12, 1.5 - (t / 100) * 1.38).toFixed(3))
+  root.style.setProperty('--lg-sheen', (Math.min(100, Math.max(0, lg.sheen)) / 50).toFixed(3))
+  root.style.setProperty('--lg-fill', (fill[lg.preset] ?? fill.custom)[light ? 1 : 0])
 }
