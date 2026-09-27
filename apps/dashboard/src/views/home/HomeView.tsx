@@ -1,0 +1,283 @@
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Icon } from '../../shared/icons'
+import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
+import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
+import { useAuth } from '../../components/auth/AuthProvider'
+import { MobileSheet } from '../../modules/mobile/MobileSheet'
+import { buildFocusItems, dataOf, formatCount, greetingFor } from './home-signals'
+import { resolveSystemState, useHomeSignals, type HomeSignals } from './useHomeSignals'
+import { HOME_MODULE_LABELS, useHomeLayout, type HomeModuleId } from './home-layout-store'
+import { openSearch } from './home-navigation'
+import {
+  ActivityModule,
+  AutomationModule,
+  CampaignsModule,
+  DealsModule,
+  FocusModule,
+  InboxModule,
+  MarketsModule,
+  PipelineModule,
+  QuickActionsModule,
+} from './HomeModules'
+import './home.css'
+
+const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
+
+/**
+ * HOME — the mobile command surface.
+ *
+ * Answers four questions in the order an operator asks them: what matters right
+ * now (Focus), what the machine is doing (Automation), where to go next (every
+ * module deep-links into its app), and what is one tap away (Quick actions).
+ *
+ * It sits inside the standard mobile shell — the portable command bar above and
+ * the app dock below — so it reads as the top layer of one operating system rather
+ * than a separate dashboard application.
+ */
+
+// ── Operator name ───────────────────────────────────────────────────────────
+
+const readOperatorName = () => loadSettings().operatorName?.trim() ?? ''
+
+function useOperatorName(): string {
+  const configured = useSyncExternalStore(subscribeSettings, readOperatorName, () => '')
+  const { user } = useAuth()
+  if (configured) return configured.split(/\s+/)[0]
+  const meta = (user?.user_metadata ?? {}) as Record<string, unknown>
+  const fromProfile = [meta.first_name, meta.full_name, meta.name].find((v): v is string => typeof v === 'string' && v.trim() !== '')
+  return fromProfile ? fromProfile.trim().split(/\s+/)[0] : ''
+}
+
+// ── Clock (minute resolution, for the greeting and relative times) ─────────
+
+function useMinuteClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+  return now
+}
+
+// ── Greeting ────────────────────────────────────────────────────────────────
+
+function buildSummary(signals: HomeSignals, focusCritical: number): ReactNode[] {
+  const inbox = dataOf(signals.inbox)
+  const campaigns = dataOf(signals.campaigns)
+  const closings = dataOf(signals.closings)
+  const messaging = dataOf(signals.messaging)
+  const queue = dataOf(signals.queue)
+
+  const needs: ReactNode[] = []
+  if (focusCritical > 0) needs.push(<span key="crit"><b>{focusCritical}</b> urgent</span>)
+  if (inbox?.newReplies) needs.push(<span key="replies"><b>{formatCount(inbox.newReplies)}</b> {inbox.newReplies === 1 ? 'reply' : 'replies'} waiting</span>)
+  if (campaigns?.attention.length) needs.push(<span key="camp"><b>{campaigns.attention.length}</b> campaign{campaigns.attention.length === 1 ? '' : 's'} flagged</span>)
+  if (closings?.closingsThisWeek) needs.push(<span key="close"><b>{closings.closingsThisWeek}</b> closing this week</span>)
+  if (needs.length > 0) return needs.slice(0, 3)
+
+  const calm: ReactNode[] = []
+  if (queue && queue.status === 'healthy' && queue.failedToday === 0) calm.push(<span key="ok">Everything operational</span>)
+  if (messaging?.sendersActive) calm.push(<span key="send"><b>{messaging.sendersActive}</b> senders active</span>)
+  if (queue?.sentToday) calm.push(<span key="sent"><b>{formatCount(queue.sentToday)}</b> sent today</span>)
+  if (messaging?.replies) calm.push(<span key="rep"><b>{formatCount(messaging.replies)}</b> replies</span>)
+  return calm.slice(0, 3)
+}
+
+const Greeting = ({
+  now,
+  name,
+  signals,
+  focusCritical,
+  onCustomize,
+}: {
+  now: Date
+  name: string
+  signals: HomeSignals
+  focusCritical: number
+  onCustomize: () => void
+}) => {
+  const system = resolveSystemState(signals)
+  const summary = buildSummary(signals, focusCritical)
+  const dateLabel = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+  return (
+    <header className="nx-home-hello">
+      <div className="nx-home-hello__top">
+        <span className="nx-home-pill" role="status">
+          <span className={cls('nx-home-dot', system.tone !== 'unknown' && `is-${system.tone}`, system.tone !== 'unknown' && 'is-live')} aria-hidden />
+          {system.label}
+        </span>
+        <div className="nx-home-hello__actions">
+          <button type="button" className="nx-home-icon-btn" aria-label="Search sellers and properties" onClick={openSearch}>
+            <Icon name="search" size={15} />
+          </button>
+          <button type="button" className="nx-home-icon-btn" aria-label="Customize Home" onClick={onCustomize}>
+            <Icon name="grid" size={15} />
+          </button>
+        </div>
+      </div>
+      <span className="nx-home-hello__date">{dateLabel}</span>
+      <h1 className="nx-home-hello__title">
+        {greetingFor(now)}{name ? <>, <em>{name}</em></> : null}
+      </h1>
+      {summary.length > 0 ? <p className="nx-home-hello__summary">{summary}</p> : null}
+    </header>
+  )
+}
+
+// ── Customize sheet ─────────────────────────────────────────────────────────
+
+const CustomizeSheet = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
+  const { layout, move, toggleHidden, toggleCompact, reset } = useHomeLayout()
+  const [name, setName] = useState(() => loadSettings().operatorName ?? '')
+
+  return (
+    <MobileSheet open={open} title="Customize Home" subtitle="Order, show and size your modules" height="full" onClose={onClose}>
+      <div className="nx-home-customize">
+        <label className="nx-home-customize__name">
+          Your name
+          <input
+            value={name}
+            placeholder="Used in your greeting"
+            autoComplete="given-name"
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => updateSetting('operatorName', name.trim())}
+          />
+        </label>
+        {layout.order.map((id, i) => {
+          const hidden = layout.hidden.includes(id)
+          const compact = layout.compact.includes(id)
+          const meta = HOME_MODULE_LABELS[id]
+          return (
+            <div key={id} className={cls('nx-home-customize__row', hidden && 'is-hidden')}>
+              <span>
+                <strong>{meta.title}</strong>
+                <small>{meta.hint}</small>
+              </span>
+              <span className="nx-home-customize__controls">
+                <button type="button" aria-label={`Move ${meta.title} up`} disabled={i === 0} onClick={() => move(id, -1)}>
+                  <Icon name="chevron-up" size={15} />
+                </button>
+                <button type="button" aria-label={`Move ${meta.title} down`} disabled={i === layout.order.length - 1} onClick={() => move(id, 1)}>
+                  <Icon name="chevron-down" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={cls(compact && 'is-on')}
+                  aria-pressed={compact}
+                  aria-label={`${meta.title} compact`}
+                  disabled={hidden}
+                  onClick={() => toggleCompact(id)}
+                >
+                  <Icon name="list" size={15} />
+                </button>
+                <button
+                  type="button"
+                  role="switch"
+                  className={cls(!hidden && 'is-on')}
+                  aria-checked={!hidden}
+                  aria-label={`${meta.title} visible`}
+                  onClick={() => toggleHidden(id)}
+                >
+                  <Icon name={hidden ? 'slash' : 'eye'} size={15} />
+                </button>
+              </span>
+            </div>
+          )
+        })}
+        <button type="button" className="nx-home-customize__reset" onClick={reset}>Restore default layout</button>
+      </div>
+    </MobileSheet>
+  )
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
+
+export const HomeView = () => {
+  const now = useMinuteClock()
+  const name = useOperatorName()
+  const { signals, refresh, refreshing } = useHomeSignals()
+  const { notifications, loading: notificationsLoading, lastFetchedAt } = useNotificationIntelligence()
+  const { layout } = useHomeLayout()
+  const [customizing, setCustomizing] = useState(false)
+
+  const focusItems = useMemo(() => buildFocusItems({
+    inbox: dataOf(signals.inbox),
+    queue: dataOf(signals.queue),
+    campaigns: dataOf(signals.campaigns),
+    pipeline: dataOf(signals.pipeline),
+    closings: dataOf(signals.closings),
+    notifications,
+    now: now.getTime(),
+  }), [notifications, now, signals])
+
+  const sources = [signals.inbox, signals.queue, signals.campaigns, signals.pipeline, signals.closings]
+  const focusSettled = sources.every((source) => source.status !== 'loading')
+  const focusAnyAvailable = sources.some((source) => source.status === 'ready') || lastFetchedAt !== null
+  const focusCritical = focusItems.filter((item) => item.tone === 'critical').length
+  const notificationsReady = !notificationsLoading || lastFetchedAt !== null
+
+  const lastUpdated = Math.max(0, ...Object.values(signals).map((load) => (load.status === 'ready' ? load.at : 0)))
+
+  const visible = layout.order.filter((id) => !layout.hidden.includes(id))
+
+  const renderModule = (id: HomeModuleId, index: number) => {
+    const compact = layout.compact.includes(id)
+    const props = { index: index + 1, compact, signals }
+    switch (id) {
+      case 'focus':
+        return <FocusModule key={id} index={index + 1} compact={compact} items={focusItems} settled={focusSettled} anyAvailable={focusAnyAvailable} />
+      case 'actions': return <QuickActionsModule key={id} {...props} />
+      case 'automation': return <AutomationModule key={id} {...props} />
+      case 'inbox': return <InboxModule key={id} {...props} />
+      case 'pipeline': return <PipelineModule key={id} {...props} />
+      case 'campaigns': return <CampaignsModule key={id} {...props} />
+      case 'deals': return <DealsModule key={id} {...props} />
+      case 'markets': return <MarketsModule key={id} {...props} />
+      case 'activity':
+        return <ActivityModule key={id} {...props} notifications={notifications} notificationsReady={notificationsReady} />
+    }
+  }
+
+  return (
+    <div className="nx-home">
+      <div className="nx-home__ambient" aria-hidden>
+        <span className="nx-home__blob nx-home__blob--a" />
+        <span className="nx-home__blob nx-home__blob--b" />
+        <span className="nx-home__blob nx-home__blob--c" />
+        <span className="nx-home__grain" />
+        <span className="nx-home__vignette" />
+      </div>
+
+      <div className="nx-home__scroll">
+        <div className="nx-home__column">
+          <Greeting
+            now={now}
+            name={name}
+            signals={signals}
+            focusCritical={focusCritical}
+            onCustomize={() => setCustomizing(true)}
+          />
+
+          {visible.map(renderModule)}
+
+          {visible.length === 0 ? (
+            <div className="nx-home-state">
+              <Icon name="grid" size={16} />
+              <span><strong>Every module is hidden</strong>Customize Home to bring them back.</span>
+            </div>
+          ) : null}
+
+          <footer className="nx-home-footer">
+            <button type="button" onClick={() => void refresh()} disabled={refreshing}>
+              <Icon name="refresh-cw" size={13} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+            {lastUpdated > 0 ? <span>Live · updated {new Date(lastUpdated).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span> : null}
+          </footer>
+        </div>
+      </div>
+
+      <CustomizeSheet open={customizing} onClose={() => setCustomizing(false)} />
+    </div>
+  )
+}

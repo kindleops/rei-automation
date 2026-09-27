@@ -5,6 +5,7 @@ import type { AppSessionSnapshot, PinnedAppId } from './pinned-app-dock.types'
 const STORAGE_KEY = 'nx.app-session-cache.v1'
 
 const SCROLL_SELECTORS = [
+  '.nx-home__scroll',
   '.nx-intel-scroll-body',
   '.nx-inbox-list-scroll',
   '.nx-workspace-pane.is-view-thread',

@@ -1,10 +1,33 @@
 import { startTransition, useCallback, useEffect, useState } from 'react'
+import { resolveBreakpoint } from '../modules/mobile/useBreakpoint'
+import { resolveViewportMetrics } from '../modules/mobile/viewport-metrics'
 
 export const defaultRoutePath = '/inbox'
+/** Where a phone lands: the Home command surface rather than a thread list. */
+export const mobileDefaultRoutePath = '/home'
+
+/**
+ * Same test the shell uses to decide it is in the mobile layout (portrait phone,
+ * including Safari's inflated "desktop website" viewport), so a phone never lands on
+ * a route the shell then renders as desktop, or the reverse.
+ */
+const isMobileLanding = () => {
+  if (typeof window === 'undefined') return false
+  const viewport = resolveViewportMetrics({
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    screenWidth: window.screen?.width,
+    screenHeight: window.screen?.height,
+    visualViewportWidth: window.visualViewport?.width,
+    visualViewportHeight: window.visualViewport?.height,
+    orientationPortrait: window.matchMedia?.('(orientation: portrait)')?.matches,
+  })
+  return resolveBreakpoint(viewport.effectiveWidth) === 'phone' && viewport.isPortrait
+}
 
 export const normalizeRoutePath = (pathname: string) => {
   if (!pathname || pathname === '/' || pathname === '/dashboard') {
-    return defaultRoutePath
+    return isMobileLanding() ? mobileDefaultRoutePath : defaultRoutePath
   }
 
   return pathname

@@ -24,6 +24,7 @@ describe('pinned-app-dock-store', () => {
   it('ships the operator default dock, derived from the canonical registry', () => {
     expect(DEFAULT_PINNED_APP_IDS).toContain(DEAL_INTELLIGENCE_APP_ID)
     expect(new Set(DEFAULT_PINNED_APP_IDS)).toEqual(new Set([
+      '/home',
       '/inbox',
       '/map',
       '/pipeline',
