@@ -46,10 +46,12 @@ import { useRealtimeActivity } from './useRealtimeActivity'
 import { MapAreaTool } from './MapAreaTool'
 import { dotsInView, usePropertyDots } from './usePropertyDots'
 import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
+import { COMP_LAYERS, DEFAULT_COMP_FILTERS, activeCompFilterCount, useSoldComps, type CompFilters } from './useSoldComps'
+import { CompFiltersPanel, MapCompCard } from './MapCompCard'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
-type SheetKey = 'layers' | 'activity' | null
+type SheetKey = 'layers' | 'activity' | 'comps' | null
 type LayersTab = 'mode' | 'appearance' | 'intel' | 'advanced'
 
 export interface MapMobileChromeProps {
@@ -93,8 +95,8 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 
 /** Phone-only map preferences: the active lens and what floats on the map. */
 const LENS_STORE = 'nexus.map.mobileLens'
-interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true }
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }
@@ -200,6 +202,24 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const lens = lensById(prefs.lens)
   const lensState = useMapLens(map, mapEpoch, lens)
   usePropertyDots(map, mapEpoch, prefs.everyProperty)
+  // Sold comps: on with the toggle, and always under a comps lens.
+  const compsOn = prefs.comps || lens.family === 'comps'
+  const comps = useSoldComps(map, mapEpoch, compsOn, { ...DEFAULT_COMP_FILTERS, ...prefs.compFilters })
+  const [compId, setCompId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!map) return
+    const onPoint = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      const id = e.features?.[0]?.properties?.comp_id
+      if (id) { setCompId(String(id)); setOpenEvent(null) }
+    }
+    const onCluster = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
+      const g = e.features?.[0]?.geometry as { coordinates?: [number, number] } | undefined
+      if (g?.coordinates) map.easeTo({ center: g.coordinates, zoom: Math.min(16, map.getZoom() + 2.2), duration: reducedMotion ? 0 : 700 })
+    }
+    map.on('click', COMP_LAYERS.point, onPoint)
+    map.on('click', COMP_LAYERS.cluster, onCluster)
+    return () => { map.off('click', COMP_LAYERS.point, onPoint); map.off('click', COMP_LAYERS.cluster, onCluster) }
+  }, [map, mapEpoch, reducedMotion])
   useMapImagery(map, mapEpoch, { labels: prefs.labels, trueColor: prefs.trueColor, relief: prefs.relief, tilted: dimension === '3d', theme: styleMode, reducedMotion })
   // The Command Map's own mode follows the lens (marker styling, overlays).
   const modeSynced = useRef(false)
@@ -365,7 +385,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   // constant pulse is switched off: new activity pulses once, from the overlay.
   // Under a heat lens the markers step back so the colour field reads; at
   // street zoom they return (each property then glows its own value).
-  const markerDim = !lens.source || lens.ambient ? 1 : zoom >= 13 ? 0.92 : lens.areal ? 0.22 : 0.14
+  const lensDim = !lens.source || lens.ambient ? 1 : zoom >= 13 ? 0.92 : lens.areal ? 0.22 : 0.14
+  // Sold comps on: properties step back so the red sales read.
+  const markerDim = Math.min(lensDim, compsOn ? (zoom >= 14 ? 0.7 : 0.3) : 1)
   const originalsRef = useRef(new Map<string, unknown>())
   const appliedRef = useRef(new Map<string, string>())
   useEffect(() => { originalsRef.current = new Map(); appliedRef.current = new Map() }, [map, mapEpoch])
@@ -620,6 +642,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           <Icon name="chevron-down" size={13} />
         </button>
         )}
+        {compsOn && (
+          <button type="button" className="mx-chip is-comps" onClick={() => setSheet('comps')} data-map-control="comps">
+            <i aria-hidden="true" /> {comps.loading && !comps.total ? 'Comps…' : `${comps.total.toLocaleString()} sold`}{activeCompFilterCount(prefs.compFilters) ? ` · ${activeCompFilterCount(prefs.compFilters)}` : ''}
+          </button>
+        )}
         {filterCount > 0 && (
           <button type="button" className="mx-chip" onClick={onOpenFilters} data-map-control="filter-summary">
             <Icon name="filter" size={12} /> Filters · {filterCount}
@@ -660,14 +687,16 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         </div>
       )}
 
-      {!cardOpen && (prefs.market || prefs.mapKey) && (
+      {compId && <MapCompCard map={map} compId={compId} onClose={() => setCompId(null)} reducedMotion={reducedMotion} />}
+
+      {!cardOpen && !compId && (prefs.market || prefs.mapKey) && (
         <div className={cls('mx-cards', activityOn && 'has-peek')}>
           {prefs.market && <MarketPanel map={map} epoch={mapEpoch} onClose={() => setPref('market', false)} />}
           {prefs.mapKey && <LensLegend lens={lens} state={lensState} zoom={zoom} />}
         </div>
       )}
 
-      {activityOn && !cardOpen && (
+      {activityOn && !cardOpen && !compId && (
         <button type="button" className="mx-peek" data-map-control="activity-feed" onClick={() => setSheet('activity')}>
           <span className={cls('mx-peek__dot', latest && `tier-${tierOf(latest)}`)} aria-hidden="true" />
           <span className="mx-peek__copy" key={latest?.id ?? 'none'}>
@@ -773,6 +802,13 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           {layersTab === 'intel' && (
             <div className="mx-list">
               <Toggle label="Every property" sub="A glowing dot for every property at any zoom, a real pin for each one up close" on={prefs.everyProperty} onChange={(v) => setPref('everyProperty', v)} />
+              <Toggle label="Sold comps" sub="Every MLS, public-record and investor sale — buyer, portfolio and hedge-fund buys flagged" on={prefs.comps} onChange={(v) => setPref('comps', v)} />
+              {compsOn && (
+                <button type="button" className="mx-row" onClick={() => setSheet('comps')}>
+                  <span className="mx-row__copy"><strong>Comp filters</strong><span>{activeCompFilterCount(prefs.compFilters) ? `${activeCompFilterCount(prefs.compFilters)} active` : 'Source, buyer type, date, price, type, beds'}</span></span>
+                  <Icon name="chevron-right" size={16} />
+                </button>
+              )}
               <Toggle label="Map key" sub="What the colour on the map means, with real values" on={prefs.mapKey} onChange={(v) => setPref('mapKey', v)} />
               <Toggle label="Market panel" sub="Census, HUD rent, price growth and flood for the ZIP at the map centre" on={prefs.market} onChange={(v) => setPref('market', v)} />
               <Toggle label="Mode pill" sub="The mode and properties-in-view pill, top left" on={prefs.modePill} onChange={(v) => setPref('modePill', v)} />
@@ -802,6 +838,18 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
             </>
           )}
           <p className="mx-foot">{activeTheme ? `${activeTheme.label} · ` : ''}{lens.label}</p>
+        </MapSheet>
+      )}
+
+      {sheet === 'comps' && (
+        <MapSheet title="Sold comps" onClose={() => setSheet(null)} className="mx-comps-sheet"
+          header={(
+            <button type="button" className={cls('mx-switch', 'is-inline', prefs.comps && 'is-on')} role="switch" aria-checked={prefs.comps} aria-label="Show sold comps on the map" onClick={() => setPref('comps', !prefs.comps)}>
+              <span />
+            </button>
+          )}
+        >
+          <CompFiltersPanel filters={{ ...DEFAULT_COMP_FILTERS, ...prefs.compFilters }} onChange={(f) => setPref('compFilters', f)} total={comps.total} institutional={comps.institutional} />
         </MapSheet>
       )}
 
