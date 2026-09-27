@@ -49,6 +49,7 @@ import { dotsInView, usePropertyDots } from './usePropertyDots'
 import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
 import { BUYER_CLASS_LABEL, COMP_LAYERS, COMP_SOURCE_LABEL, DEFAULT_COMP_FILTERS, activeCompFilterCount, loadCompsInBox, useSoldComps, type CompFilters, type CompRow } from './useSoldComps'
 import { CompFiltersPanel, MapCompCard } from './MapCompCard'
+import { MapFocusSet } from './MapFocusSet'
 import { MapSearch } from './MapSearch'
 import { MapEventCard } from './MapEventCard'
 import { landEvent, useLiveOrbs } from './useLiveOrbs'
@@ -726,6 +727,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   return (
     <div className={cls('mx', (cardOpen || compId || compList) && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing')}>
       <MapAreaTool map={map} epoch={mapEpoch} drawing={drawing} onDrawingChange={setDrawing} reducedMotion={reducedMotion} />
+      <MapFocusSet map={map} mapEpoch={mapEpoch} reducedMotion={reducedMotion} />
       {!drawing && (
         <div className="mx-searchrow">
           <MapSearch map={map} epoch={mapEpoch} reducedMotion={reducedMotion} onProperty={openSearchProperty} onActiveChange={setSearchActive} />

@@ -68,7 +68,7 @@ export function visibleNetwork(nodes: NetworkNode[], edges: NetworkEdge[], opts:
     props = keep
   }
   const keepIds = new Set(props.map((p) => p.id))
-  const outNodes = nodes.filter((n) => (n.type !== 'property' || keepIds.has(n.id)) && !opts.hiddenTypes.has(n.type) && !(n.type === 'email' && opts.hiddenTypes.has('phone')))
+  const outNodes = nodes.filter((n) => (n.type !== 'property' || keepIds.has(n.id)) && !opts.hiddenTypes.has(n.type) && !(n.type === 'email' && opts.hiddenTypes.has('phone')) && !(n.type === 'buyer' && opts.hiddenTypes.has('sale')))
   if (hidden > 0 && !opts.hiddenTypes.has('property')) {
     outNodes.push({ id: PROPERTY_CLUSTER_ID, type: 'property', label: `+${hidden}`, sub: 'more properties', meta: { cluster: true, count: hidden } })
   }
@@ -142,6 +142,40 @@ export function layoutNetwork(nodes: NetworkNode[], edges: NetworkEdge[], anchor
       const r = baseR + (i % 2) * 34
       out.set(id, { id, x: Math.cos(a) * r, y: Math.sin(a) * r, size: 34, angle: a, ring: 3 })
     })
+  }
+
+  // Recorded documents fan out from the property they are recorded against
+  // (debt, liens, sales), and a resolved buyer/seller sits beyond its sale —
+  // so the ownership chain reads outward: property → sale → buyer.
+  const RECORD_KINDS = new Set(['financed_by', 'encumbered_by', 'sold'])
+  const recordsByProperty = new Map<string, string[]>()
+  for (const n of nodes.filter((x) => x.type === 'mortgage' || x.type === 'lien' || x.type === 'sale')) {
+    const e = edges.find((x) => x.to === n.id && RECORD_KINDS.has(x.kind))
+    const parent = e?.from ?? anchorId
+    recordsByProperty.set(parent, [...(recordsByProperty.get(parent) ?? []), n.id])
+  }
+  const typeOf = new Map(nodes.map((n) => [n.id, n.type]))
+  const kindOrder = (id: string) => ({ sale: 0, mortgage: 1, lien: 2 } as Record<string, number>)[typeOf.get(id) ?? ''] ?? 3
+  for (const [parent, idsRaw] of recordsByProperty) {
+    const ids = [...idsRaw].sort((a, b) => kindOrder(a) - kindOrder(b))
+    const p = out.get(parent)
+    const baseAngle = p && (p.x !== 0 || p.y !== 0) ? p.angle : 90 * DEG
+    const baseR = p ? Math.hypot(p.x, p.y) + 96 : 150
+    const spread = Math.min(17, 110 / Math.max(1, ids.length)) * DEG
+    ids.forEach((id, i) => {
+      const a = baseAngle + (i - (ids.length - 1) / 2) * spread
+      const r = baseR + (i % 2) * 30
+      out.set(id, { id, x: Math.cos(a) * r, y: Math.sin(a) * r, size: typeOf.get(id) === 'sale' ? 40 : 36, angle: a, ring: 4 })
+    })
+  }
+  for (const b of nodes.filter((x) => x.type === 'buyer')) {
+    if (out.has(b.id)) continue
+    const e = edges.find((x) => (x.to === b.id || x.from === b.id) && (x.kind === 'purchased_by' || x.kind === 'sold_by'))
+    const saleId = e ? (e.to === b.id ? e.from : e.to) : null
+    const s = saleId ? out.get(saleId) : null
+    if (!s) continue
+    const r = Math.hypot(s.x, s.y) + 92
+    out.set(b.id, { id: b.id, x: Math.cos(s.angle) * r, y: Math.sin(s.angle) * r, size: 46, angle: s.angle, ring: 5 })
   }
 
   // Anything left (unknown types) circles far out rather than stacking at 0,0.

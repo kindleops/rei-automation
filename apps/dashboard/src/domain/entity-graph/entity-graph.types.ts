@@ -94,14 +94,69 @@ export type EntitySearchResult = {
     wrongNumber?: boolean
     entityType?: string
     lastActivity?: string
+    ownerCorporate?: boolean
+    absentee?: boolean
+    taxDelinquent?: boolean
+    yearBuilt?: number
+    loanBalance?: number
+    lat?: number
+    lng?: number
+    /** Recorded-document facts (properties browse over v_entity_graph_properties). */
+    records?: PropertyRecordFacts
+    /* Buyer entities (browse tab=buyers). Person buyers carry no name. */
+    buyerId?: string
+    entityKind?: 'company' | 'person'
+    activityStatus?: string
+    activityScore?: number
+    archetype?: string
+    archetypeLabel?: string
+    holdFlip?: string
+    dominantFamily?: string
+    primaryMarket?: string
+    topState?: string
+    acquisitions?: number
+    trailing90?: number
+    trailing365?: number
+    perYear?: number
+    lastAcquisition?: string
+    daysSinceLast?: number
+    priceP25?: number
+    priceP50?: number
+    priceP75?: number
+    cashShare?: number
+    hasBuybox?: boolean
+    portfolioCount?: number
+    ownedCount?: number
+    soldCount?: number
+    crossover?: boolean
+    confidence?: number
+    entityGrade?: string
   }
   contextIds: {
+    buyerId?: string
     propertyId?: string
     masterOwnerId?: string
     prospectId?: string
     contactMethodId?: string
     threadKey?: string
   }
+}
+
+export type RecordSignal = { key: string; label: string; tone: 'alert' | 'warn' | 'info' }
+
+export type PropertyRecordFacts = {
+  mortgageCount: number
+  mortgageBalance?: number
+  firstRate?: number
+  firstLender?: string
+  lienCount: number
+  saleCount: number
+  lastSaleDate?: string
+  lastSalePrice?: number
+  yearsOwned?: number
+  auctionDate?: string
+  ownerBuyer?: { buyerId: string; status?: string; acquisitions?: number; basis?: string }
+  signals: RecordSignal[]
 }
 
 export type EntityGraphPagination = {
@@ -132,6 +187,8 @@ export type EntityGraphTabCounts = {
   emails: number
   markets: number
   zips: number
+  /** null when the buyer read model is unreadable. */
+  buyers?: number | null
 }
 
 export type ContactLadderEntry = {
@@ -191,6 +248,8 @@ export type EntityGraphDossier = {
   scores?: Record<string, unknown>
   graph?: { nodes: EntityGraphNode[]; edges: EntityGraphEdge[] }
   timeline?: Record<string, unknown>[]
+  /** Mortgages, liens, sales (+ buyer resolution), foreclosures, parcel. null = unavailable, not "none". */
+  records?: import('./entity-graph-intel-api').PropertyRecords | null
 }
 
 export type EntityGraphFilters = {

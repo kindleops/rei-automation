@@ -419,7 +419,6 @@ export function formatPropertySummary(row) {
     zip: zip || undefined,
     value: row.estimated_value ?? undefined,
     equity: row.equity_percent ?? row.equity_amount ?? undefined,
-    acquisitionScore: row.final_acquisition_score ?? undefined,
     flagCount: parseJsonArray(row.property_flags_text).length
       || (row.property_flags_text ? String(row.property_flags_text).split(/[;,|]/).filter(Boolean).length : 0) || undefined,
     flags: row.property_flags_text || undefined,

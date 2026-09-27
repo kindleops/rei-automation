@@ -3,11 +3,16 @@ import { Icon } from '../../../shared/icons'
 import { buildEntityGraphActions } from '../../../domain/entity-graph/entity-graph-actions'
 import {
   fetchEntityGraphDossier,
-  fetchEntityGraphLens,
   fetchEntityGraphList,
   fetchEntityGraphTabCounts,
-  type EntityGraphLens,
 } from '../../../domain/entity-graph/entity-graph-api'
+import {
+  fetchCohortPropertyIds,
+  fetchComposition,
+  fetchCompositionCatalog,
+  type Composition,
+  type CompositionDimension,
+} from '../../../domain/entity-graph/entity-graph-intel-api'
 import type {
   EntityGraphAction,
   EntityGraphDossier,
@@ -30,11 +35,10 @@ import { EntityGraphMobileTable } from './EntityGraphMobileTable'
 import { defaultVisibleColumns } from './entity-graph-table-columns'
 import { EntityGraphColumnSheet } from './EntityGraphColumnSheet'
 import { EntityGraphMobileGraph } from './EntityGraphMobileGraph'
-import { EntityGraphScopeStrip } from './EntityGraphScopeStrip'
-import { EntityGraphUniverseLens } from './EntityGraphUniverseLens'
+import { EntityGraphComposition } from './EntityGraphComposition'
+import { EntityGraphUniverseOverview } from './EntityGraphUniverseOverview'
 import { EntityGraphCampaignSheet } from './EntityGraphCampaignSheet'
-import { EntityGraphCompareSheet, type CohortSnapshot } from './EntityGraphCompareSheet'
-import { cohortLabelFor } from './entity-graph-cohort'
+import { saveSegment, type SavedSegment } from './entity-graph-segments'
 import { EntityGraphMobileFilterSheet } from './EntityGraphMobileFilterSheet'
 import { EntityGraphMobileDetailSheet } from './EntityGraphMobileDetailSheet'
 import { EntityGraphMobileSelectionDock, type BulkAction } from './EntityGraphMobileSelectionDock'
@@ -51,6 +55,7 @@ import {
   type EntityScope,
 } from './entity-graph-mobile-format'
 import './entity-graph-mobile.css'
+import './entity-graph-mobile-liquid.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -58,21 +63,8 @@ const PAGE_SIZE = 25
 
 const SEARCH_PLACEHOLDER = 'Address, owner, person, phone, email, entity…'
 
-/** Lens bucket keys → the browse filter values they correspond to. */
-const ASSET_BUCKET_TO_FILTER: Record<string, string> = {
-  sfr: 'SFR',
-  multifamily: 'Multifamily',
-  apartment: 'Apartment',
-  land: 'Land',
-  other: 'Other',
-}
-
-const SCORE_BUCKET_TO_RANGE: Record<string, { min: string; max: string }> = {
-  elite: { min: '80', max: '' },
-  strong: { min: '65', max: '79' },
-  moderate: { min: '50', max: '64' },
-  low: { min: '', max: '49' },
-}
+/** Scopes the composition endpoint can break down. Others show the count only. */
+const COMPOSITION_TABS = new Set(['properties', 'buyers'])
 
 type ViewMode = 'cards' | 'table' | 'graph'
 
@@ -87,6 +79,14 @@ type Props = {
   universalContext: UniversalEntityContext
   onUniversalContextChange: (context: UniversalEntityContext) => void
   onAction?: (action: EntityGraphAction, context: UniversalEntityContext) => void
+  /** Opens the hero relationship network for a record (the console's stage). */
+  onOpenNetwork?: (result: EntitySearchResult) => void
+  /** Opens the buyer intelligence inspector. */
+  onOpenBuyer?: (buyerId: string) => void
+  /** Hands a set of properties to the Map, emphasised. */
+  onShowOnMap?: (points: Array<{ propertyId: string; lat?: number | null; lng?: number | null; address?: string | null }>) => void
+  /** A saved segment to restore (from the console / deep link). */
+  restoreSegment?: SavedSegment | null
 }
 
 const resultKey = (result: EntitySearchResult) => `${result.entityType}:${result.entityId}`
@@ -124,8 +124,14 @@ export function EntityGraphMobile({
   universalContext,
   onUniversalContextChange,
   onAction,
+  onOpenNetwork,
+  onOpenBuyer,
+  onShowOnMap,
+  restoreSegment,
 }: Props) {
   const [scope, setScope] = useState<EntityScope>('properties')
+  /** "All" — the interconnected universe overview (no query). */
+  const [universeAll, setUniverseAll] = useState(false)
   const [sortKey, setSortKey] = useState<string>(SCOPE_DEFAULT_SORT_KEY.properties)
   const [contactSubtype, setContactSubtype] = useState<'phone' | 'email'>('phone')
   const [query, setQuery] = useState('')
@@ -163,16 +169,20 @@ export function EntityGraphMobile({
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<Record<string, string[]>>({})
 
-  // Signature-tagged, same as the list: "which cohort is this lens describing"
-  // is part of the value, so a late response for an abandoned cohort can never
-  // be shown and `loading` is derived rather than toggled inside an effect.
-  const [lensState, setLensState] = useState<{ signature: string; fast: EntityGraphLens | null; deep: EntityGraphLens | null }>(
-    { signature: '', fast: null, deep: null },
+  // Composition: signature-tagged like the list, so a late response for an
+  // abandoned cohort is never shown and `loading` is derived.
+  const [dimensionByScope, setDimensionByScope] = useState<Record<string, string>>({})
+  const [dimensions, setDimensions] = useState<Record<string, CompositionDimension[]>>({})
+  const [compositionState, setCompositionState] = useState<{ signature: string; data: Composition | null; error: boolean }>(
+    { signature: '', data: null, error: false },
   )
+  const [compositionRetry, setCompositionRetry] = useState(0)
+  const [compositionCollapsed, setCompositionCollapsed] = useState(false)
 
   const [campaignOpen, setCampaignOpen] = useState(false)
-  const [compareOpen, setCompareOpen] = useState(false)
-  const [savedCohort, setSavedCohort] = useState<CohortSnapshot | null>(null)
+  /** "Select all matching" — explicit property ids for the whole cohort. */
+  const [cohortSelection, setCohortSelection] = useState<{ signature: string; ids: string[]; points: Array<{ id: string; lat: number; lng: number }>; truncated: boolean } | null>(null)
+  const [selectingAll, setSelectingAll] = useState(false)
   const [graphFullscreen, setGraphFullscreen] = useState(false)
   const [graphState, setGraphState] = useState<{ key: string; anchor: EntitySearchResult | null; dossier: EntityGraphDossier | null }>(
     { key: '', anchor: null, dossier: null },
@@ -270,54 +280,57 @@ export function EntityGraphMobile({
     if (listRef.current) listRef.current.scrollTop = 0
   }, [querySignature])
 
-  /* ── Universe Lens ─────────────────────────────────────────────────────── */
-  // Keyed on scope + filters only. The text query is not a lens dimension: the
-  // search endpoint has no facet support, so folding it in would silently show
-  // composition for a cohort the operator is not looking at.
-  const lensSignature = `${scope}|${contactSubtype}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
-  const lensIsCurrent = lensState.signature === lensSignature
-  const lens = lensIsCurrent ? lensState.fast : null
-  const deepLens = lensIsCurrent ? lensState.deep : null
-  const lensLoading = !lensIsCurrent || !lensState.fast
+  /* ── Composition ───────────────────────────────────────────────────────── */
+  // Keyed on scope + dimension + filters. The text query is not a composition
+  // dimension (search has no facet support), so while searching the chart
+  // says it describes the filter set, not the search results.
+  const compositionTab = COMPOSITION_TABS.has(scope) ? scope : null
+  const scopeDimensions = compositionTab ? (dimensions[compositionTab] ?? []) : []
+  const dimensionKey = compositionTab ? (dimensionByScope[compositionTab] ?? scopeDimensions[0]?.key ?? null) : null
+  const compositionSignature = `${compositionTab}|${dimensionKey}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}|${compositionRetry}`
+  const compositionIsCurrent = compositionState.signature === compositionSignature
+  const composition = compositionIsCurrent ? compositionState.data : (compositionState.data?.dimension?.key === dimensionKey ? compositionState.data : null)
+  const compositionLoading = Boolean(compositionTab && dimensionKey) && !compositionIsCurrent
+  const compositionError = compositionIsCurrent && compositionState.error
 
   useEffect(() => {
+    if (!compositionTab || dimensions[compositionTab]) return
     const controller = new AbortController()
-    let cancelled = false
-    const requestSignature = lensSignature
+    void fetchCompositionCatalog(compositionTab, controller.signal)
+      .then((dims) => setDimensions((current) => ({ ...current, [compositionTab]: dims })))
+      .catch(() => { /* chart stays hidden */ })
+    return () => controller.abort()
+  }, [compositionTab, dimensions])
 
-    const params = {
-      tab: tabForScope(scope),
-      subtype: scope === 'contact_methods' ? contactSubtype : undefined,
+  useEffect(() => {
+    if (!compositionTab || !dimensionKey || compositionCollapsed) return
+    const controller = new AbortController()
+    const requestSignature = compositionSignature
+    void fetchComposition({
+      tab: compositionTab,
+      dimension: dimensionKey,
       ...filtersToApiParams(filters),
       ...fieldFiltersToApiParams(fieldFilters),
-    }
-
-    void fetchEntityGraphLens(params, controller.signal)
-      .then((fast) => {
-        if (cancelled) return
-        setLensState({ signature: requestSignature, fast, deep: null })
-        // The deep facets sit on unindexed columns; they arrive separately so
-        // the composition bar is interactive while they resolve.
-        return fetchEntityGraphLens({ ...params, part: 'deep' }, controller.signal)
-      })
-      .then((deep) => {
-        if (cancelled || !deep) return
-        setLensState((current) => (
-          current.signature === requestSignature ? { ...current, deep } : current
-        ))
-      })
+    }, controller.signal)
+      .then((data) => setCompositionState({ signature: requestSignature, data, error: !data }))
       .catch(() => {
-        if (cancelled) return
-        // Tag the failure so `lensLoading` resolves and the lens hides rather
-        // than shimmering forever.
-        setLensState((current) => (
-          current.signature === requestSignature ? current : { signature: requestSignature, fast: null, deep: null }
-        ))
+        if (controller.signal.aborted) return
+        setCompositionState({ signature: requestSignature, data: null, error: true })
       })
-
-    return () => { cancelled = true; controller.abort() }
+    return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lensSignature])
+  }, [compositionSignature, compositionCollapsed])
+
+  const toggleFieldFilter = useCallback((filter: EntityGraphFieldFilter) => {
+    setFieldFilters((current) => {
+      const same = current.find((f) => f.field_key === filter.field_key
+        && f.operator === filter.operator
+        && JSON.stringify(f.value ?? null) === JSON.stringify(filter.value ?? null))
+      if (same) return current.filter((f) => f !== same)
+      // One bucket per field: tapping another bucket of the same field swaps it.
+      return [...current.filter((f) => f.field_key !== filter.field_key), filter]
+    })
+  }, [])
 
   /* ── Fetch a page ──────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -434,7 +447,8 @@ export function EntityGraphMobile({
    * why nothing above the fold ever knew an owner had seven properties.
    */
   useEffect(() => {
-    if (!graphCandidate) return
+    // Only the in-list graph fallback needs this; the network host has its own.
+    if (!graphCandidate || viewMode !== 'graph' || onOpenNetwork) return
     const entity = selectedEntityFromResult(graphCandidate)
     const apiType = dossierApiType(entity)
     if (!apiType || !entity.id) return
@@ -454,7 +468,7 @@ export function EntityGraphMobile({
 
     return () => { cancelled = true; controller.abort() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphKey])
+  }, [graphKey, viewMode])
 
   /* ── Deep links from elsewhere in the app open the sheet ───────────────── */
   /**
@@ -539,10 +553,15 @@ export function EntityGraphMobile({
 
   /* ── Open a record ─────────────────────────────────────────────────────── */
   const openRecord = useCallback((result: EntitySearchResult) => {
+    // A buyer opens the buyer intelligence inspector, not the seller dossier.
+    if (result.entityType === 'buyer' && onOpenBuyer) {
+      onOpenBuyer(result.entityId)
+      return
+    }
     setHandledContextId(result.entityId)
     setOpenResult(result)
     onUniversalContextChange(selectedEntityToContext(selectedEntityFromResult(result), result))
-  }, [onUniversalContextChange])
+  }, [onOpenBuyer, onUniversalContextChange])
 
   const closeRecord = useCallback(() => {
     setHandledContextId(openResult?.entityId ?? null)
@@ -577,106 +596,62 @@ export function EntityGraphMobile({
 
   const handleAction = useCallback((action: EntityGraphAction) => {
     if (!actionContext) return
+    // Add to campaign from a record: that record becomes the selection and the
+    // draft sheet opens right here (a DRAFT — Campaigns decides whether it sends).
+    if (action === 'add_to_campaign' && openResult) {
+      const record = openResult
+      setCohortSelection(null)
+      setSelectionMode(true)
+      setSelectedKeys(new Set([resultKey(record)]))
+      setList((current) => (current.results.some((r) => resultKey(r) === resultKey(record))
+        ? current
+        : { ...current, results: [record, ...current.results] }))
+      closeRecord()
+      setCampaignOpen(true)
+      return
+    }
     onAction?.(action, actionContext)
     closeRecord()
-  }, [actionContext, closeRecord, onAction])
+  }, [actionContext, closeRecord, onAction, openResult])
 
-  /**
-   * Which lens buckets the current filter set corresponds to, so the bar can
-   * show an active state. Derived from the filters rather than tracked
-   * separately — the highlight can't drift from what is actually applied.
-   */
-  const activeBucketKeys = useMemo(() => {
-    const keys = new Set<string>()
-    const assetKey = Object.entries(ASSET_BUCKET_TO_FILTER)
-      .find(([, label]) => label.toLowerCase() === filters.assetType.toLowerCase())?.[0]
-    if (assetKey) keys.add(assetKey)
-    const scoreKey = Object.entries(SCORE_BUCKET_TO_RANGE)
-      .find(([, band]) => band.min === filters.scoreMin && band.max === filters.scoreMax)?.[0]
-    if (scoreKey) keys.add(scoreKey)
-    if (filters.priorityTier) keys.add(filters.priorityTier)
-    if (filters.language) keys.add(filters.language)
-    return keys
-  }, [filters])
+  /* ── Saved segments ────────────────────────────────────────────────────── */
+  const handleSaveSegment = useCallback(() => {
+    const segment = saveSegment({ scope, filters, fieldFilters, query: debouncedQuery, total })
+    setToast(`Saved segment “${segment.name}”.`)
+  }, [debouncedQuery, fieldFilters, filters, scope, total])
 
-  /* ── Lens bucket → filter ──────────────────────────────────────────────── */
-  const applyLensBucket = useCallback((dimensionKey: string, bucketKey: string) => {
-    if (dimensionKey === 'asset_type') {
-      const label = ASSET_BUCKET_TO_FILTER[bucketKey]
-      if (label) setFilters((current) => ({ ...current, assetType: current.assetType === label ? '' : label }))
-      return
-    }
-    if (dimensionKey === 'acquisition_score') {
-      const band = SCORE_BUCKET_TO_RANGE[bucketKey]
-      if (!band) return
-      setFilters((current) => {
-        const already = current.scoreMin === band.min && current.scoreMax === band.max
-        return { ...current, scoreMin: already ? '' : band.min, scoreMax: already ? '' : band.max }
+  // A segment handed in from outside (saved list, deep link) restores the cohort.
+  const [restoredSegmentId, setRestoredSegmentId] = useState<string | null>(null)
+  const [pendingSegment, setPendingSegment] = useState<SavedSegment | null>(null)
+  const segmentInput = pendingSegment ?? restoreSegment ?? null
+  if (segmentInput && segmentInput.id !== restoredSegmentId) {
+    setRestoredSegmentId(segmentInput.id)
+    setUniverseAll(false)
+    setScope(segmentInput.scope)
+    setSortKey(SCOPE_DEFAULT_SORT_KEY[segmentInput.scope])
+    setFilters({ ...EMPTY_ENTITY_GRAPH_FILTERS, ...segmentInput.filters })
+    setFieldFilters(segmentInput.fieldFilters)
+    setQuery(segmentInput.query ?? '')
+  }
+
+  /* ── Select every property in the cohort ───────────────────────────────── */
+  const cohortSignature = `${scope}|${JSON.stringify(filters)}|${JSON.stringify(fieldFilters)}`
+  const activeCohortSelection = cohortSelection && cohortSelection.signature === cohortSignature ? cohortSelection : null
+  const selectAllMatching = useCallback(() => {
+    if (scope !== 'properties' || selectingAll) return
+    setSelectingAll(true)
+    const signature = cohortSignature
+    void fetchCohortPropertyIds({ ...filtersToApiParams(filters), ...fieldFiltersToApiParams(fieldFilters), limit: 5000 })
+      .then((result) => {
+        if (!result) { setToast('Couldn’t gather the cohort — try again.'); return }
+        setCohortSelection({ signature, ids: result.ids, points: result.points, truncated: result.truncated })
+        setSelectionMode(true)
+        setToast(result.truncated
+          ? `Selected the first ${result.ids.length.toLocaleString()} matching properties (cap).`
+          : `Selected all ${result.ids.length.toLocaleString()} matching properties.`)
       })
-      return
-    }
-    if (dimensionKey === 'priority_tier') {
-      setFilters((current) => ({ ...current, priorityTier: current.priorityTier === bucketKey ? '' : bucketKey }))
-      return
-    }
-    if (dimensionKey === 'language') {
-      setFilters((current) => ({ ...current, language: current.language === bucketKey ? '' : bucketKey }))
-      return
-    }
-    /**
-     * GEOGRAPHY AND OWNERSHIP DRILL THE COHORT.
-     *
-     * These are the dimensions the Universe Lens actually returns —
-     * `state`, `market`, `city`, `county`, `property_type`, `owner_type` — and
-     * without them every tap on a real bucket fell through to the toast below
-     * and the lens was a read-only chart. Drilling from a distribution into the
-     * cohort it describes is the entire point of the Universe view.
-     *
-     * Each toggles, so tapping the active bucket clears it and the operator can
-     * climb back out without a separate control.
-     */
-    if (dimensionKey === 'state') {
-      setFilters((current) => ({ ...current, state: current.state === bucketKey ? '' : bucketKey }))
-      return
-    }
-    if (dimensionKey === 'market') {
-      setFilters((current) => ({ ...current, market: current.market === bucketKey ? '' : bucketKey }))
-      return
-    }
-    if (dimensionKey === 'city') {
-      setFilters((current) => ({ ...current, city: current.city === bucketKey ? '' : bucketKey }))
-      return
-    }
-    if (dimensionKey === 'property_type') {
-      setFilters((current) => ({ ...current, assetType: current.assetType === bucketKey ? '' : bucketKey }))
-      return
-    }
-    if (dimensionKey === 'owner_type') {
-      setFilters((current) => ({ ...current, ownerType: current.ownerType === bucketKey ? '' : bucketKey }))
-      return
-    }
-
-    // County has no browse filter to carry it, so tapping it explains rather
-    // than silently doing nothing.
-    setToast('That dimension has no matching browse filter yet — use the cohort builder.')
-  }, [])
-
-  const currentCohort: CohortSnapshot | null = useMemo(() => (
-    lens ? {
-      label: cohortLabelFor(scope, filters, lens.total ?? null),
-      scope,
-      filters,
-      savedAt: 0,
-      lens,
-      deepLens,
-    } : null
-  ), [deepLens, filters, lens, scope])
-
-  const saveCohort = useCallback(() => {
-    if (!currentCohort) return
-    setSavedCohort({ ...currentCohort, savedAt: 1 })
-    setToast(`Saved “${currentCohort.label}” as cohort A.`)
-  }, [currentCohort])
+      .finally(() => setSelectingAll(false))
+  }, [cohortSignature, fieldFilters, filters, scope, selectingAll])
 
   /* ── Bulk actions ──────────────────────────────────────────────────────── */
   const handleBulkAction = useCallback((action: BulkAction) => {
@@ -684,7 +659,13 @@ export function EntityGraphMobile({
       setToast(`${action.label}: ${action.unavailable}`)
       return
     }
-    const rows = selectedResults
+    if (action.key === 'list') {
+      handleSaveSegment()
+      return
+    }
+    const rows = activeCohortSelection
+      ? activeCohortSelection.ids.map((id) => ({ entityType: 'property', entityId: id, title: id, badges: [], linkedCounts: {}, contextIds: { propertyId: id } }) as EntitySearchResult)
+      : selectedResults
     if (rows.length === 0) return
 
     if (action.key === 'copy') {
@@ -707,10 +688,17 @@ export function EntityGraphMobile({
     }
 
     if (action.key === 'map' && rows[0]) {
+      if (onShowOnMap && scope === 'properties') {
+        const points = activeCohortSelection
+          ? activeCohortSelection.points.map((p) => ({ propertyId: p.id, lat: p.lat, lng: p.lng }))
+          : rows.map((row) => ({ propertyId: row.entityId, lat: row.details?.lat ?? null, lng: row.details?.lng ?? null, address: row.title }))
+        onShowOnMap(points)
+        return
+      }
       const context = selectedEntityToContext(selectedEntityFromResult(rows[0]), rows[0])
       onAction?.('open_in_map', context)
     }
-  }, [onAction, scope, selectedResults])
+  }, [activeCohortSelection, handleSaveSegment, onAction, onShowOnMap, scope, selectedResults])
 
   /* ── Render ────────────────────────────────────────────────────────────── */
   const resolvedTheme = themeMode === 'light' ? 'light' : themeMode === 'red_ops' ? 'red_ops' : 'dark'
@@ -718,14 +706,14 @@ export function EntityGraphMobile({
   const sortOptions = SCOPE_SORTS[scope]
   const activeSort = sortOptions.find((s) => s.key === sortKey) ?? sortOptions[0]
   const scopeColumns = visibleColumns[scope] ?? defaultVisibleColumns(scope)
-  const cohortLabel = searching
-    ? `matching “${debouncedQuery}”`
-    : activeFilterCount > 0 ? `in cohort · ${scopeTotalNoun}` : scopeTotalNoun
-
   // The Lens counts the filter set, the list counts filter + search. When a
   // search is active they are different cohorts, so the Lens says so instead of
   // implying its composition describes the search results.
-  const lensTotalForCampaign = searching ? null : (lens?.total ?? total)
+  const lensTotalForCampaign = searching ? null : (composition?.total ?? total)
+  const campaignSelection = activeCohortSelection
+    ? activeCohortSelection.ids.map((id) => ({ entityType: 'property', entityId: id, title: id, badges: [], linkedCounts: {}, contextIds: { propertyId: id } }) as EntitySearchResult)
+    : selectedResults
+  const selectedCount = activeCohortSelection ? activeCohortSelection.ids.length : selectedKeys.size
 
   // The adapter bounds the score column so the DESC index can drive the order;
   // that drops rows with no score. Say how many rather than let the operator
@@ -780,103 +768,122 @@ export function EntityGraphMobile({
           ) : null}
         </div>
 
-        <div className="egm-scopes" role="tablist" aria-label="Entity scope">
-          {/* While a query is active this chip is what "search everything" looks
-              like, and it is selected by default so the search box does what it
-              says. Without a query there is nothing to search across, so it is
-              not offered. */}
-          {debouncedQuery ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={crossTypeSearch}
-              className={cls('egm-scope', 'egm-hit', crossTypeSearch && 'is-active')}
-              onClick={() => {
-                setSearchScopeLocked(false)
-                exitSelection()
-              }}
-            >
-              <span>All types</span>
-            </button>
-          ) : null}
+        <div className="egm-scopes" role="tablist" aria-label="Universe">
+          {/* ALL: with a query it searches every type; without one it is the
+              interconnected-universe overview. */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={debouncedQuery ? crossTypeSearch : universeAll}
+            className={cls('egm-scope', 'egm-hit', 'is-all', (debouncedQuery ? crossTypeSearch : universeAll) && 'is-active')}
+            onClick={() => {
+              if (debouncedQuery) setSearchScopeLocked(false)
+              else setUniverseAll(true)
+              exitSelection()
+            }}
+          >
+            <span>All</span>
+          </button>
           {MOBILE_SCOPES.map((entry) => {
-            const count = counts?.[entry.countKey as keyof EntityGraphTabCounts] as number | undefined
-            const active = debouncedQuery ? (!crossTypeSearch && scope === entry.key) : scope === entry.key
+            const count = counts?.[entry.countKey as keyof EntityGraphTabCounts] as number | null | undefined
+            const active = debouncedQuery ? (!crossTypeSearch && scope === entry.key) : (!universeAll && scope === entry.key)
             return (
               <button
                 key={entry.key}
                 type="button"
                 role="tab"
                 aria-selected={active}
-                className={cls('egm-scope', 'egm-hit', active && 'is-active')}
+                className={cls('egm-scope', 'egm-hit', `is-${entry.key}`, active && 'is-active')}
                 onClick={() => {
-                  setScope(entry.key)
-                  // Tapping a type while searching narrows to that type — the
-                  // in-tab search that used to be the only behaviour.
+                  setUniverseAll(false)
+                  if (scope !== entry.key) {
+                    setScope(entry.key)
+                    setSortKey(SCOPE_DEFAULT_SORT_KEY[entry.key])
+                    // Field filters are per-universe; a property filter means
+                    // nothing to a buyer and would fail closed.
+                    setFieldFilters([])
+                  }
+                  // Tapping a type while searching narrows to that type.
                   setSearchScopeLocked(true)
                   exitSelection()
                 }}
               >
                 <span>{entry.label}</span>
-                {count !== undefined ? <span className="egm-scope__count">{compactCount(count)}</span> : null}
+                {typeof count === 'number' ? <span className="egm-scope__count">{compactCount(count)}</span> : null}
               </button>
             )
           })}
         </div>
       </header>
 
-      <EntityGraphUniverseLens
-        lens={lens}
-        deepLens={deepLens}
-        loading={lensLoading}
-        cohortLabel={cohortLabel}
-        filtered={activeFilterCount > 0}
-        activeBucketKeys={activeBucketKeys}
-        hasSavedCohort={Boolean(savedCohort)}
-        // The dock is 120px. On a 720px viewport the expanded lens plus the
-        // dock left the results list 4px tall and pushed the dock under the
-        // pinned app dock — the selection you are acting on has to stay visible.
-        forceCollapsed={selectionMode}
-        savedCohortLabel={savedCohort?.label ?? null}
-        onSelectBucket={applyLensBucket}
-        onSaveCohort={saveCohort}
-        onOpenCompare={() => setCompareOpen(true)}
-        onClearSaved={() => { setSavedCohort(null); setToast('Cleared saved cohort A.') }}
-      />
+      {universeAll && !debouncedQuery ? (
+        <EntityGraphUniverseOverview
+          counts={counts}
+          onOpen={(target) => {
+            setUniverseAll(false)
+            setScope(target.scope)
+            setSortKey(target.sortKey ?? SCOPE_DEFAULT_SORT_KEY[target.scope])
+            setFilters({ ...EMPTY_ENTITY_GRAPH_FILTERS })
+            setFieldFilters(target.fieldFilters ?? [])
+            exitSelection()
+          }}
+        />
+      ) : null}
 
-      <div className="egm-views" role="tablist" aria-label="View mode">
-        {VIEW_MODES.map((entry) => (
-          <button
-            key={entry.key}
-            type="button"
-            role="tab"
-            aria-selected={viewMode === entry.key}
-            className={cls('egm-view', viewMode === entry.key && 'is-active')}
-            onClick={() => setViewMode(entry.key)}
-          >
-            <Icon name={entry.icon} />
-            {entry.label}
-          </button>
-        ))}
-        {viewMode === 'table' ? (
-          <button type="button" className="egm-view is-aux" onClick={() => setColumnsOpen(true)}>
-            <Icon name="settings" />
-            Columns
-          </button>
-        ) : null}
-      </div>
+      {!universeAll || debouncedQuery ? (
+        <>
+      <div className="egm-list" ref={listRef}>
+          {compositionTab && !selectionMode ? (
+            <EntityGraphComposition
+              scopeNoun={scopeTotalNoun}
+              total={searching ? total : (composition?.total ?? total)}
+              dimensions={scopeDimensions}
+              dimensionKey={dimensionKey}
+              composition={searching ? null : composition}
+              loading={compositionLoading}
+              error={compositionError}
+              collapsed={compositionCollapsed || searching}
+              fieldFilters={fieldFilters}
+              cohortLabel={searching ? `matching “${debouncedQuery}”` : activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} · tap a bar to refine` : 'Tap a bar to filter'}
+              onToggleCollapsed={() => setCompositionCollapsed((c) => !c)}
+              onPickDimension={(key) => setDimensionByScope((current) => ({ ...current, [compositionTab]: key }))}
+              onToggleFilter={toggleFieldFilter}
+              onRetry={() => setCompositionRetry((n) => n + 1)}
+            />
+          ) : null}
 
-      {/* §9 — relationship scope, stated before anything is scrolled, and the
-          one-tap entry into the graph. */}
-      <EntityGraphScopeStrip
-        anchor={graphCandidate}
-        dossier={graphDossier}
-        loading={graphLoading}
-        active={viewMode === 'graph'}
-        onOpenGraph={() => setViewMode((mode) => (mode === 'graph' ? 'cards' : 'graph'))}
-      />
+          <div className="egm-views" role="tablist" aria-label="View mode">
+            {VIEW_MODES.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                role="tab"
+                aria-selected={viewMode === entry.key}
+                className={cls('egm-view', viewMode === entry.key && 'is-active')}
+                onClick={() => {
+                  // The graph is the relationship network of a record. With a
+                  // network host available it opens full-bleed for the open
+                  // record (or the first in the cohort) instead of a thumbnail.
+                  if (entry.key === 'graph' && onOpenNetwork) {
+                    const anchor = openResult ?? results[0]
+                    if (anchor) onOpenNetwork(anchor)
+                    return
+                  }
+                  setViewMode(entry.key)
+                }}
+              >
+                <Icon name={entry.icon} />
+                {entry.label}
+              </button>
+            ))}
+            {viewMode === 'table' ? (
+              <button type="button" className="egm-view is-aux" onClick={() => setColumnsOpen(true)} aria-label="Columns">
+                <Icon name="settings" />
+              </button>
+            ) : null}
+          </div>
 
-      <div className="egm-toolbar">
+      <div className="egm-toolbar is-sticky">
         <span className="egm-toolbar__count">
           {loading && results.length === 0 ? (
             'Loading…'
@@ -939,15 +946,6 @@ export function EntityGraphMobile({
         </button>
       </div>
 
-      {unrankedCount !== null && unrankedCount > 0 ? (
-        <div className="egm-note">
-          Score order ranks the {total?.toLocaleString()} scored properties.{' '}
-          {unrankedCount.toLocaleString()} have no acquisition score and are not ranked —
-          switch to A–Z to see the full {scopeTotal?.toLocaleString()}.
-        </div>
-      ) : null}
-
-      <div className="egm-list" ref={listRef}>
         {loading && results.length === 0 ? (
           <div className="egm-skeleton">
             {Array.from({ length: 8 }).map((_, i) => <div key={i} className="egm-skeleton__row" />)}
@@ -1056,15 +1054,21 @@ export function EntityGraphMobile({
           </div>
         ) : null}
       </div>
+        </>
+      ) : null}
 
       {selectionMode ? (
         <EntityGraphMobileSelectionDock
-          count={selectedKeys.size}
+          count={selectedCount}
           scope={scope}
           pageCount={results.length}
-          allPageSelected={allPageSelected}
-          onSelectPage={handleSelectPage}
-          onClear={exitSelection}
+          allPageSelected={allPageSelected || Boolean(activeCohortSelection)}
+          cohortTotal={scope === 'properties' ? total : null}
+          cohortSelected={Boolean(activeCohortSelection)}
+          selectingAll={selectingAll}
+          onSelectAllMatching={scope === 'properties' ? selectAllMatching : undefined}
+          onSelectPage={() => { setCohortSelection(null); handleSelectPage() }}
+          onClear={() => { setCohortSelection(null); exitSelection() }}
           onAction={handleBulkAction}
         />
       ) : null}
@@ -1084,15 +1088,7 @@ export function EntityGraphMobile({
           setFieldFilters(nextFieldFilters)
           setFiltersOpen(false)
         }}
-      />
-
-      <EntityGraphCompareSheet
-        open={compareOpen}
-        saved={savedCohort}
-        current={currentCohort}
-        onClose={() => setCompareOpen(false)}
-        onSaveCurrent={() => { saveCohort(); }}
-        onClearSaved={() => { setSavedCohort(null); setToast('Cleared saved cohort A.') }}
+        onRestoreSegment={(segment) => { setPendingSegment(segment); setToast(`Restored “${segment.name}”.`) }}
       />
 
       <EntityGraphCampaignSheet
@@ -1102,9 +1098,9 @@ export function EntityGraphMobile({
         fieldFilters={fieldFilters}
         query={debouncedQuery}
         cohortTotal={lensTotalForCampaign}
-        selected={selectedResults}
+        selected={campaignSelection}
         onClose={() => setCampaignOpen(false)}
-        onDone={(message) => { setToast(message); exitSelection() }}
+        onDone={(message) => { setToast(message); setCohortSelection(null); exitSelection() }}
       />
 
       <EntityGraphColumnSheet
@@ -1125,6 +1121,8 @@ export function EntityGraphMobile({
         onClose={closeRecord}
         onAction={handleAction}
         onOpenEntity={handleOpenEntity}
+        onOpenBuyer={onOpenBuyer}
+        onOpenGraph={openResult && onOpenNetwork ? () => { const r = openResult; closeRecord(); onOpenNetwork(r) } : undefined}
       />
     </section>
   )

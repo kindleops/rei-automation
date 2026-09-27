@@ -26,11 +26,16 @@ export const NODE_ICON: Record<string, IconName> = {
   mailing: 'inbox',
   related_owner: 'link',
   conversation: 'message',
+  mortgage: 'dollar-sign',
+  lien: 'alert',
+  sale: 'refresh-cw',
+  buyer: 'target',
 }
 
 export const TYPE_TONE: Record<string, string> = {
   owner: 'var(--egx-owner)', property: 'var(--egx-property)', entity: 'var(--egx-entity)', person: 'var(--egx-person)',
   phone: 'var(--egx-contact)', email: 'var(--egx-contact)', mailing: 'var(--egx-mailing)', related_owner: 'var(--egx-related)', conversation: 'var(--egx-convo)',
+  mortgage: 'var(--egx-debt)', lien: 'var(--egx-lien)', sale: 'var(--egx-sale)', buyer: 'var(--egx-buyer)',
 }
 
 export const EDGE_TONE: Record<string, string> = {
@@ -43,6 +48,11 @@ export const EDGE_TONE: Record<string, string> = {
   cluster: 'var(--egx-related)',
   mailing: 'var(--egx-related)',
   conversation: 'var(--egx-convo)',
+  financed_by: 'var(--egx-debt)',
+  encumbered_by: 'var(--egx-lien)',
+  sold: 'var(--egx-sale)',
+  purchased_by: 'var(--egx-buyer)',
+  sold_by: 'var(--egx-buyer)',
 }
 
 type View = { x: number; y: number; k: number }

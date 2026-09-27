@@ -88,6 +88,7 @@ export const ENTITY_GRAPH_FILTER_SOURCE_BY_TAB = Object.freeze({
   master_owners: 'master_owners',
   people: 'prospects',
   contact_methods: 'phones',
+  buyers: 'eg_buyer_index',
   // `zips` and `markets` are deliberately absent. Both are per-zip/per-market
   // AGGREGATES built by an RPC over properties, so a property column filter
   // cannot be pushed into them -- and accepting one only to ignore it is the
@@ -114,6 +115,156 @@ export const ENTITY_GRAPH_EMPTY_SOURCE_COLUMNS = Object.freeze({
   'properties.other_rooms': 'no values in a 3,318-row sample (2026-09-14)',
 })
 
+/**
+ * LEGACY PODIO-ERA SCORES ARE WITHHELD FROM ENTITY GRAPH.
+ *
+ * The campaign catalog still carries them for saved campaigns, but Entity
+ * Graph is the relationship-truth surface and must not offer, filter on, or
+ * surface them (operator instruction, 2026-09-27). A request that names one
+ * fails closed like any other unsupported field.
+ */
+export const ENTITY_GRAPH_WITHHELD_FIELDS = Object.freeze(new Set([
+  'properties.cash_offer',
+  'properties.final_acquisition_score',
+  'properties.ai_score',
+  'properties.structured_motivation_score',
+  'properties.deal_strength_score',
+  'properties.tag_distress_score',
+]))
+
+const BOOL_OPS = Object.freeze([{ key: 'is_true', label: 'Yes' }, { key: 'is_false', label: 'No' }])
+const NUM_OPS = Object.freeze([
+  { key: 'gte', label: 'At least' },
+  { key: 'lte', label: 'At most' },
+  { key: 'between', label: 'Between' },
+  { key: 'is_empty', label: 'Is empty' },
+  { key: 'is_not_empty', label: 'Has a value' },
+])
+const DATE_OPS = Object.freeze([
+  { key: 'on_or_after', label: 'On or after' },
+  { key: 'on_or_before', label: 'On or before' },
+  { key: 'between', label: 'Between' },
+  { key: 'is_empty', label: 'Is empty' },
+  { key: 'is_not_empty', label: 'Has a date' },
+])
+const TEXT_OPS = Object.freeze([
+  { key: 'contains', label: 'Contains' },
+  { key: 'is_any_of', label: 'Is any of' },
+  { key: 'is_not_any_of', label: 'Is not any of' },
+  { key: 'is_empty', label: 'Is empty' },
+  { key: 'is_not_empty', label: 'Has a value' },
+])
+const ARRAY_OPS = Object.freeze([{ key: 'is_any_of', label: 'Includes any of' }])
+
+const OPS_BY_TYPE = { boolean: BOOL_OPS, number: NUM_OPS, date: DATE_OPS, text: TEXT_OPS, enum: TEXT_OPS, array: ARRAY_OPS }
+
+function syntheticField(domain, source, category, column, label, type, extra = {}) {
+  return Object.freeze({
+    key: `${domain}.${column.replace(/^rec_/, '')}`,
+    domain,
+    category,
+    label,
+    source_table_or_view: source,
+    source_column: column,
+    type,
+    operators: OPS_BY_TYPE[type],
+    filterable: true,
+    searchable: type === 'text' || type === 'enum',
+    supports_options: type === 'enum' || type === 'array',
+    supports_counts: true,
+    // Record + buyer fields do not exist in the campaign builder's catalog, so a
+    // cohort filtered on them carries into a campaign as EXPLICIT property ids,
+    // never as a filter the builder would silently drop.
+    supported_in_preview: false,
+    entity_graph_only: true,
+    ...extra,
+  })
+}
+
+/**
+ * RECORDED DOCUMENTS ON A PROPERTY — mortgages, liens, sales, foreclosures —
+ * and the owner's buyer role. Served by public.v_entity_graph_properties (the
+ * properties table joined to property_record_summary + eg_property_owner_buyer).
+ */
+const R = (category, column, label, type, extra) => syntheticField('records', 'properties', category, column, label, type, extra)
+export const ENTITY_GRAPH_RECORD_FIELDS = Object.freeze([
+  R('Mortgages & Debt', 'rec_mortgage_count', 'Open mortgages', 'number'),
+  R('Mortgages & Debt', 'rec_mortgage_balance', 'Mortgage balance (est.)', 'number', { format: 'money' }),
+  R('Mortgages & Debt', 'rec_mortgage_payment', 'Mortgage payment (est.)', 'number', { format: 'money' }),
+  R('Mortgages & Debt', 'rec_first_rate', 'First mortgage rate', 'number', { format: 'percent' }),
+  R('Mortgages & Debt', 'rec_max_rate', 'Highest mortgage rate', 'number', { format: 'percent' }),
+  R('Mortgages & Debt', 'rec_first_lender', 'First mortgage lender', 'text'),
+  R('Mortgages & Debt', 'rec_first_loan_type', 'First loan type', 'enum'),
+  R('Mortgages & Debt', 'rec_first_recording_date', 'First mortgage recorded', 'date'),
+  R('Mortgages & Debt', 'rec_first_due_date', 'First mortgage matures', 'date'),
+  R('Mortgages & Debt', 'rec_has_private_lender', 'Private lender', 'boolean'),
+  R('Mortgages & Debt', 'rec_has_heloc', 'Credit line (HELOC)', 'boolean'),
+  R('Mortgages & Debt', 'rec_has_fha', 'FHA loan', 'boolean'),
+  R('Mortgages & Debt', 'rec_has_va', 'VA loan', 'boolean'),
+  R('Mortgages & Debt', 'rec_has_seller_financing', 'Seller-financed', 'boolean'),
+  R('Mortgages & Debt', 'rec_has_adjustable', 'Adjustable / variable rate', 'boolean'),
+  R('Liens & Notices', 'rec_lien_count', 'Recorded liens & notices', 'number'),
+  R('Liens & Notices', 'rec_lien_amount_due', 'Lien amount due', 'number', { format: 'money' }),
+  R('Liens & Notices', 'rec_lien_categories', 'Document category', 'array'),
+  R('Liens & Notices', 'rec_has_probate', 'Probate filing', 'boolean'),
+  R('Liens & Notices', 'rec_has_lis_pendens', 'Lis pendens', 'boolean'),
+  R('Liens & Notices', 'rec_has_death_record', 'Death record / affidavit', 'boolean'),
+  R('Liens & Notices', 'rec_has_divorce_record', 'Divorce record', 'boolean'),
+  R('Liens & Notices', 'rec_has_judgment', 'Judgment', 'boolean'),
+  R('Liens & Notices', 'rec_has_mechanics_lien', "Mechanic's lien", 'boolean'),
+  R('Liens & Notices', 'rec_has_tax_lien', 'Tax lien', 'boolean'),
+  R('Liens & Notices', 'rec_has_hoa_lien', 'HOA lien', 'boolean'),
+  R('Liens & Notices', 'rec_has_default_notice', 'Notice of default', 'boolean'),
+  R('Sale History', 'rec_sale_count', 'Recorded sales', 'number'),
+  R('Sale History', 'rec_last_sale_date', 'Last sale date', 'date'),
+  R('Sale History', 'rec_last_sale_price', 'Last sale price', 'number', { format: 'money' }),
+  R('Sale History', 'rec_last_sale_doc_type', 'Last sale document', 'enum'),
+  R('Sale History', 'rec_last_sale_distress', 'Last sale was a trustee / sheriff deed', 'boolean'),
+  R('Sale History', 'rec_last_sale_intrafamily', 'Last sale was intrafamily / quitclaim', 'boolean'),
+  R('Sale History', 'rec_years_owned', 'Years since last sale', 'number'),
+  R('Foreclosure', 'rec_foreclosure_count', 'Foreclosure filings', 'number'),
+  R('Foreclosure', 'rec_foreclosure_stage', 'Foreclosure stage', 'enum'),
+  R('Foreclosure', 'rec_auction_date', 'Auction date', 'date'),
+  R('Buyer Crossover', 'rec_owner_buyer_status', 'Owner is a known buyer — activity', 'enum'),
+  R('Buyer Crossover', 'rec_owner_buyer_acquisitions', 'Owner’s observed purchases', 'number'),
+  R('Buyer Crossover', 'rec_owner_buyer_basis', 'Owner↔buyer match basis', 'enum'),
+])
+
+/** Buyer entities (public.eg_buyer_index — service-role read model over comp_private). */
+const B = (category, column, label, type, extra) => syntheticField('buyers', 'eg_buyer_index', category, column, label, type, extra)
+export const ENTITY_GRAPH_BUYER_FIELDS = Object.freeze([
+  B('Activity', 'activity_status', 'Activity status', 'enum'),
+  B('Activity', 'days_since_last', 'Days since last purchase', 'number'),
+  B('Activity', 'trailing_90d', 'Purchases, last 90 days', 'number'),
+  B('Activity', 'trailing_180d', 'Purchases, last 180 days', 'number'),
+  B('Activity', 'trailing_365d', 'Purchases, last 12 months', 'number'),
+  B('Activity', 'acquisition_count', 'Observed purchases', 'number'),
+  B('Activity', 'acquisitions_per_year', 'Purchases per year', 'number'),
+  B('Activity', 'last_acquisition', 'Last purchase', 'date'),
+  B('Activity', 'first_acquisition', 'First purchase', 'date'),
+  B('Behaviour', 'archetype', 'Archetype', 'enum'),
+  B('Behaviour', 'hold_flip', 'Hold / flip', 'enum'),
+  B('Behaviour', 'cash_share', 'Cash purchase share', 'number', { format: 'share' }),
+  B('Behaviour', 'has_buybox', 'Has a derived buy box', 'boolean'),
+  B('Geography', 'states', 'States bought in', 'array'),
+  B('Geography', 'counties', 'Counties bought in', 'array'),
+  B('Geography', 'zips', 'ZIPs bought in', 'array'),
+  B('Geography', 'primary_market', 'Primary market', 'text'),
+  B('Assets & Price', 'dominant_family', 'Dominant asset class', 'enum'),
+  B('Assets & Price', 'asset_families', 'Asset classes bought', 'array'),
+  B('Assets & Price', 'price_p50', 'Median purchase price', 'number', { format: 'money' }),
+  B('Assets & Price', 'price_p25', 'Low purchase price (p25)', 'number', { format: 'money' }),
+  B('Assets & Price', 'price_p75', 'High purchase price (p75)', 'number', { format: 'money' }),
+  B('Portfolio & Roles', 'portfolio_count', 'Observed portfolio size', 'number'),
+  B('Portfolio & Roles', 'owned_count', 'Owns properties in our universe', 'number'),
+  B('Portfolio & Roles', 'sold_count', 'Observed sales (as seller)', 'number'),
+  B('Portfolio & Roles', 'is_crossover', 'Both owns and has sold', 'boolean'),
+  B('Identity', 'entity_type', 'Company or individual', 'enum'),
+  B('Identity', 'confidence', 'Identity confidence', 'number', { format: 'share' }),
+])
+
+const SYNTHETIC_BY_KEY = new Map([...ENTITY_GRAPH_RECORD_FIELDS, ...ENTITY_GRAPH_BUYER_FIELDS].map((field) => [field.key, field]))
+
 export const ENTITY_GRAPH_FILTERABLE_TABS = Object.freeze(Object.keys(ENTITY_GRAPH_FILTER_SOURCE_BY_TAB))
 
 export function entityGraphFilterSourceForTab(tab) {
@@ -129,9 +280,15 @@ function decorate(field) {
 export function getEntityGraphFilterFields(tab) {
   const source = entityGraphFilterSourceForTab(tab)
   if (!source) return []
-  return CAMPAIGN_FIELD_CATALOG
-    .filter((field) => field.source_table_or_view === source && field.filterable)
+  if (source === 'eg_buyer_index') return [...ENTITY_GRAPH_BUYER_FIELDS]
+  const catalog = CAMPAIGN_FIELD_CATALOG
+    .filter((field) => field.source_table_or_view === source && field.filterable && !ENTITY_GRAPH_WITHHELD_FIELDS.has(field.key))
     .map(decorate)
+  return source === 'properties' ? [...catalog, ...ENTITY_GRAPH_RECORD_FIELDS] : catalog
+}
+
+function lookupField(fieldKey) {
+  return SYNTHETIC_BY_KEY.get(fieldKey) || getCampaignFieldDefinition(fieldKey)
 }
 
 /** The same fields grouped for the filter builder, one group per catalog category. */
@@ -213,8 +370,12 @@ export function resolveEntityGraphFieldFilters(tab, requested = []) {
       unsupported.push({ field_key: null, reason: 'missing_field_key' })
       continue
     }
-    const fieldKey = normalizeCampaignFieldKey(requestedKey)
-    const field = getCampaignFieldDefinition(fieldKey)
+    const fieldKey = SYNTHETIC_BY_KEY.has(requestedKey) ? requestedKey : normalizeCampaignFieldKey(requestedKey)
+    if (ENTITY_GRAPH_WITHHELD_FIELDS.has(fieldKey)) {
+      unsupported.push({ field_key: fieldKey, reason: 'field_withheld_from_entity_graph' })
+      continue
+    }
+    const field = lookupField(fieldKey)
     if (!field) {
       unsupported.push({ field_key: requestedKey, reason: 'unknown_campaign_field' })
       continue
@@ -271,7 +432,16 @@ export class EntityGraphUnsupportedFilterError extends Error {
 
 export function applyEntityGraphFieldFilters(query, resolved = []) {
   if (!resolved.length) return query
-  return applySupabaseFilters(query, resolved)
+  // Array columns (buyer geography, lien categories) are an OVERLAP test; the
+  // shared compiler has no array type, so they are applied here directly.
+  const arrays = resolved.filter((entry) => entry.fieldDefinition?.type === 'array')
+  const scalar = resolved.filter((entry) => entry.fieldDefinition?.type !== 'array')
+  let next = scalar.length ? applySupabaseFilters(query, scalar) : query
+  for (const entry of arrays) {
+    const values = (Array.isArray(entry.value) ? entry.value : [entry.value]).map(clean).filter(Boolean)
+    if (values.length) next = next.overlaps(entry.source_column, values)
+  }
+  return next
 }
 
 /**

@@ -15,9 +15,13 @@ import type {
 } from '../../../domain/entity-graph/entity-graph-field-filters'
 import {
   completeFieldFilters,
+  defaultOperatorFor,
+  defaultValueFor,
   fetchEntityGraphFilterCatalog,
 } from '../../../domain/entity-graph/entity-graph-field-filters'
 import { EntityGraphFieldFilterBuilder } from '../EntityGraphFieldFilterBuilder'
+import { PRESETS, presetActive, togglePreset } from './entity-graph-presets'
+import { deleteSegment, readSegments, type SavedSegment } from './entity-graph-segments'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -82,6 +86,7 @@ type Props = {
   fieldFilters: EntityGraphFieldFilter[]
   onClose: () => void
   onApply: (filters: EntityGraphFilters, fieldFilters: EntityGraphFieldFilter[]) => void
+  onRestoreSegment?: (segment: SavedSegment) => void
 }
 
 /**
@@ -98,7 +103,10 @@ export function EntityGraphMobileFilterSheet({
   scopeTotal,
   onClose,
   onApply,
+  onRestoreSegment,
 }: Props) {
+  const [segments, setSegments] = useState<SavedSegment[]>([])
+  const [openGroup, setOpenGroup] = useState<string | null>(null)
   const [draft, setDraft] = useState<EntityGraphFilters>(filters)
   const [fieldDraft, setFieldDraft] = useState<EntityGraphFieldFilter[]>(fieldFilters)
   const [wasOpen, setWasOpen] = useState(open)
@@ -137,8 +145,10 @@ export function EntityGraphMobileFilterSheet({
     if (open) {
       setDraft(filters)
       setFieldDraft(fieldFilters)
+      setSegments(readSegments())
     }
   }
+  const presetGroups = PRESETS[scope] ?? []
 
   const patch = (key: FilterKey, value: string | boolean) => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -172,6 +182,33 @@ export function EntityGraphMobileFilterSheet({
           <p>Count updates when you apply. Only filters the browse adapter can execute are offered.</p>
         </div>
 
+        {presetGroups.length > 0 ? (
+          <section className="egf-presets">
+            {presetGroups.map((group) => (
+              <div key={group.label} className="egf-presets__group">
+                <h4>{group.label}</h4>
+                <div className="egf-presets__chips">
+                  {group.presets.map((preset) => {
+                    const on = presetActive(fieldDraft, preset)
+                    return (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        className={cls('egf-preset', preset.tone && `is-${preset.tone}`, on && 'is-on')}
+                        aria-pressed={on}
+                        onClick={() => setFieldDraft((current) => togglePreset(current, preset))}
+                      >
+                        {on ? <Icon name="check" /> : null}
+                        {preset.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </section>
+        ) : null}
+
         <section className="egm-filters__section">
           <EntityGraphFieldFilterBuilder
             catalog={catalog}
@@ -181,6 +218,64 @@ export function EntityGraphMobileFilterSheet({
             onChange={setFieldDraft}
           />
         </section>
+
+        {catalog && catalog.groups.length > 0 ? (
+          <section className="egf-browse">
+            <h4>Every field · {catalog.total_fields}</h4>
+            {catalog.groups.map((group) => {
+              const expanded = openGroup === group.id
+              return (
+                <div key={group.id} className={cls('egf-browse__group', expanded && 'is-open')}>
+                  <button type="button" className="egf-browse__head" onClick={() => setOpenGroup(expanded ? null : group.id)} aria-expanded={expanded}>
+                    <span>{group.label}</span>
+                    <small>{group.fields.length}</small>
+                    <Icon name={expanded ? 'chevron-up' : 'chevron-down'} />
+                  </button>
+                  {expanded ? (
+                    <div className="egf-browse__fields">
+                      {group.fields.map((field) => {
+                        const used = fieldDraft.some((f) => f.field_key === field.key)
+                        return (
+                          <button
+                            key={field.key}
+                            type="button"
+                            className={cls('egf-field', used && 'is-used')}
+                            onClick={() => {
+                              if (used) return
+                              const operator = defaultOperatorFor(field)
+                              setFieldDraft((current) => [...current, { field_key: field.key, operator, value: defaultValueFor(field, operator) }])
+                            }}
+                          >
+                            <span>{field.label}</span>
+                            {field.data_coverage === 'empty' ? <em>no data</em> : used ? <Icon name="check" /> : <Icon name="chevron-right" />}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </section>
+        ) : null}
+
+        {segments.length > 0 && onRestoreSegment ? (
+          <section className="egf-segments">
+            <h4>Saved segments</h4>
+            {segments.slice(0, 12).map((segment) => (
+              <div key={segment.id} className="egf-segment">
+                <button type="button" className="egf-segment__open" onClick={() => { onRestoreSegment(segment); onClose() }}>
+                  <Icon name="bookmark" />
+                  <span>
+                    <b>{segment.name}</b>
+                    <small>{segment.total !== null && segment.total !== undefined ? `${segment.total.toLocaleString()} when saved · ` : ''}{new Date(segment.savedAt).toLocaleDateString()}</small>
+                  </span>
+                </button>
+                <button type="button" className="egf-segment__del" aria-label={`Delete ${segment.name}`} onClick={() => setSegments(deleteSegment(segment.id))}>×</button>
+              </div>
+            ))}
+          </section>
+        ) : null}
 
         {chips.length > 0 ? (
           <div className="egm-filters__chips">
@@ -223,15 +318,18 @@ export function EntityGraphMobileFilterSheet({
                 </label>
                 <Field label="Units min" value={draft.unitsMin} onChange={(v) => patch('unitsMin', v)} type="number" inputMode="numeric" />
                 <Field label="Units max" value={draft.unitsMax} onChange={(v) => patch('unitsMax', v)} type="number" inputMode="numeric" />
-                {/* Named for its author (§24). This bounds
-                    `properties.final_acquisition_score`, a Podio-era screening
-                    output the current Decision Engine never reads — a legitimate
-                    corpus selector, and not this system's verdict on a deal. */}
-                <Field label="Legacy screening min" value={draft.scoreMin} onChange={(v) => patch('scoreMin', v)} type="number" inputMode="numeric" />
-                <Field label="Legacy screening max" value={draft.scoreMax} onChange={(v) => patch('scoreMax', v)} type="number" inputMode="numeric" />
               </div>
             </section>
           </>
+        ) : null}
+
+        {scope === 'buyers' ? (
+          <section className="egm-fsection">
+            <h4>Geography</h4>
+            <div className="egm-fgrid is-single">
+              <Field label="Bought in state" value={draft.state} onChange={(v) => patch('state', v)} placeholder="TX" />
+            </div>
+          </section>
         ) : null}
 
         {scope === 'master_owners' ? (

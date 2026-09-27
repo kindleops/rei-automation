@@ -19,14 +19,15 @@ import type {
  * the margin?
  */
 
-export type EntityScope = 'properties' | 'master_owners' | 'people' | 'organizations' | 'contact_methods'
+export type EntityScope = 'properties' | 'master_owners' | 'buyers' | 'people' | 'organizations' | 'contact_methods'
 
 /** Scopes that are real entity universes. Markets/ZIPs are filter dimensions. */
 export const MOBILE_SCOPES: Array<{ key: EntityScope; label: string; countKey: string; noun: string }> = [
   { key: 'properties', label: 'Properties', countKey: 'properties', noun: 'properties' },
   { key: 'master_owners', label: 'Owners', countKey: 'master_owners', noun: 'owners' },
+  { key: 'buyers', label: 'Buyers', countKey: 'buyers', noun: 'buyers' },
+  { key: 'organizations', label: 'Companies', countKey: 'organizations', noun: 'companies' },
   { key: 'people', label: 'People', countKey: 'people', noun: 'people' },
-  { key: 'organizations', label: 'Entities', countKey: 'organizations', noun: 'entities' },
   { key: 'contact_methods', label: 'Contacts', countKey: 'contact_methods', noun: 'contacts' },
 ]
 
@@ -48,19 +49,14 @@ export const SCOPE_SORTS: Record<EntityScope, SortOption[]> = {
     { key: 'value', label: 'Top value', sortBy: 'estimated_value', ascending: false },
     { key: 'address', label: 'A–Z', sortBy: 'property_address_full', ascending: true },
     { key: 'market', label: 'Market', sortBy: 'market', ascending: true },
-    /**
-     * §9/§24 — kept as CAPABILITY, renamed so it cannot be mistaken for the
-     * engine's verdict.
-     *
-     * `final_acquisition_score` is a Podio-era screening output the current
-     * Decision Engine never reads. Sorting by it is a legitimate way to walk the
-     * corpus — 104,217 rows carry one — but it was labelled "Top score" and was
-     * the DEFAULT, so the first thing an operator saw was a list ranked by a
-     * retired system's heuristic, presented as this system's ranking, with the
-     * 65,580 unscored rows silently excluded. The default is now Top value,
-     * which is a current field and hides nothing.
-     */
-    { key: 'score', label: 'Legacy screening', sortBy: 'final_acquisition_score', ascending: false },
+    { key: 'equity', label: 'Top equity', sortBy: 'equity_percent', ascending: false },
+    // Podio-era screening scores are withheld from Entity Graph entirely.
+  ],
+  buyers: [
+    { key: 'purchases', label: 'Most purchases', sortBy: 'acquisition_count', ascending: false },
+    { key: 'recent', label: 'Most recent', sortBy: 'last_acquisition', ascending: false },
+    { key: 'year', label: 'Last 12 months', sortBy: 'trailing_365d', ascending: false },
+    { key: 'owns', label: 'Owns most here', sortBy: 'owned_count', ascending: false },
   ],
   master_owners: [
     { key: 'priority', label: 'Priority', sortBy: 'priority_score', ascending: false },
@@ -84,6 +80,7 @@ export const SCOPE_SORTS: Record<EntityScope, SortOption[]> = {
 export const SCOPE_DEFAULT_SORT_KEY: Record<EntityScope, string> = {
   properties: 'value',
   master_owners: 'priority',
+  buyers: 'purchases',
   people: 'contact',
   organizations: 'name',
   contact_methods: 'rank',
@@ -198,6 +195,11 @@ export function resolveIdentity(scope: EntityScope, result: EntitySearchResult):
   switch (scope) {
     case 'properties': return resolvePropertyIdentity(result)
     case 'master_owners': return resolveOwnerIdentity(result)
+    case 'buyers': return {
+      primary: text(result.title) ?? 'Buyer',
+      secondary: text(result.subtitle),
+      gap: null,
+    }
     case 'people': return resolvePersonIdentity(result)
     case 'organizations': return resolveOrganizationIdentity(result)
     case 'contact_methods': return resolveContactIdentity(result)
@@ -407,6 +409,7 @@ const ENTITY_TYPE_TO_SCOPE: Record<string, EntityScope> = {
   phone: 'contact_methods',
   email: 'contact_methods',
   contact_method: 'contact_methods',
+  buyer: 'buyers',
 }
 
 /** The tab a deep-linked entity type belongs to, so a link can be resolved by id. */
@@ -471,7 +474,6 @@ export type FilterGroupKey = 'geography' | 'property' | 'ownership' | 'people' |
 export const FILTER_GROUPS: Array<{ key: FilterGroupKey; label: string; hint: string }> = [
   { key: 'geography', label: 'Geography', hint: 'Market, state, city, ZIP' },
   { key: 'property', label: 'Property', hint: 'Asset type and unit count' },
-  { key: 'acquisition', label: 'Score & value', hint: 'Acquisition score band' },
   { key: 'ownership', label: 'Ownership', hint: 'Owner type, tier, coverage' },
   { key: 'people', label: 'People', hint: 'Language' },
   { key: 'contactability', label: 'Contactability', hint: 'Contact status and reachability' },
@@ -503,8 +505,9 @@ export const FILTER_GROUP_BY_KEY: Partial<Record<FilterKey, FilterGroupKey>> = {
 
 /** Which scopes actually apply which filter, mirroring the service. */
 const SCOPE_FILTERS: Record<EntityScope, FilterKey[]> = {
-  properties: ['market', 'city', 'state', 'zip', 'assetType', 'unitsMin', 'unitsMax', 'scoreMin', 'scoreMax'],
+  properties: ['market', 'city', 'state', 'zip', 'assetType', 'unitsMin', 'unitsMax'],
   master_owners: ['market', 'ownerType', 'priorityTier', 'coverageMin'],
+  buyers: ['state'],
   people: ['language', 'reachable'],
   organizations: ['entityType'],
   contact_methods: ['contactStatus', 'reachable'],
@@ -561,37 +564,34 @@ export type BulkAction = {
  * operator act on a set the backend never received.
  */
 export function bulkActionsForScope(scope: EntityScope, count: number): BulkAction[] {
-  const canMap = scope === 'properties' && count === 1
+  const none = count === 0 ? 'Select records first.' : null
+  if (scope === 'buyers') {
+    return [
+      { key: 'list', label: 'Save segment', icon: 'bookmark', unavailable: null, primary: true },
+      { key: 'copy', label: 'Copy IDs', icon: 'file-text', unavailable: none },
+      { key: 'export', label: 'Export CSV', icon: 'archive', unavailable: none },
+    ]
+  }
   return [
     {
       key: 'campaign',
       label: 'Add to Campaign',
       icon: 'send',
       primary: true,
-      // Real now: `properties.property_id` was already mapped in the campaign
-      // target graph and already preview-supported; it was simply missing from
-      // the field catalog, so validation rejected it as an unknown field before
-      // the mapping was consulted. With it registered, an explicit id list
-      // resolves and Campaigns runs its normal readiness pipeline over it.
-      unavailable: count === 0 ? 'Select records first.' : null,
+      // Explicit property ids (`properties.property_id in [...]`) — a DRAFT
+      // only; Campaigns still runs its own readiness before anything sends.
+      unavailable: none,
     },
-    {
-      key: 'list',
-      label: 'Add to List',
-      icon: 'bookmark',
-      unavailable: 'No saved-list table exists in the schema yet.',
-    },
+    // A saved segment is the filter set itself (local to this device), so it
+    // re-resolves later rather than freezing today's rows.
+    { key: 'list', label: 'Save segment', icon: 'bookmark', unavailable: null },
     {
       key: 'map',
-      label: 'Open in Map',
+      label: 'Show on Map',
       icon: 'map',
-      unavailable: canMap
-        ? null
-        : scope === 'properties'
-          ? 'Map opens one property at a time.'
-          : 'Map handoff is property-scoped.',
+      unavailable: scope === 'properties' ? none : 'Map handoff is property-scoped.',
     },
-    { key: 'copy', label: 'Copy IDs', icon: 'file-text', unavailable: null },
-    { key: 'export', label: 'Export CSV', icon: 'archive', unavailable: null },
+    { key: 'copy', label: 'Copy IDs', icon: 'file-text', unavailable: none },
+    { key: 'export', label: 'Export CSV', icon: 'archive', unavailable: none },
   ]
 }

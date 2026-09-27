@@ -64,7 +64,7 @@ function sampleValueFor(field) {
 test("every filterable tab maps to the table its browse query reads", () => {
   assert.deepEqual(
     ENTITY_GRAPH_FILTER_SOURCE_BY_TAB,
-    { properties: "properties", master_owners: "master_owners", people: "prospects", contact_methods: "phones" },
+    { properties: "properties", master_owners: "master_owners", people: "prospects", contact_methods: "phones", buyers: "eg_buyer_index" },
   );
   // markets and zips are RPC aggregates -- a property column filter cannot be
   // pushed into them, so they must not claim support.
@@ -78,6 +78,15 @@ test("the exposed fields come from the campaign catalog, not a second list", () 
     const fields = getEntityGraphFilterFields(tab);
     assert.ok(fields.length > 0, `${tab} exposes no fields`);
     for (const field of fields) {
+      // Entity-Graph-only fields (recorded documents, buyer intelligence) are
+      // declared once in entity-graph-field-filters.js and flagged as such;
+      // they never pose as campaign catalog fields.
+      if (field.entity_graph_only) {
+        assert.ok(/^(records|buyers)\./.test(field.key), `${field.key} is an unflagged synthetic field`);
+        assert.equal(field.supported_in_preview, false);
+        assert.equal(field.source_table_or_view, ENTITY_GRAPH_FILTER_SOURCE_BY_TAB[tab]);
+        continue;
+      }
       assert.ok(catalogKeys.has(field.key), `${field.key} is not a catalog field`);
       assert.equal(
         field.source_table_or_view,

@@ -18,6 +18,8 @@ import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/uni
 import { openInboxThread } from '../../mobile/mobile-inbox-bridge'
 import { EntityGraphMobile } from '../mobile/EntityGraphMobile'
 import { EntityGraphCampaignSheet } from '../mobile/EntityGraphCampaignSheet'
+import { BuyerInspectorSheet, type BuyerMapPoint } from '../buyer/BuyerInspector'
+import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
 import { fetchEntityNetwork, fetchTopNetworks, money, type EntityNetwork, type TopNetwork } from './entity-network-api'
 import { EntityNetworkStage, NODE_ICON } from './EntityNetworkStage'
 import { EntityNetworkInspector, type InspectorActions } from './EntityNetworkInspector'
@@ -44,6 +46,9 @@ const LAYERS: Array<{ type: string; label: string }> = [
   { type: 'mailing', label: 'Mailing' },
   { type: 'related_owner', label: 'Related' },
   { type: 'conversation', label: 'Talks' },
+  { type: 'sale', label: 'History' },
+  { type: 'mortgage', label: 'Debt' },
+  { type: 'lien', label: 'Liens' },
 ]
 
 const SHEET_HEIGHTS: Record<BottomSheetSnap, string> = { collapsed: '34dvh', half: '58dvh', expanded: 'calc(100dvh - 96px)' }
@@ -68,7 +73,10 @@ function anchorFromResult(r: EntitySearchResult): Anchor | null {
 
 export function EntityGraphConsole(props: Props) {
   const { universalContext, onUniversalContextChange, onAction } = props
-  const [mode, setMode] = useState<'graph' | 'list'>('graph')
+  // The universe (list) is home; the network opens for a record, or on arrival
+  // from another app with a subject.
+  const [mode, setMode] = useState<'graph' | 'list'>(() => (anchorFromContext(universalContext) ? 'graph' : 'list'))
+  const [buyerId, setBuyerId] = useState<string | null>(null)
   const [anchor, setAnchor] = useState<Anchor | null>(() => anchorFromContext(universalContext))
   const [trail, setTrail] = useState<Array<{ anchor: Anchor; name: string }>>([])
   const [network, setNetwork] = useState<EntityNetwork | null>(null)
@@ -90,6 +98,9 @@ export function EntityGraphConsole(props: Props) {
   useEffect(() => {
     if (ctxKey === lastCtxKey.current) return
     lastCtxKey.current = ctxKey
+    // In the universe the list owns context changes (opening a row publishes
+    // it); only a real arrival while the network is showing re-anchors it.
+    if (mode === 'list') return
     if (ctxAnchor) { setAnchor(ctxAnchor); setMode('graph') }
   }, [ctxKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -138,7 +149,14 @@ export function EntityGraphConsole(props: Props) {
 
   const back = () => {
     const prev = trail[trail.length - 1]
-    if (!prev) { setAnchor(null); setNetwork(null); return }
+    // Out of the first network: back to the universe it was opened from.
+    if (!prev) {
+      setAnchor(null); setNetwork(null); setMode('list')
+      // Leaving the network is not a request to open that record in the list.
+      lastCtxKey.current = ''
+      onUniversalContextChange({ ...EMPTY_UNIVERSAL_ENTITY_CONTEXT })
+      return
+    }
     setTrail((t) => t.slice(0, -1))
     setAnchor(prev.anchor)
     publish(prev.anchor)
@@ -181,7 +199,42 @@ export function EntityGraphConsole(props: Props) {
     showOnMap: (propertyId) => onAction?.('show_on_map', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: 'property', entityId: propertyId, propertyId }),
     openConversation: (threadKey) => openInboxThread({ threadKey }),
     addToCampaign: (ids) => setCampaignFor(ids),
+    openBuyer: (id) => setBuyerId(id),
   }
+
+  // ── Cross-surface handoffs ────────────────────────────────────────────────
+  const showSetOnMap = useCallback((label: string, tone: 'property' | 'buyer' | 'portfolio', points: Array<{ propertyId?: string; lat?: number | null; lng?: number | null; address?: string | null }>) => {
+    const usable = points.filter((p) => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)))
+    const first = points.find((p) => p.propertyId)
+    if (usable.length) {
+      writeMapFocusSet({ label, tone, points: usable.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), id: p.propertyId, label: p.address ?? null })) })
+    }
+    if (first?.propertyId) {
+      onAction?.('open_in_map', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: 'property', entityId: first.propertyId, propertyId: first.propertyId })
+    } else if (!usable.length) {
+      setToast('None of these have map coordinates.')
+      window.setTimeout(() => setToast(null), 3000)
+    }
+  }, [onAction])
+
+  const openNetworkFor = useCallback((r: EntitySearchResult) => {
+    const a = anchorFromResult(r)
+    if (!a) return
+    setTrail([])
+    go(a, false)
+  }, [go])
+
+  const buyerSheet = (
+    <BuyerInspectorSheet
+      buyerId={buyerId}
+      open={Boolean(buyerId)}
+      onClose={() => setBuyerId(null)}
+      onOpenProperty={(propertyId) => { setBuyerId(null); setTrail([]); go({ type: 'property', id: propertyId }, false) }}
+      onOpenBuyer={(id) => setBuyerId(id)}
+      onShowOnMap={(points: BuyerMapPoint[]) => { setBuyerId(null); showSetOnMap('from this buyer', 'buyer', points) }}
+      onOpenBuyerMatch={(propertyId) => onAction?.('open_buyer_match', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: propertyId ? 'property' : null, entityId: propertyId ?? null, propertyId: propertyId ?? null })}
+    />
+  )
 
   // ── Landing: search + the largest ownership networks ─────────────────────
   const [q, setQ] = useState('')
@@ -221,8 +274,13 @@ export function EntityGraphConsole(props: Props) {
   if (mode === 'list') {
     return (
       <div className="egx-listmode">
-        <EntityGraphMobile {...props} />
-        <button type="button" className="egx-fab" onClick={() => setMode('graph')} data-egx-mode="graph"><Icon name="link" />Graph</button>
+        <EntityGraphMobile
+          {...props}
+          onOpenNetwork={openNetworkFor}
+          onOpenBuyer={(id) => setBuyerId(id)}
+          onShowOnMap={(points) => showSetOnMap(`propert${points.length === 1 ? 'y' : 'ies'} from Entity Graph`, 'property', points)}
+        />
+        {buyerSheet}
       </div>
     )
   }
@@ -334,7 +392,7 @@ export function EntityGraphConsole(props: Props) {
         <div className="egx-dock" role="region" aria-label="Selection">
           <div className="egx-dock__count"><strong>{selected.size}</strong><span>selected · {money(selectedValue)}</span></div>
           <button type="button" className="egx-dock__btn is-primary" onClick={() => setCampaignFor(selectedProps.map((p) => p.id))} data-egx-action="campaign"><Icon name="send" />Campaign</button>
-          <button type="button" className="egx-dock__btn" onClick={() => selectedProps[0] && actions.showOnMap(selectedProps[0].id)}><Icon name="map" /></button>
+          <button type="button" className="egx-dock__btn" onClick={() => showSetOnMap('selected from the network', 'portfolio', selectedProps.map((p) => ({ propertyId: p.id, lat: p.lat, lng: p.lng, address: p.address })))} aria-label="Show selection on Map"><Icon name="map" /></button>
           <button type="button" className="egx-dock__btn" onClick={() => setSelected(new Set())} aria-label="Clear selection"><Icon name="close" /></button>
         </div>
       )}
@@ -386,6 +444,7 @@ export function EntityGraphConsole(props: Props) {
         onClose={() => setCampaignFor(null)}
         onDone={(message) => { setCampaignFor(null); setToast(message); window.setTimeout(() => setToast(null), 3200) }}
       />
+      {buyerSheet}
       {toast && <div className="egx-toast" role="status">{toast}</div>}
     </div>
   )

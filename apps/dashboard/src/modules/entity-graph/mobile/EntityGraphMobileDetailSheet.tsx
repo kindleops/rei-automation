@@ -22,6 +22,7 @@ import {
   type RecordSection,
 } from './entity-graph-record-schema'
 import { EntityGraphPropertyVisual } from './EntityGraphPropertyVisual'
+import { PropertyDossier, PropertyDossierActionBar } from '../dossier/PropertyDossier'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -44,6 +45,7 @@ const SCOPE_LABEL: Record<EntityScope, string> = {
   people: 'Person',
   organizations: 'Ownership entity',
   contact_methods: 'Contact method',
+  buyers: 'Buyer',
 }
 
 /** Actions that only make sense at a desk; the sheet keeps the phone-usable set. */
@@ -166,6 +168,10 @@ type Props = {
   onClose: () => void
   onAction: (action: EntityGraphAction) => void
   onOpenEntity: (entityType: string, entityId: string) => void
+  /** Open a buyer entity (public buyer id) — wired by the parent to the buyer inspector. */
+  onOpenBuyer?: (buyerId: string) => void
+  /** Open this record's relationship graph. */
+  onOpenGraph?: () => void
 }
 
 /**
@@ -187,6 +193,8 @@ export function EntityGraphMobileDetailSheet({
   onClose,
   onAction,
   onOpenEntity,
+  onOpenBuyer,
+  onOpenGraph,
 }: Props) {
   const [openSections, setOpenSections] = useState<Set<FieldSectionKey>>(new Set(DEFAULT_OPEN))
   const [chainOpen, setChainOpen] = useState(true)
@@ -219,6 +227,39 @@ export function EntityGraphMobileDetailSheet({
   const matchCount = sections.reduce((acc, section) => acc + section.fields.length, 0)
 
   if (!result) return null
+
+  /**
+   * A property opens as the dossier: imagery that never shows Google's "no
+   * imagery" tile, owner + buyer role, value/equity, the ownership chain,
+   * mortgages, liens, foreclosure and every recorded field. Other entity types
+   * keep the relationship-chain inspector below.
+   */
+  if (result.entityType === 'property') {
+    const openBuyer = onOpenBuyer ?? (() => undefined)
+    const openGraph = onOpenGraph ?? (() => onAction('show_on_map'))
+    return (
+      <MobileSheet
+        open={open}
+        title="Property"
+        subtitle={result.title}
+        height="full"
+        className="egm-sheet egd-sheet"
+        onClose={onClose}
+        footer={<PropertyDossierActionBar actions={actions} onAction={onAction} onOpenGraph={openGraph} />}
+      >
+        <PropertyDossier
+          result={result}
+          dossier={dossier}
+          loading={loading}
+          actions={actions}
+          onAction={onAction}
+          onOpenEntity={onOpenEntity}
+          onOpenBuyer={openBuyer}
+          onOpenGraph={openGraph}
+        />
+      </MobileSheet>
+    )
+  }
 
   const identity = resolveIdentity(scope, result)
   const market = resolveMarket(result)

@@ -3,9 +3,10 @@
  * owner or person (GET /api/cockpit/entity-graph/network/{type}/{id}), and the
  * largest ownership networks for the landing. Read-only.
  */
+import type { PartyRef, PropertyRecords } from '../../../domain/entity-graph/entity-graph-intel-api'
 import { callBackend } from '../../../lib/api/backendClient'
 
-export type NetworkNodeType = 'owner' | 'property' | 'entity' | 'person' | 'phone' | 'email' | 'mailing' | 'related_owner' | 'conversation'
+export type NetworkNodeType = 'owner' | 'property' | 'entity' | 'person' | 'phone' | 'email' | 'mailing' | 'related_owner' | 'conversation' | 'mortgage' | 'lien' | 'sale' | 'buyer'
 export type HolderKind = 'llc' | 'company' | 'trust' | 'estate' | 'institution' | 'individual'
 
 export interface NetworkNode {
@@ -102,6 +103,10 @@ export interface EntityNetwork {
     lastSend: { status: string; at: string; propertyId: string } | null
   }
   graph: { anchorId: string; nodes: NetworkNode[]; edges: NetworkEdge[] }
+  /** The anchor property's recorded documents (mortgages, liens, sales + buyer resolution). */
+  records?: PropertyRecords | null
+  /** The owner's buyer role, when the owner is also a known buyer entity. */
+  ownerBuyer?: PartyRef | null
 }
 
 export interface TopNetwork {

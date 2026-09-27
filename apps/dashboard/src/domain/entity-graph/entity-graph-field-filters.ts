@@ -15,7 +15,7 @@ import * as backendClient from '../../lib/api/backendClient'
  * 422 naming the field rather than a page of unfiltered rows.
  */
 
-export type EntityGraphFieldType = 'text' | 'number' | 'date' | 'boolean' | 'json' | 'enum'
+export type EntityGraphFieldType = 'text' | 'number' | 'date' | 'boolean' | 'json' | 'enum' | 'array'
 
 export type EntityGraphFieldOperator = { key: string; label: string }
 

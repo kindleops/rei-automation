@@ -14,6 +14,11 @@ type Props = {
   scope: EntityScope
   pageCount: number
   allPageSelected: boolean
+  /** Size of the whole filtered cohort, when "select all matching" is offered. */
+  cohortTotal?: number | null
+  cohortSelected?: boolean
+  selectingAll?: boolean
+  onSelectAllMatching?: () => void
   onSelectPage: () => void
   onClear: () => void
   onAction: (action: BulkAction) => void
@@ -24,19 +29,23 @@ export function EntityGraphMobileSelectionDock({
   scope,
   pageCount,
   allPageSelected,
+  cohortTotal = null,
+  cohortSelected = false,
+  selectingAll = false,
+  onSelectAllMatching,
   onSelectPage,
   onClear,
   onAction,
 }: Props) {
   const actions = bulkActionsForScope(scope, count)
-  const blocked = actions.filter((a) => a.unavailable && (a.key === 'campaign' || a.key === 'list'))
+  const offerCohort = Boolean(onSelectAllMatching) && typeof cohortTotal === 'number' && cohortTotal > pageCount && !cohortSelected
 
   return (
     <div className="egm-dock" role="region" aria-label="Bulk actions">
       <div className="egm-dock__top">
         <span className="egm-dock__count">
-          {count} selected
-          <em>of {pageCount} shown</em>
+          {count.toLocaleString()} selected
+          <em>{cohortSelected ? 'whole cohort' : `of ${pageCount} shown`}</em>
         </span>
         <button type="button" className="egm-dock__link" onClick={onSelectPage}>
           {allPageSelected ? 'Deselect all' : 'Select all'}
@@ -60,10 +69,12 @@ export function EntityGraphMobileSelectionDock({
         ))}
       </div>
 
-      {blocked.length > 0 ? (
-        <p className="egm-dock__note" id="egm-dock-note">
-          {blocked.map((a) => a.label).join(' · ')}: no id-list backend yet — tap for why.
-        </p>
+      {offerCohort ? (
+        <button type="button" className="egm-dock__cohort" onClick={onSelectAllMatching} disabled={selectingAll}>
+          <Icon name="layers" />
+          {selectingAll ? 'Gathering the cohort…' : `Select all ${Math.min(cohortTotal as number, 5000).toLocaleString()} matching`}
+          {(cohortTotal as number) > 5000 ? <em>cap 5,000</em> : null}
+        </button>
       ) : null}
     </div>
   )

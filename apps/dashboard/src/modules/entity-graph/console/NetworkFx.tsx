@@ -22,6 +22,7 @@ type View = { x: number; y: number; k: number }
 const TYPE_VAR: Record<string, string> = {
   owner: '--egx-owner', property: '--egx-property', entity: '--egx-entity', person: '--egx-person',
   phone: '--egx-contact', email: '--egx-contact', mailing: '--egx-mailing', related_owner: '--egx-related', conversation: '--egx-convo',
+  mortgage: '--egx-debt', lien: '--egx-lien', sale: '--egx-sale', buyer: '--egx-buyer',
 }
 
 function sprite(color: string, size = 48): HTMLCanvasElement {

@@ -78,18 +78,26 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
      * Current economics live in `property_acquisition_scores` and are surfaced in
      * the detail sheet, where the engine's state can be stated alongside them.
      */
-    { key: 'owner', group: 'ownership', label: 'Owner', width: 156, render: (r) => text(r.details?.ownerName) },
+    { key: 'owner', group: 'ownership', label: 'Owner', width: 170, render: (r) => text(r.details?.ownerName) },
     {
-      key: 'contacts',
-      group: 'contacts',
-      label: 'Reachable',
+      key: 'ownerBuyer',
+      group: 'ownership',
+      label: 'Owner buys',
       align: 'right',
-      width: 84,
+      width: 96,
       render: (r) => {
-        const n = r.linkedCounts.reachableContacts ?? r.linkedCounts.contacts
-        return typeof n === 'number' ? String(n) : null
+        const b = r.details?.records?.ownerBuyer
+        return b ? `${b.acquisitions ?? '—'} · ${b.status ?? ''}`.trim() : null
       },
     },
+    { key: 'loans', group: 'signals', label: 'Loans', align: 'right', width: 62, render: (r) => (r.details?.records ? String(r.details.records.mortgageCount) : null) },
+    { key: 'balance', group: 'scores', label: 'Balance', sortBy: 'rec_mortgage_balance', align: 'right', width: 88, render: (r) => compactCurrency(r.details?.records?.mortgageBalance) },
+    { key: 'rate', group: 'signals', label: 'Rate', align: 'right', width: 64, render: (r) => (typeof r.details?.records?.firstRate === 'number' ? `${Number(r.details.records.firstRate).toFixed(2)}%` : null) },
+    { key: 'lender', group: 'signals', label: 'Lender', width: 170, render: (r) => text(r.details?.records?.firstLender) },
+    { key: 'liens', group: 'signals', label: 'Liens', align: 'right', width: 60, render: (r) => (r.details?.records ? String(r.details.records.lienCount) : null) },
+    { key: 'lastSale', group: 'signals', label: 'Last sale', sortBy: 'rec_last_sale_date', width: 96, render: (r) => text(r.details?.records?.lastSaleDate)?.slice(0, 7) ?? null },
+    { key: 'lastPrice', group: 'scores', label: 'Sale price', align: 'right', width: 90, render: (r) => compactCurrency(r.details?.records?.lastSalePrice) },
+    { key: 'records', group: 'signals', label: 'Recorded signals', width: 220, render: (r) => (r.details?.records?.signals ?? []).map((s) => s.label).join(' · ') || null },
     { key: 'units', group: 'property', label: 'Units', align: 'right', width: 60, render: (r) => compactCount(r.details?.units) },
     { key: 'zip', group: 'geography', label: 'ZIP', width: 72, render: (r) => text(r.details?.zip) },
     { key: 'flags', group: 'signals', label: 'Signals', width: 200, render: (r) => text(r.details?.flags) },
@@ -154,6 +162,19 @@ export const SCOPE_TABLE_COLUMNS: Record<EntityScope, TableColumn[]> = {
       render: (r) => (typeof r.score === 'number' ? String(Math.round(r.score)) : null),
     },
   ],
+  buyers: [
+    { key: 'purchases', group: 'overview', label: 'Purchases', sortBy: 'acquisition_count', align: 'right', width: 88, render: (r) => compactCount(r.details?.acquisitions) },
+    { key: 'status', group: 'overview', label: 'Activity', width: 88, render: (r) => humanizeEnum(r.details?.activityStatus) },
+    { key: 'market', group: 'geography', label: 'Primary market', width: 150, render: (r) => text(r.details?.primaryMarket) },
+    { key: 'archetype', group: 'signals', label: 'Archetype', width: 150, render: (r) => text(r.details?.archetypeLabel) },
+    { key: 'last', group: 'overview', label: 'Last buy', sortBy: 'last_acquisition', width: 96, render: (r) => text(r.details?.lastAcquisition)?.slice(0, 7) ?? null },
+    { key: 'year', group: 'overview', label: '12 mo', sortBy: 'trailing_365d', align: 'right', width: 64, render: (r) => compactCount(r.details?.trailing365) },
+    { key: 'median', group: 'scores', label: 'Median price', align: 'right', width: 100, render: (r) => compactCurrency(r.details?.priceP50) },
+    { key: 'cash', group: 'scores', label: 'Cash', align: 'right', width: 64, render: (r) => (typeof r.details?.cashShare === 'number' ? `${Math.round(r.details.cashShare * 100)}%` : null) },
+    { key: 'owns', group: 'ownership', label: 'Owns here', sortBy: 'owned_count', align: 'right', width: 84, render: (r) => compactCount(r.details?.ownedCount) },
+    { key: 'sold', group: 'ownership', label: 'Sold', align: 'right', width: 64, render: (r) => compactCount(r.details?.soldCount) },
+    { key: 'kind', group: 'people', label: 'Kind', width: 90, render: (r) => (r.details?.entityKind === 'person' ? 'Individual' : 'Company') },
+  ],
   organizations: [
     { key: 'entityType', group: 'ownership', label: 'Entity type', width: 140, render: (r) => text(r.details?.entityType) ?? text(r.subtitle) },
     { key: 'mailing', group: 'geography', label: 'Mailing address', width: 250, render: (r) => text(r.details?.mailingAddress) },
@@ -180,7 +201,8 @@ export function defaultVisibleColumns(scope: EntityScope): string[] {
   // column picker, and the choice persists per scope.
   const all = SCOPE_TABLE_COLUMNS[scope].map((c) => c.key)
   const preferred: Partial<Record<EntityScope, string[]>> = {
-    properties: ['market', 'assetType', 'value', 'equity', 'score', 'owner', 'contacts'],
+    properties: ['value', 'equity', 'loans', 'balance', 'rate', 'liens', 'lastSale', 'owner', 'market'],
+    buyers: ['purchases', 'status', 'market', 'last', 'year', 'median', 'owns'],
     master_owners: ['ownerType', 'tier', 'portfolio', 'portfolioValue', 'coverage'],
     people: ['occupation', 'language', 'properties', 'contacts'],
     organizations: ['entityType', 'mailing'],
@@ -196,6 +218,7 @@ export const IDENTITY_SORT_COLUMN: Record<EntityScope, string | null> = {
   people: 'full_name',
   organizations: 'owner_name',
   contact_methods: null,
+  buyers: null,
 }
 
 /**

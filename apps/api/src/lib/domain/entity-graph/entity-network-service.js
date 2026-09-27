@@ -253,7 +253,133 @@ async function loadOutreach(supabase, { ownerId, propertyIds }) {
   }
 }
 
-function buildGraph({ anchor, owner, ownerNode, properties, entities, people, phones, emails, mailing, related, outreach }) {
+/** Same normalisation as public.eg_name_key — the buyer alias join key. */
+export function nameKey(value) {
+  const key = clean(value).replace(/[^A-Za-z0-9]+/g, ' ').trim().toUpperCase()
+  return key || null
+}
+
+const DOC_CATEGORY_LABEL = {
+  'LIEN <GENERAL>': 'General lien',
+  'LIS PENDENS': 'Lis pendens',
+  'AFFIDAVIT OF DEATH': 'Affidavit of death',
+  'ASSIGNMENT OF RENTS': 'Assignment of rents',
+  'MECHANICS LIEN': "Mechanic's lien",
+  'ASSESSMENT LIEN': 'Assessment lien',
+  'STATE TAX LIEN': 'State tax lien',
+  'NOTICE OF REDEMPTION': 'Notice of redemption',
+  'FINANCING STATEMENT': 'Financing statement',
+}
+const lienLabel = (l) => DOC_CATEGORY_LABEL[clean(l.doc_category)] || titleCase(l.doc_category || l.doc_type_description || (l.lien_type === 'hoa_lien' ? 'HOA lien' : 'Recorded notice'))
+const DISTRESS_CATEGORIES = new Set(['PROBATE', 'LIS PENDENS', 'AFFIDAVIT OF DEATH', 'JUDGMENT', 'STATE TAX LIEN', 'MECHANICS LIEN'])
+
+/**
+ * The anchor property's recorded documents, shaped for the graph + sheet.
+ * Only the ANCHOR property is expanded (bounded): a 60-property portfolio does
+ * not fan out into hundreds of mortgage nodes.
+ */
+export function shapeRecords(raw) {
+  if (!raw) return null
+  const mortgages = (raw.mortgages || []).map((m) => ({
+    slot: m.slot,
+    open: String(m.slot || '').startsWith('mtg'),
+    position: num(m.lien_position),
+    lender: titleCase(m.lender_name) || null,
+    amount: num(m.loan_amount),
+    balance: num(m.est_balance),
+    payment: num(m.est_payment),
+    rate: num(m.interest_rate),
+    loanType: clean(m.loan_type) || null,
+    financing: clean(m.financing_type) || null,
+    recorded: m.recording_date || null,
+    due: m.due_date || null,
+    termMonths: num(m.term_months),
+    privateLender: m.is_private_lender === true,
+  }))
+  const liens = (raw.liens || []).map((l, i) => ({
+    id: `${i}`,
+    label: lienLabel(l),
+    category: clean(l.doc_category) || null,
+    type: clean(l.lien_type) || null,
+    title: titleCase(l.doc_title) || null,
+    description: titleCase(l.doc_type_description) || null,
+    amountDue: num(l.amount_due ?? l.hoa_lien_amount),
+    recorded: l.recording_date || l.filing_date || l.nod_recording_date || l.date_updated || null,
+    party1: titleCase(l.party_1_name) || null,
+    party2: titleCase(l.party_2_name) || null,
+    hoaName: titleCase(l.hoa_lien_name) || null,
+    defaultAmount: num(l.nod_default_amount),
+    dateOfDeath: l.date_of_death || null,
+    taxPeriod: l.tax_period_begin ? [l.tax_period_begin, l.tax_period_end] : null,
+    county: titleCase(l.county) || null,
+    distress: DISTRESS_CATEGORIES.has(clean(l.doc_category)) || Boolean(l.nod_recording_date),
+  }))
+  const party = (ref) => (ref ? {
+    id: ref.buyer_id,
+    name: ref.name || (ref.entity_type === 'person' ? 'Individual buyer' : null),
+    kind: ref.entity_type || null,
+    basis: ref.basis || null,
+    method: ref.method || null,
+    confidence: num(ref.confidence),
+    purchases: num(ref.acquisition_count),
+    sold: num(ref.sold_count),
+    status: ref.activity_status || null,
+    archetype: ref.archetype || null,
+  } : null)
+  const sales = (raw.sales || []).map((s, i) => ({
+    id: s.canonical_transaction_id ? String(s.canonical_transaction_id) : `sale-${i}`,
+    date: s.event_date || null,
+    price: num(s.price),
+    docType: clean(s.doc_type) || null,
+    buyerName: titleCase(s.buyer_1_name) || null,
+    buyer2Name: titleCase(s.buyer_2_name) || null,
+    sellerName: titleCase(s.seller_1_name) || null,
+    seller2Name: titleCase(s.seller_2_name) || null,
+    cash: s.is_cash_purchase ?? null,
+    armsLength: s.is_arms_length ?? (/non-arms/i.test(clean(s.price_code)) ? false : null),
+    priceNote: clean(s.price_code) || null,
+    lender: titleCase(s.concurrent_lender) || null,
+    loanAmount: num(s.concurrent_loan_amount),
+    current: s.slot === 'current',
+    buyer: party(s.buyer),
+    seller: party(s.seller_entity),
+  }))
+  const foreclosures = (raw.foreclosures || []).map((f) => ({
+    stage: clean(f.doc_type) || null,
+    recorded: f.recording_date || null,
+    defaultDate: f.default_date || null,
+    auctionDate: f.auction_date || null,
+    auctionTime: clean(f.auction_time) || null,
+    auctionLocation: titleCase(f.auction_location || f.auction_city) || null,
+    caseNumber: clean(f.case_number) || null,
+    unpaidBalance: num(f.unpaid_balance),
+    minBid: num(f.min_bid_amount),
+    lender: titleCase(f.current_lender || f.original_lender) || null,
+    originalLoan: num(f.original_loan_amount),
+    trustee: titleCase(f.trustee_name) || null,
+    trusteePhone: clean(f.trustee_phone) || null,
+    borrower: titleCase(f.borrower_1_name) || null,
+  }))
+  const open = mortgages.filter((m) => m.open)
+  return {
+    mortgages,
+    liens,
+    sales,
+    foreclosures,
+    ownerBuyer: party(raw.owner_buyer),
+    parcel: raw.parcel || null,
+    totals: {
+      openMortgages: open.length,
+      balance: open.reduce((sum, m) => sum + (m.balance || 0), 0) || null,
+      payment: open.reduce((sum, m) => sum + (m.payment || 0), 0) || null,
+      liens: liens.length,
+      distressLiens: liens.filter((l) => l.distress).length,
+      sales: sales.length,
+    },
+  }
+}
+
+function buildGraph({ anchor, owner, ownerNode, properties, entities, people, phones, emails, mailing, related, outreach, records, anchorPropertyId }) {
   const nodes = []
   const edges = []
   const ids = new Set()
@@ -297,6 +423,53 @@ function buildGraph({ anchor, owner, ownerNode, properties, entities, people, ph
     const via = r.reasons.includes('mailing') && ids.has('mailing:owner') ? 'mailing:owner' : ownerId
     if (via) edge(via, `related:${r.id}`, r.reasons[0], r.reasons.includes('household') ? 'Same household' : r.reasons.includes('cluster') ? 'Same owner cluster' : 'Same mailing address')
   }
+  // Recorded documents hang off the anchor property. The client discloses them
+  // progressively (debt / liens / history layers); they are never auto-fanned
+  // across the whole portfolio.
+  const anchorProp = anchorPropertyId ? `property:${anchorPropertyId}` : null
+  if (records && anchorProp && ids.has(anchorProp)) {
+    const lenders = new Map()
+    for (const m of records.mortgages.filter((row) => row.open)) {
+      const id = `mortgage:${m.slot}`
+      node({ id, type: 'mortgage', label: m.lender || 'Mortgage', sub: [m.position ? `${m.position === 1 ? '1st' : m.position === 2 ? '2nd' : `${m.position}th`} position` : null, m.rate ? `${m.rate}%` : null].filter(Boolean).join(' · '), meta: { balance: m.balance, amount: m.amount, rate: m.rate, privateLender: m.privateLender, loanType: m.loanType } })
+      edge(anchorProp, id, 'financed_by', 'Financed by')
+      if (m.lender) lenders.set(m.lender, (lenders.get(m.lender) || 0) + 1)
+    }
+    const liens = records.liens.slice(0, 6)
+    for (const l of liens) {
+      const id = `lien:${l.id}`
+      node({ id, type: 'lien', label: l.label, sub: [l.recorded ? String(l.recorded).slice(0, 4) : null, l.amountDue ? `$${Math.round(l.amountDue).toLocaleString()}` : null].filter(Boolean).join(' · '), meta: { distress: l.distress, category: l.category } })
+      edge(anchorProp, id, 'encumbered_by', 'Recorded against')
+    }
+    for (const sale of records.sales.slice(0, 4)) {
+      const id = `sale:${sale.id}`
+      node({ id, type: 'sale', label: sale.price ? `$${sale.price >= 1e6 ? `${(sale.price / 1e6).toFixed(sale.price >= 1e7 ? 0 : 1)}M` : `${Math.round(sale.price / 1e3)}K`}` : 'Transfer', sub: [sale.date ? String(sale.date).slice(0, 4) : null, sale.docType].filter(Boolean).join(' · '), meta: { date: sale.date, price: sale.price, current: sale.current, cash: sale.cash } })
+      edge(anchorProp, id, 'sold', sale.current ? 'Last sale' : 'Prior sale')
+      // Identity, not role: when the buyer on a sale IS the current owner, the
+      // sale points at the owner node rather than minting a duplicate.
+      const ownerBuyerId = ownerNode?.meta?.buyerRole?.id
+      if (sale.buyer?.id && ownerId && sale.buyer.id === ownerBuyerId) {
+        edge(id, ownerId, 'purchased_by', 'Bought by (current owner)')
+      } else if (sale.buyer?.id) {
+        const bid = `buyer:${sale.buyer.id}`
+        node({ id: bid, type: 'buyer', label: sale.buyer.name || sale.buyerName || 'Buyer', sub: sale.buyer.purchases ? `${sale.buyer.purchases} purchase${sale.buyer.purchases === 1 ? '' : 's'}` : 'Buyer', meta: { buyerId: sale.buyer.id, basis: sale.buyer.basis, confidence: sale.buyer.confidence, status: sale.buyer.status, kind: sale.buyer.kind } })
+        edge(id, bid, 'purchased_by', 'Bought by')
+      }
+      if (sale.seller?.id && ownerId && sale.seller.id === ownerBuyerId) {
+        edge(ownerId, id, 'sold_by', 'Sold by (this owner)')
+      } else if (sale.seller?.id) {
+        const sid = `buyer:${sale.seller.id}`
+        node({ id: sid, type: 'buyer', label: sale.seller.name || sale.sellerName || 'Seller', sub: sale.seller.purchases ? `${sale.seller.purchases} purchase${sale.seller.purchases === 1 ? '' : 's'}` : 'Seller', meta: { buyerId: sale.seller.id, basis: sale.seller.basis, status: sale.seller.status, kind: sale.seller.kind, role: 'seller' } })
+        edge(sid, id, 'sold_by', 'Sold by')
+      }
+    }
+    for (const f of records.foreclosures.slice(0, 2)) {
+      const id = `lien:fc-${f.recorded || f.auctionDate || 'x'}`
+      node({ id, type: 'lien', label: f.stage || 'Foreclosure', sub: f.auctionDate ? `Auction ${f.auctionDate}` : (f.recorded ? String(f.recorded).slice(0, 10) : ''), meta: { distress: true, foreclosure: true } })
+      edge(anchorProp, id, 'encumbered_by', 'Foreclosure')
+    }
+  }
+
   for (const t of outreach.threads.slice(0, 6)) {
     node({ id: `thread:${t.threadKey}`, type: 'conversation', label: t.stage ? t.stage.replace(/_/g, ' ') : 'Conversation', sub: t.preview ?? '', meta: { hot: t.hot, at: t.at, threadKey: t.threadKey } })
     const to = t.personId && ids.has(`person:${t.personId}`) ? `person:${t.personId}` : t.propertyId && ids.has(`property:${t.propertyId}`) ? `property:${t.propertyId}` : ownerId
@@ -372,11 +545,21 @@ export async function getEntityNetwork(type, id, deps = {}) {
   const propertiesById = new Map(properties.map((p) => [p.id, p]))
   const propertyIds = properties.map((p) => p.id)
 
-  // Wave 2: sale history + outreach across the network.
-  const [history, outreach] = await Promise.all([
+  // Wave 2: sale history + outreach across the network, the anchor property's
+  // recorded documents, and whether the owner is a known buyer entity.
+  const recordsFor = anchorProperty ? String(anchorProperty.property_id) : null
+  const [history, outreach, recordsRaw, ownerBuyer] = await Promise.all([
     loadHistory(supabase, propertyIds, propertiesById),
     loadOutreach(supabase, { ownerId, propertyIds }),
+    recordsFor && typeof supabase.rpc === 'function'
+      ? Promise.resolve()
+        .then(() => supabase.rpc('entity_graph_property_records', { p_property_id: recordsFor }))
+        .then((r) => (r?.error ? null : r?.data ?? null))
+        .catch(() => null)
+      : Promise.resolve(null),
+    loadOwnerBuyerRole(supabase, { propertyIds, ownerName: ownerRow?.display_name || anchorProperty?.owner_name }),
   ])
+  const records = shapeRecords(recordsRaw)
 
   const ownerName = titleCase(ownerRow?.display_name || anchorProperty?.owner_display_name || anchorProperty?.owner_name) || 'Unknown owner'
   const ownerKind = classifyHolder(ownerRow?.display_name || anchorProperty?.owner_name, ownerRow?.owner_type_guess || anchorProperty?.owner_type_guess)
@@ -435,11 +618,11 @@ export async function getEntityNetwork(type, id, deps = {}) {
     type: 'owner',
     label: ownerName,
     sub: (() => { const n = ownerRow ? (num(ownerRow.property_count) || properties.length) : properties.length; return `${KIND_LABEL[ownerKind] === 'Name on title' ? 'Owner' : KIND_LABEL[ownerKind]} · ${n} ${n === 1 ? 'property' : 'properties'}` })(),
-    meta: { kind: ownerKind, linked: Boolean(ownerId) },
+    meta: { kind: ownerKind, linked: Boolean(ownerId), buyerRole: ownerBuyer },
   }
 
   const anchorId = type === 'property' ? `property:${key}` : type === 'person' && anchorPersonId ? `person:${anchorPersonId}` : ownerNode.id
-  const graph = buildGraph({ anchor: anchorId, owner: ownerRow, ownerNode, properties, entities, people, phones, emails, mailing, related, outreach })
+  const graph = buildGraph({ anchor: anchorId, owner: ownerRow, ownerNode, properties, entities, people, phones, emails, mailing, related, outreach, records, anchorPropertyId: recordsFor })
 
   return {
     anchor: { type, id: key, nodeId: anchorId },
@@ -479,7 +662,59 @@ export async function getEntityNetwork(type, id, deps = {}) {
     related,
     history,
     outreach,
+    records,
+    ownerBuyer,
     graph,
+  }
+}
+
+/**
+ * IS THIS OWNER ALSO A BUYER?
+ *
+ * Registry/individual-key evidence first (eg_property_owner_buyer on any
+ * property in the network), then an exact match of the owner's name against
+ * an UNAMBIGUOUS company alias. Returns the buyer's public reference with its
+ * basis, or null — never a guess.
+ */
+async function loadOwnerBuyerRole(supabase, { propertyIds, ownerName }) {
+  try {
+    let entityKey = null
+    let basis = null
+    if (propertyIds.length) {
+      const { data } = await supabase.from('eg_property_owner_buyer').select('buyer_entity_id, basis').in('property_id', propertyIds.slice(0, PORTFOLIO_CAP)).limit(5)
+      const best = (data || []).sort((a, b) => ['registry', 'individual_key', 'name'].indexOf(a.basis) - ['registry', 'individual_key', 'name'].indexOf(b.basis))[0]
+      if (best) { entityKey = best.buyer_entity_id; basis = best.basis }
+    }
+    if (!entityKey) {
+      const key = nameKey(ownerName)
+      if (key && key.length >= 6) {
+        const { data } = await supabase.from('eg_buyer_alias_keys').select('buyer_entity_id').eq('name_key', key).maybeSingle()
+        if (data?.buyer_entity_id) { entityKey = data.buyer_entity_id; basis = 'name' }
+      }
+    }
+    if (!entityKey) return null
+    const { data: row } = await supabase
+      .from('eg_buyer_index')
+      .select('buyer_id, display_name, entity_type, acquisition_count, sold_count, owned_count, activity_status, archetype, last_acquisition, primary_market, is_crossover')
+      .eq('entity_key', entityKey)
+      .maybeSingle()
+    if (!row) return null
+    return {
+      id: row.buyer_id,
+      name: row.display_name || (row.entity_type === 'person' ? 'Individual buyer' : null),
+      kind: row.entity_type,
+      basis,
+      purchases: num(row.acquisition_count),
+      sold: num(row.sold_count),
+      owned: num(row.owned_count),
+      status: row.activity_status || null,
+      archetype: row.archetype || null,
+      lastPurchase: row.last_acquisition || null,
+      market: clean(row.primary_market).split('|').reverse().join(', ') || null,
+      crossover: row.is_crossover === true,
+    }
+  } catch {
+    return null
   }
 }
 

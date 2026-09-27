@@ -23,6 +23,7 @@ export interface InspectorActions {
   showOnMap: (propertyId: string) => void
   openConversation: (threadKey: string) => void
   addToCampaign: (propertyIds: string[]) => void
+  openBuyer: (buyerId: string) => void
 }
 
 interface Props {
@@ -373,7 +374,11 @@ export function EntityNetworkInspector({ network, node, selected, actions }: Pro
         </div>
       </header>
 
+      {(!node || node.type === 'owner') && network.ownerBuyer && ((network.ownerBuyer.purchases ?? 0) >= 2 || network.ownerBuyer.status === 'active') ? <OwnerBuyerRole buyer={network.ownerBuyer} onOpen={() => actions.openBuyer(network.ownerBuyer!.id)} /> : null}
       {(!node || node.type === 'owner') && <NetworkSummary network={network} selected={selected} actions={actions} />}
+      {node && (node.type === 'mortgage' || node.type === 'lien' || node.type === 'sale' || node.type === 'buyer') ? (
+        <RecordNodeView node={node} network={network} actions={actions} />
+      ) : null}
       {property && <PropertyView p={property} network={network} selected={selected} actions={actions} />}
 
       {node?.type === 'person' && (
@@ -482,5 +487,120 @@ export function EntityNetworkInspector({ network, node, selected, actions }: Pro
         ) : null
       })()}
     </div>
+  )
+}
+
+const TIER_LABEL: Record<string, string> = { registry: 'Resolved · registry', individual_key: 'Resolved', link: 'Resolved by buyer engine', name: 'Observed by name' }
+const ARCH: Record<string, string> = {
+  institutional_high_volume_buyer: 'Institutional', active_flipper: 'Active flipper', long_term_rental_holder: 'Rental holder',
+  multifamily_operator: 'Multifamily operator', small_multifamily_operator: 'Small MF operator', commercial_operator: 'Commercial operator',
+  diversified_buyer: 'Diversified', geographically_concentrated_buyer: 'Concentrated', general_acquirer: 'Repeat buyer', inactive_stale_buyer: 'Gone quiet',
+}
+
+/** Identity with two roles: this owner is ALSO a buyer elsewhere. */
+function OwnerBuyerRole({ buyer, onOpen }: { buyer: NonNullable<EntityNetwork['ownerBuyer']>; onOpen: () => void }) {
+  return (
+    <button type="button" className={cls('egx-role', buyer.basis === 'name' && 'is-observed')} onClick={onOpen}>
+      <span className="egx-role__icon"><Icon name="target" /></span>
+      <span className="egx-role__text">
+        <b>Also a buyer{buyer.status === 'active' ? ' · active' : ''}</b>
+        <small>
+          {[buyer.purchases ? `${buyer.purchases} purchases` : null, buyer.sold ? `sold ${buyer.sold}` : null, buyer.archetype && ARCH[buyer.archetype] ? ARCH[buyer.archetype] : null, TIER_LABEL[buyer.basis ?? ''] ?? null].filter(Boolean).join(' · ')}
+        </small>
+      </span>
+      <Icon name="chevron-right" />
+    </button>
+  )
+}
+
+function RecordNodeView({ node, network, actions }: { node: NetworkNode; network: EntityNetwork; actions: InspectorActions }) {
+  const r = network.records
+  if (node.type === 'buyer') {
+    const buyerId = String(node.meta.buyerId ?? '')
+    const basis = String(node.meta.basis ?? '')
+    const sales = (r?.sales ?? []).filter((s) => s.buyer?.id === buyerId || s.seller?.id === buyerId)
+    return (
+      <>
+        <div className="egx-facts is-lead">
+          <span><b>{node.meta.kind === 'person' ? 'Individual buyer' : 'Buyer company'}</b></span>
+          {node.meta.status ? <span>{label(String(node.meta.status))}</span> : null}
+          {basis ? <span className={cls(basis === 'name' && 'is-warn')}>{TIER_LABEL[basis] ?? basis}</span> : null}
+          {typeof node.meta.confidence === 'number' ? <span>Confidence <b>{Math.round(Number(node.meta.confidence) * 100)}%</b></span> : null}
+        </div>
+        {sales.map((s) => (
+          <p key={s.id} className="egx-note">
+            {s.seller?.id === buyerId ? 'Sold this property' : 'Bought this property'}{s.date ? ` · ${shortDate(s.date)}` : ''}{s.price ? ` · ${money(s.price)}` : ''}{s.docType ? ` · ${s.docType}` : ''}
+          </p>
+        ))}
+        {buyerId ? <div className="egx-actions"><button type="button" className="egx-act is-primary" onClick={() => actions.openBuyer(buyerId)}><Icon name="target" />Buyer intelligence</button></div> : null}
+      </>
+    )
+  }
+  if (node.type === 'mortgage') {
+    const m = r?.mortgages.find((x) => `mortgage:${x.slot}` === node.id)
+    if (!m) return null
+    const paid = m.amount && m.balance !== null ? Math.max(0, Math.min(1, 1 - m.balance / m.amount)) : null
+    return (
+      <>
+        <div className="egx-facts is-lead">
+          {m.position ? <span><b>{m.position === 1 ? '1st' : m.position === 2 ? '2nd' : `${m.position}th`}</b> position</span> : null}
+          {m.rate !== null ? <span><b>{m.rate}%</b> {m.financing ? m.financing.toLowerCase() : ''}</span> : null}
+          {m.loanType ? <span>{m.loanType}</span> : null}
+          {m.privateLender ? <span className="is-warn">Private lender</span> : null}
+        </div>
+        <div className="egx-facts">
+          <span>Balance <b>{money(m.balance)}</b></span>
+          <span>Original <b>{money(m.amount)}</b></span>
+          {m.payment ? <span>Payment <b>{money(m.payment)}</b>/mo</span> : null}
+          {m.recorded ? <span>Recorded <b>{shortDate(m.recorded)}</b></span> : null}
+          {m.due ? <span>Matures <b>{shortDate(m.due)}</b></span> : null}
+        </div>
+        {paid !== null ? <div className="egx-paydown" style={{ ['--p' as string]: `${Math.round(paid * 100)}%` }}><i /><span>{Math.round(paid * 100)}% paid down</span></div> : null}
+      </>
+    )
+  }
+  if (node.type === 'lien') {
+    const l = r?.liens.find((x) => `lien:${x.id}` === node.id)
+    const f = !l ? r?.foreclosures.find((x) => node.id === `lien:fc-${x.recorded || x.auctionDate || 'x'}`) : null
+    if (f) {
+      return (
+        <div className="egx-facts is-lead">
+          <span className="is-hot"><b>{f.stage ?? 'Foreclosure'}</b></span>
+          {f.auctionDate ? <span>Auction <b>{shortDate(f.auctionDate)}</b>{f.auctionTime ? ` ${f.auctionTime}` : ''}</span> : null}
+          {f.unpaidBalance ? <span>Unpaid <b>{money(f.unpaidBalance)}</b></span> : null}
+          {f.trustee ? <span>Trustee {f.trustee}</span> : null}
+          {f.caseNumber ? <span>Case {f.caseNumber}</span> : null}
+        </div>
+      )
+    }
+    if (!l) return null
+    return (
+      <>
+        <div className="egx-facts is-lead">
+          <span className={cls(l.distress && 'is-warn')}><b>{l.label}</b></span>
+          {l.amountDue ? <span>Due <b>{money(l.amountDue)}</b></span> : null}
+          {l.recorded ? <span>{shortDate(l.recorded)}</span> : null}
+        </div>
+        {(l.party1 || l.party2) ? <p className="egx-note">{[l.party1, l.party2].filter(Boolean).join(' → ')}</p> : null}
+        {l.description && l.description !== l.label ? <p className="egx-note">{l.description}</p> : null}
+      </>
+    )
+  }
+  const s = r?.sales.find((x) => `sale:${x.id}` === node.id)
+  if (!s) return null
+  return (
+    <>
+      <div className="egx-facts is-lead">
+        <span><b>{s.price ? money(s.price) : 'Non-arms-length transfer'}</b></span>
+        {s.date ? <span>{shortDate(s.date)}</span> : null}
+        {s.docType ? <span>{s.docType}</span> : null}
+        {s.cash === true ? <span>Cash</span> : s.lender ? <span>Financed · {s.lender}</span> : null}
+      </div>
+      <p className="egx-note">{s.sellerName ?? 'Unknown seller'} → {s.buyerName ?? 'Unknown buyer'}</p>
+      <div className="egx-actions">
+        {s.buyer?.id ? <button type="button" className="egx-act is-primary" onClick={() => actions.openBuyer(s.buyer!.id)}><Icon name="target" />Buyer: {s.buyer.name ?? s.buyerName ?? 'intelligence'}</button> : null}
+        {s.seller?.id ? <button type="button" className="egx-act" onClick={() => actions.openBuyer(s.seller!.id)}><Icon name="target" />Seller as buyer</button> : null}
+      </div>
+    </>
   )
 }

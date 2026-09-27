@@ -16,6 +16,10 @@
   --egx-mailing: #ff7a9c;
   --egx-related: #ffb35c;
   --egx-convo: #5ef08c;
+  --egx-debt: #f0b35e;
+  --egx-lien: #ff6f61;
+  --egx-sale: #c9d2ff;
+  --egx-buyer: #34e8c4;
   --egx-ink: #04060b;
   --egx-text: #f2f5fb;
   --egx-text-2: rgb(242 245 251 / 0.7);
@@ -38,6 +42,10 @@ html[data-nexus-theme='light'] :is(.egx, .egx-sheet, .egx-landing, .egx-listmode
   --egx-mailing: #e11d48;
   --egx-related: #d97706;
   --egx-convo: #16a34a;
+  --egx-debt: #b7791f;
+  --egx-lien: #dc2626;
+  --egx-sale: #4f46e5;
+  --egx-buyer: #0d9488;
   --egx-ink: #eef2f8;
   --egx-text: #0b1220;
   --egx-text-2: rgb(11 18 32 / 0.72);
@@ -1067,3 +1075,43 @@ html[data-nexus-theme='light'] .egx-insp__liquid { opacity: 0.45; }
 @media (prefers-reduced-motion: reduce) {
   .egx-node__rim, .egx-node__sheen, .egx-hub-core, .egx-hub-sats, .egx-insp__liquid i, .egx-net__ring, .egx-landing__head h1 { animation: none !important; }
 }
+
+/* ── Records + buyers in the network ─────────────────────────────────── */
+.egx-layer.is-sale.is-on i { background: var(--egx-sale); color: var(--egx-sale); }
+.egx-layer.is-mortgage.is-on i { background: var(--egx-debt); color: var(--egx-debt); }
+.egx-layer.is-lien.is-on i { background: var(--egx-lien); color: var(--egx-lien); }
+.egx-layer.is-sale { --chip: var(--egx-sale); }
+.egx-layer.is-mortgage { --chip: var(--egx-debt); }
+.egx-layer.is-lien { --chip: var(--egx-lien); }
+.egx-node.is-mortgage { --tone: var(--egx-debt); }
+.egx-node.is-lien { --tone: var(--egx-lien); }
+.egx-node.is-sale { --tone: var(--egx-sale); }
+.egx-node.is-buyer { --tone: var(--egx-buyer); }
+.egx-insp__icon.is-mortgage, .egx-insp.is-mortgage { --tone: var(--egx-debt); }
+.egx-insp__icon.is-lien, .egx-insp.is-lien { --tone: var(--egx-lien); }
+.egx-insp__icon.is-sale, .egx-insp.is-sale { --tone: var(--egx-sale); }
+.egx-insp__icon.is-buyer, .egx-insp.is-buyer { --tone: var(--egx-buyer); }
+/* A buyer node breathes aqua; name-only evidence is drawn dashed. */
+.egx-node.is-buyer { animation: egx-buyer-breathe 3.2s ease-in-out infinite; }
+@keyframes egx-buyer-breathe { 50% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--egx-buyer) 70%, transparent)); } }
+
+.egx-role {
+  all: unset; box-sizing: border-box;
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; min-height: 58px !important; margin: 4px 0 10px; padding: 10px 12px;
+  border-radius: 16px; cursor: pointer;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--egx-buyer) 16%, transparent), color-mix(in srgb, var(--egx-buyer) 4%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--egx-buyer) 45%, transparent), 0 10px 26px -16px var(--egx-buyer);
+}
+.egx-role.is-observed { background: transparent; box-shadow: none; border: 1px dashed color-mix(in srgb, var(--egx-buyer) 55%, transparent); }
+.egx-role > svg { width: 14px; height: 14px; color: var(--egx-text-3); }
+.egx-role__icon { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: var(--egx-buyer); background: color-mix(in srgb, var(--egx-buyer) 16%, transparent); }
+.egx-role__icon svg { width: 16px; height: 16px; }
+.egx-role__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.egx-role__text b { font-size: 14px; font-weight: 650; color: var(--egx-text); }
+.egx-role__text small { font-size: 11.5px; color: var(--egx-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.egx-paydown { position: relative; height: 26px; margin: 8px 0 4px; border-radius: 9px; background: rgb(255 255 255 / 0.06); overflow: hidden; }
+.egx-paydown i { position: absolute; inset: 0 auto 0 0; width: var(--p); background: linear-gradient(90deg, color-mix(in srgb, var(--egx-debt) 55%, transparent), color-mix(in srgb, var(--egx-debt) 20%, transparent)); animation: egq-pour 900ms cubic-bezier(0.16, 1, 0.3, 1) backwards; transform-origin: left; }
+.egx-paydown span { position: relative; display: block; padding: 0 10px; line-height: 26px; font-size: 11.5px; font-weight: 600; color: var(--egx-text); }
+@media (prefers-reduced-motion: reduce) { .egx-node.is-buyer, .egx-paydown i { animation: none; } }

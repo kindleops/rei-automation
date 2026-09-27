@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { Icon } from '../../../shared/icons'
 import type { EntitySearchResult } from '../../../domain/entity-graph/entity-graph.types'
+import { ARCHETYPE_LABEL } from '../../../domain/entity-graph/entity-graph-intel-api'
 import {
   compactCount,
   compactCurrency,
@@ -21,15 +22,20 @@ const text = (v: unknown): string | null => {
   return s && s !== 'null' ? s : null
 }
 
-/** Score tier drives the rail colour so the number can leave the row. */
-function scoreTier(score?: number | null): 'hot' | 'warm' | 'cool' | 'none' {
-  if (score === null || score === undefined) return 'none'
-  const n = Number(score)
-  if (!Number.isFinite(n)) return 'none'
-  if (n >= 80) return 'hot'
-  if (n >= 65) return 'warm'
-  if (n > 0) return 'cool'
+/** The rail states the loudest RECORDED signal — never a legacy score. */
+function recordTier(result: EntitySearchResult): 'hot' | 'warm' | 'cool' | 'none' {
+  const d = result.details ?? {}
+  const signals = d.records?.signals ?? []
+  if (signals.some((s) => s.tone === 'alert')) return 'hot'
+  if (signals.some((s) => s.tone === 'warn') || d.taxDelinquent) return 'warm'
+  if (d.records && (d.records.mortgageCount > 0 || d.records.lienCount > 0 || d.records.saleCount > 0)) return 'cool'
   return 'none'
+}
+
+function relativeYears(date?: string | null): string | null {
+  if (!date) return null
+  const y = Number(String(date).slice(0, 4))
+  return Number.isFinite(y) ? String(y) : null
 }
 
 const SIGNAL_TAGS = /tax delinquent|foreclos|vacant|tired landlord|lien|divorce|probate/i
@@ -39,8 +45,9 @@ const TYPE_LABEL: Record<EntityScope, string> = {
   properties: 'Property',
   master_owners: 'Owner',
   people: 'Person',
-  organizations: 'Entity',
+  organizations: 'Company',
   contact_methods: 'Contact',
+  buyers: 'Buyer',
 }
 
 type Props = {
@@ -128,10 +135,13 @@ export function EntityGraphMobileRow({
   }, [cancelLongPress, onOpen, onToggleSelect, selectionMode])
 
   const rail = scope === 'properties'
-    ? scoreTier(d.acquisitionScore ?? result.score)
-    : scope === 'master_owners'
-      ? scoreTier(result.score)
+    ? recordTier(result)
+    : scope === 'buyers'
+      ? (d.activityStatus === 'active' ? 'buyer' : d.activityStatus === 'slowing' ? 'warm' : 'none')
       : contactability.reachable === true ? 'cool' : 'none'
+  const recordSignals = scope === 'properties' ? (d.records?.signals ?? []) : []
+  // Buyer badges already render as the activity pill + archetype meta.
+  const shownTags = scope === 'buyers' ? [] : tags
 
   return (
     <div
@@ -173,6 +183,9 @@ export function EntityGraphMobileRow({
           ) : null}
           {scope === 'properties' && d.assetType ? <span>{d.assetType}</span> : null}
           {scope === 'properties' && typeof d.equity === 'number' ? <span>{Math.round(d.equity)}% eq</span> : null}
+          {scope === 'buyers' && d.primaryMarket ? <span>{d.primaryMarket}</span> : null}
+          {scope === 'buyers' && d.archetype && ARCHETYPE_LABEL[d.archetype] && d.archetype !== 'insufficient_evidence' ? <span>{ARCHETYPE_LABEL[d.archetype]}</span> : null}
+          {scope === 'buyers' && d.lastAcquisition ? <span>Last buy {relativeYears(d.lastAcquisition)}</span> : null}
           {(scope === 'master_owners' || scope === 'people') && identity.secondary ? (
             <span>{identity.secondary}</span>
           ) : null}
@@ -205,9 +218,15 @@ export function EntityGraphMobileRow({
           <ContactPill scope={scope} result={result} />
         </span>
 
-        {tags.length > 0 ? (
+        {scope === 'properties' ? <RecordStrip result={result} /> : null}
+        {scope === 'buyers' ? <BuyerStrip result={result} /> : null}
+
+        {recordSignals.length > 0 || shownTags.length > 0 ? (
           <span className="egm-tags">
-            {tags.map((tag) => (
+            {recordSignals.map((signal) => (
+              <span key={signal.key} className={cls('egm-tag', 'is-record', `is-${signal.tone}`)}>{signal.label}</span>
+            ))}
+            {shownTags.filter((tag) => !recordSignals.some((s) => s.label.toLowerCase() === tag.toLowerCase())).map((tag) => (
               <span key={tag} className={cls('egm-tag', SIGNAL_TAGS.test(tag) && 'is-signal')}>{tag}</span>
             ))}
           </span>
@@ -217,8 +236,53 @@ export function EntityGraphMobileRow({
   )
 }
 
+/** Debt · liens · last sale, in one quiet line — the recorded story of the parcel. */
+function RecordStrip({ result }: { result: EntitySearchResult }) {
+  const r = result.details?.records
+  if (!r) return null
+  const parts: Array<{ key: string; icon: 'dollar-sign' | 'alert' | 'refresh-cw'; text: string }> = []
+  if (r.mortgageCount > 0) {
+    const bal = compactCurrency(r.mortgageBalance)
+    parts.push({ key: 'debt', icon: 'dollar-sign', text: [`${r.mortgageCount} loan${r.mortgageCount === 1 ? '' : 's'}`, bal, r.firstRate ? `${Number(r.firstRate).toFixed(2).replace(/\.?0+$/, '')}%` : null].filter(Boolean).join(' · ') })
+  } else if (r.saleCount > 0) {
+    parts.push({ key: 'debt', icon: 'dollar-sign', text: 'No open loans' })
+  }
+  if (r.lienCount > 0) parts.push({ key: 'liens', icon: 'alert', text: `${r.lienCount} lien${r.lienCount === 1 ? '' : 's'} & notices` })
+  if (r.lastSaleDate) {
+    parts.push({ key: 'sale', icon: 'refresh-cw', text: ['Sold', relativeYears(r.lastSaleDate), compactCurrency(r.lastSalePrice)].filter(Boolean).join(' ') })
+  }
+  if (!parts.length) return null
+  return (
+    <span className="egm-rec">
+      {parts.map((p) => (
+        <span key={p.key} className={cls('egm-rec__item', `is-${p.key}`)}><Icon name={p.icon} />{p.text}</span>
+      ))}
+    </span>
+  )
+}
+
+function BuyerStrip({ result }: { result: EntitySearchResult }) {
+  const d = result.details ?? {}
+  const parts: string[] = []
+  if (d.priceP50) parts.push(`Median ${compactCurrency(d.priceP50)}`)
+  if (typeof d.trailing365 === 'number' && d.trailing365 > 0) parts.push(`${d.trailing365} in 12 mo`)
+  if (typeof d.cashShare === 'number') parts.push(`${Math.round(d.cashShare * 100)}% cash`)
+  return (
+    <span className="egm-rec is-buyer">
+      {parts.map((p) => <span key={p} className="egm-rec__item">{p}</span>)}
+      {d.crossover ? <span className="egm-rec__item is-cross"><Icon name="refresh-cw" />Buys + sells</span> : null}
+      {typeof d.ownedCount === 'number' && d.ownedCount > 0 ? <span className="egm-rec__item is-owns"><Icon name="home" />Owns {d.ownedCount} here</span> : null}
+    </span>
+  )
+}
+
 function RowValue({ scope, result }: { scope: EntityScope; result: EntitySearchResult }) {
   const d = result.details ?? {}
+  if (scope === 'buyers') {
+    return typeof d.acquisitions === 'number'
+      ? <span className="egm-row__value is-buys">{d.acquisitions}<small> buys</small></span>
+      : null
+  }
   if (scope === 'properties') {
     const value = compactCurrency(d.value)
     return value
@@ -255,12 +319,33 @@ function RowOwner({
 
   if (scope === 'properties') {
     const owner = text(d.ownerName)
-    if (!owner) return <span className="egm-row__owner"><em>Owner unresolved</em></span>
+    // Every owner "bought" their own property once; the role only means
+    // something for a REPEAT or still-active buyer.
+    const rawBuyer = d.records?.ownerBuyer
+    const buyer = rawBuyer && ((rawBuyer.acquisitions ?? 0) >= 2 || rawBuyer.status === 'active') ? rawBuyer : null
+    if (!owner) return <span className="egm-row__owner"><em>No owner on title</em></span>
     return (
       <span className="egm-row__owner">
-        <Icon name={/ llc|inc| lp|trust|corp/i.test(owner) ? 'briefcase' : 'user'} />
-        {owner}
+        <Icon name={/ llc|inc| lp|trust|corp/i.test(owner) || d.ownerCorporate ? 'briefcase' : 'user'} />
+        <span className="egm-row__owner-name">{owner}</span>
         {d.ownerVia === 'linked_person' ? <em>· via person</em> : null}
+        {buyer ? (
+          <span className={cls('egm-buyerbadge', buyer.basis === 'name' && 'is-observed', buyer.status === 'active' && 'is-active')}>
+            Buyer{typeof buyer.acquisitions === 'number' ? ` · ${buyer.acquisitions}` : ''}
+          </span>
+        ) : null}
+      </span>
+    )
+  }
+
+  if (scope === 'buyers') {
+    const kind = d.entityKind === 'person' ? 'Individual' : 'Company'
+    const status = text(d.activityStatus)
+    return (
+      <span className="egm-row__owner">
+        <Icon name={d.entityKind === 'person' ? 'user' : 'briefcase'} />
+        {kind}
+        {status ? <span className={cls('egm-activity', `is-${status}`)}>{status === 'active' ? 'Active' : status === 'slowing' ? 'Slowing' : status === 'inactive' ? 'Inactive' : 'Unknown'}</span> : null}
       </span>
     )
   }

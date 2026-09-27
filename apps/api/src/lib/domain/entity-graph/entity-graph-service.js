@@ -22,6 +22,7 @@ import {
   applyEntityGraphFieldFilters,
   resolveEntityGraphFieldFiltersOrThrow,
 } from './entity-graph-field-filters.js'
+import { shapeRecords } from './entity-network-service.js'
 
 const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
@@ -32,8 +33,33 @@ const PROPERTY_SUMMARY_SELECT = [
   'property_address_state', 'property_address_zip', 'property_zip', 'market', 'market_region',
   'latitude', 'longitude', 'property_type', 'property_class', 'normalized_asset_class',
   'estimated_value', 'equity_percent', 'equity_amount', 'total_loan_balance',
-  'final_acquisition_score', 'structured_motivation_score', 'property_flags_text',
-  'total_bedrooms', 'total_baths', 'building_square_feet', 'units_count',
+  'property_flags_text', 'owner_name', 'is_corporate_owner', 'out_of_state_owner',
+  'tax_delinquent', 'active_lien',
+  'total_bedrooms', 'total_baths', 'building_square_feet', 'units_count', 'year_built',
+].join(',')
+
+/**
+ * Browse reads public.v_entity_graph_properties — the properties row plus its
+ * recorded-document summary and the owner's buyer role — so a card can say
+ * "2 mortgages · probate filed · owner is an active buyer" without a second
+ * round trip, and the record filters have columns to run against.
+ */
+const PROPERTY_BROWSE_SOURCE = 'v_entity_graph_properties'
+const PROPERTY_BROWSE_SELECT = [
+  PROPERTY_SUMMARY_SELECT,
+  'rec_mortgage_count', 'rec_mortgage_balance', 'rec_first_rate', 'rec_first_lender', 'rec_has_private_lender',
+  'rec_lien_count', 'rec_has_probate', 'rec_has_lis_pendens', 'rec_has_death_record', 'rec_has_tax_lien',
+  'rec_has_judgment', 'rec_has_default_notice', 'rec_foreclosure_count', 'rec_foreclosure_stage', 'rec_auction_date',
+  'rec_sale_count', 'rec_last_sale_date', 'rec_last_sale_price', 'rec_last_sale_distress', 'rec_years_owned',
+  'rec_owner_buyer_id', 'rec_owner_buyer_status', 'rec_owner_buyer_acquisitions', 'rec_owner_buyer_basis',
+].join(',')
+
+const BUYER_SELECT = [
+  'buyer_id', 'display_name', 'entity_type', 'entity_grade', 'confidence', 'jurisdiction_code',
+  'acquisition_count', 'disposition_count', 'first_acquisition', 'last_acquisition', 'days_since_last',
+  'trailing_90d', 'trailing_365d', 'acquisitions_per_year', 'activity_status', 'activity_score',
+  'archetype', 'hold_flip', 'dominant_family', 'top_state', 'primary_market', 'price_p25', 'price_p50',
+  'price_p75', 'cash_share', 'has_buybox', 'portfolio_count', 'owned_count', 'sold_count', 'is_crossover',
 ].join(',')
 
 const OWNER_SUMMARY_SELECT = [
@@ -472,13 +498,10 @@ function propertyToResult(row, score = 100) {
     title: summary.title,
     subtitle: summary.subtitle || undefined,
     badges: [summary.marketLabel, summary.assetType].filter(Boolean),
-    score: summary.acquisitionScore ?? score,
-    linkedCounts: {
-      prospects: 1,
-      contacts: 2,
-      reachableContacts: 2,
-      avgAcquisitionScore: summary.acquisitionScore,
-    },
+    score,
+    // No fabricated contact counts: the browse row does not resolve the contact
+    // chain, so it states none rather than the old hard-coded "2 reachable".
+    linkedCounts: {},
     details: {
       city: summary.city,
       state: summary.state,
@@ -490,11 +513,120 @@ function propertyToResult(row, score = 100) {
       units: summary.units,
       value: summary.value,
       equity: summary.equity,
-      acquisitionScore: summary.acquisitionScore,
       flagCount: summary.flagCount,
       flags: summary.flags,
+      ownerName: clean(row.owner_name) || undefined,
+      ownerCorporate: row.is_corporate_owner ?? undefined,
+      absentee: row.out_of_state_owner ?? undefined,
+      taxDelinquent: row.tax_delinquent ?? undefined,
+      yearBuilt: row.year_built ?? undefined,
+      lat: row.latitude ?? undefined,
+      lng: row.longitude ?? undefined,
+      loanBalance: row.total_loan_balance ?? undefined,
+      records: propertyRecordSummary(row),
     },
     contextIds: { propertyId: row.property_id, masterOwnerId: row.master_owner_id || undefined },
+  })
+}
+
+/** The recorded-document facts a card can state, only when the row carries them. */
+function propertyRecordSummary(row) {
+  if (!('rec_mortgage_count' in row)) return undefined
+  const signals = []
+  if (row.rec_foreclosure_count > 0) signals.push({ key: 'foreclosure', label: row.rec_foreclosure_stage || 'Foreclosure', tone: 'alert' })
+  if (row.rec_has_probate) signals.push({ key: 'probate', label: 'Probate', tone: 'alert' })
+  if (row.rec_has_lis_pendens) signals.push({ key: 'lis_pendens', label: 'Lis pendens', tone: 'alert' })
+  if (row.rec_has_default_notice) signals.push({ key: 'default', label: 'Notice of default', tone: 'alert' })
+  if (row.rec_has_death_record) signals.push({ key: 'death', label: 'Death record', tone: 'warn' })
+  if (row.rec_has_tax_lien) signals.push({ key: 'tax_lien', label: 'Tax lien', tone: 'warn' })
+  if (row.rec_has_judgment) signals.push({ key: 'judgment', label: 'Judgment', tone: 'warn' })
+  if (row.rec_has_private_lender) signals.push({ key: 'private_lender', label: 'Private lender', tone: 'info' })
+  if (row.rec_last_sale_distress) signals.push({ key: 'distress_sale', label: 'Bought at trustee sale', tone: 'info' })
+  return {
+    mortgageCount: row.rec_mortgage_count ?? 0,
+    mortgageBalance: row.rec_mortgage_balance ?? undefined,
+    firstRate: row.rec_first_rate ?? undefined,
+    firstLender: row.rec_first_lender || undefined,
+    lienCount: row.rec_lien_count ?? 0,
+    saleCount: row.rec_sale_count ?? 0,
+    lastSaleDate: row.rec_last_sale_date || undefined,
+    lastSalePrice: row.rec_last_sale_price ?? undefined,
+    yearsOwned: row.rec_years_owned ?? undefined,
+    auctionDate: row.rec_auction_date || undefined,
+    ownerBuyer: row.rec_owner_buyer_id ? {
+      buyerId: row.rec_owner_buyer_id,
+      status: row.rec_owner_buyer_status || undefined,
+      acquisitions: row.rec_owner_buyer_acquisitions ?? undefined,
+      basis: row.rec_owner_buyer_basis || undefined,
+    } : undefined,
+    signals,
+  }
+}
+
+const ARCHETYPE_LABEL = {
+  institutional_high_volume_buyer: 'Institutional',
+  active_flipper: 'Active flipper',
+  long_term_rental_holder: 'Rental holder',
+  multifamily_operator: 'Multifamily operator',
+  small_multifamily_operator: 'Small MF operator',
+  commercial_operator: 'Commercial operator',
+  diversified_buyer: 'Diversified',
+  geographically_concentrated_buyer: 'Concentrated',
+  general_acquirer: 'Repeat buyer',
+  inactive_stale_buyer: 'Gone quiet',
+  insufficient_evidence: null,
+}
+
+export function buyerToResult(row, score = 100) {
+  const person = row.entity_type === 'person'
+  const [state, county] = String(row.primary_market || '').split('|')
+  const place = county ? `${county}, ${state}` : (row.top_state || '')
+  const archetype = ARCHETYPE_LABEL[row.archetype] ?? null
+  return buildSearchResult({
+    entityType: 'buyer',
+    entityId: row.buyer_id,
+    // Natural-person buyers are never named (serving-layer privacy rule).
+    title: row.display_name || (person ? 'Individual buyer' : 'Unnamed company'),
+    subtitle: [place, row.acquisition_count ? `${row.acquisition_count} purchase${row.acquisition_count === 1 ? '' : 's'}` : null]
+      .filter(Boolean).join(' · ') || undefined,
+    badges: [archetype, row.activity_status === 'active' ? 'Active' : null].filter(Boolean),
+    score,
+    linkedCounts: {
+      purchases: row.acquisition_count ?? 0,
+      owned: row.owned_count ?? 0,
+      sold: row.sold_count ?? 0,
+      portfolio: row.portfolio_count ?? 0,
+    },
+    details: {
+      buyerId: row.buyer_id,
+      entityKind: person ? 'person' : 'company',
+      activityStatus: row.activity_status || undefined,
+      activityScore: row.activity_score ?? undefined,
+      archetype: row.archetype || undefined,
+      archetypeLabel: archetype || undefined,
+      holdFlip: row.hold_flip || undefined,
+      dominantFamily: row.dominant_family || undefined,
+      primaryMarket: place || undefined,
+      topState: row.top_state || undefined,
+      acquisitions: row.acquisition_count ?? undefined,
+      trailing90: row.trailing_90d ?? undefined,
+      trailing365: row.trailing_365d ?? undefined,
+      perYear: row.acquisitions_per_year ?? undefined,
+      lastAcquisition: row.last_acquisition || undefined,
+      daysSinceLast: row.days_since_last ?? undefined,
+      priceP25: row.price_p25 ?? undefined,
+      priceP50: row.price_p50 ?? undefined,
+      priceP75: row.price_p75 ?? undefined,
+      cashShare: row.cash_share ?? undefined,
+      hasBuybox: row.has_buybox ?? undefined,
+      portfolioCount: row.portfolio_count ?? undefined,
+      ownedCount: row.owned_count ?? undefined,
+      soldCount: row.sold_count ?? undefined,
+      crossover: row.is_crossover ?? undefined,
+      confidence: row.confidence ?? undefined,
+      entityGrade: row.entity_grade || undefined,
+    },
+    contextIds: { buyerId: row.buyer_id },
   })
 }
 
@@ -731,7 +863,8 @@ function paginatedResponse(results, total, cursor, pageSize, { pageWasFull = nul
 }
 
 const BROWSE_SORT_COLUMNS = {
-  properties: { default: 'property_address_full', columns: ['property_address_full', 'market', 'final_acquisition_score', 'estimated_value'] },
+  properties: { default: 'property_address_full', columns: ['property_address_full', 'market', 'estimated_value', 'equity_percent', 'rec_last_sale_date', 'rec_mortgage_balance'] },
+  buyers: { default: 'acquisition_count', columns: ['acquisition_count', 'last_acquisition', 'trailing_365d', 'activity_score', 'owned_count', 'sold_count', 'price_p50'] },
   master_owners: { default: 'display_name', columns: ['display_name', 'property_count', 'priority_score', 'portfolio_total_value'] },
   people: { default: 'full_name', columns: ['full_name', 'contact_score_final', 'rank_position'] },
   organizations: { default: 'owner_name', columns: ['owner_name', 'owner_entity_id'] },
@@ -740,7 +873,7 @@ const BROWSE_SORT_COLUMNS = {
   zips: { default: 'zip', columns: ['zip', 'property_count'] },
 }
 
-function parseBrowseFilters(params = {}) {
+export function parseBrowseFilters(params = {}) {
   return {
     market: clean(params.market || params.eg_market),
     city: clean(params.city || params.eg_city),
@@ -757,25 +890,36 @@ function parseBrowseFilters(params = {}) {
     scoreMax: Number(params.score_max ?? params.scoreMax ?? params.eg_score_max) || null,
     coverageMin: Number(params.coverage_min ?? params.coverageMin ?? params.eg_coverage_min) || null,
     language: clean(params.language || params.eg_language),
+    county: clean(params.county || params.eg_county),
     entityType: clean(params.entity_type || params.entityType || params.eg_entity_type),
   }
 }
 
-function applyPropertyFilters(query, filters) {
+export function applyPropertyFilters(query, filters) {
   if (filters.market) {
     const like = `%${filters.market}%`
     query = query.or(`market.ilike.${like},market_region.ilike.${like}`)
   }
   if (filters.city) query = query.ilike('property_address_city', `%${filters.city}%`)
-  if (filters.state) query = query.ilike('property_address_state', `%${filters.state}%`)
+  // A two-letter code is an exact, indexable match; anything longer is a name.
+  if (filters.state) {
+    query = /^[A-Za-z]{2}$/.test(filters.state)
+      ? query.eq('property_address_state', filters.state.toUpperCase())
+      : query.ilike('property_address_state', `%${filters.state}%`)
+  }
   if (filters.zip) query = query.or(`property_address_zip.eq.${filters.zip},property_zip.eq.${filters.zip}`)
   if (filters.assetType) {
     query = query.or(`normalized_asset_class.ilike.%${filters.assetType}%,property_type.ilike.%${filters.assetType}%`)
   }
   if (filters.unitsMin !== null) query = query.gte('units_count', filters.unitsMin)
   if (filters.unitsMax !== null) query = query.lte('units_count', filters.unitsMax)
-  if (filters.scoreMin !== null) query = query.gte('final_acquisition_score', filters.scoreMin)
-  if (filters.scoreMax !== null) query = query.lte('final_acquisition_score', filters.scoreMax)
+  if (filters.county) query = query.ilike('property_address_county_name', `%${filters.county}%`)
+  return query
+}
+
+export function applyBuyerFilters(query, filters) {
+  if (filters.state) query = query.contains('states', [filters.state.toUpperCase()])
+  if (filters.entityType) query = query.eq('entity_type', filters.entityType)
   return query
 }
 
@@ -978,11 +1122,71 @@ async function getCanonicalMarketAggregates(supabase) {
   return merged
 }
 
+/**
+ * EVERY PROPERTY ID IN THE COHORT, bounded.
+ *
+ * "Select all matching" hands a campaign draft EXPLICIT property ids, so a
+ * cohort filtered on record/buyer fields the campaign builder does not know
+ * still carries exactly. Capped: a cohort larger than the cap is reported as
+ * truncated rather than silently clipped.
+ */
+export async function listEntityGraphPropertyIds(params = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const cap = int(params.limit, 2000, 5000)
+  const filters = parseBrowseFilters(params)
+  const { resolved: fieldFilters } = resolveEntityGraphFieldFiltersOrThrow('properties', params)
+  const ids = []
+  const points = []
+  const chunk = 1000
+  for (let offset = 0; offset < cap; offset += chunk) {
+    const { data, error } = await applyEntityGraphFieldFilters(
+      applyPropertyFilters(supabase.from(PROPERTY_BROWSE_SOURCE).select('property_id, latitude, longitude'), filters),
+      fieldFilters,
+    ).order('property_id').range(offset, Math.min(offset + chunk, cap) - 1)
+    if (error) throw error
+    for (const row of data || []) {
+      if (!row.property_id) continue
+      ids.push(String(row.property_id))
+      const lat = Number(row.latitude)
+      const lng = Number(row.longitude)
+      if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0) points.push({ id: String(row.property_id), lat, lng })
+    }
+    if (!data || data.length < Math.min(chunk, cap - offset)) break
+  }
+  return { ids, points, truncated: ids.length >= cap, cap }
+}
+
+async function browseBuyers(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
+  const orderCol = BROWSE_SORT_COLUMNS.buyers.columns.includes(sortBy) ? sortBy : 'acquisition_count'
+  const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
+    table: 'eg_buyer_index',
+    select: BUYER_SELECT,
+    buildQuery: (query) => applyEntityGraphFieldFilters(applyBuyerFilters(query, filters), fieldFilters),
+    orderCol,
+    ascending,
+    cursor,
+    pageSize,
+  })
+  return paginatedResponse(rows.map((row) => buyerToResult(row)), total, cursor, pageSize, { pageWasFull })
+}
+
+async function searchBuyers(supabase, query, limit) {
+  const q = normalizeSearchQuery(query)
+  if (!q || q.length < 3 || /^\d+$/.test(q)) return []
+  const { data } = await supabase
+    .from('eg_buyer_index')
+    .select(BUYER_SELECT)
+    .ilike('search_text', `%${q.toUpperCase()}%`)
+    .order('acquisition_count', { ascending: false, nullsFirst: false })
+    .limit(limit)
+  return (data || []).map((row) => buyerToResult(row, 420))
+}
+
 async function browseProperties(supabase, { cursor, pageSize, sortBy, ascending, filters = {}, fieldFilters = [] }) {
   const orderCol = BROWSE_SORT_COLUMNS.properties.columns.includes(sortBy) ? sortBy : 'property_address_full'
   const { rows, total, pageWasFull } = await fetchPageWithCount(supabase, {
-    table: 'properties',
-    select: PROPERTY_SUMMARY_SELECT,
+    table: PROPERTY_BROWSE_SOURCE,
+    select: PROPERTY_BROWSE_SELECT,
     buildQuery: (query) => applyEntityGraphFieldFilters(applyPropertyFilters(query, filters), fieldFilters),
     orderCol,
     ascending,
@@ -1274,6 +1478,8 @@ export async function browseEntityGraph(params = {}, deps = {}) {
   switch (tab) {
     case 'properties':
       return browseProperties(supabase, browseArgs)
+    case 'buyers':
+      return browseBuyers(supabase, browseArgs)
     case 'master_owners':
       return browseOwners(supabase, browseArgs)
     case 'people':
@@ -1302,6 +1508,7 @@ export async function getEntityGraphCounts(deps = {}) {
     emails,
     markets,
     zips,
+    buyers,
   ] = await Promise.all([
     supabase.from('properties').select('property_id', { count: 'exact', head: true }),
     supabase.from('master_owners').select('master_owner_id', { count: 'exact', head: true }),
@@ -1318,6 +1525,10 @@ export async function getEntityGraphCounts(deps = {}) {
       if (!viewResult.error) return viewResult
       return { count: 0, error: null }
     }),
+    // The buyer read model is optional to the rest of the universe: if it is
+    // unreadable the tab reports no count rather than failing every chip.
+    supabase.from('eg_buyer_index').select('buyer_id', { count: 'exact', head: true })
+      .then((result) => (result.error ? { count: null, error: null } : result)),
   ])
 
   const firstError = [properties, masterOwners, people, organizations, phones, emails, markets, zips]
@@ -1335,6 +1546,7 @@ export async function getEntityGraphCounts(deps = {}) {
     emails: emails.count || 0,
     markets: markets.count || 0,
     zips: zips.count || 0,
+    buyers: buyers.count ?? null,
   }
 }
 
@@ -1437,7 +1649,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     let dbQuery = predicate.apply(
       supabase.from('properties').select(PROPERTY_SUMMARY_SELECT, { count: 'exact' }),
     )
-      .order('final_acquisition_score', { ascending: false, nullsFirst: false })
+      .order('estimated_value', { ascending: false, nullsFirst: false })
       .range(cursor, cursor + pageSize - 1)
     const { data, error, count } = await dbQuery
     if (error) throw error
@@ -1482,6 +1694,12 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     return paginatedResponse(dedupeResults(sortResults(results, query)), count || results.length, cursor, pageSize)
   }
 
+  if (tab === 'buyers') {
+    const merged = dedupeResults(sortResults(await searchBuyers(supabase, query, pageSize + cursor), query))
+    const page = merged.slice(cursor, cursor + pageSize)
+    return paginatedResponse(page, merged.length, cursor, pageSize)
+  }
+
   if (tab === 'organizations') {
     const merged = dedupeResults(sortResults(await searchOrganizations(supabase, query, pageSize + cursor), query))
     const page = merged.slice(cursor, cursor + pageSize)
@@ -1524,6 +1742,7 @@ export async function searchEntityGraph(params = {}, deps = {}) {
     searchOwners(supabase, query, perTypeLimit),
     searchProspects(supabase, query, perTypeLimit),
     searchOrganizations(supabase, query, perTypeLimit),
+    searchBuyers(supabase, query, perTypeLimit).catch(() => []),
   ])
   const merged = dedupeResults(sortResults(buckets.flat(), query))
   const page = merged.slice(cursor, cursor + pageSize)
@@ -1988,6 +2207,13 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     .limit(1)
   const engineScore = Array.isArray(engineScoreRows) ? engineScoreRows[0] || null : null
 
+  // Recorded documents (mortgages, liens, sales + buyer resolution,
+  // foreclosures) and the county parcel record. A failure leaves them null —
+  // the sheet says "records unavailable", never "no records".
+  const { data: records, error: recordsError } = await supabase
+    .rpc('entity_graph_property_records', { p_property_id: String(propertyId) })
+  if (recordsError) console.error('entity_graph.records_failed', recordsError.message)
+
   const portfolio = owner ? parseJsonArray(owner.joined_property_ids_json) : [propertyId]
   let portfolioProperties = [property]
   if (portfolio.length > 1) {
@@ -2012,7 +2238,7 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     entityType: 'property',
     entityId: propertyId,
     summary: {
-      ...property,
+      ...withoutWithheldFields(property),
       marketLabel: propertyPresentation.marketLabel,
       marketKey: propertyPresentation.marketKey,
       isUnmappedMarket: propertyPresentation.isUnmappedMarket,
@@ -2022,9 +2248,8 @@ async function loadPropertyNeighborhood(supabase, propertyId) {
     portfolio: portfolioProperties,
     threads,
     contactLadder,
+    records: recordsError ? null : shapeRecords(records),
     scores: {
-      acquisition: property.final_acquisition_score,
-      motivation: property.structured_motivation_score,
       equityPercent: property.equity_percent,
       /** 'decision_engine' when the engine has run for this property, else 'screening'. */
       acquisitionSource: engineScore ? 'decision_engine' : 'screening',
@@ -2159,6 +2384,15 @@ async function loadContactNeighborhood(supabase, type, id) {
     graph,
     timeline: [],
   }
+}
+
+/** Legacy Podio-era scores never leave the server on an Entity Graph payload. */
+const WITHHELD_PROPERTY_COLUMNS = ['cash_offer', 'final_acquisition_score', 'ai_score', 'structured_motivation_score', 'deal_strength_score', 'tag_distress_score']
+function withoutWithheldFields(row) {
+  if (!row || typeof row !== 'object') return row
+  const next = { ...row }
+  for (const column of WITHHELD_PROPERTY_COLUMNS) delete next[column]
+  return next
 }
 
 export async function getEntityGraphDossier(type, id, deps = {}) {
