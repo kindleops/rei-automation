@@ -17,6 +17,8 @@ import { usePipelineOpportunities } from './hooks/usePipelineOpportunities'
 import { sanitizePipelineError } from '../../domain/pipeline/pipeline-operator-error'
 import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { PipelineCommandCenter } from './command/PipelineCommandCenter'
 
 const OPP_PARAM = 'opp'
 const STORAGE_KEY = 'pipeline_selected_opp_v1'
@@ -54,7 +56,25 @@ function writeOppToUrl(opportunityId: string | null) {
   } catch { /* ignore */ }
 }
 
-export function PipelineWorkspace({
+/**
+ * Phones get the Pipeline command center (lifecycle, lanes, exceptions,
+ * movement, deal story); larger layouts keep the board. Deciding here keeps
+ * the board's 500-row load from running at all on mobile.
+ */
+export function PipelineWorkspace(props: PipelineWorkspaceProps) {
+  const { isMobile } = useBreakpoint()
+  if (isMobile) {
+    return (
+      <PipelineCommandCenter
+        onOpenCommandView={props.onOpenCommandView}
+        onOpenDealIntelligence={props.onOpenDealIntelligence}
+      />
+    )
+  }
+  return <PipelineWorkspaceBoard {...props} />
+}
+
+function PipelineWorkspaceBoard({
   selectedId,
   layoutMode,
   onSelect,

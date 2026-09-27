@@ -1,0 +1,724 @@
+/*
+ * PIPELINE DEAL INSPECTOR — portalled to <body>; all colour comes from the
+ * --plc-* tokens defined on .pli (pipeline-command-tokens.css), so Dark,
+ * Light, Red Ops and True Black follow automatically.
+ *
+ * Liquid colour in the stage's tone drifts under frosted glass; the lifecycle
+ * rail and the deal story carry the motion. Traps honoured: no button::after
+ * (the global 44px tap floor owns it — box-shadow instead), no
+ * background-clip:text with currentColor, and every button that must stay
+ * compact resets the tap floor explicitly.
+ */
+.pli {
+  --pli-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --pli-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 185;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  pointer-events: none;
+}
+.pli *,
+.pli *::before { box-sizing: border-box; }
+
+/* ── Scrim + sheet ─────────────────────────────────────────────────────── */
+.pli-scrim {
+  position: absolute;
+  inset: 0;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  border: 0;
+  padding: 0;
+  background: rgb(2 4 8 / 0.5);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  animation: pli-fade 280ms ease both;
+}
+html[data-nexus-theme='light'] .pli-scrim { background: rgb(15 23 42 / 0.22); }
+
+.pli-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  height: min(74dvh, 700px);
+  max-width: 560px;
+  margin: 0 auto;
+  border-radius: 28px 28px 0 0;
+  border: 1px solid var(--plc-edge-hi);
+  border-bottom: 0;
+  background: var(--plc-sheen), var(--plc-glass);
+  -webkit-backdrop-filter: var(--plc-blur);
+  backdrop-filter: var(--plc-blur);
+  box-shadow: 0 -28px 80px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  overflow: hidden;
+  isolation: isolate;
+  pointer-events: auto;
+  transform: translateY(max(0px, var(--drag, 0px)));
+  transition: height 440ms var(--pli-ease), transform 380ms var(--pli-ease);
+  animation: pli-rise 560ms var(--pli-spring) both;
+}
+.pli-sheet.is-full { height: calc(100dvh - max(env(safe-area-inset-top, 0px), 16px) - 36px); }
+.pli-sheet.is-dragging { transition: none; }
+html[data-nexus-theme='light'] .pli-sheet { box-shadow: 0 -18px 50px rgb(15 23 42 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.9); }
+
+/* Ambient liquid colour in the stage tone. */
+.pli-field {
+  position: absolute;
+  inset: -18% -30% auto;
+  height: 440px;
+  z-index: -1;
+  pointer-events: none;
+  filter: blur(48px) saturate(140%);
+  opacity: 0.5;
+}
+.pli-field i {
+  position: absolute;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  animation: pli-drift 18s ease-in-out infinite alternate;
+}
+.pli-field i:nth-child(1) { width: 62%; height: 70%; left: 6%; top: 6%; background: radial-gradient(circle, color-mix(in srgb, var(--stage) 72%, transparent), transparent 70%); }
+.pli-field i:nth-child(2) { width: 48%; height: 60%; right: 4%; top: 0; background: radial-gradient(circle, color-mix(in srgb, var(--plc-l-system) 40%, transparent), transparent 70%); animation-duration: 23s; animation-delay: -7s; }
+.pli-field i:nth-child(3) { width: 40%; height: 48%; left: 38%; top: 34%; background: radial-gradient(circle, color-mix(in srgb, var(--stage) 45%, transparent), transparent 70%); animation-duration: 28s; animation-delay: -12s; }
+html[data-nexus-theme='light'] .pli-field { opacity: 0.32; }
+html[data-nexus-theme='light'] .pli-field i { mix-blend-mode: multiply; }
+html[data-nexus-theme='true_black'] .pli-field { opacity: 0.38; }
+
+.pli-grip {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 6px;
+  cursor: grab;
+  touch-action: none;
+}
+.pli-grip__pill {
+  width: 40px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--plc-edge-hi);
+}
+.pli-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  width: 34px;
+  height: 34px;
+  min-height: 34px !important;
+  min-width: 34px !important;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  color: var(--plc-text-2);
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+  cursor: pointer;
+}
+.pli-close svg { width: 15px; height: 15px; }
+
+.pli-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 16px calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ── Hero ──────────────────────────────────────────────────────────────── */
+.pli-hero { padding: 4px 2px 6px; animation: pli-in 520ms var(--pli-spring) both; }
+.pli-hero__top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-right: 40px; }
+.pli-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--plc-text-2);
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+}
+.pli-chip svg { width: 12px; height: 12px; }
+.pli-chip.is-stage {
+  color: var(--plc-text);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--stage) 30%, transparent), color-mix(in srgb, var(--stage) 10%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stage) 55%, transparent), 0 6px 18px -8px var(--stage);
+}
+.pli-chip.is-stage b { font-weight: 800; letter-spacing: 0.02em; color: var(--stage); }
+.pli-chip.is-hot { color: var(--plc-l-operator); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-l-operator) 45%, transparent); }
+.pli-chip.is-sync i { width: 6px; height: 6px; border-radius: 50%; background: var(--plc-l-system); animation: pli-blink 1s ease-in-out infinite; }
+
+.pli-hero__title {
+  margin: 12px 0 4px;
+  font-size: 23px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--plc-text);
+  overflow-wrap: anywhere;
+}
+.pli-hero__seller {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--plc-text-2);
+  min-width: 0;
+}
+.pli-hero__seller svg { width: 13px; height: 13px; flex: none; opacity: 0.7; }
+.pli-hero__seller span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pli-hero__seller em { font-style: normal; font-size: 11px; color: var(--plc-text-3); flex: none; }
+.pli-hero__place { margin: 3px 0 0; font-size: 12.5px; color: var(--plc-text-3); }
+
+/* Lifecycle rail: ten canonical dots, the current one glowing. */
+.pli-rail { margin: 16px 0 12px; }
+.pli-rail__track {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  align-items: center;
+  height: 22px;
+}
+.pli-rail__track::before {
+  content: '';
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+}
+.pli-rail__fill {
+  position: absolute;
+  left: 5%;
+  top: 50%;
+  height: 2px;
+  width: calc(var(--p) * 0.9);
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--plc-s-early), var(--stage));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--stage) 60%, transparent);
+  transform-origin: left center;
+  animation: pli-pour 900ms var(--pli-spring) 200ms both;
+}
+.pli-rail__dot {
+  position: relative;
+  justify-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--plc-glass-hi);
+  box-shadow: inset 0 0 0 1.5px var(--plc-edge-hi);
+  transition: transform 300ms var(--pli-ease);
+}
+.pli-rail__dot.is-past { background: var(--tone); box-shadow: 0 0 6px color-mix(in srgb, var(--tone) 50%, transparent); }
+.pli-rail__dot.is-now {
+  width: 15px;
+  height: 15px;
+  background: var(--tone);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone) 22%, transparent), 0 0 18px var(--tone);
+}
+.pli-rail__dot.is-now i {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--tone);
+  animation: pli-ring 2.4s ease-out infinite;
+}
+.pli-rail__dot.is-resolved { background: var(--plc-l-complete); box-shadow: 0 0 0 4px color-mix(in srgb, var(--plc-l-complete) 24%, transparent), 0 0 18px var(--plc-l-complete); }
+.pli-rail.is-out .pli-rail__dot.is-now,
+.pli-rail.is-out .pli-rail__fill { filter: grayscale(1) opacity(0.6); }
+.pli-rail__groups {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  margin-top: 6px;
+}
+.pli-rail__groups span {
+  grid-column: calc(var(--from) + 1) / span var(--span);
+  text-align: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--plc-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.pli-rail__groups span.is-now { color: var(--stage); }
+
+/* Lane banner: whose move it is, and why. */
+.pli-lane {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 18px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--tone) 14%, transparent), color-mix(in srgb, var(--tone) 4%, transparent)), var(--plc-glass);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 32%, transparent);
+  overflow: hidden;
+  animation: pli-in 520ms var(--pli-spring) 120ms both;
+}
+.pli-lane.is-exception { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 60%, transparent), 0 10px 30px -18px var(--tone); }
+.pli-lane.is-system::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--tone) 16%, transparent) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: pli-sweep 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+.pli-lane__orb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent), 0 0 20px -6px var(--tone);
+}
+.pli-lane__orb svg { width: 17px; height: 17px; }
+.pli-lane__text { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pli-lane__eyebrow { font-size: 9.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--tone); }
+.pli-lane__text b { font-size: 15px; font-weight: 650; color: var(--plc-text); }
+.pli-lane__text small { font-size: 12px; line-height: 1.35; color: var(--plc-text-2); }
+.pli-stall {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--plc-l-operator);
+  background: color-mix(in srgb, var(--plc-l-operator) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-l-operator) 38%, transparent);
+  white-space: nowrap;
+}
+.pli-stall svg { width: 11px; height: 11px; }
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+.pli-sections { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.pli-sec {
+  --tone: var(--stage);
+  border-radius: 20px;
+  background: var(--plc-sheen), var(--plc-glass);
+  box-shadow: inset 0 0 0 1px var(--plc-edge), 0 16px 34px -26px rgb(0 0 0 / 0.9);
+  overflow: hidden;
+  animation: pli-in 520ms var(--pli-spring) both;
+  animation-delay: calc(160ms + var(--i, 0) * 60ms);
+}
+html[data-nexus-theme='light'] .pli-sec { box-shadow: inset 0 0 0 1px var(--plc-edge), 0 10px 24px -20px rgb(15 23 42 / 0.4); }
+.pli-sec__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px !important;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--plc-text);
+  text-align: left;
+  cursor: pointer;
+}
+.pli-sec__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent);
+}
+.pli-sec__icon svg { width: 15px; height: 15px; }
+.pli-sec__title { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.pli-sec__meta { font-size: 11.5px; font-weight: 600; color: var(--plc-text-3); white-space: nowrap; }
+.pli-sec__chev { display: grid; place-items: center; color: var(--plc-text-3); }
+.pli-sec__chev svg { width: 14px; height: 14px; }
+.pli-sec__body { padding: 0 14px 14px; animation: pli-in 360ms var(--pli-ease) both; }
+
+.pli-note { margin: 4px 0 10px; font-size: 12.5px; line-height: 1.45; color: var(--plc-text-3); }
+
+/* ── Deal story ───────────────────────────────────────────────────────── */
+.pli-story { list-style: none; margin: 0; padding: 4px 0 0; position: relative; }
+.pli-beat {
+  position: relative;
+  display: grid;
+  grid-template-columns: 50px 28px minmax(0, 1fr);
+  column-gap: 8px;
+  padding-bottom: 14px;
+  animation: pli-in 460ms var(--pli-spring) both;
+  animation-delay: calc(220ms + var(--i, 0) * 45ms);
+}
+.pli-beat:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 71px;
+  top: 26px;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 55%, transparent), var(--plc-track));
+}
+.pli-beat__date { display: flex; flex-direction: column; align-items: flex-end; padding-top: 5px; }
+.pli-beat__date b { font-size: 11.5px; font-weight: 700; color: var(--plc-text-2); white-space: nowrap; }
+.pli-beat__date small { font-size: 10px; color: var(--plc-text-3); }
+.pli-beat__node {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, var(--plc-glass-hi));
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--tone) 45%, transparent);
+}
+.pli-beat__node svg { width: 13px; height: 13px; }
+.pli-beat__body { min-width: 0; padding-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+.pli-beat__body b { font-size: 13.5px; font-weight: 650; color: var(--plc-text); line-height: 1.3; }
+.pli-beat__body small { font-size: 12px; color: var(--plc-text-2); line-height: 1.4; overflow-wrap: anywhere; }
+.pli-beat__quote {
+  display: block;
+  margin: 2px 0 0;
+  padding: 7px 10px;
+  border-radius: 4px 12px 12px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--plc-text-2);
+  background: var(--plc-track);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--tone) 60%, transparent);
+  quotes: none;
+  overflow-wrap: anywhere;
+}
+.pli-beat.is-now .pli-beat__date b { color: var(--tone); }
+.pli-beat.is-now .pli-beat__node {
+  position: relative;
+  color: var(--plc-ink);
+  background: var(--tone);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone) 20%, transparent), 0 0 20px var(--tone);
+}
+.pli-beat.is-now .pli-beat__node::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--tone);
+  animation: pli-ring 2.6s ease-out infinite;
+}
+.pli-beat.is-now .pli-beat__body {
+  padding: 8px 10px;
+  margin-top: -3px;
+  border-radius: 12px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--tone) 14%, transparent), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 28%, transparent);
+}
+
+/* ── Figures ──────────────────────────────────────────────────────────── */
+.pli-figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pli-figs.is-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pli-fig {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+}
+.pli-fig__label { font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--plc-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pli-fig__value { font-size: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--plc-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pli-fig.is-strong .pli-fig__value { color: var(--tone); }
+.pli-fig.is-empty .pli-fig__value { color: var(--plc-text-3); font-weight: 500; }
+.pli-fig__sub { font-size: 10.5px; color: var(--plc-text-3); }
+
+/* Decision Engine block. */
+.pli-engine {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--plc-s-negotiate) 12%, transparent), transparent 70%), var(--plc-track);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-s-negotiate) 26%, transparent);
+}
+.pli-engine__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pli-engine__badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--plc-s-negotiate); }
+.pli-engine__badge svg { width: 14px; height: 14px; }
+.pli-engine__when { font-size: 11px; color: var(--plc-text-3); white-space: nowrap; }
+.pli-engine__meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.pli-engine__meta span { padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--plc-text-2); background: var(--plc-track); box-shadow: inset 0 0 0 1px var(--plc-edge); }
+
+.pli-band { margin-top: 12px; }
+.pli-band__track { position: relative; height: 14px; border-radius: 7px; background: var(--plc-track); box-shadow: inset 0 0 0 1px var(--plc-edge); }
+.pli-band__value { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; background: color-mix(in srgb, var(--plc-s-dispo) 34%, transparent); transform-origin: left; animation: pli-pour 800ms var(--pli-spring) 300ms both; }
+.pli-band__offer { position: absolute; top: 0; bottom: 0; border-radius: 7px; background: linear-gradient(90deg, color-mix(in srgb, var(--plc-s-negotiate) 70%, transparent), var(--plc-s-negotiate)); box-shadow: 0 0 14px -2px var(--plc-s-negotiate); transform-origin: left; animation: pli-pour 900ms var(--pli-spring) 420ms both; }
+.pli-band__tick { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; }
+.pli-band__tick.is-mid { background: var(--plc-s-dispo); }
+.pli-band__tick.is-ask { background: var(--plc-l-operator); box-shadow: 0 0 8px var(--plc-l-operator); }
+.pli-band__legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 11px; color: var(--plc-text-2); }
+.pli-band__legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pli-band__legend i { width: 8px; height: 8px; border-radius: 2px; }
+.pli-band__legend .is-offer i { background: var(--plc-s-negotiate); }
+.pli-band__legend .is-value i { background: color-mix(in srgb, var(--plc-s-dispo) 60%, transparent); }
+.pli-band__legend .is-ask i { background: var(--plc-l-operator); }
+
+/* ── Conversation ─────────────────────────────────────────────────────── */
+.pli-msg { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.pli-msg__meta { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--plc-text-3); }
+.pli-msg q {
+  display: block;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  quotes: none;
+  overflow-wrap: anywhere;
+  color: var(--plc-text);
+}
+.pli-msg.is-in q { border-radius: 4px 16px 16px 16px; background: var(--plc-glass-hi); box-shadow: inset 0 0 0 1px var(--plc-edge); }
+.pli-msg.is-out { align-items: flex-end; }
+.pli-msg.is-out q {
+  border-radius: 16px 4px 16px 16px;
+  color: var(--plc-text);
+  background: color-mix(in srgb, var(--plc-l-system) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-l-system) 30%, transparent);
+  max-width: 92%;
+}
+
+/* ── Negotiation ──────────────────────────────────────────────────────── */
+.pli-offers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pli-offers li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+}
+.pli-offers li b { font-size: 15px; font-weight: 700; color: var(--plc-text); }
+.pli-offers li span:last-child { font-size: 11.5px; color: var(--plc-text-3); white-space: nowrap; }
+.pli-offers__v { font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--plc-s-negotiate); }
+.pli-offers li.is-accepted { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-s-dispo) 55%, transparent), 0 0 18px -10px var(--plc-s-dispo); }
+.pli-offers li.is-accepted .pli-offers__v,
+.pli-offers li.is-accepted span:last-child { color: var(--plc-s-dispo); }
+.pli-offers li.is-counter .pli-offers__v { color: var(--plc-l-operator); }
+
+/* ── Disposition ──────────────────────────────────────────────────────── */
+.pli-buyerstate { margin: 10px 0 6px; }
+.pli-buyers { list-style: none; margin: 8px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pli-buyers li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+}
+.pli-buyers__grade {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--plc-s-dispo);
+  background: color-mix(in srgb, var(--plc-s-dispo) 14%, transparent);
+}
+.pli-buyers li b { font-size: 13px; font-weight: 600; color: var(--plc-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pli-buyers li span:last-child { font-size: 11px; color: var(--plc-text-3); white-space: nowrap; }
+
+/* ── Contract & closing — gold, resolved weight ───────────────────────── */
+.pli-closing {
+  margin-bottom: 10px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--plc-s-closing) 12%, transparent), transparent 70%), var(--plc-track);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-s-closing) 30%, transparent);
+}
+.pli-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.pli-row + .pli-row { box-shadow: 0 -1px 0 var(--plc-edge); }
+.pli-row span { color: var(--plc-text-2); }
+.pli-row b { font-weight: 650; color: var(--plc-text); text-align: right; overflow-wrap: anywhere; }
+
+.pli-resolved {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 20px;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--plc-l-complete) 20%, transparent), color-mix(in srgb, var(--plc-s-closing) 10%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-l-complete) 45%, transparent), 0 14px 34px -20px var(--plc-l-complete);
+  animation: pli-in 520ms var(--pli-spring) both;
+}
+.pli-resolved__seal { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: var(--plc-ink); background: var(--plc-l-complete); box-shadow: 0 0 22px var(--plc-l-complete); }
+.pli-resolved__seal svg { width: 18px; height: 18px; }
+.pli-resolved b { display: block; font-size: 17px; font-weight: 700; color: var(--plc-text); }
+.pli-resolved small { font-size: 12px; color: var(--plc-text-2); }
+.pli-sheet.is-resolved .pli-field i:nth-child(2) { background: radial-gradient(circle, color-mix(in srgb, var(--plc-l-complete) 45%, transparent), transparent 70%); }
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.pli-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px !important;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--plc-text);
+  background: var(--plc-glass-hi);
+  box-shadow: inset 0 0 0 1px var(--plc-edge-hi);
+  cursor: pointer;
+  transition: transform 160ms var(--pli-ease);
+}
+.pli-btn:active { transform: scale(0.98); }
+.pli-btn svg { width: 15px; height: 15px; }
+.pli-btn.is-ghost { background: transparent; color: var(--plc-s-negotiate); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-s-negotiate) 40%, transparent); }
+
+/* ── States ───────────────────────────────────────────────────────────── */
+.pli-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--plc-text-2);
+}
+.pli-state > svg { width: 26px; height: 26px; color: var(--plc-text-3); }
+.pli-state strong { font-size: 15px; color: var(--plc-text); }
+.pli-state span { font-size: 12.5px; line-height: 1.45; max-width: 280px; }
+.pli-state .pli-btn { width: auto; margin-top: 6px; }
+
+.pli-skel { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.pli-skel i {
+  display: block;
+  height: 64px;
+  border-radius: 20px;
+  background: linear-gradient(90deg, var(--plc-track), rgb(255 255 255 / 0.08), var(--plc-track));
+  background-size: 220% 100%;
+  animation: pli-shimmer 1.5s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 110ms);
+}
+.pli-skel i:first-child { height: 160px; }
+html[data-nexus-theme='light'] .pli-skel i { background: linear-gradient(90deg, var(--plc-track), rgb(11 18 32 / 0.08), var(--plc-track)); background-size: 220% 100%; }
+
+/* ── Handoff bar ──────────────────────────────────────────────────────── */
+.pli-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--plc-glass-hi) 94%, transparent) 26%);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 -1px 0 var(--plc-edge);
+}
+.pli-act {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 52px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--plc-text);
+  background: var(--plc-track);
+  box-shadow: inset 0 0 0 1px var(--plc-edge);
+  cursor: pointer;
+  transition: transform 160ms var(--pli-ease), opacity 200ms ease;
+}
+.pli-act span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pli-act svg { width: 17px; height: 17px; }
+.pli-act:active:not(:disabled) { transform: scale(0.96); }
+.pli-act:disabled { opacity: 0.35; cursor: default; }
+.pli-act.is-primary {
+  color: var(--plc-ink);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--plc-l-system) 100%, #fff 14%), var(--plc-l-system));
+  box-shadow: 0 10px 24px -12px var(--plc-l-system);
+}
+html[data-nexus-theme='light'] .pli-act.is-primary { color: #fff; }
+
+/* ── Motion ───────────────────────────────────────────────────────────── */
+@keyframes pli-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pli-rise { from { transform: translateY(40px); opacity: 0.4; } to { transform: translateY(0); opacity: 1; } }
+@keyframes pli-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes pli-drift { 0% { transform: translate3d(0, 0, 0) scale(1); } 100% { transform: translate3d(8%, 6%, 0) scale(1.14); } }
+@keyframes pli-pour { from { transform: translateY(-50%) scaleX(0); } to { transform: translateY(-50%) scaleX(1); } }
+@keyframes pli-ring { 0% { transform: scale(0.8); opacity: 0.9; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes pli-sweep { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(110%); } }
+@keyframes pli-blink { 50% { opacity: 0.3; } }
+@keyframes pli-shimmer { from { background-position: 100% 0; } to { background-position: -120% 0; } }
+/* The band bars are not vertically centred — pour without the translate. */
+.pli-band__value, .pli-band__offer { animation-name: pli-pour-x; }
+@keyframes pli-pour-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pli *, .pli *::before, .pli *::after,
+  .pli-sheet, .pli-scrim { animation: none !important; transition: none !important; }
+}
+
+@media (max-width: 380px) {
+  .pli-body { padding: 0 12px calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .pli-hero__title { font-size: 21px; }
+  .pli-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pli-figs.is-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pli-beat { grid-template-columns: 44px 26px minmax(0, 1fr); column-gap: 7px; }
+  .pli-beat:not(:last-child)::before { left: 63px; }
+  .pli-beat__node { width: 26px; height: 26px; }
+  .pli-act { font-size: 10px; }
+  .pli-rail__groups span { font-size: 8px; letter-spacing: 0.04em; }
+}

@@ -1,0 +1,86 @@
+/*
+ * PIPELINE COMMAND — tokens, shared by the surface (.plc) and the body-portaled
+ * deal inspector (.pli), which sits outside .plc. Stage accents are a
+ * controlled progression (cool → cobalt → violet → aqua → gold → resolved),
+ * never ten rainbow colours. Themes: dark (default), light, red_ops, true_black.
+ */
+.plc,
+.pli {
+  --plc-ink: #04060b;
+  --plc-text: #f2f5fb;
+  --plc-text-2: rgb(242 245 251 / 0.68);
+  --plc-text-3: rgb(242 245 251 / 0.44);
+  --plc-edge: rgb(255 255 255 / 0.09);
+  --plc-edge-hi: rgb(255 255 255 / 0.17);
+  --plc-glass: rgb(14 18 28 / var(--lg-alpha, 0.54));
+  --plc-glass-hi: rgb(22 28 42 / 0.66);
+  --plc-track: rgb(255 255 255 / 0.05);
+  --plc-blur: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 170%));
+  --plc-sheen: linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.012));
+
+  --plc-s-early: #8fb4d8;
+  --plc-s-qualify: #6fa8ff;
+  --plc-s-negotiate: #4d7dff;
+  --plc-s-contract: #a17bff;
+  --plc-s-dispo: #34e8c4;
+  --plc-s-closing: #f5c65a;
+  --plc-s-closed: #c9f2dc;
+
+  --plc-l-system: #5ee7ff;
+  --plc-l-seller: #8ea2c8;
+  --plc-l-operator: #ffb35c;
+  --plc-l-external: #a17bff;
+  --plc-l-blocked: #ff6a5c;
+  --plc-l-dormant: #5b6478;
+  --plc-l-complete: #7df0b8;
+
+  font-family: -apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  color: var(--plc-text);
+}
+html[data-nexus-theme='light'] :is(.plc, .pli) {
+  --plc-ink: #eef2f8;
+  --plc-text: #0b1220;
+  --plc-text-2: rgb(11 18 32 / 0.68);
+  --plc-text-3: rgb(11 18 32 / 0.46);
+  --plc-edge: rgb(11 18 32 / 0.08);
+  --plc-edge-hi: rgb(11 18 32 / 0.15);
+  --plc-glass: rgb(255 255 255 / 0.74);
+  --plc-glass-hi: rgb(255 255 255 / 0.9);
+  --plc-track: rgb(11 18 32 / 0.05);
+  --plc-sheen: linear-gradient(180deg, rgb(255 255 255 / 0.7), rgb(255 255 255 / 0.2));
+  --plc-s-early: #5b7fa6;
+  --plc-s-qualify: #2f6fe0;
+  --plc-s-negotiate: #1d4ed8;
+  --plc-s-contract: #7c3aed;
+  --plc-s-dispo: #0d9488;
+  --plc-s-closing: #b7791f;
+  --plc-s-closed: #15803d;
+  --plc-l-system: #0891b2;
+  --plc-l-seller: #64748b;
+  --plc-l-operator: #c2410c;
+  --plc-l-external: #7c3aed;
+  --plc-l-blocked: #dc2626;
+  --plc-l-dormant: #94a3b8;
+  --plc-l-complete: #15803d;
+}
+html[data-nexus-theme='red_ops'] :is(.plc, .pli) {
+  --plc-ink: #0a0204;
+  --plc-glass: rgb(26 8 12 / var(--lg-alpha, 0.58));
+  --plc-glass-hi: rgb(38 12 16 / 0.7);
+  --plc-edge: rgb(255 120 120 / 0.12);
+  --plc-edge-hi: rgb(255 140 140 / 0.2);
+  --plc-s-early: #c99a9a;
+  --plc-s-qualify: #e8857a;
+  --plc-s-negotiate: #ff6a5c;
+  --plc-s-contract: #ff8fb0;
+  --plc-s-dispo: #ffb39a;
+  --plc-s-closing: #ffd27a;
+  --plc-s-closed: #ffe4d4;
+  --plc-l-system: #ff9a8a;
+}
+html[data-nexus-theme='true_black'] :is(.plc, .pli) {
+  --plc-ink: #000;
+  --plc-glass: rgb(10 10 12 / var(--lg-alpha, 0.66));
+  --plc-glass-hi: rgb(18 18 22 / 0.8);
+  --plc-edge: rgb(255 255 255 / 0.08);
+}

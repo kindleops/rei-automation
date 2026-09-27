@@ -154,7 +154,8 @@ export function hydrateOpportunityFromProperty(opportunity = {}, property = null
     units_count: Number(property.units_count) || Number(property.multifamily_units) || null,
     building_sqft: Number(property.building_square_feet) || null,
     lot_sqft: Number(property.lot_square_feet) || null,
-    estimated_value: opportunity.estimated_value ?? (Number(property.estimated_value) || null),
+    // 0 is "not valued", not a valuation — fall through to the property.
+    estimated_value: (Number(opportunity.estimated_value) || null) ?? (Number(property.estimated_value) || null),
     equity_amount: Number(property.equity_amount) || null,
     arv: opportunity.arv ?? null,
     metadata: {

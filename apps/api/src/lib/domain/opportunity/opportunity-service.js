@@ -109,7 +109,7 @@ async function appendHistory(client, row) {
   return { ok: true };
 }
 
-function applyFilters(query, params = {}) {
+export function applyFilters(query, params = {}) {
   let next = query;
   const scalar = [
     ['acquisition_stage', params.acquisition_stage ?? params.stage],
