@@ -62,60 +62,123 @@
   --home-well-border: rgba(15, 23, 42, 0.06);
 }
 
-/* ── Ambient liquid field ─────────────────────────────────────────────────── */
+/* ── Ambient liquid field ───────────────────────────────────────────────────
+   Masses of colour drifting under the glass. Each is a soft radial gradient —
+   no filter: blur — so the GPU rasterises it once and only ever moves it. The
+   companions are mixed from the accent, so the field re-tints with the theme.
+   ─────────────────────────────────────────────────────────────────────────── */
 
 .nx-home__ambient {
+  --liq-violet: color-mix(in srgb, var(--home-accent) 30%, #7c3aed);
+  --liq-teal: color-mix(in srgb, var(--home-accent) 35%, #0d9488);
+  --liq-rose: color-mix(in srgb, var(--home-accent) 25%, #db2777);
+  --liq-deep: color-mix(in srgb, var(--home-accent) 30%, #1e40af);
   position: absolute;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(120% 70% at 50% -10%, rgba(var(--home-accent-rgb), 0.1), transparent 60%),
-    var(--nexus-bg, #05070c);
+    radial-gradient(120% 60% at 50% -12%, rgba(var(--home-accent-rgb), 0.16), transparent 62%),
+    var(--nexus-bg, #04060b);
+}
+
+.nx-home__field {
+  position: absolute;
+  inset: -10% -20% -45%;
+  will-change: transform;
+}
+
+.nx-home__aurora {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  width: 150vmax;
+  height: 150vmax;
+  margin: -75vmax 0 0 -75vmax;
+  border-radius: 50%;
+  opacity: 0.2;
+  background:
+    conic-gradient(from 0deg,
+      transparent 0deg,
+      rgba(var(--home-accent-rgb), 0.9) 40deg,
+      transparent 95deg,
+      var(--liq-violet) 150deg,
+      transparent 205deg,
+      var(--liq-teal) 260deg,
+      transparent 320deg);
+  -webkit-mask-image: radial-gradient(circle, transparent 6%, #000 22%, rgba(0, 0, 0, 0.6) 46%, transparent 70%);
+  mask-image: radial-gradient(circle, transparent 6%, #000 22%, rgba(0, 0, 0, 0.6) 46%, transparent 70%);
+  animation: nx-home-spin 90s linear infinite;
+  will-change: transform;
 }
 
 .nx-home__blob {
   position: absolute;
-  width: 78vw;
-  height: 78vw;
-  max-width: 460px;
-  max-height: 460px;
+  width: 92vw;
+  height: 92vw;
+  max-width: 560px;
+  max-height: 560px;
   border-radius: 50%;
-  filter: blur(64px);
-  opacity: 0.55;
   mix-blend-mode: screen;
   will-change: transform;
 }
-
 .nx-home__blob--a {
-  top: -14vw;
-  left: -22vw;
-  background: radial-gradient(circle at 40% 40%, rgba(var(--home-accent-rgb), 0.55), transparent 66%);
-  animation: nx-home-drift-a 38s ease-in-out infinite alternate;
+  top: 0;
+  left: -8%;
+  background: radial-gradient(closest-side, rgba(var(--home-accent-rgb), 0.75), rgba(var(--home-accent-rgb), 0.18) 55%, transparent);
+  animation: nx-home-liquid-a 34s ease-in-out infinite alternate;
 }
-
 .nx-home__blob--b {
-  top: 34vh;
-  right: -30vw;
-  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--home-accent) 40%, #7c3aed) 0%, transparent 64%);
-  opacity: 0.32;
-  animation: nx-home-drift-b 46s ease-in-out infinite alternate;
+  top: 22%;
+  right: -12%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--liq-violet) 80%, transparent), color-mix(in srgb, var(--liq-violet) 16%, transparent) 58%, transparent);
+  opacity: 0.8;
+  animation: nx-home-liquid-b 42s ease-in-out infinite alternate;
 }
-
 .nx-home__blob--c {
-  bottom: -24vw;
-  left: 6vw;
-  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--home-accent) 45%, #10b981) 0%, transparent 62%);
-  opacity: 0.22;
-  animation: nx-home-drift-c 54s ease-in-out infinite alternate;
+  top: 48%;
+  left: 2%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--liq-teal) 75%, transparent), color-mix(in srgb, var(--liq-teal) 14%, transparent) 60%, transparent);
+  opacity: 0.6;
+  animation: nx-home-liquid-c 50s ease-in-out infinite alternate;
+}
+.nx-home__blob--d {
+  top: 66%;
+  right: 0;
+  width: 70vw;
+  height: 70vw;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--liq-rose) 60%, transparent), transparent);
+  opacity: 0.4;
+  animation: nx-home-liquid-d 38s ease-in-out infinite alternate;
+}
+.nx-home__blob--e {
+  top: 88%;
+  left: 14%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--liq-deep) 70%, transparent), transparent);
+  opacity: 0.55;
+  animation: nx-home-liquid-a 46s ease-in-out infinite alternate-reverse;
 }
 
-/* A grain layer keeps large blurred gradients from banding on OLED. */
+/* Light caught in moving water: faint, slow, and only ever translated. */
+.nx-home__caustics {
+  position: absolute;
+  inset: -30%;
+  opacity: 0.07;
+  mix-blend-mode: soft-light;
+  background:
+    radial-gradient(40% 18% at 20% 30%, #fff, transparent 70%),
+    radial-gradient(30% 14% at 70% 20%, #fff, transparent 70%),
+    radial-gradient(34% 16% at 55% 65%, #fff, transparent 70%),
+    radial-gradient(26% 12% at 25% 80%, #fff, transparent 70%);
+  animation: nx-home-caustics 26s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
 .nx-home__grain {
   position: absolute;
   inset: 0;
-  opacity: 0.05;
+  opacity: 0.06;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -123,31 +186,48 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.35) 100%);
+    radial-gradient(140% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.5) 100%),
+    linear-gradient(180deg, transparent 60%, rgba(0, 0, 0, 0.35) 100%);
 }
 
 [data-nexus-theme="light"] .nx-home__ambient {
   background:
-    radial-gradient(120% 70% at 50% -10%, rgba(var(--home-accent-rgb), 0.12), transparent 60%),
-    #f4f6fb;
+    radial-gradient(120% 60% at 50% -12%, rgba(var(--home-accent-rgb), 0.16), transparent 62%),
+    #f3f5fa;
 }
-[data-nexus-theme="light"] .nx-home__blob { mix-blend-mode: multiply; opacity: 0.18; }
+[data-nexus-theme="light"] .nx-home__blob { mix-blend-mode: multiply; opacity: 0.22; }
+[data-nexus-theme="light"] .nx-home__aurora { opacity: 0.1; }
 [data-nexus-theme="light"] .nx-home__vignette,
+[data-nexus-theme="light"] .nx-home__caustics,
 [data-nexus-theme="light"] .nx-home__grain { display: none; }
 
-@keyframes nx-home-drift-a {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(12vw, 6vh, 0) scale(1.12); }
-  100% { transform: translate3d(4vw, 14vh, 0) scale(0.94); }
+@keyframes nx-home-spin { to { transform: rotate(360deg); } }
+
+/* Non-uniform scale plus rotation is what reads as liquid rather than drifting
+   circles: the masses stretch, lean and recover as they move. */
+@keyframes nx-home-liquid-a {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1, 1); }
+  33% { transform: translate3d(14vw, 8vh, 0) rotate(40deg) scale(1.25, 0.85); }
+  66% { transform: translate3d(4vw, 18vh, 0) rotate(95deg) scale(0.9, 1.2); }
+  100% { transform: translate3d(-8vw, 6vh, 0) rotate(150deg) scale(1.1, 0.95); }
 }
-@keyframes nx-home-drift-b {
-  0% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(-16vw, -8vh, 0) scale(1.08); }
-  100% { transform: translate3d(-6vw, 10vh, 0) scale(1.18); }
+@keyframes nx-home-liquid-b {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1.1, 0.9); }
+  50% { transform: translate3d(-22vw, 10vh, 0) rotate(-70deg) scale(0.85, 1.3); }
+  100% { transform: translate3d(-8vw, -6vh, 0) rotate(-140deg) scale(1.2, 1); }
 }
-@keyframes nx-home-drift-c {
-  0% { transform: translate3d(0, 0, 0) scale(1.05); }
-  100% { transform: translate3d(18vw, -12vh, 0) scale(0.9); }
+@keyframes nx-home-liquid-c {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1, 1.15); }
+  50% { transform: translate3d(20vw, -10vh, 0) rotate(60deg) scale(1.3, 0.8); }
+  100% { transform: translate3d(10vw, 8vh, 0) rotate(120deg) scale(0.9, 1); }
+}
+@keyframes nx-home-liquid-d {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(-24vw, -14vh, 0) scale(1.35, 0.8) rotate(-50deg); }
+}
+@keyframes nx-home-caustics {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  100% { transform: translate3d(6%, -4%, 0) rotate(8deg) scale(1.1); }
 }
 
 /* ── Scroll column ────────────────────────────────────────────────────────── */
@@ -251,8 +331,8 @@
   border: 1px solid var(--home-card-border);
   background: var(--home-well);
   color: var(--home-muted);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   transition: transform 180ms var(--home-ease), color 180ms ease, background 180ms ease;
 }
 .nx-home-icon-btn:active { transform: scale(0.92); }
@@ -314,11 +394,9 @@
   border-radius: var(--home-radius);
   border: 1px solid var(--home-card-border);
   background: var(--home-card-fill);
-  backdrop-filter: blur(26px) saturate(1.6);
-  -webkit-backdrop-filter: blur(26px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.9) brightness(1.04);
+  backdrop-filter: blur(30px) saturate(1.9) brightness(1.04);
   box-shadow: var(--home-card-shadow);
-  animation: nx-home-rise 620ms var(--home-ease) both;
-  animation-delay: calc(var(--home-index, 0) * 55ms);
 }
 
 /* The sheen: a soft diagonal reflection across the top edge of the glass. */
@@ -708,39 +786,6 @@ button.nx-home-metric:active { background: var(--home-well); }
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
-}
-
-.nx-home-system__orb {
-  position: relative;
-  flex: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: var(--home-good);
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.28), transparent 45%),
-    radial-gradient(circle, color-mix(in srgb, currentColor 34%, transparent), color-mix(in srgb, currentColor 8%, transparent) 70%);
-  box-shadow: 0 0 24px color-mix(in srgb, currentColor 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-}
-.nx-home-system__orb.is-warn { color: var(--home-warn); }
-.nx-home-system__orb.is-bad { color: var(--home-bad); }
-.nx-home-system__orb.is-unknown { color: var(--home-muted); box-shadow: none; }
-.nx-home-system__orb::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
-  animation: nx-home-breathe 4.2s ease-in-out infinite;
-}
-.nx-home-system__orb.is-unknown::after { display: none; }
-.nx-home-system__orb > svg { color: var(--home-text); }
-
-@keyframes nx-home-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.7; }
-  50% { transform: scale(1.14); opacity: 0.15; }
 }
 
 .nx-home-system__title {
@@ -1163,19 +1208,532 @@ button.nx-home-metric:active { background: var(--home-well); }
   -webkit-tap-highlight-color: transparent;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .nx-home__blob,
-  .nx-home-card,
-  .nx-home-feed__item,
-  .nx-home-stagebar__seg,
-  .nx-home-progress > i,
-  .nx-home-system__orb::after,
-  .nx-home-dot.is-live::after,
-  .nx-home-skeleton {
-    animation: none !important;
-  }
+/* ══════════════════════════════════════════════════════════════════════════
+   CINEMATIC LAYER
+   Choreography, light and liquid. Transform and opacity only, except where a
+   repaint is confined to a few pixels (text sheen, timeline stream).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.nx-home {
+  --home-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --home-glide: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-html[data-nx-animations="off"] .nx-home * {
-  animation: none !important;
+/* ── Reveal: cards surface out of depth as they scroll into view ────────── */
+
+.nx-home-card {
+  opacity: 0;
+  transform: translate3d(0, 32px, 0) scale(0.955);
 }
+
+.nx-home-card.is-in {
+  opacity: 1;
+  transform: none;
+  /* `backwards`, not `both`: once landed the card carries no filter, because a
+     filter on a backdrop-filtered element would flatten the glass. */
+  animation: nx-home-surface 1100ms var(--home-glide) backwards;
+  animation-delay: calc(min(var(--home-index, 0), 4) * 90ms);
+}
+
+@keyframes nx-home-surface {
+  0% { opacity: 0; transform: translate3d(0, 32px, 0) scale(0.955); filter: blur(14px) saturate(1.4); }
+  55% { filter: blur(0) saturate(1); }
+  100% { opacity: 1; transform: none; filter: blur(0); }
+}
+
+/* Then the contents cascade in behind the glass. */
+.nx-home-card.is-in :is(
+  .nx-home-focus > li,
+  .nx-home-actions > .nx-home-action,
+  .nx-home-metrics > .nx-home-metric,
+  .nx-home-stages > .nx-home-stage,
+  .nx-home-rows > .nx-home-row,
+  .nx-home-hero,
+  .nx-home-system,
+  .nx-home-state
+) {
+  animation: nx-home-lift 820ms var(--home-glide) backwards;
+  animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 240ms);
+}
+.nx-home-card.is-in :is(.nx-home-focus, .nx-home-actions, .nx-home-metrics, .nx-home-stages, .nx-home-rows) > :nth-child(2) { animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 290ms); }
+.nx-home-card.is-in :is(.nx-home-focus, .nx-home-actions, .nx-home-metrics, .nx-home-stages, .nx-home-rows) > :nth-child(3) { animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 340ms); }
+.nx-home-card.is-in :is(.nx-home-focus, .nx-home-actions, .nx-home-metrics, .nx-home-stages, .nx-home-rows) > :nth-child(4) { animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 390ms); }
+.nx-home-card.is-in :is(.nx-home-focus, .nx-home-actions, .nx-home-metrics, .nx-home-stages, .nx-home-rows) > :nth-child(5) { animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 440ms); }
+.nx-home-card.is-in :is(.nx-home-focus, .nx-home-actions, .nx-home-metrics, .nx-home-stages, .nx-home-rows) > :nth-child(6) { animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 490ms); }
+.nx-home-card.is-in :is(.nx-home-focus, .nx-home-actions, .nx-home-metrics, .nx-home-stages, .nx-home-rows) > :nth-child(n + 7) { animation-delay: calc(min(var(--home-index, 0), 4) * 90ms + 540ms); }
+
+@keyframes nx-home-lift {
+  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Focus items revealed by "more" arrive on their own cascade. */
+.nx-home-focus > li { animation: nx-home-lift 600ms var(--home-glide) backwards; animation-delay: calc(var(--i, 0) * 45ms); }
+
+/* ── Glass: rim light ─────────────────────────────────────────────────────── */
+
+.nx-home-card__rim {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 1px;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Every card: light pooled on the upper edge and a faint return at the base,
+   the way a thick pane of glass catches an overhead light. */
+.nx-home-card__rim > i {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.34) 0%,
+    rgba(255, 255, 255, 0.08) 22%,
+    rgba(255, 255, 255, 0.02) 60%,
+    rgba(255, 255, 255, 0.1) 100%);
+}
+
+/* The emphasis card: a comet of the accent colour circles the rim. The square
+   rotates (composited); the static ring mask above cuts it to a hairline. */
+.nx-home-card.is-emphasis .nx-home-card__rim > i {
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  width: 260%;
+  aspect-ratio: 1;
+  background: conic-gradient(from 0deg,
+    rgba(255, 255, 255, 0.05) 0deg,
+    rgba(255, 255, 255, 0.05) 200deg,
+    rgba(var(--home-accent-rgb), 0.55) 280deg,
+    #fff 318deg,
+    rgba(var(--home-accent-rgb), 0.9) 330deg,
+    rgba(255, 255, 255, 0.05) 360deg);
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: nx-home-orbit 9s linear infinite;
+}
+
+@keyframes nx-home-orbit {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+[data-nexus-theme="light"] .nx-home-card__rim > i {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0.4) 30%, rgba(15, 23, 42, 0.05));
+}
+
+/* ── Glass: specular light under the finger ──────────────────────────────── */
+
+.nx-home-card__light {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 255, 255, 0.11), transparent 62%),
+    radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(var(--home-accent-rgb), 0.1), transparent 70%);
+  transition: opacity 700ms ease;
+}
+.nx-home-card.is-lit .nx-home-card__light { opacity: 1; transition-duration: 120ms; }
+
+.nx-home-card__head,
+.nx-home-card__body { z-index: 3; }
+
+/* ── Liquid ripple ────────────────────────────────────────────────────────── */
+
+:is(.nx-home-focus__item, .nx-home-row, .nx-home-metric, .nx-home-stage, .nx-home-action, .nx-home-feed__text, .nx-home-more) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.nx-home-action { overflow: visible; }
+.nx-home-action__well {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.nx-home-action__glyph > svg { position: relative; z-index: 1; }
+.nx-home-action__badge { z-index: 2; }
+
+.nx-home-ripple {
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.24) 0%, rgba(var(--home-accent-rgb), 0.2) 38%, transparent 68%);
+  transform: scale(0);
+  animation: nx-home-ripple 720ms var(--home-glide) forwards;
+}
+@keyframes nx-home-ripple {
+  0% { transform: scale(0); opacity: 1; }
+  70% { opacity: 0.6; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+/* Presses land with a little spring on release. */
+:is(.nx-home-focus__item, .nx-home-row, .nx-home-action, .nx-home-stage, .nx-home-icon-btn, .nx-home-hero) {
+  transition: transform 520ms var(--home-spring), background 200ms ease, border-color 200ms ease;
+}
+:is(.nx-home-focus__item, .nx-home-row, .nx-home-stage, .nx-home-hero):active { transform: scale(0.975); transition-duration: 120ms; }
+.nx-home-action:active { transform: scale(0.9); transition-duration: 120ms; }
+
+/* ── Greeting: word by word, out of soft focus ───────────────────────────── */
+
+.nx-home-hello { transform-origin: 20% 0; will-change: transform, opacity; }
+
+.nx-home-word {
+  display: inline-block;
+  animation: nx-home-word 1300ms var(--home-glide) backwards;
+  animation-delay: calc(150ms + var(--w, 0) * 120ms);
+}
+.nx-home-hello__title em.nx-home-word {
+  background-size: 250% 100%;
+  background-image: linear-gradient(100deg,
+    color-mix(in srgb, var(--home-accent) 50%, var(--home-text)) 0%,
+    color-mix(in srgb, var(--home-accent) 90%, var(--home-text)) 30%,
+    #fff 45%,
+    color-mix(in srgb, var(--home-accent) 90%, var(--home-text)) 60%,
+    color-mix(in srgb, var(--home-accent) 50%, var(--home-text)) 100%);
+  animation:
+    nx-home-word 1300ms var(--home-glide) backwards,
+    nx-home-text-flow 9s ease-in-out 1.6s infinite;
+  animation-delay: calc(150ms + var(--w, 0) * 120ms), 1.6s;
+}
+
+@keyframes nx-home-word {
+  from { opacity: 0; transform: translate3d(0, 0.4em, 0); filter: blur(12px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes nx-home-text-flow {
+  0%, 100% { background-position: 100% 0; }
+  50% { background-position: 0% 0; }
+}
+
+.nx-home-hello__date,
+.nx-home-hello__top { animation: nx-home-fade 900ms ease backwards; }
+.nx-home-hello__summary { animation: nx-home-lift 1000ms var(--home-glide) 520ms backwards; }
+@keyframes nx-home-fade { from { opacity: 0; } }
+
+.nx-home-hello__title {
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  text-shadow: 0 2px 30px rgba(var(--home-accent-rgb), 0.18);
+}
+
+/* ── Condensed header ─────────────────────────────────────────────────────── */
+
+.nx-home-condensed {
+  position: sticky;
+  top: 4px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 50px;
+  /* Takes no room in the column; it floats over the greeting it replaces. */
+  margin: 0 -4px -62px;
+  padding: 0 6px 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)),
+    color-mix(in srgb, var(--nexus-bg, #05070c) 80%, transparent);
+  -webkit-backdrop-filter: blur(44px) saturate(2);
+  backdrop-filter: blur(44px) saturate(2);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  opacity: 0;
+  transform: translate3d(0, -12px, 0) scale(0.94);
+  pointer-events: none;
+  transition: opacity 360ms ease, transform 620ms var(--home-spring);
+}
+.nx-home.is-condensed .nx-home-condensed {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.nx-home-condensed strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--home-text);
+}
+.nx-home-condensed__actions { display: flex; gap: 4px; margin-left: auto; }
+.nx-home-icon-btn.is-sm { width: 38px; height: 38px; }
+
+[data-nexus-theme="light"] .nx-home-condensed {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+/* ── Liquid orb ───────────────────────────────────────────────────────────── */
+
+.nx-home-orb {
+  --c1: #34d399;
+  --c2: var(--home-accent);
+  --c3: #a7f3d0;
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  color: #fff;
+}
+.nx-home-orb.is-warn { --c1: #f59e0b; --c2: #fb7185; --c3: #fde68a; }
+.nx-home-orb.is-bad { --c1: #ef4444; --c2: #db2777; --c3: #fecaca; }
+.nx-home-orb.is-unknown { --c1: #475569; --c2: #1e293b; --c3: #94a3b8; }
+
+.nx-home-orb__glow {
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--c1) 55%, transparent), transparent);
+  animation: nx-home-breathe 4.4s ease-in-out infinite;
+}
+.nx-home-orb__body {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c2) 45%, #020617);
+  box-shadow:
+    inset 0 -6px 14px rgba(0, 0, 0, 0.45),
+    inset 0 2px 6px rgba(255, 255, 255, 0.35),
+    0 6px 18px color-mix(in srgb, var(--c1) 35%, transparent);
+}
+.nx-home-orb__swirl {
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg, var(--c1), var(--c2), var(--c3), var(--c1), var(--c2));
+  filter: blur(5px);
+  animation: nx-home-spin 7s linear infinite;
+}
+.nx-home-orb__swirl--b {
+  opacity: 0.65;
+  mix-blend-mode: screen;
+  background: conic-gradient(from 140deg, transparent, var(--c3), transparent 40%, var(--c1), transparent 75%);
+  animation-duration: 11s;
+  animation-direction: reverse;
+}
+.nx-home-orb__core {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 58%, rgba(2, 6, 23, 0.4), transparent 62%);
+}
+.nx-home-orb__gloss {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 30%),
+    radial-gradient(circle at 60% 110%, rgba(255, 255, 255, 0.35), transparent 45%);
+}
+.nx-home-orb > svg {
+  position: relative;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+.nx-home-orb.is-unknown :is(.nx-home-orb__swirl, .nx-home-orb__glow) { animation: none; opacity: 0.4; }
+
+@keyframes nx-home-breathe {
+  0%, 100% { transform: scale(0.92); opacity: 0.55; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+/* ── Hero numeral ─────────────────────────────────────────────────────────── */
+
+.nx-home-hero {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  width: 100%;
+  margin: 2px 0 14px;
+  padding: 2px 0;
+  text-align: left;
+}
+.nx-home-hero__value {
+  font-size: clamp(46px, 13vw, 56px);
+  line-height: 0.92;
+  font-weight: 300;
+  letter-spacing: -0.055em;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, #fff 30%, color-mix(in srgb, var(--home-accent) 55%, #fff) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 6px 24px rgba(var(--home-accent-rgb), 0.25));
+}
+[data-nexus-theme="light"] .nx-home-hero__value {
+  background: linear-gradient(180deg, #0f172a 30%, color-mix(in srgb, var(--home-accent) 60%, #0f172a));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.nx-home-hero__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 4px;
+  font-size: 13px;
+  color: var(--home-muted);
+}
+.nx-home-hero__label b {
+  font-weight: 600;
+  color: var(--home-good);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-home-metric__value {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+.nx-home-stage__value { font-weight: 500; letter-spacing: -0.035em; font-size: 20px; }
+.nx-home-metrics.is-four .nx-home-metric { padding: 11px 10px 10px; }
+.nx-home-metrics.is-four .nx-home-metric__value { font-size: 19px; }
+
+/* ── Flowing light through bars ───────────────────────────────────────────── */
+
+.nx-home-stagebar__seg,
+.nx-home-progress > i { overflow: hidden; }
+
+.nx-home-stagebar__seg { position: relative; }
+.nx-home-stagebar__seg::after,
+.nx-home-progress > i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  transform: translateX(-110%);
+  animation: nx-home-flow 5s var(--home-glide) infinite;
+  animation-delay: calc(1.4s + var(--i, 0) * 160ms);
+}
+@keyframes nx-home-flow {
+  0% { transform: translateX(-110%); }
+  45%, 100% { transform: translateX(110%); }
+}
+.nx-home-stagebar { height: 12px; }
+.nx-home-stagebar__seg {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--seg) 80%, #fff), var(--seg) 60%);
+}
+
+/* ── Live stream down the activity timeline ──────────────────────────────── */
+
+.nx-home-feed::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 4px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, transparent 0 42%, rgba(var(--home-accent-rgb), 0.9) 50%, transparent 58% 100%);
+  background-size: 100% 260%;
+  animation: nx-home-stream 3.8s ease-in-out infinite;
+  filter: drop-shadow(0 0 4px rgba(var(--home-accent-rgb), 0.8));
+}
+@keyframes nx-home-stream {
+  from { background-position: 0 100%; }
+  to { background-position: 0 0; }
+}
+
+/* ── Urgency ──────────────────────────────────────────────────────────────── */
+
+.nx-home-focus__item.is-critical::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--home-bad);
+  box-shadow: 0 0 12px var(--home-bad);
+  animation: nx-home-alarm 2.4s ease-in-out infinite;
+}
+@keyframes nx-home-alarm { 50% { opacity: 0.35; } }
+
+.nx-home-count.is-bad { animation: nx-home-alarm 2.4s ease-in-out infinite; }
+
+/* The primary action breathes a faint halo. */
+.nx-home-action.is-primary .nx-home-action__glyph::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(var(--home-accent-rgb), 0.5), 0 0 22px rgba(var(--home-accent-rgb), 0.45);
+  animation: nx-home-alarm 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+.nx-home-action__glyph::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 50% 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent);
+  pointer-events: none;
+}
+
+/* ── Stillness ────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-home *,
+  .nx-home *::before,
+  .nx-home *::after {
+    animation: none !important;
+    transition-duration: 0s !important;
+  }
+  .nx-home-card { opacity: 1; transform: none; }
+}
+
+.nx-home.is-still *,
+.nx-home.is-still *::before,
+.nx-home.is-still *::after {
+  animation: none !important;
+  transition-duration: 0s !important;
+}
+.nx-home.is-still .nx-home-card { opacity: 1; transform: none; }
+
+/* ── Edge scrims ──────────────────────────────────────────────────────────────
+   Content dissolves into the chrome at both edges instead of being guillotined
+   by it — the difference between a page and a surface. */
+
+.nx-home__scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.nx-home__scrim--top {
+  top: 0;
+  height: 56px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nexus-bg, #05070c) 88%, transparent), transparent);
+}
+.nx-home__scrim--bottom {
+  bottom: 0;
+  height: 48px;
+  background: linear-gradient(0deg, color-mix(in srgb, var(--nexus-bg, #05070c) 80%, transparent), transparent);
+}
+[data-nexus-theme="light"] .nx-home__scrim--top { background: linear-gradient(180deg, rgba(243, 245, 250, 0.9), transparent); }
+[data-nexus-theme="light"] .nx-home__scrim--bottom { background: linear-gradient(0deg, rgba(243, 245, 250, 0.85), transparent); }
+
+/* On light glass the flowing highlight is a deeper accent, never white. */
+[data-nexus-theme="light"] .nx-home-hello__title em.nx-home-word {
+  background-image: linear-gradient(100deg,
+    color-mix(in srgb, var(--home-accent) 70%, #0f172a) 0%,
+    var(--home-accent) 35%,
+    color-mix(in srgb, var(--home-accent) 55%, #0f172a) 50%,
+    var(--home-accent) 65%,
+    color-mix(in srgb, var(--home-accent) 70%, #0f172a) 100%);
+}
+[data-nexus-theme="light"] .nx-home-hello__title { text-shadow: none; }

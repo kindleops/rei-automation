@@ -108,6 +108,13 @@ test('a phone lands on Home inside the mobile shell', async ({ page }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 
+  // The glass must survive the production CSS minifier on Chromium: a standard
+  // declaration placed before its -webkit- twin is collapsed to the prefix only.
+  const glass = await page.locator('section[aria-label="Focus"]').evaluate((node) => getComputedStyle(node).backdropFilter)
+  expect(glass).toContain('blur')
+
+  // Let the entrance choreography land before capturing.
+  await page.waitForTimeout(2500)
   await page.screenshot({ path: 'test-results/mobile-home/home-top.png' })
   await page.locator('.nx-home__scroll').evaluate((node) => node.scrollTo(0, node.scrollHeight / 2))
   await page.waitForTimeout(700)
@@ -126,6 +133,7 @@ test('a failed read is unavailable, never a reassuring zero', async ({ page }) =
   await expect(page.locator('section[aria-label="Pipeline"]')).toContainText('Pipeline unavailable')
   await expect(page.locator('section[aria-label="Deals"]')).toContainText('unavailable')
   await expect(page.locator('section[aria-label="Focus"]')).not.toContainText("You're clear")
+  await page.waitForTimeout(1500)
   await page.screenshot({ path: 'test-results/mobile-home/home-down.png' })
 })
 
