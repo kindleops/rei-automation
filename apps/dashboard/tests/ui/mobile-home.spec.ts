@@ -185,7 +185,7 @@ test('customize hides a module and the choice persists', async ({ page }) => {
 test('the launcher offers Home and never Property Intelligence OS', async ({ page }) => {
   await stubApi(page, 'live')
   await page.goto('/home')
-  await page.getByRole('button', { name: 'Workspace launcher' }).click()
+  await page.getByRole('button', { name: 'Home — open applications' }).click()
   const launcher = page.getByRole('dialog', { name: 'Applications' })
   await expect(launcher).toBeVisible()
   await expect(launcher.getByRole('button', { name: /^Home/ })).toBeVisible()

@@ -335,11 +335,12 @@ export interface HomeClosing {
   date: string
 }
 
+/** Null is "the desk could not measure this", never zero. */
 export interface HomeClosings {
-  underContract: number
-  closingsThisWeek: number
-  titleBlocked: number
-  actionRequired: number
+  underContract: number | null
+  closingsThisWeek: number | null
+  titleBlocked: number | null
+  actionRequired: number | null
   next: HomeClosing | null
 }
 
@@ -360,7 +361,9 @@ export async function loadHomeClosings(signal?: AbortSignal): Promise<HomeLoad<H
       underContract: model.summary.underContract,
       closingsThisWeek: model.summary.closingsThisWeek,
       titleBlocked: model.summary.titleBlocked,
-      actionRequired: model.summary.sellerActionRequired + model.summary.buyerActionRequired,
+      actionRequired: model.summary.sellerActionRequired == null && model.summary.buyerActionRequired == null
+        ? null
+        : (model.summary.sellerActionRequired ?? 0) + (model.summary.buyerActionRequired ?? 0),
       next: first
         ? { name: first.item.sellerName || first.item.displayName, address: first.item.propertyAddress || null, date: first.date }
         : null,
@@ -688,10 +691,10 @@ export function buildFocusItems(inputs: FocusInputs): FocusItem[] {
       })
     }
   }
-  if (closings && closings.titleBlocked > 0) {
+  if (closings && (closings.titleBlocked ?? 0) > 0) {
     push({
       id: 'closing-title', tone: 'high', icon: 'shield', app: 'Closing',
-      title: `${plural(closings.titleBlocked, 'deal')} blocked on title`,
+      title: `${plural(closings.titleBlocked ?? 0, 'deal')} blocked on title`,
       detail: 'Clear title issues before the closing date',
       at: null, target: { kind: 'route', path: '/closing-desk' }, weight: 800,
     })
