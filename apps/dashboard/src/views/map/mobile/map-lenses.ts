@@ -9,6 +9,7 @@
  */
 
 export type LensFamily = 'pipeline' | 'property' | 'market' | 'comps'
+export type LensStyle = 'dots' | 'surface' | 'areas'
 export type LensRamp = 'heat' | 'money' | 'water' | 'age' | 'signal' | 'spectrum'
 
 export interface MapLens {
@@ -31,14 +32,15 @@ export interface MapLens {
   areal?: boolean
   /** Decorative: a density glow that fades out once properties draw (z9.5). Markers keep full strength. */
   ambient?: boolean
+  /** Brightness = how many (a heatmap), not a value. */
+  density?: boolean
 }
 
 export const MAP_LENSES: ReadonlyArray<MapLens> = [
   // ── Pipeline ──────────────────────────────────────────────────────────
   { id: 'radar', label: 'Acquisition Radar', sub: 'Every property, coloured by conversation stage', family: 'pipeline', source: 'properties', ambient: true, legacyMode: 'acquisition', domain: [0, 1], ramp: 'signal' },
-  { id: 'command', label: 'Command', sub: 'Your live conversations and hottest leads', family: 'pipeline', source: 'motivation', legacyMode: 'command', domain: [55, 85], ramp: 'signal', format: 'score', attribution: 'Motivation score' },
-  { id: 'execution', label: 'Execution Live', sub: 'Outreach in the last 14 days · delivered is brightest', family: 'pipeline', source: 'outreach', legacyMode: 'execution', domain: [0, 1], ramp: 'signal', format: 'share', attribution: 'send_queue' },
-  { id: 'territory', label: 'Territory Scan', sub: 'Where your property universe is densest', family: 'pipeline', source: 'properties', legacyMode: 'territory', domain: [0, 1], ramp: 'spectrum', format: 'count', attribution: 'properties' },
+  { id: 'execution', label: 'Execution Live', sub: 'Outreach in the last 14 days · delivered is brightest', family: 'pipeline', source: 'outreach', legacyMode: 'execution', domain: [0, 1], ramp: 'signal', format: 'share', attribution: 'send_queue', density: true },
+  { id: 'territory', label: 'Territory Scan', sub: 'Where your property universe is densest', family: 'pipeline', source: 'properties', legacyMode: 'territory', domain: [0, 1], ramp: 'spectrum', format: 'count', attribution: 'properties', density: true },
 
   // ── Property intelligence ─────────────────────────────────────────────
   { id: 'opportunity', label: 'Opportunity Heat', sub: 'Seller motivation score, averaged by area', family: 'property', source: 'motivation', legacyMode: 'acquisition', domain: [30, 72], ramp: 'heat', format: 'score', attribution: 'Structured motivation score' },
@@ -57,21 +59,28 @@ export const MAP_LENSES: ReadonlyArray<MapLens> = [
   { id: 'census_vacancy', label: 'Vacancy', sub: 'Vacant housing share · ACS', family: 'market', source: 'census_vacancy', legacyMode: 'acquisition', domain: [0.02, 0.23], ramp: 'heat', format: 'pct', attribution: 'US Census ACS 5-yr', areal: true },
   { id: 'census_renter', label: 'Renter Share', sub: 'Renter-occupied share · ACS', family: 'market', source: 'census_renter', legacyMode: 'acquisition', domain: [0.13, 0.76], ramp: 'spectrum', format: 'pct', attribution: 'US Census ACS 5-yr', areal: true },
   { id: 'census_rent_burden', label: 'Rent Burden', sub: 'Rent as % of income · ACS', family: 'market', source: 'census_rent_burden', legacyMode: 'acquisition', domain: [25, 43], ramp: 'heat', format: 'pct100', attribution: 'US Census ACS 5-yr', areal: true },
-  { id: 'census_year_built', label: 'Housing Stock Age', sub: 'Median year built · ACS', family: 'market', source: 'census_year_built', legacyMode: 'acquisition', domain: [1942, 2005], invert: true, ramp: 'age', format: 'year', attribution: 'US Census ACS 5-yr', areal: true },
-  { id: 'market_tax_delinquent', label: 'Market Tax Delinquency', sub: 'Tax-delinquent share of SFR · county records', family: 'market', source: 'market_tax_delinquent', legacyMode: 'acquisition', domain: [0, 0.08], ramp: 'heat', format: 'pct', attribution: 'Ownership cells', areal: true },
+  { id: 'census_population', label: 'Population', sub: 'People per ZIP · ACS', family: 'market', source: 'census_population', legacyMode: 'acquisition', domain: [5000, 70000], ramp: 'spectrum', format: 'count', attribution: 'US Census ACS 5-yr', areal: true },
+  { id: 'census_owner', label: 'Owner Occupied', sub: 'Owner-occupied share · ACS', family: 'market', source: 'census_owner', legacyMode: 'acquisition', domain: [0.24, 0.87], ramp: 'money', format: 'pct', attribution: 'US Census ACS 5-yr', areal: true },
+  { id: 'census_units_2_4', label: 'Small Multifamily', sub: '2–4 unit buildings, share of housing · ACS', family: 'market', source: 'census_units_2_4', legacyMode: 'acquisition', domain: [0, 0.21], ramp: 'heat', format: 'pct', attribution: 'US Census ACS 5-yr', areal: true },
+  { id: 'census_units_5plus', label: 'Apartments', sub: '5+ unit buildings, share of housing · ACS', family: 'market', source: 'census_units_5plus', legacyMode: 'acquisition', domain: [0.01, 0.63], ramp: 'spectrum', format: 'pct', attribution: 'US Census ACS 5-yr', areal: true },
+  { id: 'market_tax_delinquent', label: 'County Tax Delinquency', sub: 'Tax-delinquent share of SFR · county records', family: 'market', source: 'market_tax_delinquent', legacyMode: 'acquisition', domain: [0, 0.08], ramp: 'heat', format: 'pct', attribution: 'Ownership cells', areal: true },
   { id: 'market_foreclosure', label: 'Foreclosure Pressure', sub: 'Foreclosure share of SFR · county records', family: 'market', source: 'market_foreclosure', legacyMode: 'acquisition', domain: [0, 0.1], ramp: 'heat', format: 'pct', attribution: 'Ownership cells', areal: true },
   { id: 'flood', label: 'Flood Exposure', sub: 'Share in FEMA special flood hazard area', family: 'market', source: 'flood', legacyMode: 'acquisition', domain: [0, 0.38], ramp: 'water', format: 'pct', attribution: 'FEMA NFHL', areal: true },
 
-  // ── Comps & buyers ────────────────────────────────────────────────────
-  { id: 'comps_price', label: 'Sold Comps', sub: 'Recent sale prices, averaged by area', family: 'comps', source: 'comps_price', legacyMode: 'comps', domain: [80000, 900000], ramp: 'money', format: 'usdk', attribution: 'Recent sold comps' },
-  { id: 'comps_ppsf', label: 'Price / Sq Ft', sub: 'Sold $ per square foot', family: 'comps', source: 'comps_ppsf', legacyMode: 'comps', domain: [60, 400], ramp: 'heat', format: 'usd', attribution: 'Recent sold comps' },
+  // ── Comps & dispositions (mv_map_sold_comps, last 24 months) ─────────
+  { id: 'investor_buys', label: 'Investor Buying', sub: 'Where investors bought · LLCs, portfolios, funds', family: 'comps', source: 'investor_buys', legacyMode: 'comps', domain: [0, 1], ramp: 'heat', format: 'count', attribution: 'Public record purchases', density: true },
+  { id: 'institutional_buys', label: 'Institutional Buying', sub: 'Hedge funds and institutional portfolios', family: 'comps', source: 'institutional_buys', legacyMode: 'comps', domain: [0, 1], ramp: 'age', format: 'count', attribution: 'Portfolio + institutional buyers', density: true },
+  { id: 'mls_price', label: 'MLS Sale Price', sub: 'Median retail sale price · MLS', family: 'comps', source: 'mls_price', legacyMode: 'comps', domain: [85000, 900000], ramp: 'money', format: 'usdk', attribution: 'MLS sold' },
+  { id: 'investor_price', label: 'Investor Price', sub: 'Median investor purchase, per door', family: 'comps', source: 'investor_price', legacyMode: 'comps', domain: [60000, 600000], ramp: 'heat', format: 'usdk', attribution: 'Public record purchases' },
+  { id: 'comps_price', label: 'All Sales', sub: 'Median sale price, every source', family: 'comps', source: 'comps_price', legacyMode: 'comps', domain: [80000, 900000], ramp: 'money', format: 'usdk', attribution: 'MLS + public record' },
+  { id: 'comps_ppsf', label: 'Price / Sq Ft', sub: 'Median sold $ per square foot', family: 'comps', source: 'comps_ppsf', legacyMode: 'comps', domain: [60, 400], ramp: 'heat', format: 'usd', attribution: 'MLS + public record' },
 ]
 
 export const LENS_FAMILIES: ReadonlyArray<{ key: LensFamily; label: string }> = [
   { key: 'pipeline', label: 'Pipeline' },
   { key: 'property', label: 'Property intelligence' },
   { key: 'market', label: 'Census & market' },
-  { key: 'comps', label: 'Comps & buyers' },
+  { key: 'comps', label: 'Comps & dispositions' },
 ]
 
 export const lensById = (id: string | null | undefined): MapLens =>

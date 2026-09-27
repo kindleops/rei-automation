@@ -24,6 +24,20 @@ describe('lens catalogue', () => {
     expect(lensById('radar').ambient).toBe(true)
     expect(lensById('nope').id).toBe('radar')
   })
+  it('no duplicate lenses: one per data source and kind', () => {
+    const seen = new Set<string>()
+    for (const l of MAP_LENSES) {
+      const k = `${l.source}:${l.ambient ? 'ambient' : l.density ? 'density' : 'value'}`
+      if (l.source) expect(seen.has(k) ? k : null).toBeNull()
+      seen.add(k)
+    }
+    expect(MAP_LENSES.some((l) => l.id === 'command')).toBe(false)
+  })
+  it('dispositions and census depth are real lenses', () => {
+    for (const id of ['investor_buys', 'institutional_buys', 'mls_price', 'investor_price', 'census_units_2_4', 'census_owner', 'census_population']) {
+      expect(lensById(id).id).toBe(id)
+    }
+  })
   it('no heat lens drives a legacy mode that paints its own heat underneath', () => {
     for (const l of MAP_LENSES) {
       expect(['opportunity_heat', 'buyer_demand', 'census']).not.toContain(l.legacyMode)

@@ -14,12 +14,15 @@ import { useEffect, useRef, useState } from 'react'
 import type maplibregl from 'maplibre-gl'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
-import { normalize, rampExpression, type MapLens } from './map-lenses'
+import { normalize, rampExpression, type LensStyle, type MapLens } from './map-lenses'
 
 const SRC = 'nx-lens'
 const L_FIELD = 'nx-lens-field'
 const L_HEAT = 'nx-lens-heat'
 const L_DOTS = 'nx-lens-dots'
+const AREA_SRC = 'nx-lens-areas'
+const L_AREA_FILL = 'nx-lens-area-fill'
+const L_AREA_LINE = 'nx-lens-area-line'
 
 export interface LensState {
   loading: boolean
@@ -45,9 +48,19 @@ export function lensGridForZoom(zoom: number): number {
 const degToPx = (deg: number, zoom: number, lat: number) =>
   (deg / 360) * 512 * Math.pow(2, zoom) * Math.max(0.35, Math.cos((lat * Math.PI) / 180) ** 0.5)
 
-const DENSITY_LENSES = new Set(['territory', 'execution'])
+const isDensity = (lens: MapLens) => Boolean(lens.density) || lens.id === 'territory' || lens.id === 'execution'
+const OWN_PREFIX = /^(nx-|prop-|command-|map-agg|inbox-|seller-|buyer-)/
 
+/**
+ * Heat sits UNDER the basemap's labels (place names, road names stay crisp on
+ * top of the colour) and under every marker we draw.
+ */
 function beforeLayer(map: maplibregl.Map): string | undefined {
+  try {
+    for (const l of map.getStyle().layers ?? []) {
+      if (l.type === 'symbol' && !OWN_PREFIX.test(l.id)) return l.id
+    }
+  } catch { /* style mid-swap */ }
   for (const id of ['prop-tiles-hit', 'prop-tiles-halo', 'command-pin-glow-raw', 'map-market-aggregates-glow']) {
     if (map.getLayer(id)) return id
   }
@@ -70,28 +83,50 @@ function ensureLayers(map: maplibregl.Map) {
   if (!map.getLayer(L_DOTS)) {
     map.addLayer({ id: L_DOTS, type: 'circle', source: SRC, layout: { visibility: 'none' }, paint: {} }, before)
   }
+  if (!map.getSource(AREA_SRC)) map.addSource(AREA_SRC, { type: 'geojson', data: LAST_AREAS.get(map) ?? { type: 'FeatureCollection', features: [] } })
+  if (!map.getLayer(L_AREA_FILL)) {
+    map.addLayer({ id: L_AREA_FILL, type: 'fill', source: AREA_SRC, layout: { visibility: 'none' }, paint: { 'fill-opacity': 0.5 } }, before)
+  }
+  if (!map.getLayer(L_AREA_LINE)) {
+    map.addLayer({ id: L_AREA_LINE, type: 'line', source: AREA_SRC, layout: { visibility: 'none', 'line-join': 'round' }, paint: { 'line-color': 'rgba(255,255,255,0.35)', 'line-width': 0.8 } }, before)
+  }
 }
 
-function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number) {
+const LAST_AREAS = new WeakMap<maplibregl.Map, GeoJSON.FeatureCollection>()
+
+export interface LensLook { style: LensStyle; blend: number }
+export const DEFAULT_LOOK: LensLook = { style: 'surface', blend: 0.7 }
+
+function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: LensLook = DEFAULT_LOOK) {
   const ramp = lens.ramp ?? 'heat'
-  const density = DENSITY_LENSES.has(lens.id) || Boolean(lens.ambient)
+  const density = isDensity(lens) || Boolean(lens.ambient)
+  const areas = look.style === 'areas' && !lens.ambient
+  // 0 = crisp individual dots, 1 = one melted surface.
+  const b = look.style === 'dots' ? 0 : Math.min(1, Math.max(0, look.blend))
   const vis = (on: boolean) => (on ? 'visible' : 'none')
   try {
-    map.setLayoutProperty(L_FIELD, 'visibility', vis(!density))
-    map.setLayoutProperty(L_HEAT, 'visibility', vis(density))
-    map.setLayoutProperty(L_DOTS, 'visibility', vis(!lens.areal && !lens.ambient))
+    map.setLayoutProperty(L_FIELD, 'visibility', vis(!density && !areas))
+    map.setLayoutProperty(L_HEAT, 'visibility', vis(density && !areas))
+    map.setLayoutProperty(L_DOTS, 'visibility', vis(!lens.areal && !lens.ambient && !areas))
+    map.setLayoutProperty(L_AREA_FILL, 'visibility', vis(areas))
+    map.setLayoutProperty(L_AREA_LINE, 'visibility', vis(areas))
+    if (areas) {
+      map.setPaintProperty(L_AREA_FILL, 'fill-color', rampExpression(ramp, ['get', 't']) as never)
+      map.setPaintProperty(L_AREA_FILL, 'fill-opacity', ['interpolate', ['linear'], ['zoom'], 3, 0.5, 10, 0.42, 14, 0.28] as never)
+    }
 
     // Value field: big soft discs, colour by value.
     // Property cells: a disc a little larger than its grid cell, so neighbouring
     // cells melt into one continuous surface; it scales exactly with the camera
     // (base 2) until the next read re-grids.
     let radius: unknown
+    const mult = 0.3 + b * 0.95
     if (lens.areal) {
-      radius = ['interpolate', ['exponential', 1.6], ['zoom'], 3, 10, 5, 22, 7, 42, 9, 90, 11, 190, 13, 380]
+      radius = ['interpolate', ['exponential', 1.6], ['zoom'], 3, 10 * mult, 5, 22 * mult, 7, 42 * mult, 9, 90 * mult, 11, 190 * mult, 13, 380 * mult]
     } else {
       const z = fetchZoom ?? map.getZoom()
       const g = lensGridForZoom(z)
-      const r = g ? Math.max(6, degToPx(g, z, map.getCenter().lat) * 0.95) : 0
+      const r = g ? Math.max(4, degToPx(g, z, map.getCenter().lat) * (0.35 + b * 0.7)) : 0
       radius = !g
         ? 0
         : z < 12.9
@@ -100,18 +135,22 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number) {
     }
     map.setPaintProperty(L_FIELD, 'circle-radius', radius as never)
     map.setPaintProperty(L_FIELD, 'circle-color', rampExpression(ramp, ['get', 't']) as never)
-    map.setPaintProperty(L_FIELD, 'circle-blur', lens.areal ? 1 : 0.9)
+    map.setPaintProperty(L_FIELD, 'circle-blur', 0.12 + b * (lens.areal ? 0.88 : 0.8))
+    // Market fields stay translucent so the map (and its names) read through.
     map.setPaintProperty(L_FIELD, 'circle-opacity', (lens.areal
-      ? ['interpolate', ['linear'], ['zoom'], 3, 0.6, 10, 0.55, 13, 0.36]
-      : ['interpolate', ['linear'], ['zoom'], 3, 0.78, 12.5, 0.72, 13, 0]) as never)
+      ? ['interpolate', ['linear'], ['zoom'], 3, 0.5 + (1 - b) * 0.3, 10, 0.42 + (1 - b) * 0.3, 13, 0.3]
+      : ['interpolate', ['linear'], ['zoom'], 3, 0.72 + (1 - b) * 0.2, 12.5, 0.68 + (1 - b) * 0.2, 13, 0]) as never)
+    map.setPaintProperty(L_FIELD, 'circle-stroke-width', b < 0.25 ? 0.6 : 0)
+    map.setPaintProperty(L_FIELD, 'circle-stroke-color', 'rgba(255,255,255,0.35)')
     map.setPaintProperty(L_FIELD, 'circle-pitch-alignment', 'map')
 
     // Density heatmap.
     map.setPaintProperty(L_HEAT, 'heatmap-weight', ['interpolate', ['linear'], ['get', 't'], 0, 0.05, 1, 1] as never)
     map.setPaintProperty(L_HEAT, 'heatmap-intensity', ['interpolate', ['linear'], ['zoom'], 3, 1.4, 9, 2, 14, 3] as never)
+    const hm = 0.45 + b * 0.85
     map.setPaintProperty(L_HEAT, 'heatmap-radius', (lens.ambient
       ? ['interpolate', ['linear'], ['zoom'], 3, 42, 6, 56, 9, 64]
-      : ['interpolate', ['linear'], ['zoom'], 3, 14, 7, 22, 10, 30, 13, 36, 16, 48]) as never)
+      : ['interpolate', ['linear'], ['zoom'], 3, 14 * hm, 7, 22 * hm, 10, 30 * hm, 13, 36 * hm, 16, 48 * hm]) as never)
     map.setPaintProperty(L_HEAT, 'heatmap-color', rampExpression(ramp, ['heatmap-density'], true) as never)
     map.setPaintProperty(L_HEAT, 'heatmap-opacity', (lens.ambient
       ? ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 0.5, 9.5, 0]
@@ -128,24 +167,30 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number) {
 }
 
 function hideAll(map: maplibregl.Map) {
-  for (const id of [L_FIELD, L_HEAT, L_DOTS]) {
+  for (const id of [L_FIELD, L_HEAT, L_DOTS, L_AREA_FILL, L_AREA_LINE]) {
     try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none') } catch { /* ignore */ }
   }
 }
 
-export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapLens): LensState {
+const countLens = (lens: MapLens) => lens.id === 'territory' || Boolean(lens.ambient) || lens.id === 'investor_buys' || lens.id === 'institutional_buys'
+
+export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapLens, look: LensLook = DEFAULT_LOOK): LensState {
   const [state, setState] = useState<LensState>({ loading: false, error: null, count: 0, inView: null })
   const seq = useRef(0)
   const timer = useRef<number | null>(null)
+  const lookRef = useRef(look)
+  lookRef.current = look
+  const areasMode = look.style === 'areas' && !lens.ambient
 
   // Layers exist for the lifetime of the style; re-added after a style swap.
+  // A look change (dots ↔ surface) restyles in place — no refetch.
   useEffect(() => {
     if (!map) return
-    const ensure = () => { try { ensureLayers(map); if (lens.source) styleFor(map, lens); else hideAll(map) } catch { /* ignore */ } }
+    const ensure = () => { try { ensureLayers(map); if (lens.source) styleFor(map, lens, undefined, lookRef.current); else hideAll(map) } catch { /* ignore */ } }
     ensure()
     map.on('styledata', ensure)
     return () => { map.off('styledata', ensure) }
-  }, [map, epoch, lens])
+  }, [map, epoch, lens, look.style, look.blend])
 
   useEffect(() => {
     if (!map) return
@@ -177,6 +222,36 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       const padLat = (b.getNorth() - b.getSouth()) * 0.15
       const padLng = (b.getEast() - b.getWest()) * 0.15
       setState((s) => ({ ...s, loading: true, error: null }))
+      if (areasMode) {
+        const { data, error } = await getSupabaseClient().rpc('get_map_lens_areas', {
+          p_lens: lens.source,
+          p_min_lat: b.getSouth() - padLat, p_min_lng: b.getWest() - padLng,
+          p_max_lat: b.getNorth() + padLat, p_max_lng: b.getEast() + padLng,
+          p_zoom: zoom,
+        })
+        if (id !== seq.current) return
+        if (error || !Array.isArray(data)) { setState({ loading: false, error: 'Layer unavailable', count: 0, inView: null, lensId: lens.id }); return }
+        const rowsIn = (data as Array<{ key: string; v: number | null; n: number; outline: GeoJSON.Geometry | null }>).filter((r) => r.outline && r.v != null && Number.isFinite(Number(r.v)))
+        const maxV = rowsIn.reduce((m, r) => Math.max(m, Number(r.v)), 1)
+        const values: number[] = []
+        const features = rowsIn.map((r) => {
+          const v = Number(r.v)
+          values.push(v)
+          const t = countLens(lens) ? Math.min(1, Math.log10(v + 1) / Math.log10(maxV + 1)) : normalize(lens, v)
+          return { type: 'Feature' as const, geometry: r.outline as GeoJSON.Geometry, properties: { v, t, n: Number(r.n) || 1, key: r.key } }
+        })
+        const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features }
+        try {
+          ensureLayers(map)
+          styleFor(map, lens, zoom, lookRef.current)
+          LAST_AREAS.set(map, fc)
+          ;(map.getSource(AREA_SRC) as maplibregl.GeoJSONSource | undefined)?.setData(fc)
+        } catch { /* style mid-swap */ }
+        values.sort((x, y) => x - y)
+        const qa = (p: number) => values[Math.min(values.length - 1, Math.max(0, Math.round(p * (values.length - 1))))]
+        setState({ loading: false, error: null, count: features.length, inView: values.length && !countLens(lens) ? [qa(0.05), qa(0.95)] : null, lensId: lens.id })
+        return
+      }
       const { data, error } = await getSupabaseClient().rpc('get_map_lens_points', {
         p_lens: lens.source,
         p_min_lat: b.getSouth() - padLat,
@@ -198,7 +273,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
         if (!Number.isFinite(v) || !Number.isFinite(r.lat) || !Number.isFinite(r.lng)) continue
         if ((lens.id === 'comps_price' || lens.id === 'comps_ppsf' || lens.id === 'value') && v <= 0) continue
         values.push(v)
-        const t = lens.id === 'territory' || lens.ambient
+        const t = countLens(lens)
           ? Math.min(1, Math.log10((Number(r.n) || 1) + 1) / Math.log10(maxN + 1))
           : normalize(lens, v)
         features.push({
@@ -209,7 +284,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       }
       try {
         ensureLayers(map)
-        styleFor(map, lens, zoom)
+        styleFor(map, lens, zoom, lookRef.current)
         const fc: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features }
         LAST_DATA.set(map, fc)
         ;(map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData(fc)
@@ -228,7 +303,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
       map.off('moveend', schedule)
       if (timer.current) window.clearTimeout(timer.current)
     }
-  }, [map, epoch, lens])
+  }, [map, epoch, lens, areasMode])
 
   return state
 }
@@ -236,6 +311,11 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
 /** Read the lens value under a screen point (for the tap-to-read callout). */
 export function lensValueAt(map: maplibregl.Map, point: { x: number; y: number }): { v: number; n: number } | null {
   try {
+    if (map.getLayer(L_AREA_FILL) && map.getLayoutProperty(L_AREA_FILL, 'visibility') !== 'none') {
+      const area = map.queryRenderedFeatures([point.x, point.y], { layers: [L_AREA_FILL] })[0]
+      const v = Number((area?.properties as Record<string, unknown> | undefined)?.v)
+      return area && Number.isFinite(v) ? { v, n: Number((area.properties as Record<string, unknown>)?.n) || 1 } : null
+    }
     const layers = [L_DOTS, L_FIELD, L_HEAT].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, 'visibility') !== 'none')
     if (!layers.length) return null
     const box: [[number, number], [number, number]] = [[point.x - 14, point.y - 14], [point.x + 14, point.y + 14]]

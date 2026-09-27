@@ -1148,3 +1148,11 @@ html[data-nexus-theme='light'] .mx-comp__section h4 { color: #9a1f33; }
 html[data-nexus-theme='light'] .mx-comp__section dt { color: rgb(60 10 20 / 0.6); }
 html[data-nexus-theme='light'] .mx-comp__flags span { color: #9a1f33; }
 .mx-search input:focus, .mx-search input:focus-visible { outline: none !important; box-shadow: none !important; }
+.mx-legend__look { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--mx-rule); }
+.mx-legend__styles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; border-radius: 11px; background: var(--mx-well); }
+.mx-legend__styles button { min-height: 30px; border: 0; border-radius: 8px; background: transparent; color: var(--mx-ink-2); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; transition: background 0.2s, color 0.2s; }
+.mx-legend__styles button.is-on { background: var(--mx-accent); color: var(--mx-accent-ink); box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--mx-accent) 70%, transparent); }
+.mx-legend__blend { -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; background: transparent; }
+.mx-legend__blend::-webkit-slider-runnable-track { height: 5px; border-radius: 5px; background: linear-gradient(90deg, var(--mx-accent) var(--lgc-pct, 70%), rgb(255 255 255 / 0.14) var(--lgc-pct, 70%)); }
+.mx-legend__blend::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7.5px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #dfe8f5 60%, #b9c6d8); box-shadow: 0 3px 10px rgb(0 0 0 / 0.45); }
+.mx-legend__blend::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: #fff; }

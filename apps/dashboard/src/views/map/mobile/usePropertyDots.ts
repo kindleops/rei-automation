@@ -105,7 +105,8 @@ function quietAggregates(map: maplibregl.Map, quiet: boolean) {
   }
 }
 
-export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean) {
+/** `quietBubbles`: count bubbles step aside (dots on, or a heat lens is showing). */
+export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean, quietBubbles: boolean = on) {
   useEffect(() => {
     if (!map) return
     const fadeFrom = getGroupingHandoffZoom()
@@ -113,7 +114,7 @@ export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: b
       try {
         ensure(map, fadeFrom)
         setVisible(map, on)
-        quietAggregates(map, on)
+        quietAggregates(map, quietBubbles)
       } catch { /* style mid-swap */ }
     }
     apply()
@@ -122,12 +123,12 @@ export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: b
     }
     map.on('styledata', apply)
     // The map re-writes aggregate paint on data refreshes; keep them quiet.
-    const tick = on ? window.setInterval(apply, 2000) : 0
+    const tick = quietBubbles ? window.setInterval(apply, 2000) : 0
     return () => {
       map.off('styledata', apply)
       if (tick) window.clearInterval(tick)
     }
-  }, [map, epoch, on])
+  }, [map, epoch, on, quietBubbles])
 }
 
 /** Properties represented by the dots rendered in view (sum of per-pixel counts). */

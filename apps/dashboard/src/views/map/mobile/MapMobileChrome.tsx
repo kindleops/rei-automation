@@ -38,7 +38,7 @@ import {
   type ActivityWindow,
   type ActivityTier,
 } from './map-mobile-model'
-import { LENS_FAMILIES, MAP_LENSES, formatLensValue, lensById, type MapLens } from './map-lenses'
+import { LENS_FAMILIES, MAP_LENSES, formatLensValue, lensById, type LensStyle, type MapLens } from './map-lenses'
 import { lensValueAt, useMapLens } from './useMapLens'
 import { HYBRID_THEMES, useMapImagery } from './useMapImagery'
 import { LensLegend, MarketPanel, rampGradient } from './MapIntelCards'
@@ -96,8 +96,8 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 
 /** Phone-only map preferences: the active lens and what floats on the map. */
 const LENS_STORE = 'nexus.map.mobileLens'
-interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS }
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7 }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }
@@ -210,10 +210,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
   // ── Intelligence lens ──────────────────────────────────────────────────────
   const lens = lensById(prefs.lens)
-  const lensState = useMapLens(map, mapEpoch, lens)
-  usePropertyDots(map, mapEpoch, prefs.everyProperty)
+  const lensLook = useMemo(() => ({ style: prefs.lensStyle, blend: prefs.lensBlend }), [prefs.lensStyle, prefs.lensBlend])
+  const lensState = useMapLens(map, mapEpoch, lens, lensLook)
+  usePropertyDots(map, mapEpoch, prefs.everyProperty, prefs.everyProperty || (Boolean(lens.source) && !lens.ambient))
   // Sold comps: on with the toggle, and always under a comps lens.
-  const compsOn = prefs.comps || lens.family === 'comps'
+  const compsOn = prefs.comps
   const comps = useSoldComps(map, mapEpoch, compsOn, { ...DEFAULT_COMP_FILTERS, ...prefs.compFilters })
   const [compId, setCompId] = useState<string | null>(null)
   useEffect(() => {
@@ -263,8 +264,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       if (!hit) return false
       const sub = l.id === 'territory'
         ? 'properties here'
+        : l.density ? `${l.label.toLowerCase()} here`
         : l.areal ? l.attribution ?? l.label : hit.n > 1 ? `${l.label} · avg of ${hit.n.toLocaleString()}` : l.label
-      setReadout({ x: point.x, y: point.y, text: l.id === 'territory' ? hit.n.toLocaleString() : formatLensValue(l, hit.v), sub, key: Date.now() })
+      setReadout({ x: point.x, y: point.y, text: l.id === 'territory' ? hit.n.toLocaleString() : l.density ? Math.round(hit.v).toLocaleString() : formatLensValue(l, hit.v), sub, key: Date.now() })
       window.clearTimeout(timer)
       timer = window.setTimeout(() => setReadout(null), 2800)
       return true
@@ -707,7 +709,15 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       {!cardOpen && !compId && !searchActive && (prefs.market || prefs.mapKey) && (
         <div className={cls('mx-cards', activityOn && 'has-peek')}>
           {prefs.market && <MarketPanel map={map} epoch={mapEpoch} onClose={() => setPref('market', false)} />}
-          {prefs.mapKey && <LensLegend lens={lens} state={lensState} zoom={zoom} />}
+          {prefs.mapKey && (
+            <LensLegend
+              lens={lens}
+              state={lensState}
+              zoom={zoom}
+              look={lensLook}
+              onLook={(next) => { if (next.style !== undefined) setPref('lensStyle', next.style); if (next.blend !== undefined) setPref('lensBlend', next.blend) }}
+            />
+          )}
         </div>
       )}
 

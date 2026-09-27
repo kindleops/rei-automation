@@ -15,8 +15,8 @@ import type maplibregl from 'maplibre-gl'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 import { UNIVERSAL_STAGE_RING_COLORS } from '../universal-stage-colors'
-import { formatLensValue, LENS_RAMPS, type MapLens } from './map-lenses'
-import type { LensState } from './useMapLens'
+import { formatLensValue, LENS_RAMPS, type LensStyle, type MapLens } from './map-lenses'
+import type { LensLook, LensState } from './useMapLens'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -32,7 +32,7 @@ const STAGE_KEY: Array<[string, string]> = [
   ['Follow-up', UNIVERSAL_STAGE_RING_COLORS.follow_up_due],
 ]
 
-export function LensLegend({ lens, state, zoom }: { lens: MapLens; state: LensState; zoom: number }) {
+export function LensLegend({ lens, state, zoom, look, onLook }: { lens: MapLens; state: LensState; zoom: number; look?: LensLook; onLook?: (next: Partial<LensLook>) => void }) {
   if (!lens.source || lens.ambient) {
     return (
       <div className="mx-legend mx-glass" data-map-card="legend">
@@ -50,7 +50,9 @@ export function LensLegend({ lens, state, zoom }: { lens: MapLens; state: LensSt
   const coldLabel = lens.invert ? `${formatLensValue(lens, b)}+` : `≤ ${formatLensValue(lens, a)}`
   const hotLabel = lens.invert ? `≤ ${formatLensValue(lens, a)}` : `${formatLensValue(lens, b)}+`
   const range = state.lensId === lens.id ? state.inView : null
-  const unit = lens.areal ? 'areas' : zoom >= 13 ? 'properties' : 'cells'
+  const isCount = lens.id === 'territory' || Boolean(lens.density)
+  const areas = look?.style === 'areas'
+  const unit = areas ? (zoom >= 7 ? 'ZIPs' : zoom >= 4.6 ? 'counties' : 'states') : lens.areal ? 'areas' : zoom >= 13 ? 'properties' : 'cells'
   return (
     <div className={cls('mx-legend mx-glass', state.loading && 'is-loading')} data-map-card="legend">
       <div className="mx-legend__head">
@@ -59,12 +61,35 @@ export function LensLegend({ lens, state, zoom }: { lens: MapLens; state: LensSt
       </div>
       <div className="mx-legend__bar" style={{ backgroundImage: rampGradient(lens) }}><i /></div>
       <div className="mx-legend__ends">
-        <span>{lens.id === 'territory' ? 'Sparse' : coldLabel}</span>
-        {range && lens.id !== 'territory' && lens.id !== 'execution' && (
+        <span>{isCount ? 'Sparse' : coldLabel}</span>
+        {range && !isCount && (
           <em>here {formatLensValue(lens, range[0])} – {formatLensValue(lens, range[1])}</em>
         )}
-        <span>{lens.id === 'territory' ? 'Dense' : hotLabel}</span>
+        <span>{isCount ? 'Dense' : hotLabel}</span>
       </div>
+      {look && onLook && (
+        <div className="mx-legend__look">
+          <div className="mx-legend__styles" role="radiogroup" aria-label="Heat style">
+            {(['dots', 'surface', 'areas'] as LensStyle[]).map((st) => (
+              <button key={st} type="button" role="radio" aria-checked={look.style === st} className={cls(look.style === st && 'is-on')} onClick={() => onLook({ style: st })} data-lens-style={st}>
+                {st === 'dots' ? 'Dots' : st === 'surface' ? 'Surface' : 'Areas'}
+              </button>
+            ))}
+          </div>
+          {look.style === 'surface' && (
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(look.blend * 100)}
+              onChange={(e) => onLook({ blend: Number(e.target.value) / 100 })}
+              aria-label="Individual dots to one surface"
+              style={{ ['--lgc-pct' as string]: `${Math.round(look.blend * 100)}%` }}
+              className="mx-legend__blend"
+            />
+          )}
+        </div>
+      )}
       <p className="mx-legend__src">{[lens.attribution, 'hold the map to read a value'].filter(Boolean).join(' · ')}</p>
     </div>
   )
