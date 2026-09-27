@@ -8,6 +8,8 @@ import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { goBack } from '../../domain/navigation/back-stack'
 import { useBackTarget } from '../../domain/navigation/useBackHandler'
 import { MobileOverflowSheet } from './MobileOverflowSheet'
+import { appHue } from './app-hues'
+import './command-island.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -143,8 +145,16 @@ export const MobileCommandDock = ({
         : 'alert'
 
   const dock = (
-    <nav className="nx-mobile-command-dock is-top-dock" aria-label="Mobile command menu">
+    <nav
+      className="nx-mobile-command-dock is-top-dock is-island"
+      aria-label="Mobile command menu"
+      data-app={activeApp.id}
+      data-queue={queueStatus}
+      style={{ ['--app-hue' as string]: appHue(activeApp.id) }}
+    >
       <div className="nx-mobile-command-dock__inner nx-liquid-surface">
+        {/* Liquid colour in the app's own light, moving under the glass. */}
+        <span className="nx-island__liquid" aria-hidden="true"><i /><i /><i /></span>
         <span className="nx-mobile-command-dock__sheen" aria-hidden="true" />
         <span className="nx-mobile-command-dock__rim" aria-hidden="true" />
         <div className="nx-mobile-command-dock__slot nx-mobile-command-dock__slot--kpi">
@@ -204,10 +214,14 @@ export const MobileCommandDock = ({
             aria-expanded={activeSurface === 'workspace'}
             onClick={() => toggle('workspace')}
           >
-            <DockGlyph hub>
-              <Icon name={activeApp.icon} size={DOCK_ICON_HUB} strokeWidth={1.55} />
-            </DockGlyph>
-            <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
+            {/* Keyed on the app: switching apps re-mounts the chip, which morphs in. */}
+            <span className="nx-island__app" key={activeApp.id}>
+              <DockGlyph hub>
+                <Icon name={activeApp.icon} size={DOCK_ICON_HUB} strokeWidth={1.7} />
+              </DockGlyph>
+              <span className="nx-mobile-command-dock__identity">{activeApp.shortLabel}</span>
+              <span className="nx-island__caret" aria-hidden="true"><Icon name="chevron-down" size={11} strokeWidth={2.2} /></span>
+            </span>
           </button>
         </div>
 

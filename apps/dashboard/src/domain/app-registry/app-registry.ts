@@ -553,7 +553,14 @@ export function isAppActive(routePath: string, app: NexusApp): boolean {
 
 /** Which app is the operator currently in? Falls back to Inbox, which owns '/'. */
 export function resolveAppForRoute(routePath: string): NexusApp {
-  return NEXUS_APPS.find((app) => isAppActive(routePath, app)) ?? BY_ID.get('inbox')!
+  // Legacy aliases (e.g. /campaigns → /campaign-command) resolve to their app:
+  // falling through to Inbox made the top bar name the wrong application.
+  const direct = NEXUS_APPS.find((app) => isAppActive(routePath, app))
+  if (direct) return direct
+  const path = routePath.replace(/\/+$/, '') || '/'
+  const alias = Object.entries(LEGACY_ROUTE_ALIASES).find(([from]) => path === from || path.startsWith(`${from}/`))
+  const target = alias ? NEXUS_APPS.find((app) => isAppActive(alias[1], app)) : null
+  return target ?? BY_ID.get('inbox')!
 }
 
 /**

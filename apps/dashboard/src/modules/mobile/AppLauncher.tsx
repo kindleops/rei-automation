@@ -12,6 +12,8 @@ import { readPropertyLocator } from '../../domain/locator/property-locator'
 import { badgeForApp, usePinnedAppDockBadges } from './usePinnedAppDockBadges'
 import type { DockAppBadge } from './pinned-app-dock.types'
 import './app-launcher.css'
+import { appHue } from './app-hues'
+import './command-island.css'
 
 /**
  * THE GLOBAL APP LAUNCHER.
@@ -109,6 +111,7 @@ export const AppLauncher = ({ routePath, onClose, onSelect }: AppLauncherProps) 
 
       <div className="nx-app-launcher__sheet nx-liquid-surface">
         <span className="nx-app-launcher__sheen" aria-hidden />
+        <span className="nx-launcher__liquid" aria-hidden="true"><i /><i /><i /></span>
         <div className="nx-app-launcher__grab" aria-hidden />
 
         <header className="nx-app-launcher__head">
@@ -157,14 +160,15 @@ export const AppLauncher = ({ routePath, onClose, onSelect }: AppLauncherProps) 
             <section key={group.group} className="nx-app-launcher__group">
               <h4>{group.label}</h4>
               <div className="nx-app-launcher__grid">
-                {group.apps.map((app) => {
+                {group.apps.map((app, index) => {
                   const active = isAppActive(routePath, app)
                   const destination = resolveAppDestination(app, locator)
                   return (
                     <button
                       key={app.id}
                       type="button"
-                      className={cls('nx-app-launcher__tile', active && 'is-active')}
+                      className={cls('nx-app-launcher__tile', 'is-lit', active && 'is-active')}
+                      style={{ ['--hue' as string]: appHue(app.id), ['--i' as string]: index }}
                       aria-current={active ? 'page' : undefined}
                       onClick={() => onSelect(app)}
                     >

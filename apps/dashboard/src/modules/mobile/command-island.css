@@ -1,0 +1,353 @@
+/*
+ * THE COMMAND ISLAND — the one global top bar, on every app.
+ *
+ * Before: two geometries (52px on Home/Campaigns, 40px wherever the Inbox
+ * stylesheet happened to be loaded), a bar welded to the top edge, and a
+ * badge sitting on the bell. Now: one floating liquid-glass island, 46px,
+ * lit from underneath in the current app's own colour (--app-hue, set on the
+ * nav from the app registry), with an app chip that morphs when you switch.
+ *
+ * Specificity is deliberate: `.is-island` + `html.is-mobile-layout` outranks
+ * every host stylesheet, and the few `!important`s answer ones already there.
+ */
+
+/* One geometry for every host. :root.is-mobile-layout (0,2,0) beats the
+   Inbox's html.is-mobile-layout (0,1,1) override of the same variable. */
+:root.is-mobile-layout {
+  --nx-dock-height: 46px;
+  --nx-dock-pad-top: 5px;
+  --nx-dock-inner-pad-y: 2px;
+}
+
+html.is-mobile-layout .nx-mobile-command-dock.is-island {
+  --hue: var(--app-hue, #5ee7ff);
+  padding-top: calc(5px + var(--nx-mobile-safe-top));
+}
+
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__inner {
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 46px;
+  max-height: 50px;
+  gap: 4px;
+  padding: 4px 5px !important;
+  border-radius: 20px !important;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.015) 55%),
+    rgb(var(--lg-fill, 8 12 20) / clamp(0.35, calc(0.62 * var(--lg-alpha, 1)), 0.9));
+  -webkit-backdrop-filter: blur(var(--lg-blur, 24px)) saturate(var(--lg-sat, 180%));
+  backdrop-filter: blur(var(--lg-blur, 24px)) saturate(var(--lg-sat, 180%));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 color-mix(in srgb, var(--hue) 35%, transparent),
+    0 14px 36px -18px rgb(0 0 0 / 0.85),
+    0 10px 30px -22px color-mix(in srgb, var(--hue) 70%, transparent);
+  transition: box-shadow 0.6s ease;
+}
+
+/* Liquid colour: three slow blobs in the app's light, under the glass. */
+.nx-island__liquid {
+  position: absolute;
+  inset: -40% -10%;
+  z-index: -1;
+  pointer-events: none;
+  filter: blur(18px) saturate(140%);
+  opacity: 0.55;
+}
+.nx-island__liquid i {
+  position: absolute;
+  width: 40%;
+  height: 120%;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  animation: nx-island-drift 14s ease-in-out infinite alternate;
+  transition: background 0.8s ease;
+}
+.nx-island__liquid i:nth-child(1) { left: 2%; top: -10%; background: radial-gradient(closest-side, color-mix(in srgb, var(--hue) 55%, transparent), transparent); }
+.nx-island__liquid i:nth-child(2) { left: 36%; top: 10%; background: radial-gradient(closest-side, color-mix(in srgb, var(--hue) 28%, #7c5cff), transparent); animation-duration: 19s; animation-delay: -5s; opacity: 0.7; }
+.nx-island__liquid i:nth-child(3) { right: 0; top: -20%; background: radial-gradient(closest-side, color-mix(in srgb, var(--hue) 30%, #00d9ff), transparent); animation-duration: 23s; animation-delay: -11s; opacity: 0.6; }
+@keyframes nx-island-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(18%, -6%, 0) scale(1.25); }
+  100% { transform: translate3d(-10%, 8%, 0) scale(0.9); }
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-island__liquid { opacity: 0.35; }
+html.is-mobile-layout[data-nexus-theme='light'] .nx-island__liquid i { mix-blend-mode: multiply; }
+
+/* A slow light passes across the glass. */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__sheen {
+  background: linear-gradient(105deg, transparent 38%, rgb(255 255 255 / 0.12) 50%, transparent 62%) 220% 0 / 260% 100% no-repeat;
+  opacity: 1;
+  animation: nx-island-sheen 11s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+@keyframes nx-island-sheen { 0%, 70% { background-position: 220% 0; } 100% { background-position: -130% 0; } }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__rim {
+  left: 18%;
+  right: 18%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--hue) 80%, transparent), transparent);
+  opacity: 0.9;
+  filter: blur(0.3px);
+}
+
+/* ── Buttons: clear glass lozenges ────────────────────────────────────── */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__btn {
+  position: relative;
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 38px !important;
+  border-radius: 13px;
+  background: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__btn:active { transform: scale(0.9); }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__glyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 0;
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.025) 60%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), inset 0 0 0 1px rgb(255 255 255 / 0.07);
+}
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__glyph svg { width: 17px; height: 17px; opacity: 0.92; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__btn.is-active .nx-mobile-command-dock__glyph {
+  color: #fff;
+  background: radial-gradient(circle at 35% 25%, rgb(255 255 255 / 0.35), transparent 50%), color-mix(in srgb, var(--hue) 55%, rgb(8 12 20 / 0.6));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 0 0 1px color-mix(in srgb, var(--hue) 60%, transparent), 0 0 18px -4px var(--hue);
+}
+
+/* ── The app chip: its own lit tile, name, and a caret that says "switch" ── */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__btn--workspace {
+  display: flex !important;
+  width: auto !important;
+  max-width: 156px !important;
+  padding: 0 8px 0 2px !important;
+  border-radius: 15px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--hue) 16%, transparent), transparent 90%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hue) 22%, transparent);
+}
+.nx-island__app {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  animation: nx-island-morph 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+}
+@keyframes nx-island-morph {
+  from { opacity: 0; transform: translateY(6px) scale(0.92); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__glyph.is-hub {
+  width: 32px;
+  height: 32px;
+  border-radius: 11px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 32% 22%, rgb(255 255 255 / 0.55), transparent 42%),
+    radial-gradient(circle at 60% 80%, color-mix(in srgb, var(--hue) 90%, #fff 0%), color-mix(in srgb, var(--hue) 45%, #070b14) 85%);
+  box-shadow:
+    inset 0 1px 1px rgb(255 255 255 / 0.55),
+    inset 0 -5px 10px rgb(0 0 0 / 0.25),
+    0 0 0 1px color-mix(in srgb, var(--hue) 60%, transparent),
+    0 0 20px -4px var(--hue);
+}
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__glyph.is-hub svg { opacity: 1; filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.35)); }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__identity {
+  font-size: 15px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+  color: #f4f7fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nx-island__caret { display: inline-grid; place-items: center; color: color-mix(in srgb, var(--hue) 70%, #fff); opacity: 0.85; transition: transform 0.3s ease; }
+.nx-mobile-command-dock__btn--workspace[aria-expanded='true'] .nx-island__caret { transform: rotate(180deg); }
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island .nx-mobile-command-dock__identity { color: #0b1220; }
+
+/* Back sits beside the chip as a split button. */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__nav.has-back .nx-mobile-command-dock__btn--workspace { padding-right: 4px !important; }
+
+/* ── The system orb: breathes in the queue's health colour ─────────────── */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__slot--kpi { position: relative; width: 40px; min-width: 40px; height: 40px; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__slot--kpi::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 13px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1.5px var(--sys, rgb(148 163 184 / 0.5)), 0 0 14px -2px var(--sys, transparent);
+  animation: nx-island-breathe 3.2s ease-in-out infinite;
+}
+.nx-mobile-command-dock.is-island[data-queue='healthy'] { --sys: #34e89e; }
+.nx-mobile-command-dock.is-island[data-queue='warning'] { --sys: #fbbf24; }
+.nx-mobile-command-dock.is-island[data-queue='critical'] { --sys: #ff4d6d; }
+@keyframes nx-island-breathe { 50% { opacity: 0.45; transform: scale(0.94); } }
+
+/* ── Badge: rides the corner, never covers the glyph ───────────────────── */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__badge {
+  top: -1px;
+  right: -5px;
+  z-index: 2;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  border: 0;
+  background: linear-gradient(180deg, #ff6b7d, #ef2b4a);
+  box-shadow: 0 0 0 2px rgb(8 12 20 / 0.9), 0 3px 10px -2px rgb(239 43 74 / 0.7);
+  animation: nx-island-pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.5) both;
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island .nx-mobile-command-dock__badge { box-shadow: 0 0 0 2px #fff, 0 3px 10px -2px rgb(239 43 74 / 0.5); }
+@keyframes nx-island-pop { from { transform: scale(0); } to { transform: scale(1); } }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__dot {
+  background: var(--hue);
+  box-shadow: 0 0 0 2px rgb(8 12 20 / 0.9), 0 0 10px var(--hue);
+}
+
+/* ── Context chip: a lit capsule in the app's colour ───────────────────── */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__context {
+  height: 34px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--hue) 14%, rgb(255 255 255 / 0.04));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hue) 40%, transparent);
+  animation: nx-island-morph 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+}
+
+/* ── Light theme ───────────────────────────────────────────────────────── */
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island .nx-mobile-command-dock__inner {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.72));
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgb(11 18 32 / 0.07), 0 14px 34px -18px rgb(11 18 32 / 0.35), 0 10px 30px -22px color-mix(in srgb, var(--hue) 60%, transparent);
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island .nx-mobile-command-dock__glyph:not(.is-hub) {
+  background: linear-gradient(160deg, #fff, rgb(11 18 32 / 0.03));
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgb(11 18 32 / 0.08);
+  color: #0b1220;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EVERY BOTTOM SHEET: the handle is a pill, not a grey disc.
+   The global 44px tap floor turned the 4px handle into a 44px circle on the
+   More sheet, notifications, the Map's sheets and every MobileBottomSheet.
+   The pill is painted; the touch band is restored invisibly by ::after.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-mobile-bottom-sheet__handle,
+html.is-mobile-layout .nx-mobile-sheet__handle,
+html.is-mobile-layout .nx-overflow-sheet__handle {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 42px !important;
+  min-width: 0 !important;
+  height: 5px !important;
+  min-height: 5px !important;
+  margin: 9px auto 7px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 3px !important;
+  background: rgb(255 255 255 / 0.28) !important;
+  box-shadow: none !important;
+}
+html.is-mobile-layout[data-nexus-theme='light'] :is(.nx-mobile-bottom-sheet__handle, .nx-mobile-sheet__handle, .nx-overflow-sheet__handle) { background: rgb(11 18 32 / 0.2) !important; }
+html.is-mobile-layout :is(.nx-mobile-bottom-sheet__handle, .nx-mobile-sheet__handle, .nx-overflow-sheet__handle)::after {
+  content: '';
+  position: absolute;
+  left: -130px;
+  right: -130px;
+  top: -12px;
+  bottom: -14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-island__liquid i, .nx-island__app, .nx-mobile-command-dock.is-island .nx-mobile-command-dock__sheen,
+  .nx-mobile-command-dock.is-island .nx-mobile-command-dock__slot--kpi::before { animation: none !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE LAUNCHER — every app a lit glass tile in its own colour.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout .nx-app-launcher__sheet { isolation: isolate; overflow: hidden; }
+.nx-launcher__liquid { position: absolute; inset: -10% -20% auto; height: 70%; z-index: -1; pointer-events: none; filter: blur(40px) saturate(140%); opacity: 0.5; }
+.nx-launcher__liquid i { position: absolute; width: 55%; height: 60%; border-radius: 50%; mix-blend-mode: screen; animation: nx-island-drift 18s ease-in-out infinite alternate; }
+.nx-launcher__liquid i:nth-child(1) { left: 0; top: 0; background: radial-gradient(closest-side, rgb(94 231 255 / 0.4), transparent); }
+.nx-launcher__liquid i:nth-child(2) { right: 0; top: 10%; background: radial-gradient(closest-side, rgb(169 139 255 / 0.4), transparent); animation-delay: -6s; }
+.nx-launcher__liquid i:nth-child(3) { left: 30%; top: 30%; background: radial-gradient(closest-side, rgb(247 199 91 / 0.28), transparent); animation-delay: -12s; }
+html[data-nexus-theme='light'] .nx-launcher__liquid { opacity: 0.3; }
+html[data-nexus-theme='light'] .nx-launcher__liquid i { mix-blend-mode: multiply; }
+
+html.is-mobile-layout .nx-app-launcher__head strong {
+  /* Explicit colour: currentColor is transparent under background-clip:text. */
+  background: linear-gradient(95deg, #f2f5fb 45%, #7fe8ff 75%, #b39bff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+html.is-mobile-layout .nx-app-launcher__tile.is-lit {
+  animation: nx-tile-in 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.2) backwards;
+  animation-delay: calc(var(--i, 0) * 35ms + 60ms);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+html.is-mobile-layout .nx-app-launcher__tile.is-lit:active { transform: scale(0.93); }
+@keyframes nx-tile-in { from { opacity: 0; transform: translateY(10px) scale(0.9); filter: blur(4px); } }
+html.is-mobile-layout .nx-app-launcher__tile.is-lit .nx-app-launcher__glyph {
+  position: relative;
+  color: #fff;
+  border: 0 !important;
+  background:
+    radial-gradient(circle at 30% 20%, rgb(255 255 255 / 0.5), transparent 40%),
+    radial-gradient(circle at 60% 85%, var(--hue), color-mix(in srgb, var(--hue) 40%, #060a12) 90%) !important;
+  box-shadow:
+    inset 0 1px 1px rgb(255 255 255 / 0.55),
+    inset 0 -8px 14px rgb(0 0 0 / 0.22),
+    0 0 0 1px color-mix(in srgb, var(--hue) 55%, transparent),
+    0 10px 24px -12px var(--hue) !important;
+  overflow: visible;
+}
+html.is-mobile-layout .nx-app-launcher__tile.is-lit .nx-app-launcher__glyph svg { filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.35)); }
+html.is-mobile-layout .nx-app-launcher__tile.is-lit .nx-app-launcher__glyph::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, transparent 35%, rgb(255 255 255 / 0.5) 48%, transparent 60%) 170% 0 / 260% 100% no-repeat;
+  mix-blend-mode: screen;
+  animation: nx-island-sheen 7s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  animation-delay: calc(var(--i, 0) * 220ms);
+  pointer-events: none;
+}
+/* The app you are in: a rotating ring of its own light. */
+html.is-mobile-layout .nx-app-launcher__tile.is-lit.is-active .nx-app-launcher__glyph::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 20px;
+  padding: 2px;
+  background: conic-gradient(from var(--nx-ring-a, 0deg), var(--hue), transparent 40%, var(--hue) 70%, transparent);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: nx-ring-spin 3.5s linear infinite;
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-app-launcher__head strong { background-image: linear-gradient(95deg, #0b1220 45%, #0891b2 75%, #7c3aed); }
+@property --nx-ring-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes nx-ring-spin { to { --nx-ring-a: 360deg; } }
+html.is-mobile-layout .nx-app-launcher__tile.is-lit.is-active .nx-app-launcher__label { color: var(--hue); font-weight: 750; }
+html.is-mobile-layout .nx-app-launcher__search { position: relative; overflow: hidden; }
+html.is-mobile-layout .nx-app-launcher__search:focus-within { box-shadow: inset 0 0 0 1.5px rgb(94 231 255 / 0.55), 0 0 0 5px rgb(94 231 255 / 0.1); }
+
+/* The More sheet: rows are glass, icons carry their tone. */
+html.is-mobile-layout .nx-mobile-overflow__icon {
+  border-radius: 13px !important;
+  background: radial-gradient(circle at 30% 20%, rgb(255 255 255 / 0.3), transparent 45%), linear-gradient(160deg, rgb(94 231 255 / 0.28), rgb(94 231 255 / 0.06)) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 0 0 1px rgb(94 231 255 / 0.25), 0 8px 18px -10px rgb(94 231 255 / 0.8) !important;
+  color: #e6fbff;
+}
+html.is-mobile-layout .nx-mobile-overflow__group-label { padding-left: 18px; letter-spacing: 0.14em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-launcher__liquid i, .nx-app-launcher__tile.is-lit, .nx-app-launcher__tile.is-lit .nx-app-launcher__glyph::after, .nx-app-launcher__tile.is-lit.is-active .nx-app-launcher__glyph::before { animation: none !important; }
+}
+html.is-mobile-layout .nx-app-launcher__search input { background: transparent !important; box-shadow: none !important; }
