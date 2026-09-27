@@ -1,124 +1,140 @@
 import type { CSSProperties } from 'react'
-import { USA_STATE_PATHS } from '../../lib/data/usaStatePaths'
-import type { HomeMarket } from './home-signals'
+import { US_DOTS, US_STATES, US_VIEWBOX } from './us-dot-matrix'
+import type { HomeMarket, HomeReplyPin } from './home-signals'
 
 /**
  * The country as a field of light.
  *
- * A dot matrix sampled from the same simplified state geometry the Analytics map
- * uses, with every state that has market activity this week lit in proportion to
- * its replies, and a beacon over the strongest. The geometry is reference data;
- * the only business data drawn here is the market leaderboard passed in.
+ * The dot matrix is sampled from the Census state boundaries (us-atlas, Albers
+ * USA) by scripts/generate-us-dot-matrix.mjs, so the outline is the real one,
+ * Alaska and Hawaii included as insets. On top of it, only real data:
+ *
+ *   market heat   states with outreach activity this week (war-room market
+ *                 leaderboard), their dots pulsing in accent-coloured waves that
+ *                 radiate out from the state, brighter with more replies
+ *   beacons       the strongest markets
+ *   sparks        where sellers are replying from right now (the inbox's own
+ *                 coordinates for the recent-replies bucket)
+ *
+ * The static dots and the animated dots are separate SVG layers: the animated
+ * layer repaints each frame, and it holds only the few hundred lit dots.
  */
 
-type Polygon = Array<[number, number]>
-
-const SPACING = 15
-
-const parsePolygon = (path: string): Polygon =>
-  (path.match(/-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?/g) ?? []).map((pair) => {
-    const [x, y] = pair.split(',').map(Number)
-    return [x, y]
-  })
-
-const inside = (x: number, y: number, poly: Polygon) => {
-  let hit = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i]
-    const [xj, yj] = poly[j]
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit
-  }
-  return hit
-}
-
-interface Dot { x: number; y: number; state: string }
+interface Dot { x: number; y: number; state: number }
 
 let cachedDots: Dot[] | null = null
-
-/** Sampled once per session: ~1,200 points, a few milliseconds of work. */
-function matrix(): Dot[] {
+function dots(): Dot[] {
   if (cachedDots) return cachedDots
-  const polygons = Object.entries(USA_STATE_PATHS).map(([state, shape]) => ({ state, poly: parsePolygon(shape.path) }))
-  const dots: Dot[] = []
-  for (let row = 0, y = 60; y < 590; y += SPACING * 0.866, row++) {
-    for (let x = 20 + (row % 2) * (SPACING / 2); x < 950; x += SPACING) {
-      const owner = polygons.find(({ poly }) => inside(x, y, poly))
-      if (owner) dots.push({ x, y, state: owner.state })
-    }
-  }
-  cachedDots = dots
-  return dots
+  const out: Dot[] = []
+  for (let i = 0; i < US_DOTS.length; i += 3) out.push({ x: US_DOTS[i] / 10, y: US_DOTS[i + 1] / 10, state: US_DOTS[i + 2] })
+  cachedDots = out
+  return out
 }
 
-const stateOfMarket = (market: HomeMarket): string | null => {
+const STATE_INDEX = new Map(US_STATES.map((state, i) => [state.abbr, i]))
+
+const stateOfMarket = (market: HomeMarket): number | null => {
   const direct = market.state?.toUpperCase()
-  if (direct && USA_STATE_PATHS[direct]) return direct
+  if (direct && STATE_INDEX.has(direct)) return STATE_INDEX.get(direct) as number
   const parsed = market.market.split(',').pop()?.trim().toUpperCase()
-  return parsed && USA_STATE_PATHS[parsed] ? parsed : null
+  return parsed && STATE_INDEX.has(parsed) ? (STATE_INDEX.get(parsed) as number) : null
 }
 
-export function MarketConstellation({ markets }: { markets: HomeMarket[] }) {
-  // Cached at module level after the first call; recomputing per render is free.
-  const dots = matrix()
+const VIEW = `0 0 ${US_VIEWBOX.width} ${US_VIEWBOX.height}`
+const DOT_R = 3.5
+const MAX_PINS = 60
 
-  const heat = (() => {
-    const byState = new Map<string, number>()
-    for (const market of markets) {
-      const state = stateOfMarket(market)
-      if (!state) continue
-      byState.set(state, (byState.get(state) ?? 0) + market.replied + market.positive * 4)
-    }
-    const peak = Math.max(1, ...byState.values())
-    return new Map([...byState].map(([state, value]) => [state, value / peak]))
-  })()
+export function MarketConstellation({ markets, pins }: { markets: HomeMarket[]; pins: HomeReplyPin[] }) {
+  const all = dots()
 
-  const beacons = (() => {
-    const seen = new Set<string>()
-    return markets
-      .map((market) => ({ market, state: stateOfMarket(market) }))
-      .filter((entry): entry is { market: HomeMarket; state: string } => {
-        if (!entry.state || seen.has(entry.state)) return false
-        seen.add(entry.state)
-        return true
-      })
-      .slice(0, 4)
-  })()
+  const heat = new Map<number, number>()
+  for (const market of markets) {
+    const state = stateOfMarket(market)
+    if (state == null) continue
+    heat.set(state, (heat.get(state) ?? 0) + market.replied + market.positive * 4)
+  }
+  const peak = Math.max(1, ...heat.values())
+
+  const beacons: Array<{ state: number; label: string }> = []
+  for (const market of markets) {
+    const state = stateOfMarket(market)
+    if (state == null || beacons.some((b) => b.state === state)) continue
+    beacons.push({ state, label: market.market.split(',')[0] })
+    if (beacons.length === 4) break
+  }
+
+  const lit = all.filter((dot) => heat.has(dot.state))
+  const shownPins = pins.slice(0, MAX_PINS)
 
   return (
-    <svg className="nx-home-constellation" viewBox="40 70 900 510" role="img" aria-label={`Market activity: ${beacons.map((b) => b.market.market).join(', ') || 'none this week'}`}>
-      <defs>
-        <radialGradient id="nx-home-beacon" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgb(var(--home-accent-rgb))" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="rgb(var(--home-accent-rgb))" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <g className="nx-home-constellation__dots">
-        {dots.map((dot, i) => {
-          const level = heat.get(dot.state) ?? 0
+    <div className="nx-home-usmap" role="img" aria-label={`United States. Active markets: ${beacons.map((b) => b.label).join(', ') || 'none this week'}. ${pins.length} recent seller replies located.`}>
+      {/* Layer 1 — the country: painted once. */}
+      <svg className="nx-home-usmap__base" viewBox={VIEW} aria-hidden>
+        {all.map((dot, i) => <circle key={i} cx={dot.x} cy={dot.y} r={DOT_R} />)}
+      </svg>
+
+      {/* Layer 2 — heat: a soft bloom under each active state, then its dots
+          pulsing in a wave that travels outward from the state's centre. */}
+      <svg className="nx-home-usmap__heat" viewBox={VIEW} aria-hidden>
+        <defs>
+          <radialGradient id="nx-home-bloom">
+            <stop className="nx-home-usmap__bloom-stop" offset="0%" stopOpacity="0.5" />
+            <stop className="nx-home-usmap__bloom-stop" offset="100%" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        {[...heat].map(([state, value]) => {
+          const anchor = US_STATES[state]
           return (
             <circle
-              key={i}
-              cx={dot.x}
-              cy={dot.y}
-              r={level > 0 ? 3.3 + level * 1.4 : 2.6}
-              className={level > 0 ? 'is-lit' : undefined}
-              style={level > 0 ? ({ '--lvl': level.toFixed(2), '--tw': `${(i * 137) % 3000}ms` } as CSSProperties) : undefined}
+              key={`bloom-${state}`}
+              className="nx-home-usmap__bloom"
+              cx={anchor.x}
+              cy={anchor.y}
+              r={40 + 70 * Math.sqrt(value / peak)}
+              fill="url(#nx-home-bloom)"
+              style={{ '--lvl': (value / peak).toFixed(2) } as CSSProperties}
             />
           )
         })}
-      </g>
-      {beacons.map(({ market, state }, i) => {
-        const { cx, cy } = USA_STATE_PATHS[state]
-        return (
-          <g key={state} className={i === 0 ? 'nx-home-beacon is-top' : 'nx-home-beacon'} transform={`translate(${cx} ${cy})`}>
-            <circle r="46" fill="url(#nx-home-beacon)" />
-            <circle className="nx-home-beacon__ring" r="10" style={{ animationDelay: `${i * 600}ms` } as CSSProperties} />
-            <circle className="nx-home-beacon__ring" r="10" style={{ animationDelay: `${i * 600 + 1300}ms` } as CSSProperties} />
-            <circle className="nx-home-beacon__core" r={i === 0 ? 6 : 4.5} />
-            {i === 0 ? <text y="-20" textAnchor="middle">{market.market.split(',')[0]}</text> : null}
+        {lit.map((dot, i) => {
+          const anchor = US_STATES[dot.state]
+          const distance = Math.hypot(dot.x - anchor.x, dot.y - anchor.y)
+          const level = (heat.get(dot.state) ?? 0) / peak
+          return (
+            <circle
+              key={i}
+              className="nx-home-usmap__lit"
+              cx={dot.x}
+              cy={dot.y}
+              r={DOT_R + 0.6}
+              style={{ '--lvl': (0.35 + level * 0.65).toFixed(2), '--d': `${Math.round(distance * 11)}ms` } as CSSProperties}
+            />
+          )
+        })}
+      </svg>
+
+      {/* Layer 3 — beacons over the strongest markets, and live reply sparks. */}
+      <svg className="nx-home-usmap__signals" viewBox={VIEW} aria-hidden>
+        {shownPins.map((pin, i) => (
+          <g key={pin.id} className={pin.hot ? 'nx-home-spark is-hot' : 'nx-home-spark'} transform={`translate(${pin.x.toFixed(1)} ${pin.y.toFixed(1)})`}>
+            <circle className="nx-home-spark__ring" r="5" style={{ animationDelay: `${(i * 373) % 4000}ms` } as CSSProperties} />
+            <circle className="nx-home-spark__core" r="3.2" />
           </g>
-        )
-      })}
-    </svg>
+        ))}
+        {beacons.map(({ state, label }, i) => {
+          const anchor = US_STATES[state]
+          return (
+            <g key={state} className={i === 0 ? 'nx-home-beacon is-top' : 'nx-home-beacon'} transform={`translate(${anchor.x} ${anchor.y})`}>
+              <circle className="nx-home-beacon__ring" r="9" style={{ animationDelay: `${i * 500}ms` } as CSSProperties} />
+              <circle className="nx-home-beacon__ring" r="9" style={{ animationDelay: `${i * 500 + 1300}ms` } as CSSProperties} />
+              <circle className="nx-home-beacon__core" r={i === 0 ? 6.5 : 5} />
+              {i < 2 ? <text y={-18} textAnchor="middle">{label}</text> : null}
+            </g>
+          )
+        })}
+      </svg>
+
+      <span className="nx-home-usmap__scan" aria-hidden />
+    </div>
   )
 }

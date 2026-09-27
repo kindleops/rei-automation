@@ -25,6 +25,9 @@ import type { CampaignSummary } from '../campaign-command/campaigns.types'
 import { loadPipelineMetricsSurface } from '../../domain/pipeline/pipeline-surface-loader'
 import { fetchClosingDeskModel } from '../../domain/closing-desk/closing-desk-api'
 import type { NotificationEvent } from '../../domain/notifications/notification-contract'
+import { loadCalendarEventsWithMeta, type CalendarEvent, type CalendarEventType } from '../../lib/data/calendarData'
+import type { CalendarLayerId } from '../../lib/calendar/calendar-layers'
+import { projectAlbersUsa } from './home-geo'
 import type { IconName } from '../../shared/icons'
 
 // ── Load envelope ───────────────────────────────────────────────────────────
@@ -403,6 +406,136 @@ export async function loadHomeMarkets(): Promise<HomeLoad<HomeMarket[]>> {
     return unavailable(str(result.data?.message) ?? 'Market leaderboard unavailable')
   }
   return ready(rankMarkets(leaderboard))
+}
+
+// ── Seller replies on the map ───────────────────────────────────────────────
+
+export interface HomeReplyPin {
+  id: string
+  x: number
+  y: number
+  hot: boolean
+  seller: string
+}
+
+/**
+ * Where sellers are replying from: the recent-replies bucket with the inbox's own
+ * map coordinates, projected into the Home map. Threads without coordinates, and
+ * Alaska/Hawaii (drawn as insets), are left off rather than misplaced.
+ */
+export async function loadHomeReplyPins(signal?: AbortSignal): Promise<HomeLoad<HomeReplyPin[]>> {
+  try {
+    const response = await fetchLiveInbox({
+      filter: 'new_replies',
+      direction: 'all',
+      limit: 80,
+      map: true,
+      skipCounts: true,
+      skipDelivery: true,
+      timeoutMode: 'auto_refresh',
+      refreshReason: 'home_map',
+      signal,
+    })
+    const hot = new Set(response.threads.filter((t) => t.sentiment === 'hot').map((t) => str(t.threadKey) ?? t.id))
+    const pins = response.mapPins.flatMap((pin): HomeReplyPin[] => {
+      const point = projectAlbersUsa(Number(pin.lng), Number(pin.lat))
+      if (!point) return []
+      return [{ id: pin.id || pin.threadKey, x: point[0], y: point[1], hot: hot.has(pin.threadKey), seller: pin.ownerName || 'Seller' }]
+    })
+    return ready(pins)
+  } catch (error) {
+    return unavailable(error instanceof Error ? error.message : 'Reply locations unavailable')
+  }
+}
+
+// ── Calendar ────────────────────────────────────────────────────────────────
+
+export interface HomeAgendaItem {
+  id: string
+  at: string
+  allDay: boolean
+  title: string
+  who: string
+  tone: CalendarEvent['tone']
+  overdue: boolean
+  hot: boolean
+  threadId: string | null
+}
+
+export interface HomeCalendarDay {
+  /** Local date key, YYYY-MM-DD. */
+  key: string
+  date: Date
+  agenda: HomeAgendaItem[]
+  scheduledSends: number
+}
+
+export interface HomeCalendar {
+  days: HomeCalendarDay[]
+  overdue: number
+}
+
+/** Record-of-what-happened types: counted elsewhere, never agenda items. */
+const HISTORY_TYPES = new Set<CalendarEventType>([
+  'sms_sent', 'sms_delivered', 'sms_failed', 'inbound_reply', 'historical_event',
+  'dnc_suppression', 'wrong_number', 'positive_intent',
+])
+const SEND_TYPES = new Set<CalendarEventType>(['scheduled_sms', 'campaign_scheduled'])
+
+const HOME_CALENDAR_LAYERS: CalendarLayerId[] = [
+  'sms', 'follow_ups', 'workflow', 'campaigns', 'offers', 'contracts', 'title', 'closings', 'buyers', 'manual_events', 'risks',
+]
+
+export const localDayKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+export function summarizeCalendar(events: CalendarEvent[], start: Date, dayCount = 7): HomeCalendar {
+  const days: HomeCalendarDay[] = Array.from({ length: dayCount }, (_, i) => {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
+    return { key: localDayKey(date), date, agenda: [], scheduledSends: 0 }
+  })
+  const byKey = new Map(days.map((day) => [day.key, day]))
+  let overdue = 0
+  for (const event of events) {
+    if (HISTORY_TYPES.has(event.type)) continue
+    const when = new Date(event.timestamp)
+    if (Number.isNaN(when.getTime())) continue
+    if (event.overdue) overdue += 1
+    const day = byKey.get(localDayKey(when))
+    if (!day) continue
+    if (SEND_TYPES.has(event.type)) {
+      day.scheduledSends += 1
+      continue
+    }
+    day.agenda.push({
+      id: event.id,
+      at: event.timestamp,
+      allDay: Boolean(event.allDay),
+      title: event.title,
+      who: [event.sellerName, event.propertyAddress].filter((v) => v && !/unknown|unresolved/i.test(v)).join(' · '),
+      tone: event.tone,
+      overdue: event.overdue,
+      hot: event.hot,
+      threadId: event.threadId,
+    })
+  }
+  for (const day of days) day.agenda.sort((a, b) => Number(b.allDay) - Number(a.allDay) || a.at.localeCompare(b.at))
+  return { days, overdue }
+}
+
+export async function loadHomeCalendar(): Promise<HomeLoad<HomeCalendar>> {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7)
+  const result = await loadCalendarEventsWithMeta({
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
+    layers: HOME_CALENDAR_LAYERS,
+  })
+  // The calendar's client fallback rebuilds events from raw tables with
+  // placeholder sellers and addresses. On Home that would be an invented agenda.
+  if (result.usedFallback || result.error) return unavailable(result.error ?? 'Calendar unavailable')
+  return ready(summarizeCalendar(result.events, start))
 }
 
 // ── Focus: the cross-app priority queue ─────────────────────────────────────

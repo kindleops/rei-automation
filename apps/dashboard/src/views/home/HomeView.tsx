@@ -15,6 +15,7 @@ import { openTarget } from './home-navigation'
 import {
   ActivityModule,
   AutomationModule,
+  CalendarModule,
   CampaignsModule,
   DealsModule,
   FocusModule,
@@ -40,6 +41,23 @@ const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filt
  */
 
 // ── Operator name ───────────────────────────────────────────────────────────
+
+const INTRO_KEY = 'nx.home-intro.v1'
+
+/**
+ * The opening: once per session, a line of light draws across the dark and
+ * opens onto the field. Never on a return visit within the session, never with
+ * motion off, and never in the way — it takes no input and lasts 1.6s.
+ */
+const shouldPlayIntro = () => {
+  try {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false
+    if (loadSettings().animationsEnabled === false) return false
+    return window.sessionStorage.getItem(INTRO_KEY) !== '1'
+  } catch {
+    return false
+  }
+}
 
 const readAnimationsOff = () => loadSettings().animationsEnabled === false
 
@@ -275,6 +293,7 @@ export const HomeView = () => {
   const { notifications, loading: notificationsLoading, lastFetchedAt } = useNotificationIntelligence()
   const { layout } = useHomeLayout()
   const [customizing, setCustomizing] = useState(false)
+  const [intro, setIntro] = useState(shouldPlayIntro)
   const still = useSyncExternalStore(subscribeSettings, readAnimationsOff, () => false)
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -282,6 +301,12 @@ export const HomeView = () => {
   const ambientRef = useRef<HTMLDivElement>(null)
   const heroRef = useRef<HTMLElement>(null)
   useLiquidTouch(rootRef)
+  useEffect(() => {
+    if (!intro) return
+    try { window.sessionStorage.setItem(INTRO_KEY, '1') } catch { /* storage blocked: it simply plays again */ }
+    const id = window.setTimeout(() => setIntro(false), 1700)
+    return () => window.clearTimeout(id)
+  }, [intro])
   useScrollDepth(scrollRef, rootRef, ambientRef, heroRef)
 
   const focusItems = useMemo(() => buildFocusItems({
@@ -319,13 +344,14 @@ export const HomeView = () => {
       case 'campaigns': return <CampaignsModule key={id} {...props} />
       case 'deals': return <DealsModule key={id} {...props} />
       case 'markets': return <MarketsModule key={id} {...props} />
+      case 'calendar': return <CalendarModule key={id} {...props} clock={now} />
       case 'activity':
         return <ActivityModule key={id} {...props} notifications={notifications} notificationsReady={notificationsReady} />
     }
   }
 
   return (
-    <div className={cls('nx-home', still && STILL_CLASS)} ref={rootRef}>
+    <div className={cls('nx-home', still && STILL_CLASS, intro && 'is-intro')} ref={rootRef}>
       {/*
         The liquid field: slow masses of the accent colour, drifting at different
         speeds under the glass, with an aurora turning beneath them. Everything
@@ -386,6 +412,13 @@ export const HomeView = () => {
         </div>
       </div>
 
+      <span className="nx-home__film" aria-hidden />
+      {intro ? (
+        <div className="nx-home-intro" aria-hidden>
+          <span className="nx-home-intro__line" />
+          <span className="nx-home-intro__flare" />
+        </div>
+      ) : null}
       <span className="nx-home__scrim nx-home__scrim--top" aria-hidden />
       <span className="nx-home__scrim nx-home__scrim--bottom" aria-hidden />
 

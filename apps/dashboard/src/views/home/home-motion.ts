@@ -16,6 +16,19 @@ export function prefersStill(): boolean {
   return Boolean(document.querySelector(`.nx-home.${STILL_CLASS}`))
 }
 
+// ── Easing ────────────────────────────────────────────────────────────────
+
+/**
+ * Clamped: a requestAnimationFrame timestamp is the frame's start and can be
+ * earlier than the performance.now() the count began at, which made progress
+ * negative and the quartic ease run away — the first frame of a count painted
+ * numbers like -857364%.
+ */
+export const easeOutQuart = (t: number) => {
+  const p = Math.min(1, Math.max(0, t))
+  return 1 - (1 - p) ** 4
+}
+
 // ── Reveal on scroll ────────────────────────────────────────────────────────
 
 /**
@@ -49,8 +62,13 @@ const RIPPLE_HOSTS = '.nx-home-focus__item, .nx-home-stage, .nx-home-chip, .nx-h
 
 const setLight = (card: HTMLElement, event: PointerEvent) => {
   const rect = card.getBoundingClientRect()
-  card.style.setProperty('--mx', `${event.clientX - rect.left}px`)
-  card.style.setProperty('--my', `${event.clientY - rect.top}px`)
+  const x = event.clientX - rect.left
+  const y = event.clientY - rect.top
+  card.style.setProperty('--mx', `${x}px`)
+  card.style.setProperty('--my', `${y}px`)
+  // The pane tips toward the finger, as a sheet of glass would under pressure.
+  card.style.setProperty('--rx', `${(-(y / rect.height - 0.5) * 7).toFixed(2)}deg`)
+  card.style.setProperty('--ry', `${((x / rect.width - 0.5) * 7).toFixed(2)}deg`)
 }
 
 /**
