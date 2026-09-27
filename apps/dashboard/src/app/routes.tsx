@@ -24,6 +24,9 @@ import type { QueueModel } from '../domain/queue/queue.types'
  * These MUST stay lazy: adding a static import of any view back into this file
  * silently re-merges it into the entry chunk.
  */
+const HomeView = lazy(() =>
+  import('../views/home/HomeView').then((m) => ({ default: m.HomeView })),
+)
 const InboxView = lazy(() =>
   import('../views/inbox/InboxView').then((m) => ({ default: m.InboxView })),
 )
@@ -110,6 +113,18 @@ const rootRoute = defineRoute<null>({
   title: 'NEXUS | Inbox',
   loader: async () => null,
   render: () => <ConversationView />,
+})
+
+/**
+ * The mobile landing surface. No blocking loader: every module reads its own source
+ * and resolves independently, so a slow Queue read never holds the greeting, the
+ * focus list or the quick actions behind a boot panel.
+ */
+const homeRoute = defineRoute<null>({
+  path: '/home',
+  title: 'NEXUS | Home',
+  loader: async () => null,
+  render: () => wrapFullscreen(<HomeView />, 'home'),
 })
 
 const inboxRoute = defineRoute<null>({
@@ -343,6 +358,7 @@ const entityGraphZipRoute = defineRoute<null>({
 
 const routes = [
   rootRoute,
+  homeRoute,
   inboxRoute,
   conversationRoute,
   dealIntelligenceRoute,

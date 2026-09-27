@@ -26,6 +26,7 @@
 import type { IconName } from '../../shared/icons'
 
 export type AppId =
+  | 'home'
   | 'inbox'
   | 'conversation'
   | 'deal-intelligence'
@@ -111,6 +112,33 @@ export interface NexusApp {
  * `defaultDock: true` entries become the default dock rail left-to-right.
  */
 export const NEXUS_APPS: NexusApp[] = [
+  {
+    /**
+     * The mobile landing surface: what matters now, what the automation is doing,
+     * and one tap to the right app. It is an orchestration layer over the other
+     * applications, so it holds no truth of its own — every figure on it is read
+     * from the surface it links to.
+     *
+     * Mobile only. The desktop command center already lands in the Inbox workspace
+     * with its own panels, and a phone-shaped column there would be a second,
+     * poorer version of that.
+     */
+    id: 'home',
+    label: 'Home',
+    shortLabel: 'Home',
+    description: 'What matters now, across every app',
+    icon: 'home',
+    route: '/home',
+    group: 'communication',
+    desktop: false,
+    mobile: true,
+    dockable: true,
+    // First in the rail: whatever app the operator is in, the way back to the
+    // overview is one tap from the thumb.
+    defaultDock: true,
+    badge: null,
+    context: {},
+  },
   {
     id: 'inbox',
     label: 'Inbox',

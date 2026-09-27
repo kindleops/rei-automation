@@ -1535,6 +1535,15 @@ function readCampaignDeepLink(): { campaignId: string | null; section: CampaignD
  */
 let lastCampaignModel: CampaignModel | null = null
 
+const readComposeIntent = () =>
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('compose') === '1'
+
+const clearComposeIntent = () => {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('compose')
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+}
+
 export const CampaignsPage = () => {
   const { isMobile } = useBreakpoint()
   const [model, setModel] = useState<CampaignModel | null>(() => lastCampaignModel)
@@ -1543,7 +1552,10 @@ export const CampaignsPage = () => {
   const [loadFailed, setLoadFailed] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [builderLink] = useState(readCampaignDeepLink)
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(builderLink.builder)
+  // `?compose=1` is how another app (Home's "Launch") opens a blank builder.
+  // Read purely here; the param is stripped once mounted so a reload or
+  // back-navigation does not reopen a builder the operator already closed.
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(() => builderLink.builder || readComposeIntent())
   const [editCampaignId, setEditCampaignId] = useState<string | null>(builderLink.builder ? builderLink.campaignId : null)
   const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'build'>(builderLink.builder ? 'edit' : 'create')
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
@@ -1715,6 +1727,10 @@ export const CampaignsPage = () => {
     },
     [actionCallbacks, load],
   )
+
+  useEffect(() => {
+    if (readComposeIntent()) clearComposeIntent()
+  }, [])
 
   const handleGlobalAction = (action: string) => {
     if (action === 'create') {
