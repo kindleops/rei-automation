@@ -15,13 +15,13 @@ import { useCallback, useSyncExternalStore } from 'react'
  */
 
 export const HOME_MODULE_IDS = [
+  'automation',
   'focus',
   'actions',
-  'automation',
   'inbox',
-  'pipeline',
   'campaigns',
   'deals',
+  'pipeline',
   'markets',
   'activity',
 ] as const

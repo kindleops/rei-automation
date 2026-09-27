@@ -4,11 +4,14 @@ import { loadSettings, subscribeSettings, updateSetting } from '../../shared/set
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { MobileSheet } from '../../modules/mobile/MobileSheet'
-import { buildFocusItems, dataOf, formatCount, greetingFor } from './home-signals'
+import { buildFocusItems, dataOf, formatCount, greetingFor, relativeTime } from './home-signals'
 import { resolveSystemState, useHomeSignals, type HomeSignals } from './useHomeSignals'
 import { HOME_MODULE_LABELS, useHomeLayout, type HomeModuleId } from './home-layout-store'
 import { openSearch } from './home-navigation'
 import { STILL_CLASS, useLiquidTouch, useScrollDepth } from './home-motion'
+import { LiquidField } from './LiquidField'
+import { buildActivity, type ActivityEntry } from './home-activity'
+import { openTarget } from './home-navigation'
 import {
   ActivityModule,
   AutomationModule,
@@ -86,6 +89,36 @@ function buildSummary(signals: HomeSignals, focusCritical: number): ReactNode[] 
   return calm.slice(0, 3)
 }
 
+/**
+ * The business, breathing: the latest events running past under the greeting in
+ * a slow continuous marquee. Duplicated once so the loop is seamless.
+ */
+const Ticker = ({ entries }: { entries: ActivityEntry[] }) => {
+  if (entries.length === 0) return null
+  const run = (copy: number) => entries.map((entry) => (
+    <button
+      key={`${copy}-${entry.id}`}
+      type="button"
+      className="nx-home-ticker__item"
+      tabIndex={copy === 0 ? 0 : -1}
+      aria-hidden={copy === 0 ? undefined : true}
+      onClick={() => openTarget(entry.target)}
+    >
+      <span className={cls('nx-home-dot', entry.tone !== 'neutral' && `is-${entry.tone}`)} />
+      {entry.title}
+      <small>{relativeTime(entry.at)}</small>
+    </button>
+  ))
+  return (
+    <div className="nx-home-ticker" aria-label="Latest activity">
+      <div className="nx-home-ticker__track" style={{ '--n': entries.length } as CSSProperties}>
+        {run(0)}
+        {run(1)}
+      </div>
+    </div>
+  )
+}
+
 const Greeting = ({
   now,
   name,
@@ -93,6 +126,7 @@ const Greeting = ({
   focusCritical,
   onCustomize,
   heroRef,
+  ticker,
 }: {
   now: Date
   name: string
@@ -100,6 +134,7 @@ const Greeting = ({
   focusCritical: number
   onCustomize: () => void
   heroRef: RefObject<HTMLElement>
+  ticker: ActivityEntry[]
 }) => {
   const system = resolveSystemState(signals)
   const summary = buildSummary(signals, focusCritical)
@@ -135,6 +170,7 @@ const Greeting = ({
         {name ? <>{' '}<em className="nx-home-word" style={{ '--w': 2 } as CSSProperties} aria-hidden>{name}</em></> : null}
       </h1>
       {summary.length > 0 ? <p className="nx-home-hello__summary">{summary}</p> : null}
+      <Ticker entries={ticker} />
     </header>
   )
 }
@@ -258,6 +294,8 @@ export const HomeView = () => {
     now: now.getTime(),
   }), [notifications, now, signals])
 
+  const ticker = useMemo(() => buildActivity(notifications, dataOf(signals.inbox), 8), [notifications, signals.inbox])
+
   const sources = [signals.inbox, signals.queue, signals.campaigns, signals.pipeline, signals.closings]
   const focusSettled = sources.every((source) => source.status !== 'loading')
   const focusAnyAvailable = sources.some((source) => source.status === 'ready') || lastFetchedAt !== null
@@ -303,6 +341,7 @@ export const HomeView = () => {
           <span className="nx-home__blob nx-home__blob--e" />
         </div>
         <span className="nx-home__caustics" />
+        <LiquidField scroller={scrollRef} touchRoot={rootRef} />
         <span className="nx-home__grain" />
         <span className="nx-home__vignette" />
       </div>
@@ -318,6 +357,7 @@ export const HomeView = () => {
           />
           <Greeting
             heroRef={heroRef}
+            ticker={ticker}
             now={now}
             name={name}
             signals={signals}
@@ -325,7 +365,9 @@ export const HomeView = () => {
             onCustomize={() => setCustomizing(true)}
           />
 
-          {visible.map(renderModule)}
+          <div className="nx-home__grid">
+            {visible.map(renderModule)}
+          </div>
 
           {visible.length === 0 ? (
             <div className="nx-home-state">

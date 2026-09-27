@@ -206,7 +206,7 @@ describe('Home layout store', () => {
 
   it('moves a module within bounds only', () => {
     const moved = moveHomeModule(DEFAULT_HOME_LAYOUT, 'actions', -1)
-    expect(moved.order.slice(0, 2)).toEqual(['actions', 'focus'])
-    expect(moveHomeModule(DEFAULT_HOME_LAYOUT, 'focus', -1)).toBe(DEFAULT_HOME_LAYOUT)
+    expect(moved.order.slice(0, 3)).toEqual(['automation', 'actions', 'focus'])
+    expect(moveHomeModule(DEFAULT_HOME_LAYOUT, 'automation', -1)).toBe(DEFAULT_HOME_LAYOUT)
   })
 })
