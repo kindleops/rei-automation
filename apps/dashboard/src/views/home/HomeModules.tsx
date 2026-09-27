@@ -12,6 +12,8 @@ import {
   type HomeThread,
 } from './home-signals'
 import { resolveSystemState, type HomeSignals } from './useHomeSignals'
+import { Counter } from './HomeCounter'
+import { useRevealed } from './home-motion'
 import { goTo, openNotifications, openSearch, openTarget, openThread } from './home-navigation'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
@@ -29,27 +31,35 @@ interface ModuleCardProps {
   children: ReactNode
 }
 
-export const ModuleCard = ({ title, index, compact, emphasis, count, countTone, link, children }: ModuleCardProps) => (
-  <section
-    className={cls('nx-home-card', compact && 'is-compact', emphasis && 'is-emphasis')}
-    style={{ '--home-index': index } as CSSProperties}
-    aria-label={title}
-  >
-    <header className="nx-home-card__head">
-      <h2 className="nx-home-card__title">
-        {title}
-        {count ? <span className={cls('nx-home-count', countTone === 'bad' && 'is-bad')}>{count > 99 ? '99+' : count}</span> : null}
-      </h2>
-      {link ? (
-        <button type="button" className="nx-home-card__link" onClick={link.onClick}>
-          {link.label}
-          <Icon name="chevron-right" size={13} />
-        </button>
-      ) : null}
-    </header>
-    <div className="nx-home-card__body">{children}</div>
-  </section>
-)
+export const ModuleCard = ({ title, index, compact, emphasis, count, countTone, link, children }: ModuleCardProps) => {
+  const [ref, revealed] = useRevealed<HTMLElement>()
+  return (
+    <section
+      ref={ref}
+      className={cls('nx-home-card', compact && 'is-compact', emphasis && 'is-emphasis', revealed && 'is-in')}
+      style={{ '--home-index': index } as CSSProperties}
+      aria-label={title}
+    >
+      {/* Rim light: a hairline of light travelling the glass edge. */}
+      <span className="nx-home-card__rim" aria-hidden><i /></span>
+      {/* Specular light under the operator's finger. */}
+      <span className="nx-home-card__light" aria-hidden />
+      <header className="nx-home-card__head">
+        <h2 className="nx-home-card__title">
+          {title}
+          {count ? <span className={cls('nx-home-count', countTone === 'bad' && 'is-bad')}>{count > 99 ? '99+' : count}</span> : null}
+        </h2>
+        {link ? (
+          <button type="button" className="nx-home-card__link" onClick={link.onClick}>
+            {link.label}
+            <Icon name="chevron-right" size={13} />
+          </button>
+        ) : null}
+      </header>
+      <div className="nx-home-card__body">{children}</div>
+    </section>
+  )
+}
 
 const Loading = ({ lines = 2 }: { lines?: number }) => (
   <div aria-busy="true" aria-label="Loading">
@@ -88,7 +98,7 @@ const Metric = ({ label, value, tone, onClick, suffix }: MetricProps) => {
   const content = (
     <>
       <span className={cls('nx-home-metric__value', tone && `is-${tone}`, value == null && 'nx-home-unavailable')}>
-        {formatCount(value)}{value != null && suffix ? suffix : null}
+        {value == null ? formatCount(value) : <Counter value={value} />}{value != null && suffix ? suffix : null}
       </span>
       <span className="nx-home-metric__label">{label}</span>
     </>
@@ -122,8 +132,8 @@ export const FocusModule = ({ index, compact, items, settled, anyAvailable }: Fo
     body = (
       <>
         <ul className="nx-home-focus">
-          {visible.map((item) => (
-            <li key={item.id}>
+          {visible.map((item, i) => (
+            <li key={item.id} style={{ '--i': i } as CSSProperties}>
               <button
                 type="button"
                 className={cls('nx-home-focus__item', `is-${item.tone}`)}
@@ -210,6 +220,7 @@ export const QuickActionsModule = ({ index, compact, signals }: { index: number;
             onClick={action.onClick}
           >
             <span className="nx-home-action__glyph">
+              <span className="nx-home-action__well" />
               <Icon name={action.icon} size={19} strokeWidth={1.6} />
               {action.badge ? (
                 <span className="nx-home-action__badge">{action.badge > 99 ? '99+' : action.badge}</span>
@@ -225,6 +236,24 @@ export const QuickActionsModule = ({ index, compact, signals }: { index: number;
 
 // ── Automation ──────────────────────────────────────────────────────────────
 
+/**
+ * The machine's heartbeat: a sphere of liquid colour that turns slowly while the
+ * engine is healthy, warms to amber with issues, runs red when it needs a person,
+ * and goes still and grey when the engine cannot be read at all.
+ */
+const LiquidOrb = ({ tone }: { tone: 'good' | 'warn' | 'bad' | 'unknown' }) => (
+  <span className={cls('nx-home-orb', `is-${tone}`)} aria-hidden>
+    <span className="nx-home-orb__glow" />
+    <span className="nx-home-orb__body">
+      <span className="nx-home-orb__swirl" />
+      <span className="nx-home-orb__swirl nx-home-orb__swirl--b" />
+      <span className="nx-home-orb__core" />
+      <span className="nx-home-orb__gloss" />
+    </span>
+    <Icon name={tone === 'good' ? 'check' : tone === 'unknown' ? 'slash' : 'alert'} size={15} strokeWidth={2.2} />
+  </span>
+)
+
 export const AutomationModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
   const system = resolveSystemState(signals)
   const queue = dataOf(signals.queue)
@@ -239,24 +268,32 @@ export const AutomationModule = ({ index, compact, signals }: { index: number; c
   return (
     <ModuleCard title="Automation" index={index} compact={compact} link={{ label: 'Queue', onClick: () => goTo('/queue') }}>
       <div className="nx-home-system">
-        <span className={cls('nx-home-system__orb', `is-${system.tone}`)} aria-hidden>
-          <Icon name={system.tone === 'good' ? 'check' : system.tone === 'unknown' ? 'slash' : 'alert'} size={16} strokeWidth={2} />
-        </span>
+        <LiquidOrb tone={system.tone} />
         <span>
           <span className="nx-home-system__title">{system.label}</span>
           <span className="nx-home-system__detail">{detail}</span>
         </span>
       </div>
-      {compact ? null : whenReady(signals.queue, 'Delivery engine', (q) => (
-        <div className="nx-home-metrics">
-          <Metric label="Sent today" value={q.sentToday} onClick={() => goTo('/queue')} />
-          <Metric label="Delivered" value={q.deliveredToday} onClick={() => goTo('/queue')} />
-          <Metric label="Replies" value={messaging?.replies ?? null} onClick={() => goTo('/inbox')} />
-          <Metric label="In queue" value={q.inFlight} onClick={() => goTo('/queue')} />
-          <Metric label="Failed" value={q.failedToday} tone={q.failedToday > 0 ? 'bad' : undefined} onClick={() => goTo('/queue')} />
-          <Metric label="Awaiting review" value={q.awaitingApproval} tone={q.awaitingApproval > 0 ? 'warn' : undefined} onClick={() => goTo('/queue')} />
-        </div>
-      ), 2)}
+      {compact ? null : whenReady(signals.queue, 'Delivery engine', (q) => {
+        const deliveredPct = q.sentToday > 0 ? Math.round((q.deliveredToday / q.sentToday) * 100) : null
+        return (
+          <>
+            <button type="button" className="nx-home-hero" onClick={() => goTo('/queue')}>
+              <span className="nx-home-hero__value"><Counter value={q.sentToday} /></span>
+              <span className="nx-home-hero__label">
+                sent today
+                {deliveredPct != null ? <b><Counter value={deliveredPct} format={(n) => `${n}%`} /> delivered</b> : null}
+              </span>
+            </button>
+            <div className="nx-home-metrics is-four">
+              <Metric label="Replies" value={messaging?.replies ?? null} onClick={() => goTo('/inbox')} />
+              <Metric label="In queue" value={q.inFlight} onClick={() => goTo('/queue')} />
+              <Metric label="Failed" value={q.failedToday} tone={q.failedToday > 0 ? 'bad' : undefined} onClick={() => goTo('/queue')} />
+              <Metric label="Review" value={q.awaitingApproval} tone={q.awaitingApproval > 0 ? 'warn' : undefined} onClick={() => goTo('/queue')} />
+            </div>
+          </>
+        )
+      }, 2)}
     </ModuleCard>
   )
 }
@@ -323,7 +360,7 @@ export const PipelineModule = ({ index, compact, signals }: { index: number; com
                 {data.buckets.map((bucket) => (
                   <button key={bucket.id} type="button" className="nx-home-stage" onClick={() => goTo('/pipeline')} style={{ '--seg': bucket.color } as CSSProperties}>
                     <span className="nx-home-stage__label"><i />{bucket.label}</span>
-                    <span className="nx-home-stage__value">{formatCount(bucket.count)}</span>
+                    <span className="nx-home-stage__value"><Counter value={bucket.count} /></span>
                   </button>
                 ))}
               </div>

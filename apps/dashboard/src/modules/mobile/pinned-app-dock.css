@@ -38,8 +38,8 @@ html.is-mobile-layout {
     border: 0;
     padding: 0;
     background: rgba(0, 0, 0, 0.28);
-    backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
     animation: nx-pinned-dock-fade-in 220ms ease;
   }
 
@@ -65,8 +65,8 @@ html.is-mobile-layout {
     border-radius: 18px 18px 12px 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(6, 10, 18, 0.78);
-    backdrop-filter: blur(28px) saturate(1.55);
     -webkit-backdrop-filter: blur(28px) saturate(1.55);
+    backdrop-filter: blur(28px) saturate(1.55);
     box-shadow:
       0 -10px 36px rgba(0, 0, 0, 0.42),
       inset 0 1px 0 rgba(255, 255, 255, 0.08);
