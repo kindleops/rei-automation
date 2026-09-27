@@ -2872,7 +2872,7 @@ const MapEntityCard = ({
           containerSize={card.containerSize}
           draftText={sellerDraftText}
           onDraftChange={onSellerDraftChange}
-          onClose={card.intent === 'selected' ? onClose : undefined}
+          onClose={card.intent === 'selected' || phone ? onClose : undefined}
           onPeekToFocus={card.intent === 'hover' ? onPeekToFocus : undefined}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
@@ -4004,6 +4004,21 @@ export function InboxCommandMap({
   const [, setCompCardAnchor] = useState<React.CSSProperties | null>(null)
   const [hoveredMapCard, setHoveredMapCard] = useState<MapCardState>(null)
   const [selectedMapCard, setSelectedMapCard] = useState<MapCardState>(null)
+  /**
+   * PHONE: A CLOSED PROPERTY STAYS CLOSED.
+   *
+   * The host (Inbox) keeps its thread selection after the operator closes the
+   * card, and the gold star + pin knockout key off that selection — so the star
+   * stayed on a property the operator had just dismissed. The dismissed subject
+   * suppresses both while no card is open. '__none__' covers a subject
+   * with no property id (a pin-only selection).
+   */
+  const [dismissedSubjectId, setDismissedSubjectId] = useState<string | null>(null)
+  const rawSelectedPropertyIdRef = useRef<string | null>(null)
+  const dismissSubject = useCallback(() => {
+    if (!isMobileRef.current) return
+    setDismissedSubjectId(rawSelectedPropertyIdRef.current ?? '__none__')
+  }, [])
   const hoveredMapCardRef = useRef<MapCardState>(null)
   const selectedMapCardRef = useRef<MapCardState>(null)
   useEffect(() => {
@@ -4675,12 +4690,17 @@ export function InboxCommandMap({
    * disable every knockout that keys off it. `selectedStarGeojson` has that fallback and
    * it is wrong there for the same reason.
    */
-  const selectedPropertyId = useMemo(() => (
+  const rawSelectedPropertyId = useMemo(() => (
     text((selectedHydratedThread as any)?.propertyId)
       || text((selectedHydratedThread as any)?.property_id)
       || text((selectedPin as any)?.property_id)
       || null
   ), [selectedHydratedThread, selectedPin])
+  rawSelectedPropertyIdRef.current = rawSelectedPropertyId
+  // Derived, never an effect: an open card always wins (the same property can
+  // be re-selected), and a different subject is never hidden by an old close.
+  const subjectDismissed = dismissedSubjectId !== null && !selectedMapCard && dismissedSubjectId === (rawSelectedPropertyId ?? '__none__')
+  const selectedPropertyId = subjectDismissed ? null : rawSelectedPropertyId
 
   /**
    * THE GOLD STAR — where the operator's selected property is.
@@ -4695,6 +4715,7 @@ export function InboxCommandMap({
    * (they are what the map flew to), then the pin indexes. Never from address text.
    */
   const selectedStarGeojson = useMemo((): FeatureCollection<Point, Record<string, unknown>> => {
+    if (subjectDismissed) return { type: 'FeatureCollection', features: [] }
     const card = selectedMapCard?.kind === 'seller' ? selectedMapCard : null
     const cardCoords = card?.coordinates
     let coords: [number, number] | null =
@@ -4728,7 +4749,7 @@ export function InboxCommandMap({
         properties: { property_id: selectedPropertyId ?? '' },
       }],
     }
-  }, [allPins, focusPin, selectedMapCard, selectedPropertyId])
+  }, [allPins, focusPin, selectedMapCard, selectedPropertyId, subjectDismissed])
 
   const liveActivityFeed = useMemo(() => (
     loadLiveActivityFeedSnapshot({
@@ -4899,14 +4920,20 @@ export function InboxCommandMap({
     setMapOverlays({ ...defaultMapOverlays, ...initialMapOverlays })
   }, [initialMapOverlays])
 
+  // The host passes an inline callback (new every render) that sets its own
+  // state: keyed on it, this effect → host render → new callback → effect…
+  // spun whenever the host re-rendered quickly (recording a voice message).
+  // Report when the MAP's state changes, through the latest callback.
+  const onStateChangeRef = useRef(onStateChange)
+  onStateChangeRef.current = onStateChange
   useEffect(() => {
-    onStateChange?.({
+    onStateChangeRef.current?.({
       activityMode,
       mapStyleMode,
       filters,
       mapOverlays,
     })
-  }, [activityMode, filters, mapOverlays, mapStyleMode, onStateChange])
+  }, [activityMode, filters, mapOverlays, mapStyleMode])
 
   useEffect(() => {
     if (!filtersOpen) return
@@ -4941,6 +4968,7 @@ export function InboxCommandMap({
   // the property here too.
   useEffect(() => {
     const onCleared = () => {
+      dismissSubject()
       setSelectedMapCard(null)
       setHoveredMapCard(null)
       setSelectedPinId(null)
@@ -5237,18 +5265,21 @@ export function InboxCommandMap({
         }
       }
 
-      setHoveredMapCard((current) => {
+      // Same card object when nothing moved by a pixel: a fresh object every
+      // move frame re-ran every effect keyed on the card (a render storm the
+      // dev build reports as "Maximum update depth exceeded").
+      const next = (current: MapCardState): MapCardState => {
         if (!current?.coordinates) return current
         const anchor = projectAnchor(current.coordinates)
         if (!anchor) return current
+        const a0 = current.anchor
+        const c0 = current.containerSize
+        if (a0 && c0 && Math.abs(a0.x - anchor.x) < 0.5 && Math.abs(a0.y - anchor.y) < 0.5
+          && c0.width === containerSize.width && c0.height === containerSize.height) return current
         return { ...current, anchor, containerSize }
-      })
-      setSelectedMapCard((current) => {
-        if (!current?.coordinates) return current
-        const anchor = projectAnchor(current.coordinates)
-        if (!anchor) return current
-        return { ...current, anchor, containerSize }
-      })
+      }
+      setHoveredMapCard(next)
+      setSelectedMapCard(next)
     }
 
     map.on('move', syncMapCardAnchors)
@@ -7952,6 +7983,7 @@ export function InboxCommandMap({
           PROPERTY_UNIVERSE_LAYER_IDS.markerRing,
         ])
         if (rendered.length === 0) {
+          if (selectedMapCardRef.current || hoveredMapCardRef.current) dismissSubject()
           setSelectedBuyerPurchase(null)
           setSelectedSoldComp(null)
           setCompCardAnchor(null)
@@ -10696,14 +10728,9 @@ export function InboxCommandMap({
           card={activeSellerMapCard}
           subject={selectedThread}
           onClose={() => {
-            if (activeSellerMapCard.intent === 'selected' && isMobile) {
-              setSelectedMapCard(null)
-              setHoveredMapCard({
-                ...activeSellerMapCard,
-                intent: 'hover',
-              })
-              return
-            }
+            // Phones close for real: this used to demote the card to a hover
+            // preview that had no close handler, so it could never be dismissed.
+            dismissSubject()
             setSelectedMapCard(null)
             setHoveredMapCard(null)
             onBackgroundClickRef.current?.()

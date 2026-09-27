@@ -539,10 +539,12 @@ html[data-nexus-theme='light'] .mx-sheet__backdrop { background: rgba(11, 18, 32
   position: absolute;
   top: 10px;
   left: 10px;
-  right: 150px;
+  right: 142px;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap; /* one row: wrapped chips ran into the address overlay */
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 .smc-mpeek__chip {
   display: inline-flex;
@@ -559,6 +561,8 @@ html[data-nexus-theme='light'] .mx-sheet__backdrop { background: rgba(11, 18, 32
   font-weight: 650;
   white-space: nowrap;
 }
+.smc-mpeek__chip { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.smc-mpeek__chip.is-stage { flex-shrink: 0; }
 .smc-mpeek__chip.is-stage::before { content: ''; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #5ee7ff; }
 .smc-mpeek__look {
   position: absolute;
@@ -584,6 +588,26 @@ html[data-nexus-theme='light'] .mx-sheet__backdrop { background: rgba(11, 18, 32
 .smc-mpeek__look::after { content: ''; position: absolute; inset: -4px -2px; }
 .smc-mpeek__look svg { width: 15px; height: 15px; }
 .smc-mpeek__below { display: flex; flex-direction: column; gap: 8px; padding: 0 6px; }
+.smc-mpeek__acts { display: flex; gap: 8px; margin-top: 4px; }
+.smc-mpeek__act {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: var(--smc-text, #f3f5f9);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.smc-mpeek__act.is-primary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; background: color-mix(in srgb, #5ee7ff 20%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, #5ee7ff 45%, transparent); }
+.smc-mpeek__act:active { transform: scale(0.97); }
+html[data-nexus-theme='light'] .smc-mpeek__act { background: rgba(11, 18, 32, 0.06); box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.1); color: #0b1220; }
+html[data-nexus-theme='light'] .smc-mpeek__act.is-primary { background: color-mix(in srgb, #0891b2 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, #0891b2 40%, transparent); }
 .smc-mpeek__metrics { display: flex; align-items: baseline; gap: 18px; }
 .smc-mpeek__metric { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
 .smc-mpeek__metric strong { font-size: 20px; font-weight: 740; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; color: var(--smc-text, #f3f5f9); }
@@ -614,9 +638,11 @@ html[data-nexus-theme='red_ops'] .smc-mpeek__metric strong { color: #fff; }
 
 /* Look Around: immersive, one obvious way out. */
 .smc-look { position: fixed; inset: 0; z-index: 10090; background: #000; animation: mx-fade 0.25s ease-out both; }
-.smc-look > div:first-child { position: absolute; inset: 0; }
+.smc-look > div:first-child { position: absolute; inset: 0; z-index: 0; isolation: isolate; }
+/* Google's panorama layers carry their own z-indexes; the way out always sits above them. */
 .smc-look__bar {
   position: absolute;
+  z-index: 5;
   left: 10px;
   right: 10px;
   top: calc(env(safe-area-inset-top, 0px) + 10px);
@@ -1257,3 +1283,17 @@ html[data-nexus-theme='light'] .mx-areacard__buyers li.is-gold { box-shadow: ins
 .mx-evt__actions { display: flex; flex-direction: column; gap: 8px; }
 .mx-evt .mx-area__row.is-two .mx-act { min-height: 44px; }
 @media (prefers-reduced-motion: reduce) { .mx-evt, .mx-evt__icon, .mx-evt__bubble { animation: none; } }
+
+/* In-card conversation header: badges on ONE scrollable row (a wrapped second
+   row was clipped under the phone number). */
+.smc-shell.is-mobile-sheet .smc-conversation__head .smc-state-row {
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  max-height: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, #000 88%, transparent);
+}
+.smc-shell.is-mobile-sheet .smc-conversation__head .smc-state-row::-webkit-scrollbar { display: none; }
+.smc-shell.is-mobile-sheet .smc-conversation__head .smc-state-row > * { flex-shrink: 0; }

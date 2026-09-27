@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { pushRoutePath } from '../../../app/router'
+import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import { Icon } from '../../../shared/icons'
 import {
   getCampaignMessagesBackend,
@@ -138,7 +138,7 @@ export function CampaignQueueMobile({
   }, [rows, bucket])
 
   const openThread = (m: CampaignMessageRow) => {
-    if (m.thread_key) pushRoutePath(`/inbox?thread=${encodeURIComponent(m.thread_key)}`)
+    if (m.thread_key) openInboxThread({ threadKey: m.thread_key })
   }
 
   const inTest = campaign.operator_state === 'test_mode'

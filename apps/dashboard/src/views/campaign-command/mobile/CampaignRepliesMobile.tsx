@@ -1,4 +1,4 @@
-import { pushRoutePath } from '../../../app/router'
+import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import { Icon } from '../../../shared/icons'
 import { formatRatePct, RATE_MIN_SAMPLE } from '../campaign-operator-language'
 import { describeIntent, intentRows, replyRatePct } from '../campaign-responses'
@@ -117,7 +117,7 @@ export function CampaignRepliesMobile({ campaign }: { campaign: CampaignSummary 
                 <li key={`${r.seller_phone}-${r.at}`}>
                   <Row
                     {...(r.thread_key
-                      ? { type: 'button' as const, onClick: () => pushRoutePath(`/inbox?thread=${encodeURIComponent(r.thread_key!)}`) }
+                      ? { type: 'button' as const, onClick: () => openInboxThread({ threadKey: r.thread_key! }) }
                       : {})}
                     className={cls('crp-row', r.thread_key && 'is-link')}
                   >

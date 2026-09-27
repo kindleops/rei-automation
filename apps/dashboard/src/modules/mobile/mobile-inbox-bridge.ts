@@ -121,3 +121,55 @@ export function closeInboxDealIntelligence() {
 export function isInboxRoute(path: string): boolean {
   return INBOX_DEAL_INTEL_ROUTES.has(normalizeRoutePath(path))
 }
+
+/**
+ * OPEN ONE CONVERSATION FROM ANOTHER APP.
+ *
+ * Map, Live Activity and Campaign replies used to push `/inbox?thread=<key>`,
+ * but nothing read the parameter: the operator landed on the Inbox list and
+ * had to find the seller by hand. The pending thread is stored (it survives the
+ * route change and a cold mount) and InboxPage opens exactly that conversation
+ * — fetched by key when it is not in the loaded page — never a different one.
+ */
+export const OPEN_INBOX_THREAD_EVENT = 'nx:open-inbox-thread'
+const PENDING_THREAD_KEY = 'nx.pending-open-thread'
+
+export interface PendingInboxThread {
+  threadKey: string
+  propertyId?: string | null
+}
+
+export function openInboxThread(target: PendingInboxThread) {
+  if (typeof window === 'undefined' || !target.threadKey) return
+  try { sessionStorage.setItem(PENDING_THREAD_KEY, JSON.stringify(target)) } catch { /* the URL still carries it */ }
+  const path = normalizeRoutePath(window.location.pathname)
+  const url = `/inbox?thread=${encodeURIComponent(target.threadKey)}`
+  if (path !== '/inbox' || !window.location.search.includes(encodeURIComponent(target.threadKey))) pushRoutePath(url)
+  window.dispatchEvent(new CustomEvent(OPEN_INBOX_THREAD_EVENT))
+  window.setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_INBOX_THREAD_EVENT)), 60)
+}
+
+export function peekPendingInboxThread(): PendingInboxThread | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = sessionStorage.getItem(PENDING_THREAD_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as PendingInboxThread
+      if (parsed?.threadKey) return parsed
+    }
+  } catch { /* fall through to the URL */ }
+  if (!isInboxRoute(window.location.pathname)) return null
+  const fromUrl = new URLSearchParams(window.location.search).get('thread')
+  return fromUrl ? { threadKey: fromUrl } : null
+}
+
+export function clearPendingInboxThread() {
+  if (typeof window === 'undefined') return
+  try { sessionStorage.removeItem(PENDING_THREAD_KEY) } catch { /* ignore */ }
+  const params = new URLSearchParams(window.location.search)
+  if (params.has('thread')) {
+    params.delete('thread')
+    const qs = params.toString()
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`)
+  }
+}

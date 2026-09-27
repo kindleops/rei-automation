@@ -16,7 +16,7 @@ import { Icon } from '../../../shared/icons'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 import { retryQueueItem } from '../../../lib/api/backendClient'
-import { pushRoutePath } from '../../../app/router'
+import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import type { LiveActivityEvent } from '../live-activity-engine'
 import { orbColor } from './useLiveOrbs'
 import { agoLabel } from './map-mobile-model'
@@ -137,7 +137,7 @@ export function MapEventCard({ event, onClose, onShowProperty }: { event: LiveAc
   const when = Date.parse(event.occurredAt || event.createdAt || '')
   const stage = thread?.seller_stage || thread?.stage
 
-  const openConversation = () => { if (threadKey) { onClose(); pushRoutePath(`/inbox?thread=${encodeURIComponent(threadKey)}`) } }
+  const openConversation = () => { if (threadKey) { onClose(); openInboxThread({ threadKey }) } }
 
   return (
     <div className="mx-evt" role="dialog" aria-label={kind.eyebrow} style={{ ['--evt' as string]: color }} data-map-card="event">

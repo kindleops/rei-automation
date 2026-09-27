@@ -18,6 +18,21 @@ import { buildThreadFromViewModel, useSellerMapCardActions } from './useSellerMa
 import { useSellerMapCardConversation } from './useSellerMapCardConversation'
 import { SellerMapCardThreadList } from './SellerMapCardThreadList'
 import { SellerMapCardConversationSkeleton } from './SellerMapCardConversationSkeleton'
+import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
+import { translateText } from '../../../modules/inbox/translate.api'
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  en: 'English', es: 'Spanish', pt: 'Portuguese', fr: 'French', ht: 'Haitian Creole', zh: 'Chinese', 'zh-cn': 'Chinese',
+  vi: 'Vietnamese', ko: 'Korean', ru: 'Russian', ar: 'Arabic', tl: 'Tagalog', it: 'Italian', de: 'German', pl: 'Polish', hi: 'Hindi',
+}
+const normLang = (v: unknown): string | null => {
+  const t = typeof v === 'string' ? v.trim().toLowerCase().replace('_', '-') : ''
+  if (!t) return null
+  if (t.startsWith('english')) return 'en'
+  if (t.startsWith('spanish') || t.startsWith('español')) return 'es'
+  if (t.startsWith('portuguese')) return 'pt'
+  return /^[a-z]{2,3}(-[a-z]{2,4})?$/.test(t) ? t : null
+}
 import {
   SellerMapCardBadgeRail,
   SellerMapCardDossierSections,
@@ -49,7 +64,7 @@ const SELLER_SHEET_SNAP_HEIGHTS = {
    * 213px. At 186px the property facts line was clipped mid-sentence, which is the
    * failure a fixed peek height exists to avoid.
    */
-  collapsed: '380px',
+  collapsed: '420px',
   half: '56dvh',
   /**
    * Full stops BELOW the map toolbar rather than at 92dvh.
@@ -233,8 +248,36 @@ export const SellerMapCard = ({
     }
   }
 
+  /**
+   * THE SELLER'S LANGUAGE — from the record when it says, otherwise detected
+   * from their own latest message (once per conversation). Drafts and voice
+   * messages are translated into it; English sellers get no translation.
+   */
+  const recordLanguage = useMemo(() => {
+    const r = record as Record<string, unknown>
+    const ctx = (threadContext ?? {}) as Record<string, unknown>
+    for (const v of [r.seller_language, r.sellerLanguage, r.preferred_language, r.language_preference, r.language, r.detected_language, ctx.seller_language, ctx.language, ctx.detected_language]) {
+      const n = normLang(v)
+      if (n) return n
+    }
+    return null
+  }, [record, threadContext])
+  const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null)
+  const lastInbound = useMemo(() => [...messages].reverse().find((m) => m.direction === 'inbound' && (m.body ?? '').trim().length >= 8)?.body ?? null, [messages])
+  useEffect(() => {
+    if (!isConversation || recordLanguage || !lastInbound) return
+    let alive = true
+    void translateText({ text: lastInbound.slice(0, 400), targetLanguage: 'en', sourceLanguage: 'auto', mode: 'thread' })
+      .then((r) => { if (alive) setDetectedLanguage(normLang(r.detectedLanguage)) })
+      .catch(() => { /* stays English */ })
+    return () => { alive = false }
+  }, [isConversation, recordLanguage, lastInbound])
+  const sellerLanguage = recordLanguage ?? detectedLanguage ?? 'en'
+  const sellerIsEnglish = sellerLanguage.startsWith('en')
+  const sellerLanguageLabel = LANGUAGE_LABELS[sellerLanguage] ?? LANGUAGE_LABELS[sellerLanguage.split('-')[0]] ?? sellerLanguage.toUpperCase()
+
   const handleTranslateDraft = async (text: string) => {
-    const translated = await translateDraft(text)
+    const translated = await translateDraft(text, sellerIsEnglish ? 'es' : sellerLanguage)
     if (translated) {
       setLocalDraft(translated)
       onDraftChange?.(translated)
@@ -370,6 +413,15 @@ export const SellerMapCard = ({
     setSheetSnap('expanded')
   }
 
+  // The REAL conversation in the Inbox (never a synthetic `property:` key —
+  // an uncontacted property has no thread to open).
+  const inboxThreadKey = viewModel.threadKey && !viewModel.threadKey.startsWith('property:') ? viewModel.threadKey : null
+  const openInInbox = () => {
+    if (!inboxThreadKey) return
+    onClose?.()
+    openInboxThread({ threadKey: inboxThreadKey, propertyId: viewModel.propertyId || null })
+  }
+
   const handlePrimaryAction = () => {
     const action = viewModel.actionBar.primary.action
     if (action === 'reply') {
@@ -440,6 +492,16 @@ export const SellerMapCard = ({
           }}
         >
           {viewModel.actionBar.secondary.label}
+        </button>
+      ) : null}
+      {isMobile && inboxThreadKey ? (
+        <button
+          type="button"
+          className="smc-action smc-action--message smc-action--inbox"
+          data-seller-action="open-inbox"
+          onClick={(event) => { stopPeekExpand(event); openInInbox() }}
+        >
+          Inbox ↗
         </button>
       ) : null}
     </footer>
@@ -530,6 +592,19 @@ export const SellerMapCard = ({
           const extra = viewModel.headerBadges.filter((b) => b.tone === 'score' || b.tone === 'units').slice(0, 1)
           return extra.length ? <span className="smc-mpeek__asset">{[viewModel.assetSummaryLine, ...extra.map((b) => b.label)].filter(Boolean).join(' · ')}</span> : <span className="smc-mpeek__asset">{viewModel.assetSummaryLine}</span>
         })()}
+        {/* Quick moves from the glance. Sending (ownership check / next stage)
+            stays one tap deeper, on Detail: from a peek it is too easy to hit. */}
+        <div className="smc-mpeek__acts">
+          {!viewModel.messagingBlocked ? (
+            <button type="button" className="smc-mpeek__act" data-seller-action="messages" onClick={(event) => { event.stopPropagation(); openConversation() }}>Messages</button>
+          ) : null}
+          {inboxThreadKey ? (
+            <button type="button" className="smc-mpeek__act" data-seller-action="open-inbox" onClick={(event) => { event.stopPropagation(); openInInbox() }}>Open in Inbox ↗</button>
+          ) : null}
+          <button type="button" className="smc-mpeek__act is-primary" data-seller-action="details" onClick={(event) => { event.stopPropagation(); setCardMode('focus'); setSheetSnap('half'); onPeekToFocus?.() }}>
+            {outreachBlockReason ? 'Details' : `Details · ${viewModel.actionBar.primary.label}`}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -651,6 +726,9 @@ export const SellerMapCard = ({
             disabledReason={viewModel.messagingBlockReason || undefined}
             isTranslatingDraft={isTranslatingDraft}
             onTranslateDraft={(text) => { void handleTranslateDraft(text) }}
+            sellerLanguageLabel={sellerIsEnglish ? 'English' : sellerLanguageLabel}
+            isSellerLanguageEnglish={sellerIsEnglish}
+            autoTranslateDraft={!sellerIsEnglish}
             layoutMode="full"
           />
         </div>
@@ -760,6 +838,13 @@ export const SellerMapCard = ({
               setCardMode('focus')
               setSheetSnap('half')
               onPeekToFocus?.()
+              return
+            }
+            // Detail → Full: a tap on the card body (not a control) opens
+            // everything. Dragging the sheet still works as before.
+            const target = event.target as HTMLElement | null
+            if (isFocus && sheetSnap === 'half' && !target?.closest('button, a, input, textarea, select, [role="button"], [data-no-expand]')) {
+              setSheetSnap('expanded')
             }
           }}
           role={isPeek && !isConversation ? 'button' : 'region'}

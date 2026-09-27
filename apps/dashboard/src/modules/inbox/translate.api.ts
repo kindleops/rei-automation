@@ -1,3 +1,5 @@
+import { callBackend } from '../../lib/api/backendClient'
+
 export interface TranslateRequest {
   text: string
   targetLanguage: string
@@ -12,24 +14,18 @@ export interface TranslateResponse {
 }
 
 export const translateText = async (payload: TranslateRequest): Promise<TranslateResponse> => {
-  const response = await fetch('/api/translate', {
+  // Through the operator session (Worker-gated cockpit route). The public
+  // /api/translate is a 501 stub in production; only the dev server answered it.
+  const res = await callBackend<Record<string, unknown>>('/api/cockpit/inbox/translate', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify(payload),
   })
-
-  const body = await response.json().catch(() => null)
-  if (!response.ok) {
+  const body = res.ok ? res.data : null
+  if (!res.ok || !body || body.ok === false) {
     const message = body && typeof body.error === 'string'
       ? body.error
-      : `Translation failed (${response.status})`
+      : `Translation failed (${res.status})`
     throw new Error(message)
-  }
-
-  if (!body || typeof body !== 'object') {
-    throw new Error('Invalid translation response')
   }
 
   const translatedText = typeof (body as { translatedText?: unknown }).translatedText === 'string'

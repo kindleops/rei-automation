@@ -61,6 +61,7 @@ import {
   queueReplyFromInbox,
   scheduleReplyFromInbox,
   sendInboxMessageNow,
+  fetchLiveInbox,
   type QueueProcessorHealth,
   type ThreadIntelligenceRecord,
   type ThreadMessage,
@@ -136,6 +137,9 @@ import {
   peekPendingInboxDealIntelligenceIdentity,
   clearPendingInboxDealIntelligenceIdentity,
   publishMobileInboxBadge,
+  OPEN_INBOX_THREAD_EVENT,
+  peekPendingInboxThread,
+  clearPendingInboxThread,
 } from '../mobile/mobile-inbox-bridge'
 
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
@@ -1265,10 +1269,22 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     [canonicalSelectedContext, workspaceThread],
   )
   const [mapPropertyCoords, setMapPropertyCoords] = useState<{ propertyId: string; lat: number; lng: number } | null>(null)
+  const mapPropertyCoordsRef = useRef(mapPropertyCoords)
+  mapPropertyCoordsRef.current = mapPropertyCoords
 
   useEffect(() => {
     let cancelled = false
-    setMapPropertyCoords(null)
+    /*
+     * IDEMPOTENT. The deps here are rebuilt on most renders, and this effect
+     * used to clear the coordinates unconditionally on every run — one
+     * setState per render, which React reported as "Maximum update depth
+     * exceeded" whenever the page re-rendered quickly (the map's composer
+     * recording a voice message). Clear only on a subject change; never
+     * refetch coordinates already resolved for this property.
+     */
+    const current = mapPropertyCoordsRef.current
+    if (current && current.propertyId === mapSelectedPropertyId) return () => { cancelled = true }
+    if (current) setMapPropertyCoords(null)
     if (!workspaceThread || !mapSelectedPropertyId) return () => { cancelled = true }
 
     const hydrated = mapThreads.find((thread) => (
@@ -4071,6 +4087,63 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [DEV, canonicalSelectionKey, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
 
   /**
+   * DEEP LINK TO ONE CONVERSATION (Map, Live Activity, Campaign replies).
+   *
+   * The thread is opened from the loaded page when it is there, and otherwise
+   * fetched BY KEY (the live route matches thread_key) and selected directly —
+   * the selection hook remembers threads outside the current list. A key that
+   * resolves to nothing is reported, never substituted with another seller.
+   */
+  const pendingThreadBusyRef = useRef<string | null>(null)
+  const openPendingThread = useCallback(async () => {
+    // Only the Inbox workspace consumes it. The Map / Pipeline / Calendar
+    // routes are InboxPage instances too, and the one that fired the deep link
+    // is still mounted when the event goes out: it used to take the pending
+    // thread, select it in itself, and unmount — the Inbox then opened on the list.
+    if (routeMode !== 'workspace') return
+    const pending = peekPendingInboxThread()
+    if (!pending?.threadKey) return
+    if (pendingThreadBusyRef.current === pending.threadKey) return
+    const norm = (v: unknown) => String(v ?? '').trim().toLowerCase()
+    const wanted = norm(pending.threadKey)
+    const inList = threads.find((t) => norm(t.threadKey) === wanted || norm(t.id) === wanted)
+    if (inList) {
+      clearPendingInboxThread()
+      handleSelect(inList.id)
+      focusWorkspaceView('sms_thread')
+      if (isMobileInboxShell) { setMobileThreadOpen(true); setMobileIntelOpen(false) }
+      return
+    }
+    pendingThreadBusyRef.current = pending.threadKey
+    try {
+      const res = await fetchLiveInbox({ filter: 'all', q: pending.threadKey, limit: 10, map: false, skipCounts: true })
+      const hit = (res.threads ?? []).map(toWorkflowThread)
+        .find((t) => norm(t.threadKey) === wanted || norm(t.id) === wanted)
+      if (peekPendingInboxThread()?.threadKey !== pending.threadKey) return
+      clearPendingInboxThread()
+      if (!hit) {
+        emitNotification({ title: 'Conversation not found', detail: `No thread for ${pending.threadKey}.`, severity: 'warning' })
+        return
+      }
+      setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
+      selectThread(hit)
+      focusWorkspaceView('sms_thread')
+      if (isMobileInboxShell) { setMobileThreadOpen(true); setMobileIntelOpen(false) }
+    } catch {
+      /* leave it pending; the next list load retries */
+    } finally {
+      pendingThreadBusyRef.current = null
+    }
+  }, [focusWorkspaceView, handleSelect, isMobileInboxShell, routeMode, selectThread, setActiveContext, threads])
+
+  useEffect(() => {
+    void openPendingThread()
+    const onOpen = () => { void openPendingThread() }
+    window.addEventListener(OPEN_INBOX_THREAD_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_INBOX_THREAD_EVENT, onOpen)
+  }, [openPendingThread])
+
+  /**
    * The linked-phone resolution below is async, so it must not read the
    * `threads` array captured when the row was pressed -- realtime and paging
    * both move it while the request is in flight.
@@ -4350,13 +4423,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         if (selected && !activeContextMatchesThread(active, selected)) return
         setDealContext((current) => {
           if (!current) return hydrated
-          return {
+          const merged = {
             ...hydrated,
             ...current,
             ownerName: current.ownerName || hydrated.ownerName,
             propertyAddress: current.propertyAddress || hydrated.propertyAddress,
             market: current.market || hydrated.market,
           }
+          // Same object when the merge changes nothing. This effect is keyed on
+          // dealContext, so a fresh-but-equal object re-ran it forever (the
+          // whole Inbox re-rendering several times a second on the Map).
+          const cur = current as unknown as Record<string, unknown>
+          const next = merged as unknown as Record<string, unknown>
+          const keys = new Set([...Object.keys(cur), ...Object.keys(next)])
+          for (const k of keys) if (cur[k] !== next[k]) return merged
+          return current
         })
       } catch {
         /* hydration is best-effort */

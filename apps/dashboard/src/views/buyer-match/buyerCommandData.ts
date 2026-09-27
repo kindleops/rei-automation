@@ -877,7 +877,19 @@ export const useBuyerCommandData = (
     hasLiveMatches: false,
   })
 
-  const context = useMemo(() => propertyContextFromThread(selectedThread), [selectedThread])
+  /*
+   * KEYED ON CONTENT, NOT IDENTITY. The host rebuilds the thread and the
+   * filters object on most renders; keyed on identity this effect refetched
+   * every buyer query and reset loading on EVERY host render — a render loop
+   * React reported as "Maximum update depth exceeded".
+   */
+  const rawContext = useMemo(() => propertyContextFromThread(selectedThread), [selectedThread])
+  const contextKey = rawContext ? JSON.stringify(rawContext) : ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const context = useMemo(() => rawContext, [contextKey])
+  const filtersKey = JSON.stringify(filters)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stableFilters = useMemo(() => filters, [filtersKey])
 
   useEffect(() => {
     if (!enabled || !context) {
@@ -1077,7 +1089,8 @@ export const useBuyerCommandData = (
       active = false
       cancelIdle?.()
     }
-  }, [context, filters, enabled])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context, stableFilters, enabled])
 
   return state
 }
