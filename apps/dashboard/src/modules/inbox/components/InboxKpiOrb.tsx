@@ -1,13 +1,14 @@
 import { createPortal } from 'react-dom'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { CommandDrawer } from '../../shell/primitives/CommandDrawer'
-import { MobileSheet } from '../../mobile/MobileSheet'
 import { type OperationalKpi, type OpsMessageTypeSection, type OpsQueueHealthSection } from '../../../lib/data/inboxKpis'
 import { useOperationalKpis } from '../../../lib/data/operationalKpis'
 import { usePerformanceIntelligence, type TimeWindow } from '../../../lib/data/performanceIntelligence'
 import type { CockpitOpsSections } from '../../../lib/api/backendClient'
+import { CountUp } from '../../../shared/motion/CountUp'
+import './kpi-pulse.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -46,61 +47,108 @@ function fmtN(n: number | undefined | null): string {
 
 type Tone = 'good' | 'warn' | 'bad' | 'dim'
 
-const TONE_COLOR: Record<Tone, string> = {
-  good: 'var(--nx-kpi-good, #00e87a)',
-  warn: 'var(--nx-kpi-warn, #f97316)',
-  bad:  'var(--nx-kpi-bad, #ff4466)',
-  dim:  'var(--nx-kpi-dim, rgba(255,255,255,0.3))',
+
+/** A metric value that counts up when it is a plain number or a percentage. */
+function MetricValue({ value }: { value: string | number }) {
+  if (typeof value === 'number' && Number.isFinite(value)) return <CountUp value={value} format={(v) => Math.round(v).toLocaleString()} ms={900} />
+  const text = String(value)
+  const int = /^-?[\d,]+$/.test(text) ? Number(text.replace(/,/g, '')) : NaN
+  if (Number.isFinite(int)) return <CountUp value={int} format={(v) => Math.round(v).toLocaleString()} ms={900} />
+  const pctM = /^(-?\d+(?:\.\d+)?)%$/.exec(text)
+  if (pctM) { const d = (pctM[1].split('.')[1] ?? '').length; return <CountUp value={Number(pctM[1])} format={(v) => `${v.toFixed(d)}%`} ms={900} /> }
+  return <>{text}</>
 }
 
-function MCard({ label, value, tone, span2 }: {
+// ── Pinning: hold any metric to put it in the top bar ─────────────────────
+
+export interface PinnedKpi { id: string; label: string; value: string; tone?: Tone }
+const PIN_KEY = 'nexus.kpiPin'
+export function readPinnedKpi(): PinnedKpi | null {
+  try { const raw = localStorage.getItem(PIN_KEY); return raw ? (JSON.parse(raw) as PinnedKpi) : null } catch { return null }
+}
+const PinCtx = createContext<{ section: string; pinnedId: string | null; onPin: (p: PinnedKpi) => void } | null>(null)
+
+function MCard({ label, value, tone, span2, pinId }: {
   label: string
   value: string | number
   tone?: Tone
   span2?: boolean
+  /** Stable id for pinning; defaults to `${section}:${label}`. */
+  pinId?: string
 }) {
-  const color = tone ? TONE_COLOR[tone] : 'var(--nx-kpi-card-value, rgba(255,255,255,0.92))'
+  const ctx = useContext(PinCtx)
+  const id = pinId ?? `${ctx?.section ?? 'kpi'}:${label}`
+  const pinned = ctx?.pinnedId === id
+  const timer = useRef<number | null>(null)
+  const start = () => {
+    if (!ctx) return
+    timer.current = window.setTimeout(() => {
+      try { navigator.vibrate?.(12) } catch { /* unsupported */ }
+      ctx.onPin({ id, label, value: String(value), tone })
+    }, 450)
+  }
+  const cancel = () => { if (timer.current) { window.clearTimeout(timer.current); timer.current = null } }
   return (
-    <div style={{
-      background: 'var(--nx-kpi-card-bg, rgba(255,255,255,0.04))',
-      border: '1px solid var(--nx-kpi-card-border, rgba(255,255,255,0.06))',
-      borderRadius: '8px',
-      padding: '9px 11px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '3px',
-      gridColumn: span2 ? 'span 2' : undefined,
-    }}>
-      <div style={{ fontSize: '9px', color: 'var(--nx-kpi-card-label, rgba(255,255,255,0.32))', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        {label}
-      </div>
-      <div style={{ fontSize: '17px', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-        {value}
-      </div>
+    <div
+      className={cls('nx-pulse-card', tone && `is-${tone}`, pinned && 'is-pinned')}
+      style={span2 ? { gridColumn: 'span 2' } : undefined}
+      onPointerDown={start}
+      onPointerUp={cancel}
+      onPointerLeave={cancel}
+      onPointerCancel={cancel}
+      onContextMenu={(e) => e.preventDefault()}
+      title={ctx ? (pinned ? 'Hold to unpin from the top bar' : 'Hold to pin to the top bar') : undefined}
+      data-kpi-pin={id}
+    >
+      <div className="nx-pulse-card__label">{label}</div>
+      <div className="nx-pulse-card__value"><MetricValue value={value} /></div>
+      {pinned && <span className="nx-pulse-card__pin" aria-label="Pinned to the top bar"><Icon name="pin" /></span>}
     </div>
   )
+}
+
+/** Every metric the panel can show, keyed like the cards, so a pin stays live. */
+function flattenMetrics(k: KpiData): Record<string, PinnedKpi> {
+  const out: Record<string, PinnedKpi> = {}
+  if (!k) return out
+  const st = (x?: string): Tone | undefined => (x === 'good' ? 'good' : x === 'critical' ? 'bad' : x === 'warning' ? 'warn' : undefined)
+  for (const v of k.volume ?? []) out[`vol:${v.id}`] = { id: `vol:${v.id}`, label: v.label, value: fmtN(v.value), tone: st(v.tone) }
+  for (const list of [k.messaging, k.quality, k.automation, k.pipeline, k.financial]) {
+    for (const m of list ?? []) out[`kpi:${m.id}`] = { id: `kpi:${m.id}`, label: m.label, value: `${m.value}${m.unit ?? ''}`, tone: st(m.status) }
+  }
+  const sec = k.sections
+  const add = (section: string, s: OpsMessageTypeSection | undefined) => {
+    if (!s) return
+    const put = (label: string, value: string) => { out[`${section}:${label}`] = { id: `${section}:${label}`, label, value } }
+    put('Sent', fmtN(s.sent)); put('Delivered', fmtN(s.delivered)); put('Failed', fmtN(s.failed)); put('Replies', fmtN(s.replies))
+    put('Delivery', fmtRate(s.delivery_rate)); put('Reply', fmtRate(s.reply_rate)); put('Failure', fmtRate(s.failure_rate))
+  }
+  add('first-touch', sec?.first_touch)
+  add('manual', sec?.manual_replies)
+  const q = sec?.queue_health
+  if (q) {
+    out['queue:Queued'] = { id: 'queue:Queued', label: 'Queued', value: fmtN(q.queued_active) }
+    out['queue:Scheduled'] = { id: 'queue:Scheduled', label: 'Scheduled', value: fmtN(q.scheduled_future) }
+    out['queue:Processing'] = { id: 'queue:Processing', label: 'Processing', value: fmtN(q.processing) }
+    out['queue:Failed'] = { id: 'queue:Failed', label: 'Failed', value: fmtN(q.failed_total) }
+  }
+  return out
 }
 
 function Grid({ children, cols = 3 }: { children: React.ReactNode; cols?: number }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: '5px' }}>
-      {children}
-    </div>
-  )
+  return <div className="nx-pulse-grid" style={{ ['--cols' as string]: cols }}>{children}</div>
 }
 
 function SubLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ fontSize: '9px', color: 'var(--nx-kpi-sublabel, rgba(255,255,255,0.28))', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>
-      {children}
-    </div>
-  )
+  return <div className="nx-pulse-sub">{children}</div>
 }
 
 function Empty() {
   return (
-    <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--nx-kpi-empty, rgba(255,255,255,0.22))', fontSize: '12px', fontStyle: 'italic' }}>
-      No activity in this window
+    <div className="nx-pulse-empty">
+      <span className="nx-pulse-empty__orb" aria-hidden="true"><Icon name="activity" /></span>
+      <strong>Quiet in this window</strong>
+      <span>Nothing moved here yet — try a wider range.</span>
     </div>
   )
 }
@@ -111,37 +159,57 @@ function HighlightCard({ tone, eyebrow, title, detail }: {
   title: string
   detail: string
 }) {
-  const c = tone === 'good' ? 'var(--nx-kpi-good, #00e87a)' : 'var(--nx-kpi-bad, #ff4466)'
-  const bg = tone === 'good' ? 'var(--nx-kpi-good-bg, rgba(0, 232, 122, 0.05))' : 'var(--nx-kpi-bad-bg, rgba(255, 68, 102, 0.05))'
-  const border = tone === 'good' ? 'var(--nx-kpi-good-border, rgba(0, 232, 122, 0.15))' : 'var(--nx-kpi-bad-border, rgba(255, 68, 102, 0.15))'
   return (
-    <div style={{
-      padding: '9px 12px',
-      background: bg,
-      border: `1px solid ${border}`,
-      borderRadius: '8px',
-      fontSize: '11px',
-    }}>
-      <div style={{ fontSize: '8px', color: c, textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: '3px' }}>{eyebrow}</div>
-      <div style={{ fontWeight: 600, marginBottom: '2px', color: 'var(--nx-kpi-highlight-title, rgba(255,255,255,0.85))' }}>{title}</div>
-      <div style={{ color: 'var(--nx-kpi-highlight-detail, rgba(255,255,255,0.38))', fontSize: '10px' }}>{detail}</div>
+    <div className={cls('nx-pulse-hl', `is-${tone}`)}>
+      <div className="nx-pulse-hl__eyebrow">{eyebrow}</div>
+      <div className="nx-pulse-hl__title">{title}</div>
+      <div className="nx-pulse-hl__detail">{detail}</div>
     </div>
   )
 }
 
 // ── Section: Overview ──────────────────────────────────────────────────────
 
+/** A ring that fills to a rate and counts up to it. */
+function Gauge({ label, value, tone }: { label: string; value: number | null; tone: 'good' | 'warn' | 'bad' | 'dim' }) {
+  const v = value === null || !Number.isFinite(value) ? null : Math.max(0, Math.min(100, value))
+  const C = 2 * Math.PI * 30
+  return (
+    <div className={cls('nx-pulse-gauge', `is-${tone}`)}>
+      <svg viewBox="0 0 72 72" aria-hidden="true">
+        <circle cx="36" cy="36" r="30" className="nx-pulse-gauge__track" />
+        <circle cx="36" cy="36" r="30" className="nx-pulse-gauge__fill" style={{ strokeDasharray: `${v === null ? 0 : (C * v) / 100} ${C}` }} />
+      </svg>
+      <strong>{v === null ? '—' : <CountUp value={v} format={(x) => `${x.toFixed(v % 1 ? 1 : 0)}%`} ms={1200} />}</strong>
+      <span>{label}</span>
+    </div>
+  )
+}
+
 function OverviewSection({ kpis }: { kpis: KpiData }) {
   if (!kpis) return <Empty />
   const vol = kpis.volume ?? []
   const msg = kpis.messaging ?? []
+  const rate = (id: string) => { const k = msg.find((m) => m.id === id); const n = k ? Number(k.value) : NaN; return Number.isFinite(n) ? n : null }
+  const toneOf = (id: string): 'good' | 'warn' | 'bad' | 'dim' => { const k = msg.find((m) => m.id === id); return !k ? 'dim' : k.status === 'good' ? 'good' : k.status === 'critical' ? 'bad' : k.status === 'warning' ? 'warn' : 'dim' }
+  const sent = vol.find((v) => /sent/i.test(v.label))
+  const received = vol.find((v) => /receiv|inbound|repl/i.test(v.label))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div className="nx-pulse-hero">
+        <Gauge label="Delivered" value={rate('delivery-rate')} tone={toneOf('delivery-rate')} />
+        <Gauge label="Reply rate" value={rate('reply-rate')} tone={toneOf('reply-rate')} />
+        <div className="nx-pulse-hero__stack">
+          <div><strong>{sent ? <MetricValue value={sent.value} /> : '—'}</strong><span>sent</span></div>
+          <div><strong>{received ? <MetricValue value={received.value} /> : '—'}</strong><span>received</span></div>
+        </div>
+      </div>
       <Grid cols={4}>
         {vol.map(v => (
           <MCard
             key={v.id}
+            pinId={`vol:${v.id}`}
             label={v.label}
             value={fmtN(v.value)}
             tone={v.tone === 'good' ? 'good' : v.tone === 'critical' ? 'bad' : v.tone === 'warning' ? 'warn' : undefined}
@@ -152,6 +220,7 @@ function OverviewSection({ kpis }: { kpis: KpiData }) {
         {msg.map(k => (
           <MCard
             key={k.id}
+            pinId={`kpi:${k.id}`}
             label={k.label}
             value={`${k.value}${k.unit ?? ''}`}
             tone={k.status === 'good' ? 'good' : k.status === 'critical' ? 'bad' : k.status === 'warning' ? 'warn' : undefined}
@@ -575,7 +644,23 @@ export const InboxKpiOrb = () => {
 
   const kpiPanelActive = isOpen || isPinned
   const useDrawerPanel = isMobile || isTouchUi
-  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive })
+  // The phone bar carries a live readout, so telemetry runs while the panel is
+  // closed there (realtime-driven, idle-deferred — cheap).
+  const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive || isMobile })
+
+  // ── Pinned metric in the bar ──
+  const [pin, setPin] = useState<PinnedKpi | null>(() => (typeof window === 'undefined' ? null : readPinnedKpi()))
+  const [pinToast, setPinToast] = useState<string | null>(null)
+  const flat = useMemo(() => flattenMetrics(kpis), [kpis])
+  const onPin = useCallback((p: PinnedKpi) => {
+    setPin((cur) => {
+      const next = cur?.id === p.id ? null : p
+      try { if (next) localStorage.setItem('nexus.kpiPin', JSON.stringify(next)); else localStorage.removeItem('nexus.kpiPin') } catch { /* private mode */ }
+      setPinToast(next ? `${p.label} pinned to the bar` : `${p.label} unpinned`)
+      window.setTimeout(() => setPinToast(null), 1800)
+      return next
+    })
+  }, [])
   const { outliers } = usePerformanceIntelligence(timeWindow as TimeWindow, { enabled: kpiPanelActive })
 
   const allKpisList = useMemo(() => {
@@ -587,6 +672,11 @@ export const InboxKpiOrb = () => {
     () => allKpisList.find(k => k.id === 'reply-rate') ?? allKpisList[0],
     [allKpisList]
   )
+  // What the bar shows: the pinned metric (kept live), else reply rate.
+  const readout = useMemo(() => {
+    if (pin) return flat[pin.id] ?? pin
+    return headlineKpi ? { id: `kpi:${headlineKpi.id}`, label: headlineKpi.label, value: `${headlineKpi.value}${headlineKpi.unit ?? '%'}` } : null
+  }, [pin, flat, headlineKpi])
 
   const orbTone = useMemo(() => {
     if (!kpis) return 'neutral'
@@ -688,90 +778,42 @@ export const InboxKpiOrb = () => {
   const dashboardBody = kpiPanelActive ? (
     <>
           {/* Header */}
-          <div
-            className="nx-orb-dashboard__header"
-            style={{
-            padding: '11px 14px 10px',
-            borderBottom: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexShrink: 0,
-          }}>
-            <div>
-              <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.03em', color: 'var(--nx-kpi-title, rgba(255,255,255,0.9))' }}>
-                Operational Intelligence
-              </div>
-              <div style={{ fontSize: '9px', color: 'var(--nx-kpi-subtitle, rgba(255,255,255,0.3))', marginTop: '1px' }}>
-                {isLive ? '⚡ Live' : 'System telemetry'}
-              </div>
+          <div className="nx-orb-dashboard__header nx-pulse-head">
+            <div className="nx-pulse-head__title">
+              <strong>Operations pulse</strong>
+              <span className={cls('nx-pulse-live', isLive && 'is-live')}>
+                <i aria-hidden="true" />{isLive ? 'Live' : 'System telemetry'}
+              </span>
             </div>
-
-            <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+            <div className="nx-pulse-range" role="radiogroup" aria-label="Time window">
               {(['today', '24h', '7d', '30d'] as const).map(w => (
                 <button
                   key={w}
+                  type="button"
+                  role="radio"
+                  aria-checked={timeWindow === w}
+                  className={cls('nx-pulse-range__btn', timeWindow === w && 'is-on')}
                   onClick={e => { e.stopPropagation(); setTimeWindow(w) }}
-                  style={{
-                    padding: '3px 7px',
-                    borderRadius: '5px',
-                    border: 'none',
-                    background: timeWindow === w ? 'var(--nx-kpi-active-btn-bg, rgba(56,208,240,0.14))' : 'var(--nx-kpi-btn-bg, rgba(255,255,255,0.06))',
-                    color: timeWindow === w ? 'var(--nx-kpi-active-btn-color, #38d0f0)' : 'var(--nx-kpi-btn-color, rgba(255,255,255,0.38))',
-                    fontSize: '9px',
-                    fontWeight: timeWindow === w ? 700 : 400,
-                    cursor: 'pointer',
-                    letterSpacing: '0.04em',
-                  }}
                 >
-                  {w.toUpperCase()}
+                  {w === 'today' ? 'Today' : w.toUpperCase()}
                 </button>
               ))}
-              <button
-                onClick={e => { e.stopPropagation(); refreshKpis() }}
-                style={{
-                  marginLeft: '2px',
-                  padding: '3px 5px',
-                  borderRadius: '5px',
-                  border: 'none',
-                  background: 'var(--nx-kpi-btn-bg, rgba(255,255,255,0.06))',
-                  color: 'var(--nx-kpi-btn-color, rgba(255,255,255,0.35))',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}
-              >
+              <button type="button" className={cls('nx-pulse-refresh', !kpis && 'is-spinning')} aria-label="Refresh" onClick={e => { e.stopPropagation(); refreshKpis() }}>
                 <Icon name="refresh-cw" />
               </button>
             </div>
           </div>
 
-          {/* Section pills */}
-          <div style={{
-            display: 'flex',
-            gap: '4px',
-            padding: '7px 10px',
-            borderBottom: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
-            overflowX: 'auto',
-            flexShrink: 0,
-            scrollbarWidth: 'none',
-          }}>
+          {/* Section tabs */}
+          <div className="nx-pulse-tabs" role="tablist">
             {SECTIONS.map(s => (
               <button
                 key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={section === s.id}
+                className={cls('nx-pulse-tab', section === s.id && 'is-on')}
                 onClick={() => handleSection(s.id)}
-                style={{
-                  padding: '3px 9px',
-                  borderRadius: '20px',
-                  border: `1px solid ${section === s.id ? 'var(--nx-kpi-active-pill-border, #38d0f0)' : 'var(--nx-kpi-pill-border, rgba(255,255,255,0.08))'}`,
-                  background: section === s.id ? 'var(--nx-kpi-active-pill-bg, rgba(56,208,240,0.1))' : 'transparent',
-                  color: section === s.id ? 'var(--nx-kpi-active-pill-color, #38d0f0)' : 'var(--nx-kpi-pill-color, rgba(255,255,255,0.38))',
-                  fontSize: '10px',
-                  fontWeight: section === s.id ? 700 : 400,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                }}
               >
                 {s.label}
               </button>
@@ -804,17 +846,11 @@ export const InboxKpiOrb = () => {
           )}
 
           {/* Section content */}
-          <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '10px 12px',
-            scrollbarWidth: 'thin',
-            scrollbarColor: 'var(--nx-kpi-scrollbar, rgba(255,255,255,0.08)) transparent',
-          }}>
+          {pinToast && <div className="nx-pulse-toast" role="status"><Icon name="pin" />{pinToast}</div>}
+          <PinCtx.Provider value={{ section: section === 'overview' ? 'kpi' : section === 'queue' ? 'queue' : section, pinnedId: pin?.id ?? null, onPin }}>
+          <div className="nx-pulse-body" key={`${section}:${timeWindow}`}>
             {!kpis ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'rgba(255,255,255,0.22)', fontSize: '12px' }}>
-                Loading...
-              </div>
+              <div className="nx-pulse-skel" aria-label="Loading metrics"><i /><i /><i /><i /><i /><i /></div>
             ) : (
               <>
                 {section === 'overview'       && <OverviewSection kpis={kpis} />}
@@ -828,42 +864,25 @@ export const InboxKpiOrb = () => {
                 {section === 'pipeline'       && <PipelineSection kpis={kpis} />}
               </>
             )}
-
+            <p className="nx-pulse-hint"><Icon name="pin" />Hold any metric to pin it to the top bar</p>
           </div>
+          </PinCtx.Provider>
 
           {/* AI Recommendation strip */}
           {recommendations.length > 0 && (
-            <div style={{
-              borderTop: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
-              padding: '7px 12px',
-              flexShrink: 0,
-              background: 'var(--nx-kpi-rec-bg, rgba(99,102,241,0.05))',
-            }}>
-              <div style={{ fontSize: '8px', color: 'var(--nx-kpi-rec-label, #6366f1)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3px' }}>
-                AI Rec
-              </div>
-              <div style={{ fontSize: '10px', color: 'var(--nx-kpi-rec-text, rgba(255,255,255,0.52))', lineHeight: 1.4 }}>
-                {recommendations[0]}
+            <div className="nx-pulse-rec">
+              <span className="nx-pulse-rec__icon" aria-hidden="true"><Icon name="spark" /></span>
+              <div>
+                <div className="nx-pulse-rec__label">Recommendation</div>
+                <div className="nx-pulse-rec__text">{recommendations[0]}</div>
               </div>
             </div>
           )}
 
           {/* Footer */}
-          <div style={{
-            borderTop: '1px solid var(--nx-kpi-border, rgba(255,255,255,0.06))',
-            padding: '5px 12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexShrink: 0,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '9px', color: 'var(--nx-kpi-footer-text, rgba(255,255,255,0.28))' }}>
-              <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: kpiError ? 'var(--nx-kpi-bad, #ff4466)' : 'var(--nx-kpi-good, #00e87a)' }} />
-              {kpiError ? 'Unavailable' : 'Up to date'}
-            </div>
-            <div style={{ fontSize: '9px', color: 'var(--nx-kpi-footer-sync, rgba(255,255,255,0.22))' }}>
-              {kpis?.lastUpdated ? `Sync ${new Date(kpis.lastUpdated).toLocaleTimeString()}` : 'Connecting...'}
-            </div>
+          <div className="nx-pulse-foot">
+            <span className={cls('nx-pulse-foot__state', kpiError && 'is-bad')}><i aria-hidden="true" />{kpiError ? 'Unavailable' : 'Up to date'}</span>
+            <span>{kpis?.lastUpdated ? `Synced ${new Date(kpis.lastUpdated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Connecting…'}</span>
           </div>
     </>
   ) : null
@@ -917,17 +936,31 @@ export const InboxKpiOrb = () => {
           {headlineKpi && (
             <span className="nx-kpi-orb__mini-value">{headlineKpi.value}{headlineKpi.unit || '%'}</span>
           )}
+          {readout && (
+            <span className={cls('nx-kpi-orb__readout', pin && 'is-pinned')} key={readout.id}>
+              <b>{readout.value}</b>
+              <em>{readout.label}</em>
+              <i className="nx-kpi-orb__flow" aria-hidden="true" />
+            </span>
+          )}
           {isLive && <div className="nx-kpi-orb__live-tag">•</div>}
         </div>
       </div>
 
       {useDrawerPanel ? (
         isMobile ? (
-          <MobileSheet open={kpiPanelActive} title="KPI Intelligence" subtitle="Operational metrics" height="half" onClose={closePanel}>
-            <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">
-              {dashboardBody}
-            </div>
-          </MobileSheet>
+          kpiPanelActive && typeof document !== 'undefined'
+            ? createPortal(
+              <>
+                <div className="nx-pulse-scrim" aria-hidden="true" />
+                <div ref={dashboardRef} className="nx-orb-dashboard nx-pulse-drop" role="dialog" aria-label="Operations pulse">
+                  <span className="nx-pulse-drop__liquid" aria-hidden="true"><i /><i /><i /></span>
+                  {dashboardBody}
+                </div>
+              </>,
+              document.body,
+            )
+            : null
         ) : (
           <CommandDrawer open={kpiPanelActive} title="KPI Intelligence" onClose={closePanel} fullWidth>
             <div ref={dashboardRef} className="nx-orb-dashboard nx-orb-dashboard--drawer">

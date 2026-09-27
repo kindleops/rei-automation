@@ -23,7 +23,7 @@ import { EntityNetworkStage, NODE_ICON } from './EntityNetworkStage'
 import { EntityNetworkInspector, type InspectorActions } from './EntityNetworkInspector'
 import { visibleNetwork } from './network-layout'
 import { LandingFx } from './LandingFx'
-import { CountUp } from './CountUp'
+import { CountUp } from '../../../shared/motion/CountUp'
 import './entity-graph-console.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')

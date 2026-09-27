@@ -11,7 +11,7 @@ import { Icon } from '../../../shared/icons'
 import type { EntityNetwork, NetworkNode, NetworkProperty, NetworkSale } from './entity-network-api'
 import { money, pct, REASON_LABEL, shortDate } from './entity-network-api'
 import { NODE_ICON } from './EntityNetworkStage'
-import { CountUp } from './CountUp'
+import { CountUp } from '../../../shared/motion/CountUp'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const label = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '')

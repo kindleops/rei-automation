@@ -351,3 +351,94 @@ html.is-mobile-layout .nx-mobile-overflow__group-label { padding-left: 18px; let
   .nx-launcher__liquid i, .nx-app-launcher__tile.is-lit, .nx-app-launcher__tile.is-lit .nx-app-launcher__glyph::after, .nx-app-launcher__tile.is-lit.is-active .nx-app-launcher__glyph::before { animation: none !important; }
 }
 html.is-mobile-layout .nx-app-launcher__search input { background: transparent !important; box-shadow: none !important; }
+
+/* The system orb, identical on every host: a glass tile with the pulse glyph.
+   (Outside the Inbox its own stylesheet is absent, and the reply-rate text
+   spilled out under the bar.) The headline number lives in the Pulse panel. */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb {
+  position: relative;
+  display: grid !important;
+  place-items: center;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  transform: none !important;
+  border-radius: 12px !important;
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.025) 60%) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), inset 0 0 0 1px rgb(255 255 255 / 0.07) !important;
+  border: 0 !important;
+  color: var(--sys, #cfe8ff);
+  cursor: pointer;
+}
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb-container { width: 34px !important; height: 34px !important; min-width: 34px !important; min-height: 34px !important; transform: none !important; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__glow { display: none !important; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__inner { display: grid !important; place-items: center; width: 100%; height: 100%; padding: 0 !important; background: none !important; border: 0 !important; box-shadow: none !important; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__icon-box { display: grid; place-items: center; width: auto !important; height: auto !important; background: none !important; border: 0 !important; box-shadow: none !important; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__icon-box svg { width: 18px !important; height: 18px !important; color: var(--sys, #7fe8ff); filter: drop-shadow(0 0 6px var(--sys, #5ee7ff)); }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__mini-value,
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__live-tag { display: none !important; }
+.nx-mobile-command-dock.is-island:not([data-queue='healthy']):not([data-queue='warning']):not([data-queue='critical']) { --sys: #7fe8ff; }
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island .nx-kpi-orb { background: linear-gradient(160deg, #fff, rgb(11 18 32 / 0.03)) !important; box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgb(11 18 32 / 0.08) !important; }
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island:not([data-queue='healthy']):not([data-queue='warning']):not([data-queue='critical']) { --sys: #0891b2; }
+
+/* ── The KPI readout pill: the pinned metric, live, with the moving colour
+   graph and the live scanning border kept from the original orb. ───────── */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-mobile-command-dock__slot--kpi { width: auto !important; min-width: 40px; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb-container { width: auto !important; min-width: 40px !important; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb {
+  width: auto !important;
+  min-width: 40px !important;
+  max-width: 92px;
+  padding: 0 8px 0 6px !important;
+  overflow: hidden;
+}
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__inner { display: flex !important; align-items: center; gap: 5px; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__icon-box svg { width: 15px !important; height: 15px !important; }
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb__readout {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1;
+  animation: nx-island-morph 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
+}
+.nx-mobile-command-dock.is-island .nx-kpi-orb__readout b {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sys, #7fe8ff);
+  white-space: nowrap;
+}
+.nx-mobile-command-dock.is-island .nx-kpi-orb__readout em {
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 8.5px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(242 245 251 / 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 54px;
+}
+html.is-mobile-layout[data-nexus-theme='light'] .nx-mobile-command-dock.is-island .nx-kpi-orb__readout em { color: rgb(11 18 32 / 0.55); }
+/* The colour graph: a live gradient flowing under the value. */
+.nx-mobile-command-dock.is-island .nx-kpi-orb__flow {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: -5px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--sys, #5ee7ff), #818cf8, #34e8a0, var(--sys, #5ee7ff)) 0 0 / 200% 100%;
+  opacity: 0.85;
+  animation: nx-island-flow 2.6s linear infinite;
+}
+@keyframes nx-island-flow { to { background-position: -200% 0; } }
+.nx-mobile-command-dock.is-island .nx-kpi-orb__readout.is-pinned b { color: #fff; text-shadow: 0 0 10px var(--sys, #5ee7ff); }
+/* Keep the original live scanning border (an event just landed). */
+html.is-mobile-layout .nx-mobile-command-dock.is-island .nx-kpi-orb.is-live-pulsing { box-shadow: inset 0 0 0 1px var(--sys, #5ee7ff), 0 0 18px -4px var(--sys, #5ee7ff) !important; }
+@media (prefers-reduced-motion: reduce) { .nx-mobile-command-dock.is-island .nx-kpi-orb__flow { animation: none; } }
