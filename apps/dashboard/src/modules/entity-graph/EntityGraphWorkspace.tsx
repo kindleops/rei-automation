@@ -44,7 +44,7 @@ import { EntityGraphInspector } from './EntityGraphInspector'
 import { EntityGraphRelationshipGraph } from './EntityGraphRelationshipGraph'
 import { EntityGraphTableView } from './EntityGraphTableView'
 import { useBreakpoint } from '../mobile/useBreakpoint'
-import { EntityGraphMobile } from './mobile/EntityGraphMobile'
+import { EntityGraphConsole } from './console/EntityGraphConsole'
 import './entity-graph.css'
 
 type LayoutMode = 'peek' | 'explorer' | 'workspace' | 'command'
@@ -93,7 +93,7 @@ export function EntityGraphWorkspace(props: EntityGraphWorkspaceProps) {
 
   if (isMobile) {
     return (
-      <EntityGraphMobile
+      <EntityGraphConsole
         themeMode={props.themeMode}
         universalContext={props.universalContext}
         onUniversalContextChange={props.onUniversalContextChange}
