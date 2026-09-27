@@ -163,3 +163,25 @@ describe('draw an area', () => {
     expect(areaCampaignName(summary, '1.2 mi radius')).toBe('Map area · Houston, TX · 32 properties · 1.2 mi radius')
   })
 })
+
+import { orbColor, orbFeatures } from './useLiveOrbs'
+
+describe('living map', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z')
+  const e = (id: string, type: string, minsAgo: number, propertyId = 'p1') => ({
+    id, type, propertyId, lat: 29.75, lng: -95.4, occurredAt: new Date(now - minsAgo * 60_000).toISOString(),
+  }) as any
+  it('one orb per property; the reply beats the send; older than a day is gone', () => {
+    const f = orbFeatures([e('a', 'message_sent', 5), e('b', 'new_reply', 30), e('c', 'new_reply', 2000, 'p2')], now)
+    expect(f.length).toBe(1)
+    expect(f[0].properties?.type).toBe('new_reply')
+    expect(f[0].properties?.color).toBe(orbColor('new_reply'))
+  })
+  it('fresh events breathe and glow brighter than old ones', () => {
+    const [fresh] = orbFeatures([e('a', 'new_reply', 2)], now)
+    const [old] = orbFeatures([e('b', 'new_reply', 600)], now)
+    expect(fresh.properties?.live).toBe(1)
+    expect(old.properties?.live).toBe(0)
+    expect(Number(fresh.properties?.fresh)).toBeGreaterThan(Number(old.properties?.fresh))
+  })
+})

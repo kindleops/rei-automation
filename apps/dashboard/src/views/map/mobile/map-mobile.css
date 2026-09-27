@@ -1156,3 +1156,36 @@ html[data-nexus-theme='light'] .mx-comp__flags span { color: #9a1f33; }
 .mx-legend__blend::-webkit-slider-runnable-track { height: 5px; border-radius: 5px; background: linear-gradient(90deg, var(--mx-accent) var(--lgc-pct, 70%), rgb(255 255 255 / 0.14) var(--lgc-pct, 70%)); }
 .mx-legend__blend::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7.5px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #dfe8f5 60%, #b9c6d8); box-shadow: 0 3px 10px rgb(0 0 0 / 0.45); }
 .mx-legend__blend::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: #fff; }
+
+/* ── Living map: an event lands ──────────────────────────────────────────── */
+.mx-land { position: relative; width: 0; height: 0; pointer-events: none; }
+.mx-land i {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--land, #3ee6ff);
+  box-shadow: 0 0 16px var(--land, #3ee6ff), inset 0 0 12px var(--land, #3ee6ff);
+  animation: mx-shock 1.8s cubic-bezier(0.1, 0.7, 0.2, 1) both;
+}
+.mx-land i:nth-child(2) { animation-delay: 0.22s; }
+.mx-land i:nth-child(3) { animation-delay: 0.44s; }
+@keyframes mx-shock { 0% { transform: scale(0.3); opacity: 1; } 100% { transform: scale(4.2); opacity: 0; } }
+.mx-land span {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font: 700 11.5px/1.2 -apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  color: #05070b;
+  background: var(--land, #3ee6ff);
+  box-shadow: 0 0 22px var(--land, #3ee6ff);
+  animation: mx-rise-label 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes mx-rise-label { 0% { opacity: 0; transform: translate(-50%, 8px) scale(0.8); } 15% { opacity: 1; transform: translate(-50%, 0) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -26px); } }
+@media (prefers-reduced-motion: reduce) { .mx-land i, .mx-land span { animation: none; opacity: 0; } }

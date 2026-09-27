@@ -162,8 +162,11 @@ export const setForceAllProperties = (on: boolean): boolean => {
 }
 export const getForceAllProperties = (): boolean => forceAllProperties
 
+/** "Every property": below this the glowing dots carry every property; from here every property has a pin. */
+export const FORCE_ALL_PIN_ZOOM = 11.5
+
 export const scoreFloorForZoom = (zoom: number, mode: PropertyDensityMode = densityMode): number => {
-  if (forceAllProperties) return 0
+  if (forceAllProperties) return zoom >= FORCE_ALL_PIN_ZOOM ? 0 : 70  // below: the dots carry every property; pins only for the strongest
   if (mode === 'high') {
     if (zoom >= 11.5) return 0
     return zoom < 9.5 ? 60 : 30
@@ -181,7 +184,7 @@ export const scoreFloorForZoom = (zoom: number, mode: PropertyDensityMode = dens
 
 /** Share of the 0-99 bucket space admitted regardless of score, by the same bands. */
 export const sampleQuotaForZoom = (zoom: number, mode: PropertyDensityMode = densityMode): number => {
-  if (forceAllProperties) return 100
+  if (forceAllProperties) return zoom >= FORCE_ALL_PIN_ZOOM ? 100 : 1
   if (mode === 'high') {
     if (zoom >= 11.5) return 100
     return zoom < 9.5 ? 12 : 40

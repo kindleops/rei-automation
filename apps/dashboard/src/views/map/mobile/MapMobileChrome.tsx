@@ -49,6 +49,7 @@ import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
 import { COMP_LAYERS, DEFAULT_COMP_FILTERS, activeCompFilterCount, useSoldComps, type CompFilters } from './useSoldComps'
 import { CompFiltersPanel, MapCompCard } from './MapCompCard'
 import { MapSearch } from './MapSearch'
+import { landEvent, useLiveOrbs } from './useLiveOrbs'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -96,8 +97,8 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 
 /** Phone-only map preferences: the active lens and what floats on the map. */
 const LENS_STORE = 'nexus.map.mobileLens'
-interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7 }
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number; liveOrbs: boolean }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }
@@ -445,7 +446,19 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   }, [map, mapEpoch, markerDim])
 
   // Live stream (Supabase realtime + the last day) merged over the map's derived feed.
-  const realtime = useRealtimeActivity(activityOn || sheet === 'activity')
+  // The stream is always on: the map itself is alive (orbs, landings), not only the feed.
+  const realtime = useRealtimeActivity(true)
+  useLiveOrbs(map, mapEpoch, realtime.events, prefs.liveOrbs, reducedMotion)
+  // A brand-new event lands where it happened: shockwave + rising label.
+  const landedRef = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    if (!map || !realtime.coveredSince) return
+    if (landedRef.current === null) { landedRef.current = new Set(realtime.events.map((e) => e.id)); return }
+    const fresh = realtime.events.filter((e) => !landedRef.current!.has(e.id))
+    for (const e of fresh) landedRef.current.add(e.id)
+    if (!prefs.liveOrbs || reducedMotion) return
+    for (const e of fresh.slice(0, 5)) landEvent(map, e)
+  }, [map, realtime.events, realtime.coveredSince, prefs.liveOrbs, reducedMotion])
   const allEvents = useMemo(() => mergeActivity(realtime.events, activityEvents, realtime.coveredSince), [realtime.events, activityEvents, realtime.coveredSince])
   const now = useMemo(() => new Date(clock), [clock])
   const events = useMemo(() => filterActivity(allEvents, { scope, window: window_, now }), [allEvents, scope, window_, now])
@@ -826,6 +839,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           )}
           {layersTab === 'intel' && (
             <div className="mx-list">
+              <Toggle label="Living map" sub="Glowing orbs where replies, sends, deliveries and stage moves happened today; new ones land with a shockwave" on={prefs.liveOrbs} onChange={(v) => setPref('liveOrbs', v)} />
               <Toggle label="Every property" sub="A glowing dot for every property at any zoom, a real pin for each one up close" on={prefs.everyProperty} onChange={(v) => setPref('everyProperty', v)} />
               <Toggle label="Sold comps" sub="Every MLS, public-record and investor sale — buyer, portfolio and hedge-fund buys flagged" on={prefs.comps} onChange={(v) => setPref('comps', v)} />
               {compsOn && (

@@ -10,7 +10,7 @@
 import { useEffect } from 'react'
 import type maplibregl from 'maplibre-gl'
 import { buildPropertyTilesUrlTemplate } from '../map-property-tile-source'
-import { applyPropertyDensity, getDensitySelection, setForceAllProperties } from '../map-marker-density'
+import { FORCE_ALL_PIN_ZOOM, applyPropertyDensity, getDensitySelection, setForceAllProperties } from '../map-marker-density'
 import { getGroupingHandoffZoom } from '../map-property-source'
 
 const SRC = 'nx-dots'
@@ -45,7 +45,7 @@ function beforeLayer(map: maplibregl.Map): string | undefined {
 function ensure(map: maplibregl.Map, fadeFrom: number) {
   if (!map.style) return
   if (!map.getSource(SRC)) {
-    map.addSource(SRC, { type: 'vector', tiles: [dotsUrl()], minzoom: 2, maxzoom: 8, attribution: '' })
+    map.addSource(SRC, { type: 'vector', tiles: [dotsUrl()], minzoom: 2, maxzoom: 11, attribution: '' })
   }
   const nRadius = (base: number, k: number) => ['+', base, ['*', k, ['ln', ['max', 1, ['get', 'n']]]]]
   const before = beforeLayer(map)
@@ -109,7 +109,7 @@ function quietAggregates(map: maplibregl.Map, quiet: boolean) {
 export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: boolean, quietBubbles: boolean = on) {
   useEffect(() => {
     if (!map) return
-    const fadeFrom = getGroupingHandoffZoom()
+    const fadeFrom = Math.max(getGroupingHandoffZoom(), FORCE_ALL_PIN_ZOOM)
     const apply = () => {
       try {
         ensure(map, fadeFrom)
@@ -135,7 +135,7 @@ export function usePropertyDots(map: maplibregl.Map | null, epoch: number, on: b
 export function dotsInView(map: maplibregl.Map): number | null {
   try {
     if (!map.getLayer(L_CORE) || map.getLayoutProperty(L_CORE, 'visibility') === 'none') return null
-    if (map.getZoom() >= getGroupingHandoffZoom()) return null
+    if (map.getZoom() >= Math.max(getGroupingHandoffZoom(), FORCE_ALL_PIN_ZOOM)) return null
     const seen = new Set<string>()
     let total = 0
     for (const f of map.queryRenderedFeatures({ layers: [L_CORE] })) {
