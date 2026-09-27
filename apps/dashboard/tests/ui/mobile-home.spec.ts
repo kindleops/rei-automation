@@ -110,7 +110,7 @@ test('a phone lands on Home inside the mobile shell', async ({ page }) => {
 
   // The glass must survive the production CSS minifier on Chromium: a standard
   // declaration placed before its -webkit- twin is collapsed to the prefix only.
-  const glass = await page.locator('section[aria-label="Focus"]').evaluate((node) => getComputedStyle(node).backdropFilter)
+  const glass = await page.locator('section[aria-label="Inbox"]').evaluate((node) => getComputedStyle(node).backdropFilter)
   expect(glass).toContain('blur')
 
   // Let the entrance choreography land before capturing.

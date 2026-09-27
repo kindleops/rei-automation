@@ -45,7 +45,7 @@ export function useRevealed<T extends Element>(): [RefObject<T>, boolean] {
 
 // ── Touch light and ripple ──────────────────────────────────────────────────
 
-const RIPPLE_HOSTS = '.nx-home-focus__item, .nx-home-row, .nx-home-metric, .nx-home-stage, .nx-home-action, .nx-home-feed__text, .nx-home-more'
+const RIPPLE_HOSTS = '.nx-home-focus__item, .nx-home-stage, .nx-home-chip, .nx-home-action, .nx-home-feed__text, .nx-home-leaders button, .nx-home-bubble, .nx-home-big'
 
 const setLight = (card: HTMLElement, event: PointerEvent) => {
   const rect = card.getBoundingClientRect()
@@ -71,7 +71,7 @@ export function useLiquidTouch(root: RefObject<HTMLElement | null>) {
 
     const onDown = (event: PointerEvent) => {
       const target = event.target as HTMLElement | null
-      const card = target?.closest<HTMLElement>('.nx-home-card') ?? null
+      const card = target?.closest<HTMLElement>('.nx-home-card.is-tile') ?? null
       if (card) {
         release()
         active = card

@@ -1,58 +1,84 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Icon, type IconName } from '../../shared/icons'
 import type { NotificationEvent } from '../../domain/notifications/notification-contract'
 import {
   dataOf,
   formatCount,
   initials,
-  notificationPath,
   relativeTime,
   type FocusItem,
   type HomeLoad,
-  type HomeThread,
+  type PipelineBucket,
 } from './home-signals'
 import { resolveSystemState, type HomeSignals } from './useHomeSignals'
+import { buildActivity } from './home-activity'
 import { Counter } from './HomeCounter'
 import { useRevealed } from './home-motion'
+import { MarketConstellation } from './MarketConstellation'
 import { goTo, openNotifications, openSearch, openTarget, openThread } from './home-navigation'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
-// ── Card chrome ─────────────────────────────────────────────────────────────
+interface ModuleProps {
+  index: number
+  compact: boolean
+  signals: HomeSignals
+}
+
+// ── Module chrome ───────────────────────────────────────────────────────────
 
 interface ModuleCardProps {
   title: string
   index: number
   compact?: boolean
-  emphasis?: boolean
+  /** `tile` is a glass pane; `bare` floats directly over the liquid field. */
+  variant?: 'tile' | 'bare'
+  span?: 'full' | 'half'
+  tall?: boolean
+  /** The hue of the tile's inner light leak. */
+  hue?: string
   count?: number | null
   countTone?: 'bad'
   link?: { label: string; onClick: () => void }
+  className?: string
   children: ReactNode
 }
 
-export const ModuleCard = ({ title, index, compact, emphasis, count, countTone, link, children }: ModuleCardProps) => {
+export const ModuleCard = ({
+  title, index, compact, variant = 'tile', span = 'full', tall, hue, count, countTone, link, className, children,
+}: ModuleCardProps) => {
   const [ref, revealed] = useRevealed<HTMLElement>()
   return (
     <section
       ref={ref}
-      className={cls('nx-home-card', compact && 'is-compact', emphasis && 'is-emphasis', revealed && 'is-in')}
-      style={{ '--home-index': index } as CSSProperties}
+      className={cls(
+        'nx-home-card',
+        `is-${variant}`,
+        `is-span-${span}`,
+        tall && 'is-tall',
+        compact && 'is-compact',
+        revealed && 'is-in',
+        className,
+      )}
+      style={{ '--home-index': index, ...(hue ? { '--tile-hue': hue } : {}) } as CSSProperties}
       aria-label={title}
     >
-      {/* Rim light: a hairline of light travelling the glass edge. */}
-      <span className="nx-home-card__rim" aria-hidden><i /></span>
-      {/* Specular light under the operator's finger. */}
-      <span className="nx-home-card__light" aria-hidden />
+      {variant === 'tile' ? (
+        <>
+          <span className="nx-home-card__leak" aria-hidden />
+          <span className="nx-home-card__rim" aria-hidden><i /></span>
+          <span className="nx-home-card__light" aria-hidden />
+        </>
+      ) : null}
       <header className="nx-home-card__head">
         <h2 className="nx-home-card__title">
           {title}
           {count ? <span className={cls('nx-home-count', countTone === 'bad' && 'is-bad')}>{count > 99 ? '99+' : count}</span> : null}
         </h2>
         {link ? (
-          <button type="button" className="nx-home-card__link" onClick={link.onClick}>
+          <button type="button" className="nx-home-card__link" onClick={link.onClick} aria-label={link.label || `Open ${title}`}>
             {link.label}
-            <Icon name="chevron-right" size={13} />
+            <Icon name={link.label ? 'chevron-right' : 'arrow-up-right'} size={13} />
           </button>
         ) : null}
       </header>
@@ -69,48 +95,130 @@ const Loading = ({ lines = 2 }: { lines?: number }) => (
   </div>
 )
 
-const Unavailable = ({ what, reason }: { what: string; reason?: string }) => (
+const Unavailable = ({ what }: { what: string }) => (
   <div className="nx-home-state" role="status">
     <Icon name="slash" size={16} />
     <span>
       <strong>{what} unavailable</strong>
-      {reason ? 'The source did not answer. Figures will appear when it does.' : null}
+      The source did not answer. Figures will appear when it does.
     </span>
   </div>
 )
 
-/** Loading, unavailable, or the module body — the one branch every module needs. */
 function whenReady<T>(load: HomeLoad<T>, what: string, render: (data: T) => ReactNode, lines = 2): ReactNode {
   if (load.status === 'loading') return <Loading lines={lines} />
-  if (load.status === 'unavailable') return <Unavailable what={what} reason={load.reason} />
+  if (load.status === 'unavailable') return <Unavailable what={what} />
   return render(load.data)
 }
 
-interface MetricProps {
-  label: string
-  value: number | null | undefined
-  tone?: 'bad' | 'warn' | 'good'
-  onClick?: () => void
-  suffix?: string
+/** A figure that counts in, or an honest dash when it was not measured. */
+const Figure = ({ value, format }: { value: number | null | undefined; format?: (n: number) => string }) =>
+  value == null ? <span className="nx-home-unavailable">—</span> : <Counter value={value} format={format} />
+
+// ── Automation: the reactor ─────────────────────────────────────────────────
+
+const RING = 112
+const INNER = 94
+const circumference = (r: number) => 2 * Math.PI * r
+
+/**
+ * The machine's heartbeat, as an instrument. The outer arc is today's delivery
+ * rate, the inner arc the share of delivered messages that drew a reply, and the
+ * core is the day's sends. The whole reactor takes the engine's colour: calm
+ * accent when healthy, amber with issues, red when it needs a person, and grey
+ * and still when the engine cannot be read.
+ */
+export const AutomationModule = ({ index, compact, signals }: ModuleProps) => {
+  const system = resolveSystemState(signals)
+  const queue = dataOf(signals.queue)
+  const messaging = dataOf(signals.messaging)
+  const campaigns = dataOf(signals.campaigns)
+  const gradient = useId().replace(/:/g, '')
+
+  const delivered = queue && queue.sentToday > 0 ? Math.min(1, queue.deliveredToday / queue.sentToday) : 0
+  const replies = messaging?.replies ?? null
+  const replyShare = queue && queue.deliveredToday > 0 && replies != null ? Math.min(1, replies / queue.deliveredToday) : 0
+
+  const detail = [
+    campaigns && `${formatCount(campaigns.live)} campaign${campaigns.live === 1 ? '' : 's'} live`,
+    messaging?.sendersActive != null && `${formatCount(messaging.sendersActive)} sender${messaging.sendersActive === 1 ? '' : 's'} active`,
+  ].filter(Boolean).join(' · ') || (queue ? `${formatCount(queue.inFlight)} messages in flight` : 'Waiting on the delivery engine')
+
+  const outer = circumference(RING)
+  const inner = circumference(INNER)
+
+  return (
+    <ModuleCard title="Automation" index={index} compact={compact} variant="bare" className="nx-home-automation" link={{ label: 'Queue', onClick: () => goTo('/queue') }}>
+      <div className={cls('nx-home-reactor', `is-${system.tone}`, signals.queue.status === 'loading' && 'is-loading', compact && 'is-compact')}>
+        <span className="nx-home-reactor__halo" aria-hidden />
+        <span className="nx-home-reactor__sweep" aria-hidden />
+        <svg className="nx-home-reactor__rings" viewBox="0 0 280 280" aria-hidden>
+          <defs>
+            <linearGradient id={`${gradient}-arc`} x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="var(--tone-2)" />
+              <stop offset="100%" stopColor="var(--tone)" />
+            </linearGradient>
+          </defs>
+          <circle className="nx-home-reactor__ticks" cx="140" cy="140" r="131" />
+          <circle className="nx-home-reactor__track" cx="140" cy="140" r={RING} />
+          <circle
+            className="nx-home-reactor__arc"
+            cx="140"
+            cy="140"
+            r={RING}
+            stroke={`url(#${gradient}-arc)`}
+            style={{ '--c': outer, '--off': outer * (1 - delivered) } as CSSProperties}
+          />
+          <g className="nx-home-reactor__head" style={{ '--deg': `${delivered * 360}deg` } as CSSProperties}>
+            <circle cx="140" cy={140 - RING} r="7" />
+          </g>
+          <circle className="nx-home-reactor__track is-inner" cx="140" cy="140" r={INNER} />
+          <circle
+            className="nx-home-reactor__arc is-inner"
+            cx="140"
+            cy="140"
+            r={INNER}
+            style={{ '--c': inner, '--off': inner * (1 - replyShare) } as CSSProperties}
+          />
+          <circle className="nx-home-reactor__orbit" cx="140" cy="140" r="76" />
+        </svg>
+        <button type="button" className="nx-home-reactor__core" onClick={() => goTo('/queue')}>
+          <span className="nx-home-reactor__value"><Figure value={queue?.sentToday} /></span>
+          <span className="nx-home-reactor__label">sent today</span>
+          {queue && queue.sentToday > 0 ? (
+            <span className="nx-home-reactor__rate"><Counter value={Math.round(delivered * 100)} format={(n) => `${n}%`} /> delivered</span>
+          ) : null}
+        </button>
+      </div>
+
+      <div className="nx-home-system">
+        <span className="nx-home-system__title">
+          <span className={cls('nx-home-dot', system.tone !== 'unknown' && `is-${system.tone}`, system.tone !== 'unknown' && 'is-live')} aria-hidden />
+          {system.label}
+        </span>
+        <span className="nx-home-system__detail">{detail}</span>
+      </div>
+
+      {compact ? null : whenReady(signals.queue, 'Delivery engine', (q) => (
+        <div className="nx-home-chips">
+          <Chip label="Replies" value={replies} onClick={() => goTo('/inbox')} />
+          <Chip label="In queue" value={q.inFlight} onClick={() => goTo('/queue')} />
+          <Chip label="Failed" value={q.failedToday} tone={q.failedToday > 0 ? 'bad' : undefined} onClick={() => goTo('/queue')} />
+          <Chip label="Review" value={q.awaitingApproval} tone={q.awaitingApproval > 0 ? 'warn' : undefined} onClick={() => goTo('/queue')} />
+        </div>
+      ), 1)}
+    </ModuleCard>
+  )
 }
 
-const Metric = ({ label, value, tone, onClick, suffix }: MetricProps) => {
-  const content = (
-    <>
-      <span className={cls('nx-home-metric__value', tone && `is-${tone}`, value == null && 'nx-home-unavailable')}>
-        {value == null ? formatCount(value) : <Counter value={value} />}{value != null && suffix ? suffix : null}
-      </span>
-      <span className="nx-home-metric__label">{label}</span>
-    </>
-  )
-  return onClick ? (
-    <button type="button" className="nx-home-metric" onClick={onClick}>{content}</button>
-  ) : (
-    <div className="nx-home-metric">{content}</div>
-  )
-}
+const Chip = ({ label, value, tone, onClick }: { label: string; value: number | null; tone?: 'bad' | 'warn'; onClick: () => void }) => (
+  <button type="button" className={cls('nx-home-chip', tone && `is-${tone}`)} onClick={onClick}>
+    <span className="nx-home-chip__value"><Figure value={value} /></span>
+    <span className="nx-home-chip__label">{label}</span>
+  </button>
+)
 
-// ── Focus ───────────────────────────────────────────────────────────────────
+// ── Focus: a deck, not a list ───────────────────────────────────────────────
 
 interface FocusModuleProps {
   index: number
@@ -120,72 +228,112 @@ interface FocusModuleProps {
   anyAvailable: boolean
 }
 
+/**
+ * The priorities as a swipeable deck. The card in front is full size; the ones
+ * either side recede, dim and turn slightly away, so the deck reads as physical
+ * objects in space rather than rows. Transforms are written in a scroll-linked
+ * frame, never through React state.
+ */
 export const FocusModule = ({ index, compact, items, settled, anyAvailable }: FocusModuleProps) => {
-  const [expanded, setExpanded] = useState(false)
-  const limit = compact ? 3 : 4
-  const visible = expanded ? items.slice(0, 10) : items.slice(0, limit)
-  const hiddenCount = Math.min(items.length, 10) - visible.length
+  const deckRef = useRef<HTMLDivElement>(null)
+  const [active, setActive] = useState(0)
+  const cards = items.slice(0, 10)
   const urgent = items.filter((item) => item.tone === 'critical').length
+  const signature = cards.map((item) => item.id).join('|')
+
+  // Items arrive source by source and are re-ranked as they do. A snapped deck
+  // stays glued to the card it snapped to, so without this it would open on
+  // whichever card loaded first rather than on the most important one.
+  useEffect(() => {
+    deckRef.current?.scrollTo({ left: 0 })
+  }, [signature])
+
+  useEffect(() => {
+    const deck = deckRef.current
+    if (!deck) return
+    let frame = 0
+    const apply = () => {
+      frame = 0
+      const center = deck.scrollLeft + deck.clientWidth / 2
+      let nearest = 0
+      let nearestDistance = Infinity
+      Array.from(deck.children).forEach((child, i) => {
+        const card = child as HTMLElement
+        const mid = card.offsetLeft + card.offsetWidth / 2
+        const d = (mid - center) / card.offsetWidth
+        const a = Math.min(1, Math.abs(d))
+        card.style.setProperty('transform', `perspective(900px) rotateY(${(-d * 14).toFixed(2)}deg) scale(${(1 - a * 0.08).toFixed(3)})`)
+        card.style.setProperty('opacity', (1 - a * 0.45).toFixed(3))
+        if (Math.abs(d) < nearestDistance) { nearestDistance = Math.abs(d); nearest = i }
+      })
+      setActive((current) => (current === nearest ? current : nearest))
+    }
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(apply) }
+    onScroll()
+    deck.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      deck.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [cards.length])
 
   let body: ReactNode
-  if (items.length > 0) {
+  if (cards.length > 0) {
     body = (
       <>
-        <ul className="nx-home-focus">
-          {visible.map((item, i) => (
-            <li key={item.id} style={{ '--i': i } as CSSProperties}>
-              <button
-                type="button"
-                className={cls('nx-home-focus__item', `is-${item.tone}`)}
-                onClick={() => openTarget(item.target)}
-              >
-                <span className="nx-home-glyph"><Icon name={item.icon} size={17} strokeWidth={1.7} /></span>
-                <span className="nx-home-focus__text">
-                  <span className="nx-home-focus__title">{item.title}</span>
-                  <span className="nx-home-focus__detail">
-                    <span className="nx-home-focus__app">{item.app}</span>
-                    {item.detail}
-                  </span>
-                </span>
-                <span className="nx-home-focus__meta">
-                  {item.at ? <span>{relativeTime(item.at)}</span> : <Icon name="chevron-right" size={14} />}
-                </span>
-              </button>
-            </li>
+        <div className={cls('nx-home-deck', compact && 'is-compact')} ref={deckRef}>
+          {cards.map((item, i) => (
+            <button
+              key={item.id}
+              type="button"
+              className={cls('nx-home-focus__item', `is-${item.tone}`)}
+              style={{ '--i': i } as CSSProperties}
+              onClick={() => openTarget(item.target)}
+            >
+              <span className="nx-home-focus__glow" aria-hidden />
+              {item.tone === 'critical' ? <span className="nx-home-card__rim is-comet" aria-hidden><i /></span> : null}
+              <span className="nx-home-focus__top">
+                <span className="nx-home-glyph"><Icon name={item.icon} size={20} strokeWidth={1.7} /></span>
+                <span className="nx-home-focus__app">{item.app}</span>
+                <span className="nx-home-focus__time">{item.at ? relativeTime(item.at) : item.tone === 'critical' ? 'Now' : ''}</span>
+              </span>
+              <span className="nx-home-focus__title">{item.title}</span>
+              <span className="nx-home-focus__detail">{item.detail}</span>
+              <span className="nx-home-focus__cta">Open {item.app}<Icon name="arrow-up-right" size={13} /></span>
+            </button>
           ))}
-        </ul>
-        {hiddenCount > 0 || expanded ? (
-          <button type="button" className="nx-home-more" onClick={() => setExpanded((open) => !open)}>
-            {expanded ? 'Show less' : `${hiddenCount} more`}
-            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={13} />
-          </button>
+        </div>
+        {cards.length > 1 ? (
+          <div className="nx-home-pager" aria-hidden>
+            {cards.map((item, i) => <i key={item.id} className={cls(i === active && 'is-on', `is-${item.tone}`)} />)}
+          </div>
         ) : null}
       </>
     )
   } else if (!settled) {
-    body = <Loading lines={3} />
+    body = <div className="nx-home-deck-skeleton"><Loading lines={3} /></div>
   } else if (!anyAvailable) {
-    body = <Unavailable what="Priorities" reason="sources" />
+    body = <Unavailable what="Priorities" />
   } else {
     body = (
-      <div className="nx-home-state is-calm" role="status">
-        <span className="nx-home-glyph is-good"><Icon name="check" size={17} /></span>
-        <span>
-          <strong>You're clear</strong>
-          Nothing needs you right now. Automation is handling the rest.
-        </span>
+      <div className="nx-home-clear" role="status">
+        <span className="nx-home-clear__mark" aria-hidden><Icon name="check" size={22} strokeWidth={2} /></span>
+        <strong>You're clear</strong>
+        <span>Nothing needs you right now. Automation is handling the rest.</span>
       </div>
     )
   }
 
   return (
-    <ModuleCard title="Focus" index={index} compact={compact} emphasis count={items.length || null} countTone={urgent > 0 ? 'bad' : undefined}>
+    <ModuleCard title="Focus" index={index} compact={compact} variant="bare" count={items.length || null} countTone={urgent > 0 ? 'bad' : undefined}>
       {body}
     </ModuleCard>
   )
 }
 
-// ── Quick actions ───────────────────────────────────────────────────────────
+// ── Quick actions: a rail ───────────────────────────────────────────────────
 
 interface QuickAction {
   id: string
@@ -196,7 +344,7 @@ interface QuickAction {
   primary?: boolean
 }
 
-export const QuickActionsModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
+export const QuickActionsModule = ({ index, compact, signals }: ModuleProps) => {
   const inbox = dataOf(signals.inbox)
   const queue = dataOf(signals.queue)
   const actions: QuickAction[] = [
@@ -210,7 +358,7 @@ export const QuickActionsModule = ({ index, compact, signals }: { index: number;
     { id: 'calendar', label: 'Calendar', icon: 'calendar', onClick: () => goTo('/calendar') },
   ]
   return (
-    <ModuleCard title="Quick actions" index={index} compact={compact}>
+    <ModuleCard title="Quick actions" index={index} compact={compact} variant="bare">
       <div className="nx-home-actions">
         {actions.map((action) => (
           <button
@@ -221,7 +369,7 @@ export const QuickActionsModule = ({ index, compact, signals }: { index: number;
           >
             <span className="nx-home-action__glyph">
               <span className="nx-home-action__well" />
-              <Icon name={action.icon} size={19} strokeWidth={1.6} />
+              <Icon name={action.icon} size={20} strokeWidth={1.6} />
               {action.badge ? (
                 <span className="nx-home-action__badge">{action.badge > 99 ? '99+' : action.badge}</span>
               ) : null}
@@ -234,200 +382,101 @@ export const QuickActionsModule = ({ index, compact, signals }: { index: number;
   )
 }
 
-// ── Automation ──────────────────────────────────────────────────────────────
+// ── Inbox tile ──────────────────────────────────────────────────────────────
 
-/**
- * The machine's heartbeat: a sphere of liquid colour that turns slowly while the
- * engine is healthy, warms to amber with issues, runs red when it needs a person,
- * and goes still and grey when the engine cannot be read at all.
- */
-const LiquidOrb = ({ tone }: { tone: 'good' | 'warn' | 'bad' | 'unknown' }) => (
-  <span className={cls('nx-home-orb', `is-${tone}`)} aria-hidden>
-    <span className="nx-home-orb__glow" />
-    <span className="nx-home-orb__body">
-      <span className="nx-home-orb__swirl" />
-      <span className="nx-home-orb__swirl nx-home-orb__swirl--b" />
-      <span className="nx-home-orb__core" />
-      <span className="nx-home-orb__gloss" />
-    </span>
-    <Icon name={tone === 'good' ? 'check' : tone === 'unknown' ? 'slash' : 'alert'} size={15} strokeWidth={2.2} />
-  </span>
-)
-
-export const AutomationModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
-  const system = resolveSystemState(signals)
-  const queue = dataOf(signals.queue)
-  const messaging = dataOf(signals.messaging)
-  const campaigns = dataOf(signals.campaigns)
-
-  const detail = [
-    campaigns && `${formatCount(campaigns.live)} campaign${campaigns.live === 1 ? '' : 's'} live`,
-    messaging?.sendersActive != null && `${formatCount(messaging.sendersActive)} sender${messaging.sendersActive === 1 ? '' : 's'} active`,
-  ].filter(Boolean).join(' · ') || (queue ? `${formatCount(queue.inFlight)} messages in flight` : 'Waiting on the delivery engine')
-
-  return (
-    <ModuleCard title="Automation" index={index} compact={compact} link={{ label: 'Queue', onClick: () => goTo('/queue') }}>
-      <div className="nx-home-system">
-        <LiquidOrb tone={system.tone} />
-        <span>
-          <span className="nx-home-system__title">{system.label}</span>
-          <span className="nx-home-system__detail">{detail}</span>
-        </span>
-      </div>
-      {compact ? null : whenReady(signals.queue, 'Delivery engine', (q) => {
-        const deliveredPct = q.sentToday > 0 ? Math.round((q.deliveredToday / q.sentToday) * 100) : null
-        return (
-          <>
-            <button type="button" className="nx-home-hero" onClick={() => goTo('/queue')}>
-              <span className="nx-home-hero__value"><Counter value={q.sentToday} /></span>
-              <span className="nx-home-hero__label">
-                sent today
-                {deliveredPct != null ? <b><Counter value={deliveredPct} format={(n) => `${n}%`} /> delivered</b> : null}
-              </span>
-            </button>
-            <div className="nx-home-metrics is-four">
-              <Metric label="Replies" value={messaging?.replies ?? null} onClick={() => goTo('/inbox')} />
-              <Metric label="In queue" value={q.inFlight} onClick={() => goTo('/queue')} />
-              <Metric label="Failed" value={q.failedToday} tone={q.failedToday > 0 ? 'bad' : undefined} onClick={() => goTo('/queue')} />
-              <Metric label="Review" value={q.awaitingApproval} tone={q.awaitingApproval > 0 ? 'warn' : undefined} onClick={() => goTo('/queue')} />
-            </div>
-          </>
-        )
-      }, 2)}
-    </ModuleCard>
-  )
-}
-
-// ── Inbox ───────────────────────────────────────────────────────────────────
-
-const ThreadRow = ({ thread }: { thread: HomeThread }) => (
-  <button type="button" className={cls('nx-home-row', thread.unread && 'is-unread')} onClick={() => openThread(thread)}>
-    <span className={cls('nx-home-avatar', thread.hot && 'is-hot')} aria-hidden>{initials(thread.seller)}</span>
-    <span className="nx-home-row__main">
-      <span className="nx-home-row__title">
-        <span>{thread.seller}</span>
-        {thread.hot ? <span className="nx-home-tag is-warn">Hot</span> : null}
-      </span>
-      <span className="nx-home-row__sub">{thread.preview || thread.address || 'Open the conversation'}</span>
-    </span>
-    <span className="nx-home-row__meta">{relativeTime(thread.at)}</span>
-  </button>
-)
-
-export const InboxModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
+export const InboxModule = ({ index, compact, signals }: ModuleProps) => {
   const inbox = dataOf(signals.inbox)
   return (
-    <ModuleCard title="Inbox" index={index} compact={compact} count={inbox?.newReplies ?? null} link={{ label: 'Open', onClick: () => goTo('/inbox') }}>
-      {whenReady(signals.inbox, 'Inbox', (data) => (
-        <>
-          <div className="nx-home-metrics">
-            <Metric label="New replies" value={data.newReplies} onClick={() => goTo('/inbox')} />
-            <Metric label="Priority" value={data.priority} tone={(data.priority ?? 0) > 0 ? 'warn' : undefined} onClick={() => goTo('/inbox')} />
-            <Metric label="Need attention" value={data.needsAttention} onClick={() => goTo('/inbox')} />
-          </div>
-          {!compact && data.threads.length > 0 ? (
-            <div className="nx-home-rows">
-              {data.threads.slice(0, 3).map((thread) => <ThreadRow key={thread.id} thread={thread} />)}
-            </div>
-          ) : null}
-        </>
-      ), 3)}
-    </ModuleCard>
-  )
-}
-
-// ── Pipeline ────────────────────────────────────────────────────────────────
-
-export const PipelineModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
-  const pipeline = dataOf(signals.pipeline)
-  return (
-    <ModuleCard title="Pipeline" index={index} compact={compact} link={{ label: pipeline?.active != null ? `${formatCount(pipeline.active)} active` : 'Open', onClick: () => goTo('/pipeline') }}>
-      {whenReady(signals.pipeline, 'Pipeline', (data) => {
-        const total = data.buckets.reduce((sum, bucket) => sum + bucket.count, 0)
+    <ModuleCard title="Inbox" index={index} compact={compact} span="half" tall hue="var(--home-accent)" count={inbox?.newReplies ?? null} link={{ label: '', onClick: () => goTo('/inbox') }}>
+      {whenReady(signals.inbox, 'Inbox', (data) => {
         return (
           <>
-            <div className={cls('nx-home-stagebar', total === 0 && 'is-empty')} role="img" aria-label={data.buckets.map((b) => `${b.label} ${b.count}`).join(', ')}>
-              {data.buckets.map((bucket, i) => (
-                <span
-                  key={bucket.id}
-                  className="nx-home-stagebar__seg"
-                  style={{ flexGrow: total === 0 ? 1 : Math.max(bucket.count, total * 0.02), '--seg': bucket.color, '--i': i } as CSSProperties}
-                />
-              ))}
-            </div>
-            {compact ? null : (
-              <div className="nx-home-stages">
-                {data.buckets.map((bucket) => (
-                  <button key={bucket.id} type="button" className="nx-home-stage" onClick={() => goTo('/pipeline')} style={{ '--seg': bucket.color } as CSSProperties}>
-                    <span className="nx-home-stage__label"><i />{bucket.label}</span>
-                    <span className="nx-home-stage__value"><Counter value={bucket.count} /></span>
+            <button type="button" className="nx-home-big" onClick={() => goTo('/inbox')}>
+              <span className="nx-home-big__value"><Figure value={data.newReplies} /></span>
+              <span className="nx-home-big__label">replies waiting</span>
+            </button>
+            {data.threads.length > 0 ? (
+              <div className="nx-home-faces" aria-label="Latest sellers">
+                {data.threads.slice(0, 4).map((thread, i) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    className={cls('nx-home-avatar', thread.hot && 'is-hot')}
+                    style={{ '--i': i } as CSSProperties}
+                    aria-label={`Open ${thread.seller}`}
+                    onClick={() => openThread(thread)}
+                  >
+                    {initials(thread.seller)}
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
+            {!compact && data.threads.length > 0 ? (
+              <div className="nx-home-bubbles">
+                {data.threads.slice(0, 3).map((thread, i) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    className={cls('nx-home-bubble', thread.hot && 'is-hot')}
+                    style={{ '--i': i } as CSSProperties}
+                    onClick={() => openThread(thread)}
+                  >
+                    <span className="nx-home-bubble__who">
+                      <b>{thread.seller}</b>
+                      <span>{relativeTime(thread.at)}</span>
+                    </span>
+                    <span className="nx-home-bubble__text">{thread.preview || thread.address || 'Open the conversation'}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="nx-home-minis">
+              <span><b className={cls((data.priority ?? 0) > 0 && 'is-warn')}><Figure value={data.priority} /></b>priority</span>
+              <span><b><Figure value={data.needsAttention} /></b>attention</span>
+            </div>
           </>
         )
-      })}
+      }, 4)}
     </ModuleCard>
   )
 }
 
-// ── Campaigns ───────────────────────────────────────────────────────────────
+// ── Campaigns tile ──────────────────────────────────────────────────────────
 
-export const CampaignsModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
+export const CampaignsModule = ({ index, compact, signals }: ModuleProps) => {
   const campaigns = dataOf(signals.campaigns)
-  const queue = dataOf(signals.queue)
   return (
     <ModuleCard
       title="Campaigns"
       index={index}
       compact={compact}
+      span="half"
+      hue="color-mix(in srgb, var(--home-accent) 30%, #8b5cf6)"
       count={campaigns?.attention.length || null}
       countTone="bad"
-      link={{ label: 'Command', onClick: () => goTo('/campaign-command') }}
+      link={{ label: '', onClick: () => goTo('/campaign-command') }}
     >
       {whenReady(signals.campaigns, 'Campaigns', (data) => {
-        const rows = [...data.attention.slice(0, 1), ...data.highlighted.filter((c) => !data.attention.some((a) => a.id === c.id))].slice(0, 2)
+        const lead = data.highlighted[0]
+        const progress = lead && lead.total > 0 ? Math.min(100, (lead.sent / lead.total) * 100) : 0
         return (
           <>
-            <div className="nx-home-metrics">
-              <Metric label="Live" value={data.live} tone={data.live > 0 ? 'good' : undefined} onClick={() => goTo('/campaign-command')} />
-              <Metric label="Sellers ready" value={data.readyTargets} onClick={() => goTo('/campaign-command')} />
-              <Metric label="Sent today" value={queue?.sentToday ?? null} onClick={() => goTo('/queue')} />
+            <button type="button" className="nx-home-big" onClick={() => goTo('/campaign-command')}>
+              <span className="nx-home-big__value is-live">
+                {data.live > 0 ? <span className="nx-home-live" aria-hidden><i /><i /></span> : null}
+                <Counter value={data.live} />
+              </span>
+              <span className="nx-home-big__label">live now</span>
+            </button>
+            <div className="nx-home-minis is-stack">
+              <span><b><Counter value={data.readyTargets} /></b>sellers ready</span>
+              {data.attention.length > 0 ? <span className="is-warn"><b>{data.attention.length}</b>flagged</span> : null}
             </div>
-            {!compact && rows.length > 0 ? (
-              <div className="nx-home-rows">
-                {rows.map((campaign) => {
-                  const progress = campaign.total > 0 ? Math.min(100, (campaign.sent / campaign.total) * 100) : 0
-                  return (
-                    <button key={campaign.id} type="button" className="nx-home-row" onClick={() => goTo('/campaign-command')}>
-                      <span className={cls('nx-home-glyph', campaign.issue ? 'is-warn' : undefined)} aria-hidden>
-                        <Icon name={campaign.issue ? 'alert' : 'bolt'} size={16} />
-                      </span>
-                      <span className="nx-home-row__main">
-                        <span className="nx-home-row__title">
-                          <span>{campaign.name}</span>
-                        </span>
-                        <span className="nx-home-row__sub">
-                          {campaign.issue ?? [campaign.market, `${formatCount(campaign.sent)} sent`, `${formatCount(campaign.replies)} replies`].filter(Boolean).join(' · ')}
-                        </span>
-                        <span className={cls('nx-home-progress', campaign.issue && 'is-warn')}>
-                          <i style={{ '--p': `${progress}%` } as CSSProperties} />
-                        </span>
-                      </span>
-                      <span className={cls('nx-home-tag', campaign.status === 'paused' || campaign.status === 'failed' ? 'is-warn' : 'is-good')}>
-                        {campaign.status.replace(/_/g, ' ')}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : null}
-            {data.live === 0 && data.attention.length === 0 && !compact ? (
-              <div className="nx-home-state" style={{ marginTop: 12 }}>
-                <Icon name="bolt" size={16} />
-                <span><strong>No campaigns running</strong>Build one when you're ready to reach new sellers.</span>
-              </div>
+            {!compact && lead ? (
+              <button type="button" className="nx-home-mini-campaign" onClick={() => goTo('/campaign-command')}>
+                <span>{lead.name}</span>
+                <span className="nx-home-progress"><i style={{ '--p': `${progress}%` } as CSSProperties} /></span>
+              </button>
             ) : null}
           </>
         )
@@ -436,122 +485,180 @@ export const CampaignsModule = ({ index, compact, signals }: { index: number; co
   )
 }
 
-// ── Deals ───────────────────────────────────────────────────────────────────
+// ── Deals tile ──────────────────────────────────────────────────────────────
 
-const formatClosingDate = (iso: string) => {
-  const date = new Date(iso)
-  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-}
+const formatClosingDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
-export const DealsModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => {
+export const DealsModule = ({ index, compact, signals }: ModuleProps) => {
   const pipeline = dataOf(signals.pipeline)
   const closings = dataOf(signals.closings)
-  const settled = signals.pipeline.status !== 'loading' || signals.closings.status !== 'loading'
+  const bothSettled = signals.pipeline.status !== 'loading' && signals.closings.status !== 'loading'
 
   let body: ReactNode
   if (!pipeline && !closings) {
-    body = settled && signals.pipeline.status !== 'loading' && signals.closings.status !== 'loading'
-      ? <Unavailable what="Deal flow" reason="sources" />
-      : <Loading lines={2} />
+    body = bothSettled ? <Unavailable what="Deal flow" /> : <Loading lines={3} />
   } else {
     body = (
       <>
-        <div className="nx-home-metrics is-two">
-          <Metric label="Offers out" value={pipeline?.offers ?? null} onClick={() => goTo('/pipeline')} />
-          <Metric label="Contracts sent" value={pipeline?.contractsOut ?? null} onClick={() => goTo('/pipeline')} />
-          <Metric label="Under contract" value={closings?.underContract ?? pipeline?.underContract ?? null} onClick={() => goTo('/closing-desk')} />
-          <Metric label="Closing this week" value={closings?.closingsThisWeek ?? null} tone={(closings?.closingsThisWeek ?? 0) > 0 ? 'good' : undefined} onClick={() => goTo('/closing-desk')} />
-        </div>
+        <button type="button" className="nx-home-big" onClick={() => goTo('/pipeline')}>
+          <span className="nx-home-big__value"><Figure value={pipeline?.offers} /></span>
+          <span className="nx-home-big__label">offers out</span>
+        </button>
+        <ul className="nx-home-ledger">
+          <li><i style={{ '--dot': '#34d399' } as CSSProperties} />Contracts<b><Figure value={pipeline?.contractsOut} /></b></li>
+          <li><i style={{ '--dot': '#60a5fa' } as CSSProperties} />Under contract<b><Figure value={closings?.underContract ?? pipeline?.underContract} /></b></li>
+          <li><i style={{ '--dot': '#f472b6' } as CSSProperties} />This week<b><Figure value={closings?.closingsThisWeek} /></b></li>
+        </ul>
         {!compact && closings?.next ? (
-          <div className="nx-home-rows">
-            <button type="button" className="nx-home-row" onClick={() => goTo('/closing-desk')}>
-              <span className="nx-home-glyph is-good" aria-hidden><Icon name="calendar" size={16} /></span>
-              <span className="nx-home-row__main">
-                <span className="nx-home-row__title"><span>Next closing · {closings.next.name}</span></span>
-                <span className="nx-home-row__sub">{closings.next.address ?? 'Address pending'}</span>
-              </span>
-              <span className="nx-home-row__meta">{formatClosingDate(closings.next.date)}</span>
-            </button>
-          </div>
-        ) : null}
-        {!compact && closings && closings.titleBlocked + closings.actionRequired > 0 ? (
-          <div className="nx-home-rows">
-            <button type="button" className="nx-home-row" onClick={() => goTo('/closing-desk')}>
-              <span className="nx-home-glyph is-warn" aria-hidden><Icon name="shield" size={16} /></span>
-              <span className="nx-home-row__main">
-                <span className="nx-home-row__title"><span>Closing blockers</span></span>
-                <span className="nx-home-row__sub">
-                  {[closings.titleBlocked > 0 && `${closings.titleBlocked} title`, closings.actionRequired > 0 && `${closings.actionRequired} awaiting a party`].filter(Boolean).join(' · ')}
-                </span>
-              </span>
-              <Icon name="chevron-right" size={14} />
-            </button>
-          </div>
+          <button type="button" className="nx-home-next" onClick={() => goTo('/closing-desk')}>
+            <Icon name="calendar" size={13} />
+            <span>{closings.next.name}</span>
+            <b>{formatClosingDate(closings.next.date)}</b>
+          </button>
         ) : null}
       </>
     )
   }
 
   return (
-    <ModuleCard title="Deals" index={index} compact={compact} link={{ label: 'Closing desk', onClick: () => goTo('/closing-desk') }}>
+    <ModuleCard title="Deals" index={index} compact={compact} span="half" hue="color-mix(in srgb, var(--home-accent) 25%, #10b981)" link={{ label: '', onClick: () => goTo('/closing-desk') }}>
       {body}
     </ModuleCard>
   )
 }
 
-// ── Markets ─────────────────────────────────────────────────────────────────
+// ── Pipeline: a liquid funnel ───────────────────────────────────────────────
 
-export const MarketsModule = ({ index, compact, signals }: { index: number; compact: boolean; signals: HomeSignals }) => (
-  <ModuleCard title="Market signals" index={index} compact={compact} link={{ label: 'Map', onClick: () => goTo('/map') }}>
-    {whenReady(signals.markets, 'Market signals', (markets) => {
-      if (markets.length === 0) {
-        return (
+const FUNNEL_W = 320
+const FUNNEL_H = 104
+const FUNNEL_MID = FUNNEL_H / 2
+
+/** A smooth band whose thickness follows each stage's count. */
+function funnelPath(buckets: PipelineBucket[]) {
+  const peak = Math.max(1, ...buckets.map((bucket) => bucket.count))
+  const points = buckets.map((bucket, i) => ({
+    x: (FUNNEL_W * (i + 0.5)) / buckets.length,
+    t: 10 + 84 * Math.sqrt(bucket.count / peak),
+  }))
+  const edge = [{ x: 0, t: points[0].t }, ...points, { x: FUNNEL_W, t: points[points.length - 1].t }]
+  const curve = (pts: typeof edge, sign: 1 | -1) =>
+    pts.slice(1).map((p, i) => {
+      const prev = pts[i]
+      const dx = (p.x - prev.x) / 2
+      return `C${prev.x + dx},${FUNNEL_MID + (sign * prev.t) / 2} ${p.x - dx},${FUNNEL_MID + (sign * p.t) / 2} ${p.x},${FUNNEL_MID + (sign * p.t) / 2}`
+    }).join(' ')
+  const reversed = [...edge].reverse()
+  return `M0,${FUNNEL_MID - edge[0].t / 2} ${curve(edge, -1)} L${FUNNEL_W},${FUNNEL_MID + reversed[0].t / 2} ${curve(reversed, 1)} Z`
+}
+
+/**
+ * The pipeline as one body of liquid: its thickness at each stage is that stage's
+ * share (square-root scaled, so a thin late stage stays visible beside a fat top
+ * of funnel), with light washing through it and particles flowing downstream.
+ */
+const Funnel = ({ buckets }: { buckets: PipelineBucket[] }) => {
+  const id = useId().replace(/:/g, '')
+  const d = funnelPath(buckets)
+  return (
+    <svg className="nx-home-funnel" viewBox={`0 0 ${FUNNEL_W} ${FUNNEL_H}`} preserveAspectRatio="none" role="img" aria-label={buckets.map((b) => `${b.label} ${b.count}`).join(', ')}>
+      <defs>
+        <linearGradient id={`${id}-fill`} x1="0" y1="0" x2="1" y2="0">
+          {buckets.map((bucket, i) => (
+            <stop key={bucket.id} offset={`${((i + 0.5) / buckets.length) * 100}%`} stopColor={bucket.color} />
+          ))}
+        </linearGradient>
+        <linearGradient id={`${id}-sheen`} gradientUnits="userSpaceOnUse" x1="-90" y1="0" x2="0" y2="0">
+          <stop offset="0%" stopColor="#fff" stopOpacity="0" />
+          <stop offset="50%" stopColor="#fff" stopOpacity="0.5" />
+          <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+          <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to={`${FUNNEL_W + 180} 0`} dur="4.5s" begin="1.2s" repeatCount="indefinite" />
+        </linearGradient>
+        <linearGradient id={`${id}-depth`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#fff" stopOpacity="0.38" />
+          <stop offset="42%" stopColor="#fff" stopOpacity="0" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0.4" />
+        </linearGradient>
+      </defs>
+      <g className="nx-home-funnel__body">
+        <path d={d} fill={`url(#${id}-fill)`} className="nx-home-funnel__glow" />
+        <path d={d} fill={`url(#${id}-fill)`} />
+        <path d={d} fill={`url(#${id}-depth)`} />
+        <path d={d} fill={`url(#${id}-sheen)`} />
+        {Array.from({ length: 9 }, (_, i) => {
+          const y = FUNNEL_MID + ((i % 3) - 1) * 2.4
+          return (
+            <circle key={i} className="nx-home-funnel__particle" r={i % 2 ? 1.2 : 1.7} cx="0" cy="0">
+              <animateMotion path={`M-6,${y} L${FUNNEL_W + 6},${y}`} dur={`${3.4 + (i % 4) * 0.7}s`} begin={`${(i * 0.53).toFixed(2)}s`} repeatCount="indefinite" />
+            </circle>
+          )
+        })}
+      </g>
+    </svg>
+  )
+}
+
+export const PipelineModule = ({ index, compact, signals }: ModuleProps) => {
+  const pipeline = dataOf(signals.pipeline)
+  return (
+    <ModuleCard
+      title="Pipeline"
+      index={index}
+      compact={compact}
+      hue="color-mix(in srgb, var(--home-accent) 40%, #6366f1)"
+      link={{ label: pipeline?.active != null ? `${formatCount(pipeline.active)} active` : 'Open', onClick: () => goTo('/pipeline') }}
+    >
+      {whenReady(signals.pipeline, 'Pipeline', (data) => (
+        <>
+          <Funnel buckets={data.buckets} />
+          <div className="nx-home-stages">
+            {data.buckets.map((bucket) => (
+              <button key={bucket.id} type="button" className="nx-home-stage" onClick={() => goTo('/pipeline')} style={{ '--seg': bucket.color } as CSSProperties}>
+                <span className="nx-home-stage__value"><Counter value={bucket.count} /></span>
+                <span className="nx-home-stage__label"><i />{bucket.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ), 3)}
+    </ModuleCard>
+  )
+}
+
+// ── Markets: the constellation ──────────────────────────────────────────────
+
+export const MarketsModule = ({ index, compact, signals }: ModuleProps) => (
+  <ModuleCard title="Market signals" index={index} compact={compact} hue="color-mix(in srgb, var(--home-accent) 50%, #14b8a6)" link={{ label: 'Map', onClick: () => goTo('/map') }}>
+    {whenReady(signals.markets, 'Market signals', (markets) => (
+      <>
+        <button type="button" className="nx-home-map" onClick={() => goTo('/map')} aria-label="Open the map">
+          <MarketConstellation markets={markets} />
+        </button>
+        {markets.length === 0 ? (
           <div className="nx-home-state">
             <Icon name="map" size={16} />
             <span><strong>No market activity this week</strong>Signals appear once outreach is sending.</span>
           </div>
-        )
-      }
-      const rows = markets.slice(0, compact ? 3 : 4)
-      const top = Math.max(1, ...rows.map((row) => row.replied))
-      return (
-        <div className="nx-home-rows is-ranked" style={{ marginTop: 4 }}>
-          {rows.map((row, i) => (
-            <button key={`${row.market}-${i}`} type="button" className="nx-home-row" onClick={() => goTo('/map')}>
-              <span className="nx-home-rank">{i + 1}</span>
-              <span className="nx-home-row__main">
-                <span className="nx-home-row__title">
-                  <span>{row.market}</span>
+        ) : (
+          <ol className="nx-home-leaders">
+            {markets.slice(0, compact ? 2 : 3).map((row, i) => (
+              <li key={`${row.market}-${i}`}>
+                <button type="button" onClick={() => goTo('/map')}>
+                  <span className="nx-home-rank">{i + 1}</span>
+                  <span className="nx-home-leaders__name">{row.market}</span>
                   {row.positive > 0 ? <span className="nx-home-tag is-good">{row.positive} warm</span> : null}
-                </span>
-                <span className="nx-home-progress"><i style={{ '--p': `${(row.replied / top) * 100}%` } as CSSProperties} /></span>
-              </span>
-              <span className="nx-home-row__meta">{formatCount(row.replied)} replies</span>
-            </button>
-          ))}
-        </div>
-      )
-    }, 3)}
+                  <span className="nx-home-leaders__value"><Counter value={row.replied} /> <small>replies</small></span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </>
+    ), 3)}
   </ModuleCard>
 )
 
 // ── Live activity ───────────────────────────────────────────────────────────
-
-interface ActivityEntry {
-  id: string
-  tone: 'good' | 'warn' | 'bad' | 'neutral'
-  title: string
-  detail: string
-  at: string | null
-  onClick: () => void
-}
-
-const NOTIFICATION_TONE: Record<NotificationEvent['severity'], ActivityEntry['tone']> = {
-  positive: 'good',
-  neutral: 'neutral',
-  warning: 'warn',
-  critical: 'bad',
-}
 
 export const ActivityModule = ({
   index,
@@ -559,51 +666,20 @@ export const ActivityModule = ({
   signals,
   notifications,
   notificationsReady,
-}: {
-  index: number
-  compact: boolean
-  signals: HomeSignals
-  notifications: NotificationEvent[]
-  notificationsReady: boolean
-}) => {
+}: ModuleProps & { notifications: NotificationEvent[]; notificationsReady: boolean }) => {
   const inbox = dataOf(signals.inbox)
-  const entries = useMemo<ActivityEntry[]>(() => {
-    const fromNotifications = notifications
-      .filter((event) => event.status !== 'dismissed')
-      .map((event): ActivityEntry => ({
-        id: `n-${event.id}`,
-        tone: NOTIFICATION_TONE[event.severity],
-        title: event.title,
-        detail: event.summary || event.body,
-        at: event.createdAt,
-        onClick: () => goTo(notificationPath(event)),
-      }))
-    const notifiedThreads = new Set(notifications.map((event) => event.threadKey).filter(Boolean))
-    const fromReplies = (inbox?.threads ?? [])
-      .filter((thread) => thread.at && !notifiedThreads.has(thread.threadKey))
-      .map((thread): ActivityEntry => ({
-        id: `r-${thread.id}`,
-        tone: thread.hot ? 'warn' : 'good',
-        title: `${thread.seller} replied`,
-        detail: thread.preview || thread.address || '',
-        at: thread.at,
-        onClick: () => openThread(thread),
-      }))
-    return [...fromNotifications, ...fromReplies]
-      .sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime())
-      .slice(0, compact ? 3 : 6)
-  }, [compact, inbox?.threads, notifications])
-
+  const entries = useMemo(() => buildActivity(notifications, inbox, compact ? 3 : 6), [compact, inbox, notifications])
   const settled = notificationsReady || signals.inbox.status !== 'loading'
 
   return (
-    <ModuleCard title="Live activity" index={index} compact={compact} link={{ label: 'All', onClick: openNotifications }}>
+    <ModuleCard title="Live activity" index={index} compact={compact} hue="var(--home-accent)" link={{ label: 'All', onClick: openNotifications }} className="nx-home-activity">
+      <span className="nx-home-onair" aria-hidden><i />Live</span>
       {entries.length > 0 ? (
         <ul className="nx-home-feed" aria-live="polite">
           {entries.map((entry, i) => (
-            <li key={entry.id} className="nx-home-feed__item" style={{ animationDelay: `${i * 40}ms` }}>
+            <li key={entry.id} className="nx-home-feed__item" style={{ '--i': i } as CSSProperties}>
               <span className={cls('nx-home-dot', entry.tone !== 'neutral' && `is-${entry.tone}`, i === 0 && 'is-live')} aria-hidden />
-              <button type="button" className="nx-home-feed__text" onClick={entry.onClick} style={{ textAlign: 'left', padding: 0 }}>
+              <button type="button" className="nx-home-feed__text" onClick={() => openTarget(entry.target)}>
                 <b>{entry.title}</b>
                 {entry.detail ? <small>{entry.detail}</small> : null}
               </button>
