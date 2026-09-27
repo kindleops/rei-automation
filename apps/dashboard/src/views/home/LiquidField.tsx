@@ -32,6 +32,7 @@ uniform vec3 uA;
 uniform vec3 uB;
 uniform vec3 uC;
 uniform vec3 uTouch;
+uniform float uVel;
 
 vec3 permute(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
 float snoise(vec2 v) {
@@ -77,10 +78,12 @@ void main() {
 
   // Large, slow forms: low frequency, folded twice for the ink-in-water motion.
   vec2 s = p * 0.62;
+  // Scrolling stirs the whole body of liquid, harder the faster it moves.
+  s += vec2(0.0, uVel * 0.35);
   vec2 q = vec2(fbm(s + vec2(0.0, t)), fbm(s + vec2(5.2, -t * 0.8)));
   vec2 r = vec2(fbm(s + 1.7 * q + vec2(1.7, 9.2) + t * 0.9),
                 fbm(s + 1.7 * q + vec2(8.3, 2.8) - t * 0.7));
-  float n = fbm(s + 1.9 * r);
+  float n = fbm(s + (1.9 + uVel * 1.4) * r);
 
   vec3 col = mix(uA, uB, smoothstep(-0.45, 0.55, r.x));
   col = mix(col, uC, smoothstep(0.25, 0.9, length(q)));
@@ -91,6 +94,9 @@ void main() {
   float crest = pow(smoothstep(0.35, 0.0, abs(n - 0.18)), 2.0);
   vec3 dark = mix(uBase, col * 0.55, body * body * 0.85);
   dark += col * crest * 0.22 * (0.4 + body);
+  // Caustic glints: light caught where the currents fold over.
+  float glint = pow(max(0.0, snoise(s * 3.1 + r * 2.2 + vec2(t * 3.0, -t * 2.0))), 8.0);
+  dark += mix(col, vec3(1.0), 0.45) * glint * (0.5 + body) * (0.35 + uVel);
   dark *= mix(0.55, 1.0, smoothstep(0.0, 0.75, uv.y));
 
   vec3 light = mix(vec3(0.955, 0.965, 0.985), col, 0.12 + 0.28 * body);
@@ -167,7 +173,7 @@ export function LiquidField({ scroller, touchRoot }: {
 
     const u = (name: string) => gl.getUniformLocation(program, name)
     const uRes = u('uRes'), uTime = u('uTime'), uScroll = u('uScroll'), uLight = u('uLight')
-    const uBase = u('uBase'), uA = u('uA'), uB = u('uB'), uC = u('uC'), uTouch = u('uTouch')
+    const uBase = u('uBase'), uA = u('uA'), uB = u('uB'), uC = u('uC'), uTouch = u('uTouch'), uVel = u('uVel')
 
     const applyPalette = () => {
       const palette = readPalette()
@@ -215,11 +221,18 @@ export function LiquidField({ scroller, touchRoot }: {
 
     let frame = 0
     let lost = false
+    let lastScroll = scroller.current?.scrollTop ?? 0
+    let velocity = 0
     const start = performance.now()
     const draw = (now: number) => {
       if (lost) return
       touch.strength += (touch.target - touch.strength) * (touch.target > touch.strength ? 0.12 : 0.025)
       const scrollTop = scroller.current?.scrollTop ?? 0
+      // Scroll speed, eased: rises with a flick, settles back over a second.
+      const speed = Math.min(1, Math.abs(scrollTop - lastScroll) / 60)
+      lastScroll = scrollTop
+      velocity += (speed - velocity) * (speed > velocity ? 0.3 : 0.04)
+      gl.uniform1f(uVel, velocity)
       gl.uniform1f(uTime, prefersStill() ? 12 : (now - start) / 1000)
       gl.uniform1f(uScroll, (scrollTop / Math.max(1, canvas.clientHeight)) * 0.35)
       gl.uniform3f(uTouch, touch.x, touch.y, touch.strength)

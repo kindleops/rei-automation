@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bucketPipelineStages,
+  summarizeCalendar,
   buildFocusItems,
   greetingFor,
   rankMarkets,
@@ -10,6 +11,10 @@ import {
 } from './home-signals'
 import { DEFAULT_HOME_LAYOUT, HOME_MODULE_IDS, moveHomeModule, sanitizeHomeLayout } from './home-layout-store'
 import type { NotificationEvent } from '../../domain/notifications/notification-contract'
+import type { CalendarEvent } from '../../lib/data/calendarData'
+import { projectAlbersUsa } from './home-geo'
+import { easeOutQuart } from './home-motion'
+import { US_DOTS, US_STATES } from './us-dot-matrix'
 
 const NOW = Date.parse('2026-09-27T15:00:00Z')
 
@@ -208,5 +213,77 @@ describe('Home layout store', () => {
     const moved = moveHomeModule(DEFAULT_HOME_LAYOUT, 'actions', -1)
     expect(moved.order.slice(0, 3)).toEqual(['automation', 'actions', 'focus'])
     expect(moveHomeModule(DEFAULT_HOME_LAYOUT, 'automation', -1)).toBe(DEFAULT_HOME_LAYOUT)
+  })
+})
+
+describe('Home map projection', () => {
+  it('matches the Census Albers USA geometry', () => {
+    // Colorado's pre-projected polygon in us-atlas spans x 264.6..395.3 and
+    // y 237.2..340.7. On a conic projection the meridians slant, so its
+    // westmost point is the south-west corner and its lowest the south-east.
+    const sw = projectAlbersUsa(-109.05, 36.99)!
+    const se = projectAlbersUsa(-102.04, 36.99)!
+    expect(sw[0]).toBeCloseTo(264.6, 0)
+    expect(se[1]).toBeCloseTo(340.7, 0)
+  })
+
+  it('places cities inside their own state', () => {
+    const nearest = (x: number, y: number) => {
+      let best = { d: Infinity, abbr: '' }
+      for (let i = 0; i < US_DOTS.length; i += 3) {
+        const d = Math.hypot(US_DOTS[i] / 10 - x, US_DOTS[i + 1] / 10 - y)
+        if (d < best.d) best = { d, abbr: US_STATES[US_DOTS[i + 2]].abbr }
+      }
+      return best.abbr
+    }
+    for (const [lng, lat, abbr] of [[-96.797, 32.777, 'TX'], [-97.52, 35.47, 'OK'], [-104.99, 39.74, 'CO'], [-84.39, 33.75, 'GA']] as const) {
+      const point = projectAlbersUsa(lng, lat)!
+      expect(nearest(point[0], point[1])).toBe(abbr)
+    }
+  })
+
+  it('refuses points it would misplace', () => {
+    expect(projectAlbersUsa(-149.9, 61.2)).toBeNull()
+    expect(projectAlbersUsa(0, 0)).toBeNull()
+  })
+})
+
+describe('Home calendar summary', () => {
+  const event = (overrides: Partial<CalendarEvent>): CalendarEvent => ({
+    id: 'e', type: 'seller_follow_up', tone: 'amber', title: 'Follow up', description: '', timestamp: '2026-09-27T15:00:00',
+    sourceTable: 't', status: 'scheduled', market: '', state: '', sellerName: 'Dana', propertyAddress: '', propertyId: null,
+    sellerId: null, threadId: null, priority: 'normal', actor: 'System', overdue: false, dueSoon: false, hot: false,
+    automationBlocked: false, ...overrides,
+  })
+  const start = new Date(2026, 8, 27)
+
+  it('keeps work, rolls up sends, drops history', () => {
+    const summary = summarizeCalendar([
+      event({ id: 'a', timestamp: new Date(2026, 8, 27, 15).toISOString() }),
+      event({ id: 'b', type: 'scheduled_sms', timestamp: new Date(2026, 8, 27, 9).toISOString() }),
+      event({ id: 'c', type: 'scheduled_sms', timestamp: new Date(2026, 8, 28, 9).toISOString() }),
+      event({ id: 'd', type: 'sms_delivered', timestamp: new Date(2026, 8, 27, 10).toISOString() }),
+      event({ id: 'e', timestamp: new Date(2026, 9, 9).toISOString() }),
+    ], start)
+    expect(summary.days).toHaveLength(7)
+    expect(summary.days[0].agenda.map((item) => item.id)).toEqual(['a'])
+    expect(summary.days[0].scheduledSends).toBe(1)
+    expect(summary.days[1].scheduledSends).toBe(1)
+  })
+
+  it('counts overdue work and hides placeholder names', () => {
+    const summary = summarizeCalendar([
+      event({ id: 'a', overdue: true, sellerName: 'Unresolved event', timestamp: new Date(2026, 8, 27, 8).toISOString() }),
+    ], start)
+    expect(summary.overdue).toBe(1)
+    expect(summary.days[0].agenda[0].who).toBe('')
+  })
+})
+
+describe('Home counter easing', () => {
+  it('never leaves 0..1, even for a frame stamped before the count began', () => {
+    expect(easeOutQuart(-0.5)).toBe(0)
+    expect(easeOutQuart(2)).toBe(1)
+    expect(easeOutQuart(0.5)).toBeGreaterThan(0.5)
   })
 })

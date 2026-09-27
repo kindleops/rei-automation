@@ -1,8 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import { formatCount } from './home-signals'
-import { prefersStill } from './home-motion'
+import { easeOutQuart, prefersStill } from './home-motion'
 
-const easeOutQuart = (t: number) => 1 - (1 - t) ** 4
 
 /**
  * A number that counts to its value instead of snapping to it — up from zero on
@@ -30,8 +29,10 @@ export function Counter({ value, format = formatCount }: { value: number; format
     const t0 = performance.now()
     const duration = 900 + Math.min(700, Math.log10(Math.abs(end - start) + 1) * 220)
     let frame = 0
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - t0) / duration)
+    // One clock for start and progress: the rAF timestamp is a frame time on
+    // the animation timeline and can sit before, or drift from, performance.now().
+    const tick = () => {
+      const p = Math.min(1, Math.max(0, (performance.now() - t0) / duration))
       const current = Math.round(start + (end - start) * easeOutQuart(p))
       shown.current = current
       node.textContent = format(current)

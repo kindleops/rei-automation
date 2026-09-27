@@ -288,7 +288,7 @@
 .nx-home-word {
   display: inline-block;
   animation: nx-home-word 1400ms var(--home-glide) backwards;
-  animation-delay: calc(150ms + var(--w, 0) * 130ms);
+  animation-delay: calc(150ms + var(--intro, 0ms) + var(--w, 0) * 130ms);
 }
 .nx-home-hello__title em.nx-home-word {
   font-style: normal;
@@ -306,7 +306,7 @@
   animation:
     nx-home-word 1400ms var(--home-glide) backwards,
     nx-home-text-flow 9s ease-in-out 1.8s infinite;
-  animation-delay: calc(150ms + var(--w, 0) * 130ms), 1.8s;
+  animation-delay: calc(150ms + var(--intro, 0ms) + var(--w, 0) * 130ms), 1.8s;
 }
 [data-nexus-theme="light"] .nx-home-hello__title { text-shadow: none; }
 [data-nexus-theme="light"] .nx-home-hello__title em.nx-home-word {
@@ -1209,36 +1209,6 @@
 .nx-home-stage__label { display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; font-size: 10.5px; font-weight: 500; color: var(--home-muted); }
 .nx-home-stage__label i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--seg); box-shadow: 0 0 8px var(--seg); }
 
-/* ── Market constellation ─────────────────────────────────────────────────── */
-
-.nx-home-map { display: block; width: 100%; margin: 2px 0 6px; }
-.nx-home-constellation { display: block; width: 100%; height: auto; overflow: visible; }
-.nx-home-constellation__dots circle { fill: rgba(255, 255, 255, 0.16); }
-.nx-home-constellation__dots circle.is-lit {
-  fill: rgb(var(--home-accent-rgb));
-  opacity: calc(0.4 + var(--lvl, 0) * 0.6);
-  animation: nx-home-twinkle 3.2s ease-in-out infinite;
-  animation-delay: var(--tw, 0ms);
-}
-@keyframes nx-home-twinkle { 50% { opacity: calc(0.2 + var(--lvl, 0) * 0.4); } }
-[data-nexus-theme="light"] .nx-home-constellation__dots circle { fill: rgba(15, 23, 42, 0.14); }
-[data-nexus-theme="light"] .nx-home-constellation__dots circle.is-lit { fill: rgb(var(--home-accent-rgb)); }
-
-.nx-home-beacon__ring {
-  fill: none;
-  stroke: rgb(var(--home-accent-rgb));
-  stroke-width: 2;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: nx-home-beacon 2.6s var(--home-ease) infinite;
-}
-@keyframes nx-home-beacon {
-  0% { transform: scale(0.6); opacity: 1; }
-  100% { transform: scale(4.2); opacity: 0; }
-}
-.nx-home-beacon__core { fill: #fff; filter: drop-shadow(0 0 6px rgb(var(--home-accent-rgb))) drop-shadow(0 0 16px rgb(var(--home-accent-rgb))); }
-.nx-home-beacon text { fill: var(--home-text); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; paint-order: stroke; stroke: rgba(0, 0, 0, 0.5); stroke-width: 4px; }
-
 .nx-home-leaders { margin: 0; padding: 0; list-style: none; }
 .nx-home-leaders li + li { border-top: 1px solid var(--home-hairline); }
 .nx-home-leaders button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; }
@@ -1507,3 +1477,359 @@
 }
 .nx-home-bubbles .nx-home-bubble:nth-child(n + 2) .nx-home-bubble__text { -webkit-line-clamp: 2; }
 .nx-home-bubbles .nx-home-bubble:nth-child(3) { opacity: 0.7; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   V4 — the map, the calendar, the opening, and the film
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── The map ──────────────────────────────────────────────────────────────── */
+
+.nx-home-markets .nx-home-card__body { padding-left: 10px; padding-right: 10px; }
+.nx-home-markets :is(.nx-home-legend, .nx-home-leaders, .nx-home-state) { margin-left: 6px; margin-right: 6px; }
+
+.nx-home-usmap {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 975 / 610;
+  overflow: hidden;
+  border-radius: 18px;
+}
+.nx-home-usmap > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.nx-home-usmap__base circle { fill: rgba(255, 255, 255, 0.17); }
+[data-nexus-theme="light"] .nx-home-usmap__base circle { fill: rgba(15, 23, 42, 0.16); }
+
+.nx-home-usmap__bloom {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: calc(0.35 + var(--lvl, 0) * 0.65);
+  animation: nx-home-bloom 4.2s ease-in-out infinite;
+}
+@keyframes nx-home-bloom { 50% { transform: scale(1.12); opacity: calc(0.2 + var(--lvl, 0) * 0.5); } }
+
+/* Each lit dot pulses; the delay grows with distance from the state's centre, so
+   the pulse travels outward across the state as a wave of accent light. */
+.nx-home-usmap__lit {
+  fill: rgb(var(--home-accent-rgb));
+  opacity: calc(var(--lvl, 1) * 0.55);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nx-home-wave 3.6s var(--home-ease) infinite;
+  animation-delay: var(--d, 0ms);
+}
+/* Colour stays on the element (a var() inside a keyframed SVG fill does not
+   resolve and paints black); the crest of the wave is carried by scale and a
+   white core that brightens with it. */
+@keyframes nx-home-wave {
+  0% { transform: scale(0.8); opacity: calc(var(--lvl, 1) * 0.45); }
+  12% { transform: scale(1.55); opacity: 1; }
+  34% { transform: scale(1); opacity: calc(var(--lvl, 1) * 0.8); }
+  100% { transform: scale(0.8); opacity: calc(var(--lvl, 1) * 0.45); }
+}
+.nx-home-usmap__bloom-stop { stop-color: rgb(var(--home-accent-rgb)); }
+
+.nx-home-beacon__ring {
+  fill: none;
+  stroke: rgb(var(--home-accent-rgb));
+  stroke-width: 2.2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nx-home-beacon 2.6s var(--home-ease) infinite;
+}
+@keyframes nx-home-beacon {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(4.6); opacity: 0; }
+}
+.nx-home-beacon__core { fill: #fff; filter: drop-shadow(0 0 6px rgb(var(--home-accent-rgb))) drop-shadow(0 0 16px rgb(var(--home-accent-rgb))); }
+.nx-home-beacon text {
+  fill: #fff;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  paint-order: stroke;
+  stroke: rgba(2, 6, 18, 0.7);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+[data-nexus-theme="light"] .nx-home-beacon text { fill: #0f172a; stroke: rgba(255, 255, 255, 0.85); }
+
+.nx-home-spark__core { fill: #fff; filter: drop-shadow(0 0 4px rgb(var(--home-accent-rgb))); }
+.nx-home-spark__ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 1.4;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: nx-home-spark 4s var(--home-ease) infinite;
+}
+.nx-home-spark.is-hot .nx-home-spark__core { fill: var(--home-warn); filter: drop-shadow(0 0 5px var(--home-warn)); }
+.nx-home-spark.is-hot .nx-home-spark__ring { stroke: var(--home-warn); }
+@keyframes nx-home-spark {
+  0% { transform: scale(0.5); opacity: 0.95; }
+  40%, 100% { transform: scale(3.2); opacity: 0; }
+}
+
+/* A band of light scanning the country, left to right. */
+.nx-home-usmap__scan {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  pointer-events: none;
+  /* Soft on every edge: a sweep of light, never a visible rectangle. */
+  background: radial-gradient(50% 50% at 50% 50%, rgba(var(--home-accent-rgb), 0.2), rgba(var(--home-accent-rgb), 0.06) 55%, transparent 75%);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 35%, #000 65%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 35%, #000 65%, transparent);
+  mix-blend-mode: plus-lighter;
+  transform: translate3d(-110%, 0, 0);
+  animation: nx-home-scan 7s cubic-bezier(0.45, 0, 0.2, 1) 1.5s infinite;
+}
+@keyframes nx-home-scan {
+  0% { transform: translate3d(-110%, 0, 0); }
+  55%, 100% { transform: translate3d(310%, 0, 0); }
+}
+
+.nx-home-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--home-muted);
+}
+.nx-home-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.nx-home-legend i { width: 7px; height: 7px; border-radius: 50%; }
+.nx-home-legend i.is-heat { background: rgb(var(--home-accent-rgb)); box-shadow: 0 0 8px rgb(var(--home-accent-rgb)); }
+.nx-home-legend i.is-spark { background: #fff; box-shadow: 0 0 8px rgb(var(--home-accent-rgb)); }
+
+/* ── The calendar ─────────────────────────────────────────────────────────── */
+
+.nx-home-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 4px;
+}
+.nx-home-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 0 7px;
+  border-radius: 16px;
+  transition: background 300ms ease, transform 520ms var(--home-spring);
+}
+.nx-home-day:active { transform: scale(0.92); transition-duration: 120ms; }
+.nx-home-day__dow { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; color: var(--home-faint); text-transform: uppercase; }
+.nx-home-day__num { font-size: 18px; font-weight: 400; letter-spacing: -0.03em; color: var(--home-body); font-variant-numeric: tabular-nums; }
+.nx-home-day__load { width: 18px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.nx-home-day__load i { display: block; width: var(--load, 0%); height: 100%; border-radius: inherit; background: var(--tile-hue, var(--home-accent)); box-shadow: 0 0 6px var(--tile-hue, var(--home-accent)); }
+.nx-home-day.is-today .nx-home-day__dow { color: color-mix(in srgb, var(--home-accent) 85%, #fff); }
+.nx-home-day.is-on {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.25), transparent 70%),
+    linear-gradient(180deg, rgba(var(--home-accent-rgb), 0.55), color-mix(in srgb, var(--home-accent) 35%, #4c1d95));
+  box-shadow: 0 10px 26px -8px rgba(var(--home-accent-rgb), 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.nx-home-day.is-on :is(.nx-home-day__dow, .nx-home-day__num) { color: #fff; }
+.nx-home-day.is-on .nx-home-day__load { background: rgba(255, 255, 255, 0.25); }
+.nx-home-day.is-on .nx-home-day__load i { background: #fff; }
+
+.nx-home-agenda { margin-top: 14px; animation: nx-home-lift 520ms var(--home-glide) backwards; }
+.nx-home-agenda__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.nx-home-agenda__head strong { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; color: var(--home-text); }
+.nx-home-agenda__head span { font-size: 11.5px; color: var(--home-muted); }
+
+.nx-home-sends {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  background: rgba(var(--home-accent-rgb), 0.1);
+  border: 1px solid rgba(var(--home-accent-rgb), 0.2);
+  color: color-mix(in srgb, var(--home-accent) 85%, #fff);
+  font-size: 12.5px;
+}
+.nx-home-sends span { flex: 1; color: var(--home-body); }
+.nx-home-sends b { font-weight: 600; color: var(--home-text); font-variant-numeric: tabular-nums; }
+
+.nx-home-agenda__list { margin: 0; padding: 0; list-style: none; }
+.nx-home-agenda__list li { animation: nx-home-lift 600ms var(--home-glide) backwards; animation-delay: calc(80ms + var(--i, 0) * 60ms); }
+.nx-home-event {
+  display: grid;
+  grid-template-columns: 58px 3px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 6px 0;
+  border-radius: 12px;
+}
+.nx-home-event__time { font-size: 11.5px; font-weight: 500; color: var(--home-muted); font-variant-numeric: tabular-nums; }
+.nx-home-event__bar { align-self: stretch; border-radius: 3px; background: var(--tone); box-shadow: 0 0 10px var(--tone); }
+.nx-home-event__main { min-width: 0; }
+.nx-home-event__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--home-text); }
+.nx-home-event__who { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--home-muted); }
+.nx-home-event.is-past { opacity: 0.45; }
+.nx-home-event.is-overdue .nx-home-event__time { color: var(--home-bad); }
+.nx-home-tag.is-bad { background: color-mix(in srgb, var(--home-bad) 16%, transparent); color: var(--home-bad); }
+.nx-home-tag.is-warn { background: color-mix(in srgb, var(--home-warn) 16%, transparent); color: var(--home-warn); }
+
+/* The "now" line: where the day is, drawn through the agenda. */
+.nx-home-now {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--home-bad);
+}
+.nx-home-now i { width: 7px; height: 7px; border-radius: 50%; background: var(--home-bad); box-shadow: 0 0 10px var(--home-bad); animation: nx-home-alarm 1.8s ease-in-out infinite; }
+.nx-home-now::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--home-bad), transparent); }
+
+.nx-home-agenda__empty { display: flex; align-items: center; gap: 8px; padding: 12px 2px; font-size: 13px; color: var(--home-muted); }
+.nx-home-agenda__more { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; font-weight: 600; color: color-mix(in srgb, var(--home-accent) 85%, #fff); }
+
+/* ── The reactor, elevated ────────────────────────────────────────────────── */
+
+.nx-home-reactor__orbiter { animation: nx-home-spin var(--period, 10s) linear infinite; }
+.nx-home-reactor__orbiter.is-rev { animation-direction: reverse; }
+.nx-home-reactor__orbiter circle { fill: #fff; filter: drop-shadow(0 0 4px var(--tone)) drop-shadow(0 0 8px var(--tone)); }
+.nx-home-reactor.is-unknown .nx-home-reactor__orbiter { display: none; }
+
+.nx-home-reactor__iris {
+  position: absolute;
+  inset: 22.5%;
+  border-radius: 50%;
+  padding: 1.5px;
+  background: conic-gradient(from 0deg, #22d3ee, #a78bfa, #f472b6, #fbbf24, #34d399, #22d3ee);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: 0.55;
+  animation: nx-home-spin 12s linear infinite;
+  pointer-events: none;
+}
+.nx-home-reactor.is-unknown .nx-home-reactor__iris { opacity: 0.12; animation: none; }
+
+.nx-home-reactor__flash {
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--tone), 0 0 40px var(--tone);
+  opacity: 0;
+  animation: nx-home-flash 1.4s var(--home-ease) 2.2s;
+}
+@keyframes nx-home-flash {
+  0% { opacity: 0.9; transform: scale(0.96); }
+  100% { opacity: 0; transform: scale(1.35); }
+}
+
+/* ── Glass tips toward the finger ─────────────────────────────────────────── */
+
+.nx-home-card.is-tile.is-in { transition: transform 700ms var(--home-spring); }
+.nx-home-card.is-tile.is-in.is-lit {
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(0.985);
+  transition-duration: 180ms;
+}
+
+/* ── Lower-thirds: a hairline drawn after each floating section title ─────── */
+
+.nx-home-card.is-bare .nx-home-card__title::after {
+  content: '';
+  width: 36px;
+  height: 1px;
+  margin-left: 4px;
+  background: linear-gradient(90deg, rgba(var(--home-accent-rgb), 0.9), transparent);
+  transform-origin: left center;
+}
+.nx-home-card.is-bare.is-in .nx-home-card__title::after { animation: nx-home-grow 1.2s var(--home-glide) 500ms backwards; }
+
+/* ── Film: animated grain over everything, at a whisper ───────────────────── */
+
+.nx-home__film {
+  position: absolute;
+  inset: -20%;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: nx-home-grain 0.9s steps(6) infinite;
+}
+@keyframes nx-home-grain {
+  0% { transform: translate3d(0, 0, 0); }
+  17% { transform: translate3d(-4%, 3%, 0); }
+  33% { transform: translate3d(3%, -5%, 0); }
+  50% { transform: translate3d(-6%, -2%, 0); }
+  67% { transform: translate3d(5%, 4%, 0); }
+  83% { transform: translate3d(-2%, 6%, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+[data-nexus-theme="light"] .nx-home__film { display: none; }
+
+/* ── The opening ──────────────────────────────────────────────────────────── */
+
+.nx-home.is-intro { --intro: 700ms; }
+.nx-home.is-intro .nx-home-card.is-in { animation-delay: calc(700ms + min(var(--home-index, 0), 5) * 80ms); }
+
+.nx-home-intro {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--nexus-bg, #03050a);
+  animation: nx-home-intro-open 1.6s cubic-bezier(0.7, 0, 0.2, 1) forwards;
+}
+@keyframes nx-home-intro-open {
+  0%, 38% { clip-path: inset(0 0 0 0); opacity: 1; }
+  100% { clip-path: inset(50% 0 50% 0); opacity: 0.6; }
+}
+.nx-home-intro__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--home-accent-rgb)) 30%, #fff 50%, rgb(var(--home-accent-rgb)) 70%, transparent);
+  box-shadow: 0 0 18px rgb(var(--home-accent-rgb)), 0 0 40px rgba(var(--home-accent-rgb), 0.6);
+  transform: scaleX(0);
+  animation: nx-home-intro-line 0.75s cubic-bezier(0.65, 0, 0.35, 1) 0.05s forwards;
+}
+@keyframes nx-home-intro-line { to { transform: scaleX(1); } }
+.nx-home-intro__flare {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 280px;
+  height: 280px;
+  margin: -140px 0 0 -140px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(var(--home-accent-rgb), 0.55), transparent);
+  opacity: 0;
+  animation: nx-home-intro-flare 1.1s ease-out 0.35s forwards;
+}
+@keyframes nx-home-intro-flare {
+  0% { opacity: 0; transform: scale(0.2); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: scale(2.4); }
+}
+
+.nx-home-map { display: block; width: 100%; margin: 2px 0 0; }
+
+/* Gradient stops take theme colours through CSS; var() in an SVG presentation
+   attribute is not reliably resolved across engines. */
+.nx-home-reactor__stop-a { stop-color: var(--tone-2); }
+.nx-home-reactor__stop-b { stop-color: var(--tone); }

@@ -6,7 +6,9 @@ import {
   formatCount,
   initials,
   relativeTime,
+  localDayKey,
   type FocusItem,
+  type HomeAgendaItem,
   type HomeLoad,
   type PipelineBucket,
 } from './home-signals'
@@ -15,7 +17,7 @@ import { buildActivity } from './home-activity'
 import { Counter } from './HomeCounter'
 import { useRevealed } from './home-motion'
 import { MarketConstellation } from './MarketConstellation'
-import { goTo, openNotifications, openSearch, openTarget, openThread } from './home-navigation'
+import { goTo, openNotifications, openSearch, openTarget, openThread, openThreadKey } from './home-navigation'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -117,6 +119,9 @@ const Figure = ({ value, format }: { value: number | null | undefined; format?: 
 
 // ── Automation: the reactor ─────────────────────────────────────────────────
 
+/** Stable identity: a new formatter each render would restart the count. */
+const formatPercent = (n: number) => `${n}%`
+
 const RING = 112
 const INNER = 94
 const circumference = (r: number) => 2 * Math.PI * r
@@ -155,8 +160,8 @@ export const AutomationModule = ({ index, compact, signals }: ModuleProps) => {
         <svg className="nx-home-reactor__rings" viewBox="0 0 280 280" aria-hidden>
           <defs>
             <linearGradient id={`${gradient}-arc`} x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="var(--tone-2)" />
-              <stop offset="100%" stopColor="var(--tone)" />
+              <stop className="nx-home-reactor__stop-a" offset="0%" />
+              <stop className="nx-home-reactor__stop-b" offset="100%" />
             </linearGradient>
           </defs>
           <circle className="nx-home-reactor__ticks" cx="140" cy="140" r="131" />
@@ -181,12 +186,20 @@ export const AutomationModule = ({ index, compact, signals }: ModuleProps) => {
             style={{ '--c': inner, '--off': inner * (1 - replyShare) } as CSSProperties}
           />
           <circle className="nx-home-reactor__orbit" cx="140" cy="140" r="76" />
+          {/* Particles in orbit, each on its own ring and period. */}
+          <g className="nx-home-reactor__orbiter" style={{ '--period': '9s' } as CSSProperties}><circle cx="140" cy={140 - RING} r="2.2" /></g>
+          <g className="nx-home-reactor__orbiter is-rev" style={{ '--period': '14s' } as CSSProperties}><circle cx="140" cy={140 - INNER} r="1.8" /></g>
+          <g className="nx-home-reactor__orbiter" style={{ '--period': '21s' } as CSSProperties}><circle cx="140" cy={140 - 131} r="1.6" /></g>
         </svg>
+        {/* An iridescent rim turning around the core. */}
+        <span className="nx-home-reactor__iris" aria-hidden />
+        {/* Re-keyed on every new count, so each refresh lands with a flash. */}
+        <span key={queue?.sentToday ?? 'none'} className="nx-home-reactor__flash" aria-hidden />
         <button type="button" className="nx-home-reactor__core" onClick={() => goTo('/queue')}>
           <span className="nx-home-reactor__value"><Figure value={queue?.sentToday} /></span>
           <span className="nx-home-reactor__label">sent today</span>
           {queue && queue.sentToday > 0 ? (
-            <span className="nx-home-reactor__rate"><Counter value={Math.round(delivered * 100)} format={(n) => `${n}%`} /> delivered</span>
+            <span className="nx-home-reactor__rate"><Counter value={Math.round(delivered * 100)} format={formatPercent} /> delivered</span>
           ) : null}
         </button>
       </div>
@@ -627,36 +640,154 @@ export const PipelineModule = ({ index, compact, signals }: ModuleProps) => {
 
 // ── Markets: the constellation ──────────────────────────────────────────────
 
-export const MarketsModule = ({ index, compact, signals }: ModuleProps) => (
-  <ModuleCard title="Market signals" index={index} compact={compact} hue="color-mix(in srgb, var(--home-accent) 50%, #14b8a6)" link={{ label: 'Map', onClick: () => goTo('/map') }}>
-    {whenReady(signals.markets, 'Market signals', (markets) => (
-      <>
-        <button type="button" className="nx-home-map" onClick={() => goTo('/map')} aria-label="Open the map">
-          <MarketConstellation markets={markets} />
-        </button>
-        {markets.length === 0 ? (
-          <div className="nx-home-state">
-            <Icon name="map" size={16} />
-            <span><strong>No market activity this week</strong>Signals appear once outreach is sending.</span>
+export const MarketsModule = ({ index, compact, signals }: ModuleProps) => {
+  const pins = dataOf(signals.pins) ?? []
+  return (
+    <ModuleCard title="Market signals" index={index} compact={compact} hue="color-mix(in srgb, var(--home-accent) 50%, #14b8a6)" className="nx-home-markets" link={{ label: 'Map', onClick: () => goTo('/map') }}>
+      {whenReady(signals.markets, 'Market signals', (markets) => (
+        <>
+          <button type="button" className="nx-home-map" onClick={() => goTo('/map')} aria-label="Open the map">
+            <MarketConstellation markets={markets} pins={pins} />
+          </button>
+          <div className="nx-home-legend" aria-hidden>
+            <span><i className="is-heat" />Market heat · 7 days</span>
+            {signals.pins.status === 'ready' ? <span><i className="is-spark" />{pins.length} replies located</span> : null}
           </div>
-        ) : (
-          <ol className="nx-home-leaders">
-            {markets.slice(0, compact ? 2 : 3).map((row, i) => (
-              <li key={`${row.market}-${i}`}>
-                <button type="button" onClick={() => goTo('/map')}>
-                  <span className="nx-home-rank">{i + 1}</span>
-                  <span className="nx-home-leaders__name">{row.market}</span>
-                  {row.positive > 0 ? <span className="nx-home-tag is-good">{row.positive} warm</span> : null}
-                  <span className="nx-home-leaders__value"><Counter value={row.replied} /> <small>replies</small></span>
+          {markets.length === 0 ? (
+            <div className="nx-home-state">
+              <Icon name="map" size={16} />
+              <span><strong>No market activity this week</strong>Signals appear once outreach is sending.</span>
+            </div>
+          ) : (
+            <ol className="nx-home-leaders">
+              {markets.slice(0, compact ? 2 : 3).map((row, i) => (
+                <li key={`${row.market}-${i}`}>
+                  <button type="button" onClick={() => goTo('/map')}>
+                    <span className="nx-home-rank">{i + 1}</span>
+                    <span className="nx-home-leaders__name">{row.market}</span>
+                    {row.positive > 0 ? <span className="nx-home-tag is-good">{row.positive} warm</span> : null}
+                    <span className="nx-home-leaders__value"><Counter value={row.replied} /> <small>replies</small></span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </>
+      ), 3)}
+    </ModuleCard>
+  )
+}
+
+// ── Calendar ────────────────────────────────────────────────────────────────
+
+const TONE_COLOR: Record<HomeAgendaItem['tone'], string> = {
+  blue: '#60a5fa', cyan: '#22d3ee', green: '#34d399', amber: '#f5b84a', red: '#ff5a52', purple: '#a78bfa',
+  gold: '#eab308', gray: '#94a3b8', violet: '#8b5cf6', teal: '#14b8a6', emerald: '#10b981', pink: '#f472b6',
+}
+
+const timeLabel = (item: HomeAgendaItem) =>
+  item.allDay ? 'All day' : new Date(item.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+
+/**
+ * Today and the week ahead: a strip of days, each carrying a small bar for how
+ * much is due, and the selected day's agenda with a live "now" line through it.
+ * Scheduled sends are one line ("412 messages scheduled"), never 412 rows.
+ */
+export const CalendarModule = ({ index, compact, signals, clock }: ModuleProps & { clock: Date }) => {
+  const [selected, setSelected] = useState(0)
+  const calendar = dataOf(signals.calendar)
+  const todayKey = localDayKey(clock)
+  return (
+    <ModuleCard
+      title="Calendar"
+      index={index}
+      compact={compact}
+      hue="color-mix(in srgb, var(--home-accent) 40%, #f472b6)"
+      className="nx-home-calendar"
+      count={calendar?.overdue || null}
+      countTone="bad"
+      link={{ label: 'Open', onClick: () => goTo('/calendar') }}
+    >
+      {whenReady(signals.calendar, 'Calendar', (data) => {
+        const day = data.days[selected] ?? data.days[0]
+        const busiest = Math.max(1, ...data.days.map((d) => d.agenda.length))
+        const isToday = day.key === todayKey
+        const now = clock.getTime()
+        const limit = compact ? 2 : 4
+        const items = day.agenda.slice(0, limit)
+        const nowIndex = isToday ? items.findIndex((item) => !item.allDay && new Date(item.at).getTime() > now) : -1
+        return (
+          <>
+            <div className="nx-home-week" role="tablist" aria-label="Week">
+              {data.days.map((d, i) => (
+                <button
+                  key={d.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={i === selected}
+                  className={cls('nx-home-day', i === selected && 'is-on', d.key === todayKey && 'is-today')}
+                  onClick={() => setSelected(i)}
+                >
+                  <span className="nx-home-day__dow">{d.date.toLocaleDateString(undefined, { weekday: 'narrow' })}</span>
+                  <span className="nx-home-day__num">{d.date.getDate()}</span>
+                  <span className="nx-home-day__load" aria-hidden>
+                    <i style={{ '--load': `${Math.round((d.agenda.length / busiest) * 100)}%` } as CSSProperties} />
+                  </span>
                 </button>
-              </li>
-            ))}
-          </ol>
-        )}
-      </>
-    ), 3)}
-  </ModuleCard>
-)
+              ))}
+            </div>
+
+            <div className="nx-home-agenda" key={day.key}>
+              <div className="nx-home-agenda__head">
+                <strong>{isToday ? 'Today' : day.date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</strong>
+                <span>{day.agenda.length === 0 ? 'Nothing due' : `${day.agenda.length} due`}</span>
+              </div>
+              {day.scheduledSends > 0 ? (
+                <button type="button" className="nx-home-sends" onClick={() => goTo('/queue')}>
+                  <Icon name="send" size={13} />
+                  <span><b><Counter value={day.scheduledSends} /></b> messages scheduled</span>
+                  <Icon name="chevron-right" size={13} />
+                </button>
+              ) : null}
+              {items.length > 0 ? (
+                <ol className="nx-home-agenda__list">
+                  {items.map((item, i) => (
+                    <li key={item.id} style={{ '--tone': TONE_COLOR[item.tone] ?? TONE_COLOR.gray, '--i': i } as CSSProperties}>
+                      {i === nowIndex ? <span className="nx-home-now" aria-label="Now"><i />Now</span> : null}
+                      <button
+                        type="button"
+                        className={cls('nx-home-event', item.overdue && 'is-overdue', isToday && !item.allDay && new Date(item.at).getTime() < now && 'is-past')}
+                        onClick={() => (item.threadId ? openThreadKey(item.threadId) : goTo('/calendar'))}
+                      >
+                        <span className="nx-home-event__time">{timeLabel(item)}</span>
+                        <span className="nx-home-event__bar" aria-hidden />
+                        <span className="nx-home-event__main">
+                          <span className="nx-home-event__title">{item.title}</span>
+                          {item.who ? <span className="nx-home-event__who">{item.who}</span> : null}
+                        </span>
+                        {item.overdue ? <span className="nx-home-tag is-bad">Overdue</span> : item.hot ? <span className="nx-home-tag is-warn">Hot</span> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <div className="nx-home-agenda__empty">
+                  <Icon name="calendar" size={16} />
+                  {day.scheduledSends > 0 ? 'Only automated sends today. Nothing needs you.' : 'A clear day.'}
+                </div>
+              )}
+              {day.agenda.length > limit ? (
+                <button type="button" className="nx-home-agenda__more" onClick={() => goTo('/calendar')}>
+                  {day.agenda.length - limit} more in Calendar <Icon name="arrow-up-right" size={12} />
+                </button>
+              ) : null}
+            </div>
+          </>
+        )
+      }, 3)}
+    </ModuleCard>
+  )
+}
 
 // ── Live activity ───────────────────────────────────────────────────────────
 

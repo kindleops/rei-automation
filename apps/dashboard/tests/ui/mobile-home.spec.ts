@@ -28,6 +28,13 @@ const FIXTURES: Record<string, unknown> = {
       { id: 'th-3', thread_key: 'th-3', property_id: 'p-3', owner_display_name: 'Tom Reyes', property_address_full: '901 W 5th St, Austin, TX', latest_message_body: 'Send me the offer in writing.', latest_message_at: iso(64), latest_message_direction: 'inbound', status: 'read' },
     ],
     counts: { new_replies: 17, priority: 5, needs_attention: 9 },
+    mapPins: [
+      { thread_key: 'th-1', latitude: 36.154, longitude: -95.993 },
+      { thread_key: 'th-2', latitude: 32.777, longitude: -96.797 },
+      { thread_key: 'th-3', latitude: 30.267, longitude: -97.743 },
+      { thread_key: 'th-4', latitude: 35.149, longitude: -90.049 },
+      { thread_key: 'th-5', latitude: 61.2, longitude: -149.9 },
+    ],
     pagination: { cursor: null, nextCursor: null, hasMore: false, limit: 6 },
   },
   '/api/cockpit/queue/processor-health': {
@@ -68,6 +75,17 @@ const FIXTURES: Record<string, unknown> = {
       { market: 'Memphis, TN', state: 'TN', sent: 1200, replied: 70, positive: 5, replyRate: 5.8 },
     ],
   },
+  '/api/cockpit/calendar/events': {
+    ok: true,
+    events: [
+      { event_id: 'e-1', event_type: 'seller_follow_up', tone: 'amber', title: 'Follow up with Marcus Hale', seller_name: 'Marcus Hale', property_address: '4127 Ridgecrest Dr', start_timestamp: iso(-90), thread_key: 'th-1', hot: true },
+      { event_id: 'e-2', event_type: 'offer_follow_up', tone: 'purple', title: 'Offer response due', seller_name: 'Elena Park', property_address: '88 Juniper Ln', start_timestamp: iso(-240) },
+      { event_id: 'e-3', event_type: 'manual_call', tone: 'blue', title: 'Call title company', seller_name: 'Unresolved event', start_timestamp: iso(120) },
+      { event_id: 'e-4', event_type: 'contract_signature_deadline', tone: 'red', title: 'Signature deadline', seller_name: 'Tom Reyes', start_timestamp: iso(-60 * 26) },
+      ...Array.from({ length: 12 }, (_, i) => ({ event_id: `s-${i}`, event_type: 'scheduled_sms', tone: 'cyan', title: 'Scheduled SMS', start_timestamp: iso(-30 - i) })),
+      { event_id: 'h-1', event_type: 'sms_delivered', tone: 'green', title: 'Delivered', start_timestamp: iso(10) },
+    ],
+  },
   '/api/cockpit/notifications': {
     ok: true,
     notifications: [
@@ -104,6 +122,19 @@ test('a phone lands on Home inside the mobile shell', async ({ page }) => {
   await expect(page.locator('section[aria-label="Automation"]')).toContainText('Running with issues')
   await expect(page.locator('section[aria-label="Pipeline"] .nx-home-stage')).toHaveCount(5)
 
+  // The map is the real Census outline (thousands of dots, not a sketch), with
+  // live sparks only where coordinates were given in the lower 48.
+  await expect(page.locator('.nx-home-usmap__base circle')).toHaveCount(2907)
+  await expect(page.locator('.nx-home-spark')).toHaveCount(4)
+
+  // The calendar lists work, rolls scheduled sends into one line, and never
+  // lists a delivered SMS as something to do.
+  const calendar = page.locator('section[aria-label="Calendar"]')
+  await expect(calendar.locator('.nx-home-day')).toHaveCount(7)
+  await expect(calendar).toContainText('12 messages scheduled', { timeout: 15_000 })
+  await expect(calendar).not.toContainText('Delivered')
+  await expect(calendar).not.toContainText('Unresolved')
+
   // Nothing on Home may scroll the page sideways at phone width.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
@@ -132,6 +163,7 @@ test('a failed read is unavailable, never a reassuring zero', async ({ page }) =
   await expect(page.locator('section[aria-label="Automation"]')).not.toContainText('operational')
   await expect(page.locator('section[aria-label="Pipeline"]')).toContainText('Pipeline unavailable')
   await expect(page.locator('section[aria-label="Deals"]')).toContainText('unavailable')
+  await expect(page.locator('section[aria-label="Calendar"]')).toContainText('Calendar unavailable', { timeout: 20_000 })
   await expect(page.locator('section[aria-label="Focus"]')).not.toContainText("You're clear")
   await page.waitForTimeout(1500)
   await page.screenshot({ path: 'test-results/mobile-home/home-down.png' })
