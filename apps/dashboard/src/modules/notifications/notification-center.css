@@ -14,8 +14,8 @@
   overflow: hidden !important;
   z-index: 12060 !important;
   background: var(--nx-glass-bg-tinted, rgba(8, 12, 20, 0.72)) !important;
-  backdrop-filter: blur(var(--nx-shell-glass-blur, 28px)) saturate(var(--nx-shell-glass-saturate, 180%)) !important;
   -webkit-backdrop-filter: blur(var(--nx-shell-glass-blur, 28px)) saturate(var(--nx-shell-glass-saturate, 180%)) !important;
+  backdrop-filter: blur(var(--nx-shell-glass-blur, 28px)) saturate(var(--nx-shell-glass-saturate, 180%)) !important;
   border: 1px solid var(--nx-glass-border-shell, rgba(255, 255, 255, 0.10)) !important;
   box-shadow:
     var(--nx-shell-glass-shadow, 0 24px 80px rgba(0, 0, 0, 0.45)),
