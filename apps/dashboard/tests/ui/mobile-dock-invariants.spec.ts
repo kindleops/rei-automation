@@ -147,14 +147,16 @@ test('expanding reveals the full catalogue with drag-in and drag-out affordances
   await expect(page.locator('.nx-pinned-app-dock__drop-slot')).toBeVisible()
 
   // Every application the registry exposes has to be reachable from here: the pinned
-  // track plus the catalogue must together cover the dockable set. Properties, Entity
-  // Graph, Comp Intelligence and Buyer Match were unreachable on mobile before.
+  // track plus the catalogue must together cover the dockable set. Entity Graph, Comp
+  // Intelligence and Buyer Match were unreachable on mobile before. Property
+  // Intelligence OS is a desktop workspace and must NOT be offered on a phone.
   const labels = await page.locator(APP_BUTTON).evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute('aria-label')).filter(Boolean) as string[],
   )
-  for (const required of ['Properties', 'Entity Graph', 'Comp Intelligence', 'Buyer Match']) {
+  for (const required of ['Home', 'Entity Graph', 'Comp Intelligence', 'Buyer Match']) {
     expect(labels).toContain(required)
   }
+  expect(labels).not.toContain('Properties')
 })
 
 test('pinned order is preserved across a reload', async ({ page }) => {

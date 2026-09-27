@@ -1430,13 +1430,25 @@ export const CampaignListPanel = ({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
+const readComposeIntent = () =>
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('compose') === '1'
+
+const clearComposeIntent = () => {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('compose')
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+}
+
 export const CampaignsPage = () => {
   const { isMobile } = useBreakpoint()
   const [model, setModel] = useState<CampaignModel | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  // `?compose=1` is how another app (Home's "New campaign") opens the builder
+  // directly. Read purely here; the param is stripped once mounted so a reload or
+  // back-navigation does not reopen a builder the operator already closed.
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(readComposeIntent)
   const [editCampaignId, setEditCampaignId] = useState<string | null>(null)
   const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'build'>('create')
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
@@ -1558,6 +1570,10 @@ export const CampaignsPage = () => {
     },
     [actionCallbacks, load],
   )
+
+  useEffect(() => {
+    if (readComposeIntent()) clearComposeIntent()
+  }, [])
 
   const handleGlobalAction = (action: string) => {
     if (action === 'create') {
