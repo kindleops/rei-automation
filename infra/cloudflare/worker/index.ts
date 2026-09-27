@@ -161,6 +161,11 @@ export class ApiContainer extends Container<Env> {
       // `queue_engine_shared_secret` row in system_control, which IS populated.
       // Forwarding an explicit value makes the authority deterministic rather
       // than resolved from a database row.
+      // Web push (RFC 8292). Without these the API reports push as not configured
+      // and no phone can subscribe; the private key never leaves the container.
+      ...(env.VAPID_PUBLIC_KEY ? { VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY } : {}),
+      ...(env.VAPID_PRIVATE_KEY ? { VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY } : {}),
+      ...(env.VAPID_SUBJECT ? { VAPID_SUBJECT: env.VAPID_SUBJECT } : {}),
       ...(env.SCOPED_CANARY_EXECUTION_SECRET
         ? { SCOPED_CANARY_EXECUTION_SECRET: env.SCOPED_CANARY_EXECUTION_SECRET }
         : {}),
@@ -191,6 +196,9 @@ interface Env {
   TEXTGRID_WEBHOOK_SECRET?: string;
   TEXTGRID_ACCOUNT_SID?: string;
   TEXTGRID_AUTH_TOKEN?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
   APP_BASE_URL?: string;
   INTERNAL_API_BASE_URL?: string;
   TEXTGRID_WEBHOOK_PUBLIC_BASE_URL?: string;

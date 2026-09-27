@@ -125,9 +125,14 @@ self.addEventListener('push', (event) => {
   // The Push API requires a visible notification for a user-visible-only
   // subscription. Bailing out silently would get the subscription revoked by
   // the browser, so an unreadable payload still shows something truthful.
-  const title = payload?.title || 'LeadCommand'
+  // Phone numbers read like phone numbers on the lock screen too.
+  const readable = (text) => String(text || '').replace(/\+?1?(\d{3})(\d{3})(\d{4})\b/g, (m, a, b, c) => (m.replace(/\D/g, '').length >= 10 ? `(${a}) ${b}-${c}` : m))
+  const cue = payload?.severity === 'critical' ? '● ' : ''
+  const title = `${cue}${readable(payload?.title) || 'LeadCommand'}`
   const options = {
-    body: payload?.body || 'New operational signal',
+    body: readable(payload?.body) || 'New operational signal',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
     tag: payload?.id || undefined,
     // Same tag replaces rather than stacks: a grouped signal that fires twice
     // should update one notification, not fill the shade.
