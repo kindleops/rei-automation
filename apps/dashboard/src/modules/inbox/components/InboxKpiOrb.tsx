@@ -78,25 +78,12 @@ function MCard({ label, value, tone, span2, pinId }: {
 }) {
   const ctx = useContext(PinCtx)
   const id = pinId ?? `${ctx?.section ?? 'kpi'}:${label}`
-  const pinned = ctx?.pinnedId === id
-  const timer = useRef<number | null>(null)
-  const start = () => {
-    if (!ctx) return
-    timer.current = window.setTimeout(() => {
-      try { navigator.vibrate?.(12) } catch { /* unsupported */ }
-      ctx.onPin({ id, label, value: String(value), tone })
-    }, 450)
-  }
-  const cancel = () => { if (timer.current) { window.clearTimeout(timer.current); timer.current = null } }
+  const { pinned, handlers } = usePinHold(id, label, String(value), tone)
   return (
     <div
       className={cls('nx-pulse-card', tone && `is-${tone}`, pinned && 'is-pinned')}
       style={span2 ? { gridColumn: 'span 2' } : undefined}
-      onPointerDown={start}
-      onPointerUp={cancel}
-      onPointerLeave={cancel}
-      onPointerCancel={cancel}
-      onContextMenu={(e) => e.preventDefault()}
+      {...handlers}
       title={ctx ? (pinned ? 'Hold to unpin from the top bar' : 'Hold to pin to the top bar') : undefined}
       data-kpi-pin={id}
     >
@@ -190,43 +177,85 @@ function OverviewSection({ kpis }: { kpis: KpiData }) {
   if (!kpis) return <Empty />
   const vol = kpis.volume ?? []
   const msg = kpis.messaging ?? []
+  const volOf = (id: string) => vol.find((v) => v.id === id)?.value ?? null
   const rate = (id: string) => { const k = msg.find((m) => m.id === id); const n = k ? Number(k.value) : NaN; return Number.isFinite(n) ? n : null }
   const toneOf = (id: string): 'good' | 'warn' | 'bad' | 'dim' => { const k = msg.find((m) => m.id === id); return !k ? 'dim' : k.status === 'good' ? 'good' : k.status === 'critical' ? 'bad' : k.status === 'warning' ? 'warn' : 'dim' }
-  const sent = vol.find((v) => /sent/i.test(v.label))
-  const received = vol.find((v) => /receiv|inbound|repl/i.test(v.label))
+  const sent = volOf('sent') ?? 0
+  const funnel = [
+    { id: 'vol:sent', label: 'Sent', value: sent, tone: 'cyan' },
+    { id: 'vol:delivered', label: 'Delivered', value: volOf('delivered') ?? 0, tone: 'good' },
+    { id: 'vol:received', label: 'Replied', value: volOf('received') ?? 0, tone: 'violet' },
+  ]
+  const failed = volOf('failed') ?? 0
+  const rows = msg.filter((m) => m.id !== 'delivery-rate' && m.id !== 'reply-rate')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      <div className="nx-pulse-hero">
+    <div className="nx-pulse-ov">
+      <section className="nx-pulse-hero2">
+        <span className="nx-pulse-hero2__liquid" aria-hidden="true"><i /><i /></span>
         <Gauge label="Delivered" value={rate('delivery-rate')} tone={toneOf('delivery-rate')} />
         <Gauge label="Reply rate" value={rate('reply-rate')} tone={toneOf('reply-rate')} />
-        <div className="nx-pulse-hero__stack">
-          <div><strong>{sent ? <MetricValue value={sent.value} /> : '—'}</strong><span>sent</span></div>
-          <div><strong>{received ? <MetricValue value={received.value} /> : '—'}</strong><span>received</span></div>
-        </div>
-      </div>
-      <Grid cols={4}>
-        {vol.map(v => (
-          <MCard
-            key={v.id}
-            pinId={`vol:${v.id}`}
-            label={v.label}
-            value={fmtN(v.value)}
-            tone={v.tone === 'good' ? 'good' : v.tone === 'critical' ? 'bad' : v.tone === 'warning' ? 'warn' : undefined}
-          />
+      </section>
+
+      <section className="nx-pulse-funnel" aria-label="Send funnel">
+        <header><span>Send funnel</span>{failed > 0 ? <b className="is-bad">{fmtN(failed)} failed</b> : <b className="is-good">No failures</b>}</header>
+        {funnel.map((f, i) => (
+          <FunnelRow key={f.id} id={f.id} label={f.label} value={f.value} max={Math.max(1, sent, ...funnel.map((x) => x.value))} tone={f.tone} delay={i * 90} />
         ))}
-      </Grid>
-      <Grid cols={3}>
-        {msg.map(k => (
-          <MCard
-            key={k.id}
-            pinId={`kpi:${k.id}`}
-            label={k.label}
-            value={`${k.value}${k.unit ?? ''}`}
-            tone={k.status === 'good' ? 'good' : k.status === 'critical' ? 'bad' : k.status === 'warning' ? 'warn' : undefined}
-          />
+      </section>
+
+      <section className="nx-pulse-rates" aria-label="Rates">
+        {rows.map((k) => (
+          <RateRow key={k.id} id={`kpi:${k.id}`} label={k.label} value={Number(k.value)} unit={k.unit ?? ''} trend={k.trend} tone={k.status === 'good' ? 'good' : k.status === 'critical' ? 'bad' : k.status === 'warning' ? 'warn' : 'dim'} />
         ))}
-      </Grid>
+      </section>
+    </div>
+  )
+}
+
+/** Hold-to-pin behaviour shared by the tiles, funnel rows and rate rows. */
+function usePinHold(id: string, label: string, value: string, tone?: Tone) {
+  const ctx = useContext(PinCtx)
+  const timer = useRef<number | null>(null)
+  const start = () => {
+    if (!ctx) return
+    timer.current = window.setTimeout(() => {
+      try { navigator.vibrate?.(12) } catch { /* unsupported */ }
+      ctx.onPin({ id, label, value, tone })
+    }, 450)
+  }
+  const cancel = () => { if (timer.current) { window.clearTimeout(timer.current); timer.current = null } }
+  return {
+    pinned: ctx?.pinnedId === id,
+    handlers: { onPointerDown: start, onPointerUp: cancel, onPointerLeave: cancel, onPointerCancel: cancel, onContextMenu: (e: React.MouseEvent) => e.preventDefault() },
+  }
+}
+
+function FunnelRow({ id, label, value, max, tone, delay }: { id: string; label: string; value: number; max: number; tone: string; delay: number }) {
+  const { pinned, handlers } = usePinHold(id, label, value.toLocaleString())
+  return (
+    <div className={cls('nx-pulse-frow', `is-${tone}`, pinned && 'is-pinned')} {...handlers} data-kpi-pin={id}>
+      <span className="nx-pulse-frow__label">{label}</span>
+      <span className="nx-pulse-frow__bar"><i style={{ width: `${Math.max(2, (value / max) * 100)}%`, animationDelay: `${delay}ms` }} /></span>
+      <strong className="nx-pulse-frow__value"><CountUp value={value} format={(v) => Math.round(v).toLocaleString()} ms={900} /></strong>
+      {pinned && <span className="nx-pulse-card__pin" aria-label="Pinned"><Icon name="pin" /></span>}
+    </div>
+  )
+}
+
+function RateRow({ id, label, value, unit, trend, tone }: { id: string; label: string; value: number; unit: string; trend?: string; tone: 'good' | 'warn' | 'bad' | 'dim' }) {
+  const text = `${Number.isFinite(value) ? value.toFixed(1) : '—'}${unit}`
+  const { pinned, handlers } = usePinHold(id, label, text, tone === 'dim' ? undefined : tone)
+  const pctW = unit === '%' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null
+  return (
+    <div className={cls('nx-pulse-rrow', `is-${tone}`, pinned && 'is-pinned')} {...handlers} data-kpi-pin={id}>
+      <span className="nx-pulse-rrow__label">{label}</span>
+      {pctW !== null && <span className="nx-pulse-rrow__meter"><i style={{ width: `${pctW}%` }} /></span>}
+      <strong className="nx-pulse-rrow__value">
+        {Number.isFinite(value) ? <CountUp value={value} format={(v) => `${v.toFixed(1)}${unit}`} ms={900} /> : '—'}
+        {trend === 'up' ? <em className="is-up">▲</em> : trend === 'down' ? <em className="is-down">▼</em> : null}
+      </strong>
+      {pinned && <span className="nx-pulse-card__pin" aria-label="Pinned"><Icon name="pin" /></span>}
     </div>
   )
 }
@@ -786,18 +815,21 @@ export const InboxKpiOrb = () => {
               </span>
             </div>
             <div className="nx-pulse-range" role="radiogroup" aria-label="Time window">
-              {(['today', '24h', '7d', '30d'] as const).map(w => (
-                <button
-                  key={w}
-                  type="button"
-                  role="radio"
-                  aria-checked={timeWindow === w}
-                  className={cls('nx-pulse-range__btn', timeWindow === w && 'is-on')}
-                  onClick={e => { e.stopPropagation(); setTimeWindow(w) }}
-                >
-                  {w === 'today' ? 'Today' : w.toUpperCase()}
-                </button>
-              ))}
+              <span className="nx-pulse-range__track">
+                <span className="nx-pulse-range__glide" aria-hidden="true" style={{ ['--i' as string]: (['today', '24h', '7d', '30d'] as const).indexOf(timeWindow as 'today') }} />
+                {(['today', '24h', '7d', '30d'] as const).map(w => (
+                  <button
+                    key={w}
+                    type="button"
+                    role="radio"
+                    aria-checked={timeWindow === w}
+                    className={cls('nx-pulse-range__btn', timeWindow === w && 'is-on')}
+                    onClick={e => { e.stopPropagation(); setTimeWindow(w) }}
+                  >
+                    {w === 'today' ? 'Today' : w.toUpperCase()}
+                  </button>
+                ))}
+              </span>
               <button type="button" className={cls('nx-pulse-refresh', !kpis && 'is-spinning')} aria-label="Refresh" onClick={e => { e.stopPropagation(); refreshKpis() }}>
                 <Icon name="refresh-cw" />
               </button>
@@ -813,7 +845,7 @@ export const InboxKpiOrb = () => {
                 role="tab"
                 aria-selected={section === s.id}
                 className={cls('nx-pulse-tab', section === s.id && 'is-on')}
-                onClick={() => handleSection(s.id)}
+                onClick={(e) => { handleSection(s.id); e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }) }}
               >
                 {s.label}
               </button>

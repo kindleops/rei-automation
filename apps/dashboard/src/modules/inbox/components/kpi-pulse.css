@@ -321,3 +321,193 @@ html[data-nexus-theme='light'] .nx-pulse-drop__liquid i { mix-blend-mode: multip
 .nx-kpi-orb__readout { display: none; }
 .nx-orb-dashboard.nx-pulse-drop .nx-pulse-head { display: flex !important; }
 .nx-orb-dashboard.nx-pulse-drop .nx-pulse-range { width: 100%; box-sizing: border-box; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PULSE v2 — an instrument, not a grid of boxes.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nx-pulse-drop .nx-pulse-head { padding: 18px 18px 6px; }
+.nx-pulse-head__title strong { font-size: 21px; font-weight: 800; letter-spacing: -0.035em; }
+.nx-pulse-live { margin-top: 4px; font-size: 11.5px; }
+
+/* Range: one track, a liquid glide that slides to the chosen window. */
+.nx-pulse-range { padding: 0; background: none; box-shadow: none; gap: 6px; }
+.nx-pulse-range__track {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 3px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1px var(--pulse-edge), inset 0 1px 2px rgb(0 0 0 / 0.25);
+}
+html[data-nexus-theme='light'] .nx-pulse-range__track { background: rgb(11 18 32 / 0.05); box-shadow: inset 0 0 0 1px var(--pulse-edge); }
+.nx-pulse-range__glide {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 4);
+  border-radius: 11px;
+  transform: translateX(calc(var(--i, 1) * 100%));
+  background: radial-gradient(120% 140% at 30% 0%, rgb(255 255 255 / 0.55), transparent 60%), linear-gradient(180deg, color-mix(in srgb, var(--pulse-cyan) 92%, #fff), var(--pulse-cyan));
+  box-shadow: 0 6px 18px -6px var(--pulse-cyan), inset 0 1px 0 rgb(255 255 255 / 0.6);
+  transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+}
+.nx-pulse-range .nx-pulse-range__btn { position: relative; z-index: 1; min-height: 34px; background: none !important; box-shadow: none !important; }
+.nx-pulse-range .nx-pulse-range__btn.is-on { color: #04121a; }
+.nx-pulse-refresh { width: 40px; height: 40px; border-radius: 13px; background: rgb(255 255 255 / 0.05); box-shadow: inset 0 0 0 1px var(--pulse-edge); }
+
+/* Tabs: text with a glowing underline — no pill cages. */
+.nx-pulse-tabs { gap: 2px; padding: 6px 12px 0; border-bottom: 1px solid var(--pulse-edge); }
+.nx-pulse-tab {
+  position: relative;
+  min-height: 40px;
+  padding: 0 11px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--pulse-text-3);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.nx-pulse-tab::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--pulse-cyan), #818cf8);
+  box-shadow: 0 0 12px var(--pulse-cyan);
+  transform: scaleX(0);
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.15);
+}
+.nx-pulse-tab.is-on { color: var(--pulse-text); background: none; box-shadow: none; }
+.nx-pulse-tab.is-on::after { transform: scaleX(1); }
+.nx-pulse-body { padding: 14px 14px 12px; }
+
+/* Overview */
+.nx-pulse-ov { display: grid; gap: 14px; }
+.nx-pulse-hero2 {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 14px 8px 12px;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.015));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 0 0 1px rgb(255 255 255 / 0.05);
+  animation: nx-pulse-in 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards;
+}
+html[data-nexus-theme='light'] .nx-pulse-hero2 { background: linear-gradient(160deg, #fff, rgb(255 255 255 / 0.6)); box-shadow: inset 0 0 0 1px var(--pulse-edge); }
+.nx-pulse-hero2__liquid { position: absolute; inset: -30%; z-index: -1; filter: blur(30px); opacity: 0.75; pointer-events: none; }
+.nx-pulse-hero2__liquid i { position: absolute; width: 60%; height: 70%; border-radius: 50%; animation: nx-pulse-blob 10s ease-in-out infinite alternate; }
+.nx-pulse-hero2__liquid i:nth-child(1) { left: 5%; top: 15%; background: radial-gradient(closest-side, color-mix(in srgb, var(--pulse-good) 45%, transparent), transparent); }
+.nx-pulse-hero2__liquid i:nth-child(2) { right: 5%; top: 20%; background: radial-gradient(closest-side, rgb(129 140 248 / 0.45), transparent); animation-delay: -4s; }
+.nx-pulse-hero2 .nx-pulse-gauge { background: none; box-shadow: none; padding: 2px; animation: none; }
+.nx-pulse-hero2 .nx-pulse-gauge svg { width: 112px; height: 112px; }
+.nx-pulse-hero2 .nx-pulse-gauge strong { top: 40px; font-size: 25px; }
+.nx-pulse-hero2 .nx-pulse-gauge span { margin-top: 6px; font-size: 12px; letter-spacing: 0.04em; }
+.nx-pulse-hero2 .nx-pulse-gauge__track { stroke-width: 7; }
+.nx-pulse-hero2 .nx-pulse-gauge__fill { stroke-width: 7; }
+
+.nx-pulse-funnel, .nx-pulse-rates {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 20px;
+  background: rgb(255 255 255 / 0.035);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07);
+  animation: nx-pulse-in 0.5s 0.08s cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards;
+}
+html[data-nexus-theme='light'] :is(.nx-pulse-funnel, .nx-pulse-rates) { background: rgb(255 255 255 / 0.6); box-shadow: inset 0 0 0 1px var(--pulse-edge); }
+.nx-pulse-rates { animation-delay: 0.16s; }
+.nx-pulse-funnel > header { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 10px 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pulse-text-3); }
+.nx-pulse-funnel > header b { font-size: 11.5px; letter-spacing: 0; text-transform: none; font-weight: 700; }
+.nx-pulse-funnel > header b.is-good { color: var(--pulse-good); }
+.nx-pulse-funnel > header b.is-bad { color: var(--pulse-bad); }
+.nx-pulse-frow, .nx-pulse-rrow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.nx-pulse-frow:active, .nx-pulse-rrow:active { background: rgb(255 255 255 / 0.05); transform: scale(0.99); }
+.nx-pulse-frow.is-pinned, .nx-pulse-rrow.is-pinned { background: color-mix(in srgb, var(--pulse-cyan) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pulse-cyan) 40%, transparent); }
+.nx-pulse-frow__label, .nx-pulse-rrow__label { font-size: 13.5px; font-weight: 650; color: var(--pulse-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-pulse-frow__bar, .nx-pulse-rrow__meter { position: relative; height: 8px; border-radius: 99px; background: rgb(255 255 255 / 0.06); overflow: hidden; }
+html[data-nexus-theme='light'] :is(.nx-pulse-frow__bar, .nx-pulse-rrow__meter) { background: rgb(11 18 32 / 0.06); }
+.nx-pulse-frow__bar i, .nx-pulse-rrow__meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fc) 55%, transparent), var(--fc));
+  box-shadow: 0 0 12px -2px var(--fc);
+  transform-origin: left center;
+  animation: nx-pulse-grow 1s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes nx-pulse-grow { from { transform: scaleX(0); } }
+.nx-pulse-frow { --fc: var(--pulse-cyan); }
+.nx-pulse-frow.is-good { --fc: var(--pulse-good); }
+.nx-pulse-frow.is-violet { --fc: #a78bfa; }
+.nx-pulse-frow__value, .nx-pulse-rrow__value { display: inline-flex; align-items: baseline; gap: 5px; min-width: 44px; justify-content: flex-end; font-size: 17px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--pulse-text); }
+.nx-pulse-rrow { --fc: var(--pulse-cyan); grid-template-columns: 1fr 70px auto; }
+.nx-pulse-rrow.is-good { --fc: var(--pulse-good); }
+.nx-pulse-rrow.is-warn { --fc: var(--pulse-warn); }
+.nx-pulse-rrow.is-bad { --fc: var(--pulse-bad); }
+.nx-pulse-rrow.is-dim { --fc: var(--pulse-text-3); }
+.nx-pulse-rrow__value { color: var(--fc); }
+.nx-pulse-rrow.is-dim .nx-pulse-rrow__value { color: var(--pulse-text); }
+.nx-pulse-rrow__value em { font-style: normal; font-size: 9px; }
+.nx-pulse-rrow__value em.is-up { color: var(--pulse-good); }
+.nx-pulse-rrow__value em.is-down { color: var(--pulse-bad); }
+.nx-pulse-rrow + .nx-pulse-rrow::before, .nx-pulse-frow + .nx-pulse-frow::before { content: ''; position: absolute; left: 12px; right: 12px; top: -1px; height: 1px; background: var(--pulse-edge); }
+:is(.nx-pulse-frow, .nx-pulse-rrow) .nx-pulse-card__pin { top: 50%; right: -6px; transform: translateY(-50%); }
+
+/* Section tiles elsewhere: borderless glass, bigger numbers, no cages. */
+.nx-pulse-grid { gap: 8px; }
+.nx-pulse-card {
+  padding: 13px 13px 12px;
+  border-radius: 18px;
+  background: linear-gradient(165deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.02));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+}
+html[data-nexus-theme='light'] .nx-pulse-card { background: linear-gradient(165deg, #fff, rgb(255 255 255 / 0.6)); box-shadow: inset 0 0 0 1px var(--pulse-edge); }
+.nx-pulse-card__value { font-size: 23px; margin-top: 6px; }
+.nx-pulse-card__label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 750; }
+.nx-pulse-card::after { left: 13px; right: auto; width: 26px; bottom: 9px; height: 3px; background: var(--tone); box-shadow: 0 0 8px var(--tone); }
+.nx-pulse-sub { margin: 14px 4px 2px; }
+.nx-pulse-foot { padding: 10px 18px 12px; }
+@media (prefers-reduced-motion: reduce) { .nx-pulse-range__glide, .nx-pulse-tab::after, .nx-pulse-frow__bar i, .nx-pulse-rrow__meter i, .nx-pulse-hero2__liquid i, .nx-pulse-hero2, .nx-pulse-funnel, .nx-pulse-rates { animation: none !important; transition: none !important; } }
+/* Glow on the whole ring (a filter on the SVG circle clips to a square box). */
+.nx-pulse-gauge__fill { filter: none !important; }
+.nx-pulse-gauge svg { overflow: visible; filter: drop-shadow(0 0 7px color-mix(in srgb, var(--tone) 70%, transparent)); }
+/* Pin marker sits on the row's corner, never over the number. */
+:is(.nx-pulse-frow, .nx-pulse-rrow) .nx-pulse-card__pin { top: -6px; right: -4px; transform: none; }
+/* The underline lives inside the scroll box (it was clipped at -1px). */
+.nx-pulse-tab::after { bottom: 0; }
+/* The global tap-target rule owns button::after, so the underline is a shadow. */
+.nx-pulse-tabs .nx-pulse-tab.is-on {
+  box-shadow: inset 0 -2.5px 0 var(--pulse-cyan), 0 10px 18px -14px var(--pulse-cyan) !important;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--pulse-cyan) 60%, transparent);
+  transition: box-shadow 0.35s ease, color 0.25s ease;
+}
+/* The global 44px tap floor makes each tab 44px; the strip must hold that
+   height or it clips the underline. */
+.nx-orb-dashboard .nx-pulse-tabs { height: 52px; min-height: 52px; align-items: flex-end; flex-shrink: 0; overflow-y: hidden; }
+.nx-orb-dashboard .nx-pulse-tabs .nx-pulse-tab { height: 44px; }
+.nx-orb-dashboard .nx-pulse-card__label { text-transform: none; letter-spacing: 0.005em; font-size: 12px; font-weight: 650; }
