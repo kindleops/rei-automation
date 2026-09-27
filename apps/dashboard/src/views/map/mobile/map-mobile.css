@@ -1189,3 +1189,10 @@ html[data-nexus-theme='light'] .mx-comp__flags span { color: #9a1f33; }
 }
 @keyframes mx-rise-label { 0% { opacity: 0; transform: translate(-50%, 8px) scale(0.8); } 15% { opacity: 1; transform: translate(-50%, 0) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -26px); } }
 @media (prefers-reduced-motion: reduce) { .mx-land i, .mx-land span { animation: none; opacity: 0; } }
+/* Light-theme polish: the global input fill and the photo title. */
+.mx-search input { background: transparent !important; box-shadow: none !important; border-radius: 0 !important; }
+.mx-comp__title strong { color: #fff !important; }
+.mx-comp__title span { color: rgb(255 228 232 / 0.9) !important; }
+html[data-nexus-theme='light'] .mx-comp__buyer-label { color: #9a1f33; }
+html[data-nexus-theme='light'] .mx-areacard__buyers li.is-gold em { color: #8a5a00; }
+html[data-nexus-theme='light'] .mx-areacard__buyers li.is-gold { box-shadow: inset 0 0 0 1px rgb(180 130 0 / 0.45); }
