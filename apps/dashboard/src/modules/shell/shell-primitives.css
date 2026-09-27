@@ -540,8 +540,8 @@
     rgba(10, 16, 28, 0.72) 18%,
     rgba(10, 16, 28, 0.94) 100%
   );
-  backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;

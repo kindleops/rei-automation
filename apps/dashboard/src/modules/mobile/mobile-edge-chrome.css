@@ -26,8 +26,8 @@
     z-index: 0;
     pointer-events: none;
     background: rgba(6, 10, 18, 0.5);
-    backdrop-filter: blur(20px) saturate(1.8);
     -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
   }
 
   /* Square at the display edge, refined where it meets the app. Depth sits on
@@ -60,8 +60,8 @@
     border-color: transparent !important;
     border-radius: 0 !important;
     box-shadow: none !important;
-    backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
   }
 
   /* ── Light theme ──────────────────────────────────────────────────────── */

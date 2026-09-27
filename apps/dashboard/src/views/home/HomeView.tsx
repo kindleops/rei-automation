@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { Icon } from '../../shared/icons'
 import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
@@ -8,6 +8,7 @@ import { buildFocusItems, dataOf, formatCount, greetingFor } from './home-signal
 import { resolveSystemState, useHomeSignals, type HomeSignals } from './useHomeSignals'
 import { HOME_MODULE_LABELS, useHomeLayout, type HomeModuleId } from './home-layout-store'
 import { openSearch } from './home-navigation'
+import { STILL_CLASS, useLiquidTouch, useScrollDepth } from './home-motion'
 import {
   ActivityModule,
   AutomationModule,
@@ -36,6 +37,8 @@ const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filt
  */
 
 // ── Operator name ───────────────────────────────────────────────────────────
+
+const readAnimationsOff = () => loadSettings().animationsEnabled === false
 
 const readOperatorName = () => loadSettings().operatorName?.trim() ?? ''
 
@@ -89,18 +92,20 @@ const Greeting = ({
   signals,
   focusCritical,
   onCustomize,
+  heroRef,
 }: {
   now: Date
   name: string
   signals: HomeSignals
   focusCritical: number
   onCustomize: () => void
+  heroRef: RefObject<HTMLElement>
 }) => {
   const system = resolveSystemState(signals)
   const summary = buildSummary(signals, focusCritical)
   const dateLabel = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
   return (
-    <header className="nx-home-hello">
+    <header className="nx-home-hello" ref={heroRef}>
       <div className="nx-home-hello__top">
         <span className="nx-home-pill" role="status">
           <span className={cls('nx-home-dot', system.tone !== 'unknown' && `is-${system.tone}`, system.tone !== 'unknown' && 'is-live')} aria-hidden />
@@ -116,11 +121,46 @@ const Greeting = ({
         </div>
       </div>
       <span className="nx-home-hello__date">{dateLabel}</span>
-      <h1 className="nx-home-hello__title">
-        {greetingFor(now)}{name ? <>, <em>{name}</em></> : null}
+      {/* Word by word, out of a soft focus. */}
+      <h1 className="nx-home-hello__title" aria-label={`${greetingFor(now)}${name ? `, ${name}` : ''}`}>
+        {/* Spaces sit between the spans: an inline-block swallows its own trailing space. */}
+        {greetingFor(now).split(' ').map((word, i, words) => (
+          <Fragment key={word}>
+            {i > 0 ? ' ' : null}
+            <span className="nx-home-word" style={{ '--w': i } as CSSProperties} aria-hidden>
+              {word}{i === words.length - 1 && name ? ',' : ''}
+            </span>
+          </Fragment>
+        ))}
+        {name ? <>{' '}<em className="nx-home-word" style={{ '--w': 2 } as CSSProperties} aria-hidden>{name}</em></> : null}
       </h1>
       {summary.length > 0 ? <p className="nx-home-hello__summary">{summary}</p> : null}
     </header>
+  )
+}
+
+/**
+ * The greeting, condensed. Fades in as the large title lifts away so the status
+ * and the two header actions are never more than a glance from the thumb.
+ */
+const CondensedBar = ({ now, name, signals, focusCount, onCustomize }: {
+  now: Date
+  name: string
+  signals: HomeSignals
+  focusCount: number
+  onCustomize: () => void
+}) => {
+  const system = resolveSystemState(signals)
+  return (
+    <div className="nx-home-condensed" aria-hidden>
+      <span className={cls('nx-home-dot', system.tone !== 'unknown' && `is-${system.tone}`, system.tone !== 'unknown' && 'is-live')} />
+      <strong>{greetingFor(now)}{name ? `, ${name}` : ''}</strong>
+      {focusCount > 0 ? <span className="nx-home-count">{focusCount}</span> : null}
+      <span className="nx-home-condensed__actions">
+        <button type="button" tabIndex={-1} className="nx-home-icon-btn is-sm" onClick={openSearch}><Icon name="search" size={14} /></button>
+        <button type="button" tabIndex={-1} className="nx-home-icon-btn is-sm" onClick={onCustomize}><Icon name="grid" size={14} /></button>
+      </span>
+    </div>
   )
 }
 
@@ -199,6 +239,14 @@ export const HomeView = () => {
   const { notifications, loading: notificationsLoading, lastFetchedAt } = useNotificationIntelligence()
   const { layout } = useHomeLayout()
   const [customizing, setCustomizing] = useState(false)
+  const still = useSyncExternalStore(subscribeSettings, readAnimationsOff, () => false)
+
+  const rootRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const ambientRef = useRef<HTMLDivElement>(null)
+  const heroRef = useRef<HTMLElement>(null)
+  useLiquidTouch(rootRef)
+  useScrollDepth(scrollRef, rootRef, ambientRef, heroRef)
 
   const focusItems = useMemo(() => buildFocusItems({
     inbox: dataOf(signals.inbox),
@@ -239,18 +287,37 @@ export const HomeView = () => {
   }
 
   return (
-    <div className="nx-home">
+    <div className={cls('nx-home', still && STILL_CLASS)} ref={rootRef}>
+      {/*
+        The liquid field: slow masses of the accent colour, drifting at different
+        speeds under the glass, with an aurora turning beneath them. Everything
+        here moves by transform alone, so the compositor carries it.
+      */}
       <div className="nx-home__ambient" aria-hidden>
-        <span className="nx-home__blob nx-home__blob--a" />
-        <span className="nx-home__blob nx-home__blob--b" />
-        <span className="nx-home__blob nx-home__blob--c" />
+        <div className="nx-home__field" ref={ambientRef}>
+          <span className="nx-home__aurora" />
+          <span className="nx-home__blob nx-home__blob--a" />
+          <span className="nx-home__blob nx-home__blob--b" />
+          <span className="nx-home__blob nx-home__blob--c" />
+          <span className="nx-home__blob nx-home__blob--d" />
+          <span className="nx-home__blob nx-home__blob--e" />
+        </div>
+        <span className="nx-home__caustics" />
         <span className="nx-home__grain" />
         <span className="nx-home__vignette" />
       </div>
 
-      <div className="nx-home__scroll">
+      <div className="nx-home__scroll" ref={scrollRef}>
         <div className="nx-home__column">
+          <CondensedBar
+            now={now}
+            name={name}
+            signals={signals}
+            focusCount={focusItems.length}
+            onCustomize={() => setCustomizing(true)}
+          />
           <Greeting
+            heroRef={heroRef}
             now={now}
             name={name}
             signals={signals}
@@ -276,6 +343,9 @@ export const HomeView = () => {
           </footer>
         </div>
       </div>
+
+      <span className="nx-home__scrim nx-home__scrim--top" aria-hidden />
+      <span className="nx-home__scrim nx-home__scrim--bottom" aria-hidden />
 
       <CustomizeSheet open={customizing} onClose={() => setCustomizing(false)} />
     </div>
