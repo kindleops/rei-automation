@@ -16,7 +16,7 @@ import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 
 export type CompSource = 'mls' | 'public_record' | 'investor'
-export type BuyerClass = 'institutional' | 'hedge_fund' | 'portfolio' | 'llc_investor' | 'individual' | 'trust' | 'bank' | 'government' | 'unknown'
+export type BuyerClass = 'institutional' | 'hedge_fund' | 'builder' | 'portfolio' | 'llc_investor' | 'individual' | 'trust' | 'bank' | 'government' | 'unknown'
 
 export interface CompFilters {
   sources: CompSource[]
@@ -35,6 +35,7 @@ export const DEFAULT_COMP_FILTERS: CompFilters = {
 
 export const COMP_SOURCE_LABEL: Record<CompSource, string> = { mls: 'MLS sale', public_record: 'Public record', investor: 'Investor purchase' }
 export const BUYER_CLASS_LABEL: Record<BuyerClass, string> = {
+  builder: 'Home builder',
   institutional: 'Institutional', hedge_fund: 'Hedge fund', portfolio: 'Portfolio buyer', llc_investor: 'LLC / investor',
   individual: 'Individual', trust: 'Trust / estate', bank: 'Bank / lender', government: 'Government', unknown: 'Buyer not on record',
 }
@@ -217,7 +218,9 @@ export interface CompDetail {
   buyer_class: BuyerClass
   portfolio_size: number
   portfolio: Array<{ comp_id: string; address: string; lat: number; lng: number; type: string | null }> | null
-  buyer_stats: { purchases: number; first: string | null; last: string | null; markets: number } | null
+  buyer_stats: { purchases: number; first: string | null; last: string | null; markets: number; median_price?: number | null } | null
+  /** Everything the source record knows (blanks dropped). */
+  details: Record<string, string | number | boolean | null> | null
 }
 
 export async function loadCompDetail(compId: string): Promise<CompDetail | null> {

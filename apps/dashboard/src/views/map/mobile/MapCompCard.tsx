@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom'
 import type maplibregl from 'maplibre-gl'
 import { Icon } from '../../../shared/icons'
 import { useStreetViewAvailability } from '../seller-card/use-street-view-availability'
+import { InteractiveStreetViewPanorama } from '../../../modules/deal-intelligence/InteractiveStreetViewPanorama'
 import {
   BUYER_CLASS_LABEL,
   COMP_SOURCE_LABEL,
@@ -35,6 +36,28 @@ const dateLabel = (d?: string | null) => {
 const titleCase = (s?: string | null) => (s ? s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : '')
 
 const PORTFOLIO_SRC = 'nx-comps-portfolio'
+const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined
+
+/** The stored image when the record has one, else Street View at the sale's own coordinates. */
+export function compStreetViewUrl(comp: Pick<CompDetail, 'streetview_image' | 'lat' | 'lng' | 'address'> | null): string | null {
+  if (!comp) return null
+  if (comp.streetview_image) return comp.streetview_image
+  if (!MAPS_KEY) return null
+  const hasCoords = Number.isFinite(comp.lat) && Number.isFinite(comp.lng) && Math.abs(comp.lat) > 0.0001
+  const location = hasCoords ? `${comp.lat},${comp.lng}` : (comp.address ?? '').trim()
+  if (!location) return null
+  const params = new URLSearchParams({ size: '640x400', location, fov: '80', pitch: '4', source: 'outdoor', key: MAPS_KEY })
+  return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`
+}
+
+const pctText = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v)}%` : null)
+const moneyText = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v !== 0 ? usd(Math.abs(v)).replace('$', v < 0 ? '−$' : '$') : null)
+const text = (v: unknown) => (v == null || v === '' ? null : String(v))
+
+/** Label/value rows for a section, only the ones the record actually has. */
+function rows(pairs: Array<[string, string | null]>): Array<[string, string]> {
+  return pairs.filter((p): p is [string, string] => Boolean(p[1]))
+}
 
 function showPortfolio(map: maplibregl.Map, comp: CompDetail | null) {
   try {
@@ -56,6 +79,7 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
   const [comp, setComp] = useState<CompDetail | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [showAll, setShowAll] = useState(false)
+  const [lookAround, setLookAround] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -72,7 +96,8 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
 
   useEffect(() => () => { if (map) showPortfolio(map, null) }, [map, compId])
 
-  const hero = useStreetViewAvailability(comp?.streetview_image ?? null)
+  const heroUrl = compStreetViewUrl(comp)
+  const hero = useStreetViewAvailability(heroUrl)
   const isPortfolio = (comp?.portfolio_size ?? 1) >= 2
   const instit = comp?.buyer_class === 'institutional' || comp?.buyer_class === 'hedge_fund'
 
@@ -87,15 +112,20 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
   return createPortal(
     <div className={cls('mx-comp', instit && 'is-institutional', isPortfolio && 'is-portfolio')} role="dialog" aria-label="Sold comp" data-map-card="comp">
       <div className="mx-comp__hero">
-        {comp?.streetview_image && hero === 'available'
-          ? <img src={comp.streetview_image} alt="" loading="lazy" />
-          : <div className="mx-comp__hero-fallback" aria-hidden="true"><Icon name="home" size={26} /></div>}
+        {heroUrl && hero !== 'unavailable' && hero !== 'error'
+          ? <img src={heroUrl} alt="" loading="lazy" className={cls(hero === 'loading' && 'is-loading')} />
+          : <div className="mx-comp__hero-fallback" aria-hidden="true"><Icon name="home" size={26} /><span>No street imagery here</span></div>}
         <div className="mx-comp__scrim" />
         <div className="mx-comp__chips">
           <span className={cls('mx-comp__chip', `src-${comp?.source ?? 'mls'}`)}>{comp ? COMP_SOURCE_LABEL[comp.source] : 'Sold'}</span>
           {comp && comp.buyer_class !== 'unknown' && <span className={cls('mx-comp__chip', 'buyer', instit && 'is-gold')}>{BUYER_CLASS_LABEL[comp.buyer_class]}</span>}
         </div>
         <button type="button" className="mx-comp__close" aria-label="Close comp" onClick={onClose} data-map-sheet-close><Icon name="close" size={14} /></button>
+        {comp && Number.isFinite(comp.lat) && (
+          <button type="button" className="mx-comp__look" onClick={() => setLookAround(true)} data-comp-look>
+            <Icon name="globe" size={14} /> Look Around
+          </button>
+        )}
         <div className="mx-comp__title">
           <strong>{comp?.address ? titleCase(comp.address) : state === 'loading' ? 'Loading sale…' : 'Sale unavailable'}</strong>
           <span>{comp ? [comp.property_type, dateLabel(comp.sold_on)].filter(Boolean).join(' · ') : ''}</span>
@@ -134,10 +164,79 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
               {[
                 comp.buyer_class !== 'unknown' ? BUYER_CLASS_LABEL[comp.buyer_class] : null,
                 comp.buyer_stats && comp.buyer_stats.purchases > 1 ? `${comp.buyer_stats.purchases} purchases${comp.buyer_stats.markets > 1 ? ` in ${comp.buyer_stats.markets} states` : ''}` : null,
+                comp.buyer_stats?.median_price && comp.buyer_stats.purchases > 1 ? `median ${usd(comp.buyer_stats.median_price)}` : null,
                 comp.out_of_state_owner ? 'Out-of-state' : null,
               ].filter(Boolean).join(' · ')}
             </span>
           </div>
+
+          {comp.details && (() => {
+            const d = comp.details
+            const deal = isPortfolio ? [] : rows([
+              ['ARV estimate', moneyText(d.arv_estimate)],
+              ['Below value', typeof d.percent_off === 'number' && d.percent_off > 0 ? `${Math.round(d.percent_off)}% · ${moneyText(d.price_off_value) ?? ''}` : null],
+              ['Potential spread', typeof d.potential_spread === 'number' && d.potential_spread > 0 ? moneyText(d.potential_spread) : null],
+              ['Est. repairs', moneyText(d.estimated_repair_cost)],
+              ['Renovation', text(d.renovation_level)],
+              ['Deal grade', text(d.deal_grade)],
+              ['Equity at sale', typeof d.equity_percent === 'number' && d.equity_percent > -100 ? `${pctText(d.equity_percent)} · ${moneyText(d.equity_amount) ?? ''}` : null],
+            ])
+            const sale = rows([
+              ['Recorded', d.recording_date ? dateLabel(String(d.recording_date)) : null],
+              ['Public record', d.sale_price ? `${usd(Number(d.sale_price))} · ${dateLabel(text(d.sale_date))}` : null],
+              ['MLS sold', d.mls_sold_price ? `${usd(Number(d.mls_sold_price))} · ${dateLabel(text(d.mls_sold_date))}` : null],
+              ['MLS status', text(d.mls_status)],
+              ['Listed at', moneyText(d.mls_list_price)],
+              ['Assessed', moneyText(d.assessed_total_value)],
+              ['APN', text(d.apn)],
+            ])
+            const building = rows([
+              ['Lot', d.lot_square_feet ? `${Math.round(Number(d.lot_square_feet)).toLocaleString()} sq ft` : d.lot_acreage ? `${d.lot_acreage} ac` : null],
+              ['Stories', text(d.stories)],
+              ['Condition', text(d.building_condition)],
+              ['Quality', text(d.building_quality)],
+              ['Construction', text(d.construction_type)],
+              ['Exterior', text(d.exterior_walls)],
+              ['Roof', text(d.roof)],
+              ['Garage', text(d.garage)],
+              ['Pool', text(d.pool)],
+              ['Basement', text(d.basement)],
+              ['Cooling', text(d.air_conditioning)],
+              ['Heating', text(d.heating)],
+              ['Style', text(d.style)],
+              ['Effective built', text(d.effective_year_built)],
+            ])
+            const place = rows([
+              ['County', text(d.county)],
+              ['Subdivision', text(d.subdivision)],
+              ['Schools', text(d.school_district)],
+              ['Zoning', text(d.zoning)],
+              ['Flood zone', text(d.flood_zone)],
+              ['Class', text(d.property_class)],
+            ])
+            const buyerMore = rows([
+              ['Buyer mailing', text(d.owner_mailing)],
+              ['Buy box', text(d.buyer_buy_box)],
+              ['Activity', text(d.buyer_activity)],
+              ['Entity', text(d.buyer_entity_strength)],
+            ])
+            const Section = ({ title, items, tone }: { title: string; items: Array<[string, string]>; tone?: string }) => items.length ? (
+              <section className={cls('mx-comp__section', tone)}>
+                <h4>{title}</h4>
+                <dl>{items.map(([k, v]) => (<div key={k}><dt>{k}</dt><dd>{v}</dd></div>))}</dl>
+              </section>
+            ) : null
+            return (
+              <>
+                <Section title="Deal math" items={deal} tone="is-deal" />
+                <Section title="The sale" items={sale} />
+                <Section title="Building" items={building} />
+                <Section title="Location" items={place} />
+                <Section title="Buyer profile" items={buyerMore} />
+                {text(d.flags) && <div className="mx-comp__flags">{String(d.flags).split(/;\s*/).filter(Boolean).map((f) => <span key={f}>{f}</span>)}</div>}
+              </>
+            )
+          })()}
 
           {isPortfolio && (
             <div className="mx-comp__portfolio">
@@ -158,6 +257,16 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
           )}
         </div>
       )}
+      {lookAround && comp && createPortal(
+        <div className="smc-look" role="dialog" aria-label={`Look Around — ${comp.address ?? 'sold property'}`}>
+          <InteractiveStreetViewPanorama address={comp.address ?? ''} lat={comp.lat} lng={comp.lng} visible onFailure={() => setLookAround(false)} />
+          <div className="smc-look__bar">
+            <span className="smc-look__addr">{titleCase(comp.address)}</span>
+            <button type="button" className="smc-look__done" onClick={() => setLookAround(false)}>Done</button>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>,
     document.body,
   )
@@ -166,7 +275,7 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
 // ── Filters ──────────────────────────────────────────────────────────────────
 
 const SOURCES: CompSource[] = ['mls', 'public_record', 'investor']
-const CLASSES: BuyerClass[] = ['institutional', 'portfolio', 'llc_investor', 'individual', 'trust', 'bank', 'government']
+const CLASSES: BuyerClass[] = ['institutional', 'portfolio', 'builder', 'llc_investor', 'individual', 'trust', 'bank', 'government']
 const TYPES = ['Single Family', 'Multi-Family', 'Condominium', 'Townhouse', 'Apartment', 'Vacant Land', 'Mobile Home']
 const PRICES = [0, 50_000, 100_000, 150_000, 200_000, 300_000, 400_000, 500_000, 750_000, 1_000_000, 2_000_000]
 

@@ -48,6 +48,7 @@ import { dotsInView, usePropertyDots } from './usePropertyDots'
 import { LiquidGlassControls } from '../../../shared/LiquidGlassControls'
 import { COMP_LAYERS, DEFAULT_COMP_FILTERS, activeCompFilterCount, useSoldComps, type CompFilters } from './useSoldComps'
 import { CompFiltersPanel, MapCompCard } from './MapCompCard'
+import { MapSearch } from './MapSearch'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -195,6 +196,15 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const [clock, setClock] = useState(() => Date.now())
   const [prefs, setPrefs] = useState<LensPrefs>(readLensPrefs)
   const [drawing, setDrawing] = useState(false)
+  const [searchActive, setSearchActive] = useState(false)
+  const openSearchProperty = useCallback((hit: { propertyId: string; lng: number; lat: number; label: string }) => {
+    onSelectEvent({
+      id: `search:${hit.propertyId}`, type: 'new_reply', priority: 'normal', title: hit.label, severity: 'info', channel: 'context',
+      summary: hit.label, primaryAction: 'Show on map', secondaryAction: null, occurredAt: new Date().toISOString(), receivedAt: new Date().toISOString(),
+      source: 'search', isUnread: false, isPinned: false, isAcknowledged: true, rankScore: 0, isGlobalCritical: false,
+      lat: hit.lat, lng: hit.lng, targetType: 'seller', targetId: hit.propertyId, propertyId: hit.propertyId, address: hit.label,
+    } as LiveActivityEvent)
+  }, [onSelectEvent])
   const setPref = useCallback(<K extends keyof LensPrefs>(k: K, v: LensPrefs[K]) => setPrefs((p) => ({ ...p, [k]: v })), [])
   useEffect(() => { try { localStorage.setItem(LENS_STORE, JSON.stringify(prefs)) } catch { /* private mode */ } }, [prefs])
 
@@ -623,7 +633,12 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   return (
     <div className={cls('mx', cardOpen && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing')}>
       <MapAreaTool map={map} epoch={mapEpoch} drawing={drawing} onDrawingChange={setDrawing} reducedMotion={reducedMotion} />
-      {!drawing && <div className="mx-top">
+      {!drawing && (
+        <div className="mx-searchrow">
+          <MapSearch map={map} epoch={mapEpoch} reducedMotion={reducedMotion} onProperty={openSearchProperty} onActiveChange={setSearchActive} />
+        </div>
+      )}
+      {!drawing && <div className={cls('mx-top', searchActive && 'is-yielding')}>
         {prefs.modePill && (
         <button type="button" className="mx-context" data-map-control="mode" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
           <span className={cls('mx-context__swatch', !pillSwatch && 'is-ramp')} aria-hidden="true" style={pillSwatch ? undefined : { backgroundImage: rampGradient(lens, '0deg') }}>
@@ -689,14 +704,14 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
       {compId && <MapCompCard map={map} compId={compId} onClose={() => setCompId(null)} reducedMotion={reducedMotion} />}
 
-      {!cardOpen && !compId && (prefs.market || prefs.mapKey) && (
+      {!cardOpen && !compId && !searchActive && (prefs.market || prefs.mapKey) && (
         <div className={cls('mx-cards', activityOn && 'has-peek')}>
           {prefs.market && <MarketPanel map={map} epoch={mapEpoch} onClose={() => setPref('market', false)} />}
           {prefs.mapKey && <LensLegend lens={lens} state={lensState} zoom={zoom} />}
         </div>
       )}
 
-      {activityOn && !cardOpen && !compId && (
+      {activityOn && !cardOpen && !compId && !searchActive && (
         <button type="button" className="mx-peek" data-map-control="activity-feed" onClick={() => setSheet('activity')}>
           <span className={cls('mx-peek__dot', latest && `tier-${tierOf(latest)}`)} aria-hidden="true" />
           <span className="mx-peek__copy" key={latest?.id ?? 'none'}>

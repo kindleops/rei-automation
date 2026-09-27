@@ -6,7 +6,8 @@
 -- recording 2+ properties on one date at ONE price is a portfolio sale (that
 -- price is the whole portfolio's; per_door = price / size). 93,854 rows at build.
 -- Refresh after comp imports:  REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_map_sold_comps;
-CREATE MATERIALIZED VIEW IF NOT EXISTS public.mv_map_sold_comps AS
+DROP MATERIALIZED VIEW IF EXISTS public.mv_map_sold_comps;
+CREATE MATERIALIZED VIEW public.mv_map_sold_comps AS
 WITH rsp AS (
   SELECT r.id::text AS rid, NULLIF(btrim(r.property_id), '') AS property_id,
          COALESCE(NULLIF(btrim(r.buyer_name_clean), ''), NULLIF(btrim(r.buyer_name), ''), NULLIF(btrim(r.owner_name_clean), ''), NULLIF(btrim(r.owner_name), '')) AS buyer,
@@ -60,7 +61,8 @@ unified AS (
 SELECT u.*,
   CASE
     WHEN u.owner_type = 'Hedgefund' THEN 'hedge_fund'
-    WHEN u.buyer ~* '(INVITATION HOMES|AMERICAN HOMES 4 RENT|\mAMH\M|PROGRESS RESIDENTIAL|TRICON|\mSFR\M|FIRSTKEY|MAIN STREET RENEWAL|VINEBROOK|PRETIUM|HOME PARTNERS|AMHERST|CERBERUS|BLACKSTONE|RESICAP|OPENDOOR|OFFERPAD|\mMYND\M|ROOFSTOCK|FRONT YARD|HAVENBROOK|BROOKFIELD|STARWOOD|INVH|FUNDRISE)' THEN 'institutional'
+    WHEN u.buyer ~* '(INVITATION HOMES|AMERICAN HOMES 4 RENT|\mAMH\M|\mAH4R\M|PROGRESS RESIDENTIAL|TRICON|\mSFR\M|FIRSTKEY|MAIN STREET RENEWAL|VINEBROOK|PRETIUM|HOME PARTNERS|AMHERST|CERBERUS|BLACKSTONE|RESICAP|OPENDOOR|OFFERPAD|\mMYND\M|ROOFSTOCK|FRONT YARD|HAVENBROOK|BROOKFIELD|STARWOOD|INVH|FUNDRISE)' THEN 'institutional'
+    WHEN u.buyer ~* '(LENNAR|D\.? ?R\.? HORTON|PULTE|\mKB HOME|MERITAGE|TAYLOR MORRISON|CENTEX|\mNVR\M|RYAN HOMES|TOLL BROTHERS|HIGHLAND HOMES|PERRY HOMES|DAVID WEEKLEY|CENTURY COMMUNITIES|LGI HOMES|STARLIGHT HOMES|ASHTON WOODS|CHESMAR|BEAZER|M/I HOMES|DREAM FINDERS|TRI POINTE|SHEA HOMES|WILLIAM LYON|K HOVNANIAN|MATTAMY)' THEN 'builder'
     WHEN u.portfolio_size >= 10 AND COALESCE(u.price, 0) >= 1000000 THEN 'institutional'
     WHEN u.portfolio_size >= 2 THEN 'portfolio'
     WHEN u.owner_type = 'Trust / Estate' THEN 'trust'
@@ -161,3 +163,7 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.get_map_sold_comps(double precision, double precision, double precision, double precision, double precision, jsonb) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_map_sold_comp(text) TO authenticated, service_role;
+
+-- 2026-09-26 (later): buyer_class gains 'builder' (above), buyer median price,
+-- and the source record's full detail on get_map_sold_comp. Applied via MCP
+-- migration map_sold_comp_details; see that migration for the function body.
