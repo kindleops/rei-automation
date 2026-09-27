@@ -27,6 +27,12 @@ export const openThread = (thread: HomeThread) => {
   pushRoutePath('/inbox')
 }
 
+/** Opens a conversation known only by its thread key (calendar items). */
+export const openThreadKey = (threadKey: string) => {
+  setPropertyLocator({ threadKey })
+  pushRoutePath('/inbox')
+}
+
 export const openTarget = (target: FocusTarget) => {
   if (target.kind === 'thread') openThread(target.thread)
   else goTo(target.path)

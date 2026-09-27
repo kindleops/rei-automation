@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   dataOf,
+  loadHomeCalendar,
   loadHomeCampaigns,
   loadHomeClosings,
   loadHomeInbox,
@@ -8,6 +9,8 @@ import {
   loadHomeMessaging,
   loadHomePipeline,
   loadHomeQueue,
+  loadHomeReplyPins,
+  type HomeCalendar,
   type HomeCampaigns,
   type HomeClosings,
   type HomeInbox,
@@ -16,6 +19,7 @@ import {
   type HomeMessaging,
   type HomePipeline,
   type HomeQueue,
+  type HomeReplyPin,
 } from './home-signals'
 
 export interface HomeSignals {
@@ -26,6 +30,8 @@ export interface HomeSignals {
   pipeline: HomeLoad<HomePipeline>
   closings: HomeLoad<HomeClosings>
   markets: HomeLoad<HomeMarket[]>
+  pins: HomeLoad<HomeReplyPin[]>
+  calendar: HomeLoad<HomeCalendar>
 }
 
 type SourceKey = keyof HomeSignals
@@ -38,6 +44,8 @@ const LOADING: HomeSignals = {
   pipeline: { status: 'loading' },
   closings: { status: 'loading' },
   markets: { status: 'loading' },
+  pins: { status: 'loading' },
+  calendar: { status: 'loading' },
 }
 
 const LOADERS: { [K in SourceKey]: (signal: AbortSignal) => Promise<HomeSignals[K]> } = {
@@ -48,6 +56,8 @@ const LOADERS: { [K in SourceKey]: (signal: AbortSignal) => Promise<HomeSignals[
   pipeline: () => loadHomePipeline(),
   closings: loadHomeClosings,
   markets: () => loadHomeMarkets(),
+  pins: loadHomeReplyPins,
+  calendar: () => loadHomeCalendar(),
 }
 
 /** The engine moves fastest; the pipeline and closings move on the scale of hours. */
@@ -61,7 +71,7 @@ const SLOW_POLL_MS = 3 * 60_000
  */
 const SOURCE_TIMEOUT_MS = 15_000
 const FAST: SourceKey[] = ['inbox', 'queue', 'messaging']
-const SLOW: SourceKey[] = ['campaigns', 'pipeline', 'closings', 'markets']
+const SLOW: SourceKey[] = ['campaigns', 'pipeline', 'closings', 'markets', 'pins', 'calendar']
 
 /**
  * Loads every Home source in parallel, each settling on its own.
