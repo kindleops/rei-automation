@@ -197,7 +197,6 @@ html[data-nexus-theme='light'] .egx-icon-btn { background: rgb(11 18 32 / 0.04);
 html[data-nexus-theme='light'] .egx-orbit { stroke: rgb(11 18 32 / 0.08); }
 .egx-edge {
   fill: none;
-  stroke: var(--tone);
   stroke-width: 1.4;
   stroke-linecap: round;
   opacity: 0.34;
@@ -293,7 +292,7 @@ html[data-nexus-theme='light'] .egx-orbit { stroke: rgb(11 18 32 / 0.08); }
 }
 @keyframes egx-ping { 0% { opacity: 0.9; transform: scale(0.9); } 100% { opacity: 0; transform: scale(1.5); } }
 .egx-node.is-focus .egx-node__orb { transform: scale(1.18); box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.6), 0 0 0 2px var(--tone), 0 0 0 7px color-mix(in srgb, var(--tone) 18%, transparent), 0 0 40px 0 color-mix(in srgb, var(--tone) 70%, transparent); }
-.egx-node.is-dim { opacity: 0.22; filter: saturate(0.4); }
+.egx-node.is-dim { opacity: 0.2; filter: saturate(0.35) blur(1.4px); }
 .egx-node.is-selected .egx-node__orb { box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.6), 0 0 0 2.5px #fff, 0 0 0 6px color-mix(in srgb, var(--tone) 60%, transparent), 0 0 28px color-mix(in srgb, var(--tone) 70%, transparent); }
 .egx-node__check {
   position: absolute;
@@ -723,7 +722,7 @@ html[data-nexus-theme='light'] .egx-act { background: rgb(255 255 255 / 0.8); }
   isolation: isolate;
   padding: 18px 14px calc(110px + env(safe-area-inset-bottom, 0px));
 }
-.egx-landing > *:not(.egx-aurora) { position: relative; z-index: 1; }
+.egx-landing > *:not(.egx-aurora):not(.egx-landing-fx) { position: relative; z-index: 1; }
 .egx-aurora.is-landing { position: fixed; }
 .egx-landing__head { padding: 8px 4px 18px; animation: egx-rise 0.6s ease both; }
 .egx-landing__head h1 {
@@ -836,3 +835,235 @@ html[data-nexus-theme='light'] .egx-act { background: rgb(255 255 255 / 0.8); }
 }
 html[data-nexus-theme='light'] .egx-sheet .nx-mobile-bottom-sheet__handle { background: rgb(11 18 32 / 0.22) !important; }
 .egx-sheet .nx-mobile-bottom-sheet__handle::after { content: ''; position: absolute; left: -140px; right: -140px; top: -12px; bottom: -14px; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   CINEMATIC LAYER — live FX, liquid glass orbs, liquid colour
+   ════════════════════════════════════════════════════════════════════════ */
+.egx-fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.egx-world { z-index: 1; }
+.egx-stage { background: radial-gradient(120% 80% at 50% 38%, rgb(20 26 44 / 0.6), transparent 70%); }
+html[data-nexus-theme='light'] .egx-stage { background: radial-gradient(120% 80% at 50% 38%, rgb(255 255 255 / 0.7), transparent 70%); }
+/* A faint lattice under everything — the "instrument" feel. */
+.egx-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgb(160 200 255 / 0.09) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 30%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 30%, transparent 80%);
+}
+html[data-nexus-theme='light'] .egx-stage::before { background-image: radial-gradient(rgb(11 18 32 / 0.08) 1px, transparent 1.2px); }
+
+/* Liquid glass orb: clear body, iridescent rim that turns, a sheen that travels. */
+.egx-node__orb { isolation: isolate; overflow: visible; }
+.egx-node__orb > svg, .egx-node__count { position: relative; z-index: 3; }
+.egx-node__rim {
+  position: absolute;
+  inset: -2px;
+  z-index: 1;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, var(--tone), #d8f6ff, color-mix(in srgb, var(--tone) 40%, #ff9bf5), var(--tone), color-mix(in srgb, var(--tone) 60%, #9dffea), var(--tone));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  opacity: 0.8;
+  animation: egx-spin 7s linear infinite;
+  animation-delay: calc(var(--d, 0ms) * -3);
+}
+@keyframes egx-spin { to { transform: rotate(360deg); } }
+.egx-node__sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(115deg, transparent 32%, rgb(255 255 255 / 0.55) 46%, rgb(255 255 255 / 0.12) 52%, transparent 62%) 150% 0 / 260% 100% no-repeat;
+  mix-blend-mode: screen;
+  animation: egx-sheen 6.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  animation-delay: calc(var(--d, 0ms) * 2);
+  pointer-events: none;
+}
+@keyframes egx-sheen { 0%, 62% { background-position: 150% 0; } 100% { background-position: -110% 0; } }
+.egx-node:not(.is-hub) .egx-node__orb {
+  background:
+    radial-gradient(circle at 32% 24%, rgb(255 255 255 / 0.62), transparent 38%),
+    radial-gradient(circle at 70% 80%, color-mix(in srgb, var(--tone) 55%, transparent), transparent 55%),
+    radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--tone) 42%, rgb(8 12 22 / 0.4)), rgb(6 10 18 / 0.72) 80%);
+  -webkit-backdrop-filter: blur(6px) saturate(160%);
+  backdrop-filter: blur(6px) saturate(160%);
+}
+
+/* The owner: a molten liquid core under clear glass, satellites in orbit. */
+.egx-node.is-hub .egx-node__orb { background: radial-gradient(circle at 32% 22%, rgb(255 255 255 / 0.55), transparent 36%), rgb(28 20 6 / 0.55); }
+.egx-hub-core {
+  position: absolute;
+  inset: 5px;
+  z-index: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: conic-gradient(from 0deg, #f7c75b, #fff1c2, #ff9d3c, #f7c75b, #ffd98a, #c9861a, #f7c75b);
+  filter: blur(5px) saturate(130%);
+  animation: egx-spin 6s linear infinite, egx-core 3.2s ease-in-out infinite;
+  opacity: 0.95;
+}
+@keyframes egx-core { 50% { transform: scale(0.9) rotate(180deg); opacity: 0.8; } }
+.egx-hub-sats { position: absolute; inset: -16px; z-index: 0; border-radius: 50%; pointer-events: none; animation: egx-spin 9s linear infinite; }
+.egx-hub-sats i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 10px 2px var(--egx-owner);
+}
+.egx-hub-sats i:nth-child(1) { left: 50%; top: -2px; }
+.egx-hub-sats i:nth-child(2) { right: 4px; bottom: 14%; width: 4px; height: 4px; }
+.egx-hub-sats i:nth-child(3) { left: 6px; bottom: 20%; width: 5px; height: 5px; background: var(--egx-owner); }
+
+/* Selecting sends a ripple. */
+.egx-node__burst {
+  position: absolute;
+  inset: -3px;
+  z-index: 4;
+  border-radius: 50%;
+  border: 2px solid var(--tone);
+  pointer-events: none;
+  animation: egx-burst 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes egx-burst { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(2.4); } }
+.egx-node__check { z-index: 5; animation: egx-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.6) both; }
+@keyframes egx-pop { from { transform: scale(0); } to { transform: scale(1); } }
+
+/* Focus: the camera's subject glows and floats. */
+.egx-node.is-focus .egx-node__orb { animation: egx-float 3.4s ease-in-out infinite; }
+@keyframes egx-float { 50% { transform: scale(1.18) translateY(-3px); } }
+.egx-node.is-focus .egx-node__label { box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 50%, transparent), 0 8px 24px -10px var(--tone); }
+
+/* Liquid chips: the active layer fills with its own colour. */
+.egx-layer.is-on {
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--chip, var(--egx-property)) 22%, transparent), transparent 70%),
+    var(--egx-glass);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip, var(--egx-property)) 36%, transparent), inset 0 1px 0 var(--egx-edge-hi);
+}
+.egx-layer.is-property { --chip: var(--egx-property); }
+.egx-layer.is-entity { --chip: var(--egx-entity); }
+.egx-layer.is-person { --chip: var(--egx-person); }
+.egx-layer.is-phone { --chip: var(--egx-contact); }
+.egx-layer.is-mailing { --chip: var(--egx-mailing); }
+.egx-layer.is-related_owner { --chip: var(--egx-related); }
+.egx-layer.is-conversation { --chip: var(--egx-convo); }
+.egx-layer { animation: egx-rise 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards; }
+.egx-layer:nth-child(2) { animation-delay: 60ms; } .egx-layer:nth-child(3) { animation-delay: 110ms; } .egx-layer:nth-child(4) { animation-delay: 160ms; }
+.egx-layer:nth-child(5) { animation-delay: 210ms; } .egx-layer:nth-child(6) { animation-delay: 260ms; } .egx-layer:nth-child(7) { animation-delay: 310ms; } .egx-layer:nth-child(8) { animation-delay: 360ms; }
+
+/* Top bar: a slow light passes across the glass. */
+.egx-top-bar { overflow: hidden; }
+.egx-top-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 40%, rgb(255 255 255 / 0.1) 50%, transparent 60%) 200% 0 / 250% 100% no-repeat;
+  animation: egx-sheen 9s ease-in-out infinite;
+}
+.egx-top-bar__title strong { background: linear-gradient(95deg, var(--egx-text) 55%, color-mix(in srgb, var(--egx-owner) 80%, var(--egx-text))); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ── Inspector: liquid colour under the header, numbers that arrive ─────── */
+.egx-insp { --tone: var(--egx-owner); }
+.egx-insp.is-property { --tone: var(--egx-property); }
+.egx-insp.is-entity { --tone: var(--egx-entity); }
+.egx-insp.is-person { --tone: var(--egx-person); }
+.egx-insp.is-phone, .egx-insp.is-email { --tone: var(--egx-contact); }
+.egx-insp.is-mailing { --tone: var(--egx-mailing); }
+.egx-insp.is-related_owner { --tone: var(--egx-related); }
+.egx-insp.is-conversation { --tone: var(--egx-convo); }
+.egx-insp__head { position: relative; isolation: isolate; animation: egx-rise 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.1) both; }
+.egx-insp__head > *:not(.egx-insp__liquid) { position: relative; z-index: 1; }
+.egx-insp__liquid { position: absolute; inset: -34px -16px -10px; z-index: 0; overflow: hidden; pointer-events: none; filter: blur(26px) saturate(150%); opacity: 0.75; }
+.egx-insp__liquid i { position: absolute; width: 58%; height: 120%; border-radius: 50%; animation: egx-drift 9s ease-in-out infinite alternate; }
+.egx-insp__liquid i:nth-child(1) { left: -10%; top: -30%; background: radial-gradient(closest-side, color-mix(in srgb, var(--tone) 60%, transparent), transparent); }
+.egx-insp__liquid i:nth-child(2) { right: -8%; top: -20%; background: radial-gradient(closest-side, color-mix(in srgb, var(--tone) 35%, #7c5cff), transparent); animation-duration: 12s; animation-delay: -3s; }
+.egx-insp__liquid i:nth-child(3) { left: 30%; top: 10%; background: radial-gradient(closest-side, color-mix(in srgb, var(--tone) 30%, #00e0ff), transparent); animation-duration: 15s; animation-delay: -6s; opacity: 0.7; }
+html[data-nexus-theme='light'] .egx-insp__liquid { opacity: 0.45; }
+.egx-insp__icon { position: relative; overflow: hidden; }
+.egx-insp__icon::after { content: ''; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 35%, rgb(255 255 255 / 0.55) 48%, transparent 60%) 150% 0 / 260% 100% no-repeat; animation: egx-sheen 4.5s ease-in-out infinite; }
+.egx-insp__head h2 { background: linear-gradient(95deg, var(--egx-text) 60%, color-mix(in srgb, var(--tone) 70%, var(--egx-text))); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.egx-kpi { position: relative; overflow: hidden; animation: egx-rise 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards; }
+.egx-kpi:nth-child(2) { animation-delay: 70ms; } .egx-kpi:nth-child(3) { animation-delay: 140ms; } .egx-kpi:nth-child(4) { animation-delay: 210ms; }
+.egx-kpi::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.14) 48%, transparent 62%) 160% 0 / 260% 100% no-repeat;
+  animation: egx-kpi-sheen 1.6s 0.35s cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+@keyframes egx-kpi-sheen { to { background-position: -120% 0; } }
+.egx-kpi::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--kpi, var(--tone)), transparent);
+  opacity: 0.7;
+}
+.egx-kpi.is-eq { --kpi: var(--egx-person); }
+.egx-kpi.is-debt { --kpi: var(--egx-mailing); }
+.egx-sec { animation: egx-rise 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards; }
+.egx-sec:nth-of-type(1) { animation-delay: 120ms; } .egx-sec:nth-of-type(2) { animation-delay: 190ms; } .egx-sec:nth-of-type(3) { animation-delay: 260ms; }
+.egx-sec:nth-of-type(4) { animation-delay: 330ms; } .egx-sec:nth-of-type(5) { animation-delay: 400ms; } .egx-sec:nth-of-type(6) { animation-delay: 470ms; }
+.egx-eqbar__track { position: relative; }
+.egx-eqbar__debt, .egx-eqbar__equity { transform-origin: left center; animation: egx-grow 1.1s 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+@keyframes egx-grow { from { transform: scaleX(0); } }
+.egx-eqbar__equity { background-size: 200% 100%; animation: egx-grow 1.1s 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) backwards, egx-liquid 5s linear infinite; background-image: linear-gradient(90deg, var(--egx-person), color-mix(in srgb, var(--egx-person) 50%, var(--egx-property)), var(--egx-person)); }
+@keyframes egx-liquid { to { background-position: -200% 0; } }
+.egx-ltv__fill { animation: egx-arc 1.3s 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+@keyframes egx-arc { from { stroke-dasharray: 0 157; } }
+.egx-tl__dot::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 1px solid currentColor; opacity: 0; }
+.egx-tl:first-child .egx-tl__dot { animation: egx-breathe 2.4s ease-in-out infinite; }
+.egx-prow, .egx-rcard, .egx-person, .egx-entity { animation: egx-rise 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.1) backwards; }
+.egx-plist > :nth-child(2), .egx-cards > :nth-child(2) { animation-delay: 50ms; } .egx-plist > :nth-child(3), .egx-cards > :nth-child(3) { animation-delay: 100ms; }
+.egx-plist > :nth-child(4), .egx-cards > :nth-child(4) { animation-delay: 150ms; } .egx-plist > :nth-child(n+5) { animation-delay: 200ms; }
+.egx-act.is-primary { position: relative; overflow: hidden; }
+.egx-act.is-primary::after { content: ''; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.45) 50%, transparent 65%) 160% 0 / 260% 100% no-repeat; animation: egx-sheen 3.8s ease-in-out infinite; }
+.egx-dock__btn.is-primary { position: relative; overflow: hidden; }
+.egx-dock__btn.is-primary::after { content: ''; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.5) 50%, transparent 65%) 160% 0 / 260% 100% no-repeat; animation: egx-sheen 3.2s ease-in-out infinite; }
+.egx-dock__count strong { background: linear-gradient(95deg, var(--egx-text), var(--egx-property)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* ── Landing: a living constellation behind the hero ──────────────────── */
+.egx-landing-fx { position: fixed; left: 0; top: 0; width: 100vw; height: 62vh; z-index: 0; pointer-events: none; opacity: 0.72; -webkit-mask-image: linear-gradient(180deg, #000 40%, transparent 85%); mask-image: linear-gradient(180deg, #000 55%, transparent); }
+.egx-landing__head h1 { background-size: 220% 100%; animation: egx-liquid 9s linear infinite; background-image: linear-gradient(100deg, var(--egx-text) 15%, var(--egx-property) 40%, var(--egx-entity) 60%, var(--egx-text) 85%); }
+.egx-net { position: relative; isolation: isolate; overflow: hidden; }
+.egx-net::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(120% 140% at 0% 50%, color-mix(in srgb, var(--egx-owner) 12%, transparent), transparent 55%); }
+.egx-net:first-child::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--egx-a, 0deg), var(--egx-owner), var(--egx-property), var(--egx-entity), var(--egx-owner));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: egx-border 5s linear infinite;
+  pointer-events: none;
+}
+@property --egx-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes egx-border { to { --egx-a: 360deg; } }
+.egx-net__ring { position: absolute; inset: 0; animation: egx-spin 12s linear infinite; }
+.egx-net__orbit b { position: relative; z-index: 1; animation: egx-breathe 3s ease-in-out infinite; }
+.egx-search__field { position: relative; overflow: hidden; }
+.egx-search__field::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 40%, rgb(255 255 255 / 0.12) 50%, transparent 60%) 200% 0 / 250% 100% no-repeat; animation: egx-sheen 7s ease-in-out infinite; }
+.egx-search__field:focus-within { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--egx-property) 60%, transparent), 0 0 0 5px color-mix(in srgb, var(--egx-property) 12%, transparent), 0 18px 40px -20px var(--egx-property); }
+
+@media (prefers-reduced-motion: reduce) {
+  .egx-node__rim, .egx-node__sheen, .egx-hub-core, .egx-hub-sats, .egx-insp__liquid i, .egx-net__ring, .egx-landing__head h1 { animation: none !important; }
+}

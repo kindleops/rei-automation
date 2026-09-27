@@ -22,6 +22,8 @@ import { fetchEntityNetwork, fetchTopNetworks, money, type EntityNetwork, type T
 import { EntityNetworkStage, NODE_ICON } from './EntityNetworkStage'
 import { EntityNetworkInspector, type InspectorActions } from './EntityNetworkInspector'
 import { visibleNetwork } from './network-layout'
+import { LandingFx } from './LandingFx'
+import { CountUp } from './CountUp'
 import './entity-graph-console.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
@@ -264,6 +266,7 @@ export function EntityGraphConsole(props: Props) {
     return (
       <div className="egx egx-landing">
         <div className="egx-aurora is-landing" aria-hidden="true"><i /><i /><i /></div>
+        <LandingFx />
         <header className="egx-landing__head">
           <span className="egx-eyebrow">Entity Graph</span>
           <h1>Who really owns it.</h1>
@@ -278,14 +281,16 @@ export function EntityGraphConsole(props: Props) {
               {(top ?? []).map((t, i) => (
                 <button key={t.id} type="button" className="egx-net" style={{ animationDelay: `${i * 40}ms` }} onClick={() => go({ type: 'owner', id: t.id }, false)} data-egx-network={t.id}>
                   <span className="egx-net__orbit" aria-hidden="true">
-                    {Array.from({ length: Math.min(9, t.propertyCount) }, (_, k) => <i key={k} style={{ transform: `rotate(${(k / Math.min(9, t.propertyCount)) * 360}deg) translateX(19px)` }} />)}
+                    <span className="egx-net__ring" style={{ animationDuration: `${10 + (i % 5) * 3}s`, animationDirection: i % 2 ? 'reverse' : 'normal' }}>
+                      {Array.from({ length: Math.min(9, t.propertyCount) }, (_, k) => <i key={k} style={{ transform: `rotate(${(k / Math.min(9, t.propertyCount)) * 360}deg) translateX(19px)` }} />)}
+                    </span>
                     <b><Icon name="star" /></b>
                   </span>
                   <span className="egx-net__body">
                     <strong>{t.name}</strong>
                     <em>{t.propertyCount.toLocaleString()} properties{t.markets.length ? ` · ${t.markets.slice(0, 2).join(', ')}` : ''}</em>
                   </span>
-                  <span className="egx-net__value">{money(t.value)}</span>
+                  <span className="egx-net__value"><CountUp value={t.value} format={(x) => money(x)} ms={1400 + i * 60} /></span>
                 </button>
               ))}
             </div>

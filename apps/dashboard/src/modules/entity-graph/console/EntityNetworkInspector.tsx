@@ -11,6 +11,7 @@ import { Icon } from '../../../shared/icons'
 import type { EntityNetwork, NetworkNode, NetworkProperty, NetworkSale } from './entity-network-api'
 import { money, pct, REASON_LABEL, shortDate } from './entity-network-api'
 import { NODE_ICON } from './EntityNetworkStage'
+import { CountUp } from './CountUp'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const label = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '')
@@ -31,12 +32,12 @@ interface Props {
   actions: InspectorActions
 }
 
-function Kpis({ items }: { items: Array<{ k: string; v: string; tone?: string; sub?: string }> }) {
+function Kpis({ items }: { items: Array<{ k: string; v: string; n?: number | null; fmt?: (v: number) => string; tone?: string; sub?: string }> }) {
   return (
     <div className="egx-kpis" style={{ gridTemplateColumns: `repeat(${items.length === 4 ? 2 : items.length}, minmax(0, 1fr))` }}>
       {items.map((it) => (
         <div key={it.k} className={cls('egx-kpi', it.tone && `is-${it.tone}`)}>
-          <strong>{it.v}</strong>
+          <strong>{it.n != null && it.fmt ? <CountUp value={it.n} format={it.fmt} /> : it.v}</strong>
           <span>{it.k}</span>
           {it.sub && <em>{it.sub}</em>}
         </div>
@@ -150,10 +151,10 @@ function NetworkSummary({ network, selected, actions }: Omit<Props, 'node'>) {
   return (
     <>
       <Kpis items={[
-        { k: 'Portfolio value', v: money(owner.portfolio?.value ?? debt.totalValue) },
-        { k: 'Equity', v: money(owner.portfolio?.equity ?? debt.totalEquity), tone: 'eq' },
-        { k: 'Debt', v: money(owner.portfolio?.loanBalance ?? debt.totalLoanBalance), tone: 'debt', sub: debt.blendedLtv !== null ? `${Math.round(debt.blendedLtv)}% LTV` : undefined },
-        { k: 'Properties', v: owner.propertyCount.toLocaleString(), sub: owner.units ? `${owner.units.toLocaleString()} units` : undefined },
+        { k: 'Portfolio value', v: money(owner.portfolio?.value ?? debt.totalValue), n: owner.portfolio?.value ?? debt.totalValue, fmt: (x) => money(x) },
+        { k: 'Equity', v: money(owner.portfolio?.equity ?? debt.totalEquity), n: owner.portfolio?.equity ?? debt.totalEquity, fmt: (x) => money(x), tone: 'eq' },
+        { k: 'Debt', v: money(owner.portfolio?.loanBalance ?? debt.totalLoanBalance), n: owner.portfolio?.loanBalance ?? debt.totalLoanBalance, fmt: (x) => money(x), tone: 'debt', sub: debt.blendedLtv !== null ? `${Math.round(debt.blendedLtv)}% LTV` : undefined },
+        { k: 'Properties', v: owner.propertyCount.toLocaleString(), n: owner.propertyCount, fmt: (x) => Math.round(x).toLocaleString(), sub: owner.units ? `${owner.units.toLocaleString()} units` : undefined },
       ]} />
 
       <Section title="Debt across the portfolio">
@@ -303,7 +304,7 @@ function PropertyView({ p, network, selected, actions }: { p: NetworkProperty; n
         {p.county && <span>{p.county} County</span>}
       </div>
       <Kpis items={[
-        { k: 'Est. value', v: money(p.value) },
+        { k: 'Est. value', v: money(p.value), n: p.value, fmt: (x) => money(x) },
         { k: (p.equity ?? 0) < 0 || (p.equityPct ?? 0) < 0 ? 'Underwater' : 'Equity', v: p.equity !== null ? money(p.equity) : pct(p.equityPct), tone: (p.equity ?? 0) < 0 || (p.equityPct ?? 0) < 0 ? 'debt' : 'eq', sub: p.equityPct !== null ? pct(p.equityPct) : undefined },
         { k: 'Loan balance', v: p.loanBalance ? money(p.loanBalance) : p.freeAndClear ? 'None' : '—', tone: 'debt' },
       ]} />
@@ -362,7 +363,8 @@ export function EntityNetworkInspector({ network, node, selected, actions }: Pro
 
   return (
     <div className={cls('egx-insp', `is-${type}`)}>
-      <header className="egx-insp__head">
+      <header className="egx-insp__head" key={node?.id ?? 'network'}>
+        <span className="egx-insp__liquid" aria-hidden="true"><i /><i /><i /></span>
         <span className={cls('egx-insp__icon', `is-${node?.type ?? 'owner'}`)}><Icon name={header.icon} /></span>
         <div>
           <span className="egx-insp__eyebrow">{header.eyebrow}</span>

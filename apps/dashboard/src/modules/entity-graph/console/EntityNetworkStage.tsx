@@ -12,6 +12,7 @@ import { Icon, type IconName } from '../../../shared/icons'
 import type { NetworkEdge, NetworkNode } from './entity-network-api'
 import { money } from './entity-network-api'
 import { layoutNetwork, neighbours, PROPERTY_CLUSTER_ID } from './network-layout'
+import { NetworkFx } from './NetworkFx'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -25,6 +26,11 @@ export const NODE_ICON: Record<string, IconName> = {
   mailing: 'inbox',
   related_owner: 'link',
   conversation: 'message',
+}
+
+export const TYPE_TONE: Record<string, string> = {
+  owner: 'var(--egx-owner)', property: 'var(--egx-property)', entity: 'var(--egx-entity)', person: 'var(--egx-person)',
+  phone: 'var(--egx-contact)', email: 'var(--egx-contact)', mailing: 'var(--egx-mailing)', related_owner: 'var(--egx-related)', conversation: 'var(--egx-convo)',
 }
 
 export const EDGE_TONE: Record<string, string> = {
@@ -58,6 +64,7 @@ interface Props {
 export function EntityNetworkStage({ nodes, edges, anchorId, focusId, selected, selectMode, fitKey, onFocus, onToggleSelect, onExpandCluster, reducedMotion }: Props) {
   const { placed, radius } = useMemo(() => layoutNetwork(nodes, edges, anchorId), [nodes, edges, anchorId])
   const lit = useMemo(() => (focusId ? neighbours(edges, focusId) : null), [edges, focusId])
+  const typeOf = useMemo(() => new Map(nodes.map((n) => [n.id, n.type])), [nodes])
 
   const stageRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
@@ -109,7 +116,22 @@ export function EntityNetworkStage({ nodes, edges, anchorId, focusId, selected, 
   }, [apply, band, placed, radius])
 
   // Fit when the network changes (a new anchor, an expansion).
-  useLayoutEffect(() => { fit(false); const t = window.setTimeout(() => fit(true), 380); return () => window.clearTimeout(t) }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Cinematic open: the camera starts pulled back and pushes in to frame the network.
+  useLayoutEffect(() => {
+    fit(false)
+    if (!reducedMotion) {
+      const s = stageRef.current?.getBoundingClientRect()
+      if (s) {
+        const v = view.current
+        const k0 = v.k * 0.62
+        view.current = { k: k0, x: s.width / 2 - ((s.width / 2 - v.x) / v.k) * k0, y: s.height * 0.42 - ((s.height * 0.42 - v.y) / v.k) * k0 }
+        apply(false)
+      }
+    }
+    const t = window.setTimeout(() => fit(true), 60)
+    const t2 = window.setTimeout(() => fit(true), 520)
+    return () => { window.clearTimeout(t); window.clearTimeout(t2) }
+  }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gestures: pan, pinch, wheel. Taps are resolved on the node buttons.
   useEffect(() => {
@@ -208,9 +230,21 @@ export function EntityNetworkStage({ nodes, edges, anchorId, focusId, selected, 
   return (
     <div ref={stageRef} className={cls('egx-stage', `is-${zoomTier}`, focusId && 'has-focus', selectMode && 'is-selecting')} onClick={(e) => { if (panMoved.current) return; if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('egx-world')) onFocus(null) }}>
       <div className="egx-aurora" aria-hidden="true"><i /><i /><i /></div>
+      <NetworkFx nodes={nodes} edges={edges} placed={placed} lit={lit} view={view} epoch={fitKey} reducedMotion={reducedMotion} />
       <div ref={worldRef} className="egx-world" style={{ width: size, height: size }}>
         <svg className="egx-edges" width={size} height={size} viewBox={`${-R} ${-R} ${size} ${size}`} aria-hidden="true">
           <defs>
+            {edges.map((e, i) => {
+              const a = placed.get(e.from)
+              const b = placed.get(e.to)
+              if (!a || !b) return null
+              return (
+                <linearGradient key={`g${i}`} id={`egx-g-${i}`} gradientUnits="userSpaceOnUse" x1={a.x} y1={a.y} x2={b.x} y2={b.y}>
+                  <stop offset="0%" style={{ stopColor: TYPE_TONE[typeOf.get(e.from) ?? ''] ?? 'var(--egx-owner)' }} />
+                  <stop offset="100%" style={{ stopColor: TYPE_TONE[typeOf.get(e.to) ?? ''] ?? 'var(--egx-property)' }} />
+                </linearGradient>
+              )
+            })}
             <radialGradient id="egx-halo" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="var(--egx-owner)" stopOpacity="0.22" />
               <stop offset="100%" stopColor="var(--egx-owner)" stopOpacity="0" />
@@ -235,6 +269,7 @@ export function EntityNetworkStage({ nodes, edges, anchorId, focusId, selected, 
                 key={`${e.from}>${e.to}:${i}`}
                 d={`M${a.x},${a.y} Q${cx},${cy} ${b.x},${b.y}`}
                 className={cls('egx-edge', `is-${e.kind}`, on && 'is-lit', lit && !on && 'is-dim')}
+                stroke={`url(#egx-g-${i})`}
                 style={{ ['--tone' as string]: EDGE_TONE[e.kind] ?? 'var(--egx-contact)', animationDelay: `${Math.min(900, i * 14)}ms` }}
               />
             )
@@ -272,7 +307,12 @@ export function EntityNetworkStage({ nodes, edges, anchorId, focusId, selected, 
               aria-label={`${n.type.replace('_', ' ')}: ${n.label}`}
             >
               <span className="egx-node__orb">
+                <span className="egx-node__rim" aria-hidden="true" />
+                {isHub && <span className="egx-hub-core" aria-hidden="true" />}
+                {isHub && <span className="egx-hub-sats" aria-hidden="true"><i /><i /><i /></span>}
+                <span className="egx-node__sheen" aria-hidden="true" />
                 {cluster ? <b className="egx-node__count">{n.label}</b> : <Icon name={NODE_ICON[n.type] ?? 'grid'} />}
+                {selected.has(n.id) && <span className="egx-node__burst" aria-hidden="true" />}
                 {selected.has(n.id) && <span className="egx-node__check" aria-hidden="true"><Icon name="check" /></span>}
                 {flags.length > 0 && <span className={cls('egx-node__flag', `is-${flags[0]}`)} aria-hidden="true" />}
               </span>
