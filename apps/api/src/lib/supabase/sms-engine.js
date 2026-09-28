@@ -10,6 +10,7 @@ import {
   normalizePhone,
 } from "@/lib/providers/textgrid.js";
 import { hasSupabaseConfig, supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import { BUSINESS_TOKEN } from "@/lib/domain/entity-graph/buyer-name-privacy.js";
 import { captureRouteException, addSentryBreadcrumb } from "@/lib/monitoring/sentry.js";
 import { captureSystemEvent } from "@/lib/analytics/posthog-server.js";
 import { sendCriticalAlert } from "@/lib/alerts/discord.js";
@@ -254,9 +255,23 @@ function resolveQueueSellerFirstNameFromSources(row = null) {
       firstToken(snapshot.display_name),
       firstToken(snapshot.seller_full_name),
       firstToken(snapshot.phone_full_name),
-      firstToken(snapshot.owner_display_name)
+      firstToken(snapshot.owner_display_name),
+      personFirstToken(safe_row.seller_display_name)
     )
   );
+}
+
+/**
+ * The row's own seller_display_name, when it names a PERSON. Auto-replies
+ * carry seller_display_name but none of the snapshot fields above, so every
+ * inbound auto-reply paused as paused_name_missing (2026-09-28: "Arsenio J
+ * Thunstrom" replied "Yes" and the reply sat paused). A business name never
+ * yields a first name: "Pegasus Land Co LLC" must not become "Hi Pegasus".
+ */
+function personFirstToken(value) {
+  const name = clean(value);
+  if (!name || BUSINESS_TOKEN.test(name) || /\d/.test(name) || /[&/]/.test(name)) return "";
+  return firstToken(name);
 }
 
 function getQueueRowDestinationCandidates(row = null) {

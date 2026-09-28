@@ -108,6 +108,12 @@ export function deriveUseCaseFromBody(body) {
  * @param {string} [args.canonical_stage]     lifecycle stage, when known
  * @param {string} [args.language]
  */
+function phoneVariants(e164) {
+  const digits = String(e164 ?? "").replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  return [...new Set([String(e164), `+1${ten}`, `1${ten}`, ten].filter(Boolean))];
+}
+
 export async function buildConversationContext({
   thread_key,
   inbound_received_at,
@@ -124,7 +130,11 @@ export async function buildConversationContext({
     const { data, error } = await supabase
       .from("send_queue")
       .select("id,message_type,message_body,provider_message_id,sent_at,delivered_at,queue_status")
-      .eq("to_phone_number", thread_key)
+      // Campaign rows were written with a bare 10-digit number ("6125589879")
+      // while the thread is E.164, so an exact match found no outbound, the
+      // context was "unavailable" and a plain "Yes" to "do you still own…?"
+      // was capped at 0.72 and sent to review (2026-09-28). Match every form.
+      .in("to_phone_number", phoneVariants(thread_key))
       .in("queue_status", ["sent", "delivered"])
       .not("sent_at", "is", null)
       .lte("sent_at", inbound_received_at)

@@ -6587,11 +6587,23 @@ function missingLaunchCaps(caps = {}) {
   return missing
 }
 
+function toE164(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  return raw.startsWith('+') ? raw : raw
+}
+
 export function launchCandidateFromTarget(target = {}, campaign = {}) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
   const outreach = metadataObject(metadata.outreach_snapshot)
-  const phone = firstNonEmpty(target.to_phone_number, snapshot.to_phone_number, snapshot.canonical_e164)
+  // Always E.164. Targets can carry a bare 10-digit number ("6125589879"); a
+  // queue row written that way is invisible to every lookup keyed on the E.164
+  // thread — reply context, dedupe, prior contact (2026-09-28 Minneapolis).
+  const phone = toE164(firstNonEmpty(snapshot.canonical_e164, target.to_phone_number, snapshot.to_phone_number))
   const prospectId = firstNonEmpty(target.prospect_id, metadata.prospect_id, snapshot.prospect_id, snapshot.canonical_prospect_id)
   const phoneId = firstNonEmpty(target.phone_id, snapshot.phone_id, snapshot.best_phone_id)
   const market = firstNonEmpty(target.market, snapshot.market, campaign.market)
