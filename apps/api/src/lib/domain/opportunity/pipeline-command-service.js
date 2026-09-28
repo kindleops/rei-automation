@@ -600,7 +600,7 @@ export async function getPipelineDealStory(id, deps = {}) {
   const [historyRes, messagesRes, offersRes, closingEventsRes, scoreRes, buyersRes] = await Promise.all([
     client.from('acquisition_opportunity_history').select('id, event_type, previous_value, new_value, reason, actor, source, created_at').eq('opportunity_id', id).order('created_at', { ascending: true }).limit(300),
     thread
-      ? client.from('message_events').select('id, direction, message_body, intent, created_at, delivery_status, campaign_id').or(`thread_key.eq.${thread},from_phone_number.eq.${thread},to_phone_number.eq.${thread}`).order('created_at', { ascending: true }).limit(200)
+      ? client.from('message_events').select('id, direction, message_body, intent:detected_intent, created_at, delivery_status').or(`thread_key.eq.${thread},from_phone_number.eq.${thread},to_phone_number.eq.${thread}`).order('created_at', { ascending: true }).limit(200)
       : Promise.resolve({ data: [] }),
     client.from('seller_offers').select('offer_id, offer_version, direction, purchase_price, status, created_at, sent_at, accepted_at, accepted_price').eq('opportunity_id', id).order('created_at', { ascending: true }),
     client.from('closing_activity_events').select('event_type, detail, created_at, closing_case_id').ilike('closing_case_id', `%${id}%`).order('created_at', { ascending: true }).limit(100),

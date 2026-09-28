@@ -6,57 +6,100 @@
 import { useState } from 'react'
 import { Icon } from '../../../../shared/icons'
 import type { IconName } from '../../../../shared/icons'
-import type { DealDecision } from '../../../../domain/deal-intelligence/deal-decision-api'
+import type { DealComp, DealDecision } from '../../../../domain/deal-intelligence/deal-decision-api'
 import { money, shortDate } from '../../../../domain/deal-intelligence/deal-decision-api'
-import { cls, DdCard, DdLink, Meter, ProvenanceChip } from './dd-primitives'
+import { cls, DdCard, DdLink, Meter, ProvenanceChip, Ring } from './dd-primitives'
 
 const SOURCE_LABEL: Record<string, string> = { mls_sold: 'MLS', public_record_sold: 'Public record' }
 
+const FAMILY_LABEL: Record<string, string> = { multi: 'Multifamily', single: 'Single family', land: 'Land', commercial: 'Commercial' }
+
+function CompCard({ c, index, subjectUnits }: { c: DealComp; index: number; subjectUnits: number | null }) {
+  const src = c.saleSource ?? (c.source ? SOURCE_LABEL[c.source] : null)
+  const isMls = /mls/i.test(src ?? '')
+  const specs = [
+    c.propertyType ? `${c.propertyType}${c.units && c.units > 1 ? ` · ${c.units}u` : ''}` : null,
+    c.beds ? `${c.beds} bd` : null,
+    c.baths ? `${c.baths} ba` : null,
+    c.sqft ? `${Math.round(c.sqft).toLocaleString('en-US')} sf` : null,
+    c.yearBuilt ? `Built ${c.yearBuilt}` : null,
+    c.condition ? c.condition : null,
+    c.renovation && c.renovation !== c.condition ? `${c.renovation} reno` : null,
+    c.lotSqft ? `${Math.round(c.lotSqft).toLocaleString('en-US')} sf lot` : null,
+  ].filter(Boolean) as string[]
+  return (
+    <article className={cls('ddx-cc', c.assetMatch ? 'is-match' : 'is-off')} style={{ animationDelay: `${index * 70}ms` }}>
+      <div className="ddx-cc__media">
+        {c.photo ? <img src={c.photo} alt="" loading="lazy" decoding="async" /> : <div className="ddx-cc__mono">{(c.address ?? '•').slice(0, 1)}</div>}
+        <div className="ddx-cc__shade" />
+        <span className={cls('ddx-cc__src', isMls ? 'is-mls' : 'is-pr')}>{isMls ? 'MLS sold' : src ?? 'Public record'}</span>
+        <span className="ddx-cc__weight">{c.weight !== null ? `${Math.round(c.weight * 100)}% weight` : ''}</span>
+        <div className="ddx-cc__price">
+          <b>{money(c.salePrice)}</b>
+          {c.adjustedValue && c.salePrice && Math.abs(c.adjustedValue - c.salePrice) > 500 ? <em>adj. {money(c.adjustedValue)}</em> : null}
+        </div>
+      </div>
+      <div className="ddx-cc__body">
+        <div className="ddx-cc__row">
+          <p className="ddx-cc__addr">{c.address}</p>
+          <Ring value={c.score} size={38} stroke={3} />
+        </div>
+        <div className="ddx-cc__meta">{[shortDate(c.saleDate), c.distanceMiles !== null ? `${c.distanceMiles.toFixed(2)} mi` : null].filter(Boolean).join(' · ')}</div>
+        <div className={cls('ddx-cc__asset', c.assetMatch ? 'is-match' : 'is-off')}>
+          <Icon name={c.assetMatch ? 'check' : 'alert'} />
+          {c.assetMatch ? `Asset match · ${subjectUnits && subjectUnits > 1 && c.units ? `${c.units}u vs ${subjectUnits}u` : FAMILY_LABEL[c.family] ?? c.family}` : `Different asset · ${c.propertyType ?? 'unknown'}`}
+        </div>
+        <div className="ddx-cc__specs">{specs.map((x) => <span key={x}>{x}</span>)}</div>
+        <div className="ddx-cc__nums">
+          <div><span>$/sq ft</span><b>{c.ppsf ? `$${Math.round(c.ppsf)}` : '—'}</b></div>
+          <div><span>$/unit</span><b>{c.ppu ? money(c.ppu) : '—'}</b></div>
+          <div><span>AVM at sale</span><b>{money(c.avmAtSale) ?? '—'}</b></div>
+        </div>
+        <div className={cls('ddx-cc__buyer', `is-${c.buyerKind}`)}>
+          <Icon name={c.buyerKind === 'company' ? 'briefcase' : 'user'} />
+          <span>{c.buyerKind === 'company' ? c.buyerLabel : c.buyerKind === 'individual' ? 'Individual buyer' : 'Buyer not recorded'}</span>
+          <em>{c.buyerKind === 'company' ? 'LLC / entity' : c.buyerKind === 'individual' ? 'owner-occupant or retail' : ''}</em>
+        </div>
+        {c.mismatches.length ? <p className="ddx-cc__miss">Differs: {c.mismatches.map((m) => `${m.feature} ${String(m.comp)} vs ${String(m.subject)}`).join(' · ')}</p> : null}
+      </div>
+    </article>
+  )
+}
+
 export function CompEvidence({ d, onOpenComps }: { d: DealDecision; onOpenComps: () => void }) {
-  const [all, setAll] = useState(false)
   const c = d.comps
   if (!c) return null
+  const ai = c.assetIntegrity
   const maxRej = Math.max(1, ...c.rejectionBreakdown.map((r) => r.count))
-  const top = all ? c.top : c.top.slice(0, 3)
   return (
-    <DdCard id="comps" title="Comparable sales" icon="stats" tone={c.selected === 0 ? 'bad' : c.selected <= 2 ? 'warn' : undefined}
-      meta={`${c.selected} qualified${c.raw !== null ? ` of ${c.raw}` : ''}`}
+    <DdCard id="comps" title="Comparable sales" icon="stats" tone={c.selected === 0 || (ai?.mismatched.length ?? 0) > 0 ? 'bad' : c.selected <= 2 ? 'warn' : undefined}
+      meta={`${c.selected} priced · ${c.raw ?? '—'} screened`}
       action={<DdLink icon="stats" label="Open in Comps" onClick={onOpenComps} />}>
-      <div className="ddx-quality">
-        <div><span>Qualified</span><b>{c.selected}</b><em>{c.eligible !== null ? `${c.eligible} eligible` : ''}</em></div>
-        <div><span>Dispersion</span><b>{c.dispersion !== null ? `${Math.round(c.dispersion * 100)}%` : '—'}</b><em>{c.dispersion === null ? '' : c.dispersion > 0.35 ? 'wide' : c.dispersion > 0.2 ? 'moderate' : 'tight'}</em></div>
-        <div><span>Avg distance</span><b>{c.avgDistanceMiles !== null ? `${c.avgDistanceMiles} mi` : '—'}</b><em /></div>
-        <div><span>Median age</span><b>{c.medianAgeMonths !== null ? `${c.medianAgeMonths} mo` : '—'}</b><em /></div>
+      {ai && ai.total ? (
+        <div className={cls('ddx-integrity', ai.mismatched.length ? 'is-off' : 'is-ok')}>
+          <Icon name={ai.mismatched.length ? 'alert' : 'shield'} />
+          <div>
+            <b>{ai.mismatched.length ? `${ai.mismatched.length} of ${ai.total} comps are a different asset type` : `All ${ai.total} pricing comps match the asset`}</b>
+            <span>Subject {ai.subjectType ?? 'unknown'}{ai.subjectUnits && ai.subjectUnits > 1 ? ` · ${ai.subjectUnits} units` : ''} — comps {ai.types.map((t) => `${t.type} ${t.count}`).join(' · ')}</span>
+          </div>
+        </div>
+      ) : null}
+      <div className="ddx-quality is-4">
+        <div><span>Comps</span><b>{c.selected}</b><em>{c.eligible !== null ? `${c.eligible} eligible` : ''}</em></div>
+        <div><span>Spread</span><b>{c.dispersion !== null ? `${Math.round(c.dispersion * 100)}%` : '—'}</b><em>{c.dispersion === null ? '' : c.dispersion > 0.35 ? 'wide' : c.dispersion > 0.2 ? 'moderate' : 'tight'}</em></div>
+        <div><span>Distance</span><b>{c.avgDistanceMiles !== null ? `${c.avgDistanceMiles}` : '—'}</b><em>mi avg</em></div>
+        <div><span>Age</span><b>{c.medianAgeMonths !== null ? `${c.medianAgeMonths}` : '—'}</b><em>mo median</em></div>
       </div>
-      {Object.keys(c.sources).length ? (
-        <p className="ddx-note">Sources: {Object.entries(c.sources).map(([k, n]) => `${SOURCE_LABEL[k] ?? k} ${n}`).join(' · ')}{c.completeness !== null ? ` · field completeness ${c.completeness}%` : ''}</p>
-      ) : null}
       {c.message && c.selected === 0 ? <p className="ddx-note is-warn">{c.message}</p> : null}
-      {top.length ? (
-        <ul className="ddx-comps">
-          {top.map((x, i) => (
-            <li key={x.id ?? i} className="ddx-comp" style={{ animationDelay: `${i * 60}ms` }}>
-              <div className="ddx-comp__row">
-                <b>{money(x.salePrice)}</b>
-                {x.adjustedValue && x.salePrice && Math.abs(x.adjustedValue - x.salePrice) > 500 ? <span className="ddx-comp__adj">adj. {money(x.adjustedValue)}</span> : null}
-                <span className="ddx-comp__when">{shortDate(x.saleDate)}</span>
-              </div>
-              <p className="ddx-comp__addr">{x.address}</p>
-              <div className="ddx-comp__meta">
-                {x.distanceMiles !== null ? <span>{x.distanceMiles.toFixed(2)} mi</span> : null}
-                {x.score !== null ? <span>match {Math.round(x.score)}</span> : null}
-                {x.weight !== null ? <span>weight {Math.round(x.weight * 100)}%</span> : null}
-                {x.source ? <span>{SOURCE_LABEL[x.source] ?? x.source}</span> : null}
-              </div>
-              {x.mismatches.length ? <p className="ddx-comp__miss">Differs: {x.mismatches.map((m) => `${m.feature} ${String(m.comp)} vs ${String(m.subject)}`).join(' · ')}</p> : null}
-            </li>
-          ))}
-        </ul>
+      {c.top.length ? (
+        <div className="ddx-carousel" role="list" aria-label="Pricing comps">
+          {c.top.map((x, i) => <div role="listitem" key={x.id ?? i}><CompCard c={x} index={i} subjectUnits={d.subject.units} /></div>)}
+        </div>
       ) : null}
-      {c.top.length > 3 ? <button type="button" className="ddx-more" onClick={() => setAll((v) => !v)}>{all ? 'Show top 3' : `Show top ${c.top.length}`}</button> : null}
+      {c.top.length > 1 ? <p className="ddx-note">Swipe · {c.top.length} comps, heaviest weight first. Sources: {Object.entries(c.sources).map(([k, n]) => `${SOURCE_LABEL[k] ?? k} ${n}`).join(' · ')}</p> : null}
       {c.rejectionBreakdown.length ? (
         <div className="ddx-rejects">
-          <span className="ddx-sub">Why {c.rejected ?? ''} were rejected</span>
+          <span className="ddx-sub">Why {c.rejected ?? ''} candidates were rejected</span>
           {c.rejectionBreakdown.map((r) => (
             <div key={r.reason} className="ddx-rejects__row"><span>{r.label}</span><i style={{ width: `${(r.count / maxRej) * 100}%` }} /><b>{r.count}</b></div>
           ))}

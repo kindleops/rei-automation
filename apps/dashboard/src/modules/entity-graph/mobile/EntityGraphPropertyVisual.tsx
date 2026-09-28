@@ -36,7 +36,7 @@ function cachedState(url: string | null): StaticState {
   return cached === 'ok' ? 'ok' : cached === 'failed' ? 'failed' : 'idle'
 }
 
-function staticStreetViewUrl(address: string | null, lat?: number | null, lng?: number | null): string | null {
+export function staticStreetViewUrl(address: string | null, lat?: number | null, lng?: number | null): string | null {
   if (!MAPS_KEY) return null
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(Number(lat)) > 0.0001
   const location = hasCoords ? `${lat},${lng}` : (address ?? '').trim()

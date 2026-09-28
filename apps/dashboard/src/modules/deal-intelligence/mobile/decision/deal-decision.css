@@ -377,6 +377,7 @@ html[data-nexus-theme='light'] .ddx-hero__liquid { opacity: 0.5; }
 .ddx-note b { color: var(--dd-text); }
 .ddx-note.is-warn { color: color-mix(in srgb, var(--dd-hold) 80%, var(--dd-text)); }
 .ddx-sub { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700; color: var(--dd-text-3); margin-top: 2px; }
+.ddx .ddx-more { color: var(--dd-accent) !important; font-size: 13px !important; }
 .ddx-more {
   all: unset; align-self: flex-start; min-height: 36px !important; display: inline-flex; align-items: center;
   font-size: 13px; font-weight: 650; color: var(--dd-accent); cursor: pointer;

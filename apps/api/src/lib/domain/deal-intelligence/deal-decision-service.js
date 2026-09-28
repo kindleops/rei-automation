@@ -26,6 +26,9 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipeline-registry.js'
 import { offerSensitivity, replayStoredOffer, computeScenarioOffer } from './deal-scenario-model.js'
+import { getConversationSignal } from './conversation-signal-service.js'
+import { getMarketDemand } from './market-demand-service.js'
+import { COMP_DETAIL_COLUMNS, enrichComp, ownerSections, parcelSections, prospectCards } from './deal-record-sections.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -130,8 +133,8 @@ export function compEvidenceQuality(evidence) {
   }
 }
 
-/** The top selected comps, shaped for a phone. */
-export function topComps(evidence, limit = 5) {
+/** The selected comps, shaped for a phone, merged with their source record. */
+export function topComps(evidence, limit = 12, details = new Map(), subject = {}) {
   return arr(obj(evidence).selected_comps)
     .slice()
     .sort((a, b) => (num(b.weight) || 0) - (num(a.weight) || 0))
@@ -139,8 +142,9 @@ export function topComps(evidence, limit = 5) {
     .map((c) => {
       const core = arr(obj(obj(c.match_breakdown).core).features)
       const mismatches = core.filter((f) => f.status === 'mismatch').map((f) => ({ feature: humanize(f.feature), subject: f.subject, comp: f.comp }))
+      const id = clean(c.comp_id || c.id) || null
       return {
-        id: clean(c.comp_id || c.id) || null,
+        id,
         propertyId: clean(c.property_id) || null,
         address: clean(c.address) || null,
         salePrice: num(c.sale_price),
@@ -153,6 +157,7 @@ export function topComps(evidence, limit = 5) {
         source: clean(c.source) || null,
         completeness: num(c.data_completeness),
         mismatches: mismatches.slice(0, 3),
+        ...enrichComp(c, details.get(id), subject),
       }
     })
 }
@@ -266,6 +271,48 @@ export function engineStrategies(score) {
     .sort((a, b) => Number(b.isBest) - Number(a.isBest) || (b.score ?? 0) - (a.score ?? 0))
 }
 
+/** Who bought the pricing comps, and what each group paid — from the comps' own deeds. */
+export function compBuyerMix(comps) {
+  const med = (xs) => { const v = xs.filter((x) => x > 0).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null }
+  const by = (pred) => comps.filter(pred).map((c) => num(c.salePrice) || 0)
+  const company = comps.filter((c) => c.buyerKind === 'company')
+  const individual = comps.filter((c) => c.buyerKind === 'individual')
+  const mls = comps.filter((c) => /mls/i.test(c.saleSource || c.source || ''))
+  const pr = comps.filter((c) => !/mls/i.test(c.saleSource || c.source || ''))
+  return {
+    total: comps.length,
+    company: company.length,
+    individual: individual.length,
+    unknown: comps.length - company.length - individual.length,
+    companyMedian: med(by((c) => c.buyerKind === 'company')),
+    individualMedian: med(by((c) => c.buyerKind === 'individual')),
+    mls: mls.length,
+    publicRecord: pr.length,
+    mlsMedian: med(mls.map((c) => num(c.salePrice) || 0)),
+    publicRecordMedian: med(pr.map((c) => num(c.salePrice) || 0)),
+    companyPpsf: med(company.map((c) => num(c.ppsf) || 0)),
+    individualPpsf: med(individual.map((c) => num(c.ppsf) || 0)),
+  }
+}
+
+/** Do the comps the offer was priced from share the subject's asset family and unit band? */
+export function assetIntegrity(comps, subject) {
+  const total = comps.length
+  const matched = comps.filter((c) => c.assetMatch).length
+  const unknown = comps.filter((c) => !c.propertyType && !c.assetClass).length
+  const types = {}
+  for (const c of comps) { const k = c.propertyType || 'Unknown'; types[k] = (types[k] || 0) + 1 }
+  return {
+    subjectType: subject.propertyType || null,
+    subjectUnits: subject.units ?? null,
+    total,
+    matched,
+    unknown,
+    mismatched: comps.filter((c) => !c.assetMatch && (c.propertyType || c.assetClass)).map((c) => ({ address: c.address, propertyType: c.propertyType, units: c.units })),
+    types: Object.entries(types).map(([type, count]) => ({ type, count })),
+  }
+}
+
 const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 }
 
 /**
@@ -273,7 +320,7 @@ const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 }
  * No aggregate score — the operator reads the list.
  */
 export function deriveDealRisks(ctx) {
-  const { score, props, parcel, records, ns, replay, quality, thread, propertyId, ask, avm, now = Date.now() } = ctx
+  const { score, props, parcel, records, ns, replay, quality, thread, propertyId, ask, avm, now = Date.now(), integrity } = ctx
   const risks = []
   const add = (key, severity, title, detail, source) => risks.push({ key, severity, title, detail: detail || null, source })
   const ev = obj(score?.evidence)
@@ -293,6 +340,10 @@ export function deriveDealRisks(ctx) {
   const anomalous = arr(ev.selected_comps).filter((c) => (num(c.sale_price) || 0) > outlierCap && units <= 4)
   if (anomalous.length) add('comp_price_anomaly', 'critical', `${anomalous.length === 1 ? 'A selected comp' : `${anomalous.length} selected comps`} sold for ${money(anomalous[0].sale_price)}`, `${clean(anomalous[0].address)} — a portfolio or bulk sale priced as one ${units > 1 ? `${units}-unit` : 'single'} asset. The valuation inherits it.`, 'evidence.selected_comps')
 
+  if (integrity?.mismatched?.length) {
+    const m = integrity.mismatched
+    add('asset_mismatch_comps', 'critical', `${m.length} pricing comp${m.length === 1 ? ' is' : 's are'} a different asset type`, `Subject is ${integrity.subjectType || 'unknown'}${integrity.subjectUnits > 1 ? ` (${integrity.subjectUnits} units)` : ''}; ${m.slice(0, 2).map((c) => `${c.address} is ${c.propertyType || 'unknown'}${c.units > 1 ? ` (${c.units} units)` : ''}`).join('; ')}. The value mixes asset types.`, 'selected comps vs subject asset family')
+  }
   if (score) {
     const sel = quality?.selected ?? 0
     if (sel === 0) add('no_comps', 'critical', 'No qualified comps', `${quality?.raw ?? 0} candidates screened, none qualified — value rests on a fallback.`, 'evidence.comp_data_status')
@@ -377,7 +428,7 @@ export function decisionSummary({ score, tierReasons, gates, ns, ask, replay }) 
 
 const PROPERTY_COLUMNS = [
   'property_id', 'property_address_full', 'property_address_city', 'property_address_state', 'property_address_zip',
-  'property_type', 'units_count', 'total_bedrooms', 'total_baths', 'year_built', 'latitude', 'longitude', 'market',
+  'master_owner_id', 'property_type', 'units_count', 'total_bedrooms', 'total_baths', 'year_built', 'latitude', 'longitude', 'market',
   'estimated_value', 'equity_amount', 'equity_percent', 'total_loan_balance', 'total_loan_amt', 'total_loan_payment',
   'estimated_repair_cost', 'building_condition', 'mls_current_listing_price', 'mls_market_status', 'mls_sold_price',
   'mls_sold_date', 'monthly_rent', 'rent_estimate', 'tax_amt', 'tax_year', 'tax_delinquent', 'tax_delinquent_year',
@@ -455,6 +506,21 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const records = obj(recRes.data)
   const parcel = obj(records.parcel)
   if (!props && !score && !Object.keys(parcel).length) return null
+
+  /* second wave: comp source rows, owner, people — all keyed off the first */
+  const compIds = arr(score?.evidence?.selected_comps).map((c) => clean(c.comp_id || c.id)).filter(Boolean)
+  const ownerId = clean(props?.master_owner_id) || null
+  // Side reads never sink the decision: a failure here renders as "unavailable".
+  const soft = (p) => Promise.resolve(p).catch((error) => { console.warn('deal_decision.side_read_failed', error?.message); return null })
+  const [compRes, ownerRes, prospectRes, conversation, market] = await Promise.all([
+    compIds.length ? client.from('v_recent_sold_comps').select(COMP_DETAIL_COLUMNS).in('id', compIds) : Promise.resolve({ data: [] }),
+    ownerId ? client.from('master_owners').select('*').eq('master_owner_id', ownerId).maybeSingle() : Promise.resolve({ data: null }),
+    ownerId ? client.from('prospects').select('prospect_id, full_name, first_name, gender, marital_status, education_model, occupation_group, est_household_income, net_asset_value, buying_power, language_preference, likely_owner, likely_renting, best_phone, best_email, contact_window, timezone, sms_eligible, email_eligible, contact_score_final, person_flags_text, is_primary_prospect, rank_position').eq('master_owner_id', ownerId).order('rank_position', { ascending: true }).limit(8) : Promise.resolve({ data: [] }),
+    thread ? soft(getConversationSignal({ threadKey: thread, now }, { supabase: client })) : Promise.resolve(null),
+    soft(getMarketDemand({ propertyId, radiusMiles: 1.5, months: 18 }, { supabase: client })),
+  ])
+  const compDetails = new Map(arr(compRes.data).map((r) => [clean(r.id), r]))
+  const subjectForComps = { propertyType: clean(parcel.property_type || props?.property_type), units: num(parcel.units_count ?? props?.units_count) }
 
   const meta = obj(opp?.metadata)
   const ns = meta.negotiation_state && typeof meta.negotiation_state === 'object' ? meta.negotiation_state : null
@@ -570,7 +636,9 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
     evidence: [closing.funding_date && 'funded', closing.recording_date && 'recorded', closing.revenue_confirmed_date && 'revenue confirmed'].filter(Boolean),
   } : null
 
-  const risks = deriveDealRisks({ score, props, parcel, records, ns, replay, quality, thread: threadRes.data, propertyId, ask, avm, now })
+  const compsTop = score ? topComps(score.evidence, 12, compDetails, subjectForComps) : []
+  const integrity = score ? assetIntegrity(compsTop, subjectForComps) : null
+  const risks = deriveDealRisks({ score, props, parcel, records, ns, replay, quality, thread: threadRes.data, propertyId, ask, avm, now, integrity })
   const latestSnap = snapshots[0] || null
   const stage = clean(opp?.acquisition_stage) || null
 
@@ -682,8 +750,15 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
       },
     } : null,
     sellerFacts: sellerFactsWithProvenance({ ns, sellerFacts: meta.seller_facts, props, parcel, score }),
-    comps: score ? { ...quality, top: topComps(score.evidence), anchor: ns?.selected_comp_anchor ? { address: clean(ns.selected_comp_anchor.address), salePrice: pos(ns.selected_comp_anchor.sale_price), saleDate: ns.selected_comp_anchor.sale_date || null, statement: clean(ns.selected_comp_anchor.authorized_statement) || null, disclosed: ns.selected_comp_anchor.previously_disclosed === true } : null } : null,
+    comps: score ? { ...quality, top: compsTop, assetIntegrity: integrity, buyerMix: compBuyerMix(compsTop), anchor: ns?.selected_comp_anchor ? { address: clean(ns.selected_comp_anchor.address), salePrice: pos(ns.selected_comp_anchor.sale_price), saleDate: ns.selected_comp_anchor.sale_date || null, statement: clean(ns.selected_comp_anchor.authorized_statement) || null, disclosed: ns.selected_comp_anchor.previously_disclosed === true } : null } : null,
     economics,
+    conversation,
+    market,
+    record: {
+      sections: parcelSections(parcel),
+      owner: ownerRes.data ? { name: clean(ownerRes.data.display_name) || null, sections: ownerSections(ownerRes.data) } : null,
+      prospects: prospectCards(prospectRes.data),
+    },
     history: history.slice(0, 40),
     valuationHistory: snapshots.map((s) => ({ at: s.computed_at, low: pos(s.valuation_low), mid: pos(s.valuation_mid), high: pos(s.valuation_high), offer: pos(s.recommended_cash_offer), tier: TIER_META[clean(s.decision_tier)]?.label || humanize(s.decision_tier), comps: num(s.selected_comp_count) })).reverse(),
     strategies: engineStrategies(score),

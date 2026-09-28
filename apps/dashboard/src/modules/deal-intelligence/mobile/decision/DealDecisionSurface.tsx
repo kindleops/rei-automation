@@ -16,16 +16,20 @@ import { pushRoutePath } from '../../../../app/router'
 import { writeMapFocusSet } from '../../../../domain/map/map-focus-set'
 import type { DealDecision } from '../../../../domain/deal-intelligence/deal-decision-api'
 import { fetchDealDecision } from '../../../../domain/deal-intelligence/deal-decision-api'
-import { cls, DdLink } from './dd-primitives'
+import { cls, DdLink, Reveal } from './dd-primitives'
 import { DecisionHero, DecisionSummary, OfferIntelligence, RiskList, StrategyStack, ValuationSpectrum } from './DecisionLayer'
-import { BuyerDemand, CompEvidence, DebtAndLiens, HistoryTimeline, SellerFacts, ValuationTrend } from './EvidenceLayer'
+import { CompEvidence, HistoryTimeline, SellerFacts, ValuationTrend } from './EvidenceLayer'
 import { Methodology, ScenarioLab, Sensitivity } from './ModelLayer'
+import { RecordLayer } from './RecordLayer'
+import { MarketPulse, SellerSignal } from './SignalAndMarket'
 import './deal-decision.css'
+import './deal-decision-elite.css'
 
-type Layer = 'decision' | 'evidence' | 'model'
+type Layer = 'decision' | 'evidence' | 'record' | 'model'
 const LAYERS: Array<{ key: Layer; label: string }> = [
   { key: 'decision', label: 'Decision' },
   { key: 'evidence', label: 'Evidence' },
+  { key: 'record', label: 'Record' },
   { key: 'model', label: 'Model' },
 ]
 
@@ -129,35 +133,36 @@ export function DealDecisionSurface({ propertyId, threadKey, refreshKey = 0, onO
       <div className="ddx-layer" key={layer}>
         {layer === 'decision' ? (
           <>
-            <DecisionSummary d={d} onRunEngine={onRunEngine} engineBusy={engineBusy} />
-            <RiskList d={d} />
-            <OfferIntelligence d={d} />
-            <StrategyStack d={d} />
-            <div className="ddx-links">
+            <Reveal delay={0}><DecisionSummary d={d} onRunEngine={onRunEngine} engineBusy={engineBusy} /></Reveal>
+            <Reveal delay={50}><SellerSignal d={d} /></Reveal>
+            <Reveal delay={100}><RiskList d={d} /></Reveal>
+            <Reveal delay={150}><OfferIntelligence d={d} /></Reveal>
+            <Reveal delay={200}><StrategyStack d={d} /></Reveal>
+            <Reveal delay={250}><div className="ddx-links">
               <DdLink icon="message" label="Conversation" onClick={() => onOpenConversation?.()} disabled={!onOpenConversation} />
               <DdLink icon="layers" label="Pipeline" sub={d.pipeline?.stageLabel ?? 'no deal'} onClick={openPipeline} disabled={!d.pipeline} />
               <DdLink icon="stats" label="Comps" onClick={openComps} />
               <DdLink icon="users" label="Buyer Match" onClick={openBuyers} />
               <DdLink icon="radar" label="Entity Graph" onClick={openGraph} />
               <DdLink icon="map" label="Map" onClick={openMap} />
-            </div>
+            </div></Reveal>
           </>
         ) : null}
         {layer === 'evidence' ? (
           <>
-            <CompEvidence d={d} onOpenComps={openComps} />
-            <SellerFacts d={d} />
-            <DebtAndLiens d={d} />
-            <HistoryTimeline d={d} />
-            <ValuationTrend d={d} />
-            <BuyerDemand d={d} onOpenBuyers={openBuyers} />
+            <Reveal delay={0}><CompEvidence d={d} onOpenComps={openComps} /></Reveal>
+            <Reveal delay={60}><MarketPulse d={d} /></Reveal>
+            <Reveal delay={120}><SellerFacts d={d} /></Reveal>
+            <Reveal delay={180}><HistoryTimeline d={d} /></Reveal>
+            <Reveal delay={240}><ValuationTrend d={d} /></Reveal>
           </>
         ) : null}
+        {layer === 'record' ? <Reveal><RecordLayer d={d} /></Reveal> : null}
         {layer === 'model' ? (
           <>
-            <ScenarioLab key={d.lineage.computedAt ?? 'none'} d={d} />
-            <Sensitivity d={d} />
-            <Methodology d={d} onRunEngine={onRunEngine} engineBusy={engineBusy} />
+            <Reveal delay={0}><ScenarioLab key={d.lineage.computedAt ?? 'none'} d={d} /></Reveal>
+            <Reveal delay={60}><Sensitivity d={d} /></Reveal>
+            <Reveal delay={120}><Methodology d={d} onRunEngine={onRunEngine} engineBusy={engineBusy} /></Reveal>
           </>
         ) : null}
       </div>

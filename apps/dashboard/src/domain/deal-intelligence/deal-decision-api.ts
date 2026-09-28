@@ -49,6 +49,53 @@ export type ScenarioResult = {
   terms: { confidence_haircut_pct: number; motivation_discount_pct: number; demand_premium_pct: number }
 }
 
+export type DealComp = {
+  id: string | null; propertyId: string | null; address: string | null; salePrice: number | null; adjustedValue: number | null
+  saleDate: string | null; distanceMiles: number | null; score: number | null; weight: number | null; confidence: number | null
+  source: string | null; completeness: number | null; mismatches: Array<{ feature: string; subject: unknown; comp: unknown }>
+  propertyType: string | null; assetClass: string | null; family: string; assetMatch: boolean
+  beds: number | null; baths: number | null; sqft: number | null; lotSqft: number | null; units: number | null
+  yearBuilt: number | null; effectiveYear: number | null; condition: string | null; quality: string | null; construction: string | null
+  renovation: string | null; stories: string | null; pool: string | null; ppsf: number | null; ppu: number | null
+  saleSource: string | null; mlsSoldPrice: number | null; avmAtSale: number | null
+  buyerKind: 'company' | 'individual' | 'unknown'; buyerLabel: string | null; photo: string | null
+}
+
+export type ConversationSignal = {
+  version: string
+  counts: { inbound: number; substantiveInbound: number; distinctInbound: number; repeatedInbound: number; reactions: number; autoReplies: number; outbound: number; inboundWords: number; avgWordsPerInbound: number | null; questionsAsked: number; daysActive: number }
+  responsiveness: { medianReplyMinutes: number | null; fastestReplyMinutes: number | null; replyRate: number | null; touches: number; lastInboundAt: string | null; lastOutboundAt: string | null; silenceDays: number | null; awaitingUs: boolean; trend: 'accelerating' | 'steady' | 'cooling' | null }
+  timing: { hourBuckets: number[]; share: { morning: number; workday: number; evening: number; lateNight: number }; weekendShare: number | null; timezone: string | null; timezoneSource: 'seller' | 'utc_fallback' }
+  language: { profanity: number; hostility: number; urgency: number; distress: { financial: number; legal: number; life_event: number; property_burden: number }; priceMentions: number[]; positive: number; negative: number; optOut: number; wrongNumber: number; notOwner: number }
+  intents: Record<string, number>
+  score: number | null
+  rawScore: number | null
+  band: 'hot' | 'warm' | 'engaged' | 'lukewarm' | 'cold' | 'hostile' | 'opted_out' | 'no_reply'
+  factors: Array<{ key: string; label: string; value: string; points: number; cap?: number; evidence?: { quote: string; at: string } }>
+  confidence: 'low' | 'medium' | 'high'
+}
+
+type MarketGroup = { count: number; priced: number; medianPrice: number | null; medianPpsf: number | null; medianPpu?: number | null }
+export type MarketDemand = {
+  ok: boolean
+  error?: string
+  subject: { family: string; familyLabel: string; propertyType: string | null; units: number | null; sqft: number | null; estimatedValue: number | null; zip: string | null; city: string | null; state: string | null }
+  radius: { requested: number; used: number; widened: boolean; minSalesTarget: number }
+  unitsBand: { applied: boolean; min: number | null; max: number | null }
+  window: { months: number; since: string; until: string; dataThrough: string | null; dataAgeDays: number | null }
+  totals: { sales: number; pricedSales: number; unpricedSales: number; excludedOutliers: number; excludedByReason: Array<{ reason: string; label: string; count: number }> }
+  overall: { medianPrice: number | null; avgPrice: number | null; p25Price: number | null; p75Price: number | null; medianPpsf: number | null; ppsfSample: number | null; medianPpu: number | null; ppuSample: number | null; medianBeds: number | null; medianSqft: number | null; medianUnits: number | null; medianYearBuilt: number | null; medianDistanceMiles: number | null; buyerKnownShare: number | null; portfolioDoors: number | null; portfolioTransactions: number | null; latestSaleOn: string | null; earliestSaleOn: string | null }
+  bySource: Array<{ source: string; label: string; count: number; priced: number; share: number; medianPrice: number | null; medianPpsf: number | null }>
+  byBuyer: Array<{ group: string; label: string; count: number; priced: number; share: number; medianPrice: number | null; medianPpsf: number | null; outOfStateShare: number | null }>
+  investorVsRetail: { investor: MarketGroup; retail: MarketGroup; nonInvestor: MarketGroup; unclassifiedCount: number; nonMarketCount: number; minSample: number; discountPct: number | null; ppsfDiscountPct: number | null; discountVsNonInvestorPct: number | null; definitions?: Record<string, string> }
+  trend: Array<{ quarter: string; quarterStart: string; count: number; priced: number; medianPrice: number | null; medianPpsf: number | null; investorCount: number }>
+  zips: Array<{ zip: string; count: number; priced: number; medianPrice: number | null; medianPpsf: number | null; isSubjectZip: boolean }>
+}
+
+export type CompBuyerMix = { total: number; company: number; individual: number; unknown: number; companyMedian: number | null; individualMedian: number | null; mls: number; publicRecord: number; mlsMedian: number | null; publicRecordMedian: number | null; companyPpsf: number | null; individualPpsf: number | null }
+
+export type RecordSection = { title: string; fields: Array<{ label: string; value: string }> }
+
 export type DealRisk = { key: string; severity: Severity; title: string; detail: string | null; source: string }
 export type SellerFact = { key: string; label: string; value: unknown; display: string | null; provenance: Provenance; source: string; at?: string | null; quote?: string | null; confidence?: number | null }
 
@@ -151,7 +198,9 @@ export type DealDecision = {
     completeness: number | null
     adjustedLow: number | null
     adjustedHigh: number | null
-    top: Array<{ id: string | null; propertyId: string | null; address: string | null; salePrice: number | null; adjustedValue: number | null; saleDate: string | null; distanceMiles: number | null; score: number | null; weight: number | null; confidence: number | null; source: string | null; completeness: number | null; mismatches: Array<{ feature: string; subject: unknown; comp: unknown }> }>
+    top: DealComp[]
+    buyerMix: CompBuyerMix | null
+    assetIntegrity: { subjectType: string | null; subjectUnits: number | null; total: number; matched: number; unknown: number; mismatched: Array<{ address: string | null; propertyType: string | null; units: number | null }>; types: Array<{ type: string; count: number }> } | null
     anchor: { address: string; salePrice: number | null; saleDate: string | null; statement: string | null; disclosed: boolean } | null
   } | null
   economics: {
@@ -171,6 +220,13 @@ export type DealDecision = {
     foreclosure: { status: string | null; docType?: string | null; defaultAt?: string | null; auctionAt: string | null; recordedAt?: string | null } | null
     tax: { annual: number | null; year: number | null; delinquent: boolean; delinquentYear: number | null }
     atOffer: { offer: number; ceilingSpread: number | null; debtCovered: boolean | null } | null
+  }
+  conversation: ConversationSignal | null
+  market: MarketDemand | null
+  record: {
+    sections: RecordSection[]
+    owner: { name: string | null; sections: RecordSection[] } | null
+    prospects: Array<{ id: string; name: string; primary: boolean; fields: Array<{ label: string; value: string }> }>
   }
   history: Array<{ at: string; kind: 'sale' | 'mortgage' | 'lien' | 'foreclosure' | 'ask' | 'analysis' | 'offer'; title: string; amount: number | null; detail: string | null }>
   valuationHistory: Array<{ at: string; low: number | null; mid: number | null; high: number | null; offer: number | null; tier: string | null; comps: number | null }>

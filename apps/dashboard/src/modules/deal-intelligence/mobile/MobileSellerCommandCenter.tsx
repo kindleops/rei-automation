@@ -350,7 +350,7 @@ export function MobileSellerCommandCenter({
   }
 
   return (
-    <div className="msc-root">
+    <div className="msc-root msc-root--decision">
       <CommandHeader
         sellerName={sellerName}
         address={street}

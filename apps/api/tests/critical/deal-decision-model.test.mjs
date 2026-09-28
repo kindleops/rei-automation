@@ -161,3 +161,51 @@ test('summary lines are deterministic facts from the payload', () => {
   assert.ok(lines.some((l) => /withholding/.test(l)))
   assert.ok(lines.some((l) => /Seller asks \$315K — \$209K above/.test(l)))
 })
+
+import { assetIntegrity, compBuyerMix } from '../../src/lib/domain/deal-intelligence/deal-decision-service.js'
+import { buyerFromPurchaseInfo, enrichComp, ownerSections, parcelSections, prospectCards } from '../../src/lib/domain/deal-intelligence/deal-record-sections.js'
+
+test('comp enrichment: asset match follows family and the engine unit band', () => {
+  const subject = { propertyType: 'Multi-Family', units: 2 }
+  const mf = enrichComp({ sale_price: 241000 }, { property_type: 'Multi-Family', normalized_asset_class: 'multifamily', units_count: 2, total_bedrooms: 4, total_baths: 2, building_square_feet: 1600, purchase_info: 'Sese Properties LLC · New Britain, CT · Multifamily' }, subject)
+  assert.equal(mf.assetMatch, true)
+  assert.equal(mf.buyerKind, 'company')
+  assert.equal(mf.buyerLabel, 'Sese Properties LLC')
+  assert.equal(mf.ppsf, 151)
+  const sfr = enrichComp({ sale_price: 250000 }, { property_type: 'Single Family', normalized_asset_class: 'single_family', units_count: 1 }, subject)
+  assert.equal(sfr.assetMatch, false)
+  const big = enrichComp({ sale_price: 2e6 }, { property_type: 'Apartment', normalized_asset_class: 'apartment', units_count: 12 }, subject)
+  assert.equal(big.assetMatch, false) // 12 units vs 2 is outside 0.35–2.75
+  const integrity = assetIntegrity([{ ...mf, address: 'a' }, { ...sfr, address: 'b' }], subject)
+  assert.equal(integrity.matched, 1)
+  assert.equal(integrity.mismatched[0].address, 'b')
+})
+
+test('individual buyers are never named; companies are', () => {
+  assert.deepEqual(buyerFromPurchaseInfo('John Q Smith · Miami, FL · Single Family'), { kind: 'individual', label: 'Individual' })
+  assert.equal(buyerFromPurchaseInfo('Tcs Holdings LLC · East Berlin, CT').kind, 'company')
+  assert.equal(buyerFromPurchaseInfo(null).kind, 'unknown')
+})
+
+test('comp buyer mix splits company vs individual and MLS vs public record', () => {
+  const mix = compBuyerMix([
+    { buyerKind: 'company', salePrice: 300000, saleSource: 'Public Record Sold', ppsf: 150 },
+    { buyerKind: 'company', salePrice: 320000, saleSource: 'MLS Sold', ppsf: 160 },
+    { buyerKind: 'individual', salePrice: 200000, saleSource: 'Public Record Sold', ppsf: 120 },
+  ])
+  assert.equal(mix.company, 2)
+  assert.equal(mix.individual, 1)
+  assert.equal(mix.mls, 1)
+  assert.equal(mix.mlsMedian, 320000)
+})
+
+test('record sections: populated fields only, grouped, no ids or legacy fields', () => {
+  const sections = parcelSections({ property_type: 'Single Family', bedrooms: 4, building_sqft: 2372, estimated_value: 677000, total_loan_balance: 0, apn: '74-42', row_hash: 'x', structured_motivation_score: 88, owner_name: 'John' })
+  const titles = sections.map((s) => s.title)
+  assert.ok(titles.includes('Structure') && titles.includes('Value & equity') && titles.includes('Ownership'))
+  const all = sections.flatMap((s) => s.fields.map((f) => f.label))
+  assert.ok(!all.some((l) => /hash/i.test(l)))
+  assert.ok(!all.some((l) => /Loan balance|Open balance/.test(l))) // $0 debt is "not recorded"
+  assert.equal(ownerSections({ display_name: 'David Larson', property_count: 1, row_hash: 'x' })[0].fields[0].value, 'David Larson')
+  assert.equal(prospectCards([{ prospect_id: 'p1', full_name: 'A B', likely_owner: true, likely_renting: true }])[0].fields.find((f) => f.label === 'Tenure').value, 'Unclear — flagged owner and renter')
+})

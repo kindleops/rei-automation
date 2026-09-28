@@ -3,11 +3,12 @@
  * break it. Every number is from the canonical projection; nothing here is a
  * binding offer, and nothing here can send one.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Icon } from '../../../../shared/icons'
 import type { DealDecision, SpectrumMarker } from '../../../../domain/deal-intelligence/deal-decision-api'
-import { ago, money, shortDate } from '../../../../domain/deal-intelligence/deal-decision-api'
-import { cls, DdCard, Meter, ProvenanceChip, useCountUp } from './dd-primitives'
+import { ago, money } from '../../../../domain/deal-intelligence/deal-decision-api'
+import { cls, DdCard, Meter, ProvenanceChip, Ring, useCountUp } from './dd-primitives'
+import { staticStreetViewUrl } from '../../../entity-graph/mobile/EntityGraphPropertyVisual'
 
 type Available = Extract<DealDecision['decision'], { status: 'available' }>
 
@@ -31,61 +32,77 @@ export function DecisionHero({ d }: { d: DealDecision }) {
   const accepted = d.offer?.offers.find((o) => o.acceptedAt && !o.supersededAt) ?? null
   const actual = d.actuals
   const heroValue = actual?.contractPrice ?? accepted?.price ?? d.valuation?.mid ?? d.valuation?.avm ?? null
-  const heroLabel = actual ? 'Contract price · actual' : accepted ? 'Accepted price' : d.valuation?.mid ? 'Engine value' : d.valuation?.avm ? 'AVM value · not analysed' : 'Value'
-  const shown = useCountUp(heroValue)
+  const heroLabel = actual ? 'Contract price · actual' : accepted ? 'Accepted price' : d.valuation?.mid ? 'Engine value' : d.valuation?.avm ? 'AVM · not analysed' : 'Value'
+  const shown = useCountUp(heroValue, 1400)
   const mode = actual ? 'Closed · actuals' : STAGE_MODE[d.pipeline?.stage ?? ''] ?? (d.pipeline ? 'Underwriting' : 'Property underwriting')
   const conf = dec?.confidence ?? null
   const ask = d.offer?.negotiation.ask ?? null
+  const photo = useMemo(() => staticStreetViewUrl(d.subject.address, d.subject.lat, d.subject.lng), [d.subject.address, d.subject.lat, d.subject.lng])
+  const [photoOk, setPhotoOk] = useState<boolean | null>(null)
+  const specs = [
+    d.subject.propertyType,
+    d.subject.units && d.subject.units > 1 ? `${d.subject.units} units` : null,
+    d.subject.beds ? `${d.subject.beds} bd` : null,
+    d.subject.baths ? `${d.subject.baths} ba` : null,
+    d.subject.sqft ? `${d.subject.sqft.toLocaleString('en-US')} sf` : null,
+    d.subject.yearBuilt ? `${d.subject.yearBuilt}` : null,
+  ].filter(Boolean)
+  const [street, ...rest] = (d.subject.address ?? '').split(',')
 
   return (
     <header className={cls('ddx-hero', dec && `tone-${dec.tierTone}`)}>
-      <div className="ddx-hero__liquid" aria-hidden="true" />
-      <div className="ddx-hero__top">
-        <span className="ddx-hero__mode">{mode}</span>
-        {d.pipeline?.stageLabel ? <span className="ddx-hero__stage">{d.pipeline.stageLabel}</span> : null}
+      <div className={cls('ddx-hero__media', photoOk === true && 'is-ready', photoOk === false && 'is-failed')} aria-hidden="true">
+        <div className="ddx-hero__mesh" />
+        {photo && photoOk !== false ? (
+          <img src={photo} alt="" loading="eager" decoding="async" onLoad={() => setPhotoOk(true)} onError={() => setPhotoOk(false)} />
+        ) : null}
+        <div className="ddx-hero__scrim" />
+        <div className="ddx-hero__grain" />
       </div>
-      {d.subject.address ? (
-        <p className="ddx-hero__addr">
-          {d.subject.address}
-          <span>{[d.subject.propertyType, d.subject.units && d.subject.units > 1 ? `${d.subject.units} units` : null, d.subject.beds ? `${d.subject.beds}bd` : null, d.subject.baths ? `${d.subject.baths}ba` : null, d.subject.sqft ? `${d.subject.sqft.toLocaleString('en-US')} sqft` : null, d.subject.yearBuilt ? `built ${d.subject.yearBuilt}` : null].filter(Boolean).join(' · ')}</span>
-        </p>
-      ) : null}
-      <span className="ddx-hero__label">{heroLabel}</span>
-      <strong className="ddx-hero__value">{shown !== null ? money(shown, { exact: true }) : '—'}</strong>
-      {d.valuation?.low && d.valuation.high && !actual ? (
-        <span className="ddx-hero__range">Supported {money(d.valuation.low)} – {money(d.valuation.high)}</span>
-      ) : null}
-
-      {actual ? (
-        <div className="ddx-hero__tiles">
-          <div className="ddx-tile"><span>Assignment fee</span><strong>{money(actual.assignmentFee) ?? '—'}</strong><em>actual</em></div>
-          <div className="ddx-tile"><span>Buyer price</span><strong>{money(actual.buyerPrice) ?? '—'}</strong><em>actual</em></div>
-          <div className="ddx-tile"><span>Evidence</span><strong className="is-small">{actual.evidence.join(' · ')}</strong><em>{shortDate(actual.closedAt)}</em></div>
-        </div>
-      ) : (
-        <div className="ddx-hero__tiles">
-          <div className="ddx-tile is-offer">
-            <span>Supported offer</span>
-            <strong>{d.offer?.recommended ? `${money(d.offer.floor)}–${money(d.offer.recommended)}` : d.offer ? '$0' : '—'}</strong>
-            <em>engine · not an offer</em>
+      <div className="ddx-hero__top">
+        <span className="ddx-hero__mode"><i />{mode}</span>
+        {dec?.tierLabel ? <span className={cls('ddx-hero__tier', `tone-${dec.tierTone}`)}>{dec.tierLabel}</span> : null}
+      </div>
+      <div className="ddx-hero__title">
+        <h2>{street || 'Property'}</h2>
+        {rest.length ? <p>{rest.join(',').trim()}</p> : null}
+        {specs.length ? <div className="ddx-hero__specs">{specs.map((x) => <span key={x as string}>{x}</span>)}</div> : null}
+      </div>
+      <div className="ddx-hero__panel">
+        <span className="ddx-hero__label">{heroLabel}</span>
+        <strong className="ddx-hero__value">{shown !== null ? money(shown, { exact: true }) : '—'}</strong>
+        {d.valuation?.low && d.valuation.high && !actual ? (
+          <span className="ddx-hero__range"><i />Supported {money(d.valuation.low)} – {money(d.valuation.high)}</span>
+        ) : null}
+        {actual ? (
+          <div className="ddx-hero__tiles">
+            <div className="ddx-tile"><span>Assignment fee</span><strong>{money(actual.assignmentFee) ?? '—'}</strong><em>actual</em></div>
+            <div className="ddx-tile"><span>Buyer price</span><strong>{money(actual.buyerPrice) ?? '—'}</strong><em>actual</em></div>
           </div>
-          <div className="ddx-tile">
-            <span>Seller ask</span>
-            <strong>{money(ask) ?? '—'}</strong>
-            <em>{ask ? 'seller said' : 'not stated'}</em>
+        ) : (
+          <div className="ddx-hero__tiles">
+            <div className="ddx-tile is-offer">
+              <span>Supported offer</span>
+              <strong>{d.offer?.recommended ? `${money(d.offer.floor)}–${money(d.offer.recommended)}` : d.offer ? '$0' : '—'}</strong>
+              <em>engine · not an offer</em>
+            </div>
+            <div className="ddx-tile is-ask">
+              <span>Seller ask</span>
+              <strong>{money(ask) ?? '—'}</strong>
+              <em>{ask ? 'seller said' : 'not stated'}</em>
+            </div>
+            <div className="ddx-tile">
+              <span>Equity</span>
+              <strong>{d.economics.equityPercent !== null ? `${Math.round(d.economics.equityPercent)}%` : '—'}</strong>
+              <em>{money(d.economics.equityEstimate) ? `${money(d.economics.equityEstimate)} est.` : 'record'}</em>
+            </div>
+            <div className="ddx-tile is-conf">
+              <Ring value={conf} size={46} stroke={4} />
+              <div><span>Confidence</span><em>{dec?.valuationConfidence !== null && dec?.valuationConfidence !== undefined ? `valuation ${Math.round(dec.valuationConfidence)}` : 'engine'}</em></div>
+            </div>
           </div>
-          <div className="ddx-tile">
-            <span>Equity</span>
-            <strong>{d.economics.equityPercent !== null ? `${Math.round(d.economics.equityPercent)}%` : '—'}</strong>
-            <em>{money(d.economics.equityEstimate) ? `${money(d.economics.equityEstimate)} est.` : 'record'}</em>
-          </div>
-          <div className="ddx-tile is-conf">
-            <span>Confidence</span>
-            <strong>{conf !== null ? Math.round(conf) : '—'}</strong>
-            <Meter value={conf} />
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </header>
   )
 }
