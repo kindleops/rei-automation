@@ -431,6 +431,8 @@
 .cov2-row strong { font-weight: 620; color: var(--cd-ink); text-align: right; font-variant-numeric: tabular-nums; }
 
 .cov2-note { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--cd-ink-2); }
+.cov2-pairs + .cov2-note { margin-top: 10px; }
+.cov2-note.is-bad { color: var(--cd-bad); }
 
 /* ── action dock ────────────────────────────────────────────────────── */
 /* Prefixed with .cdm2: `.ccc--mobile-campaign-detail .ccc-mobile-dock

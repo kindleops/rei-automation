@@ -1,4 +1,5 @@
 import { emitNotification } from '../../shared/NotificationToast'
+import { CAMPAIGN_HYDRATION_CHUNK } from './campaign-builder-launch'
 import {
   buildCampaignTargetSnapshots,
   campaignLifecycle,
@@ -185,7 +186,9 @@ export async function executeCampaignAction(
       pendingActions.add(key)
       const isLiveBatch = action === 'queue_batch_live'
       const res = await queueBatch(campaign.id, {
-        limit: Math.min(campaign.ready_targets, isLiveBatch ? 5 : campaign.ready_targets),
+        // A live batch is one hydration chunk (was a 5-row canary); the feeder
+        // carries the rest of the cohort automatically.
+        limit: Math.min(campaign.ready_targets, isLiveBatch ? CAMPAIGN_HYDRATION_CHUNK : campaign.ready_targets),
         respect_send_window: true,
         interval_seconds: campaign.send_interval_seconds || 15,
         no_send: !isLiveBatch,

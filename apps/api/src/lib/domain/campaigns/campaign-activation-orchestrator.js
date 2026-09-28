@@ -262,12 +262,29 @@ function failResult(error, steps, extra = {}) {
   }
 }
 
+/**
+ * A schedule this far in the past was MISSED, not due. Scheduled activation was
+ * unwired in production (no scheduler called activate-due after the Vercel
+ * crons were removed), so campaigns sat `scheduled` for days past their start.
+ * Wiring it back must not turn a days-old schedule into an immediate, unannounced
+ * send the moment a deploy lands: a missed schedule is surfaced for the operator
+ * to reschedule or activate, never auto-fired.
+ */
+export const SCHEDULE_MISSED_GRACE_MS = 2 * 60 * 60 * 1000
+
+export function isScheduleMissed(campaign = {}, now = Date.now()) {
+  const at = Date.parse(campaign.scheduled_for || '')
+  return Number.isFinite(at) && now - at > SCHEDULE_MISSED_GRACE_MS
+}
+
 export async function findDueScheduledCampaigns(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const now = new Date().toISOString()
+  const now = new Date(deps.now || Date.now()).toISOString()
   const { data, error } = await supabase
     .from('campaigns')
-    .select('id,name,status,scheduled_for,activation_attempt_count')
+    // '*' — this selected id/name/status/scheduled_for only, so the activation
+    // request read `campaign.batch_max` as undefined and hydrated 5 rows.
+    .select('*')
     .eq('status', 'scheduled')
     .lte('scheduled_for', now)
     .order('scheduled_for', { ascending: true })
@@ -276,8 +293,12 @@ export async function findDueScheduledCampaigns(deps = {}) {
   return data || []
 }
 
+/** Internal hydration chunk for the first activation; the feeder continues from there. */
+export const ACTIVATION_HYDRATION_CHUNK = 100
+
 export function buildScheduledActivationRequest(campaign = {}) {
   const scheduledFor = campaign.scheduled_for || null
+  const chunk = Math.max(1, Math.trunc(Number(campaign.batch_max) || ACTIVATION_HYDRATION_CHUNK))
   return {
     activation_idempotency_key: `scheduled:${campaign.id}:${scheduledFor}`,
     lock_owner: 'scheduled_worker',
@@ -286,16 +307,44 @@ export function buildScheduledActivationRequest(campaign = {}) {
     scheduled_for: scheduledFor,
     first_scheduled_at: scheduledFor,
     first_scheduled_at_utc: scheduledFor,
-    batch_max: campaign.batch_max ?? 5,
+    batch_max: chunk,
     confirm_live: true,
     no_send: false,
   }
 }
 
+async function markScheduleMissed(campaign, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
+  if (metadata.schedule_missed_for === campaign.scheduled_for) return false
+  await supabase
+    .from('campaigns')
+    .update({
+      metadata: { ...metadata, schedule_missed_at: new Date().toISOString(), schedule_missed_for: campaign.scheduled_for },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', campaign.id)
+  return true
+}
+
 export async function runDueScheduledCampaignActivations(deps = {}) {
   const due = await findDueScheduledCampaigns(deps)
+  const now = new Date(deps.now || Date.now()).getTime()
   const results = []
   for (const campaign of due) {
+    if (isScheduleMissed(campaign, now)) {
+      const marked = await markScheduleMissed(campaign, deps).catch(() => false)
+      results.push({
+        campaign_id: campaign.id,
+        name: campaign.name,
+        ok: false,
+        skipped: true,
+        error: 'schedule_missed',
+        scheduled_for: campaign.scheduled_for,
+        newly_marked: marked,
+      })
+      continue
+    }
     const result = await runCanonicalCampaignActivation(
       campaign.id,
       buildScheduledActivationRequest(campaign),

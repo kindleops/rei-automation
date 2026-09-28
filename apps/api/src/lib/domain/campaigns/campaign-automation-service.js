@@ -5573,6 +5573,18 @@ function mapCampaignSummary(campaign = {}, targets = [], windows = [], countBuck
     quarantine_reason: clean(metadataObject(campaign.metadata?.quarantine).reason) || null,
     ready_targets: ready,
     planned_targets: planned,
+    /**
+     * Campaign accounting, never conflated: audience = total_targets, held =
+     * targets legitimately blocked (review / identity), eligible = the rest,
+     * remaining = eligible targets not yet handed to the queue. A campaign with
+     * 50 rows scheduled and 453 remaining must SAY 453 remaining.
+     */
+    held_targets: Number(counts.blocked || 0),
+    eligible_targets: Math.max(0, Number(totalFromBucket ?? targets.length) - Number(counts.blocked || 0)),
+    remaining_targets: ready,
+    held_by_reason: blockedByReason,
+    feeder_last: metadataObject(campaign.metadata?.feeder_last).at ? metadataObject(campaign.metadata?.feeder_last) : null,
+    schedule_missed_for: clean(campaign.metadata?.schedule_missed_for) || null,
     // `scheduled_targets` is the reconciliation-facing number: all scheduled
     // queue rows, matching send_queue and Inbox Scheduled.
     scheduled_targets: allScheduled,
@@ -7520,6 +7532,14 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       items: [],
     }
     let cursor = new Date(window.window_start_utc).getTime()
+    /**
+     * A refill continues the campaign's cadence after its last queued row
+     * (the feeder passes schedule_not_before). Without it every refill restarted
+     * at the window start and overlapped rows already queued, doubling the send
+     * rate. Rows that no longer fit today stay `ready` for the next window.
+     */
+    const notBeforeMs = Date.parse(clean(input.schedule_not_before))
+    if (Number.isFinite(notBeforeMs)) cursor = Math.max(cursor, notBeforeMs)
     const endMs = new Date(window.window_end_utc).getTime()
     for (const item of group.items) {
       if (cursor >= endMs) {

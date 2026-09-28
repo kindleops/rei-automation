@@ -66,6 +66,16 @@ export interface CampaignSummary {
   explicit_target_count?: number | null
   ready_targets: number
   planned_targets?: number
+  /** Legitimately blocked (review / identity). Never forced. */
+  held_targets?: number
+  /** Audience minus held. */
+  eligible_targets?: number
+  /** Eligible targets not yet handed to the queue — the feeder's backlog. */
+  remaining_targets?: number
+  /** The campaign feeder's last pass over this campaign. */
+  feeder_last?: CampaignFeederState | null
+  /** Set when the scheduled start passed while activation was not running. */
+  schedule_missed_for?: string | null
   scheduled_targets: number
   scheduled_queue_rows?: number
   queued_targets: number
@@ -499,4 +509,16 @@ export interface CreateCampaignPayload {
     pause_on_optout_rate: number | null
     pause_on_failure_rate: number | null
   }
+}
+
+export interface CampaignFeederState {
+  at: string
+  inserted: number
+  active_live_rows: number
+  ready_remaining: number
+  held_targets?: number
+  bound?: string
+  reason?: string | null
+  stalled?: boolean
+  last_refill_at?: string | null
 }

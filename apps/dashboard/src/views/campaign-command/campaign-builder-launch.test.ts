@@ -10,7 +10,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  buildActivateNowPayload,
   buildCampaignPersistPayload,
+  CAMPAIGN_HYDRATION_CHUNK,
   hydrateLaunchSettings,
   toLocalDateTimeInputValue,
   type LaunchPersistSettings,
@@ -61,6 +63,24 @@ describe('what the draft actually persists', () => {
     expect(payload.send_interval_seconds).toBe(60)
     expect(payload.contact_window_start).toBe('09:00')
     expect(payload.contact_window_end).toBe('18:00')
+  })
+})
+
+describe('campaign size is never the worker chunk (the 50-message choke point)', () => {
+  // Minneapolis: 503 eligible sellers, batch_max hard-clamped to 50, and the
+  // feeder treated batch_max as the whole queue. The operator's size is
+  // total_cap; batch_max is only the first hydration chunk.
+  it('persists the selected cohort as total_cap, unclamped', () => {
+    const payload = buildCampaignPersistPayload(draft, launch({ max_targets: '549' }), serialize) as Record<string, any>
+    expect(payload.total_cap).toBe(549)
+    expect(payload.batch_max).toBe(CAMPAIGN_HYDRATION_CHUNK)
+  })
+
+  it('Activate Now asks for the whole cohort, hydrating one chunk first', () => {
+    const payload = buildActivateNowPayload(launch({ max_targets: '549' }), 'c1', 'America/Chicago') as Record<string, any>
+    expect(payload.max_targets).toBe(549)
+    expect(payload.total_cap).toBe(549)
+    expect(payload.batch_max).toBe(CAMPAIGN_HYDRATION_CHUNK)
   })
 })
 

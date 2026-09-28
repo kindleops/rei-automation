@@ -14,7 +14,9 @@ const iso = (daysAgo) => new Date(Date.now() - daysAgo * DAY).toISOString().slic
 
 test('subject-vs-comp facts are deltas, not a composite score', () => {
   const s = { sqft: 1842, beds: 3, baths: 2, yearBuilt: 1987, lotSqft: 6000, units: 1 }
-  const c = { sqft: 1920, beds: 3, baths: 2.5, yearBuilt: 1989, lotSqft: 5400, units: 1, saleDate: iso(38), assetMatch: true }
+  // A full timestamp: iso() truncates to UTC midnight, so after 12:00 UTC a
+  // date-only 38 days ago rounds to 39 and this failed by time of day.
+  const c = { sqft: 1920, beds: 3, baths: 2.5, yearBuilt: 1989, lotSqft: 5400, units: 1, saleDate: new Date(Date.now() - 38 * DAY).toISOString(), assetMatch: true }
   const d = compareToSubject(s, c)
   assert.equal(d.sqftPct, 4)
   assert.equal(d.beds, 0)

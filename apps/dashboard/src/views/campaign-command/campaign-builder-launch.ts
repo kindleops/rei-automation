@@ -1,6 +1,13 @@
 import type { CampaignWizardDraft, CampaignFilterGroups } from './campaignWizardAdapter'
 import type { CreateCampaignPayload } from './campaigns.types'
 
+/**
+ * Rows the FIRST activation hydrates. A worker chunk, never a campaign size:
+ * the campaign feeder keeps refilling the queue from the campaign's remaining
+ * eligible targets until the whole cohort is resolved.
+ */
+export const CAMPAIGN_HYDRATION_CHUNK = 100
+
 export const MARKET_TIMEZONES: Record<string, string> = {
   'los angeles, ca': 'America/Los_Angeles',
   'miami, fl': 'America/New_York',
@@ -125,7 +132,10 @@ export function buildCampaignPersistPayload(
   const { market, state } = extractMarketFromFilterDraft(draft)
   const timezone = resolveCampaignTimezone(market)
   const dailyCap = parsePositiveInt(launch.daily_cap, 750)
-  const batchMax = Math.min(parsePositiveInt(launch.max_targets, 50), 50)
+  // total_cap is the operator's campaign size. batch_max is only the worker's
+  // first hydration chunk — it was `Math.min(max_targets, 50)`, which the feeder
+  // then treated as the campaign's whole queue: 503 eligible sellers became 50.
+  const batchMax = CAMPAIGN_HYDRATION_CHUNK
   const totalCap = parsePositiveInt(launch.max_targets, dailyCap)
 
   return {
@@ -179,7 +189,7 @@ export function buildActivateNowPayload(
   campaignId: string,
   timezone: string,
 ): Record<string, unknown> {
-  const batchMax = Math.min(parsePositiveInt(launch.max_targets, 50), 50)
+  const batchMax = CAMPAIGN_HYDRATION_CHUNK
   const insideWindow = isInsideContactWindow(timezone, launch.contact_window_start, launch.contact_window_end)
   const scheduledAt = insideWindow
     ? new Date(Date.now() + 60_000).toISOString()
@@ -193,7 +203,7 @@ export function buildActivateNowPayload(
     trigger_immediate_processor: true,
     batch_max: batchMax,
     limit: batchMax,
-    max_targets: parsePositiveInt(launch.max_targets, batchMax),
+    max_targets: parsePositiveInt(launch.max_targets, 750),
     daily_cap: parsePositiveInt(launch.daily_cap, 750),
     per_sender_cap: parsePositiveInt(launch.per_sender_cap, 150),
     per_market_cap: parsePositiveInt(launch.per_market_cap, 400),

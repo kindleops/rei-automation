@@ -1338,7 +1338,7 @@ export const CreateCampaignModal = ({
 
       setActivationProgress('Building eligible targets…')
       await buildCampaignTargetSnapshots(campaignId, {
-        limit: parsePositiveInt(launchSettings.max_targets, 50),
+        limit: parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS),
       })
 
       setActivationProgress('Activating live campaign…')

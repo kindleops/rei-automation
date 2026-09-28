@@ -189,14 +189,13 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
   if (!campaign.total_cap) {
     warnings.push('Total send cap is not set')
   }
-  if (!campaign.batch_max) {
-    blockers.push(BLOCKER_LABELS.missing_batch_max)
-    blockerCodes.push('missing_batch_max')
-  }
-  if (!campaign.market_cap) {
-    blockers.push(BLOCKER_LABELS.missing_market_cap)
-    blockerCodes.push('missing_market_cap')
-  }
+  /**
+   * batch_max and market_cap are NOT launch requirements. batch_max is the
+   * worker's hydration chunk (the feeder owns its own chunk/buffer and never
+   * reads it as a campaign size), and market_cap only bounds how many rows one
+   * planning pass gives a single market. Neither has an operator control, so
+   * blocking on them showed a "safety" blocker nobody could resolve.
+   */
   if (!campaign.per_sender_cap) {
     blockers.push(BLOCKER_LABELS.missing_per_sender_cap)
     blockerCodes.push('missing_per_sender_cap')

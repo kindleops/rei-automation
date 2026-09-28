@@ -4,6 +4,7 @@ import { Icon } from '../../../shared/icons'
 import { activateCampaignWithReview, fetchCampaignDetail } from '../campaigns.adapter'
 import { computeCampaignReadiness } from '../campaign-health'
 import { mergeCampaignDetail } from '../campaign-detail-merge'
+import { CAMPAIGN_HYDRATION_CHUNK } from '../campaign-builder-launch'
 import type { CampaignSummary } from '../campaigns.types'
 
 type ActivationStep =
@@ -121,7 +122,8 @@ export const CampaignActivationModal = ({
         confirm_live: true,
         no_send: isTest,
         explicit_operator_action: true,
-        batch_max: Math.min(campaign.ready_targets || 5, 5),
+        // First hydration chunk only; the feeder continues through the cohort.
+        batch_max: Math.min(campaign.ready_targets || CAMPAIGN_HYDRATION_CHUNK, CAMPAIGN_HYDRATION_CHUNK),
       })
 
       if (!result.ok) {

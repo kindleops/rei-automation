@@ -3,10 +3,10 @@
  */
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { asBoolean } from '@/lib/domain/queue/queue-control-safety.js'
+import { asBoolean, isEmergencyStopActive } from '@/lib/domain/queue/queue-control-safety.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
 import { createCampaignQueuePlan } from '@/lib/domain/campaigns/campaign-automation-service.js'
-import { isLiveCampaignStatus, normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
+import { isLiveCampaignStatus, normalizeCampaignStatus, transitionCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 import {
   computeNextValidSendInstant,
 } from '@/lib/domain/campaigns/campaign-convert-to-live.js'
@@ -48,8 +48,20 @@ export async function countActiveLiveQueueRows(supabase, campaignId) {
   return live
 }
 
-async function countSentToday(supabase, campaignId, timezone = 'America/New_York') {
-  const now = new Date()
+/**
+ * Midnight of the campaign's local day, as a UTC instant. This parsed
+ * `YYYY-MM-DDT00:00:00` in the SERVER's zone, so "today" for a Chicago campaign
+ * started at UTC midnight on the container — 5-6 hours off the campaign's day.
+ */
+export function campaignDayStart(now, timezone, parts) {
+  const at = new Date(now)
+  const inZone = Date.parse(at.toLocaleString('en-US', { timeZone: timezone }))
+  const inUtc = Date.parse(at.toLocaleString('en-US', { timeZone: 'UTC' }))
+  const offsetMs = inZone - inUtc
+  return new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)) - offsetMs)
+}
+
+async function countSentToday(supabase, campaignId, timezone = 'America/New_York', now = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     year: 'numeric',
@@ -57,7 +69,7 @@ async function countSentToday(supabase, campaignId, timezone = 'America/New_York
     day: '2-digit',
   })
   const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]))
-  const dayStart = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00`)
+  const dayStart = campaignDayStart(now, timezone, parts)
   const { count, error } = await supabase
     .from('send_queue')
     .select('id', { count: 'exact', head: true })
@@ -68,73 +80,229 @@ async function countSentToday(supabase, campaignId, timezone = 'America/New_York
   return Number(count || 0)
 }
 
-function resolveBatchLimit(campaign = {}, activeLiveRows = 0) {
-  const batchMax = asPositiveInteger(campaign.batch_max, 5)
-  const dailyCap = asPositiveInteger(campaign.daily_cap, batchMax)
-  const totalCap = asPositiveInteger(campaign.total_cap, dailyCap)
-  const sentCount = asPositiveInteger(campaign.sent_count, 0)
-  const remainingTotal = Math.max(0, totalCap - sentCount)
-  const targetBuffer = batchMax
-  const need = Math.max(0, targetBuffer - activeLiveRows)
-  return Math.min(need, batchMax, dailyCap, remainingTotal)
+/**
+ * CAMPAIGN SIZE IS NOT WORKER SIZE.
+ *
+ * This used `campaign.batch_max` as the rolling buffer: `need = batch_max -
+ * activeLiveRows`. The mobile builder hard-clamped batch_max to 50, so a
+ * 503-seller campaign put 50 rows in the queue, the feeder saw a "satisfied"
+ * buffer, and the other 453 sat `ready` forever. batch_max is not consulted
+ * here any more. These two numbers are worker internals; the campaign's own
+ * intent is its targets, bounded only by the operator's total_cap/daily_cap
+ * and by real sender/window capacity downstream.
+ */
+export const FEEDER_BUFFER_TARGET = 150 // live rows kept scheduled ahead of the processor
+export const FEEDER_HYDRATION_CHUNK = 100 // rows planned per campaign per feeder cycle
+
+/**
+ * Skip reasons that mean "this target can never be sent by this campaign".
+ * A campaign whose only remaining ready targets carry these is finished.
+ * Anything else (window full, sender/market cap, routing, render) is capacity
+ * or operator-fixable, so the campaign stays live and keeps retrying.
+ */
+const PERMANENT_INELIGIBLE_REASONS = new Set([
+  'missing_to_phone_number',
+  'missing_prospect_id',
+  'prior_contacted_suppression',
+  'graph_suppression_or_queue_block',
+  'owner_identity_not_verified',
+  'renter_not_owner',
+  'likely_renter',
+])
+
+export function resolveFeedLimit({
+  campaign = {},
+  activeLiveRows = 0,
+  readyRemaining = 0,
+  committedTargets = 0,
+  sentToday = 0,
+} = {}) {
+  const dailyCap = asPositiveInteger(campaign.daily_cap, 0)
+  const totalCap = asPositiveInteger(campaign.total_cap, 0)
+  const bufferNeed = Math.max(0, FEEDER_BUFFER_TARGET - activeLiveRows)
+  // Rows already sitting in the queue will spend today's allowance first.
+  const dailyRemaining = dailyCap ? Math.max(0, dailyCap - sentToday - activeLiveRows) : Number.POSITIVE_INFINITY
+  // total_cap is the operator's campaign-size intent: targets already handed
+  // to the queue (planned or beyond) count against it, held targets do not.
+  const totalRemaining = totalCap ? Math.max(0, totalCap - committedTargets) : Number.POSITIVE_INFINITY
+  const limit = Math.min(bufferNeed, FEEDER_HYDRATION_CHUNK, dailyRemaining, totalRemaining, Math.max(0, readyRemaining))
+  let bound = 'buffer'
+  if (readyRemaining <= 0) bound = 'cohort_exhausted'
+  else if (totalRemaining <= 0) bound = 'total_cap_reached'
+  else if (dailyRemaining <= 0) bound = 'daily_cap_reached'
+  else if (bufferNeed <= 0) bound = 'buffer_full'
+  return { limit: Math.max(0, Math.trunc(limit)), bound, buffer_need: bufferNeed, daily_remaining: dailyRemaining, total_remaining: totalRemaining }
 }
 
+export function isCohortResolved({ readyRemaining = 0, activeLiveRows = 0, inserted = 0, skippedByReason = {} } = {}) {
+  if (activeLiveRows > 0 || inserted > 0) return false
+  if (readyRemaining <= 0) return true
+  const reasons = Object.entries(skippedByReason).filter(([, n]) => Number(n) > 0).map(([r]) => r)
+  if (!reasons.length) return false
+  const skipped = reasons.reduce((sum, r) => sum + Number(skippedByReason[r] || 0), 0)
+  return skipped >= readyRemaining && reasons.every((r) => PERMANENT_INELIGIBLE_REASONS.has(r))
+}
+
+async function countTargets(supabase, campaignId, statuses, { not = false } = {}) {
+  let query = supabase.from('campaign_targets').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId)
+  query = not ? query.not('target_status', 'in', `(${statuses.join(',')})`) : query.in('target_status', statuses)
+  const { count, error } = await query
+  if (error) throw error
+  return Number(count || 0)
+}
+
+async function latestActiveScheduledAt(supabase, campaignId) {
+  const { data, error } = await supabase
+    .from('send_queue')
+    .select('scheduled_for')
+    .eq('campaign_id', campaignId)
+    .in('queue_status', ACTIVE_QUEUE_STATUSES)
+    .order('scheduled_for', { ascending: false, nullsFirst: false })
+    .limit(1)
+  if (error) throw error
+  return data?.[0]?.scheduled_for || null
+}
+
+/** A campaign that has ever had a real (non-proof) send_queue row is a live launch. */
+export async function hasLiveQueueHistory(supabase, campaignId) {
+  const { data, error } = await supabase
+    .from('send_queue')
+    .select('id,metadata')
+    .eq('campaign_id', campaignId)
+    .limit(200)
+  if (error) throw error
+  return (data || []).some((row) => {
+    const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    return !(asBoolean(meta.no_send ?? meta.proof_no_send, false) || clean(meta.launch_mode) === 'proof_hydration_no_send')
+  })
+}
+
+/**
+ * Live campaigns whose operator left auto-queue on. This required
+ * `auto_send_enabled` + a `production_launch` stamp, which only the Activate
+ * Now path writes — a campaign that went live on its SCHEDULE never qualified,
+ * so the feeder could not continue it past its first chunk. A live launch is
+ * now also recognised by its own live queue history.
+ */
 export async function findFeedableCampaigns(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const { data, error } = await supabase
     .from('campaigns')
     .select('*')
-    .eq('status', 'active')
+    .in('status', ['active', 'activating', 'live_limited'])
     .eq('auto_queue_enabled', true)
-    .eq('auto_send_enabled', true)
     .order('execution_heartbeat_at', { ascending: true, nullsFirst: true })
-    .limit(20)
+    .limit(50)
   if (error) throw error
-  return (data || []).filter((campaign) => {
-    const status = normalizeCampaignStatus(campaign.status)
-    return isLiveCampaignStatus(status) && isCampaignProductionLaunch(campaign)
-  })
+  const out = []
+  for (const campaign of data || []) {
+    if (!isLiveCampaignStatus(normalizeCampaignStatus(campaign.status))) continue
+    if (isEmergencyStopActive(campaign.emergency_stop_at)) continue
+    if (isCampaignProductionLaunch(campaign) || await hasLiveQueueHistory(supabase, campaign.id)) out.push(campaign)
+  }
+  return out
 }
 
 export async function feedCampaignBatch(campaign, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const activeLiveRows = await countActiveLiveQueueRows(supabase, campaign.id)
-  const batchLimit = resolveBatchLimit(campaign, activeLiveRows)
-  if (batchLimit <= 0) {
-    return {
-      ok: true,
-      campaign_id: campaign.id,
-      skipped: true,
-      reason: 'buffer_satisfied_or_caps_reached',
-      active_live_rows: activeLiveRows,
-      batch_limit: 0,
-      inserted: 0,
-    }
+  const now = new Date(deps.now || Date.now())
+  const timezone = clean(campaign.metadata?.timezone || campaign.metadata?.launch_timezone) || 'America/New_York'
+  const [activeLiveRows, readyRemaining, heldTargets, committedTargets, sentToday] = await Promise.all([
+    countActiveLiveQueueRows(supabase, campaign.id),
+    countTargets(supabase, campaign.id, ['ready']),
+    countTargets(supabase, campaign.id, ['blocked']),
+    countTargets(supabase, campaign.id, ['ready', 'blocked'], { not: true }),
+    countSentToday(supabase, campaign.id, timezone, now),
+  ])
+  const feed = resolveFeedLimit({ campaign, activeLiveRows, readyRemaining, committedTargets, sentToday })
+  const base = {
+    campaign_id: campaign.id,
+    campaign_name: campaign.name,
+    active_live_rows: activeLiveRows,
+    ready_remaining: readyRemaining,
+    held_targets: heldTargets,
+    committed_targets: committedTargets,
+    sent_today: sentToday,
+    batch_limit: feed.limit,
+    bound: feed.bound,
   }
 
-  const schedule = computeNextValidSendInstant(campaign)
-  const launchInput = mergeLaunchWriteModeIntoInput(campaign, {
-    lock_owner: 'campaign_feeder',
-    production_live_write: true,
-    explicit_operator_action: true,
-    scheduled_for: schedule.scheduled_for,
-    first_scheduled_at: schedule.scheduled_for,
-    batch_max: batchLimit,
-    limit: batchLimit,
-    daily_cap: campaign.daily_cap,
-    per_sender_cap: campaign.per_sender_cap,
-    per_market_cap: campaign.market_cap,
-    block_on_global_emergency_stop: false,
+  let result = null
+  let inserted = 0
+  if (feed.limit > 0) {
+    const next = computeNextValidSendInstant(campaign, now)
+    // Continue the campaign's cadence after its last queued row instead of
+    // restarting at "now", which would double the send rate on overlap.
+    const lastScheduled = await latestActiveScheduledAt(supabase, campaign.id)
+    const intervalMs = asPositiveInteger(campaign.send_interval_seconds, 60) * 1000
+    const notBefore = lastScheduled ? new Date(new Date(lastScheduled).getTime() + intervalMs).toISOString() : null
+    const launchInput = mergeLaunchWriteModeIntoInput(campaign, {
+      lock_owner: 'campaign_feeder',
+      production_live_write: true,
+      explicit_operator_action: true,
+      scheduled_for: next.scheduled_for,
+      first_scheduled_at: next.scheduled_for,
+      schedule_not_before: notBefore,
+      batch_max: feed.limit,
+      limit: feed.limit,
+      max_targets: feed.limit,
+      daily_cap: campaign.daily_cap,
+      per_sender_cap: campaign.per_sender_cap,
+      per_market_cap: campaign.market_cap,
+      block_on_global_emergency_stop: false,
+      now: now.toISOString(),
+    })
+    result = await (deps.createCampaignQueuePlan || createCampaignQueuePlan)(campaign.id, launchInput, deps)
+    inserted = Number(result.send_queue_rows_created ?? result.queue_rows_created ?? 0)
+  }
+
+  const readyAfter = Math.max(0, readyRemaining - inserted)
+  const resolved = isCohortResolved({
+    readyRemaining: readyAfter,
+    activeLiveRows: activeLiveRows + inserted,
+    inserted,
+    skippedByReason: result?.skipped_counts_by_reason || {},
   })
+  let completed = false
+  // Only a campaign that actually executed can finish. An active campaign with
+  // no audience at all is a configuration problem, not a completed campaign.
+  if (resolved && committedTargets + inserted > 0) {
+    const transition = await (deps.transitionCampaignStatus || transitionCampaignStatus)(supabase, campaign.id, 'completed', {
+      reason: 'campaign_feeder:cohort_resolved',
+    }).catch((error) => ({ ok: false, error: error?.message }))
+    completed = transition?.ok !== false
+  }
 
-  const result = await createCampaignQueuePlan(campaign.id, launchInput, deps)
-  const inserted = Number(result.send_queue_rows_created ?? result.queue_rows_created ?? 0)
+  // A live campaign with sendable targets left that could not place a single
+  // row, while nothing is queued ahead, is stalled — say so, don't idle.
+  const stalled = !completed && readyAfter > 0 && activeLiveRows + inserted === 0 &&
+    !['daily_cap_reached', 'total_cap_reached'].includes(feed.bound)
+  const reason = completed
+    ? 'cohort_resolved'
+    : inserted > 0
+      ? null
+      : (result?.blockers?.[0] || (feed.limit > 0 ? 'no_row_placed' : feed.bound))
 
+  const heartbeatAt = new Date().toISOString()
+  const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
   await supabase
     .from('campaigns')
     .update({
-      execution_heartbeat_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      execution_heartbeat_at: heartbeatAt,
+      updated_at: heartbeatAt,
+      metadata: {
+        ...metadata,
+        feeder_last: {
+          at: heartbeatAt,
+          inserted,
+          ...base,
+          ready_remaining: readyAfter,
+          reason,
+          stalled,
+          skipped_counts_by_reason: result?.skipped_counts_by_reason || {},
+          ...(inserted > 0 ? { last_refill_at: heartbeatAt } : { last_refill_at: metadata.feeder_last?.last_refill_at || null }),
+        },
+      },
     })
     .eq('id', campaign.id)
 
@@ -143,29 +311,42 @@ export async function feedCampaignBatch(campaign, deps = {}) {
   }
 
   return {
-    ok: result.ok !== false,
-    campaign_id: campaign.id,
-    campaign_name: campaign.name,
+    ok: result ? result.ok !== false : true,
+    ...base,
+    ready_remaining: readyAfter,
     skipped: inserted === 0,
-    reason: inserted === 0 ? (result.blockers?.[0] || 'no_eligible_targets') : null,
-    active_live_rows: activeLiveRows,
-    batch_limit: batchLimit,
+    reason,
+    stalled,
+    completed,
     inserted,
-    skipped_count: Number(result.skipped_count || 0),
-    blockers: result.blockers || [],
-    launch_summary: result.launch_summary || null,
+    skipped_count: Number(result?.skipped_count || 0),
+    skipped_counts_by_reason: result?.skipped_counts_by_reason || {},
+    blockers: result?.blockers || [],
+    launch_summary: result?.launch_summary || null,
   }
 }
 
 export async function runCampaignOutboundFeeder(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
+  const writeHeartbeat = async (fields) => {
+    const heartbeatAt = new Date().toISOString()
+    await (deps.setSystemValues || setSystemValues)({
+      campaign_feeder_heartbeat_at: heartbeatAt,
+      ...fields,
+    }, { supabase })
+    return heartbeatAt
+  }
+
   const globalAutoEnqueue = await getSystemValue('queue_auto_enqueue_enabled', { supabase })
   if (!asBoolean(globalAutoEnqueue, false)) {
+    // Still a heartbeat: "ran and was told not to queue" is not "did not run".
+    const heartbeatAt = await writeHeartbeat({ campaign_feeder_last_reason: 'global_auto_enqueue_disabled' })
     return {
       ok: true,
       skipped: true,
       reason: 'global_auto_enqueue_disabled',
       processed: 0,
+      heartbeat_at: heartbeatAt,
       results: [],
     }
   }
@@ -174,31 +355,41 @@ export async function runCampaignOutboundFeeder(deps = {}) {
   const results = []
   let totalInserted = 0
   let totalBlocked = 0
+  let stalled = 0
 
   for (const campaign of campaigns) {
-    if (!isCampaignFullyLive(campaign) && !isCampaignProductionLaunch(campaign)) continue
-    if (isCampaignFullyLive(campaign)) {
-      await syncProductionQueueRailsFromCampaign(campaign, deps)
+    try {
+      if (isCampaignFullyLive(campaign)) {
+        await syncProductionQueueRailsFromCampaign(campaign, deps)
+      }
+      const feedResult = await feedCampaignBatch(campaign, deps)
+      results.push(feedResult)
+      totalInserted += Number(feedResult.inserted || 0)
+      if ((feedResult.blockers || []).length) totalBlocked += 1
+      if (feedResult.stalled) stalled += 1
+    } catch (error) {
+      // One bad campaign must not starve the others of their refill.
+      results.push({ ok: false, campaign_id: campaign.id, campaign_name: campaign.name, error: error?.message || String(error) })
+      totalBlocked += 1
     }
-    const feedResult = await feedCampaignBatch(campaign, deps)
-    results.push(feedResult)
-    totalInserted += Number(feedResult.inserted || 0)
-    if ((feedResult.blockers || []).length) totalBlocked += 1
   }
 
-  const heartbeatAt = new Date().toISOString()
-  await setSystemValues({
-    campaign_feeder_heartbeat_at: heartbeatAt,
-    campaign_feeder_last_batch_at: totalInserted > 0 ? heartbeatAt : await getSystemValue('campaign_feeder_last_batch_at', { supabase }),
+  const lastBatchAt = totalInserted > 0 ? new Date().toISOString() : await getSystemValue('campaign_feeder_last_batch_at', { supabase })
+  const heartbeatAt = await writeHeartbeat({
+    campaign_feeder_last_batch_at: lastBatchAt || '',
     campaign_feeder_last_inserted_count: String(totalInserted),
     campaign_feeder_last_blocked_count: String(totalBlocked),
-  }, { supabase })
+    campaign_feeder_last_campaign_count: String(results.length),
+    campaign_feeder_last_stalled_count: String(stalled),
+    campaign_feeder_last_reason: '',
+  })
 
   return {
     ok: true,
     processed: results.length,
     total_inserted: totalInserted,
     total_blocked: totalBlocked,
+    stalled,
     heartbeat_at: heartbeatAt,
     results,
   }

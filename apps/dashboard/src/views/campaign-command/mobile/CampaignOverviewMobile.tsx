@@ -67,8 +67,20 @@ export function CampaignOverviewMobile({ campaign }: { campaign: CampaignSummary
 
   const total = Number(campaign.total_targets ?? 0)
   const ready = Number(campaign.ready_targets ?? 0)
-  const planned = Number(campaign.planned_targets ?? 0)
   const scheduled = Number(campaign.scheduled_queue_rows ?? campaign.scheduled_targets ?? 0)
+  const held = Number(campaign.held_targets ?? 0)
+  const eligible = Number(campaign.eligible_targets ?? Math.max(0, total - held))
+  const remaining = Number(campaign.remaining_targets ?? ready)
+  const sent = Number(campaign.sent_count ?? 0)
+  const feeder = campaign.feeder_last ?? null
+  const feederStalled = Boolean(feeder?.stalled)
+  const feederNote = campaign.schedule_missed_for
+    ? `The scheduled start (${new Date(campaign.schedule_missed_for).toLocaleString()}) was missed. Reschedule or activate to send.`
+    : feederStalled
+      ? `${nf(remaining)} sellers are waiting but the last refill placed none (${String(feeder?.reason || 'no reason recorded').replace(/_/g, ' ')}).`
+      : remaining > 0 && feeder?.at
+        ? `Queue refilled automatically · last checked ${new Date(feeder.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+        : null
   const next = resolveNextSend(campaign).label
   const interval = Number(campaign.send_interval_seconds ?? 0)
 
@@ -106,22 +118,34 @@ export function CampaignOverviewMobile({ campaign }: { campaign: CampaignSummary
         {total > 0 ? (
           <>
             <div className="cov2-big">
-              <strong>{nf(ready)}</strong>
-              <span>of {nf(total)} ready to message</span>
+              <strong>{nf(eligible)}</strong>
+              <span>of {nf(total)} eligible{held > 0 ? ` · ${nf(held)} held for review` : ''}</span>
             </div>
             <div className="cov2-meter" aria-hidden="true">
-              <span style={{ width: `${Math.max(0, Math.min(100, (ready / total) * 100))}%` }} />
+              <span style={{ width: `${Math.max(0, Math.min(100, eligible > 0 ? ((eligible - remaining) / eligible) * 100 : 0))}%` }} />
             </div>
+            {/* Where every eligible seller is. Scheduled is only the queue's
+                current buffer; Remaining is the rest of the campaign, which the
+                feeder keeps queueing — it is not a smaller campaign. */}
             <div className="cov2-pairs">
-              <div className={cls('cov2-pair', planned === 0 && 'is-nil')}>
-                <strong>{nf(planned)}</strong>
-                <span>Planned</span>
-              </div>
               <div className={cls('cov2-pair', scheduled === 0 && 'is-nil')}>
                 <strong>{nf(scheduled)}</strong>
                 <span>Scheduled</span>
               </div>
+              <div className={cls('cov2-pair', sent === 0 && 'is-nil')}>
+                <strong>{nf(sent)}</strong>
+                <span>Sent</span>
+              </div>
+              <div className={cls('cov2-pair', remaining === 0 && 'is-nil')}>
+                <strong>{nf(remaining)}</strong>
+                <span>Remaining</span>
+              </div>
+              <div className={cls('cov2-pair', held === 0 && 'is-nil')}>
+                <strong>{nf(held)}</strong>
+                <span>Held</span>
+              </div>
             </div>
+            {feederNote && <p className={cls('cov2-note', feederStalled && 'is-bad')}>{feederNote}</p>}
           </>
         ) : (
           <p className="cov2-note">No audience has been built for this campaign yet.</p>
