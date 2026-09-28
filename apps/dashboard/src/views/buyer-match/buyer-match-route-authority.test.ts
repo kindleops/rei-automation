@@ -131,6 +131,20 @@ describe('the production Buyer Match route', () => {
    * bar's chip, Buyer Match said "Select a property". The page must be scoped
    * to exactly what the chip shows (URL first, then the selected context).
    */
+  /**
+   * 2026-09-28: on the installed PWA the document has no scroll, and the new
+   * surface rendered one screen and froze. The root must own its own scroll,
+   * absolute against the shared app root (never a viewport-unit height).
+   */
+  it('owns its own vertical scroll on mobile', () => {
+    const css = read('views/buyer-match/workspace/buyer-match-surface.css')
+    const root = css.slice(css.indexOf('\n.bmx {'), css.indexOf('}', css.indexOf('\n.bmx {')))
+    expect(root).toMatch(/position:\s*absolute/)
+    expect(root).toMatch(/inset:\s*0/)
+    expect(root).toMatch(/overflow-y:\s*auto/)
+    expect(root).not.toMatch(/\d+(dvh|vh|lvh|svh)/)
+  })
+
   it('follows the property the global context chip shows', () => {
     const page = read('views/buyer-match/BuyerMatchSubjectPage.tsx')
     expect(page).toMatch(/readSelectedContext\(\)/)

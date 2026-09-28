@@ -21,7 +21,7 @@ await page.route('**/api/**', (r) => { const m = r.request().method(); if (['GET
 const tag = `${THEME}-${W}-${PID}`
 const shot = async (name) => { await page.screenshot({ path: `${OUT}/${tag}-${name}.png` }); console.log('shot', name) }
 const center = (sel) => page.evaluate((s) => document.querySelector(s)?.scrollIntoView({ block: 'center' }), sel)
-const start = (sel) => page.evaluate((s) => { const el = document.querySelector(s); if (el) window.scrollBy(0, el.getBoundingClientRect().top - 70) || el.scrollIntoView({ block: 'start' }) }, sel)
+const start = (sel) => page.evaluate((s) => { const el = document.querySelector(s); const sc = document.querySelector('.bmx'); if (el && sc) sc.scrollBy(0, el.getBoundingClientRect().top - 70) }, sel)
 const overflow = () => page.evaluate(() => {
   const root = document.querySelector('.bmx')
   if (!root) return null
@@ -43,7 +43,7 @@ const R = {
 }
 await start('.bmx-views'); await page.waitForTimeout(700); await shot('03-cards')
 if (!QUICK) {
-  await page.evaluate(() => window.scrollBy(0, 640)); await page.waitForTimeout(500); await shot('04-cards-2')
+  await page.evaluate(() => document.querySelector('.bmx')?.scrollBy(0, 640)); await page.waitForTimeout(500); await shot('04-cards-2')
   await center('.bmx-market'); await page.waitForTimeout(700); await shot('05-market')
   await center('.bmx-rail'); await page.waitForTimeout(600); await shot('06-rail')
   await center('.bmx-whynot'); await page.waitForTimeout(500); await shot('07-whynot')

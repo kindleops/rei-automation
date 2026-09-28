@@ -70,11 +70,16 @@ html[data-nexus-theme='true_black'] :is(.bmx, .bmx-sheet) {
   --bmx-glass-hi: rgb(16 18 22 / 0.86);
 }
 
+/* The installed PWA gives the document no scroll: like every certified mobile
+   surface, the root is absolute against the shared app root and owns its own
+   vertical scroll (never sized from a viewport unit). Content scrolls under
+   the floating island and above the dock via padding. */
 .bmx {
-  position: relative; isolation: isolate;
+  position: absolute; inset: 0; isolation: isolate;
+  overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
   display: flex; flex-direction: column; gap: 12px;
   padding: calc(env(safe-area-inset-top, 0px) + 64px) 12px calc(env(safe-area-inset-bottom, 0px) + 140px);
-  min-width: 0; min-height: 100%;
+  min-width: 0;
 }
 .bmx > * { flex-shrink: 0; }
 .bmx *, .bmx-sheet * { box-sizing: border-box; }
