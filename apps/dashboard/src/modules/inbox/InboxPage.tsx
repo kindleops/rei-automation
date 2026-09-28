@@ -304,6 +304,7 @@ const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace'
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
 const AnalyticsSurface = lazy(() => import('../../views/analytics/performance/AnalyticsSurface').then((m) => ({ default: m.AnalyticsSurface })))
+const CalendarSurface = lazy(() => import('../../views/calendar/timeline/CalendarSurface').then((m) => ({ default: m.CalendarSurface })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
 const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
 const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })))
@@ -5702,6 +5703,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     if (view === 'calendar') {
+      // Phones get the time command surface; desktop keeps the execution grid.
+      if (isMobile) {
+        return (
+          <section className={cls('nx-workspace-surface', 'nx-workspace-surface--calendar', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
+            <WorkspaceSuspense>
+              <CalendarSurface />
+            </WorkspaceSuspense>
+          </section>
+        )
+      }
       return (
         <section className={cls('nx-workspace-surface', 'nx-workspace-surface--calendar', `is-view-${view}`, `is-width-${paneWidth}`, `is-layout-${layoutMode}`)}>
           <InboxCalendarView

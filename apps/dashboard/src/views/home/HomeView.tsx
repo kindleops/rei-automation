@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, t
 import { Icon } from '../../shared/icons'
 import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
-import { useAuth } from '../../components/auth/AuthProvider'
+import { useOperatorName } from '../../shared/useOperatorName'
 import { MobileSheet } from '../../modules/mobile/MobileSheet'
 import { buildFocusItems, dataOf, formatCount, greetingFor, relativeTime } from './home-signals'
 import { resolveSystemState, useHomeSignals, type HomeSignals } from './useHomeSignals'
@@ -60,17 +60,6 @@ const shouldPlayIntro = () => {
 }
 
 const readAnimationsOff = () => loadSettings().animationsEnabled === false
-
-const readOperatorName = () => loadSettings().operatorName?.trim() ?? ''
-
-function useOperatorName(): string {
-  const configured = useSyncExternalStore(subscribeSettings, readOperatorName, () => '')
-  const { user } = useAuth()
-  if (configured) return configured.split(/\s+/)[0]
-  const meta = (user?.user_metadata ?? {}) as Record<string, unknown>
-  const fromProfile = [meta.first_name, meta.full_name, meta.name].find((v): v is string => typeof v === 'string' && v.trim() !== '')
-  return fromProfile ? fromProfile.trim().split(/\s+/)[0] : ''
-}
 
 // ── Clock (minute resolution, for the greeting and relative times) ─────────
 

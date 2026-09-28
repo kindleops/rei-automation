@@ -47,6 +47,8 @@ const DEAD_OPP = new Set(['suppressed', 'dead', 'closed', 'lost', 'archived', 'd
 const OPERATOR_ACTIONS = new Set(['human_review', 'call_seller', 'manual_review', 'operator_review', 'review', 'call'])
 
 const clean = (v) => String(v ?? '').trim()
+// Same minute: a campaign's start reads before its first sends.
+const TYPE_ORDER = { campaign_start: 0, campaign_window: 1, campaign_sends: 2 }
 const iso = (ms) => new Date(ms).toISOString()
 
 /** Offset (ms) of `timezone` at instant `at`. */
@@ -744,7 +746,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null } = 
     ...buildCampaignEvents(campaigns, { from: start, to: end, now, stats }),
     ...buildClosingEvents(closings, { from: readFrom, to: end, today }),
     ...buildOfferEvents(offers, { from: readFrom, to: end, today, now }),
-  ]).sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+  ]).sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || (TYPE_ORDER[a.type] ?? 5) - (TYPE_ORDER[b.type] ?? 5))
 
   // In range = shown on days; before range = attention context only.
   const startAt = zonedInstant(start, '00:00', zone)
