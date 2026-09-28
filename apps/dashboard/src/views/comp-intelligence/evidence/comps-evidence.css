@@ -67,11 +67,14 @@ html[data-nexus-theme='true_black'] :is(.cev, .cev-sheet) {
   --cev-glass-hi: rgb(20 20 24 / 0.84);
 }
 
+/* The installed PWA gives the document no scroll, so the surface owns it:
+   absolute against the workspace section, never a viewport-unit height. */
 .cev {
-  position: relative; isolation: isolate;
+  position: absolute; inset: 0; isolation: isolate;
+  overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
   display: flex; flex-direction: column; gap: 12px;
   padding: calc(env(safe-area-inset-top, 0px) + 64px) 12px calc(env(safe-area-inset-bottom, 0px) + 132px);
-  min-width: 0; min-height: 100%;
+  min-width: 0;
 }
 .cev * { box-sizing: border-box; }
 .cev button, .cev-sheet button { font-family: inherit; color: inherit; }

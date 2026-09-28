@@ -32,7 +32,15 @@ await page.goto(`http://localhost:5173/comp-intelligence?property_id=${PID}`, { 
 await page.waitForSelector(".cev-subject", { timeout: 240000 }).catch(() => {})
 await page.waitForTimeout(3500)
 await page.evaluate(() => document.querySelector('.cev-subject')?.scrollIntoView({ block: 'center' })); await page.waitForTimeout(700); await shot('01-subject')
-const R = { cards: await page.locator('.cev-card').count(), tabs: await page.locator('.cev-views__tab').allInnerTexts(), overflow: await overflow() }
+// The PWA gives the document no scroll: .cev must own it, and a real wheel/drag must move it.
+const scroll = await (async () => {
+  const before = await page.evaluate(() => { const r = document.querySelector('.cev'); if (!r) return null; r.scrollTop = 0; return { sh: r.scrollHeight, ch: r.clientHeight, oy: getComputedStyle(r).overflowY } })
+  await page.mouse.move(W / 2, 500); await page.mouse.wheel(0, 900); await page.waitForTimeout(700)
+  const after = await page.evaluate(() => document.querySelector('.cev')?.scrollTop ?? 0)
+  await page.evaluate(() => { const r = document.querySelector('.cev'); if (r) r.scrollTop = 0 })
+  return before && { ...before, wheelTop: after, owns: before.sh > before.ch && after > 0 }
+})()
+const R = { scroll, cards: await page.locator('.cev-card').count(), tabs: await page.locator('.cev-views__tab').allInnerTexts(), overflow: await overflow() }
 await to('.cev-readout'); await page.waitForTimeout(600); await shot('02-readout')
 await to('.cev-mapwrap'); await page.waitForTimeout(1800); await shot('03-map')
 await page.locator('.cev-map__recenter').evaluate((e) => e.click()).catch(() => {}); await page.waitForTimeout(3500); await page.evaluate(() => document.querySelector('.cev-mapwrap')?.scrollIntoView({ block: 'center' })); await shot('03b-map-3d')

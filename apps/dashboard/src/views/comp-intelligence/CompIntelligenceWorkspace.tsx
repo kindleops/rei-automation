@@ -4,6 +4,8 @@ import {
   getUniversalEntityContextSnapshot,
   subscribeUniversalEntityContext,
 } from '../../domain/entity-graph/universal-entity-context-store'
+import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
+import { readSelectedContext } from '../../domain/locator/active-context'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import type { DealContext } from '../../lib/data/dealContext'
 import type { ViewWidthPercent, ViewLayoutMode } from '../../domain/inbox/view-layout'
@@ -80,15 +82,36 @@ export function CompIntelligenceWorkspace(props: Props) {
   return <CompIntelligenceDesktopWorkspace {...props} />
 }
 
-/** Same subject precedence as the desktop workspace: URL → deal context → universal context → thread. */
+/** The property the global bar's context chip shows (readSelectedContext: URL → EG deep link → locator). */
+function readChipPropertyId(): string | null {
+  const selected = readSelectedContext()
+  return selected?.kind === 'property' && selected.id ? selected.id : null
+}
+
+/**
+ * Subject precedence: URL → deal context → the header chip's property →
+ * universal context → thread. The chip is visible and clearable, so Comps is
+ * never "No subject selected" while the chip names a property (the same bug
+ * Buyer Match shipped with).
+ */
 function CompsMobileEntry({ thread, dealContext }: { thread: InboxWorkflowThread | null; dealContext: DealContext | null }) {
   const urlPropertyId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('property_id') : null
   const [globalContext, setGlobalContext] = useState(() => getUniversalEntityContextSnapshot())
   useEffect(() => subscribeUniversalEntityContext(setGlobalContext), [])
+  const [chipPropertyId, setChipPropertyId] = useState<string | null>(() => readChipPropertyId())
+  useEffect(() => {
+    const onLocator = () => setChipPropertyId(readChipPropertyId())
+    window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
+    window.addEventListener('popstate', onLocator)
+    return () => {
+      window.removeEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
+      window.removeEventListener('popstate', onLocator)
+    }
+  }, [])
   const contextPropertyId = globalContext?.propertyId || (globalContext?.entityType === 'property' ? globalContext?.entityId : null) || null
   const threadPropertyId = (thread as unknown as { propertyId?: string; property_id?: string } | null)?.propertyId
     ?? (thread as unknown as { property_id?: string } | null)?.property_id ?? null
-  const propertyId = urlPropertyId || dealContext?.propertyId || dealContext?.property_id || contextPropertyId || threadPropertyId || null
+  const propertyId = urlPropertyId || dealContext?.propertyId || dealContext?.property_id || chipPropertyId || contextPropertyId || threadPropertyId || null
   if (!propertyId) {
     return (
       <div className="ci-workspace ci-workspace--empty" data-comp-intelligence="mobile">

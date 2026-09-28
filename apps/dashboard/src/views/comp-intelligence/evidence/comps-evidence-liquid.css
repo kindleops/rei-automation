@@ -327,3 +327,10 @@ html[data-nexus-theme='light'] :is(.cev, .cev-sheet) { --cev-grain: none; }
 .cev .cev-footnote { font-size: 11px; letter-spacing: 0.01em; }
 .cev .cev-mark.is-end em { transform: translateX(calc(-100% + 8px)); }
 .cev .cev-mark.is-start em { transform: translateX(-8px); }
+
+/* The view tabs are sticky: once stuck, content scrolls beneath them, so they
+   carry a denser glass (two glass-hi layers ≈ 93%) than the static panels. */
+.cev .cev-views {
+  background: var(--cev-spec) padding-box, linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box, linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box, var(--cev-rim) border-box;
+  -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%);
+}
