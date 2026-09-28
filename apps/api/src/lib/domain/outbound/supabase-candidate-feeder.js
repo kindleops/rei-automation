@@ -3378,6 +3378,17 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   template_routing_details.template_fallback_level = template_fallback_level;
   template_routing_details.asset_property_group = asset_group;
 
+  // Operator-blocked templates (system_control.sms_blocked_template_ids) leave
+  // the pool here, so rotation lands on an allowed sibling instead of a
+  // template the send-time health guard will refuse. Supplied by the caller;
+  // absent, the pool is unchanged.
+  const blocked_template_ids = options.blocked_template_ids instanceof Set
+    ? options.blocked_template_ids
+    : new Set(Array.isArray(options.blocked_template_ids) ? options.blocked_template_ids.map(String) : []);
+  if (blocked_template_ids.size) {
+    templates = templates.filter((t) => !blocked_template_ids.has(String(getTemplateReferenceId(t) ?? "")));
+  }
+
   if (!templates.length) {
     logTemplateRenderFailure(candidate, "no_template_after_fallback", {
       selected_template_id: null,

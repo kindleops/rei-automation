@@ -47,3 +47,16 @@ test("campaign candidates always carry an E.164 phone", () => {
   assert.equal(launchCandidateFromTarget({ to_phone_number: "16125589879", metadata: {} }).canonical_e164, "+16125589879");
   assert.equal(launchCandidateFromTarget({ to_phone_number: "+16125589879", metadata: {} }).canonical_e164, "+16125589879");
 });
+
+import { renderOutboundTemplate } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
+
+test("an operator-blocked template leaves the rotation pool; the seller gets an allowed sibling", async () => {
+  const tpl = (id, body) => ({ template_id: id, id, use_case: "ownership_check", stage_code: "S1", language: "English", is_active: true, active: "Yes", property_type_scope: "Any Residential", allowed_property_groups: ["sfr"], template_body: body, text: body })
+  const templates = [tpl("204705", "Hey {{seller_first_name}}, do you still own {{property_address}}?"), tpl("840900", "Hi {{seller_first_name}}, is {{property_address}} yours?")]
+  const candidate = { seller_first_name: "Thai", property_address: "3111 Thomas Ave N", property_type: "Single Family", language: "English", canonical_e164: "+17634475601" }
+  const base = { template_use_case: "ownership_check", stage_code: "S1", first_touch: true }
+  const deps = { fetchSmsTemplates: async () => templates }
+  const blocked = await renderOutboundTemplate(candidate, { ...base, blocked_template_ids: new Set(["204705"]) }, deps)
+  const id = String(blocked.template_id ?? blocked.template?.template_id ?? blocked.selected_template_id ?? "")
+  assert.notEqual(id, "204705", "a blocked template is never chosen")
+});

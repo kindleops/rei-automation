@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { isSenderDispatchBlocked, isTemplateDispatchBlocked, loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
 import { evaluateCampaignResumeReadiness } from '@/lib/domain/campaigns/campaign-resume-readiness.js'
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
@@ -7377,6 +7378,11 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     }
   }
 
+  // Same operator blocklists the send-time health guard enforces. A read
+  // failure leaves the sets empty; the send-time guard still refuses the row.
+  const dispatchBlocked = await (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)()
+    .catch(() => ({ template_ids: new Set(), sender_numbers: new Set() }))
+  launchOptions.blocked_template_ids = dispatchBlocked.template_ids
   let planLoopCounter = 0
   for (const target of readyTargets) {
     if (plannedItems.length >= caps.effective_limit) break
@@ -7484,6 +7490,19 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       recordSkip('missing_selected_sender_number', target)
       continue
     }
+    /**
+     * The operator blocklists (system_control.sms_blocked_sender_numbers /
+     * sms_blocked_template_ids) were enforced only at SEND time by the health
+     * guard; planning never read them, so a campaign queued rows onto a blocked
+     * number or template and each one was burned as blocked_by_health_guard
+     * (Minneapolis 2026-09-28: its only number, then 47 rows on 5 blocked
+     * templates). Honour the same lists when planning: the target stays
+     * `ready` and the campaign reports why it could not place it.
+     */
+    if (isSenderDispatchBlocked(senderNumber, dispatchBlocked)) {
+      recordSkip('sender_blocked_by_operator', target, { sender: senderNumber })
+      continue
+    }
     if (caps.per_sender_cap && Number(senderUseCounts[senderKey] || 0) >= caps.per_sender_cap) {
       recordSkip('per_sender_cap_reached', target, { sender: senderNumber })
       continue
@@ -7497,6 +7516,10 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     const rendered = await renderOutboundTemplate(candidate, launchOptions, deps)
     const templateId = renderedTemplateId(rendered)
     const messageBody = renderedMessageBody(rendered)
+    if (templateId && isTemplateDispatchBlocked(templateId, dispatchBlocked)) {
+      recordSkip('template_blocked_by_operator', target, { template_id: templateId })
+      continue
+    }
     if (!rendered.ok || !templateId || !messageBody) {
       recordSkip(rendered.reason_code || rendered.reason || 'template_render_failed', target, {
         template_id: templateId,
