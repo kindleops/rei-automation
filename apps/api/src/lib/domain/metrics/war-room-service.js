@@ -22,11 +22,11 @@ import {
 const SMS_COST_PER_MSG = 0.0079
 
 // ── Intent classification (mirrors api/cockpit/ops/metrics/_shared.js) ────────
-const POSITIVE_INTENTS = new Set([
+export const POSITIVE_INTENTS = new Set([
   'seller_interested', 'asking_price_provided', 'asks_offer',
   'ownership_confirmed', 'price_anchor', 'price_interest',
 ])
-const OPTOUT_INTENTS = new Set(['opt_out', 'stop', 'unsubscribe', 'remove'])
+export const OPTOUT_INTENTS = new Set(['opt_out', 'stop', 'unsubscribe', 'remove'])
 const WRONG_NUM_INTENTS = new Set(['wrong_number', 'wrong_person', 'not_owner', 'wrong_contact'])
 
 const US_STATE_ABBRS = new Set([
