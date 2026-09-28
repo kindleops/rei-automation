@@ -289,3 +289,17 @@ test("an active campaign with no audience is never auto-completed", async () => 
   assert.equal(r.completed, false);
   assert.equal(store.campaign.status, "active");
 });
+
+test("per_sender_cap holds per DAY across refills: today's rows seed the planner", async () => {
+  // Minneapolis has ONE sender number. per_sender_cap counted per plan call, so
+  // a rolling refill could push that one number far past 150/day.
+  const store = makeStore({ ready: 300, preQueued: 50 });
+  for (const row of store.queue) row.from_phone_number = "+16125550100";
+  let seen = null;
+  const plan = async (_id, input) => { seen = input.sender_use_seed; return { ok: true, send_queue_rows_created: 0, skipped_counts_by_reason: { per_sender_cap_reached: 300 }, blockers: [] }; };
+  const r = await feedCampaignBatch(store.campaign, deps(store, plan));
+  assert.deepEqual(seen, { "+16125550100": 50 });
+  assert.equal(r.stalled, false, "a full sender for today is pacing, not a stall");
+  assert.equal(r.reason, "capacity_reached_today");
+  assert.equal(r.completed, false);
+});

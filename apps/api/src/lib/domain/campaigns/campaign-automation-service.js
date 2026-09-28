@@ -7338,7 +7338,13 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const routingCounts = {}
   const marketCounts = {}
   const seenPhones = new Set()
-  const senderUseCounts = {}
+  /**
+   * per_sender_cap is a PER-DAY limit per sender number. These counters were
+   * per plan call, which was only right while one call planned the whole day;
+   * a rolling refill plans in chunks, so the feeder seeds what each sender
+   * already carries today for this campaign (sender_use_seed).
+   */
+  const senderUseCounts = { ...(input.sender_use_seed && typeof input.sender_use_seed === 'object' ? input.sender_use_seed : {}) }
   const marketUseCounts = {}
 
   const recordSkip = (reason, target = {}, extra = {}) => {

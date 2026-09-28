@@ -110,6 +110,9 @@ const PERMANENT_INELIGIBLE_REASONS = new Set([
   'likely_renter',
 ])
 
+/** Skip reasons that mean "no more room today", not "cannot be sent". */
+const CAPACITY_REASONS = new Set(['per_sender_cap_reached', 'per_market_cap_reached', 'schedule_window_full'])
+
 export function resolveFeedLimit({
   campaign = {},
   activeLiveRows = 0,
@@ -149,6 +152,32 @@ async function countTargets(supabase, campaignId, statuses, { not = false } = {}
   const { count, error } = await query
   if (error) throw error
   return Number(count || 0)
+}
+
+/**
+ * What each sender number already carries for this campaign today: rows sent
+ * since the campaign's local midnight plus rows still queued. Seeds the
+ * planner's per-sender counters so per_sender_cap holds per DAY across refills.
+ */
+export async function senderUseToday(supabase, campaignId, timezone = 'America/New_York', now = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' })
+  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]))
+  const dayStart = campaignDayStart(now, timezone, parts).toISOString()
+  const { data, error } = await supabase
+    .from('send_queue')
+    .select('from_phone_number,queue_status,updated_at')
+    .eq('campaign_id', campaignId)
+    .in('queue_status', [...ACTIVE_QUEUE_STATUSES, 'sent', 'delivered'])
+  if (error) throw error
+  const seed = {}
+  for (const row of data || []) {
+    const sender = clean(row.from_phone_number)
+    if (!sender) continue
+    const active = ACTIVE_QUEUE_STATUSES.includes(row.queue_status)
+    if (!active && String(row.updated_at || '') < dayStart) continue
+    seed[sender] = (seed[sender] || 0) + 1
+  }
+  return seed
 }
 
 async function latestActiveScheduledAt(supabase, campaignId) {
@@ -234,6 +263,7 @@ export async function feedCampaignBatch(campaign, deps = {}) {
     // Continue the campaign's cadence after its last queued row instead of
     // restarting at "now", which would double the send rate on overlap.
     const lastScheduled = await latestActiveScheduledAt(supabase, campaign.id)
+    const senderSeed = await senderUseToday(supabase, campaign.id, timezone, now)
     const intervalMs = asPositiveInteger(campaign.send_interval_seconds, 60) * 1000
     const notBefore = lastScheduled ? new Date(new Date(lastScheduled).getTime() + intervalMs).toISOString() : null
     const launchInput = mergeLaunchWriteModeIntoInput(campaign, {
@@ -243,6 +273,7 @@ export async function feedCampaignBatch(campaign, deps = {}) {
       scheduled_for: next.scheduled_for,
       first_scheduled_at: next.scheduled_for,
       schedule_not_before: notBefore,
+      sender_use_seed: senderSeed,
       batch_max: feed.limit,
       limit: feed.limit,
       max_targets: feed.limit,
@@ -275,13 +306,17 @@ export async function feedCampaignBatch(campaign, deps = {}) {
 
   // A live campaign with sendable targets left that could not place a single
   // row, while nothing is queued ahead, is stalled — say so, don't idle.
-  const stalled = !completed && readyAfter > 0 && activeLiveRows + inserted === 0 &&
+  // Hitting today's capacity (sender cap, window, daily cap) is pacing, not a
+  // stall: the remainder waits for the next day/window by design.
+  const skipped = result?.skipped_counts_by_reason || {}
+  const capacityBound = Object.keys(skipped).some((r) => CAPACITY_REASONS.has(r) && Number(skipped[r]) > 0)
+  const stalled = !completed && readyAfter > 0 && activeLiveRows + inserted === 0 && !capacityBound &&
     !['daily_cap_reached', 'total_cap_reached'].includes(feed.bound)
   const reason = completed
     ? 'cohort_resolved'
     : inserted > 0
       ? null
-      : (result?.blockers?.[0] || (feed.limit > 0 ? 'no_row_placed' : feed.bound))
+      : (result?.blockers?.[0] || (capacityBound ? 'capacity_reached_today' : feed.limit > 0 ? 'no_row_placed' : feed.bound))
 
   const heartbeatAt = new Date().toISOString()
   const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
