@@ -13,7 +13,7 @@ const LENDER_CLASSES = [
   ['agency', /\b(secretary of|department of|dept\.? of|housing and urban|housing & urban|veterans? affairs|united states|state of|county of|city of|commonwealth of|government)\b/i],
   ['gse', /\b(federal national mortgage|fannie mae|federal home loan mortgage|freddie mac|federal home loan bank|ginnie mae)\b/i],
   ['servicer', /\b(loan servicing|mortgage servicing|servicing,? (llc|inc|corp)|lakeview loan|shellpoint|nationstar|mr\.? cooper|carrington mortgage|newrez|rushmore loan|specialized loan|selene finance|pennymac)\b/i],
-  ['lender', /\b(mortgage (corp(oration)?|company|co\.?|llc|inc)|home loans?|lending(,? (llc|inc))?|bancorp|savings (bank|fund|and loan)|federal savings|fsb|credit union|national association|n\.a\.?$|, n\.a\.|\bbank(?!\s+(st|street|rd|road|ave|avenue)\b)\b)/i],
+  ['lender', /\b(mortgage,? (corp(oration)?|company|co\.?|llc|inc)|home loans?|lending(,? (llc|inc))?|bancorp|savings (bank|fund|and loan)|federal savings|fsb|credit union|national association|n\.a\.?$|, n\.a\.|\bbank(?!\s+(st|street|rd|road|ave|avenue)\b)\b)/i],
   ['reo_vehicle', /\breo\b|\basset (company|trust) \d/i],
 ]
 export function lenderClass(name) {

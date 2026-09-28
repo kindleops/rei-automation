@@ -31,7 +31,7 @@ test('a repeat local cash buyer with same-type purchases in range is a strong ma
 })
 
 test('lenders, servicers, GSEs and agencies are never disposition buyers — with the measured deed share', () => {
-  for (const name of ['Secretary Of Veterans Affairs', 'Secretary Of Housing And Urban Development', 'FEDERAL NATIONAL MORTGAGE ASSOCIATION', 'WELLS FARGO BANK, N.A.', 'LAKEVIEW LOAN SERVICING, LLC', 'Wilmington Savings Fund Society, FSB', 'Navy Federal Credit Union', 'State Of Texas', 'VMC REO, LLC']) {
+  for (const name of ['Secretary Of Veterans Affairs', 'Secretary Of Housing And Urban Development', 'FEDERAL NATIONAL MORTGAGE ASSOCIATION', 'WELLS FARGO BANK, N.A.', 'LAKEVIEW LOAN SERVICING, LLC', 'Wilmington Savings Fund Society, FSB', 'Navy Federal Credit Union', 'State Of Texas', 'VMC REO, LLC', 'DATA MORTGAGE, INC.', 'Freedom Mortgage Corporation']) {
     assert.ok(lenderClass(name), name)
   }
   for (const name of ['ZAK VENTURES L.L.C.', 'Bank Street Holdings LLC', 'Estate Of Smith Investments LLC', 'Opendoor Property Trust I']) {
