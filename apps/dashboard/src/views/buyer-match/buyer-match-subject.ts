@@ -38,7 +38,8 @@ export interface BuyerMatchSubject {
   addressHint: string | null
   opportunityId: string | null
   threadKey: string | null
-  source: 'url'
+  /** 'url' = explicit deep link; 'context' = the header's visible, clearable property context. */
+  source: 'url' | 'context'
 }
 
 const clean = (value: unknown): string | null => {

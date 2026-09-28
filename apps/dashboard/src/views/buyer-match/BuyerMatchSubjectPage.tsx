@@ -4,6 +4,7 @@ import { fetchCanonicalSubjectProperty } from '../../domain/comp-intelligence/co
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
 import { Icon } from '../../shared/icons'
 import { resolveBuyerMatchSubject, type BuyerMatchSubject } from './buyer-match-subject'
+import { readSelectedContext } from '../../domain/locator/active-context'
 import './mobile/buyer-match-mobile.css'
 
 /**
@@ -63,9 +64,23 @@ const numOrNull = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
+function resolveSubjectOrSelected(): BuyerMatchSubject | null {
+  const fromUrl = resolveBuyerMatchSubject()
+  if (fromUrl) return fromUrl
+  const selected = readSelectedContext()
+  if (selected?.kind !== 'property' || !selected.id) return null
+  return { propertyId: selected.id, addressHint: selected.detail && !selected.detail.startsWith('Selected') ? selected.detail : null, opportunityId: null, threadKey: null, source: 'context' }
+}
+
 export function BuyerMatchSubjectPage() {
   const { isMobile } = useBreakpoint()
-  const [subject, setSubject] = useState<BuyerMatchSubject | null>(() => resolveBuyerMatchSubject())
+  /**
+   * With no ?property_id, Buyer Match is about exactly the property the global
+   * bar's context chip shows (readSelectedContext: URL → Entity Graph deep
+   * link → selected-property locator). The chip is visible and clearable (✕),
+   * so the page can never be scoped to something the operator can't see.
+   */
+  const [subject, setSubject] = useState<BuyerMatchSubject | null>(() => resolveSubjectOrSelected())
   const [property, setProperty] = useState<HydratedProperty | null>(null)
   const [, setHydrationFailed] = useState<string | null>(null)
   /**
@@ -86,7 +101,7 @@ export function BuyerMatchSubjectPage() {
    * re-hydrates and re-queries against the NEW property id.
    */
   useEffect(() => {
-    const onLocator = () => setSubject(resolveBuyerMatchSubject())
+    const onLocator = () => setSubject(resolveSubjectOrSelected())
     window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
     window.addEventListener('popstate', onLocator)
     return () => {

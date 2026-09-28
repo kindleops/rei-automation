@@ -126,6 +126,18 @@ describe('the production Buyer Match route', () => {
    * (buyer-match-workspace-service). The surface may re-order what came back
    * (operator sorts) but never assigns a tier, a score or a reason.
    */
+  /**
+   * 2026-09-28: opened from the app switcher with a property in the global
+   * bar's chip, Buyer Match said "Select a property". The page must be scoped
+   * to exactly what the chip shows (URL first, then the selected context).
+   */
+  it('follows the property the global context chip shows', () => {
+    const page = read('views/buyer-match/BuyerMatchSubjectPage.tsx')
+    expect(page).toMatch(/readSelectedContext\(\)/)
+    expect(page).toMatch(/resolveBuyerMatchSubject\(\)[\s\S]*readSelectedContext\(\)/)
+    expect(page).toMatch(/PROPERTY_LOCATOR_EVENT, onLocator/)
+  })
+
   it('never tiers, scores or explains a buyer in the browser', () => {
     const surface = read('views/buyer-match/workspace/BuyerMatchSurface.tsx')
     const parts = read('views/buyer-match/workspace/BuyerMatchParts.tsx')
