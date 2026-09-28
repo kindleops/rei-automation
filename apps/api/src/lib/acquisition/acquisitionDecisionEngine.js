@@ -1241,6 +1241,18 @@ function assetCompatible(subject, comp) {
   return false;
 }
 
+/** The pricing-set invariant: same asset family, and for multifamily the engine's unit band. */
+export function assetFamilyInvariantHolds(subject = {}, comp = {}) {
+  if (!assetCompatible(subject, comp)) return false;
+  const multi = (x) => x?.asset_family === 'multifamily' || isMultifamilyLane(x);
+  if (multi(subject) !== multi(comp)) return false;
+  if (multi(subject) && num(subject.units) && num(comp.units)) {
+    const ratio = num(comp.units) / num(subject.units);
+    if (ratio < 0.35 || ratio > 2.75) return false;
+  }
+  return true;
+}
+
 function eligibilityLimits(subject) {
   if (subject.asset_family === 'land') return { radius: 20, months: 48 };
   if (subject.asset_family === 'commercial') return { radius: 15, months: 48 };
@@ -3225,16 +3237,28 @@ export function calculateAcquisitionDecision({
     .filter((comp) => comp.eligible && comp.comp_score >= 30 && comp.adjusted_price)
     .sort((a, b) => b.weight - a.weight);
   const outliers = removeOutliers(initiallySelected);
-  const selected = outliers.selected
+  // ASSET-FAMILY INVARIANT (defense in depth, 2026-09-27). Eligibility already
+  // rejects asset_type_mismatch / unit_count_outside_range; this re-asserts it
+  // on the final pricing set so no future corpus row whose classification slips
+  // past eligibility can price a multifamily subject off single-family sales
+  // (or the reverse). Automated offers are built from this set.
+  const invariantRejected = [];
+  const familySafe = outliers.selected.filter((comp) => {
+    if (assetFamilyInvariantHolds(subject, comp.comp ?? comp)) return true;
+    invariantRejected.push({ ...comp, eligible: false, reasons: ['asset_family_invariant'] });
+    return false;
+  });
+  const selected = familySafe
     .sort((a, b) => b.weight - a.weight)
     .slice(0, MAX_SELECTED_COMPS);
-  const excessRejected = outliers.selected
+  const excessRejected = familySafe
     .slice(MAX_SELECTED_COMPS)
     .map((comp) => ({ ...comp, reasons: ['outside_top_comp_limit'] }));
   const rejected = [
     ...eligibilityRejected,
     ...qualityRejected,
     ...outliers.rejected,
+    ...invariantRejected,
     ...excessRejected,
   ];
   const valuation = calculateValuation(subject, selected);

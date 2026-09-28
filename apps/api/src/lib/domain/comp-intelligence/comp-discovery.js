@@ -133,6 +133,37 @@ function normalizeCompRow(row, index, subjectFlat) {
   };
 }
 
+
+/**
+ * ASSET-FAMILY GATE (2026-09-27). A comp of a different asset family — a
+ * single-family sale for a multifamily subject, or the reverse — can never be
+ * selected or priced from, and a multifamily comp must sit in the same unit
+ * band the acquisition engine uses (0.35–2.75× the subject's units). The
+ * legacy path previously force-included the top 40% by a similarity score in
+ * which a different asset class cost only 20 points.
+ */
+const MULTI_RE = /multi|apartment|duplex|triplex|quad|plex/i
+export function compAssetFamily(assetType, propertyType, units) {
+  const text = `${assetType ?? ''} ${propertyType ?? ''}`
+  if (MULTI_RE.test(text) || Number(units) >= 2) return 'multi'
+  if (/land|lot\b|vacant/i.test(text)) return 'land'
+  if (/commercial|office|retail|industrial|warehouse/i.test(text)) return 'commercial'
+  if (!clean(text) && !Number(units)) return null
+  return 'single'
+}
+export function assetGate(subject, comp) {
+  const sf = compAssetFamily(subject?.asset_type, subject?.property_type, subject?.units)
+  const cf = compAssetFamily(comp?.asset_type, comp?.property_subtype, comp?.units)
+  if (!sf) return { ok: true, reason: null }
+  if (!cf) return sf === 'single' ? { ok: true, reason: null } : { ok: false, reason: 'Asset type unknown — cannot confirm multifamily' }
+  if (sf !== cf) return { ok: false, reason: 'Different asset type' }
+  if (sf === 'multi' && Number(subject?.units) > 0 && Number(comp?.units) > 0) {
+    const ratio = Number(comp.units) / Number(subject.units)
+    if (ratio < 0.35 || ratio > 2.75) return { ok: false, reason: 'Unit count too different' }
+  }
+  return { ok: true, reason: null }
+}
+
 export async function discoverCompsForSubject(subjectContract, options = {}, deps = {}) {
   const startedAt = Date.now();
   const db = deps.db ?? supabase;
@@ -197,9 +228,21 @@ export async function discoverCompsForSubject(subjectContract, options = {}, dep
     candidates.push(normalizeCompRow(row, index, subjectFlat));
   }
 
-  let scored = detectOutliers(candidates, subjectFlat);
+  let scored = detectOutliers(candidates, subjectFlat).map((comp) => {
+    const gate = assetGate(subjectFlat, comp);
+    if (gate.ok) return comp;
+    return {
+      ...comp,
+      selected: false,
+      excluded: true,
+      inclusion_eligible: false,
+      asset_gate_rejected: true,
+      exclusion_reasons: [...new Set([gate.reason, ...(comp.exclusion_reasons ?? [])])],
+    };
+  });
 
   const ranked = [...scored]
+    .filter((c) => !c.asset_gate_rejected)
     .filter((c) => (c.sold_price ?? c.sale_list_price) && (c.latitude ?? c.lat))
     .sort((a, b) => (b.similarity_score ?? 0) - (a.similarity_score ?? 0));
   const autoIncludeCount = Math.min(6, Math.max(2, Math.ceil(ranked.length * 0.4)));

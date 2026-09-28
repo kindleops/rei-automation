@@ -28,6 +28,7 @@ import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipel
 import { offerSensitivity, replayStoredOffer, computeScenarioOffer } from './deal-scenario-model.js'
 import { getConversationSignal } from './conversation-signal-service.js'
 import { getMarketDemand } from './market-demand-service.js'
+import { REASON_LABELS } from '../comp-intelligence/comps-reason-labels.js'
 import { COMP_DETAIL_COLUMNS, enrichComp, ownerSections, parcelSections, prospectCards } from './deal-record-sections.js'
 
 const DAY = 86_400_000
@@ -86,15 +87,8 @@ const WITHHELD_REASONS = Object.freeze({
   valuation_absent: 'No offer-authoritative valuation exists yet — the automation will not name a number.',
 })
 
-const REJECTION_LABELS = Object.freeze({
-  asset_type_mismatch: 'Different asset type',
-  outside_radius: 'Too far away',
-  stale_sale: 'Sale too old',
-  price_outlier: 'Price outlier',
-  missing_price: 'No sale price',
-  size_mismatch: 'Size mismatch',
-  unit_mismatch: 'Unit-count mismatch',
-})
+// The engine's own reason codes (shared with Comps Intelligence).
+const REJECTION_LABELS = REASON_LABELS
 
 /* ── pure builders (exported for tests) ─────────────────────────────────── */
 

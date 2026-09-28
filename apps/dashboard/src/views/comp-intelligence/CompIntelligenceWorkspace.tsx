@@ -65,7 +65,49 @@ interface Props {
 
 const FILTER_KEYS: CompFilterKey[] = ['all', 'strong', 'usable', 'review', 'excluded']
 
-export function CompIntelligenceWorkspace({
+const CompsEvidenceSurface = lazy(() =>
+  import('./evidence/CompsEvidenceSurface').then((m) => ({ default: m.CompsEvidenceSurface })),
+)
+
+/**
+ * Phones get the valuation-evidence surface (one bounded server read, the
+ * engine's own verdicts). It is a separate component so the desktop
+ * workspace's hooks — three competing comp requests per refresh — never run
+ * on a phone, and switching layouts can't change a component's hook order.
+ */
+export function CompIntelligenceWorkspace(props: Props) {
+  if (props.isMobile) return <CompsMobileEntry thread={props.thread} dealContext={props.dealContext ?? null} />
+  return <CompIntelligenceDesktopWorkspace {...props} />
+}
+
+/** Same subject precedence as the desktop workspace: URL → deal context → universal context → thread. */
+function CompsMobileEntry({ thread, dealContext }: { thread: InboxWorkflowThread | null; dealContext: DealContext | null }) {
+  const urlPropertyId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('property_id') : null
+  const [globalContext, setGlobalContext] = useState(() => getUniversalEntityContextSnapshot())
+  useEffect(() => subscribeUniversalEntityContext(setGlobalContext), [])
+  const contextPropertyId = globalContext?.propertyId || (globalContext?.entityType === 'property' ? globalContext?.entityId : null) || null
+  const threadPropertyId = (thread as unknown as { propertyId?: string; property_id?: string } | null)?.propertyId
+    ?? (thread as unknown as { property_id?: string } | null)?.property_id ?? null
+  const propertyId = urlPropertyId || dealContext?.propertyId || dealContext?.property_id || contextPropertyId || threadPropertyId || null
+  if (!propertyId) {
+    return (
+      <div className="ci-workspace ci-workspace--empty" data-comp-intelligence="mobile">
+        <div className="ci-empty-state">
+          <div className="ci-empty-state__icon">⌖</div>
+          <strong>No subject selected</strong>
+          <p>Open a property from the Map, Pipeline, Deal Intelligence or Entity Graph to review its comparable sales.</p>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <Suspense fallback={<div className="ci-workspace ci-workspace--empty" data-comp-intelligence="mobile-loading" />}>
+      <CompsEvidenceSurface key={propertyId} propertyId={String(propertyId)} />
+    </Suspense>
+  )
+}
+
+function CompIntelligenceDesktopWorkspace({
   thread,
   dealContext,
   paneWidth = '100',

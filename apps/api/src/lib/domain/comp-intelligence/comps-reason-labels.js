@@ -1,0 +1,22 @@
+/** Engine + data-truth comp reason codes → operator language (acquisitionDecisionEngine evaluateCompEligibility / selection, plus recorded-deed facts). */
+export const REASON_LABELS = Object.freeze({
+  invalid_sale_price: 'No usable sale price',
+  nominal_non_arms_length_transfer: 'Nominal price — not a market sale',
+  package_consideration_unresolved: 'Portfolio / package sale price',
+  same_property: 'Same property as the subject',
+  asset_type_mismatch: 'Different asset type',
+  sale_too_old: 'Sale too old for the engine window',
+  outside_radius: 'Outside the engine search radius',
+  outside_zip_without_coordinates: 'Different ZIP, no coordinates',
+  square_feet_outside_range: 'Size too different',
+  unit_count_outside_range: 'Unit count too different',
+  building_size_outside_range: 'Building size too different',
+  comp_score_below_30: 'Similarity too low',
+  missing_adjusted_price: 'Could not be adjusted to the subject',
+  adjusted_price_outlier: 'Price outlier after adjustment',
+  outside_top_comp_limit: 'Eligible, but outside the engine’s top 12',
+  asset_family_invariant: 'Different asset family — never priced from',
+  nominal_price: 'Nominal price — not a market sale',
+  non_arms_length: 'Not an arm’s-length sale',
+  distress_or_transfer_deed: 'Foreclosure / transfer deed',
+})

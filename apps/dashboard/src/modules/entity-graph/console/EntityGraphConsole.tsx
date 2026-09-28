@@ -76,7 +76,10 @@ export function EntityGraphConsole(props: Props) {
   // The universe (list) is home; the network opens for a record, or on arrival
   // from another app with a subject.
   const [mode, setMode] = useState<'graph' | 'list'>(() => (anchorFromContext(universalContext) ? 'graph' : 'list'))
-  const [buyerId, setBuyerId] = useState<string | null>(null)
+  // `?buyer=<public buyer_id>` opens that buyer (Comps "View buyer" and other deep links).
+  const [buyerId, setBuyerId] = useState<string | null>(() => {
+    try { return new URLSearchParams(window.location.search).get('buyer') || null } catch { return null }
+  })
   const [anchor, setAnchor] = useState<Anchor | null>(() => anchorFromContext(universalContext))
   const [trail, setTrail] = useState<Array<{ anchor: Anchor; name: string }>>([])
   const [network, setNetwork] = useState<EntityNetwork | null>(null)

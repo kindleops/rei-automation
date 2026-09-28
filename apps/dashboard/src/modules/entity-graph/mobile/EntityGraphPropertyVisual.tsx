@@ -47,6 +47,8 @@ export function staticStreetViewUrl(address: string | null, lat?: number | null,
     fov: '78',
     pitch: '4',
     source: 'outdoor',
+    // 404 instead of Google's grey "no imagery" tile, so callers can fall back.
+    return_error_code: 'true',
     key: MAPS_KEY,
   })
   return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`
