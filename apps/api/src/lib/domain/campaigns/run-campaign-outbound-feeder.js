@@ -232,10 +232,82 @@ export async function findFeedableCampaigns(deps = {}) {
   return out
 }
 
+/**
+ * CARRIER-FILTERED SENDS RETRY WITH A DIFFERENT TEMPLATE.
+ *
+ * A text the carrier filtered as spam (failure_bucket 'Spam') never reached
+ * the seller, and on 2026-09-28 the filtering was driven by wording: the same
+ * sellers on the same numbers delivered plainer templates. So a filtered send
+ * puts its target back in line with that template excluded, once. A hard
+ * bounce (dead number) is never retried; neither is a second filtering.
+ */
+export const SPAM_RETRY_LIMIT = 1
+
+export async function recycleFilteredSends(supabase, campaignId, { now = Date.now() } = {}) {
+  const since = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString()
+  const { data: failed, error } = await supabase
+    .from('send_queue')
+    .select('id,campaign_target_id,template_id,provider_message_id,metadata')
+    .eq('campaign_id', campaignId)
+    .in('queue_status', ['failed_transport', 'failed'])
+    .gte('updated_at', since)
+    .limit(500)
+  if (error) throw error
+  const fresh = (failed || []).filter((r) => r.campaign_target_id && !(r.metadata && r.metadata.recycled_at))
+  if (!fresh.length) return { recycled: 0, skipped: 0 }
+
+  const sids = fresh.map((r) => r.provider_message_id).filter(Boolean)
+  const ids = fresh.map((r) => r.id)
+  const buckets = new Map()
+  if (sids.length || ids.length) {
+    const { data: events } = await supabase
+      .from('message_events')
+      .select('queue_id,provider_message_sid,failure_bucket')
+      .or([sids.length ? `provider_message_sid.in.(${sids.map((x) => `"${x}"`).join(',')})` : null, `queue_id.in.(${ids.join(',')})`].filter(Boolean).join(','))
+      .limit(1000)
+    for (const e of events || []) {
+      if (e.failure_bucket) {
+        if (e.queue_id) buckets.set(String(e.queue_id), e.failure_bucket)
+        if (e.provider_message_sid) buckets.set(String(e.provider_message_sid), e.failure_bucket)
+      }
+    }
+  }
+
+  let recycled = 0
+  let skipped = 0
+  const stamp = new Date(now).toISOString()
+  for (const row of fresh) {
+    const bucket = buckets.get(String(row.id)) || buckets.get(String(row.provider_message_id || ''))
+    const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+    if (!bucket) { skipped += 1; continue } // no carrier verdict yet — decide on a later pass
+    let retried = false
+    if (bucket === 'Spam') {
+      const { data: target } = await supabase.from('campaign_targets').select('id,target_status,metadata').eq('id', row.campaign_target_id).maybeSingle()
+      const tmeta = target?.metadata && typeof target.metadata === 'object' ? target.metadata : {}
+      const count = Number(tmeta.spam_retry_count || 0)
+      if (target && target.target_status === 'planned' && count < SPAM_RETRY_LIMIT) {
+        const excluded = [...new Set([...(Array.isArray(tmeta.excluded_template_ids) ? tmeta.excluded_template_ids : []), row.template_id].filter(Boolean).map(String))]
+        await supabase.from('campaign_targets').update({
+          target_status: 'ready',
+          metadata: { ...tmeta, excluded_template_ids: excluded, spam_retry_count: count + 1, last_spam_retry_at: stamp },
+          updated_at: stamp,
+        }).eq('id', target.id).eq('target_status', 'planned')
+        recycled += 1
+        retried = true
+      }
+    }
+    await supabase.from('send_queue').update({ metadata: { ...meta, recycled_at: stamp, recycle_outcome: retried ? 'retry_different_template' : `no_retry:${bucket}` } }).eq('id', row.id)
+    if (!retried) skipped += 1
+  }
+  return { recycled, skipped }
+}
+
 export async function feedCampaignBatch(campaign, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const now = new Date(deps.now || Date.now())
   const timezone = clean(campaign.metadata?.timezone || campaign.metadata?.launch_timezone) || 'America/New_York'
+  const recycle = await (deps.recycleFilteredSends || recycleFilteredSends)(supabase, campaign.id, { now: now.getTime() })
+    .catch((error) => ({ recycled: 0, skipped: 0, error: error?.message || String(error) }))
   const [activeLiveRows, readyRemaining, heldTargets, committedTargets, sentToday] = await Promise.all([
     countActiveLiveQueueRows(supabase, campaign.id),
     countTargets(supabase, campaign.id, ['ready']),
@@ -330,6 +402,7 @@ export async function feedCampaignBatch(campaign, deps = {}) {
         feeder_last: {
           at: heartbeatAt,
           inserted,
+          spam_retries: recycle?.recycled ?? 0,
           ...base,
           ready_remaining: readyAfter,
           reason,

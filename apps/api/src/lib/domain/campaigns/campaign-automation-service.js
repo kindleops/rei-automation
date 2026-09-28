@@ -6810,6 +6810,12 @@ async function fetchActiveQueueRowsByPhone(supabase, phones = []) {
   return rows
 }
 
+function neverDelivered(row = {}) {
+  if (row.is_final_failure === true) return true
+  const status = lower(row.raw_carrier_status || row.delivery_status)
+  return status === 'failed' || status === 'undelivered'
+}
+
 async function fetchPriorContactRowsByPhone(supabase, phones = []) {
   const rows = []
   const phoneValues = uniqueClean(phones)
@@ -6823,7 +6829,7 @@ async function fetchPriorContactRowsByPhone(supabase, phones = []) {
         .limit(5000),
       supabase
         .from('message_events')
-        .select('id,to_phone_number,direction,event_type,sent_at,event_timestamp,created_at,queue_id')
+        .select('id,to_phone_number,direction,event_type,sent_at,event_timestamp,created_at,queue_id,raw_carrier_status,delivery_status,is_final_failure')
         .in('to_phone_number', phoneChunk)
         .limit(5000),
     ])
@@ -6832,6 +6838,9 @@ async function fetchPriorContactRowsByPhone(supabase, phones = []) {
     rows.push(...(queueResult.data || []).map((row) => ({ ...row, source: 'send_queue' })))
     rows.push(...(eventResult.data || [])
       .filter((row) => lower(row.direction || row.event_type).includes('out'))
+      // A message the carrier refused never reached the seller: it is not
+      // contact. Counting it made a spam-filtered seller unreachable forever.
+      .filter((row) => !neverDelivered(row))
       .map((row) => ({ ...row, source: 'message_events' })))
   }
   return rows
@@ -7513,10 +7522,15 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       continue
     }
 
-    const rendered = await renderOutboundTemplate(candidate, launchOptions, deps)
+    // A seller whose earlier text was carrier-filtered never gets that template again.
+    const targetExcluded = Array.isArray(target.metadata?.excluded_template_ids) ? target.metadata.excluded_template_ids.map(String) : []
+    const renderOptions = targetExcluded.length
+      ? { ...launchOptions, blocked_template_ids: new Set([...(launchOptions.blocked_template_ids || []), ...targetExcluded]) }
+      : launchOptions
+    const rendered = await renderOutboundTemplate(candidate, renderOptions, deps)
     const templateId = renderedTemplateId(rendered)
     const messageBody = renderedMessageBody(rendered)
-    if (templateId && isTemplateDispatchBlocked(templateId, dispatchBlocked)) {
+    if (templateId && (isTemplateDispatchBlocked(templateId, dispatchBlocked) || targetExcluded.includes(String(templateId)))) {
       recordSkip('template_blocked_by_operator', target, { template_id: templateId })
       continue
     }

@@ -303,3 +303,59 @@ test("per_sender_cap holds per DAY across refills: today's rows seed the planner
   assert.equal(r.reason, "capacity_reached_today");
   assert.equal(r.completed, false);
 });
+
+import { recycleFilteredSends } from "@/lib/domain/campaigns/run-campaign-outbound-feeder.js";
+
+function tableStore(tables) {
+  return {
+    from(name) {
+      const f = []
+      let patch = null
+      const rows = () => tables[name] || []
+      const run = () => {
+        const out = rows().filter((r) => f.every((x) => x(r)))
+        if (patch) { for (const r of out) Object.assign(r, patch); return { data: out, error: null } }
+        return { data: out, error: null }
+      }
+      const b = {
+        select() { return b }, update(p) { patch = p; return b },
+        eq(c, v) { f.push((r) => r[c] === v); return b }, in(c, vs) { f.push((r) => vs.includes(r[c])); return b },
+        gte() { return b }, limit() { return b }, or() { return b },
+        maybeSingle: async () => ({ data: run().data[0] || null, error: null }),
+        then(res, rej) { return Promise.resolve(run()).then(res, rej) },
+      }
+      return b
+    },
+  }
+}
+
+test("a carrier-filtered (Spam) send retries ONCE with that template excluded; a hard bounce never retries", async () => {
+  const tables = {
+    send_queue: [
+      { id: "q1", campaign_id: "c", campaign_target_id: "t1", template_id: "204513", provider_message_id: "S1", queue_status: "failed_transport", metadata: {} },
+      { id: "q2", campaign_id: "c", campaign_target_id: "t2", template_id: "200017", provider_message_id: "S2", queue_status: "failed_transport", metadata: {} },
+      { id: "q3", campaign_id: "c", campaign_target_id: "t3", template_id: "211377", provider_message_id: "S3", queue_status: "failed_transport", metadata: {} },
+    ],
+    message_events: [
+      { queue_id: "q1", provider_message_sid: "S1", failure_bucket: "Spam" },
+      { queue_id: "q2", provider_message_sid: "S2", failure_bucket: "Hard Bounce" },
+      { queue_id: "q3", provider_message_sid: "S3", failure_bucket: "Spam" },
+    ],
+    campaign_targets: [
+      { id: "t1", target_status: "planned", metadata: {} },
+      { id: "t2", target_status: "planned", metadata: {} },
+      { id: "t3", target_status: "planned", metadata: { spam_retry_count: 1, excluded_template_ids: ["204513"] } },
+    ],
+  };
+  const r = await recycleFilteredSends(tableStore(tables), "c");
+  assert.equal(r.recycled, 1);
+  const [t1, t2, t3] = tables.campaign_targets;
+  assert.equal(t1.target_status, "ready");
+  assert.deepEqual(t1.metadata.excluded_template_ids, ["204513"]);
+  assert.equal(t1.metadata.spam_retry_count, 1);
+  assert.equal(t2.target_status, "planned", "a dead number is not retried");
+  assert.equal(t3.target_status, "planned", "a second filtering is not retried");
+  assert.ok(tables.send_queue.every((q) => q.metadata.recycled_at), "each failed row is decided exactly once");
+  const again = await recycleFilteredSends(tableStore(tables), "c");
+  assert.equal(again.recycled, 0, "idempotent across feeder runs");
+});
