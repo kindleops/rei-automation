@@ -303,7 +303,7 @@ const CompIntelligenceWorkspace = lazy(() => import('../../views/comp-intelligen
 const BuyerMatchWorkspace = lazy(() => import('./components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })))
 const PipelineWorkspace = lazy(() => import('../../views/pipeline/PipelineWorkspace').then((m) => ({ default: m.PipelineWorkspace })))
 const MetricsWarRoom = lazy(() => import('./components/MetricsWarRoom').then((m) => ({ default: m.MetricsWarRoom })))
-const AnalyticsGeoMobile = lazy(() => import('../../views/analytics/mobile/AnalyticsGeoMobile').then((m) => ({ default: m.AnalyticsGeoMobile })))
+const AnalyticsSurface = lazy(() => import('../../views/analytics/performance/AnalyticsSurface').then((m) => ({ default: m.AnalyticsSurface })))
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
 const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
 const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })))
@@ -5740,7 +5740,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               * phone should be shown first.
               */}
             {isMobile
-              ? <AnalyticsGeoMobile />
+              ? <AnalyticsSurface />
               : <MetricsWarRoom layoutMode={layoutMode} paneWidth={paneWidth} paused={false} />}
           </WorkspaceSuspense>
         </section>
