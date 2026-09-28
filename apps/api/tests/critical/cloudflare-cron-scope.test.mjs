@@ -43,7 +43,17 @@ const RECONCILIATION_JOB_PATHS = [
 // entry here should be as deliberate as adding the first.
 const SEND_CAPABLE_JOB_PATHS = ["/api/internal/queue/run"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS];
+// CAMPAIGN EXECUTION, commissioned 2026-09-28 by explicit operator
+// authorization. Neither transmits: activate-due walks scheduled->active (a
+// stale schedule is marked missed, never fired) and feed writes send_queue rows
+// that only queue/run can send, under every operator brake. They ARM rows, which
+// is why they were forbidden until an operator commissioned them by name.
+const CAMPAIGN_EXECUTION_JOB_PATHS = [
+  "/api/internal/campaigns/activate-due",
+  "/api/internal/campaigns/feed",
+];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -51,8 +61,6 @@ const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATH
 const FORBIDDEN_JOBS = [
   "/api/internal/queue/retry",
   "/api/internal/queue/force-due",
-  "/api/internal/campaigns/feed",
-  "/api/internal/campaigns/activate-due",
   "/api/internal/campaigns/recover-stale-expired",
   "/api/internal/autopilot/run",
   "/api/internal/seller-flow/flush-inbound-bursts",
@@ -191,12 +199,15 @@ test("production declares the reconciliation and send schedules, and only approv
   assert.equal(vars.DEPLOYMENT_ENV, "production");
   assert.equal(vars.CRON_ENABLED, "true", "production is commissioned");
 
-  // Only reconciliation flags may be true. Any other CRON_* flag turned on is
+  // Only commissioned flags may be true. Any other CRON_* flag turned on is
   // an unapproved job.
   const enabled = Object.entries(vars).filter(([k, v]) => k.startsWith("CRON_") && v === "true").map(([k]) => k);
   assert.deepEqual(
     enabled.sort(),
     [
+      // Campaign execution, operator-commissioned 2026-09-28.
+      "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED",
+      "CRON_CAMPAIGN_FEED_ENABLED",
       "CRON_DELIVERY_RECONCILE_ENABLED",
       "CRON_ENABLED",
       // PRODUCTION-COMMISSIONING-1. Both send-incapable; see
@@ -297,4 +308,18 @@ test("the transport and queue-engine secrets remain withheld from the container"
     !/QUEUE_ENGINE_SHARED_SECRET:\s*env\./.test(code),
     "the queue-engine secret must stay withheld"
   );
+});
+
+test("campaign execution jobs are registered on the */5 lane, carry no body, and are not the sender", async () => {
+  const code = await workerCode();
+  for (const [name, path] of [["CAMPAIGN_ACTIVATE_DUE", "/api/internal/campaigns/activate-due"], ["CAMPAIGN_FEED", "/api/internal/campaigns/feed"]]) {
+    const block = code.match(new RegExp(`const ${name}: CronJob = \\{([\\s\\S]*?)\\};`));
+    assert.ok(block, `${name} must be declared`);
+    assert.ok(block[1].includes(path), `${name} must point at ${path}`);
+    assert.ok(!/body\s*:/.test(block[1]), `${name} must not hardcode a body`);
+    assert.ok(!SEND_CAPABLE_JOB_PATHS.includes(path), `${name} must not be counted as a sender`);
+  }
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(fiveMin[1].includes("CAMPAIGN_ACTIVATE_DUE") && fiveMin[1].includes("CAMPAIGN_FEED"));
 });

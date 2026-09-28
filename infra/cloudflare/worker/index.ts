@@ -605,6 +605,36 @@ const QUEUE_RECONCILE: CronJob = {
 };
 
 /**
+ * CAMPAIGN EXECUTION -- scheduled activation + rolling refill.
+ *
+ * Commissioned 2026-09-28 by explicit operator authorization ("Wire both
+ * Cloudflare jobs. Enable their production flags."). Both lived only in
+ * apps/api/vercel.json; when those crons were removed nothing replaced them,
+ * so in production:
+ *   - a `scheduled` campaign never became `active`, and queue/run refuses rows
+ *     of a non-live campaign, so its rows could never leave;
+ *   - a live campaign never got past its first queue chunk (Minneapolis: 50
+ *     queued, 453 eligible sellers `ready` with nothing to queue them).
+ *
+ * Neither job transmits. Activation walks scheduled->active (a schedule more
+ * than two hours stale is marked missed, never auto-fired); the feeder writes
+ * send_queue rows inside the campaign's contact window. queue/run remains the
+ * only sender, under every operator brake, window, suppression and sender rail.
+ * Like the runner, neither carries a body: caps come from the campaign row.
+ */
+const CAMPAIGN_ACTIVATE_DUE: CronJob = {
+  id: "campaign_activate_due",
+  enabledBy: "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED",
+  path: "/api/internal/campaigns/activate-due",
+};
+
+const CAMPAIGN_FEED: CronJob = {
+  id: "campaign_feed",
+  enabledBy: "CRON_CAMPAIGN_FEED_ENABLED",
+  path: "/api/internal/campaigns/feed",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -622,12 +652,12 @@ const QUEUE_RECONCILE: CronJob = {
  * and the two lanes worth keeping were moved here under their own flags.
  *
  * Still deliberately absent (each can cause a seller-visible send or arm a row
- * a later processor would send): queue/retry, queue/force-due, campaigns/feed,
- * campaigns/activate-due, campaigns/recover-stale-expired, autopilot/run,
+ * a later processor would send): queue/retry, queue/force-due,
+ * campaigns/recover-stale-expired, autopilot/run,
  * outbound/feed-master-owners, seller-flow/flush-inbound-bursts,
  * seller-flow/recover-inbound, webhooks/recover-inbound, offers/recalculate.
- * Campaign feed/activation are commissioned with the campaign arming step, not
- * here.
+ * Campaign feed/activation were commissioned 2026-09-28 (CAMPAIGN_ACTIVATE_DUE,
+ * CAMPAIGN_FEED above).
  */
 const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
   "*/5 * * * *": [
@@ -635,6 +665,8 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     DELIVERY_RECONCILIATION,
     WORKFLOW_RUNTIME_TICK,
     QUEUE_RECONCILE,
+    CAMPAIGN_ACTIVATE_DUE,
+    CAMPAIGN_FEED,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

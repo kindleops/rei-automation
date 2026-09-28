@@ -86,9 +86,9 @@
 
     "CRON_ENABLED": "true",
     // Per-job authority. These two remain RECONCILIATION lanes and remain
-    // send-incapable. Campaign feed, campaign activation, autopilot, queue
-    // retry, force-due and DocuSign are STILL not registered for any
-    // environment -- commissioning the runner did not commission them.
+    // send-incapable. Autopilot, queue retry, force-due and DocuSign are
+    // STILL not registered for any environment -- commissioning the runner did
+    // not commission them. (Campaign feed/activation: see below.)
     "CRON_SELLER_STATE_RECONCILE_ENABLED": "true",
     "CRON_DELIVERY_RECONCILE_ENABLED": "true",
     // PRODUCTION OUTBOUND COMMISSIONED. Per-job authority for the one
@@ -105,6 +105,14 @@
     // writes only terminal/delivered states, disjoint from claimable ones.
     "CRON_WORKFLOW_RUNTIME_ENABLED": "true",
     "CRON_QUEUE_RECONCILE_ENABLED": "true",
+    // CAMPAIGN EXECUTION COMMISSIONED (operator authorization, 2026-09-28:
+    // "Wire both Cloudflare jobs. Enable their production flags."). Without
+    // them a scheduled campaign never went live and a live one never got past
+    // its first queue chunk. Neither transmits: activation walks
+    // scheduled->active, the feeder writes send_queue rows; queue/run above,
+    // under every operator brake, is still the only sender.
+    "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED": "true",
+    "CRON_CAMPAIGN_FEED_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",
