@@ -1,0 +1,329 @@
+/*
+ * COMPS INTELLIGENCE — liquid layer, loaded after comps-evidence.css.
+ * Liquid glass (specular top light + caustic sweeps), liquid motion (spring
+ * entrances, sliding tab ink, cinematic hero open) and liquid color (drifting
+ * aurora, spinning conic rims, flowing gradient numerals). Animations move
+ * transform / opacity / background-position / one registered angle, and all
+ * of it stops under prefers-reduced-motion.
+ */
+@property --cev-spin { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+
+.cev, .cev-sheet {
+  --cev-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --cev-spec: linear-gradient(180deg, rgb(255 255 255 / 0.13), rgb(255 255 255 / 0.035) 18%, transparent 42%);
+  --cev-liquid: linear-gradient(100deg, color-mix(in srgb, var(--cev-accent) 70%, #fff), var(--cev-accent) 24%, color-mix(in srgb, var(--cev-accent) 45%, var(--cev-deed)) 44%, var(--cev-gold) 66%, color-mix(in srgb, var(--cev-gold) 40%, #fff) 82%, color-mix(in srgb, var(--cev-accent) 70%, #fff));
+  --cev-sweep: rgb(255 255 255 / 0.075);
+}
+html[data-nexus-theme='light'] :is(.cev, .cev-sheet) {
+  --cev-spec: linear-gradient(180deg, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.3) 24%, transparent 50%);
+  --cev-liquid: linear-gradient(100deg, var(--cev-text), color-mix(in srgb, var(--cev-accent) 65%, var(--cev-text)) 35%, color-mix(in srgb, var(--cev-gold) 80%, var(--cev-text)) 65%, var(--cev-text));
+  --cev-sweep: rgb(255 255 255 / 0.55);
+}
+
+/* ── liquid color field: a second aurora drifting against the first ── */
+.cev::after {
+  content: ''; position: absolute; left: -40px; right: -40px; top: 640px; height: 1500px; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(34% 20% at 82% 10%, color-mix(in srgb, var(--cev-accent) 20%, transparent), transparent 70%),
+    radial-gradient(30% 16% at 8% 44%, color-mix(in srgb, var(--cev-deed) 18%, transparent), transparent 70%),
+    radial-gradient(36% 18% at 72% 78%, color-mix(in srgb, var(--cev-gold) 13%, transparent), transparent 72%);
+  filter: blur(30px) saturate(150%);
+  animation: cev-aurora-b 30s ease-in-out infinite alternate;
+}
+html[data-nexus-theme='light'] .cev::after { opacity: 0.45; }
+html[data-nexus-theme='true_black'] .cev::after { opacity: 0.7; }
+@keyframes cev-aurora-b { from { transform: translate3d(3%, 0, 0) scale(1.05); } to { transform: translate3d(-3%, -3%, 0) scale(1); } }
+
+/* ── liquid glass: specular top light, deeper shadow, caustic sweep ── */
+.cev :is(.cev-readout, .cev-mapwrap, .cev-strip, .cev-market, .cev-views, .cev-none) {
+  background: var(--cev-spec) padding-box, linear-gradient(var(--cev-glass), var(--cev-glass)) padding-box, var(--cev-rim) border-box;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 -1px 0 rgb(0 0 0 / 0.22), 0 26px 60px -34px rgb(0 0 0 / 0.9);
+}
+.cev :is(.cev-readout, .cev-strip, .cev-market) { position: relative; overflow: hidden; isolation: isolate; }
+.cev :is(.cev-readout, .cev-strip, .cev-market)::after {
+  content: ''; position: absolute; top: -20%; bottom: -20%; left: 0; width: 45%; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--cev-sweep) 50%, transparent);
+  transform: translate3d(-160%, 0, 0) skewX(-18deg);
+  animation: cev-caustic 11s var(--cev-ease) infinite;
+}
+.cev .cev-strip::after { animation-delay: 3.5s; }
+.cev .cev-market::after { animation-delay: 7s; }
+@keyframes cev-caustic { 0%, 62% { transform: translate3d(-160%, 0, 0) skewX(-18deg); } 88%, 100% { transform: translate3d(330%, 0, 0) skewX(-18deg); } }
+
+/* ── subject hero: cinematic open, light leak, caustic, grain, glass rim ── */
+.cev .cev-subject { box-shadow: 0 34px 70px -36px rgb(0 0 0 / 0.95); }
+.cev-subject::before {
+  content: ''; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: linear-gradient(#000, #000) top / 100% 0% no-repeat, linear-gradient(#000, #000) bottom / 100% 0% no-repeat;
+  animation: cev-letterbox 1.15s var(--cev-ease) 0.05s backwards;
+}
+@keyframes cev-letterbox { from { background-size: 100% 50%, 100% 50%; } to { background-size: 100% 0%, 100% 0%; } }
+.cev-subject::after {
+  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: inherit; padding: 1px;
+  background: linear-gradient(150deg, rgb(255 255 255 / 0.4), rgb(255 255 255 / 0.05) 34%, transparent 60%, color-mix(in srgb, var(--cev-gold) 55%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.cev-subject__leak {
+  position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen;
+  background: radial-gradient(55% 45% at 92% 6%, rgb(255 196 120 / 0.34), transparent 70%), radial-gradient(40% 40% at 4% 96%, color-mix(in srgb, var(--cev-accent) 30%, transparent), transparent 70%);
+  animation: cev-leak 9s ease-in-out infinite alternate;
+}
+@keyframes cev-leak { from { opacity: 0.55; transform: translate3d(2%, -2%, 0); } to { opacity: 1; transform: none; } }
+.cev-subject__caustic {
+  position: absolute; top: -30%; bottom: -30%; left: 0; width: 40%; pointer-events: none; mix-blend-mode: soft-light;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55) 50%, transparent);
+  transform: translate3d(-170%, 0, 0) skewX(-20deg);
+  animation: cev-caustic 9s var(--cev-ease) 1.4s infinite;
+}
+.cev-subject__grain {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.09; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.cev .cev-subject h2 { animation: cev-reveal 0.9s var(--cev-ease) 0.35s backwards; }
+.cev .cev-subject p { animation: cev-reveal 0.9s var(--cev-ease) 0.45s backwards; }
+.cev .cev-subject__specs span { animation: cev-reveal 0.7s var(--cev-ease) backwards; }
+.cev .cev-subject__specs span:nth-child(1) { animation-delay: 0.5s; }
+.cev .cev-subject__specs span:nth-child(2) { animation-delay: 0.56s; }
+.cev .cev-subject__specs span:nth-child(3) { animation-delay: 0.62s; }
+.cev .cev-subject__specs span:nth-child(4) { animation-delay: 0.68s; }
+.cev .cev-subject__specs span:nth-child(n+5) { animation-delay: 0.74s; }
+.cev .cev-subject__values > div { animation: cev-reveal 0.8s var(--cev-ease) backwards; }
+.cev .cev-subject__values > div:nth-child(1) { animation-delay: 0.6s; }
+.cev .cev-subject__values > div:nth-child(2) { animation-delay: 0.7s; }
+.cev .cev-subject__values > div:nth-child(3) { animation-delay: 0.8s; }
+.cev .cev-subject__values > div:nth-child(4) { animation-delay: 0.9s; }
+.cev .cev-subject__actions { animation: cev-reveal 0.8s var(--cev-ease) 0.85s backwards; }
+@keyframes cev-reveal { from { opacity: 0; transform: translate3d(0, 14px, 0); filter: blur(8px); } }
+.cev .cev-subject__specs span,
+.cev .cev-subject__values > div,
+.cev .cev-subject__actions button {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.2), rgb(255 255 255 / 0.04) 45%, rgb(255 255 255 / 0.02)), rgb(6 8 14 / 0.36);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 10px 24px -14px rgb(0 0 0 / 0.8);
+  -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+}
+/* lead value: a spinning gold rim and liquid numerals */
+.cev .cev-subject__values > div:first-child {
+  border-color: transparent;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.03) 45%) padding-box,
+    linear-gradient(rgb(8 9 14 / 0.62), rgb(8 9 14 / 0.62)) padding-box,
+    conic-gradient(from var(--cev-spin), #f5c65a, rgb(245 198 90 / 0.05) 28%, rgb(255 255 255 / 0.55) 50%, rgb(245 198 90 / 0.05) 72%, #f5c65a) border-box;
+  animation: cev-reveal 0.8s var(--cev-ease) 0.6s backwards, cev-spin 6s linear infinite;
+}
+.cev .cev-subject__values > div:first-child b {
+  background: linear-gradient(100deg, #fff4d6, #f5c65a 45%, #fff 70%, #f5c65a); background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: cev-flow 7s ease-in-out infinite alternate;
+}
+@keyframes cev-spin { to { --cev-spin: 360deg; } }
+@keyframes cev-flow { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+.cev .cev-subject__actions button { transition: transform 0.35s var(--cev-spring), background 0.3s; }
+.cev .cev-subject__actions button:active,
+.cev .cev-lookbtn:active,
+.cev .cev-chip:active,
+.cev .cev-reset:active { transform: scale(0.95); }
+.cev .cev-lookbtn { transition: transform 0.35s var(--cev-spring); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 10px 26px -10px rgb(0 0 0 / 0.7); }
+.cev .cev-eyebrow i { animation: cev-beacon 2.4s ease-in-out infinite; }
+@keyframes cev-beacon { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: 0.65; } }
+
+/* ── readout: liquid median well ── */
+.cev .cev-readout__hero {
+  position: relative; border: 1px solid transparent;
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--cev-accent) 18%, transparent), color-mix(in srgb, var(--cev-gold) 7%, transparent)) padding-box,
+    var(--cev-spec) padding-box,
+    linear-gradient(var(--cev-ink), var(--cev-ink)) padding-box,
+    conic-gradient(from var(--cev-spin), var(--cev-accent), color-mix(in srgb, var(--cev-accent) 6%, transparent) 26%, color-mix(in srgb, var(--cev-gold) 85%, transparent) 50%, color-mix(in srgb, var(--cev-accent) 6%, transparent) 74%, var(--cev-accent)) border-box;
+  box-shadow: 0 18px 40px -24px var(--cev-accent), inset 0 1px 0 rgb(255 255 255 / 0.12);
+  animation: cev-spin 8s linear infinite;
+}
+.cev .cev-readout__hero strong {
+  background: var(--cev-liquid); background-size: 240% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: cev-flow 9s ease-in-out infinite alternate;
+}
+.cev-meter {
+  position: relative; height: 5px; margin: 9px 2px 2px; border-radius: 5px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--cev-accent) 18%, var(--cev-track)), color-mix(in srgb, var(--cev-gold) 50%, transparent) 50%, color-mix(in srgb, var(--cev-accent) 18%, var(--cev-track)));
+}
+.cev-meter i {
+  position: absolute; top: 50%; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, var(--cev-accent) 58%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cev-accent) 24%, transparent), 0 0 16px var(--cev-accent);
+  transition: left 0.8s var(--cev-spring);
+}
+.cev .cev-readout__grid > div, .cev .cev-market__grid > div {
+  background: var(--cev-spec), var(--cev-track);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 0 0 1px var(--cev-edge);
+}
+.cev .cev-setpill { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12); background: var(--cev-spec), var(--cev-track); }
+.cev .cev-setpill.is-yours { background: var(--cev-spec), color-mix(in srgb, var(--cev-accent) 14%, transparent); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 8px 22px -12px var(--cev-accent); }
+.cev .cev-suff i { animation: cev-beacon 2.8s ease-in-out infinite; }
+
+/* ── map: lens vignette + rim light ── */
+.cev .cev-mapwrap::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(120% 90% at 50% 45%, transparent 58%, rgb(0 0 0 / 0.42));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 0 0 1px rgb(255 255 255 / 0.04);
+}
+html[data-nexus-theme='light'] .cev .cev-mapwrap::after { background: radial-gradient(120% 90% at 50% 45%, transparent 62%, rgb(11 18 32 / 0.14)); }
+.cev .cev-mapbar, .cev .cev-map__recenter, .cev .cev-map__legend { z-index: 2; }
+.cev :is(.cev-mapbar .cev-chip, .cev-map__recenter, .cev-map__legend) { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 10px 26px -14px rgb(0 0 0 / 0.8); }
+
+/* ── chips + tabs: sliding liquid ink ── */
+.cev .cev-chip { transition: color 0.25s, background 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.35s var(--cev-spring); }
+.cev .cev-chip.is-on {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.14), transparent 60%), color-mix(in srgb, var(--cev-accent) 24%, var(--cev-glass-hi));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 8px 22px -10px var(--cev-accent);
+}
+.cev-views__ink {
+  position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 4); border-radius: 13px; pointer-events: none;
+  transform: translate3d(calc(var(--vi, 0) * 100%), 0, 0);
+  transition: transform 0.6s var(--cev-spring);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.18), transparent 55%), linear-gradient(160deg, color-mix(in srgb, var(--cev-accent) 42%, transparent), color-mix(in srgb, var(--cev-accent) 14%, transparent));
+  box-shadow: 0 8px 22px -10px var(--cev-accent), inset 0 1px 0 rgb(255 255 255 / 0.28), inset 0 0 0 1px color-mix(in srgb, var(--cev-accent) 40%, transparent);
+}
+.cev .cev-views__tab { position: relative; z-index: 1; }
+.cev .cev-views__tab.is-on { background: none; box-shadow: none; }
+.cev .cev-sortbar__opts button { transition: color 0.25s, background 0.3s; }
+.cev .cev-sortbar__opts button.is-on { background: var(--cev-spec), var(--cev-track); box-shadow: inset 0 0 0 1px var(--cev-edge-hi); }
+
+/* ── comp gallery: spring entrance, liquid focus rim, living media ── */
+.cev .cev-rail > div { animation: cev-card-in 0.75s var(--cev-ease) backwards; animation-delay: calc(var(--i, 0) * 70ms + 80ms); }
+@keyframes cev-card-in { from { opacity: 0; transform: translate3d(34px, 0, 0) scale(0.95); } }
+.cev .cev-card {
+  animation: none;
+  background: var(--cev-spec) padding-box, linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box, var(--cev-rim) border-box;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 22px 44px -28px rgb(0 0 0 / 0.9);
+  transition: transform 0.5s var(--cev-spring), box-shadow 0.5s var(--cev-ease);
+}
+.cev .cev-card.in-set { background: var(--cev-spec) padding-box, linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box, linear-gradient(150deg, color-mix(in srgb, var(--cev-set) 85%, transparent), rgb(255 255 255 / 0.04) 50%, color-mix(in srgb, var(--cev-set) 45%, transparent)) border-box; }
+.cev .cev-card.is-focus {
+  background:
+    var(--cev-spec) padding-box,
+    linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box,
+    linear-gradient(var(--cev-ink), var(--cev-ink)) padding-box,
+    conic-gradient(from var(--cev-spin), var(--cev-set), color-mix(in srgb, var(--cev-set) 8%, transparent) 24%, color-mix(in srgb, var(--cev-gold) 80%, transparent) 50%, color-mix(in srgb, var(--cev-set) 8%, transparent) 76%, var(--cev-set)) border-box;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 24px 48px -22px color-mix(in srgb, var(--cev-set) 70%, transparent);
+  animation: cev-spin 6s linear infinite;
+}
+.cev .cev-card:active { transform: scale(0.985); }
+.cev .cev-card.is-focus:active { transform: translateY(-4px) scale(0.985); }
+.cev .cev-card__media img { transition: transform 7s ease-out, opacity 0.6s; animation: cev-img-in 0.9s var(--cev-ease) backwards; }
+.cev .cev-card.is-focus .cev-card__media img { transform: scale(1.12); }
+@keyframes cev-img-in { from { opacity: 0; transform: scale(1.12); filter: blur(10px); } }
+.cev .cev-card__media::after {
+  content: ''; position: absolute; top: -30%; bottom: -30%; left: 0; width: 40%; pointer-events: none; mix-blend-mode: soft-light;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6) 50%, transparent);
+  transform: translate3d(-170%, 0, 0) skewX(-20deg);
+}
+.cev .cev-card.is-focus .cev-card__media::after { animation: cev-caustic 7s var(--cev-ease) 0.4s infinite; }
+.cev .cev-card__price b {
+  background: linear-gradient(180deg, #fff 35%, color-mix(in srgb, var(--cev-accent) 40%, #fff));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none; filter: drop-shadow(0 2px 10px rgb(0 0 0 / 0.65));
+}
+.cev .cev-card.in-set .cev-card__price b { background: linear-gradient(100deg, #fff, color-mix(in srgb, var(--cev-set) 55%, #fff) 50%, #fff); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; animation: cev-flow 6s ease-in-out infinite alternate; }
+.cev :is(.cev-card__src, .cev-card__state) { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22); }
+.cev .cev-card__state.is-system { background: linear-gradient(180deg, #ffe6a6, #f5c65a 60%, #d9a53c); border-color: rgb(255 240 200 / 0.6); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6), 0 4px 14px -4px rgb(245 198 90 / 0.8); }
+.cev .cev-card__toggle { transition: transform 0.4s var(--cev-spring), background 0.35s var(--cev-ease), color 0.3s, box-shadow 0.35s; background: var(--cev-spec), var(--cev-track); }
+.cev .cev-card__toggle:active { transform: scale(0.96); }
+.cev .cev-card__toggle.is-on {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 55%), linear-gradient(100deg, color-mix(in srgb, var(--cev-set) 75%, #fff), var(--cev-set) 38%, color-mix(in srgb, var(--cev-set) 70%, var(--cev-deed)) 68%, color-mix(in srgb, var(--cev-set) 80%, #fff));
+  background-size: 100% 100%, 240% 100%;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45), 0 12px 28px -12px var(--cev-set);
+  animation: cev-flow-2 6s ease-in-out infinite alternate;
+}
+@keyframes cev-flow-2 { from { background-position: 0 0, 0% 50%; } to { background-position: 0 0, 100% 50%; } }
+
+/* ── evidence strips: flowing band, living focus ── */
+.cev .cev-strip__band {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--cev-set) 30%, transparent), var(--cev-set), color-mix(in srgb, var(--cev-gold) 70%, transparent), var(--cev-set), color-mix(in srgb, var(--cev-set) 30%, transparent));
+  background-size: 220% 100%; opacity: 0.55;
+  animation: cev-flow 6s ease-in-out infinite alternate;
+}
+.cev .cev-strip__rail { background: linear-gradient(90deg, transparent, var(--cev-track) 8%, var(--cev-track) 92%, transparent); }
+.cev .cev-dot.is-set { background: radial-gradient(circle at 35% 30%, #fff, var(--cev-set) 60%); }
+.cev .cev-dot.is-focus::before {
+  content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 1.5px solid var(--cev-set);
+  animation: cev-ping 1.8s var(--cev-ease) infinite;
+}
+@keyframes cev-ping { from { transform: scale(0.6); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+.cev .cev-mark em { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 6px 16px -8px var(--m); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.cev .cev-strip__head b, .cev .cev-market__head span { background: var(--cev-liquid); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: cev-flow 10s ease-in-out infinite alternate; }
+
+/* ── boot: a liquid assembling state instead of flat skeletons ── */
+.cev .cev-boot > div { background: var(--cev-spec), linear-gradient(var(--cev-glass), var(--cev-glass)); border: 1px solid var(--cev-edge); }
+.cev .cev-boot > div::after { background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--cev-accent) 14%, transparent) 45%, color-mix(in srgb, var(--cev-gold) 10%, transparent) 55%, transparent 75%); animation-duration: 1.8s; }
+.cev-boot__label { position: absolute; left: 16px; bottom: 16px; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; font-weight: 650; color: var(--cev-text-2); }
+.cev-boot__label i { width: 8px; height: 8px; border-radius: 50%; background: var(--cev-accent); box-shadow: 0 0 12px var(--cev-accent); animation: cev-beacon 1.4s ease-in-out infinite; }
+
+/* ── sheets: liquid panel + glass rows ── */
+.cev-sheet .cev-sheet__panel {
+  background: var(--cev-spec) padding-box, linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box, var(--cev-rim) border-box;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 -24px 70px -20px rgb(0 0 0 / 0.75);
+  animation: cev-sheet-rise 0.6s var(--cev-spring) both;
+}
+html[data-nexus-theme='true_black'] .cev-sheet .cev-sheet__panel { background: var(--cev-spec) padding-box, linear-gradient(#08080a, #08080a) padding-box, var(--cev-rim) border-box; }
+@keyframes cev-sheet-rise { from { transform: translate3d(0, 60px, 0); opacity: 0; } }
+.cev-sheet .cev-sheet__grab { background: var(--cev-liquid); background-size: 240% 100%; opacity: 0.7; animation: cev-flow 5s ease-in-out infinite alternate; }
+.cev-sheet :is(.cev-eng > div, .cev-kv > div, .cev-adj li) { background: var(--cev-spec), var(--cev-track); box-shadow: inset 0 0 0 1px var(--cev-edge); }
+.cev-sheet .cev-eng b { background: var(--cev-liquid); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.cev-sheet :is(.cev-btn, .cev-seg button, .cev-x) { transition: transform 0.35s var(--cev-spring); }
+.cev-sheet :is(.cev-btn, .cev-seg button, .cev-x):active { transform: scale(0.96); }
+.cev-sheet .cev-btn.is-primary { background: linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 55%), linear-gradient(180deg, color-mix(in srgb, var(--cev-accent) 88%, #fff), var(--cev-accent)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 14px 30px -14px var(--cev-accent); }
+.cev-look__bar { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 18px 40px -20px rgb(0 0 0 / 0.8); animation: cev-reveal 0.7s var(--cev-ease) 0.2s backwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cev::after, .cev-subject::before, .cev-sheet .cev-sheet__panel, .cev-sheet .cev-sheet__grab, .cev-look__bar { animation: none !important; }
+}
+
+/* Hero content can outgrow min-height (long specs, four values) — reserve a
+   top band so the eyebrow and Look around never sit on the title. */
+.cev .cev-subject, .cev .cev-subject__body { min-height: 360px; }
+.cev .cev-subject__body { padding-top: 64px; }
+.cev .cev-strip__scale em { font-style: normal; color: var(--cev-text-3); opacity: 0.8; }
+
+/* ── editorial layer: chapters, spec grid, refined controls, glass grain ── */
+.cev, .cev-sheet {
+  --cev-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  --cev-hair: color-mix(in srgb, var(--cev-gold) 55%, transparent);
+}
+html[data-nexus-theme='light'] :is(.cev, .cev-sheet) { --cev-grain: none; }
+.cev :is(.cev-readout, .cev-mapwrap, .cev-strip, .cev-market, .cev-views, .cev-none) {
+  background: var(--cev-grain) padding-box, var(--cev-spec) padding-box, linear-gradient(var(--cev-glass), var(--cev-glass)) padding-box, var(--cev-rim) border-box;
+}
+.cev .cev-card { background: var(--cev-grain) padding-box, var(--cev-spec) padding-box, linear-gradient(var(--cev-glass-hi), var(--cev-glass-hi)) padding-box, var(--cev-rim) border-box; }
+
+.cev-chapter { display: flex; align-items: center; gap: 10px; margin: 14px 4px -2px; animation: cev-reveal 0.8s var(--cev-ease) backwards; }
+.cev-chapter__n { font-family: var(--cev-display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--cev-gold); font-variant-numeric: tabular-nums; }
+.cev-chapter__t { font-family: var(--cev-display); font-size: 12px; font-weight: 750; letter-spacing: 0.22em; text-transform: uppercase; color: var(--cev-text); }
+.cev-chapter i { flex: 1; height: 1px; min-width: 16px; background: linear-gradient(90deg, var(--cev-hair), color-mix(in srgb, var(--cev-accent) 30%, transparent) 60%, transparent); }
+.cev-chapter em { font-style: normal; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--cev-text-3); white-space: nowrap; }
+
+.cev .cev-card__body { padding: 12px 14px 10px; gap: 9px; }
+.cev .cev-card__addr { font-family: var(--cev-display); font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.cev-card__kind { font-size: 10px; font-weight: 750; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cev-gold); margin-top: -4px; }
+.cev-card__spec { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-radius: 12px; overflow: hidden; background: var(--cev-edge); gap: 1px; box-shadow: inset 0 0 0 1px var(--cev-edge); }
+.cev-card__spec > div { padding: 7px 8px 6px; background: color-mix(in srgb, var(--cev-ink) 55%, var(--cev-glass-hi)); min-width: 0; }
+.cev-card__spec dt { font-size: 8.5px; font-weight: 750; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cev-text-3); }
+.cev-card__spec dd { margin: 2px 0 0; font-family: var(--cev-display); font-size: 14px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cev .cev-card__why span { font-size: 10px !important; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 999px; }
+.cev .cev-card__price b { font-size: 28px; letter-spacing: -0.04em; }
+
+/* refined controls: slimmer, tracked, hairline */
+.cev .cev-chipbar .cev-chip, .cev .cev-none .cev-chip { min-height: 34px !important; padding: 0 14px; font-size: 11px !important; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; border-width: 1px; }
+.cev .cev-sortbar__opts button { font-size: 11px !important; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
+.cev .cev-sortbar > span { font-size: 9.5px; letter-spacing: 0.22em; color: var(--cev-gold); }
+.cev .cev-views__tab { font-size: 10.5px !important; letter-spacing: 0.1em; text-transform: uppercase; }
+.cev .cev-views__tab b { font-family: var(--cev-display); font-size: 17px !important; letter-spacing: -0.02em; margin-top: 1px; }
+.cev .cev-readout__grid span, .cev .cev-market__grid span, .cev .cev-readout__hero span { letter-spacing: 0.16em; }
+.cev .cev-readout__grid b, .cev .cev-market__grid b { font-size: 17px; letter-spacing: -0.02em; }
+.cev .cev-readout__hero strong { font-size: clamp(24px, 7.2vw, 34px); letter-spacing: -0.04em; max-width: 100%; overflow: hidden; text-overflow: clip; }
+.cev .cev-subject h2 { font-size: clamp(26px, 8vw, 34px); letter-spacing: -0.035em; }
+.cev .cev-subject__values b { font-size: 18px; letter-spacing: -0.02em; }
+.cev .cev-footnote { font-size: 11px; letter-spacing: 0.01em; }
+.cev .cev-mark.is-end em { transform: translateX(calc(-100% + 8px)); }
+.cev .cev-mark.is-start em { transform: translateX(-8px); }

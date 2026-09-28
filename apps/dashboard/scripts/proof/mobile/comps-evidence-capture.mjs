@@ -29,12 +29,13 @@ const small = () => page.evaluate(() => [...document.querySelectorAll('.cev butt
 const to = (sel) => page.evaluate((s) => document.querySelector(s)?.scrollIntoView({ block: 'start' }), sel)
 
 await page.goto(`http://localhost:5173/comp-intelligence?property_id=${PID}`, { waitUntil: 'domcontentloaded' })
-await page.waitForSelector('.cev-subject', { timeout: 90000 }).catch(() => {})
+await page.waitForSelector(".cev-subject", { timeout: 240000 }).catch(() => {})
 await page.waitForTimeout(3500)
-await to('.cev-subject'); await page.waitForTimeout(700); await shot('01-subject')
+await page.evaluate(() => document.querySelector('.cev-subject')?.scrollIntoView({ block: 'center' })); await page.waitForTimeout(700); await shot('01-subject')
 const R = { cards: await page.locator('.cev-card').count(), tabs: await page.locator('.cev-views__tab').allInnerTexts(), overflow: await overflow() }
 await to('.cev-readout'); await page.waitForTimeout(600); await shot('02-readout')
 await to('.cev-mapwrap'); await page.waitForTimeout(1800); await shot('03-map')
+await page.locator('.cev-map__recenter').evaluate((e) => e.click()).catch(() => {}); await page.waitForTimeout(3500); await page.evaluate(() => document.querySelector('.cev-mapwrap')?.scrollIntoView({ block: 'center' })); await shot('03b-map-3d')
 await to('.cev-views'); await page.waitForTimeout(600); await shot('04-gallery')
 if (!QUICK) {
   R.setBefore = await page.locator('.cev-setpill b').innerText().catch(() => null)
@@ -54,6 +55,10 @@ if (!QUICK) {
   await page.evaluate(() => document.querySelector('.cev-sheet__panel')?.scrollTo(0, 2000)); await page.waitForTimeout(500); await shot('10-inspector-2')
   await page.locator('.cev-x').evaluate((e) => e.click()); await page.waitForTimeout(500)
   await page.locator('.cev-mapbar .cev-chip').nth(1).evaluate((e) => e.click()); await page.waitForTimeout(800); await shot('11-area-sheet')
+  await page.keyboard.press('Escape'); await page.waitForTimeout(400)
+  await to('.cev-subject'); await page.waitForTimeout(300)
+  await page.locator('.cev-lookbtn').evaluate((e) => e.click()).catch(() => {}); await page.waitForTimeout(6000); await shot('12-look')
+  R.look = await page.locator('.cev-look').count()
   R.small = await small()
 }
 await browser.close().catch(() => {})

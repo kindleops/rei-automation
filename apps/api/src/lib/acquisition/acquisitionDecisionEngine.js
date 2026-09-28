@@ -752,6 +752,14 @@ export function normalizePropertyFeatures(row = {}, options = {}) {
     asset_class_source_field: assetResolution.source_field,
     asset_class_source_value: assetResolution.source_value,
     asset_class_reason: assetResolution.reason,
+    // When the unit count overrode what the record's own vocabulary said
+    // ("Single Family" + units_count 12), keep what the vocabulary said so a
+    // comp's count can be checked against its floor area before it prices a
+    // building. See unitCountCredible.
+    unit_count_promoted_from:
+      assetResolution.reason === 'unit_count_governs_residential_lane'
+        ? resolveAssetClass({ ...row, units_count: null, units: null, number_of_units: null, num_units: null, multifamily_units: null }).class
+        : null,
     asset_subtype: clean(
       first(
         row.normalized_asset_subclass,
@@ -1241,9 +1249,31 @@ function assetCompatible(subject, comp) {
   return false;
 }
 
+/**
+ * A comp whose record NAMES a single-unit (or 2-4) asset but carries a larger
+ * unit count is either a building mis-typed or one unit in a complex carrying
+ * the complex's count. Measured 2026-09-27: 92 engine-pool and ~200 recorded-
+ * deed sales typed "Single Family" with units > 1, nearly half addressed
+ * "Unit"/"Apt"/"#" — e.g. a 2,468 sf, 3-bed townhome recorded with 12 units,
+ * which then priced a 24-unit apartment at $56K/unit. The count only describes
+ * a building when the floor area can hold it; otherwise the sale is not
+ * multifamily evidence. Comp-side only: a subject's own record is not judged.
+ */
+const MIN_CREDIBLE_SQFT_PER_UNIT = 350;
+const UNIT_COUNT_CONTRADICTS = new Set(['single_family', 'residential_2_to_4']);
+export function unitCountCredible(comp = {}) {
+  if (!UNIT_COUNT_CONTRADICTS.has(comp.unit_count_promoted_from)) return true;
+  const units = num(comp.units);
+  if (!units || units <= 1) return true;
+  const sqft = num(comp.sqft);
+  if (!sqft) return false;
+  return sqft / units >= MIN_CREDIBLE_SQFT_PER_UNIT;
+}
+
 /** The pricing-set invariant: same asset family, and for multifamily the engine's unit band. */
 export function assetFamilyInvariantHolds(subject = {}, comp = {}) {
   if (!assetCompatible(subject, comp)) return false;
+  if (!unitCountCredible(comp)) return false;
   const multi = (x) => x?.asset_family === 'multifamily' || isMultifamilyLane(x);
   if (multi(subject) !== multi(comp)) return false;
   if (multi(subject) && num(subject.units) && num(comp.units)) {
@@ -1383,6 +1413,7 @@ export function evaluateCompEligibility(subject, comp, now = new Date(), options
   if (subject.property_id && comp.property_id === subject.property_id) reasons.push('same_property');
   const assetVerdict = assetCompatibilityVerdict(subject, comp);
   if (!assetCompatible(subject, comp)) reasons.push('asset_type_mismatch');
+  if (!unitCountCredible(comp)) reasons.push('unit_count_implausible');
   if (age !== null && age > limits.months) reasons.push('sale_too_old');
   if (distance !== null && distance > limits.radius) reasons.push('outside_radius');
   if (distance === null && subject.zip && comp.zip && subject.zip !== comp.zip) {

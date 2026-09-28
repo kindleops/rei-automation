@@ -12,6 +12,7 @@
  * written back or presented as the canonical valuation.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import { pushRoutePath } from '../../../app/router'
@@ -23,6 +24,7 @@ import { CompCard, EvidenceReadout, EvidenceStrip, SubjectHero, cls } from './Co
 import { CompsEvidenceMap } from './CompsEvidenceMap'
 import { InteractiveStreetViewPanorama } from '../../../modules/deal-intelligence/InteractiveStreetViewPanorama'
 import './comps-evidence.css'
+import './comps-evidence-liquid.css'
 
 type View = 'set' | 'candidates' | 'excluded' | 'all'
 type Sort = 'engine' | 'nearest' | 'newest' | 'price' | 'ppsf' | 'size' | 'year'
@@ -209,7 +211,7 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
     return (
       <div className="cev" data-theme={theme}>
         {loading ? (
-          <div className="cev-boot" aria-busy="true"><div className="cev-boot__hero" /><div className="cev-boot__map" /><div className="cev-boot__row" /></div>
+          <div className="cev-boot" aria-busy="true"><div className="cev-boot__hero"><p className="cev-boot__label"><i />Gathering recorded sales around the subject…</p></div><div className="cev-boot__map" /><div className="cev-boot__row" /></div>
         ) : (
           <div className="cev-empty"><Icon name="alert-circle" /><p>{error === 'property_not_found' ? 'This property isn’t in the property record.' : 'Couldn’t load comparable sales.'}</p></div>
         )}
@@ -234,8 +236,10 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
     <div className={cls('cev', loading && 'is-refreshing')} data-theme={theme}>
       <SubjectHero w={w} onMap={openMap} onGraph={() => openGraph()} onDeal={openDeal} onLookAround={() => setLookAround(true)} />
 
+      <Chapter n="01" title="Evidence" note={isSystem ? (systemKeys.size ? 'engine pricing set' : 'starter set') : 'your set'} />
       <EvidenceReadout w={w} stats={stats} isSystem={isSystem} hasSystem={systemKeys.size > 0} setCount={inSet.size} onReset={() => setInSet(new Set(baselineKeys))} />
 
+      <Chapter n="02" title="Location" note={`${w.query.radiusMiles} mi · ${w.query.months} mo`} />
       <section className="cev-mapwrap">
         <CompsEvidenceMap
           subject={{ lat: w.subject.lat, lng: w.subject.lng, address: w.subject.address }}
@@ -255,7 +259,9 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
         </div>
       </section>
 
-      <nav className="cev-views" role="tablist" aria-label="Comparable sets">
+      <Chapter n="03" title="Comparables" note={`${counts.all} sales judged`} />
+      <nav className="cev-views" role="tablist" aria-label="Comparable sets" style={{ '--vi': (['set', 'candidates', 'excluded', 'all'] as View[]).indexOf(view) } as CSSProperties}>
+        <span className="cev-views__ink" aria-hidden="true" />
         {([['set', 'Your set'], ['candidates', 'Candidates'], ['excluded', 'Excluded'], ['all', 'All']] as Array<[View, string]>).map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={view === k} className={cls('cev-views__tab', view === k && 'is-on')} onClick={() => setView(k)}>
             {label}<b>{counts[k]}</b>
@@ -278,22 +284,24 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
       {visible.length ? (
         <div className="cev-rail" ref={railRef} role="list" aria-label="Comparable sales">
           {visible.map((c, i) => (
-            <div role="listitem" key={c.key}>
+            <div role="listitem" key={c.key} style={{ '--i': Math.min(i, 8) } as CSSProperties}>
               <CompCard c={c} inSet={inSet.has(c.key)} focus={focusKey === c.key} near={Math.abs(i - focusIndex) <= 2} multi={multi} onToggle={() => toggle(c.key)} onOpen={() => { setFocusKey(c.key); setInspect(c.key) }} />
             </div>
           ))}
         </div>
       ) : (
         <div className="cev-none">
-          <p>{view === 'set' ? 'Your set is empty — add candidates to build evidence.' : 'No comparable sales match this view within the current radius and window.'}</p>
+          <p>{view === 'set' && counts.candidates > 0 ? 'Your set is empty — add candidates to build evidence.' : counts.candidates === 0 && counts.excluded > 0 && view !== 'excluded' ? `No admissible same-type sales within ${w.query.radiusMiles} mi / ${w.query.months} mo — ${counts.excluded} nearby sales were rejected. Open Excluded to see why each one can’t price this property.` : 'No comparable sales match this view within the current radius and window.'}</p>
           <div>
             {w.query.radiusMiles < 10 ? <button type="button" className="cev-chip is-on" onClick={() => setRadius(w.query.radiusOptions.find((r) => r > w.query.radiusMiles) ?? 10)}>Expand radius</button> : null}
             {w.query.months < 36 ? <button type="button" className="cev-chip" onClick={() => setMonths(w.query.monthOptions.find((m) => m > w.query.months) ?? 36)}>Expand window</button> : null}
             {preset !== 'none' ? <button type="button" className="cev-chip" onClick={() => setPreset('none')}>Clear preset</button> : null}
+            {view !== 'excluded' && counts.excluded > 0 ? <button type="button" className="cev-chip" onClick={() => setView('excluded')}>Why excluded</button> : null}
           </div>
         </div>
       )}
 
+      {dotsPrice.length || dotsUnit.length ? <Chapter n="04" title="Distribution" note="where the evidence sits" /> : null}
       <EvidenceStrip
         title="Sale price evidence"
         dots={dotsPrice}
@@ -317,6 +325,7 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
         note={subjectImplied ? <>Subject implied = Deal Intelligence value ÷ subject {multi ? 'units' : 'sq ft'}.</> : null}
       />
 
+      {w.market ? <Chapter n="05" title="Market" note={`ZIP ${w.market.zip}`} /> : null}
       {w.market ? (
         <section className="cev-market">
           <div className="cev-market__head"><span>ZIP {w.market.zip} · last {Math.round((w.market.windowDays ?? 365) / 30.4)} months</span><em>{w.market.admissible ? 'canonical market cell' : 'low sample'}</em></div>
@@ -382,8 +391,21 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
 
 /* ── inspector ────────────────────────────────────────────────────────── */
 
+function Chapter({ n, title, note }: { n: string; title: string; note?: string }) {
+  return (
+    <div className="cev-chapter" aria-hidden="true">
+      <span className="cev-chapter__n">{n}</span>
+      <span className="cev-chapter__t">{title}</span>
+      <i />
+      {note ? <em>{note}</em> : null}
+    </div>
+  )
+}
+
 const DIM_LABEL: Record<string, string> = { asset_type: 'Asset type', units: 'Units', sqft: 'Size', beds: 'Beds', baths: 'Baths', year_built: 'Year built', lot_sqft: 'Lot', distance_miles: 'Distance', condition: 'Condition', zip: 'ZIP', subdivision: 'Subdivision' }
-const ADJ_LABEL: Record<string, string> = { sale_price: 'Sale price', price_per_unit: 'Per unit', price_per_sqft: 'Per sq ft', price_per_building_sqft: 'Per building sq ft', price_per_lot_sqft: 'Per lot sq ft', bedroom_ratio: 'Bedroom ratio', bedroom_count: 'Bedroom count', repair_difference: 'Repair difference' }
+// Each engine basis re-prices the SUBJECT from this sale (per unit × subject
+// units, per sq ft × subject sq ft …); weights are relative within the blend.
+const ADJ_LABEL: Record<string, string> = { sale_price: 'Sale price as-is', price_per_unit: 'Per unit × subject units', price_per_sqft: 'Per sq ft × subject sq ft', price_per_building_sqft: 'Per sq ft × subject sq ft', price_per_lot_sqft: 'Per lot sq ft × subject lot', bedroom_ratio: 'Bedroom ratio', bedroom_count: 'Bedroom count', repair_difference: 'Repair difference' }
 const humanKey = (k: string) => ADJ_LABEL[k] ?? k.replace(/_/g, ' ').replace(/^\w/, (x) => x.toUpperCase())
 
 function CompInspector({ c, w, theme, inSet, onToggle, onClose, onGraph, onBuyer }: {
@@ -440,9 +462,12 @@ function CompInspector({ c, w, theme, inSet, onToggle, onClose, onGraph, onBuyer
             ) : null}
             {c.engine.adjustments?.length ? (
               <ul className="cev-adj">
-                {c.engine.adjustments.map((a, i) => (
-                  <li key={`${a.basis}-${i}`}><span>{humanKey(a.basis)}</span><b>{a.amount !== null ? `${a.amount > 0 ? '+' : ''}${money(a.amount)}` : money(a.value)}</b>{a.weight !== null ? <em>{Math.round(a.weight * 100)}% weight</em> : null}</li>
-                ))}
+                {c.engine.adjustments.map((a, i, all) => {
+                  const total = all.reduce((t, x) => t + (x.amount === null && x.weight ? x.weight : 0), 0)
+                  return (
+                    <li key={`${a.basis}-${i}`}><span>{humanKey(a.basis)}</span><b>{a.amount !== null ? `${a.amount > 0 ? '+' : ''}${money(a.amount)}` : money(a.value)}</b>{a.amount === null && a.weight !== null && total > 0 ? <em>{Math.round((a.weight / total) * 100)}% of blend</em> : null}</li>
+                  )
+                })}
               </ul>
             ) : null}
           </>

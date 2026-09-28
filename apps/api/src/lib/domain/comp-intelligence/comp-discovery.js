@@ -143,9 +143,20 @@ function normalizeCompRow(row, index, subjectFlat) {
  * which a different asset class cost only 20 points.
  */
 const MULTI_RE = /multi|apartment|duplex|triplex|quad|plex/i
-export function compAssetFamily(assetType, propertyType, units) {
+const SINGLE_UNIT_RE = /single|\bsfr\b|\bsfh\b|town\s*(house|home)|condo/i
+/**
+ * `sqft` is passed for COMPS only: a record naming a single-unit asset whose
+ * unit count its floor area cannot hold (< 350 sf/unit, or unknown) is one unit
+ * in a complex, not a building — it never becomes multifamily evidence.
+ */
+export function compAssetFamily(assetType, propertyType, units, sqft) {
   const text = `${assetType ?? ''} ${propertyType ?? ''}`
-  if (MULTI_RE.test(text) || Number(units) >= 2) return 'multi'
+  if (MULTI_RE.test(text)) return 'multi'
+  if (Number(units) >= 2) {
+    const contradicted = sqft !== undefined && SINGLE_UNIT_RE.test(text)
+    if (!contradicted || Number(sqft) / Number(units) >= 350) return 'multi'
+    return 'single'
+  }
   if (/land|lot\b|vacant/i.test(text)) return 'land'
   if (/commercial|office|retail|industrial|warehouse/i.test(text)) return 'commercial'
   if (!clean(text) && !Number(units)) return null
@@ -153,7 +164,7 @@ export function compAssetFamily(assetType, propertyType, units) {
 }
 export function assetGate(subject, comp) {
   const sf = compAssetFamily(subject?.asset_type, subject?.property_type, subject?.units)
-  const cf = compAssetFamily(comp?.asset_type, comp?.property_subtype, comp?.units)
+  const cf = compAssetFamily(comp?.asset_type, comp?.property_subtype ?? comp?.property_type, comp?.units, comp?.square_feet ?? comp?.sqft ?? comp?.building_square_feet ?? null)
   if (!sf) return { ok: true, reason: null }
   if (!cf) return sf === 'single' ? { ok: true, reason: null } : { ok: false, reason: 'Asset type unknown — cannot confirm multifamily' }
   if (sf !== cf) return { ok: false, reason: 'Different asset type' }

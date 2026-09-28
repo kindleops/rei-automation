@@ -15,6 +15,7 @@ export const REASON_LABELS = Object.freeze({
   missing_adjusted_price: 'Could not be adjusted to the subject',
   adjusted_price_outlier: 'Price outlier after adjustment',
   outside_top_comp_limit: 'Eligible, but outside the engine’s top 12',
+  unit_count_implausible: 'Recorded unit count doesn’t fit the floor area — one unit in a complex, not a building',
   asset_family_invariant: 'Different asset family — never priced from',
   nominal_price: 'Nominal price — not a market sale',
   non_arms_length: 'Not an arm’s-length sale',

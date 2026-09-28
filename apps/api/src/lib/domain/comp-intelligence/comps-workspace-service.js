@@ -101,10 +101,23 @@ export function compareToSubject(subject, comp) {
   }
 }
 
+// Same rule as the engine's unitCountCredible: a comp record that names a
+// single-unit asset only counts as a building when its floor area can hold
+// the unit count it carries.
+const SINGLE_UNIT_RE = /single|\bsfr\b|\bsfh\b|town\s*(house|home)|condo/i
+function compIsMulti(comp) {
+  if (/multi|apartment|duplex|triplex|quad|plex/i.test(clean(comp.propertyType))) return true
+  const units = num(comp.units) ?? 1
+  if (units < 2) return false
+  if (!SINGLE_UNIT_RE.test(clean(comp.propertyType))) return true
+  return (num(comp.sqft) ?? 0) / units >= 350
+}
+
 function assetMatches(subject, comp) {
   const multi = (t, u) => /multi|apartment|duplex|triplex|quad|plex/i.test(clean(t)) || (num(u) ?? 1) >= 2
   const sMulti = multi(subject.propertyType, subject.units)
-  const cMulti = multi(comp.propertyType, comp.units)
+  const cMulti = compIsMulti(comp)
+  if (cMulti === false && (num(comp.units) ?? 1) >= 2 && sMulti) return false
   if (sMulti !== cMulti) return false
   if (!sMulti) return true
   const ratio = Math.max(1, num(comp.units) ?? 1) / Math.max(1, num(subject.units) ?? 1)

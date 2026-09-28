@@ -62,6 +62,9 @@ export function SubjectHero({ w, onMap, onGraph, onDeal, onLookAround }: { w: Co
         <div className="cev-subject__mesh" />
         {photo && ok !== false ? <img src={photo} alt="" onLoad={() => setOk(true)} onError={() => setOk(false)} /> : null}
         <div className="cev-subject__scrim" />
+        <div className="cev-subject__leak" />
+        <div className="cev-subject__caustic" />
+        <div className="cev-subject__grain" />
       </div>
       <div className="cev-subject__body">
         <span className="cev-eyebrow"><i />Subject</span>
@@ -112,6 +115,9 @@ export function EvidenceReadout({ w, stats, isSystem, hasSystem, onReset, setCou
           <span>Median sale</span>
           <strong><Glide value={stats.medianPrice} fmt={(n) => money(n, true) ?? '—'} /></strong>
           <em>{stats.low && stats.high ? `${money(stats.low)} – ${money(stats.high)} observed` : 'no priced sales'}</em>
+          {stats.low && stats.high && stats.medianPrice && stats.high > stats.low ? (
+            <div className="cev-meter" aria-hidden="true"><i style={{ left: `${Math.max(4, Math.min(96, ((stats.medianPrice - stats.low) / (stats.high - stats.low)) * 100))}%` }} /></div>
+          ) : null}
         </div>
         <div className="cev-readout__grid">
           <div><span>{multi ? '$/unit' : '$/sq ft'}</span><b><Glide value={multi ? stats.medianPpu : stats.medianPpsf} fmt={(n) => (multi ? money(n) ?? '—' : `$${Math.round(n)}`)} /></b></div>
@@ -146,7 +152,8 @@ export function EvidenceStrip({ title, dots, markers, fmt, focusKey, onFocus, no
   note?: ReactNode
 }) {
   const vals = [...dots.filter((d) => !d.excluded).map((d) => d.v), ...markers.map((m) => m.v ?? NaN)].filter((v) => Number.isFinite(v) && v > 0)
-  if (vals.length < 1) return null
+  // No sales, no distribution — markers alone would draw an empty chart.
+  if (!dots.length || vals.length < 1) return null
   const sorted = [...vals].sort((a, b) => a - b)
   const lo = sorted[Math.floor(sorted.length * 0.02)] ?? sorted[0]
   const hi = sorted[Math.ceil(sorted.length * 0.98) - 1] ?? sorted[sorted.length - 1]
@@ -157,6 +164,9 @@ export function EvidenceStrip({ title, dots, markers, fmt, focusKey, onFocus, no
   const setVals = dots.filter((d) => d.inSet).map((d) => d.v).sort((a, b) => a - b)
   const band = setVals.length ? { from: at(setVals[0]), to: at(setVals[setVals.length - 1]) } : null
   const med = setVals.length ? setVals[Math.floor((setVals.length - 1) / 2)] : null
+  // Sales beyond the scale are counted at its ends, not stacked on its edge.
+  const below = dots.filter((d) => d.v < min).length
+  const above = dots.filter((d) => d.v > max).length
   // Jitter rows so coincident dots stay tappable.
   const rows = new Map<number, number>()
   return (
@@ -165,17 +175,16 @@ export function EvidenceStrip({ title, dots, markers, fmt, focusKey, onFocus, no
       <div className="cev-strip__stage">
         <div className="cev-strip__rail" />
         {band ? <div className="cev-strip__band" style={{ left: `${band.from}%`, width: `${Math.max(1.5, band.to - band.from)}%` }} /> : null}
-        {dots.map((d) => {
+        {dots.filter((d) => d.v >= min && d.v <= max).map((d) => {
           const x = at(d.v)
           const bucket = Math.round(x / 3)
           const row = rows.get(bucket) ?? 0
           rows.set(bucket, row + 1)
-          const off = d.v < min || d.v > max
           return (
             <button
               key={d.key}
               type="button"
-              className={cls('cev-dot', d.inSet ? 'is-set' : d.excluded ? 'is-excl' : 'is-cand', focusKey === d.key && 'is-focus', off && 'is-off')}
+              className={cls('cev-dot', d.inSet ? 'is-set' : d.excluded ? 'is-excl' : 'is-cand', focusKey === d.key && 'is-focus')}
               style={{ left: `${x}%`, top: `${50 + (row % 2 ? 1 : -1) * Math.ceil(row / 2) * 9}%` }}
               onClick={() => onFocus(d.key)}
               aria-label={fmt(d.v)}
@@ -183,12 +192,15 @@ export function EvidenceStrip({ title, dots, markers, fmt, focusKey, onFocus, no
           )
         })}
         {markers.filter((m) => m.v).map((m, i) => (
-          <span key={m.key} className={cls('cev-mark', `tone-${m.tone}`, i % 2 ? 'is-low' : 'is-high')} style={{ left: `${at(m.v as number)}%` }}>
+          <span key={m.key} className={cls('cev-mark', `tone-${m.tone}`, i % 2 ? 'is-low' : 'is-high', at(m.v as number) > 80 && 'is-end', at(m.v as number) < 20 && 'is-start')} style={{ left: `${at(m.v as number)}%` }}>
             <i /><em>{m.label} {fmt(m.v as number)}</em>
           </span>
         ))}
       </div>
-      <div className="cev-strip__scale"><span>{fmt(min)}</span><span>{fmt(max)}</span></div>
+      <div className="cev-strip__scale">
+        <span>{fmt(min)}{below ? <em> · {below} lower</em> : null}</span>
+        <span>{above ? <em>{above} higher · </em> : null}{fmt(max)}</span>
+      </div>
       {note ? <p className="cev-footnote">{note}</p> : null}
     </section>
   )
@@ -203,13 +215,9 @@ export function CompCard({ c, inSet, focus, near, onToggle, onOpen, multi }: { c
   // the focused one (no fan-out across the whole gallery).
   const [photoFailed, setPhotoFailed] = useState(false)
   const photo = c.photo ?? (near ? staticStreetViewUrl(c.address, c.lat, c.lng) : null)
-  const facts = [
-    c.propertyType ? `${c.propertyType}${c.units && c.units > 1 ? ` · ${c.units}u` : ''}` : null,
-    c.beds !== null ? `${c.beds} bd` : null,
-    c.baths !== null ? `${c.baths} ba` : null,
-    c.sqft ? `${Math.round(c.sqft).toLocaleString('en-US')} sf` : null,
-    c.yearBuilt ? `${c.yearBuilt}` : null,
-  ].filter(Boolean) as string[]
+  const specCells: Array<[string, string]> = (multi
+    ? [['Units', c.units ? String(c.units) : '—'], ['Sq ft', c.sqft ? Math.round(c.sqft).toLocaleString('en-US') : '—'], ['Built', c.yearBuilt ? String(c.yearBuilt) : '—'], ['Beds', c.beds !== null ? String(c.beds) : '—']]
+    : [['Beds', c.beds !== null ? String(c.beds) : '—'], ['Baths', c.baths !== null ? String(c.baths) : '—'], ['Sq ft', c.sqft ? Math.round(c.sqft).toLocaleString('en-US') : '—'], ['Built', c.yearBuilt ? String(c.yearBuilt) : '—']]) as Array<[string, string]>
   const why = [
     c.distanceMiles !== null ? { k: 'mi', v: `${c.distanceMiles.toFixed(2)} mi`, good: c.distanceMiles <= 1 } : null,
     c.compare.days !== null ? { k: 'age', v: `${ageLabel(c.compare.days)} ago`, good: c.compare.days <= 365 } : null,
@@ -233,7 +241,10 @@ export function CompCard({ c, inSet, focus, near, onToggle, onOpen, multi }: { c
         </div>
         <div className="cev-card__body">
           <p className="cev-card__addr">{c.address}</p>
-          <div className="cev-card__facts">{facts.map((f) => <span key={f}>{f}</span>)}</div>
+          <div className="cev-card__kind">{c.propertyType ?? 'Sale'}{c.units && c.units > 1 ? ` · ${c.units} units` : ''}</div>
+          <dl className="cev-card__spec">
+            {specCells.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+          </dl>
           <div className="cev-card__why">{why.map((x) => <span key={x.k} className={x.good ? 'is-good' : 'is-off'}>{x.v}</span>)}</div>
           {c.state === 'excluded' && c.reasons.length ? <p className="cev-card__reason"><Icon name="slash" />{c.reasons[0].label}{c.reasons.length > 1 ? ` +${c.reasons.length - 1}` : ''}</p> : null}
           <div className="cev-card__tx">
