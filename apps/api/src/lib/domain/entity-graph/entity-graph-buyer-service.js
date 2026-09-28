@@ -11,6 +11,7 @@
  *             confidence carried)
  *   name      exact normalized-name match, unambiguous alias      → Observed by name
  */
+import { displayableCompanyName } from './buyer-name-privacy.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 
 const num = (value) => (value === null || value === undefined || value === '' ? null : Number(value))
@@ -53,12 +54,14 @@ export function shapeBuyerProfile(raw) {
   const price = behavior.price_profile || {}
   const holdFlip = behavior.hold_flip_profile || {}
   const person = index.entity_type === 'person'
+  const shownName = person ? null : displayableCompanyName(index.display_name)
+  const withheld = person || (!shownName && !!index.display_name)
 
   return {
     id: index.buyer_id,
     kind: person ? 'person' : 'company',
-    name: index.display_name || (person ? 'Individual buyer' : 'Unnamed company'),
-    nameWithheld: person,
+    name: shownName || (withheld ? (person ? 'Individual buyer' : 'Registered entity') : 'Unnamed company'),
+    nameWithheld: withheld,
     identity: {
       grade: raw.identity?.entity_grade ?? index.entity_grade ?? null,
       confidence: num(raw.identity?.confidence ?? index.confidence),
@@ -69,7 +72,7 @@ export function shapeBuyerProfile(raw) {
       modelAsOf: raw.identity?.materialized_at ?? null,
     },
     registry: raw.registry || null,
-    aliases: (raw.aliases || []).map((alias) => ({
+    aliases: (withheld ? [] : raw.aliases || []).map((alias) => ({
       name: alias.alias,
       forms: alias.forms || [],
       canonical: Boolean(alias.canonical),
@@ -148,7 +151,7 @@ export function shapeBuyerProfile(raw) {
     network: (raw.relationships || []).map((rel) => ({
       other: rel.other ? {
         id: rel.other.buyer_id,
-        name: rel.other.name || (rel.other.entity_type === 'person' ? 'Individual' : 'Company'),
+        name: (rel.other.entity_type === 'person' ? null : displayableCompanyName(rel.other.name)) || (rel.other.entity_type === 'person' ? 'Individual' : 'Company'),
         kind: rel.other.entity_type,
         purchases: rel.other.acquisition_count ?? null,
       } : null,

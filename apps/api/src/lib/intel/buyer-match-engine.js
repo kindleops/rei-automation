@@ -21,6 +21,7 @@ import {
   flattenSubjectForConsumers,
 } from '@/lib/domain/comp-intelligence/canonical-subject-property.js';
 import { buildCanonicalBuyerDemand } from './buyer-match-demand.js';
+import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js';
 import {
   BUYER_MATCH_MODEL_VERSION,
   BUYER_MATCH_DATA_VERSION,
@@ -333,7 +334,11 @@ export async function buildBuyerMatchIntel({
   });
   if (rpcError) throw rpcError;
 
-  const topBuyers = candidates ?? [];
+  // Lenders, servicers, GSEs and agencies take title at foreclosure; they are
+  // not disposition buyers (the Secretary of Veterans Affairs was this
+  // engine's #1 "A 91.4 institutional capital" match for 24613730). Same rule
+  // as the mobile Buyer Match workspace.
+  const topBuyers = (candidates ?? []).filter((c) => !lenderClass(c.buyer_name));
   const fallbackLevel = topBuyers[0]?.fallback_level ?? 'none';
   const highFitCount = topBuyers.filter((c) => c.match_grade === 'A+' || c.match_grade === 'A').length;
 

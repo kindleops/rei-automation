@@ -23,6 +23,7 @@
  * Legacy Podio-era fields (properties.cash_offer, final_acquisition_score,
  * ai_score, structured_motivation_score, deal_strength_score) are not read.
  */
+import { latestRunCandidates } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipeline-registry.js'
 import { offerSensitivity, replayStoredOffer, computeScenarioOffer } from './deal-scenario-model.js'
@@ -489,7 +490,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
     client.from('acquisition_score_snapshots').select('snapshot_id, computed_at, engine_version, policy_version, valuation_low, valuation_mid, valuation_high, recommended_cash_offer, minimum_acceptable_offer, decision_tier, confidence, selected_comp_count').eq('property_id', propertyId).order('computed_at', { ascending: false }).limit(12),
     client.rpc('entity_graph_property_records', { p_property_id: propertyId }),
     client.from('seller_offers').select('offer_id, offer_version, offer_type, direction, purchase_price, status, strategy, ade_snapshot_id, recommended_offer, authorized_ceiling, created_at, sent_at, accepted_at, accepted_price, superseded_at').eq('property_id', propertyId).order('created_at', { ascending: false }).limit(20),
-    client.from('buyer_match_candidates').select('buyer_type, match_grade, match_score, suggested_dispo_price, buyer_response_status, package_sent_at, selected').eq('property_id', propertyId).order('match_score', { ascending: false }).limit(300),
+    client.from('buyer_match_candidates').select('buyer_match_run_id, created_at, buyer_display_name, buyer_type, match_grade, match_score, suggested_dispo_price, buyer_response_status, package_sent_at, selected').eq('property_id', propertyId).order('created_at', { ascending: false }).limit(300),
     client.from('closing_cases').select('closing_status, contract_status, seller_contract_price, buyer_price, assignment_fee, net_revenue, confirmed_gross_revenue, revenue_status, revenue_confirmed_date, funding_date, recording_date, scheduled_closing_date, provenance').eq('property_id', propertyId).limit(5),
     thread ? client.from('inbox_thread_state').select('thread_key, is_suppressed, operational_status').eq('thread_key', thread).maybeSingle() : Promise.resolve({ data: null }),
   ])
@@ -593,7 +594,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   history.sort((a, b) => (ts(b.at) || 0) - (ts(a.at) || 0))
 
   /* buyers — demand shape only; buyer identities stay in Buyer Match */
-  const cands = arr(buyersRes.data)
+  const cands = latestRunCandidates(arr(buyersRes.data))
   const grades = {}
   const types = {}
   const dispo = []

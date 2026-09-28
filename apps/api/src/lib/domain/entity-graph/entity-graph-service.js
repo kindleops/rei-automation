@@ -1,3 +1,4 @@
+import { displayableCompanyName } from './buyer-name-privacy.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   canonicalMarketKey,
@@ -586,7 +587,7 @@ export function buyerToResult(row, score = 100) {
     entityType: 'buyer',
     entityId: row.buyer_id,
     // Natural-person buyers are never named (serving-layer privacy rule).
-    title: row.display_name || (person ? 'Individual buyer' : 'Unnamed company'),
+    title: (person ? null : displayableCompanyName(row.display_name)) || (person ? 'Individual buyer' : row.display_name ? 'Registered entity' : 'Unnamed company'),
     subtitle: [place, row.acquisition_count ? `${row.acquisition_count} purchase${row.acquisition_count === 1 ? '' : 's'}` : null]
       .filter(Boolean).join(' · ') || undefined,
     badges: [archetype, row.activity_status === 'active' ? 'Active' : null].filter(Boolean),

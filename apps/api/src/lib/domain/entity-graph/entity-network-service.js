@@ -22,6 +22,7 @@
  *
  * Read-only. Every query is indexed; the network is capped at 60 properties.
  */
+import { displayableCompanyName } from './buyer-name-privacy.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { clean, formatReadablePhone, parseJsonArray } from './entity-graph-normalize.js'
 
@@ -701,7 +702,7 @@ async function loadOwnerBuyerRole(supabase, { propertyIds, ownerName }) {
     if (!row) return null
     return {
       id: row.buyer_id,
-      name: row.display_name || (row.entity_type === 'person' ? 'Individual buyer' : null),
+      name: (row.entity_type === 'person' ? null : displayableCompanyName(row.display_name)) || (row.entity_type === 'person' ? 'Individual buyer' : row.display_name ? 'Registered entity' : null),
       kind: row.entity_type,
       basis,
       purchases: num(row.acquisition_count),

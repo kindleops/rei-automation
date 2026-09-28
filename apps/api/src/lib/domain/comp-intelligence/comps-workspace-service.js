@@ -33,6 +33,7 @@ import {
 } from '@/lib/acquisition/acquisitionDecisionEngine.js'
 import { buyerFromPurchaseInfo } from '../deal-intelligence/deal-record-sections.js'
 import { REASON_LABELS } from './comps-reason-labels.js'
+import { displayableCompanyName } from '../entity-graph/buyer-name-privacy.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -188,7 +189,7 @@ function shapePoolRow(row, detail, subjectView) {
     source: saleLabel(detail?.sale_source ?? (pos(d.mls_sold_price) ? 'MLS Sold' : 'Public Record Sold')),
     mls: pos(d.mls_sold_price) !== null,
     buyerKind: buyer.kind === 'company' ? 'company' : buyer.kind === 'individual' ? 'person' : null,
-    buyerCompany: buyer.kind === 'company' ? buyer.label : null,
+    buyerCompany: buyer.kind === 'company' ? displayableCompanyName(buyer.label) : null,
     buyerId: null,
     buyerAcquisitions: null,
     buyerActivity: null,
@@ -232,7 +233,7 @@ function shapeCorpusRow(r, subjectView) {
     source: 'Recorded deed',
     mls: false,
     buyerKind: buyerKind === 'company' ? 'company' : buyerKind === 'person' ? 'person' : null,
-    buyerCompany: clean(r.buyer_company) || null,
+    buyerCompany: displayableCompanyName(r.buyer_company),
     buyerId: clean(r.buyer_id) || null,
     buyerAcquisitions: num(r.buyer_acquisitions),
     buyerActivity: clean(r.buyer_activity) || null,

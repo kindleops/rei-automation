@@ -31,6 +31,7 @@
  * (347 dead, 127 suppressed). A closing is only "Closed" with closing evidence;
  * dead/suppressed terminal rows are reported as "closed out", never as won.
  */
+import { latestRunCandidates } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { applyFilters, normalizeOpportunityRow } from './opportunity-service.js'
 import { batchHydrateOpportunityProperties } from './opportunity-property-hydration.js'
@@ -608,7 +609,7 @@ export async function getPipelineDealStory(id, deps = {}) {
       ? client.from('property_acquisition_scores').select('aos_score, decision_tier, confidence, best_strategy, recommended_cash_offer, minimum_acceptable_offer, valuation_low, valuation_mid, valuation_high, expected_assignment_fee, computed_at').eq('property_id', card.propertyId).order('computed_at', { ascending: false }).limit(1)
       : Promise.resolve({ data: [] }),
     card.propertyId
-      ? client.from('buyer_match_candidates').select('buyer_display_name, match_grade, match_score, buyer_response_status, selected, package_sent_at, suggested_dispo_price').eq('property_id', card.propertyId).order('match_score', { ascending: false }).limit(50)
+      ? client.from('buyer_match_candidates').select('buyer_match_run_id, created_at, buyer_display_name, match_grade, match_score, buyer_response_status, selected, package_sent_at, suggested_dispo_price').eq('property_id', card.propertyId).order('created_at', { ascending: false }).order('match_score', { ascending: false }).limit(150)
       : Promise.resolve({ data: [] }),
   ])
 
@@ -647,7 +648,7 @@ export async function getPipelineDealStory(id, deps = {}) {
   story.push({ at: new Date().toISOString(), kind: 'now', title: card.lane.label, detail: card.lane.detail, lane: card.lane.key })
 
   const score = (scoreRes.data || [])[0] || null
-  const buyers = buyersRes.data || []
+  const buyers = latestRunCandidates(buyersRes.data || []).sort((x, y) => (Number(y.match_score) || 0) - (Number(x.match_score) || 0))
   return {
     card,
     story,
