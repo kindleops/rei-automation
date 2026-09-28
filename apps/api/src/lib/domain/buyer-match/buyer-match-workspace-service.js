@@ -311,7 +311,7 @@ function shapeBuyer(b, c, ctx, contacts) {
     },
     portfolio: { observed: num(b.portfolio) ?? 0, owned: num(b.owned) ?? 0, sold: num(b.sold) ?? 0, crossover: !!b.crossover },
     recent: arr(b.recent).map((r) => ({
-      txnId: num(r.txn_id), propertyId: clean(r.property_id) || null, address: clean(r.address) || null, city: clean(r.city) || null,
+      txnId: num(r.txn_id), propertyId: clean(r.property_id) || null, lat: num(r.lat), lng: num(r.lng), address: clean(r.address) || null, city: clean(r.city) || null,
       date: clean(r.date) || null, price: pos(r.price), family: FAMILY_LABEL[clean(r.family)] || clean(r.family) || null,
       sameFamily: clean(r.family) === ctx.family, beds: num(r.beds), sqft: pos(r.sqft), yearBuilt: pos(r.year_built),
       cash: r.cash === true ? true : r.cash === false ? false : null, miles: num(r.miles),

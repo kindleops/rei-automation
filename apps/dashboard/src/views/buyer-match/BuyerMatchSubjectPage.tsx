@@ -2,10 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { fetchCanonicalSubjectProperty } from '../../domain/comp-intelligence/comp-intelligence-api'
 import { PROPERTY_LOCATOR_EVENT } from '../../domain/locator/property-locator'
-import { EntityGraphPropertyVisual } from '../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
 import { Icon } from '../../shared/icons'
 import { resolveBuyerMatchSubject, type BuyerMatchSubject } from './buyer-match-subject'
-import { BuyerMatchMobile } from './mobile/BuyerMatchMobile'
 import './mobile/buyer-match-mobile.css'
 
 /**
@@ -31,6 +29,8 @@ import './mobile/buyer-match-mobile.css'
  * `referenceCommandCenterData` is deliberately NOT deleted — other reference
  * surfaces still import it. It is simply no longer the Buyer Match product.
  */
+
+const BuyerMatchSurface = lazy(() => import('./workspace/BuyerMatchSurface').then((m) => ({ default: m.BuyerMatchSurface })))
 
 const BuyerMatchWorkspace = lazy(() =>
   import('../../modules/inbox/components/BuyerMatchWorkspace').then((m) => ({ default: m.BuyerMatchWorkspace })),
@@ -67,7 +67,7 @@ export function BuyerMatchSubjectPage() {
   const { isMobile } = useBreakpoint()
   const [subject, setSubject] = useState<BuyerMatchSubject | null>(() => resolveBuyerMatchSubject())
   const [property, setProperty] = useState<HydratedProperty | null>(null)
-  const [hydrationFailed, setHydrationFailed] = useState<string | null>(null)
+  const [, setHydrationFailed] = useState<string | null>(null)
   /**
    * §21 — LOADING AND FAILED ARE DIFFERENT CLAIMS.
    *
@@ -78,7 +78,7 @@ export function BuyerMatchSubjectPage() {
    * separate block below said the details were unavailable. Measured against a
    * cold API: the header never stopped claiming it was loading.
    */
-  const [hydrating, setHydrating] = useState(false)
+  const [, setHydrating] = useState(false)
 
   /**
    * §4 — A -> B. The locator broadcasts on selection, so switching subject in
@@ -167,19 +167,6 @@ export function BuyerMatchSubjectPage() {
     }
   }, [])
 
-  /**
-   * What the header may claim about the subject, in order of what is known:
-   * the real address, the locator's hint, an honest in-flight state, or an
-   * honest failure naming the id that could not be resolved.
-   */
-  const headerAddress = property?.address
-    ?? subject?.addressHint
-    ?? (hydrating
-      ? 'Loading property…'
-      : hydrationFailed
-        ? `Property ${subject?.propertyId ?? ''} — address unavailable`.trim()
-        : 'Loading property…')
-
   useEffect(() => {
     if (!subject?.propertyId) return
     void hydrate(subject.propertyId, subject.addressHint)
@@ -204,39 +191,13 @@ export function BuyerMatchSubjectPage() {
     )
   }
 
-  /**
-   * §12 — ONE selected property's visual, and only on mobile where it earns its
-   * space. There is deliberately no imagery on buyer cards: 25 cards would mean
-   * 25 Street View requests, which is the fan-out rule this codebase has
-   * already paid for on Inbox and the Pipeline board.
-   */
-  const propertyVisual = property?.address && isMobile ? (
-    <EntityGraphPropertyVisual
-      address={property.address}
-      lat={property.latitude ?? null}
-      lng={property.longitude ?? null}
-    />
-  ) : null
-
   if (isMobile) {
+    // Observed-behaviour workspace (W8C identity, shared with Entity Graph):
+    // it resolves its own subject, so header hydration isn't needed here.
     return (
-      <>
-        <BuyerMatchMobile
-          key={subject.propertyId}
-          propertyId={subject.propertyId}
-          address={headerAddress}
-          market={property?.market}
-          propertyType={property?.property_type}
-          estimatedValue={property?.estimated_value ?? null}
-          propertyVisual={propertyVisual}
-        />
-        {hydrationFailed ? (
-          <div className="bmm__state is-error" role="status">
-            <strong>Property details unavailable</strong>
-            <p>{hydrationFailed}. Buyer matches below are still scoped to {subject.propertyId}.</p>
-          </div>
-        ) : null}
-      </>
+      <Suspense fallback={<div className="bmm__state">Loading Buyer Match…</div>}>
+        <BuyerMatchSurface key={subject.propertyId} propertyId={subject.propertyId} />
+      </Suspense>
     )
   }
 

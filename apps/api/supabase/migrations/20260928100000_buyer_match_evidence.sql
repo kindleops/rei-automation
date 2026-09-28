@@ -38,7 +38,7 @@ with params as (
          greatest(10, least(coalesce(p_limit, 120), 200)) as lim
 ),
 near_tx as (
-  select m.buyer_id, m.txn_id, m.property_id, m.address, m.city, m.zip, m.event_date, m.price, m.family,
+  select m.buyer_id, m.txn_id, m.property_id, m.lat, m.lng, m.address, m.city, m.zip, m.event_date, m.price, m.family,
          m.beds, m.baths, m.sqft, m.year_built, m.is_cash_purchase, m.doc_type, m.nominal_price, m.distress_or_transfer_deed,
          3958.8 * 2 * asin(sqrt(power(sin(radians(m.lat - p_lat) / 2), 2)
            + cos(radians(p_lat)) * cos(radians(m.lat)) * power(sin(radians(m.lng - p_lng) / 2), 2))) as d
@@ -155,7 +155,7 @@ rows as (
     'recent', case when k.is_near then (
       select coalesce(jsonb_agg(r order by r.rank), '[]'::jsonb) from (
         select row_number() over (order by (x.family = p_family) desc, x.event_date desc) as rank,
-               x.txn_id, x.property_id, x.address, x.city, x.zip, x.event_date as date, x.price, x.family,
+               x.txn_id, x.property_id, round(x.lat::numeric, 6) as lat, round(x.lng::numeric, 6) as lng, x.address, x.city, x.zip, x.event_date as date, x.price, x.family,
                x.beds, x.baths, x.sqft, x.year_built, x.is_cash_purchase as cash, x.doc_type,
                round(x.d::numeric, 2) as miles
         from near_in x where x.buyer_id = k.buyer_id

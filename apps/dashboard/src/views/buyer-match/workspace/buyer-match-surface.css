@@ -1,0 +1,554 @@
+/*
+ * BUYER MATCH — capital intelligence surface (.bmx) and portaled sheets
+ * (.bmx-sheet). Liquid glass (specular rim + caustic sweep), liquid color
+ * (emerald → aqua → cobalt, gold only for the operator's shortlist), liquid
+ * motion (spring, staggered resolve, orbit fly-in). Themes: dark, light,
+ * red_ops, true_black. Positive fit is never painted in a warning red.
+ */
+@property --bmx-spin { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+
+.bmx, .bmx-sheet {
+  --bmx-ink: #03060a;
+  --bmx-text: #eef6f7;
+  --bmx-text-2: rgb(238 246 247 / 0.72);
+  --bmx-text-3: rgb(238 246 247 / 0.46);
+  --bmx-edge: rgb(255 255 255 / 0.08);
+  --bmx-edge-hi: rgb(255 255 255 / 0.17);
+  --bmx-glass: rgb(10 16 22 / var(--lg-alpha, 0.58));
+  --bmx-glass-hi: rgb(16 24 32 / 0.76);
+  --bmx-track: rgb(255 255 255 / 0.055);
+  --bmx-blur: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 175%));
+  --bmx-emerald: #34e3a4;
+  --bmx-aqua: #3cc8f0;
+  --bmx-cobalt: #7c8cff;
+  --bmx-gold: #f4c860;
+  --bmx-slate: #7b8796;
+  --bmx-bad: #ff7a6b;
+  --bmx-accent: var(--nx-accent, #3cc8f0);
+  --bmx-spec: linear-gradient(180deg, rgb(255 255 255 / 0.13), rgb(255 255 255 / 0.03) 18%, transparent 42%);
+  --bmx-rim: linear-gradient(150deg, rgb(255 255 255 / 0.24), rgb(255 255 255 / 0.03) 36%, rgb(255 255 255 / 0.02) 62%, color-mix(in srgb, var(--bmx-aqua) 45%, transparent));
+  --bmx-liquid: linear-gradient(100deg, var(--bmx-emerald), var(--bmx-aqua) 34%, var(--bmx-cobalt) 64%, color-mix(in srgb, var(--bmx-aqua) 60%, #fff) 84%, var(--bmx-emerald));
+  --bmx-sweep: rgb(255 255 255 / 0.07);
+  --bmx-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --bmx-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --bmx-display: -apple-system, 'SF Pro Display', 'Inter Display', 'Inter', system-ui, sans-serif;
+  color: var(--bmx-text);
+  font-family: -apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+html[data-nexus-theme='light'] :is(.bmx, .bmx-sheet) {
+  --bmx-ink: #eef3f6;
+  --bmx-text: #08131a;
+  --bmx-text-2: rgb(8 19 26 / 0.7);
+  --bmx-text-3: rgb(8 19 26 / 0.48);
+  --bmx-edge: rgb(8 19 26 / 0.08);
+  --bmx-edge-hi: rgb(8 19 26 / 0.16);
+  --bmx-glass: rgb(255 255 255 / 0.8);
+  --bmx-glass-hi: rgb(255 255 255 / 0.95);
+  --bmx-track: rgb(8 19 26 / 0.05);
+  --bmx-emerald: #0c9f6c;
+  --bmx-aqua: #0b8fb8;
+  --bmx-cobalt: #4b5bdc;
+  --bmx-gold: #b7791f;
+  --bmx-slate: #6b7685;
+  --bmx-spec: linear-gradient(180deg, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.3) 24%, transparent 50%);
+  --bmx-rim: linear-gradient(150deg, rgb(255 255 255 / 0.95), rgb(8 19 26 / 0.06) 40%, color-mix(in srgb, var(--bmx-aqua) 35%, transparent));
+  --bmx-sweep: rgb(255 255 255 / 0.6);
+}
+html[data-nexus-theme='red_ops'] :is(.bmx, .bmx-sheet) {
+  --bmx-ink: #090305;
+  --bmx-glass: rgb(24 8 12 / var(--lg-alpha, 0.62));
+  --bmx-glass-hi: rgb(36 12 18 / 0.78);
+  --bmx-edge: rgb(255 140 140 / 0.12);
+  --bmx-edge-hi: rgb(255 160 160 / 0.2);
+  --bmx-rim: linear-gradient(150deg, rgb(255 210 210 / 0.22), rgb(255 255 255 / 0.03) 38%, color-mix(in srgb, #ff5a6a 35%, transparent));
+}
+html[data-nexus-theme='true_black'] :is(.bmx, .bmx-sheet) {
+  --bmx-ink: #000;
+  --bmx-glass: rgb(8 10 12 / var(--lg-alpha, 0.74));
+  --bmx-glass-hi: rgb(16 18 22 / 0.86);
+}
+
+.bmx {
+  position: relative; isolation: isolate;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: calc(env(safe-area-inset-top, 0px) + 64px) 12px calc(env(safe-area-inset-bottom, 0px) + 140px);
+  min-width: 0; min-height: 100%;
+}
+.bmx > * { flex-shrink: 0; }
+.bmx *, .bmx-sheet * { box-sizing: border-box; }
+.bmx button, .bmx-sheet button { font-family: inherit; color: inherit; }
+.bmx svg, .bmx-sheet svg:not(.bmx-orbit svg) { flex: none; }
+.bmx.is-refreshing :is(.bmx-list, .bmx-hero__count) { opacity: 0.55; transition: opacity 0.3s; }
+
+/* liquid color field */
+.bmx::before, .bmx::after { content: ''; position: absolute; left: -40px; right: -40px; z-index: -1; pointer-events: none; }
+.bmx::before {
+  top: -40px; height: 1100px;
+  background:
+    radial-gradient(38% 24% at 14% 8%, color-mix(in srgb, var(--bmx-emerald) 24%, transparent), transparent 70%),
+    radial-gradient(34% 22% at 90% 30%, color-mix(in srgb, var(--bmx-cobalt) 22%, transparent), transparent 70%),
+    radial-gradient(40% 26% at 40% 66%, color-mix(in srgb, var(--bmx-aqua) 16%, transparent), transparent 72%);
+  filter: blur(28px) saturate(150%);
+  animation: bmx-drift 26s ease-in-out infinite alternate;
+}
+.bmx::after {
+  top: 900px; height: 1600px;
+  background:
+    radial-gradient(34% 20% at 82% 12%, color-mix(in srgb, var(--bmx-aqua) 18%, transparent), transparent 70%),
+    radial-gradient(30% 16% at 10% 46%, color-mix(in srgb, var(--bmx-emerald) 14%, transparent), transparent 70%),
+    radial-gradient(36% 18% at 70% 80%, color-mix(in srgb, var(--bmx-cobalt) 14%, transparent), transparent 72%);
+  filter: blur(30px) saturate(150%);
+  animation: bmx-drift-b 32s ease-in-out infinite alternate;
+}
+html[data-nexus-theme='light'] :is(.bmx::before, .bmx::after) { opacity: 0.45; }
+@keyframes bmx-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-3%, 3%, 0) scale(1.06); } }
+@keyframes bmx-drift-b { from { transform: translate3d(3%, 0, 0) scale(1.05); } to { transform: translate3d(-3%, -3%, 0) scale(1); } }
+@keyframes bmx-rise { from { opacity: 0; transform: translate3d(0, 14px, 0); filter: blur(6px); } }
+@keyframes bmx-reveal { from { opacity: 0; transform: translate3d(0, 12px, 0); filter: blur(8px); } }
+@keyframes bmx-spin { to { --bmx-spin: 360deg; } }
+@keyframes bmx-flow { from { background-position: 0% 50%; } to { background-position: 100% 50%; } }
+@keyframes bmx-caustic { 0%, 62% { transform: translate3d(-160%, 0, 0) skewX(-18deg); } 88%, 100% { transform: translate3d(330%, 0, 0) skewX(-18deg); } }
+@keyframes bmx-beacon { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: 0.6; } }
+
+/* rimmed liquid glass */
+.bmx :is(.bmx-panel, .bmx-hero) {
+  position: relative; isolation: isolate; overflow: hidden;
+  border: 1px solid transparent; border-radius: 24px;
+  background: var(--bmx-spec) padding-box, linear-gradient(var(--bmx-glass), var(--bmx-glass)) padding-box, var(--bmx-rim) border-box;
+  -webkit-backdrop-filter: var(--bmx-blur); backdrop-filter: var(--bmx-blur);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 -1px 0 rgb(0 0 0 / 0.22), 0 26px 60px -34px rgb(0 0 0 / 0.9);
+  animation: bmx-rise 0.7s var(--bmx-ease) both;
+}
+.bmx :is(.bmx-panel, .bmx-hero)::after {
+  content: ''; position: absolute; top: -20%; bottom: -20%; left: 0; width: 45%; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--bmx-sweep) 50%, transparent);
+  transform: translate3d(-160%, 0, 0) skewX(-18deg);
+  animation: bmx-caustic 12s var(--bmx-ease) infinite;
+}
+.bmx-panel { padding: 14px; }
+.bmx-panel__head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; margin-bottom: 10px; }
+.bmx-panel__head span { font-family: var(--bmx-display); font-size: 15px; font-weight: 750; letter-spacing: -0.01em; }
+.bmx-panel__head em { font-style: normal; font-size: 10.5px; font-weight: 650; letter-spacing: 0.06em; color: var(--bmx-text-3); white-space: nowrap; }
+.bmx-note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--bmx-text-3); }
+.bmx-foot { margin: 12px 2px 0; font-size: 11.5px; line-height: 1.45; color: var(--bmx-text-3); }
+.bmx-sub { display: block; margin: 14px 0 7px; font-size: 10px; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; color: #fff; }
+.bmx-eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: var(--bmx-gold); box-shadow: 0 0 10px var(--bmx-gold); animation: bmx-beacon 2.6s ease-in-out infinite; }
+.bmx-eyebrow.is-aqua { color: var(--bmx-text); }
+.bmx-eyebrow.is-aqua i { background: var(--bmx-aqua); box-shadow: 0 0 12px var(--bmx-aqua); }
+
+/* chapters */
+.bmx-chapter { display: flex; align-items: center; gap: 10px; margin: 16px 4px -2px; animation: bmx-reveal 0.8s var(--bmx-ease) backwards; }
+.bmx-chapter .n { font-family: var(--bmx-display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--bmx-gold); }
+.bmx-chapter .t { font-family: var(--bmx-display); font-size: 12px; font-weight: 750; letter-spacing: 0.22em; text-transform: uppercase; }
+.bmx-chapter i { flex: 1; height: 1px; min-width: 16px; background: linear-gradient(90deg, color-mix(in srgb, var(--bmx-gold) 55%, transparent), color-mix(in srgb, var(--bmx-aqua) 30%, transparent) 60%, transparent); }
+.bmx-chapter em { font-style: normal; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--bmx-text-3); white-space: nowrap; }
+
+/* ── subject ── */
+.bmx-subject { position: relative; border-radius: 26px; overflow: hidden; isolation: isolate; min-height: 380px; box-shadow: 0 34px 70px -36px rgb(0 0 0 / 0.95); animation: bmx-rise 0.8s var(--bmx-ease) both; }
+.bmx-subject::before {
+  content: ''; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  background: linear-gradient(#000, #000) top / 100% 0% no-repeat, linear-gradient(#000, #000) bottom / 100% 0% no-repeat;
+  animation: bmx-letterbox 1.15s var(--bmx-ease) 0.05s backwards;
+}
+@keyframes bmx-letterbox { from { background-size: 100% 50%, 100% 50%; } to { background-size: 100% 0%, 100% 0%; } }
+.bmx-subject::after {
+  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: inherit; padding: 1px;
+  background: linear-gradient(150deg, rgb(255 255 255 / 0.42), rgb(255 255 255 / 0.05) 34%, transparent 60%, color-mix(in srgb, var(--bmx-emerald) 55%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.bmx-subject__photo { position: absolute; inset: 0; z-index: -1; background: #04070b; }
+.bmx-subject__mesh { position: absolute; inset: -20%; background: radial-gradient(40% 50% at 25% 30%, color-mix(in srgb, var(--bmx-emerald) 42%, transparent), transparent 70%), radial-gradient(40% 50% at 80% 25%, color-mix(in srgb, var(--bmx-cobalt) 45%, transparent), transparent 70%), #04070b; filter: blur(22px); animation: bmx-drift 16s ease-in-out infinite alternate; }
+.bmx-subject__photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transform: scale(1.1); transition: opacity 1.1s var(--bmx-ease); }
+.bmx-subject__photo.is-ready img { opacity: 1; animation: bmx-kenburns 30s ease-in-out infinite alternate; }
+@keyframes bmx-kenburns { from { transform: scale(1.08); } to { transform: scale(1.2) translate3d(-2%, -2%, 0); } }
+.bmx-subject__scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgb(3 6 10 / 0.55), rgb(3 6 10 / 0.1) 26%, rgb(3 6 10 / 0.66) 60%, rgb(3 6 10 / 0.94)); }
+.bmx-subject__sweep { position: absolute; top: -30%; bottom: -30%; left: 0; width: 40%; mix-blend-mode: soft-light; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55) 50%, transparent); transform: translate3d(-170%, 0, 0) skewX(-20deg); animation: bmx-caustic 9s var(--bmx-ease) 1.4s infinite; }
+.bmx-subject__body { position: relative; padding: 16px 14px 14px; color: #fff; display: flex; flex-direction: column; gap: 5px; min-height: 380px; justify-content: flex-end; }
+.bmx-subject__top { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.bmx-subject__top .bmx-eyebrow, .bmx-stage { padding: 6px 11px; border-radius: 999px; background: rgb(3 6 10 / 0.45); border: 1px solid rgb(255 255 255 / 0.16); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.bmx-stage.is-lost { color: rgb(255 255 255 / 0.6); }
+.bmx-stage { font-size: 10.5px; font-weight: 750; letter-spacing: 0.12em; text-transform: uppercase; color: rgb(255 255 255 / 0.85); }
+.bmx-subject h2 { margin: 0; font-family: var(--bmx-display); font-size: clamp(26px, 8vw, 34px); font-weight: 780; letter-spacing: -0.035em; line-height: 1.05; text-shadow: 0 2px 20px rgb(0 0 0 / 0.55); animation: bmx-reveal 0.9s var(--bmx-ease) 0.35s backwards; }
+.bmx-subject p { margin: 0; font-size: 13px; color: rgb(255 255 255 / 0.8); animation: bmx-reveal 0.9s var(--bmx-ease) 0.45s backwards; }
+.bmx-subject__specs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; animation: bmx-reveal 0.8s var(--bmx-ease) 0.55s backwards; }
+.bmx-subject__specs span, .bmx-subject__values > div, .bmx-subject__actions button {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.2), rgb(255 255 255 / 0.04) 45%, rgb(255 255 255 / 0.02)), rgb(6 8 14 / 0.36);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 10px 24px -14px rgb(0 0 0 / 0.8);
+  -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+}
+.bmx-subject__specs span { font-size: 11.5px; font-weight: 650; padding: 4px 10px; border-radius: 999px; }
+.bmx-subject__values { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; margin-top: 10px; animation: bmx-reveal 0.8s var(--bmx-ease) 0.65s backwards; }
+.bmx-subject__values > div { padding: 8px 9px; border-radius: 14px; min-width: 0; }
+.bmx-subject__values span { display: block; font-size: 9px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; color: rgb(255 255 255 / 0.62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmx-subject__values b { display: block; font-family: var(--bmx-display); font-size: 16px; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmx-subject__values > div.is-lead {
+  border-color: transparent;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.03) 45%) padding-box, linear-gradient(rgb(6 9 14 / 0.62), rgb(6 9 14 / 0.62)) padding-box,
+    conic-gradient(from var(--bmx-spin), var(--bmx-emerald), rgb(52 227 164 / 0.05) 28%, rgb(255 255 255 / 0.55) 50%, rgb(60 200 240 / 0.05) 72%, var(--bmx-emerald)) border-box;
+  animation: bmx-spin 7s linear infinite;
+}
+.bmx-subject__values > div.is-lead b { background: linear-gradient(100deg, #e9fff6, #34e3a4 45%, #fff 70%, #3cc8f0); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: bmx-flow 7s ease-in-out infinite alternate; }
+.bmx-subject__actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; margin-top: 10px; animation: bmx-reveal 0.8s var(--bmx-ease) 0.8s backwards; }
+.bmx-subject__actions button {
+  all: unset; box-sizing: border-box; min-height: 42px !important; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border-radius: 13px; font-size: 11.5px !important; font-weight: 700; color: #fff; cursor: pointer; transition: transform 0.35s var(--bmx-spring);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.2), rgb(255 255 255 / 0.04) 45%, rgb(255 255 255 / 0.02)), rgb(6 8 14 / 0.36);
+  border: 1px solid rgb(255 255 255 / 0.2);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 10px 24px -14px rgb(0 0 0 / 0.8);
+  -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+}
+@media (max-width: 400px) { .bmx-subject__actions button { flex-direction: column; gap: 3px; font-size: 10.5px !important; min-height: 50px !important; } }
+.bmx-subject__actions button:active { transform: scale(0.94); }
+.bmx-subject__actions svg { width: 14px !important; height: 14px !important; }
+
+/* ── match hero ── */
+.bmx-hero { padding: 16px 14px 14px; }
+.bmx-hero__glow { position: absolute; inset: -30% -20% auto; height: 70%; z-index: -1; background: radial-gradient(50% 60% at 30% 40%, color-mix(in srgb, var(--bmx-emerald) 26%, transparent), transparent 70%), radial-gradient(40% 50% at 80% 30%, color-mix(in srgb, var(--bmx-cobalt) 22%, transparent), transparent 70%); filter: blur(20px); animation: bmx-drift 14s ease-in-out infinite alternate; }
+.bmx-hero__head { display: flex; justify-content: space-between; align-items: center; }
+.bmx-hero__window { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--bmx-text-3); }
+.bmx-hero__count { display: flex; align-items: flex-end; gap: 12px; margin: 10px 0 12px; }
+.bmx-hero__count strong { font-family: var(--bmx-display); font-size: clamp(64px, 21vw, 88px); line-height: 0.86; font-weight: 800; letter-spacing: -0.06em; background: var(--bmx-liquid); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: bmx-flow 9s ease-in-out infinite alternate; filter: drop-shadow(0 10px 30px color-mix(in srgb, var(--bmx-aqua) 30%, transparent)); }
+.bmx-hero__count span { font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--bmx-text-2); padding-bottom: 6px; }
+.bmx-flow { display: flex; gap: 4px; height: 10px; border-radius: 10px; overflow: hidden; background: var(--bmx-track); }
+.bmx-flow i { width: var(--w); border-radius: 10px; background-size: 200% 100%; transform-origin: left; animation: bmx-grow 1.1s var(--bmx-spring) var(--d) backwards, bmx-flow 6s ease-in-out infinite alternate; }
+@keyframes bmx-grow { from { transform: scaleX(0); opacity: 0; } }
+.bmx-flow .t-strong { background-image: linear-gradient(90deg, var(--bmx-emerald), color-mix(in srgb, var(--bmx-emerald) 60%, #fff), var(--bmx-emerald)); box-shadow: 0 0 16px var(--bmx-emerald); }
+.bmx-flow .t-moderate { background-image: linear-gradient(90deg, var(--bmx-aqua), color-mix(in srgb, var(--bmx-aqua) 55%, #fff), var(--bmx-aqua)); }
+.bmx-flow .t-exploratory { background-image: linear-gradient(90deg, var(--bmx-cobalt), color-mix(in srgb, var(--bmx-cobalt) 55%, #fff), var(--bmx-cobalt)); opacity: 0.85; }
+.bmx-tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+.bmx-tiers > div { padding: 9px 10px; border-radius: 14px; background: var(--bmx-spec), var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-tiers b { display: block; font-family: var(--bmx-display); font-size: 22px; font-weight: 780; letter-spacing: -0.03em; }
+.bmx-tiers span { font-size: 10px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-tiers .t-strong b { color: var(--bmx-emerald); }
+.bmx-tiers .t-moderate b { color: var(--bmx-aqua); }
+.bmx-tiers .t-exploratory b { color: var(--bmx-cobalt); }
+
+/* orbit */
+.bmx-orbit { margin: 14px 0 0; }
+.bmx-orbit svg { display: block; width: 100% !important; height: auto !important; max-height: 360px; overflow: visible; }
+.bmx-orbit__ring { fill: none; stroke: var(--bmx-edge-hi); stroke-width: 1; stroke-dasharray: 2 5; }
+.bmx-orbit__edge { fill: none; stroke: color-mix(in srgb, var(--bmx-aqua) 40%, transparent); stroke-width: 1.2; }
+.bmx-orbit__county { fill: none; stroke: var(--bmx-edge-hi); stroke-width: 1; stroke-dasharray: 1 7; }
+.bmx-orbit__lbl { font-size: 8.5px; font-weight: 700; fill: var(--bmx-text-3); letter-spacing: 0.04em; }
+.bmx-orbit__sweep { transform-origin: 160px 160px; animation: bmx-radar 7s linear infinite; }
+.bmx-orbit__sweep path { fill: url(#bmx-field); opacity: 0.9; }
+@keyframes bmx-radar { to { transform: rotate(360deg); } }
+.bmx-orbit__halo { fill: none; stroke: var(--bmx-gold); stroke-width: 1.2; transform-origin: 160px 160px; animation: bmx-halo 3s ease-in-out infinite; }
+@keyframes bmx-halo { 0%, 100% { transform: scale(0.9); opacity: 0.9; } 50% { transform: scale(1.5); opacity: 0; } }
+.bmx-orbit__dot { cursor: pointer; animation: bmx-fly 1s var(--bmx-spring) backwards; animation-delay: calc(var(--i) * 28ms + 200ms); }
+@keyframes bmx-fly { from { transform: translate(calc(var(--x) * -1), calc(var(--y) * -1)) scale(0.2); opacity: 0; } }
+.bmx-orbit__dot .hit { fill: transparent; }
+.bmx-orbit__dot .dot { stroke: rgb(255 255 255 / 0.85); stroke-width: 1; transition: r 0.3s var(--bmx-spring); }
+.bmx-orbit__dot.t-strong .dot { fill: var(--bmx-emerald); filter: drop-shadow(0 0 6px var(--bmx-emerald)); }
+.bmx-orbit__dot.t-moderate .dot { fill: var(--bmx-aqua); }
+.bmx-orbit__dot.t-exploratory .dot { fill: var(--bmx-cobalt); opacity: 0.85; }
+.bmx-orbit__dot.is-focus .dot { stroke: var(--bmx-gold); stroke-width: 2.4; filter: drop-shadow(0 0 10px var(--bmx-gold)); }
+.bmx-orbit figcaption { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; margin-top: 4px; font-size: 10.5px; font-weight: 650; color: var(--bmx-text-2); }
+.bmx-orbit figcaption span { display: inline-flex; align-items: center; gap: 5px; }
+.bmx-orbit figcaption i { width: 8px; height: 8px; border-radius: 50%; }
+.bmx-orbit figcaption .t-strong { background: var(--bmx-emerald); box-shadow: 0 0 8px var(--bmx-emerald); }
+.bmx-orbit figcaption .t-moderate { background: var(--bmx-aqua); }
+.bmx-orbit figcaption .t-exploratory { background: var(--bmx-cobalt); }
+.bmx-orbit figcaption em { flex-basis: 100%; text-align: center; font-style: normal; font-size: 10px; color: var(--bmx-text-3); }
+
+/* ── views / toolbar ── */
+.bmx-views { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 2px 12px; }
+.bmx-views::-webkit-scrollbar { display: none; }
+.bmx-chip {
+  all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px !important; padding: 0 13px; cursor: pointer; white-space: nowrap;
+  border-radius: 999px; font-size: 11px !important; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bmx-text-2);
+  background: var(--bmx-spec), var(--bmx-glass-hi); border: 1px solid var(--bmx-edge-hi); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  transition: color 0.25s, background 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.35s var(--bmx-spring);
+}
+.bmx-chip b { font-family: var(--bmx-display); font-size: 12px; letter-spacing: 0; color: var(--bmx-text); opacity: 0.8; }
+.bmx-chip svg { width: 13px !important; height: 13px !important; }
+.bmx-chip:active { transform: scale(0.95); }
+.bmx-chip.is-on { color: var(--bmx-text); background: linear-gradient(180deg, rgb(255 255 255 / 0.14), transparent 60%), color-mix(in srgb, var(--bmx-aqua) 24%, var(--bmx-glass-hi)); border-color: color-mix(in srgb, var(--bmx-aqua) 60%, transparent); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 8px 22px -10px var(--bmx-aqua); }
+.bmx-chip.is-gold { color: var(--bmx-gold); }
+.bmx-chip.is-gold.is-on { background: linear-gradient(180deg, rgb(255 255 255 / 0.16), transparent 60%), color-mix(in srgb, var(--bmx-gold) 24%, var(--bmx-glass-hi)); border-color: color-mix(in srgb, var(--bmx-gold) 60%, transparent); box-shadow: 0 8px 22px -10px var(--bmx-gold); }
+.bmx-chip.is-ghost { padding: 0 11px; }
+.bmx-toolbar { display: flex; align-items: center; gap: 6px; }
+.bmx-sorts { flex: 1; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.bmx-sorts::-webkit-scrollbar { display: none; }
+.bmx-sorts button { all: unset; flex: none; min-height: 34px !important; padding: 0 9px; border-radius: 10px; font-size: 11px !important; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bmx-text-3); cursor: pointer; white-space: nowrap; transition: color 0.25s, background 0.3s; }
+.bmx-sorts button.is-on { color: var(--bmx-text); background: var(--bmx-spec), var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge-hi); }
+.bmx-chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* ── buyer cards ── */
+.bmx-list { display: flex; flex-direction: column; gap: 10px; }
+.bmx-card {
+  position: relative; border-radius: 22px; overflow: hidden;
+  border: 1px solid transparent;
+  background: var(--bmx-spec) padding-box, linear-gradient(var(--bmx-glass-hi), var(--bmx-glass-hi)) padding-box, var(--bmx-rim) border-box;
+  -webkit-backdrop-filter: var(--bmx-blur); backdrop-filter: var(--bmx-blur);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 22px 44px -28px rgb(0 0 0 / 0.9);
+  animation: bmx-resolve 0.75s var(--bmx-ease) backwards; animation-delay: calc(var(--i) * 60ms + 60ms);
+  transition: transform 0.5s var(--bmx-spring), box-shadow 0.5s var(--bmx-ease);
+}
+@keyframes bmx-resolve { from { opacity: 0; transform: translate3d(0, 22px, 0) scale(0.97); filter: blur(8px); } }
+.bmx-card::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--tc); box-shadow: 0 0 14px var(--tc); }
+.bmx-card.t-strong { --tc: var(--bmx-emerald); }
+.bmx-card.t-moderate { --tc: var(--bmx-aqua); }
+.bmx-card.t-exploratory { --tc: var(--bmx-cobalt); }
+.bmx-card.t-excluded { --tc: var(--bmx-slate); }
+.bmx-card.t-strong { background: var(--bmx-spec) padding-box, linear-gradient(var(--bmx-glass-hi), var(--bmx-glass-hi)) padding-box, linear-gradient(150deg, color-mix(in srgb, var(--bmx-emerald) 70%, transparent), rgb(255 255 255 / 0.04) 45%, color-mix(in srgb, var(--bmx-aqua) 40%, transparent)) border-box; }
+.bmx-card.is-focus {
+  background: var(--bmx-spec) padding-box, linear-gradient(var(--bmx-glass-hi), var(--bmx-glass-hi)) padding-box, linear-gradient(var(--bmx-ink), var(--bmx-ink)) padding-box,
+    conic-gradient(from var(--bmx-spin), var(--tc), color-mix(in srgb, var(--tc) 8%, transparent) 24%, color-mix(in srgb, var(--bmx-gold) 80%, transparent) 50%, color-mix(in srgb, var(--tc) 8%, transparent) 76%, var(--tc)) border-box;
+  box-shadow: 0 24px 50px -22px color-mix(in srgb, var(--tc) 60%, transparent);
+  animation: bmx-spin 6s linear infinite;
+}
+.bmx-card.is-short { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-gold) 45%, transparent), 0 22px 44px -28px rgb(0 0 0 / 0.9); }
+.bmx-card:active { transform: scale(0.985); }
+.bmx-card__open { all: unset; display: block; width: 100%; box-sizing: border-box; padding: 14px 14px 10px 16px; cursor: pointer; }
+.bmx-card__top { display: flex; align-items: center; gap: 11px; }
+.bmx-mono {
+  flex: none; width: 44px; height: 44px; border-radius: 15px; display: grid; place-items: center; position: relative;
+  background: conic-gradient(from 210deg, color-mix(in srgb, var(--tc) 80%, #fff), var(--tc), color-mix(in srgb, var(--tc) 40%, var(--bmx-cobalt)), color-mix(in srgb, var(--tc) 80%, #fff));
+  box-shadow: 0 8px 22px -8px var(--tc), inset 0 1px 0 rgb(255 255 255 / 0.5);
+}
+.bmx-mono i { font-style: normal; font-family: var(--bmx-display); font-size: 15px; font-weight: 800; letter-spacing: -0.02em; color: #041018; text-transform: uppercase; }
+.bmx-card__id { flex: 1; min-width: 0; }
+.bmx-card__id h3 { margin: 0; font-family: var(--bmx-display); font-size: 16px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.bmx-card__id p { margin: 2px 0 0; font-size: 11px; font-weight: 600; color: var(--bmx-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx-tier { flex: none; padding: 5px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--tc, var(--bmx-text)); background: color-mix(in srgb, var(--tc, var(--bmx-aqua)) 14%, transparent); border: 1px solid color-mix(in srgb, var(--tc, var(--bmx-aqua)) 45%, transparent); }
+.bmx-tier.t-strong { --tc: var(--bmx-emerald); }
+.bmx-tier.t-moderate { --tc: var(--bmx-aqua); }
+.bmx-tier.t-exploratory { --tc: var(--bmx-cobalt); }
+.bmx-tier.t-excluded { --tc: var(--bmx-slate); }
+.bmx-card__metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 12px 0 0; border-radius: 14px; overflow: hidden; background: var(--bmx-edge); box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-card__metrics > div { padding: 8px 8px 7px; background: color-mix(in srgb, var(--bmx-ink) 55%, var(--bmx-glass-hi)); min-width: 0; }
+.bmx-card__metrics dt { font-size: 8.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-card__metrics dd { margin: 2px 0 0; font-family: var(--bmx-display); font-size: 16px; font-weight: 750; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmx-card__metrics em { display: block; font-style: normal; font-size: 9.5px; color: var(--bmx-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmx-fits { display: flex; gap: 4px; margin-top: 9px; }
+.bmx-fits span { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; padding: 5px 0; border-radius: 9px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fc); background: color-mix(in srgb, var(--fc) 11%, transparent); border: 1px solid color-mix(in srgb, var(--fc) 30%, transparent); }
+.bmx-fits i { width: 5px; height: 5px; border-radius: 50%; background: var(--fc); box-shadow: 0 0 6px var(--fc); }
+.f-good { --fc: var(--bmx-emerald); }
+.f-mid { --fc: var(--bmx-aqua); }
+.f-unk { --fc: var(--bmx-slate); }
+.f-bad { --fc: var(--bmx-bad); }
+html[data-nexus-theme='red_ops'] .f-bad { --fc: #c9a3a3; }
+.bmx-card__why { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bmx-card__why li { position: relative; padding-left: 13px; font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+.bmx-card__why li i { position: absolute; left: 0; top: 0.55em; width: 5px; height: 5px; border-radius: 50%; background: var(--tc); box-shadow: 0 0 6px var(--tc); }
+.bmx-card__why em { font-style: normal; font-weight: 500; color: var(--bmx-text-3); }
+.bmx-card__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 10px 10px 16px; }
+.bmx-card__foot > div { display: flex; gap: 6px; }
+.bmx-contact { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 10.5px; font-weight: 650; color: var(--bmx-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx-contact i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--bmx-slate); }
+.bmx-contact.c-available i { background: var(--bmx-emerald); box-shadow: 0 0 8px var(--bmx-emerald); }
+.bmx-iconbtn { all: unset; box-sizing: border-box; width: 38px; height: 38px; min-height: 38px !important; display: grid; place-items: center; border-radius: 12px; cursor: pointer; color: var(--bmx-text-2); background: var(--bmx-spec), var(--bmx-track); border: 1px solid var(--bmx-edge-hi); transition: transform 0.35s var(--bmx-spring), background 0.3s, color 0.3s; }
+.bmx-iconbtn svg { width: 15px !important; height: 15px !important; }
+.bmx-iconbtn:active { transform: scale(0.9); }
+.bmx-iconbtn.is-on { color: var(--bmx-text); background: color-mix(in srgb, var(--bmx-aqua) 24%, transparent); border-color: color-mix(in srgb, var(--bmx-aqua) 55%, transparent); }
+.bmx-iconbtn.is-gold { color: #1a1204; background: linear-gradient(180deg, #ffe7a3, var(--bmx-gold)); border-color: transparent; box-shadow: 0 8px 20px -8px var(--bmx-gold); }
+
+/* ── market / band ── */
+.bmx-market__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.bmx-market__grid > div { padding: 10px; border-radius: 14px; background: var(--bmx-spec), var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-market__grid b { display: block; font-family: var(--bmx-display); font-size: 24px; font-weight: 780; letter-spacing: -0.035em; background: var(--bmx-liquid); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: bmx-flow 10s ease-in-out infinite alternate; }
+.bmx-market__grid span { font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--bmx-text-2); }
+.bmx-band { margin-top: 12px; }
+.bmx-band__row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 650; color: var(--bmx-text-2); }
+.bmx-band__row b { font-family: var(--bmx-display); font-size: 16px; color: var(--bmx-text); }
+.bmx-pricebar { position: relative; height: 34px; margin-top: 6px; }
+.bmx-pricebar__rail { position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 3px; background: var(--bmx-track); }
+.bmx-pricebar__band { position: absolute; top: 50%; height: 12px; margin-top: -6px; border-radius: 12px; background: linear-gradient(90deg, color-mix(in srgb, var(--bmx-emerald) 50%, transparent), var(--bmx-aqua), color-mix(in srgb, var(--bmx-cobalt) 60%, transparent)); background-size: 200% 100%; box-shadow: 0 0 16px -2px var(--bmx-aqua); animation: bmx-flow 6s ease-in-out infinite alternate, bmx-grow 1s var(--bmx-spring) backwards; transform-origin: left; }
+.bmx-pricebar__win { position: absolute; top: 3px; bottom: 3px; border-radius: 8px; border: 1.5px solid var(--bmx-gold); background: color-mix(in srgb, var(--bmx-gold) 10%, transparent); box-shadow: 0 0 12px -2px var(--bmx-gold); }
+.bmx-pricebar__win em { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 8.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bmx-gold); }
+
+/* ── disposition rail ── */
+.bmx-rail ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.bmx-rail li { position: relative; padding: 9px 9px 8px; border-radius: 14px; background: var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); opacity: 0.62; animation: bmx-reveal 0.6s var(--bmx-ease) backwards; animation-delay: calc(var(--i) * 45ms); }
+.bmx-rail li.is-on { opacity: 1; background: var(--bmx-spec), color-mix(in srgb, var(--bmx-emerald) 12%, var(--bmx-track)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-emerald) 40%, transparent); }
+.bmx-rail li b { display: block; font-family: var(--bmx-display); font-size: 20px; font-weight: 780; letter-spacing: -0.03em; }
+.bmx-rail li span { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.bmx-rail li em { display: block; font-style: normal; font-size: 9.5px; color: var(--bmx-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bmx-outreach p, .bmx-none p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--bmx-text-2); }
+
+/* ── why not / lineage ── */
+.bmx-whynot__reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+.bmx-whynot__reasons span { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 650; color: var(--bmx-text-2); background: var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-whynot__reasons b { font-family: var(--bmx-display); font-size: 15px; color: var(--bmx-text); }
+.bmx-whynot ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bmx-whynot li button { all: unset; box-sizing: border-box; width: 100%; display: flex; flex-direction: column; gap: 2px; min-height: 44px !important; padding: 8px 10px; border-radius: 12px; cursor: pointer; background: var(--bmx-track); }
+.bmx-whynot li strong { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx-whynot li span { font-size: 11.5px; color: var(--bmx-text-3); line-height: 1.35; }
+.bmx-lineage summary { list-style: none; display: flex; justify-content: space-between; align-items: center; min-height: 28px; cursor: pointer; font-family: var(--bmx-display); font-size: 14px; font-weight: 750; }
+.bmx-lineage summary::-webkit-details-marker { display: none; }
+.bmx-lineage summary svg { width: 14px !important; height: 14px !important; transition: transform 0.3s var(--bmx-ease); }
+.bmx-lineage[open] summary svg { transform: rotate(180deg); }
+.bmx-lineage dl { margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.bmx-lineage dt { font-size: 9.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-lineage dd { margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--bmx-text-2); }
+
+/* ── compare dock ── */
+.bmx-dock {
+  position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + var(--nx-pinned-dock-handle-band, 92px)); z-index: 60;
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: 20px;
+  border: 1px solid transparent; background: var(--bmx-spec) padding-box, linear-gradient(var(--bmx-glass-hi), var(--bmx-glass-hi)) padding-box, var(--bmx-rim) border-box;
+  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%); box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.8);
+  animation: bmx-dock-in 0.55s var(--bmx-spring) both;
+}
+@keyframes bmx-dock-in { from { transform: translate3d(0, 30px, 0) scale(0.96); opacity: 0; } }
+.bmx-dock span { flex: 1; font-size: 12.5px; font-weight: 650; color: var(--bmx-text-2); }
+.bmx-dock span b { font-family: var(--bmx-display); font-size: 17px; color: var(--bmx-text); }
+.bmx-dock .bmx-btn { width: auto; margin: 0; }
+
+/* ── boot / empty ── */
+.bmx-boot { display: flex; flex-direction: column; gap: 12px; }
+.bmx-boot > div { position: relative; overflow: hidden; border-radius: 24px; background: var(--bmx-spec), linear-gradient(var(--bmx-glass), var(--bmx-glass)); border: 1px solid var(--bmx-edge); }
+.bmx-boot > div::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--bmx-emerald) 14%, transparent) 45%, color-mix(in srgb, var(--bmx-cobalt) 12%, transparent) 55%, transparent 75%); animation: bmx-sheen 1.8s infinite; }
+@keyframes bmx-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.bmx-boot__hero { height: 300px; }
+.bmx-boot__hero p { position: absolute; left: 16px; bottom: 16px; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; font-weight: 650; color: var(--bmx-text-2); }
+.bmx-boot__hero p i { width: 8px; height: 8px; border-radius: 50%; background: var(--bmx-emerald); box-shadow: 0 0 12px var(--bmx-emerald); animation: bmx-beacon 1.4s ease-in-out infinite; }
+.bmx-boot__orbit { height: 300px; display: grid; place-items: center; }
+.bmx-boot__orbit span { position: absolute; border-radius: 50%; border: 1px dashed var(--bmx-edge-hi); animation: bmx-halo 2.4s ease-in-out infinite; }
+.bmx-boot__orbit span:nth-child(1) { width: 60px; height: 60px; }
+.bmx-boot__orbit span:nth-child(2) { width: 150px; height: 150px; animation-delay: 0.3s; }
+.bmx-boot__orbit span:nth-child(3) { width: 240px; height: 240px; animation-delay: 0.6s; }
+.bmx-boot__row { height: 170px; }
+.bmx-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 16px; text-align: center; color: var(--bmx-text-2); }
+.bmx-empty svg { width: 24px !important; height: 24px !important; }
+.bmx-empty p { margin: 0; max-width: 320px; font-size: 13px; line-height: 1.5; }
+.bmx-empty .bmx-btn { width: auto; }
+
+/* ── sheets ── */
+.bmx-sheet { position: fixed; inset: 0; z-index: 9000; display: flex; flex-direction: column; justify-content: flex-end; }
+.bmx-sheet__scrim { all: unset; position: absolute; inset: 0; background: rgb(0 0 0 / 0.5); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); animation: bmx-fade 0.3s both; }
+html[data-nexus-theme='light'] .bmx-sheet__scrim { background: rgb(8 19 26 / 0.28); }
+@keyframes bmx-fade { from { opacity: 0; } }
+.bmx-sheet__panel {
+  position: relative; max-height: 90vh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 8px 16px calc(env(safe-area-inset-bottom, 0px) + 26px); border-radius: 28px 28px 0 0;
+  border: 1px solid transparent; border-bottom: 0;
+  background: var(--bmx-spec) padding-box, linear-gradient(var(--bmx-glass-hi), var(--bmx-glass-hi)) padding-box, var(--bmx-rim) border-box;
+  -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 -24px 70px -20px rgb(0 0 0 / 0.75);
+  animation: bmx-sheet-up 0.6s var(--bmx-spring) both;
+}
+html[data-nexus-theme='true_black'] .bmx-sheet__panel { background: var(--bmx-spec) padding-box, linear-gradient(#07080a, #07080a) padding-box, var(--bmx-rim) border-box; }
+@keyframes bmx-sheet-up { from { transform: translate3d(0, 60px, 0); opacity: 0; } }
+.bmx-sheet__grab { width: 42px; height: 5px; border-radius: 5px; margin: 0 auto 12px; background: var(--bmx-liquid); background-size: 240% 100%; opacity: 0.75; animation: bmx-flow 5s ease-in-out infinite alternate; }
+.bmx-sheet h3 { margin: 4px 0 0; font-family: var(--bmx-display); font-size: 21px; font-weight: 780; letter-spacing: -0.025em; line-height: 1.15; overflow-wrap: anywhere; }
+.bmx-insp__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.bmx-insp__head p { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--bmx-text-3); }
+.bmx-x { all: unset; flex: none; width: 40px; height: 40px; min-height: 40px !important; display: grid; place-items: center; border-radius: 13px; cursor: pointer; background: var(--bmx-track); transition: transform 0.35s var(--bmx-spring); }
+.bmx-x:active { transform: scale(0.9); }
+.bmx-x svg { width: 16px !important; height: 16px !important; }
+.bmx-insp__kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
+.bmx-insp__kpis > div { padding: 9px 8px; border-radius: 14px; background: var(--bmx-spec), var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); min-width: 0; }
+.bmx-insp__kpis b { display: block; font-family: var(--bmx-display); font-size: 18px; font-weight: 780; letter-spacing: -0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--bmx-liquid); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.bmx-insp__kpis span { font-size: 9.5px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-tabs { position: sticky; top: -8px; z-index: 2; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 14px -16px 0; padding: 6px 16px; background: linear-gradient(var(--bmx-glass-hi), var(--bmx-glass-hi)); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.bmx-tabs::-webkit-scrollbar { display: none; }
+.bmx-tabs button { all: unset; flex: none; min-height: 34px !important; padding: 0 12px; border-radius: 11px; font-size: 11px !important; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bmx-text-3); cursor: pointer; transition: color 0.25s, background 0.3s; }
+.bmx-tabs button.is-on { color: var(--bmx-text); background: linear-gradient(180deg, rgb(255 255 255 / 0.16), transparent 55%), color-mix(in srgb, var(--bmx-aqua) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-aqua) 45%, transparent), 0 8px 20px -10px var(--bmx-aqua); }
+.bmx-insp__body { padding-top: 6px; animation: bmx-reveal 0.5s var(--bmx-ease) both; }
+.bmx-insp__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 16px; }
+.bmx-insp__actions .bmx-btn { margin: 0; }
+.bmx-callout { margin-top: 12px; padding: 11px 13px; border-radius: 16px; background: var(--bmx-spec), color-mix(in srgb, var(--bmx-aqua) 8%, var(--bmx-track)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-aqua) 22%, transparent); }
+.bmx-callout b { font-size: 13px; font-weight: 750; }
+.bmx-callout p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; color: var(--bmx-text-2); }
+.bmx-callout ul { margin: 6px 0 0; padding-left: 16px; font-size: 12.5px; line-height: 1.5; color: var(--bmx-text-2); }
+.bmx-callout.is-not { background: color-mix(in srgb, var(--bmx-slate) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-slate) 40%, transparent); }
+.bmx-callout.is-contact { background: var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bmx-evidence li { display: grid; grid-template-columns: 10px 1fr; column-gap: 8px; align-items: baseline; padding: 9px 11px; border-radius: 13px; background: var(--bmx-spec), var(--bmx-track); animation: bmx-reveal 0.5s var(--bmx-ease) backwards; animation-delay: calc(var(--i) * 50ms); }
+.bmx-evidence i { width: 6px; height: 6px; border-radius: 50%; background: var(--bmx-emerald); box-shadow: 0 0 8px var(--bmx-emerald); }
+.bmx-evidence b { font-size: 13.5px; font-weight: 700; }
+.bmx-evidence em { grid-column: 2; font-style: normal; font-size: 11px; color: var(--bmx-text-3); }
+.bmx-fittable { border-radius: 16px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-fittable__head, .bmx-fitrow { display: grid; grid-template-columns: 62px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 8px 11px; }
+.bmx-fittable__head { font-size: 9.5px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--bmx-text-3); background: var(--bmx-track); }
+.bmx-fitrow { position: relative; align-items: baseline; border-top: 1px solid var(--bmx-edge); animation: bmx-reveal 0.5s var(--bmx-ease) backwards; animation-delay: calc(var(--i) * 60ms); }
+.bmx-fitrow .k { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-fitrow .s, .bmx-fitrow .b { font-size: 12.5px; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+.bmx-fitrow em { grid-column: 2 / 4; display: inline-flex; align-items: center; gap: 6px; font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fc); }
+.bmx-fitrow em i { width: 6px; height: 6px; border-radius: 50%; background: var(--fc); box-shadow: 0 0 6px var(--fc); }
+.bmx-fitrow .bar { grid-column: 1 / 4; }
+.bmx-tx, .bmx-timeline, .bmx-holdings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bmx-tx button, .bmx-timeline button, .bmx-holdings button, .bmx-holdings li > div {
+  all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 48px !important; padding: 8px 11px; border-radius: 13px; cursor: pointer;
+  background: var(--bmx-spec), var(--bmx-track);
+}
+.bmx-holdings button, .bmx-holdings li > div { grid-template-columns: minmax(0, 1fr) auto; }
+.bmx-holdings li > div { cursor: default; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.bmx-tx .d, .bmx-timeline .d { font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bmx-aqua); }
+.bmx-tx .a, .bmx-timeline .a { display: flex; flex-direction: column; min-width: 0; }
+.bmx-tx .a b, .bmx-timeline .a b, .bmx-holdings b { font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx-tx .a em, .bmx-timeline .a em, .bmx-holdings em { font-style: normal; font-size: 10.5px; color: var(--bmx-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx-tx .p, .bmx-timeline .p, .bmx-holdings span { font-family: var(--bmx-display); font-size: 14px; font-weight: 750; text-align: right; }
+.bmx-tx .p em { display: block; font-style: normal; font-family: inherit; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bmx-emerald); }
+.bmx-timeline { position: relative; padding-left: 12px; }
+.bmx-timeline::before { content: ''; position: absolute; left: 3px; top: 10px; bottom: 10px; width: 2px; border-radius: 2px; background: linear-gradient(180deg, var(--bmx-emerald), var(--bmx-aqua), var(--bmx-cobalt), transparent); }
+.bmx-timeline li { position: relative; animation: bmx-reveal 0.5s var(--bmx-ease) backwards; animation-delay: calc(var(--i) * 40ms); }
+.bmx-timeline li::before { content: ''; position: absolute; left: -12px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: var(--bmx-aqua); box-shadow: 0 0 0 3px var(--bmx-ink), 0 0 10px var(--bmx-aqua); }
+.bmx-cadence { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.bmx-cadence > div { padding: 10px 8px; border-radius: 14px; background: var(--bmx-spec), var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); text-align: center; }
+.bmx-cadence b { display: block; font-family: var(--bmx-display); font-size: 22px; font-weight: 780; letter-spacing: -0.03em; }
+.bmx-cadence span { font-size: 9.5px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-years { display: flex; align-items: flex-end; gap: 8px; height: 120px; margin-top: 14px; padding: 0 4px; }
+.bmx-years { justify-content: center; }
+.bmx-years > div { flex: 1; max-width: 56px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+.bmx-years i { width: 100%; height: var(--h); min-height: 3px; border-radius: 8px 8px 3px 3px; background: linear-gradient(180deg, var(--bmx-emerald), var(--bmx-aqua) 60%, var(--bmx-cobalt)); box-shadow: 0 0 16px -4px var(--bmx-aqua); transform-origin: bottom; animation: bmx-bar 0.9s var(--bmx-spring) backwards; animation-delay: calc(var(--i) * 70ms); }
+@keyframes bmx-bar { from { transform: scaleY(0); } }
+.bmx-years b { font-family: var(--bmx-display); font-size: 12px; }
+.bmx-years span { font-size: 10px; color: var(--bmx-text-3); }
+.bmx-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.bmx-bars li { position: relative; display: flex; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 11px; overflow: hidden; background: var(--bmx-track); font-size: 12px; font-weight: 650; animation: bmx-reveal 0.5s var(--bmx-ease) backwards; animation-delay: calc(var(--i) * 45ms); }
+.bmx-bars li span { position: relative; z-index: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bmx-bars li b { position: relative; z-index: 1; font-family: var(--bmx-display); white-space: nowrap; }
+.bmx-bars li b em { font-style: normal; font-weight: 600; color: var(--bmx-text-3); }
+.bmx-bars li i { position: absolute; inset: 0 auto 0 0; width: var(--w); background: linear-gradient(90deg, color-mix(in srgb, var(--bmx-emerald) 28%, transparent), color-mix(in srgb, var(--bmx-aqua) 16%, transparent)); transform-origin: left; animation: bmx-grow 0.9s var(--bmx-spring) backwards; }
+.bmx-box { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.bmx-box__cell { padding: 11px; border-radius: 16px; background: var(--bmx-spec), var(--bmx-track); box-shadow: inset 0 0 0 1px var(--bmx-edge); min-width: 0; }
+.bmx-box__cell.is-wide { grid-column: 1 / -1; }
+.bmx-box__cell > span { display: block; margin-bottom: 6px; font-size: 9.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-box__cell > b { font-family: var(--bmx-display); font-size: 16px; font-weight: 750; }
+.bmx-box__cell > em { display: block; margin-top: 3px; font-style: normal; font-size: 11px; color: var(--bmx-text-3); }
+.bmx-big { display: block; font-size: 22px !important; letter-spacing: -0.03em; background: var(--bmx-liquid); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; }
+.bmx-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.bmx-chips i { font-style: normal; padding: 5px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 650; background: color-mix(in srgb, var(--bmx-aqua) 12%, transparent); border: 1px solid color-mix(in srgb, var(--bmx-aqua) 30%, transparent); }
+.bmx-gauge { display: flex; align-items: center; gap: 10px; }
+.bmx-gauge__ring { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--bmx-emerald) calc(var(--v) * 360deg), var(--bmx-track) 0); -webkit-mask: radial-gradient(circle, transparent 57%, #000 58%); mask: radial-gradient(circle, transparent 57%, #000 58%); position: relative; }
+.bmx-gauge__ring b { position: absolute; }
+.bmx-gauge > .bmx-gauge__ring + span { font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-idcard { padding: 13px; border-radius: 16px; background: var(--bmx-spec), color-mix(in srgb, var(--bmx-emerald) 8%, var(--bmx-track)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-emerald) 25%, transparent); display: flex; flex-direction: column; gap: 4px; }
+.bmx-idcard b { font-size: 14px; font-weight: 750; }
+.bmx-idcard em { font-style: normal; font-size: 11.5px; color: var(--bmx-text-3); }
+.bmx-idtier { align-self: flex-start; padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bmx-emerald); border: 1px solid color-mix(in srgb, var(--bmx-emerald) 45%, transparent); }
+.bmx-idtier.i-engine { color: var(--bmx-aqua); border-color: color-mix(in srgb, var(--bmx-aqua) 45%, transparent); }
+.bmx-idtier.i-observed { color: var(--bmx-slate); border-color: var(--bmx-edge-hi); }
+.bmx-skel { height: 140px; border-radius: 16px; background: var(--bmx-track); position: relative; overflow: hidden; }
+.bmx-skel::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.07) 50%, transparent 70%); animation: bmx-sheen 1.5s infinite; }
+.bmx-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.bmx-seg button { all: unset; box-sizing: border-box; min-height: 40px !important; min-width: 56px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; border-radius: 13px; font-size: 12.5px !important; font-weight: 700; cursor: pointer; color: var(--bmx-text-2); background: var(--bmx-spec), var(--bmx-track); border: 1px solid var(--bmx-edge); transition: transform 0.35s var(--bmx-spring), background 0.3s; }
+.bmx-seg button:active { transform: scale(0.95); }
+.bmx-seg button.is-on { color: var(--bmx-text); background: linear-gradient(180deg, rgb(255 255 255 / 0.14), transparent 55%), color-mix(in srgb, var(--bmx-aqua) 22%, var(--bmx-track)); border-color: color-mix(in srgb, var(--bmx-aqua) 55%, transparent); }
+.bmx-btn { all: unset; box-sizing: border-box; width: 100%; min-height: 46px !important; margin-top: 12px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 15px; font-size: 13.5px !important; font-weight: 750; cursor: pointer; color: var(--bmx-text); background: var(--bmx-spec), var(--bmx-track); border: 1px solid var(--bmx-edge-hi); transition: transform 0.35s var(--bmx-spring); }
+.bmx-btn svg { width: 15px !important; height: 15px !important; }
+.bmx-btn:active { transform: scale(0.97); }
+.bmx-btn:disabled { opacity: 0.45; }
+.bmx-btn.is-primary { color: #03141a; background: linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 55%), linear-gradient(100deg, var(--bmx-emerald), var(--bmx-aqua) 55%, color-mix(in srgb, var(--bmx-cobalt) 70%, var(--bmx-aqua))); background-size: 100% 100%, 220% 100%; border-color: transparent; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45), 0 14px 30px -14px var(--bmx-aqua); animation: bmx-flow2 6s ease-in-out infinite alternate; }
+@keyframes bmx-flow2 { from { background-position: 0 0, 0% 50%; } to { background-position: 0 0, 100% 50%; } }
+.bmx-btn.is-gold { color: #1a1204; background: linear-gradient(180deg, #ffe7a3, var(--bmx-gold)); border-color: transparent; box-shadow: 0 12px 26px -12px var(--bmx-gold); }
+.bmx-compare { display: flex; flex-direction: column; margin-top: 14px; border-radius: 16px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--bmx-edge); }
+.bmx-compare__row { display: grid; grid-template-columns: 84px repeat(var(--n), minmax(0, 1fr)); gap: 8px; padding: 9px 11px; border-top: 1px solid var(--bmx-edge); align-items: baseline; animation: bmx-reveal 0.45s var(--bmx-ease) backwards; animation-delay: calc(var(--i, 0) * 35ms); }
+.bmx-compare__row.is-head { border-top: 0; background: var(--bmx-track); }
+.bmx-compare__row > span { font-size: 9.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bmx-text-3); }
+.bmx-compare__row > b { font-size: 12.5px; font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.bmx-compare__row.is-head button { all: unset; min-height: 36px !important; font-family: var(--bmx-display); font-size: 12.5px !important; font-weight: 780; line-height: 1.2; cursor: pointer; overflow-wrap: anywhere; color: var(--tc, var(--bmx-text)); }
+.bmx-compare__row.is-head .t-strong { --tc: var(--bmx-emerald); }
+.bmx-compare__row.is-head .t-moderate { --tc: var(--bmx-aqua); }
+.bmx-compare__row.is-head .t-exploratory { --tc: var(--bmx-cobalt); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bmx *, .bmx::before, .bmx::after, .bmx-sheet *, .bmx-subject::before { animation: none !important; transition: none !important; }
+}

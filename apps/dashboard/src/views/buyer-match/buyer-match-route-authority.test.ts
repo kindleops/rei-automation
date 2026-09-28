@@ -113,12 +113,27 @@ describe('the production Buyer Match route', () => {
    * this codebase has already paid for on Inbox and the Pipeline board.
    */
   it('puts imagery on the property and never on a buyer card', () => {
-    const page = read('views/buyer-match/BuyerMatchSubjectPage.tsx')
-    const lens = read('views/buyer-match/mobile/BuyerMatchMobile.tsx')
-    expect(page).toMatch(/EntityGraphPropertyVisual/)
-    // The lens renders the visual it is HANDED, and builds none itself.
-    expect(lens).not.toMatch(/EntityGraphPropertyVisual|buildStreetViewUrl|streetview/i)
-    expect(lens).toMatch(/propertyVisual/)
+    const parts = read('views/buyer-match/workspace/BuyerMatchParts.tsx')
+    const card = parts.slice(parts.indexOf('export function BuyerCard'))
+    const hero = parts.slice(parts.indexOf('export function SubjectHero'), parts.indexOf('export function MatchHero'))
+    // One Street View request, for the subject — none per buyer card.
+    expect(hero).toMatch(/staticStreetViewUrl/)
+    expect(card).not.toMatch(/staticStreetViewUrl|streetview|<img/i)
+  })
+
+  /**
+   * The observed-behaviour workspace tiers and explains on the SERVER
+   * (buyer-match-workspace-service). The surface may re-order what came back
+   * (operator sorts) but never assigns a tier, a score or a reason.
+   */
+  it('never tiers, scores or explains a buyer in the browser', () => {
+    const surface = read('views/buyer-match/workspace/BuyerMatchSurface.tsx')
+    const parts = read('views/buyer-match/workspace/BuyerMatchParts.tsx')
+    for (const source of [surface, parts]) {
+      expect(source).not.toMatch(/tier\s*[:=]\s*['"](strong|moderate|exploratory)/)
+      expect(source).not.toMatch(/matchScore\s*=|classifyBuyer|evidenceLines/)
+    }
+    expect(surface).toMatch(/fetchBuyerMatchWorkspace/)
   })
 })
 
