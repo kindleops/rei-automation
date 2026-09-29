@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { effectivePerSenderCap, loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 import { isSenderDispatchBlocked, isTemplateDispatchBlocked, loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
 import { evaluateCampaignResumeReadiness } from '@/lib/domain/campaigns/campaign-resume-readiness.js'
@@ -6557,7 +6558,8 @@ function resolveLaunchCaps(campaign = {}, input = {}, readyTargetCount = 0) {
   )
   const capFallback = batchMax || maxTargets || 500
   const dailyCap = asPositiveInteger(input.daily_cap ?? input.dailyCap ?? campaign.daily_cap, capFallback)
-  const perSenderCap = asPositiveInteger(input.per_sender_cap ?? input.perSenderCap ?? campaign.per_sender_cap, capFallback)
+  // Override (input/campaign) else the configured per-number limit; never a literal.
+  const perSenderCap = effectivePerSenderCap({ input, campaign, configured: input.per_sender_cap_default })
   const perMarketCap = asPositiveInteger(
     input.per_market_cap ?? input.perMarketCap ?? input.market_cap ?? campaign.market_cap,
     capFallback
@@ -6583,7 +6585,6 @@ function missingLaunchCaps(caps = {}) {
   const missing = []
   if (!caps.max_targets && !caps.effective_limit) missing.push('max_targets')
   if (!caps.daily_cap) missing.push('daily_cap')
-  if (!caps.per_sender_cap) missing.push('per_sender_cap')
   if (!caps.per_market_cap) missing.push('per_market_cap')
   return missing
 }
@@ -6893,10 +6894,14 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
     templateId,
     scheduledIso,
   ].join('|')).digest('hex')}`
+  // A carrier-filtered touch retried on a different template is a SECOND action
+  // for this target+touch; the dispatch identity keys it by this generation.
+  const spamRetryGeneration = Math.max(0, Math.trunc(Number(target?.metadata?.spam_retry_count) || 0))
   const metadata = {
     source: 'campaign_launch_execution',
     campaign_id: campaign.id,
     campaign_target_id: target.id,
+    ...(spamRetryGeneration > 0 ? { spam_retry_generation: spamRetryGeneration } : {}),
     campaign_send_window_id: window.id || null,
     campaign_session_id: campaignSessionId,
     launch_mode: noSend ? 'proof_hydration_no_send' : 'guarded_live_queue_creation',
@@ -7266,7 +7271,8 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     }
   }
 
-  const caps = resolveLaunchCaps(campaign, input, readyTargets.length)
+  const perSenderCapDefault = await (deps.loadConfiguredPerSenderCap || loadConfiguredPerSenderCap)(deps)
+  const caps = resolveLaunchCaps(campaign, { ...input, per_sender_cap_default: perSenderCapDefault }, readyTargets.length)
   const hydrateNoSend = writeMode.hydrateNoSend
   const isLiveSendWrite = writeMode.isLiveSendWrite
   const productionLiveWrite = writeMode.productionLiveWrite === true
@@ -8202,7 +8208,7 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
       max_targets: batchLimit,
       limit: batchLimit,
       daily_cap: input.daily_cap ?? campaign.daily_cap ?? batchLimit,
-      per_sender_cap: input.per_sender_cap ?? campaign.per_sender_cap ?? batchLimit,
+      per_sender_cap: input.per_sender_cap ?? campaign.per_sender_cap ?? undefined,
       per_market_cap: input.per_market_cap ?? campaign.market_cap ?? batchLimit,
       block_on_global_emergency_stop: false,
     })

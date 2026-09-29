@@ -196,10 +196,8 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
    * planning pass gives a single market. Neither has an operator control, so
    * blocking on them showed a "safety" blocker nobody could resolve.
    */
-  if (!campaign.per_sender_cap) {
-    blockers.push(BLOCKER_LABELS.missing_per_sender_cap)
-    blockerCodes.push('missing_per_sender_cap')
-  }
+  // per_sender_cap is an optional override: absent, system_control
+  // queue_per_number_cap governs (sender-capacity.js). Not a launch blocker.
   if (!campaign.contact_window_start || !campaign.contact_window_end) {
     blockers.push(BLOCKER_LABELS.missing_send_window)
     blockerCodes.push('missing_send_window')

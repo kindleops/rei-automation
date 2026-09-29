@@ -34,6 +34,7 @@
  */
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 
 const DAY = 86_400_000
 const MAX_RANGE_DAYS = 62
@@ -323,7 +324,7 @@ export function buildOpportunityEvents(rows = [], { now = Date.now() } = {}) {
  * zone (never the device's) and only projected while the campaign still has
  * eligible sellers to reach, for as many days as its real pace needs.
  */
-export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now(), stats = new Map() } = {}) {
+export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now(), stats = new Map(), perSenderDefault = null } = {}) {
   const out = []
   for (const c of campaigns) {
     const status = clean(c.status)
@@ -361,7 +362,7 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
     if (!live && status !== 'scheduled') continue
     const remaining = Number(s.remaining || 0) + Number(s.scheduled || 0)
     if (remaining <= 0) continue
-    const pace = dailyPace(c, s)
+    const pace = dailyPace(c, s, perSenderDefault)
     const days = pace > 0 ? Math.ceil(remaining / pace) : 1
     const firstDay = status === 'scheduled' && Number.isFinite(scheduledAt) ? localDate(scheduledAt, tz) : localDate(now, tz)
     for (let i = 0; i < days; i += 1) {
@@ -405,10 +406,11 @@ function campaignZone(c = {}) {
   return isValidZone(tz) ? tz : null
 }
 
-/** Real daily pace: bounded by daily_cap and per_sender_cap × senders in use. */
-export function dailyPace(c = {}, s = {}) {
+/** Real daily pace: bounded by daily_cap and per-sender limit × senders in use.
+ * The per-sender limit is the campaign override, else the configured default. */
+export function dailyPace(c = {}, s = {}, perSenderDefault = null) {
   const daily = Number(c.daily_cap) || 0
-  const perSender = Number(c.per_sender_cap) || 0
+  const perSender = Number(c.per_sender_cap) || Number(perSenderDefault) || 0
   const senders = Math.max(1, Number(s.senders || 0))
   const bySender = perSender ? perSender * senders : 0
   const caps = [daily, bySender].filter((n) => n > 0)
@@ -707,6 +709,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null } = 
     for (const c of more) campaignMap.set(c.id, { ...c, tz: campaignZone(c) })
   }
   const stats = new Map()
+  const perSenderDefault = campaigns.length ? await loadConfiguredPerSenderCap({ supabase }) : null
   if (campaigns.length) {
     const ids = campaigns.map((c) => c.id)
     const [targets, queue] = await Promise.all([
@@ -743,7 +746,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null } = 
     ...buildQueueEvents(queueRows, { tz: zone, now, campaigns: campaignMap, people }),
     ...buildFollowUpEvents(threads, { now, people }),
     ...buildOpportunityEvents(opps, { now }),
-    ...buildCampaignEvents(campaigns, { from: start, to: end, now, stats }),
+    ...buildCampaignEvents(campaigns, { from: start, to: end, now, stats, perSenderDefault }),
     ...buildClosingEvents(closings, { from: readFrom, to: end, today }),
     ...buildOfferEvents(offers, { from: readFrom, to: end, today, now }),
   ]).sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || (TYPE_ORDER[a.type] ?? 5) - (TYPE_ORDER[b.type] ?? 5))

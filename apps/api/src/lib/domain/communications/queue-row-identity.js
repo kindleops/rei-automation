@@ -141,12 +141,19 @@ export function resolveQueueRowIdentity(queue_row = {}) {
   const campaign_target_id = clean(queue_row.campaign_target_id);
   const touch_number = queue_row.touch_number;
   if (campaign_target_id && Number.isInteger(Number(touch_number)) && Number(touch_number) >= 1) {
+    // A touch the carrier filtered (never delivered) and that the feeder
+    // re-planned on a different template is the NEXT action of that touch, not
+    // the same one: reusing action 1 hit its failed-terminal state and every
+    // retry was refused as state_forbids_attempt (2026-09-28, 92 rows). The
+    // generation is small and bounded; the key builder enforces 1..999.
+    const generation = Math.trunc(Number(md.spam_retry_generation) || 0);
+    const action_sequence = generation > 0 && generation < 999 ? String(generation + 1) : null;
     return {
       ok: true,
       bound: false,
       communication_type: COMMUNICATION_TYPES.CAMPAIGN_TOUCH,
-      anchors: { campaign_target_id, touch_number: String(touch_number) },
-      lineage: { ...lineage, campaign_target_id, touch_number: String(touch_number) },
+      anchors: { campaign_target_id, touch_number: String(touch_number), ...(action_sequence ? { action_sequence } : {}) },
+      lineage: { ...lineage, campaign_target_id, touch_number: String(touch_number), ...(action_sequence ? { action_sequence } : {}) },
     };
   }
 

@@ -93,3 +93,18 @@ test("an auto-reply is superseded when anything went out to the seller after the
   const campaign = await evaluateAutoReplySuperseded({ supabase: eventsDb(events), queue_row: { id: "c1", thread_key: "+1612", metadata: {} } })
   assert.equal(campaign.superseded, false, "rows that answer no inbound (campaign/manual) are never checked")
 })
+
+import { resolveQueueRowIdentity } from "@/lib/domain/communications/queue-row-identity.js";
+import { buildLogicalCommunicationKey } from "@/lib/domain/communications/logical-communication-key.js";
+
+test("a spam retry of a campaign touch is a NEW logical communication (action 2), the original stays action 1", () => {
+  const base = { campaign_target_id: "t1", touch_number: 1, metadata: {} }
+  const original = resolveQueueRowIdentity(base)
+  const retry = resolveQueueRowIdentity({ ...base, metadata: { spam_retry_generation: 1 } })
+  const k1 = buildLogicalCommunicationKey({ communication_type: original.communication_type, ...original.anchors })
+  const k2 = buildLogicalCommunicationKey({ communication_type: retry.communication_type, ...retry.anchors })
+  assert.ok(k1.ok && k2.ok)
+  assert.notEqual(k1.key, k2.key, "the retry must not collide with the failed original")
+  const again = resolveQueueRowIdentity({ ...base, metadata: { spam_retry_generation: 1 } })
+  assert.equal(buildLogicalCommunicationKey({ communication_type: again.communication_type, ...again.anchors }).key, k2.key, "the same retry is still idempotent")
+})

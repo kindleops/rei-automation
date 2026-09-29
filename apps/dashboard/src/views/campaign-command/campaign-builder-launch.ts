@@ -48,6 +48,16 @@ function parsePositiveInt(value: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
 }
 
+/**
+ * Per-number daily limit is an optional OVERRIDE. Left blank, the server's
+ * configured limit (system_control.queue_per_number_cap) governs — the builder
+ * never invents one.
+ */
+export function perSenderOverride(value: string): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
+}
+
 function filterFieldKey(filter: { fieldKey?: string; field_key?: string }): string {
   return clean(filter.fieldKey || filter.field_key).toLowerCase()
 }
@@ -151,7 +161,7 @@ export function buildCampaignPersistPayload(
     total_cap: totalCap,
     batch_max: batchMax,
     market_cap: parsePositiveInt(launch.per_market_cap, 400),
-    per_sender_cap: parsePositiveInt(launch.per_sender_cap, 150),
+    per_sender_cap: perSenderOverride(launch.per_sender_cap),
     send_interval_seconds: parsePositiveInt(launch.spread_interval_seconds, 45),
     contact_window_start: launch.contact_window_start || '08:00',
     contact_window_end: launch.contact_window_end || '21:00',
@@ -205,7 +215,7 @@ export function buildActivateNowPayload(
     limit: batchMax,
     max_targets: parsePositiveInt(launch.max_targets, 750),
     daily_cap: parsePositiveInt(launch.daily_cap, 750),
-    per_sender_cap: parsePositiveInt(launch.per_sender_cap, 150),
+    per_sender_cap: perSenderOverride(launch.per_sender_cap),
     per_market_cap: parsePositiveInt(launch.per_market_cap, 400),
     total_cap: parsePositiveInt(launch.max_targets, 750),
     spread_interval_seconds: parsePositiveInt(launch.spread_interval_seconds, 45),

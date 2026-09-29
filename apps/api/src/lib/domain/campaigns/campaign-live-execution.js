@@ -303,7 +303,9 @@ export function buildProductionQueueRailsPatch(campaign = {}) {
   const batchMax = asPositiveInteger(campaign.batch_max, 50)
   const dailyCap = asPositiveInteger(campaign.daily_cap, batchMax)
   const marketCap = asPositiveInteger(campaign.market_cap, dailyCap)
-  const perSenderCap = asPositiveInteger(campaign.per_sender_cap, batchMax)
+  // Only an explicit campaign override is pushed to the rail; otherwise the
+  // operator's configured queue_per_number_cap stays authoritative.
+  const perSenderCap = asPositiveInteger(campaign.per_sender_cap, null)
   const market = clean(campaign.market)
   const state = market.toLowerCase().includes(', fl') ? 'FL' : clean(campaign.metadata?.state)
 
@@ -330,7 +332,7 @@ export function buildProductionQueueRailsPatch(campaign = {}) {
     queue_max_batch_size: String(batchMax),
     queue_daily_send_cap: String(dailyCap),
     queue_market_cap: String(marketCap),
-    queue_per_number_cap: String(perSenderCap),
+    ...(perSenderCap ? { queue_per_number_cap: String(perSenderCap) } : {}),
     ...(market ? { queue_market_filter: market } : {}),
     ...(state ? { queue_state_filter: state } : {}),
     queue_last_run_status: '',

@@ -87,7 +87,7 @@ describe('campaign size is never the worker chunk (the 50-message choke point)',
 describe('what reopening a saved draft restores', () => {
   it('restores pacing and the window from the campaign, not from presets', () => {
     const restored = hydrateLaunchSettings(launch({
-      daily_cap: '750', per_sender_cap: '150', contact_window_start: '08:00', contact_window_end: '21:00',
+      daily_cap: '750', per_sender_cap: '', contact_window_start: '08:00', contact_window_end: '21:00',
     }), {
       daily_cap: 300, per_sender_cap: 90, market_cap: 250, total_cap: 40,
       send_interval_seconds: 60, contact_window_start: '09:00', contact_window_end: '18:00',
@@ -130,5 +130,16 @@ describe('what reopening a saved draft restores', () => {
     // the real send.
     const at = new Date(2026, 8, 20, 9, 5)
     expect(toLocalDateTimeInputValue(at)).toBe('2026-09-20T09:05')
+  })
+})
+
+describe('per-number daily limit', () => {
+  it('is an optional override: blank defers to the server-configured limit, never a builder literal', () => {
+    const blank = buildActivateNowPayload(launch({ per_sender_cap: '' }), 'c1', 'America/Chicago') as Record<string, any>
+    expect(blank.per_sender_cap).toBeNull()
+    const persisted = buildCampaignPersistPayload(draft, launch({ per_sender_cap: '' }), serialize) as Record<string, any>
+    expect(persisted.per_sender_cap).toBeNull()
+    const override = buildActivateNowPayload(launch({ per_sender_cap: '300' }), 'c1', 'America/Chicago') as Record<string, any>
+    expect(override.per_sender_cap).toBe(300)
   })
 })

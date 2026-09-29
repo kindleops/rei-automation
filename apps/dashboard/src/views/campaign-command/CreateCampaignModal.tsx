@@ -31,6 +31,7 @@ import {
   extractMarketFromFilterDraft,
   hydrateLaunchSettings,
   isInsideContactWindow,
+  perSenderOverride,
   resolveCampaignTimezone,
 } from './campaign-builder-launch'
 import { getCampaignBackend, getQueueControlSettings, queueCampaignPlan, type CampaignLaunchPreflight } from '../../lib/api/backendClient'
@@ -103,9 +104,9 @@ interface PacingPresetConfig {
 }
 
 const PACING_PRESETS: PacingPresetConfig[] = [
-  { key: 'conservative', label: 'Conservative', blurb: 'Slow & safe', daily_cap: '250', spread_interval_seconds: '90', per_sender_cap: '75', per_market_cap: '150' },
-  { key: 'normal', label: 'Normal', blurb: 'Balanced cadence', daily_cap: '750', spread_interval_seconds: '45', per_sender_cap: '150', per_market_cap: '400' },
-  { key: 'aggressive', label: 'Aggressive', blurb: 'Max throughput', daily_cap: '2000', spread_interval_seconds: '20', per_sender_cap: '300', per_market_cap: '1000' },
+  { key: 'conservative', label: 'Conservative', blurb: 'Slow & safe', daily_cap: '250', spread_interval_seconds: '90', per_sender_cap: '', per_market_cap: '150' },
+  { key: 'normal', label: 'Normal', blurb: 'Balanced cadence', daily_cap: '750', spread_interval_seconds: '45', per_sender_cap: '', per_market_cap: '400' },
+  { key: 'aggressive', label: 'Aggressive', blurb: 'Max throughput', daily_cap: '2000', spread_interval_seconds: '20', per_sender_cap: '', per_market_cap: '1000' },
   { key: 'custom', label: 'Custom', blurb: 'Advanced controls', daily_cap: '', spread_interval_seconds: '', per_sender_cap: '', per_market_cap: '' },
 ]
 
@@ -731,7 +732,7 @@ const buildLaunchPayload = (settings: LaunchSettings): CampaignLaunchPayload => 
     // the form ships with so an empty field never truncates the audience.
     max_targets: parsePositiveInt(settings.max_targets, DEFAULT_MAX_TARGETS),
     daily_cap: parsePositiveInt(settings.daily_cap, 750),
-    per_sender_cap: parsePositiveInt(settings.per_sender_cap, 150),
+    per_sender_cap: perSenderOverride(settings.per_sender_cap) ?? undefined,
     per_market_cap: parsePositiveInt(settings.per_market_cap, 400),
     first_scheduled_at: firstScheduledAt,
     spread_interval_seconds: parsePositiveInt(settings.spread_interval_seconds, 45),
@@ -2497,7 +2498,7 @@ export const CreateCampaignModal = ({
                     <div className="cmp-pacing-readout" role="group" aria-label="Pacing summary">
                       <span><em>Messages/day</em><strong>{formatNumber(launchEstimates.dailyVolume)}/day</strong></span>
                       <span><em>Spacing</em><strong>{launchEstimates.spacingSeconds}s</strong></span>
-                      <span><em>Sender cap</em><strong>{formatNumber(parsePositiveInt(launchSettings.per_sender_cap, 150))}/day</strong></span>
+                      <span><em>Sender cap</em><strong>{perSenderOverride(launchSettings.per_sender_cap) ? `${formatNumber(perSenderOverride(launchSettings.per_sender_cap) as number)}/day` : 'System limit'}</strong></span>
                       <span><em>Market cap</em><strong>{formatNumber(parsePositiveInt(launchSettings.per_market_cap, 400))}/day</strong></span>
                       <span><em>Runtime</em><strong>{launchEstimates.durationLabel}</strong></span>
                     </div>
@@ -2566,6 +2567,7 @@ export const CreateCampaignModal = ({
                       <input
                         type="number"
                         min={1}
+                        placeholder="System limit"
                         value={launchSettings.per_sender_cap}
                         onChange={(event) => updateLaunchSetting({ per_sender_cap: event.target.value })}
                       />
@@ -2972,7 +2974,7 @@ const LaunchConfirmModal = ({
           <div><span>Pacing</span><strong>{PACING_PRESET_BY_KEY.get(payload.pacing ?? 'custom')?.label ?? 'Custom'}</strong></div>
           <div><span>Send Cap</span><strong>{payload.max_targets}</strong></div>
           <div><span>Daily Cap</span><strong>{payload.daily_cap}</strong></div>
-          <div><span>Sender Cap</span><strong>{payload.per_sender_cap ?? '—'}</strong></div>
+          <div><span>Sender Cap</span><strong>{payload.per_sender_cap ?? 'System limit'}</strong></div>
           <div><span>Market Cap</span><strong>{payload.per_market_cap ?? '—'}</strong></div>
           <div><span>First Send</span><strong>{isActivate ? 'Now' : formatDateTime(payload.first_scheduled_at)}</strong></div>
           <div><span>Spacing</span><strong>{payload.spread_interval_seconds}s</strong></div>

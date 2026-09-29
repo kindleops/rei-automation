@@ -359,3 +359,21 @@ test("a carrier-filtered (Spam) send retries ONCE with that template excluded; a
   const again = await recycleFilteredSends(tableStore(tables), "c");
   assert.equal(again.recycled, 0, "idempotent across feeder runs");
 });
+
+test("per-sender limit is config-driven: campaign override first, else queue_per_number_cap, never a literal", async () => {
+  const { effectivePerSenderCap, loadConfiguredPerSenderCap } = await import("@/lib/domain/campaigns/sender-capacity.js");
+  const { buildProductionQueueRailsPatch } = await import("@/lib/domain/campaigns/campaign-live-execution.js");
+  const { dailyPace } = await import("@/lib/domain/calendar/calendar-timeline-service.js");
+  assert.equal(effectivePerSenderCap({ campaign: {}, configured: 800 }), 800);
+  assert.equal(effectivePerSenderCap({ campaign: { per_sender_cap: 300 }, configured: 800 }), 300);
+  assert.equal(effectivePerSenderCap({ input: { per_sender_cap: 40 }, campaign: { per_sender_cap: 300 }, configured: 800 }), 40);
+  assert.equal(effectivePerSenderCap({ campaign: {}, configured: null }), null);
+  assert.equal(await loadConfiguredPerSenderCap({ getSystemValue: async (k) => (k === "queue_per_number_cap" ? "800" : null) }), 800);
+  assert.equal(await loadConfiguredPerSenderCap({ getSystemValue: async () => { throw new Error("down"); } }), null);
+  // The rail follows config unless the campaign carries its own override.
+  assert.equal("queue_per_number_cap" in buildProductionQueueRailsPatch({ batch_max: 100, daily_cap: 750 }), false);
+  assert.equal(buildProductionQueueRailsPatch({ batch_max: 100, daily_cap: 750, per_sender_cap: 300 }).queue_per_number_cap, "300");
+  // Calendar pace: 3 senders × configured 800, bounded by daily_cap.
+  assert.equal(dailyPace({ daily_cap: 5000 }, { senders: 3 }, 800), 2400);
+  assert.equal(dailyPace({ daily_cap: 750 }, { senders: 3 }, 800), 750);
+});

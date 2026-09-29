@@ -509,7 +509,7 @@ async function loadCampaignDiagnostics(values) {
     if (!asPositiveInteger(activeCampaign.total_cap, null)) exactBlockers.push('active_campaign_missing_total_cap')
     if (!asPositiveInteger(activeCampaign.batch_max, null)) exactBlockers.push('active_campaign_missing_batch_max')
     if (!asPositiveInteger(activeCampaign.market_cap, null)) exactBlockers.push('active_campaign_missing_market_cap')
-    if (!asPositiveInteger(activeCampaign.per_sender_cap, null)) exactBlockers.push('active_campaign_missing_per_sender_cap')
+    // per_sender_cap is an optional override; queue_per_number_cap governs otherwise.
   }
 
   return {
