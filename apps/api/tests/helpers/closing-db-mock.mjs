@@ -86,6 +86,12 @@ export function makeClosingDb(seed = {}, ext = {}) {
       contains(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.every((x) => r[c].includes(x))); return api },
       overlaps(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.some((x) => r[c].includes(x))); return api },
       neq(c, v) { filters.push((r) => r[c] !== v); return api },
+      not(c, op, v) {
+        if (op === 'in') { const list = String(v).replace(/^\(|\)$/g, '').split(',').map((x) => x.replace(/^"|"$/g, '')); filters.push((r) => !list.includes(String(r[c]))) }
+        else if (op === 'is') filters.push((r) => !(v === null ? r[c] === null || r[c] === undefined : r[c] === v))
+        else filters.push((r) => r[c] !== v)
+        return api
+      },
       in(c, arr) { filters.push((r) => arr.includes(r[c])); return api },
       is(c, v) { filters.push((r) => (v === null ? r[c] === null || r[c] === undefined : r[c] === v)); return api },
       order(c, o = {}) { orderBy = { c, asc: o.ascending !== false }; return api },

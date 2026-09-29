@@ -646,25 +646,26 @@ export async function recordSellerInboundExecutionTimeline({
     await record('contactability_checked', { executionStatus: 'succeeded' });
   }
 
-  if (execution?.queued || execution?.queue_row_id || decision?.queue_row_id) {
+  // LEDGER TRUTH (2026-09-29): a reply is "queued" only when a real queue row
+  // exists, and it is never "sent" here — delivery happens later in the queue
+  // runner and its outcome lives on the send_queue row. The old recorder wrote
+  // message_queued/message_sent whenever `execution.queued` was truthy, so
+  // review-only and auto-reply-off runs claimed sends that never happened.
+  const queueRowId = execution?.queue_row_id || decision?.queue_row_id || null;
+  if (queueRowId) {
     await record('duplicate_send_check', { executionStatus: 'succeeded' });
     await record('message_queued', {
       executionStatus: 'succeeded',
-      queueId: execution?.queue_row_id || decision?.queue_row_id || null,
-      outputSummary: { queued: true },
+      queueId: queueRowId,
+      outputSummary: { queued: true, queue_row_id: queueRowId },
     });
   }
 
-  if (execution?.queue_result?.ok === false) {
+  if (execution?.queue_result?.ok === false && execution?.queue_result?.reason !== 'duplicate_blocked') {
     await record('message_failed', {
       executionStatus: 'failed',
       errorDetails: execution?.queue_result || null,
       providerStatus: 'failed',
-    });
-  } else if (execution?.queued) {
-    await record('message_sent', {
-      executionStatus: 'succeeded',
-      providerStatus: 'sent',
     });
   }
 
