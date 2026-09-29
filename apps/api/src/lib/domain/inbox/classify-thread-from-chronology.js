@@ -246,6 +246,7 @@ export function patchToInboxThreadState(patch = {}, overrides = {}) {
     updated_at: patch.updated_at || new Date().toISOString(),
   };
 
+  if (overrides.seller_display_name) row.seller_display_name = overrides.seller_display_name;
   if (overrides.is_read !== undefined) row.is_read = overrides.is_read;
   if (overrides.status !== undefined) row.status = overrides.status;
   if (overrides.stage !== undefined) row.stage = overrides.stage;

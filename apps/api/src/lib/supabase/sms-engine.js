@@ -1980,6 +1980,7 @@ export async function writeOutboundSuccessMessageEvent(row, send_result, options
           prospect_id: savedPayload.prospect_id,
           property_id: savedPayload.property_id,
           market: normalized.market || null,
+          seller_display_name: normalized.seller_display_name || savedPayload.seller_display_name || null,
           conversationStage: savedPayload.stage_after || savedPayload.stage_before,
           messageEvent: savedPayload,
           is_read: true,
@@ -3996,6 +3997,10 @@ export async function syncClassifiedInboxThreadState({
   prospect_id,
   property_id,
   market,
+  // The name the send was addressed to (send_queue.seller_display_name). The
+  // inbox view falls back to master_owners/prospects, which many campaign
+  // targets never resolve to — without this a thread shows only a number.
+  seller_display_name,
   conversationStage,
   classification,
   messageEvent,
@@ -4091,6 +4096,7 @@ export async function syncClassifiedInboxThreadState({
     prospect_id,
     property_id,
     market,
+    seller_display_name,
     is_read,
     increment_direction,
     status: "active",
@@ -5272,6 +5278,9 @@ export async function upsertInboxThreadState(payload, deps = {}) {
     }
   };
 
+  // Name is additive only: a message without one (an inbound, an auto-reply)
+  // must never blank the name a campaign send already recorded.
+  if (clean(payload.seller_display_name)) insert_payload.seller_display_name = clean(payload.seller_display_name);
   if (payload.latest_message_body !== undefined) insert_payload.latest_message_body = clean(payload.latest_message_body);
   if (payload.latest_message_at !== undefined) insert_payload.latest_message_at = payload.latest_message_at;
   if (payload.latest_direction !== undefined) insert_payload.latest_direction = clean(payload.latest_direction);

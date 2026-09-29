@@ -108,3 +108,23 @@ test("a spam retry of a campaign touch is a NEW logical communication (action 2)
   const again = resolveQueueRowIdentity({ ...base, metadata: { spam_retry_generation: 1 } })
   assert.equal(buildLogicalCommunicationKey({ communication_type: again.communication_type, ...again.anchors }).key, k2.key, "the same retry is still idempotent")
 })
+
+test("a campaign send names its inbox thread; a later message without a name never blanks it", async () => {
+  const { upsertInboxThreadState } = await import("@/lib/supabase/sms-engine.js");
+  const { patchToInboxThreadState } = await import("@/lib/domain/inbox/classify-thread-from-chronology.js");
+  const writes = [];
+  const supabase = {
+    from: () => ({
+      select() { return this; }, eq() { return this; }, limit() { return this; },
+      maybeSingle: async () => ({ data: null, error: null }),
+      upsert(row) { writes.push(row); return { select: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }; },
+    }),
+  };
+  const named = patchToInboxThreadState({ latest_direction: "outbound" }, { thread_key: "+16125550100", seller_phone: "+16125550100", seller_display_name: "Jane Seller" });
+  assert.equal(named.seller_display_name, "Jane Seller");
+  await upsertInboxThreadState(named, { supabase });
+  assert.equal(writes[0].seller_display_name, "Jane Seller");
+  const unnamed = patchToInboxThreadState({ latest_direction: "inbound" }, { thread_key: "+16125550100", seller_phone: "+16125550100" });
+  await upsertInboxThreadState(unnamed, { supabase });
+  assert.equal("seller_display_name" in writes[1], false);
+});
