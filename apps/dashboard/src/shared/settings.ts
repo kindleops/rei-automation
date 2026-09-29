@@ -141,6 +141,10 @@ export interface NexusSettings {
   notificationQuietHoursEnd: string
   notificationDomainMutes: Record<string, boolean>
   notificationMasterMuted: boolean
+  /** Per alert type (domain/notifications/alert-types.ts): alert at all in the app. */
+  alertTypeEnabled: Record<string, boolean>
+  /** Per alert type: sound asset id, or 'none'. Missing = the type's default sound. */
+  alertTypeSound: Record<string, string>
 
   // Keyboard
   keyboardShortcutsEnabled: boolean
@@ -259,6 +263,8 @@ export const DEFAULT_SETTINGS: NexusSettings = {
   notificationQuietHoursEnd: '07:00',
   notificationDomainMutes: {},
   notificationMasterMuted: false,
+  alertTypeEnabled: {},
+  alertTypeSound: {},
   keyboardShortcutsEnabled: true,
 
   // Operator personalization

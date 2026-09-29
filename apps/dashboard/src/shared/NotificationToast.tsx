@@ -28,6 +28,8 @@ export interface NexusNotification {
   dismissMs?: number        // default: 3000
   read?: boolean
   source?: string           // module that emitted the notification
+  /** The caller already played its own sound (server alerts pick theirs in Settings). */
+  silent?: boolean
   action?: {
     label: string
     onClick: () => void
@@ -98,7 +100,9 @@ export const NotificationToasts = () => {
       setToasts((prev) => [notif, ...prev].slice(0, MAX_VISIBLE_TOASTS + 2))
 
       // Play sound
-      if (notif.sound) {
+      if (notif.silent) {
+        // sound (or deliberate silence) already handled by the caller
+      } else if (notif.sound) {
         playSound(notif.sound)
       } else if (notif.severity === 'critical') {
         playSound('alert-triggered')

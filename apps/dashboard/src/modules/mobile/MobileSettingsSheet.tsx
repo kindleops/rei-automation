@@ -7,7 +7,7 @@ import {
   type RuntimeShellReport,
 } from '../../lib/build-identity'
 import { MobileAppearanceControls } from './MobileAppearanceControls'
-import { MobileNotificationPermission } from '../notifications/MobileNotificationPermission'
+import { AlertSettings } from '../notifications/AlertSettings'
 import { useBreakpoint } from './useBreakpoint'
 import { getViewportDebug } from './viewport-runtime'
 
@@ -109,8 +109,8 @@ export const MobileSettingsSheet = ({ open, onClose }: MobileSettingsSheetProps)
           */}
           <MobileAppearanceControls />
 
-          <p className="nx-mobile-settings-sheet__label">Notifications</p>
-          <MobileNotificationPermission variant="setting" />
+          <p className="nx-mobile-settings-sheet__label">Alerts</p>
+          <AlertSettings />
           <p className="nx-mobile-settings-sheet__label">About</p>
           <div className="nx-mobile-settings-sheet__about">
             <span>Build</span>

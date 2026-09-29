@@ -25,8 +25,16 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     window.setTimeout(() => window.location.reload(), 120)
   }
 
-  navigator.serviceWorker.addEventListener('message', (event: MessageEvent<{ type?: string }>) => {
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent<{ type?: string; url?: string }>) => {
     if (event.data?.type === 'NEXUS_SW_ACTIVATED') scheduleReload()
+    // A tapped phone alert, when the worker cannot navigate the window itself.
+    // The worker posted this for months with nobody listening.
+    if (event.data?.type === 'NEXUS_PUSH_NAVIGATE' && event.data.url) {
+      const target = new URL(event.data.url, window.location.origin)
+      if (target.origin === window.location.origin) {
+        void import('./app/router').then(({ pushRoutePath }) => pushRoutePath(`${target.pathname}${target.search}`))
+      }
+    }
   })
   navigator.serviceWorker.addEventListener('controllerchange', scheduleReload)
 

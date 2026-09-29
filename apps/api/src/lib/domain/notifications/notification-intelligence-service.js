@@ -5,6 +5,7 @@
  * Dedup-safe upsert, grouping evolution, operator state, rate limits, mutes.
  */
 
+import { alertTypeFor, OCCURRENCE_TYPES } from './alert-types.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { child } from '@/lib/logging/logger.js'
 import {
@@ -236,12 +237,25 @@ export async function upsertNotificationEvent(fields = {}) {
 
     if (existing) {
       const evolvedCount = Number(existing.group_count ?? 1) + 1
+      // A seller reply / hot lead is a NEW thing each time (another message), so
+      // it re-opens the notification — unread, undismissed — and alerts again.
+      // A standing condition re-reporting is not new: a notification the
+      // operator dismissed stays dismissed unless the condition turned critical.
+      // (Previously every re-emission revived a dismissed row — while leaving it
+      // "read", so it came back silently: swiped away, back on the next event.)
+      const alertType = alertTypeFor(baseRow)
+      const isOccurrence = OCCURRENCE_TYPES.has(alertType)
+      const reopen = isOccurrence
+        || (existing.status === 'dismissed' && baseRow.severity === 'critical')
+        || existing.status === 'resolved'
+      const status = existing.status === 'dismissed' && !reopen ? 'dismissed' : (baseRow.status || 'active')
       const patch = {
         ...baseRow,
         group_count: evolvedCount,
         description: interpolateDescription(baseRow.description ?? existing.description, evolvedCount),
-        status: existing.status === 'dismissed' ? 'active' : (baseRow.status || existing.status),
-        dismissed_at: existing.status === 'dismissed' ? null : undefined,
+        status,
+        ...(reopen && existing.status === 'dismissed' ? { dismissed_at: null } : {}),
+        ...(isOccurrence ? { read_at: null } : {}),
         updated_at: now().toISOString(),
       }
       const { data, error } = await db
@@ -255,7 +269,9 @@ export async function upsertNotificationEvent(fields = {}) {
         logger.warn('notification.upsert_evolve_error', { error: error.message })
         return { ok: false, error: error.message }
       }
-      return { ok: true, id: data?.id ?? existing.id, evolved: true }
+      // A new occurrence alerts like a new notification would.
+      if (isOccurrence) void dispatchPushForNotification({ ...baseRow, id: data?.id ?? existing.id })
+      return { ok: true, id: data?.id ?? existing.id, evolved: true, reopened: reopen }
     }
 
     const insertRow = {
@@ -650,11 +666,14 @@ async function dispatchPushForNotification(row) {
     const { deliverPushNotification } = await import('./web-push-transport.js')
 
     const severity = String(row.severity ?? 'neutral')
-    // Only work-shaped signals are worth interrupting a phone for. `positive` and
-    // `neutral` still land in the notification centre; they do not buzz.
-    if (severity !== 'critical' && severity !== 'warning') return
+    // Which notifications buzz a phone is the operator's choice per alert TYPE
+    // and per device (push_subscriptions.alert_types, defaults in PUSH_DEFAULTS).
+    // Severity alone was the wrong gate: a seller reply is `neutral`, so the
+    // alert the operator most wanted never reached the phone.
+    const alertType = alertTypeFor(row)
 
     await deliverPushNotification({
+      alertType,
       id: row.id,
       title: row.title,
       body: row.description || '',

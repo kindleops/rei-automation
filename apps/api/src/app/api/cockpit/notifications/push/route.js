@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server.js'
 import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../_shared.js'
 import {
+  readPushAlertTypes,
   removePushSubscription,
   resolvePushConfig,
   savePushSubscription,
+  updatePushAlertTypes,
 } from '@/lib/domain/notifications/web-push-transport.js'
+import { ALERT_TYPES, PUSH_DEFAULTS } from '@/lib/domain/notifications/alert-types.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -34,11 +37,18 @@ export async function GET(request) {
   if (!auth.ok) return auth.response
 
   const config = resolvePushConfig()
+  // ?endpoint= also returns what THIS device receives, so the settings screen
+  // shows the stored choice rather than assuming the defaults.
+  const endpoint = new URL(request.url).searchParams.get('endpoint')
+  const device = endpoint ? await readPushAlertTypes(endpoint) : null
   return NextResponse.json({
     ok: true,
     configured: config.configured,
     vapid_public_key: config.publicKey,
     reason: config.reason,
+    alert_types_available: ALERT_TYPES,
+    alert_type_defaults: PUSH_DEFAULTS,
+    device: device?.ok ? { subscribed: device.found, alert_types: device.alert_types } : null,
   }, { status: 200, headers: cors })
 }
 
@@ -63,6 +73,7 @@ export async function POST(request) {
       subscription: body.subscription,
       userKey: body.user_key ?? body.userKey ?? null,
       userAgent: request.headers.get('user-agent'),
+      alertTypes: body.alert_types ?? null,
     })
 
     if (!result.ok) {
@@ -74,6 +85,24 @@ export async function POST(request) {
       { ok: false, error: error?.message || 'push_subscribe_failed' },
       { status: 500, headers: cors },
     )
+  }
+}
+
+/** PATCH { endpoint, alert_types } — which alert types reach this device. */
+export async function PATCH(request) {
+  const cors = corsHeaders(request)
+  const auth = ensureMutationAuth(request)
+  if (!auth.ok) return auth.response
+  try {
+    const body = await parseJsonSafe(request)
+    const result = await updatePushAlertTypes(body.endpoint, body.alert_types)
+    if (!result.ok) {
+      const status = result.error === 'subscription_not_found' ? 404 : 400
+      return NextResponse.json({ ok: false, error: result.error }, { status, headers: cors })
+    }
+    return NextResponse.json({ ok: true, alert_types: result.alert_types }, { status: 200, headers: cors })
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error?.message || 'push_update_failed' }, { status: 500, headers: cors })
   }
 }
 

@@ -110,7 +110,7 @@ const wrapFullscreen = (node: ReactNode, viewId?: string) => (
 
 const rootRoute = defineRoute<null>({
   path: '/',
-  title: 'NEXUS | Inbox',
+  title: 'LeadCommand | Inbox',
   loader: async () => null,
   render: () => <ConversationView />,
 })
@@ -122,49 +122,49 @@ const rootRoute = defineRoute<null>({
  */
 const homeRoute = defineRoute<null>({
   path: '/home',
-  title: 'NEXUS | Home',
+  title: 'LeadCommand | Home',
   loader: async () => null,
   render: () => wrapFullscreen(<HomeView />, 'home'),
 })
 
 const inboxRoute = defineRoute<null>({
   path: '/inbox',
-  title: 'NEXUS | Inbox',
+  title: 'LeadCommand | Inbox',
   loader: async () => null,
   render: () => <InboxView routeMode="workspace" />,
 })
 
 const conversationRoute = defineRoute<null>({
   path: '/conversation',
-  title: 'NEXUS | Conversation',
+  title: 'LeadCommand | Conversation',
   loader: async () => null,
   render: () => <ConversationView />,
 })
 
 const dealIntelligenceRoute = defineRoute<null>({
   path: '/deal-intelligence',
-  title: 'NEXUS | Deal Intelligence',
+  title: 'LeadCommand | Deal Intelligence',
   loader: async () => null,
   render: () => <DealIntelligenceInboxRoute />,
 })
 
 const propertiesRoute = defineRoute<AcquisitionWorkspaceModel>({
   path: '/properties',
-  title: 'NEXUS | Properties',
+  title: 'LeadCommand | Properties',
   loader: loadAcquisitionWorkspace,
   render: (data) => wrapFullscreen(<PropertyIntelligenceApp data={data} />, 'deal_intelligence'),
 })
 
 const compIntelligenceRoute = defineRoute<null>({
   path: '/comp-intelligence',
-  title: 'NEXUS | Comp Intelligence',
+  title: 'LeadCommand | Comp Intelligence',
   loader: async () => null,
   render: () => <InboxView initialWorkspaceView="comp_intelligence" routeMode="fullscreen" />,
 })
 
 const buyerMatchRoute = defineRoute<null>({
   path: '/buyer-match',
-  title: 'NEXUS | Buyer Match',
+  title: 'LeadCommand | Buyer Match',
   // No loader: the subject comes from the property locator / URL, and the
   // canonical candidates are queried for THAT property. The old `loadBuyer`
   // loader hydrated the demo dataset on every visit.
@@ -174,28 +174,28 @@ const buyerMatchRoute = defineRoute<null>({
 
 const queueRoute = defineRoute<QueueModel>({
   path: '/queue',
-  title: 'NEXUS | Queue',
+  title: 'LeadCommand | Queue',
   loader: loadQueue,
   render: (data) => wrapFullscreen(<QueueView data={data} />, 'queue'),
 })
 
 const pipelineRoute = defineRoute<null>({
   path: '/pipeline',
-  title: 'NEXUS | Pipeline',
+  title: 'LeadCommand | Pipeline',
   loader: async () => null,
   render: () => <InboxView initialWorkspaceView="pipeline" routeMode="fullscreen" />,
 })
 
 const calendarRoute = defineRoute<null>({
   path: '/calendar',
-  title: 'NEXUS | Calendar',
+  title: 'LeadCommand | Calendar',
   loader: async () => null,
   render: () => <InboxView initialWorkspaceView="calendar" routeMode="fullscreen" />,
 })
 
 const mapRoute = defineRoute<null>({
   path: '/map',
-  title: 'NEXUS | Map',
+  title: 'LeadCommand | Map',
   loader: async () => null,
   render: () => <InboxView initialWorkspaceView="command_map" routeMode="fullscreen" />,
 })
@@ -237,35 +237,35 @@ const mapRoute = defineRoute<null>({
  */
 const analyticsRoute = defineRoute<null>({
   path: '/analytics',
-  title: 'NEXUS | Analytics',
+  title: 'LeadCommand | Analytics',
   loader: async () => null,
   render: () => <InboxView initialWorkspaceView="metrics" routeMode="fullscreen" />,
 })
 
 const closingDeskRoute = defineRoute<null>({
   path: '/closing-desk',
-  title: 'NEXUS | Closing Desk',
+  title: 'LeadCommand | Closing Desk',
   loader: async () => null,
   render: () => wrapFullscreen(<ClosingDeskView />, 'closing_desk'),
 })
 
 const campaignCommandRoute = defineRoute<null>({
   path: '/campaign-command',
-  title: 'NEXUS | Campaign Command',
+  title: 'LeadCommand | Campaign Command',
   loader: async () => null,
   render: () => wrapFullscreen(<CampaignsPage />, 'campaigns'),
 })
 
 const emailCommandRoute = defineRoute<null>({
   path: '/email-command',
-  title: 'NEXUS | Email Command',
+  title: 'LeadCommand | Email Command',
   loader: async () => null,
   render: () => wrapFullscreen(<EmailCommandCenter paneWidth="100" />, 'email'),
 })
 
 const workflowStudioRoute = defineRoute<null>({
   path: '/workflow-studio',
-  title: 'NEXUS | Workflow Studio',
+  title: 'LeadCommand | Workflow Studio',
   loader: async () => null,
   render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
@@ -277,7 +277,7 @@ const CompIntelligenceV4Harness = lazy(
 )
 const devCompIntelligenceV4Route = defineRoute<null>({
   path: '/dev/comp-v4',
-  title: 'NEXUS | Comp Intelligence V4 (dev)',
+  title: 'LeadCommand | Comp Intelligence V4 (dev)',
   loader: async () => null,
   render: () => (
     <Suspense fallback={null}>
@@ -291,7 +291,7 @@ const BuyerMatchV4Harness = lazy(
 )
 const devBuyerMatchV4Route = defineRoute<null>({
   path: '/dev/buyer-match-v4',
-  title: 'NEXUS | Buyer Match V4 (dev)',
+  title: 'LeadCommand | Buyer Match V4 (dev)',
   loader: async () => null,
   render: () => (
     <Suspense fallback={null}>
@@ -302,56 +302,56 @@ const devBuyerMatchV4Route = defineRoute<null>({
 
 const entityGraphRoute = defineRoute<null>({
   path: '/entity-graph',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphPropertyRoute = defineRoute<null>({
   path: '/entity-graph/property/:property_id',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphOwnerRoute = defineRoute<null>({
   path: '/entity-graph/owner/:master_owner_id',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphProspectRoute = defineRoute<null>({
   path: '/entity-graph/prospect/:prospect_id',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphContactRoute = defineRoute<null>({
   path: '/entity-graph/contact/:type/:id',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphOrganizationRoute = defineRoute<null>({
   path: '/entity-graph/organization/:id',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphMarketRoute = defineRoute<null>({
   path: '/entity-graph/market/:market_key',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })
 
 const entityGraphZipRoute = defineRoute<null>({
   path: '/entity-graph/zip/:zip',
-  title: 'NEXUS | Entity Graph',
+  title: 'LeadCommand | Entity Graph',
   loader: async () => null,
   render: () => <EntityGraphView />,
 })

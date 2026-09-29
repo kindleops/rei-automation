@@ -312,3 +312,58 @@ test('grouping evolution increments group_count on repeat dedup', async () => {
 test('THRESHOLDS align with proactive notification sample size', () => {
   assert.equal(THRESHOLDS.MIN_SAMPLE_SIZE, 50)
 })
+// ---------------------------------------------------------------------------
+// Alert types + re-open semantics (2026-09-28)
+// ---------------------------------------------------------------------------
+
+test('a second seller reply re-opens a read or dismissed notification as unread', async () => {
+  const mock = makeSupabaseMock()
+  __setDeps({ supabase_override: mock, now_override: '2026-09-28T12:00:00.000Z', rate_limit_cache: new Map() })
+  const emit = () => upsertNotificationEvent({ event_type: 'inbox_message_received', domain: 'inbox', severity: 'neutral', deduplication_key: 'inbox_message_received:+16125550100:2026-09-28', title: 'Seller replied' })
+  await emit()
+  const row = mock.state.notification_events[0]
+  Object.assign(row, { status: 'dismissed', dismissed_at: '2026-09-28T12:01:00Z', read_at: '2026-09-28T12:01:00Z' })
+  const again = await emit()
+  assert.equal(again.evolved, true)
+  assert.equal(row.status, 'active')
+  assert.equal(row.dismissed_at, null)
+  assert.equal(row.read_at, null, 'a new message must be unread again, or it comes back silently')
+  __resetDeps()
+})
+
+test('a dismissed standing condition stays dismissed when it re-reports (swiped away means gone)', async () => {
+  const mock = makeSupabaseMock()
+  __setDeps({ supabase_override: mock, now_override: '2026-09-28T12:00:00.000Z', rate_limit_cache: new Map() })
+  const emit = (severity = 'warning') => upsertNotificationEvent({ event_type: 'campaign_stale_heartbeat', domain: 'campaigns', severity, deduplication_key: 'campaign_stale_heartbeat:c1:2026-09-28', title: 'Heartbeat stale' })
+  await emit()
+  const row = mock.state.notification_events[0]
+  Object.assign(row, { status: 'dismissed', dismissed_at: '2026-09-28T12:01:00Z', read_at: '2026-09-28T12:01:00Z' })
+  await emit()
+  assert.equal(row.status, 'dismissed')
+  assert.equal(row.dismissed_at, '2026-09-28T12:01:00Z')
+  await emit('critical')
+  assert.equal(row.status, 'active', 'a condition that turns critical does resurface')
+  __resetDeps()
+})
+
+test('alert types: real event types land in the type the operator controls, server and dashboard agree', async () => {
+  const { alertTypeFor, pushEnabledFor, sanitizeAlertTypes, PUSH_DEFAULTS } = await import('@/lib/domain/notifications/alert-types.js')
+  const cases = [
+    [{ event_type: 'inbox_message_received', domain: 'inbox', severity: 'neutral' }, 'seller_reply'],
+    [{ event_type: 'inbox_hot_lead', domain: 'inbox', severity: 'positive' }, 'hot_lead'],
+    [{ event_type: 'inbox_ownership_confirmed', domain: 'inbox', severity: 'positive' }, 'hot_lead'],
+    [{ event_type: 'inbox_price_captured', domain: 'inbox', severity: 'positive' }, 'hot_lead'],
+    [{ event_type: 'inbox_opt_out_received', domain: 'inbox', severity: 'warning' }, 'opt_out'],
+    [{ event_type: 'inbox_negative_sentiment', domain: 'inbox', severity: 'warning' }, 'opt_out'],
+    [{ event_type: 'campaign_paused', domain: 'campaigns', severity: 'warning' }, 'campaign'],
+    [{ event_type: 'campaign_stale_heartbeat', domain: 'campaigns', severity: 'warning' }, 'system'],
+    [{ event_type: 'launch_safety.send_failed', domain: 'launch_safety', severity: 'warning' }, 'system'],
+    [{ event_type: 'platform_webhook_stale', domain: 'platform', severity: 'warning' }, 'system'],
+  ]
+  for (const [row, expected] of cases) assert.equal(alertTypeFor(row), expected, row.event_type)
+  // Seller replies buzz the phone by default — severity `neutral` used to block them.
+  assert.equal(pushEnabledFor(null, 'seller_reply'), true)
+  assert.equal(pushEnabledFor({ seller_reply: false }, 'seller_reply'), false)
+  assert.equal(pushEnabledFor({}, 'campaign'), PUSH_DEFAULTS.campaign)
+  assert.deepEqual(sanitizeAlertTypes({ seller_reply: true, bogus: true, campaign: 'yes' }), { seller_reply: true })
+})

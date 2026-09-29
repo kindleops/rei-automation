@@ -10,6 +10,7 @@ export type SoundAssetId =
   | 'new-alert'
   | 'error-alert'
   | 'deal-to-offer-stage'
+  | 'delivered-sms'
 
 export const SOUND_ASSET_URLS: Record<SoundAssetId, string> = {
   'priority-sms': '/sounds/priority-sms.mp3',
@@ -17,6 +18,7 @@ export const SOUND_ASSET_URLS: Record<SoundAssetId, string> = {
   'new-alert': '/sounds/new-alert.mp3',
   'error-alert': '/sounds/error-alert.mp3',
   'deal-to-offer-stage': '/sounds/deal-to-offer-stage.mp3',
+  'delivered-sms': '/sounds/delivered-sms.mp3',
 }
 
 export const SOUND_ASSET_LABELS: Record<SoundAssetId, string> = {
@@ -25,6 +27,7 @@ export const SOUND_ASSET_LABELS: Record<SoundAssetId, string> = {
   'new-alert': 'New Alert',
   'error-alert': 'Error Alert',
   'deal-to-offer-stage': 'Deal / Offer Stage',
+  'delivered-sms': 'Soft Chime',
 }
 
 /** Map legacy + intelligence sound events to bundled MP3 assets. */

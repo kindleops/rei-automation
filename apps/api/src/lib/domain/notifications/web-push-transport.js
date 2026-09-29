@@ -19,6 +19,7 @@
  * Generating a keypair (once, then set the two env vars):
  *   node -e "console.log(require('web-push').generateVAPIDKeys())"
  */
+import { pushEnabledFor, sanitizeAlertTypes } from './alert-types.js'
 import webpush from 'web-push'
 import { supabase } from '@/lib/supabase/client.js'
 import { child } from '@/lib/logging/logger.js'
@@ -76,7 +77,7 @@ function db() {
  * than an insert, and a re-subscribe after a permission toggle does not accumulate
  * duplicate rows that would each deliver the same alert.
  */
-export async function savePushSubscription({ subscription, userKey, userAgent }) {
+export async function savePushSubscription({ subscription, userKey, userAgent, alertTypes }) {
   const endpoint = subscription?.endpoint
   const p256dh = subscription?.keys?.p256dh
   const auth = subscription?.keys?.auth
@@ -95,6 +96,10 @@ export async function savePushSubscription({ subscription, userKey, userAgent })
     failure_count: 0,
     updated_at: new Date().toISOString(),
   }
+  // Only written when the client sent a choice: a plain re-subscribe must not
+  // wipe the alert types this device already chose.
+  const chosen = sanitizeAlertTypes(alertTypes)
+  if (chosen) row.alert_types = chosen
 
   const { error } = await db()
     .from(PUSH_SUBSCRIPTION_TABLE)
@@ -105,6 +110,33 @@ export async function savePushSubscription({ subscription, userKey, userAgent })
     return { ok: false, error: error.message }
   }
   return { ok: true }
+}
+
+/** The alert-type choices stored for one device (null = all defaults). */
+export async function readPushAlertTypes(endpoint) {
+  if (!endpoint) return { ok: false, error: 'endpoint_required' }
+  const { data, error } = await db()
+    .from(PUSH_SUBSCRIPTION_TABLE)
+    .select('alert_types')
+    .eq('endpoint', endpoint)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, found: Boolean(data), alert_types: data?.alert_types ?? null }
+}
+
+/** Replace one device's alert-type choices. */
+export async function updatePushAlertTypes(endpoint, alertTypes) {
+  if (!endpoint) return { ok: false, error: 'endpoint_required' }
+  const chosen = sanitizeAlertTypes(alertTypes)
+  if (!chosen) return { ok: false, error: 'alert_types_required' }
+  const { data, error } = await db()
+    .from(PUSH_SUBSCRIPTION_TABLE)
+    .update({ alert_types: chosen, updated_at: new Date().toISOString() })
+    .eq('endpoint', endpoint)
+    .select('endpoint')
+  if (error) return { ok: false, error: error.message }
+  if (!data?.length) return { ok: false, error: 'subscription_not_found' }
+  return { ok: true, alert_types: chosen }
 }
 
 export async function removePushSubscription(endpoint) {
@@ -155,7 +187,7 @@ export async function deliverPushNotification(payload) {
 
   const { data: subscriptions, error } = await db()
     .from(PUSH_SUBSCRIPTION_TABLE)
-    .select('endpoint, p256dh, auth')
+    .select('endpoint, p256dh, auth, alert_types')
     .is('revoked_at', null)
     .limit(500)
 
@@ -163,14 +195,17 @@ export async function deliverPushNotification(payload) {
     logger.warn('push.subscription_read_failed', { error: error.message })
     return { ok: false, skipped: false, reason: error.message, sent: 0 }
   }
-  if (!subscriptions?.length) {
-    return { ok: true, skipped: true, reason: 'no_subscriptions', sent: 0 }
+  // Each device chooses which alert types reach it; a payload without a type
+  // (legacy caller) goes everywhere, as before.
+  const targets = (subscriptions || []).filter((row) => !payload.alertType || pushEnabledFor(row.alert_types, payload.alertType))
+  if (!targets.length) {
+    return { ok: true, skipped: true, reason: subscriptions?.length ? 'no_subscriber_wants_type' : 'no_subscriptions', sent: 0 }
   }
 
   const body = JSON.stringify(payload)
   let sent = 0
 
-  await Promise.all(subscriptions.map(async (row) => {
+  await Promise.all(targets.map(async (row) => {
     try {
       await webpush.sendNotification(
         { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } },

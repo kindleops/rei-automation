@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../shared/icons'
+import { AlertSettings } from './AlertSettings'
 import { updateSetting } from '../../shared/settings'
 import type { NotificationDomain, NotificationPreferences, SoundCategory } from '../../domain/notifications/notification-contract'
 import { NOTIFICATION_DOMAINS, SOUND_CATEGORIES } from '../../domain/notifications/notification-contract'
@@ -124,6 +125,10 @@ export const NotificationPreferencesPanel = ({
       </header>
 
       <div className="lcnc-prefs__body">
+        <section className="lcnc-prefs__section">
+          <label className="lcnc-prefs__label">ALERTS</label>
+          <AlertSettings />
+        </section>
         <section className="lcnc-prefs__section">
           <label className="lcnc-prefs__label">MASTER CONTROLS</label>
           <div className="lcnc-prefs__row">

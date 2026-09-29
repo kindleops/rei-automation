@@ -37,7 +37,7 @@ export const RequireAuth = ({ children }: { children: ReactNode }) => {
     return (
       <main className="app-state">
         <div className="app-state__panel">
-          <span className="app-state__eyebrow">NEXUS</span>
+          <span className="app-state__eyebrow">LeadCommand</span>
           <h1>Authenticating</h1>
           <p>Verifying operator credentials…</p>
         </div>

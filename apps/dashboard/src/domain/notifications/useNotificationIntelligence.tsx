@@ -23,7 +23,37 @@ import type {
   NotificationPatchOp,
   NotificationPreferences,
 } from './notification-contract'
-import { playGroupedNotificationSounds } from './notification-sound-bridge'
+import { isAlertTypeEnabled, playGroupedNotificationSounds } from './notification-sound-bridge'
+import { alertTypeFor } from './alert-types'
+import { emitNotification, type NotificationSeverity as ToastSeverity } from '../../shared/NotificationToast'
+import { pushRoutePath } from '../../app/router'
+import { resolveNotificationDestination } from '../../modules/notifications/notification-destination'
+
+const TOAST_SEVERITY: Record<NotificationEvent['severity'], ToastSeverity> = {
+  critical: 'critical', warning: 'warning', positive: 'success', neutral: 'info',
+}
+
+/** Unread-ness + group count: a reopened row (same id) is still news. */
+const arrivalSignature = (item: NotificationEvent) => `${item.status}:${item.groupedCount ?? 1}`
+
+/** In-app pop-up for alerts that just arrived — the centre alone was silent. */
+function announceArrivals(items: NotificationEvent[]) {
+  const settings = loadSettings()
+  if (settings.notificationsEnabled === false || settings.notificationMasterMuted) return
+  const shown = items.filter((item) => isAlertTypeEnabled(alertTypeFor(item))).slice(0, 3)
+  for (const item of shown) {
+    const href = resolveNotificationDestination(item)
+    emitNotification({
+      title: item.title,
+      detail: item.body || item.summary || undefined,
+      severity: TOAST_SEVERITY[item.severity] ?? 'info',
+      source: 'notifications',
+      silent: true,
+      dismissMs: Math.min(10_000, Math.max(3_000, Number(settings.notificationToastDuration) || 5_000)),
+      action: href ? { label: 'Open', onClick: () => pushRoutePath(href) } : undefined,
+    })
+  }
+}
 
 const POLL_INTERVAL_MS = 30_000
 const POLL_BACKOFF_MAX_MS = 5 * 60_000
@@ -78,7 +108,7 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
 
-  const knownIdsRef = useRef<Set<string>>(new Set())
+  const knownIdsRef = useRef<Map<string, string>>(new Map())
   const initialLoadRef = useRef(true)
   const filtersRef = useRef<NotificationListFilters>({ limit: 120, includeSnoozed: false })
   const preferencesRef = useRef(preferences)
@@ -140,15 +170,18 @@ function useNotificationIntelligenceInternal(): NotificationIntelligenceValue {
 
     if (!initialLoadRef.current) {
       const known = knownIdsRef.current
+      // New id, OR a known row that became unread again / grew (another reply
+      // from the same seller re-opens the same notification server-side).
       const freshUnread = result.notifications.filter(
-        (item) => item.status === 'unread' && !known.has(item.id),
+        (item) => item.status === 'unread' && known.get(item.id) !== arrivalSignature(item),
       )
       if (freshUnread.length) {
         playGroupedNotificationSounds(freshUnread, preferencesRef.current)
+        announceArrivals(freshUnread)
       }
     }
 
-    knownIdsRef.current = new Set(result.notifications.map((item) => item.id))
+    knownIdsRef.current = new Map(result.notifications.map((item) => [item.id, arrivalSignature(item)]))
     initialLoadRef.current = false
   }, [])
 

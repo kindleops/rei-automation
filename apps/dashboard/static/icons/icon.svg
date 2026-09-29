@@ -36,7 +36,7 @@
     </radialGradient>
     <filter id="soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="7"/></filter>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="0" fill="url(#bg)"/>
   <circle cx="256" cy="256" r="132" fill="url(#glow)"/>
   <circle cx="256" cy="256" r="148" fill="none" stroke="url(#ring)" stroke-opacity=".78" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="202.48 30" stroke-dashoffset="217.48"/>
   <circle cx="256" cy="256" r="196" fill="none" stroke="#7cc4ff" stroke-opacity=".10" stroke-width="1.5"/>
@@ -52,5 +52,5 @@
   <circle cx="256" cy="256" r="36" fill="#7cc4ff" opacity=".75" filter="url(#soft)"/>
   <circle cx="256" cy="256" r="27" fill="url(#core)"/>
   <circle cx="248" cy="247" r="7" fill="#ffffff" opacity=".85"/>
-  <rect x="2.5" y="2.5" width="507" height="507" rx="109.5" fill="none" stroke="url(#edge)" stroke-width="3"/>
+  
 </svg>

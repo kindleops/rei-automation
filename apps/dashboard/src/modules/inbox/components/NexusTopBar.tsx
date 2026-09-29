@@ -530,12 +530,12 @@ export const NexusTopBar = ({
       {/* Zone 1: Workspace identity */}
       <div className="nx-topbar__left nx-topbar-shell-left nx-mobile-command-row">
         {!isMobile ? (
-          <div className="nx-topbar__brand" aria-label="NEXUS Dashboard">
-            <div className="nx-topbar__logo">
-              <Icon name="spark" />
+          <div className="nx-topbar__brand" aria-label="LeadCommand">
+            <div className="nx-topbar__logo nx-topbar__logo--mark">
+              <img src="/favicon.svg" alt="" width={28} height={28} draggable={false} />
             </div>
             <div className="nx-topbar-identity">
-              <span>NEXUS</span>
+              <span>LeadCommand</span>
               <strong>{activeWorkspaceLabel}</strong>
               {contextSubtitle ? <small>{contextSubtitle}</small> : null}
             </div>

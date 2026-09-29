@@ -32,9 +32,11 @@ export interface MobileNotificationPermissionProps {
    *            operator has somewhere to REVOKE a device rather than only enable one.
    */
   variant?: 'banner' | 'setting'
+  /** Told after push is turned on or off on this device. */
+  onChange?: (status: PushStatus) => void
 }
 
-export const MobileNotificationPermission = ({ variant = 'banner' }: MobileNotificationPermissionProps) => {
+export const MobileNotificationPermission = ({ variant = 'banner', onChange }: MobileNotificationPermissionProps) => {
   const [status, setStatus] = useState<PushStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [dismissed, setDismissed] = useState(false)
@@ -50,14 +52,16 @@ export const MobileNotificationPermission = ({ variant = 'banner' }: MobileNotif
     const next = await enablePush()
     setStatus(next)
     setBusy(false)
-  }, [])
+    onChange?.(next)
+  }, [onChange])
 
   const handleDisable = useCallback(async () => {
     setBusy(true)
     const next = await disablePush()
     setStatus(next)
     setBusy(false)
-  }, [])
+    onChange?.(next)
+  }, [onChange])
 
   if (!status) return null
 
@@ -85,7 +89,7 @@ export const MobileNotificationPermission = ({ variant = 'banner' }: MobileNotif
         </strong>
         <small>
           {status.detail
-            ?? 'Critical and warning signals reach this device even when LeadCommand is closed.'}
+            ?? 'Seller replies, hot leads and problems reach this device even when LeadCommand is closed.'}
         </small>
       </div>
       {status.state === 'granted' ? (

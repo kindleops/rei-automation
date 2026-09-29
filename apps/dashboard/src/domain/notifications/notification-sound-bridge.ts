@@ -5,9 +5,12 @@
 import { loadSettings } from '../../shared/settings'
 import {
   resolveNotificationSoundAsset,
+  SOUND_ASSET_URLS,
   SOUND_CATEGORY_ASSET_MAP,
+  type SoundAssetId,
 } from '../../shared/sound-assets'
 import { playSoundAsset, previewSoundAsset } from '../../shared/sounds'
+import { alertTypeFor, DEFAULT_ALERT_SOUND, type AlertType } from './alert-types'
 import type { NotificationEvent, NotificationPreferences, SoundCategory } from './notification-contract'
 
 const SETTINGS_ENABLED_KEY: Record<SoundCategory, keyof ReturnType<typeof loadSettings>> = {
@@ -75,12 +78,30 @@ export function resolveNotificationVolume(category: SoundCategory): number {
   return settings.soundVolume
 }
 
+/** The sound the operator picked for an alert type: an asset id, or null for "None". */
+export function alertSoundFor(type: AlertType): SoundAssetId | null {
+  const chosen = loadSettings().alertTypeSound?.[type]
+  if (chosen === 'none') return null
+  if (chosen && chosen in SOUND_ASSET_URLS) return chosen as SoundAssetId
+  return DEFAULT_ALERT_SOUND[type]
+}
+
+/** Is this alert type switched on in the app (pop-up + sound)? Default on. */
+export function isAlertTypeEnabled(type: AlertType): boolean {
+  return loadSettings().alertTypeEnabled?.[type] !== false
+}
+
 export function shouldPlayNotificationSound(
-  event: Pick<NotificationEvent, 'domain' | 'soundCategory'>,
+  event: Pick<NotificationEvent, 'domain' | 'soundCategory'> & Partial<Pick<NotificationEvent, 'type' | 'severity'>>,
   prefs?: Partial<NotificationPreferences>,
 ): boolean {
   const settings = loadSettings()
-  if (!settings.soundEnabled) return false
+  // Alert sounds have their own switch (default ON). They used to hang off the
+  // general UI-sound switch, which defaults OFF and had no control anywhere —
+  // so no notification ever made a sound.
+  if (settings.notificationSoundEnabled === false) return false
+  const alertType = alertTypeFor(event)
+  if (!isAlertTypeEnabled(alertType) || !alertSoundFor(alertType)) return false
   if (settings.notificationMasterMuted || prefs?.masterMuted) return false
   if (isWithinQuietHours(undefined, prefs as NotificationPreferences)) return false
 
@@ -116,7 +137,7 @@ export function playNotificationSound(
   const key = dedupKey(event)
   if (shouldDedup(key, now)) return
 
-  const asset = resolveNotificationSoundAsset({
+  const asset = alertSoundFor(alertTypeFor(event)) ?? resolveNotificationSoundAsset({
     type: event.type,
     domain: event.domain,
     severity: event.severity,
@@ -158,4 +179,8 @@ export function previewNotificationSound(category: SoundCategory): void {
   const asset = SOUND_CATEGORY_ASSET_MAP[category]
   const volume = resolveNotificationVolume(category)
   previewSoundAsset(asset, volume)
+}
+/** Audition a sound from the alert settings (ignores every switch). */
+export function previewAlertSound(asset: SoundAssetId): void {
+  previewSoundAsset(asset, Math.max(0.35, loadSettings().soundVolume))
 }

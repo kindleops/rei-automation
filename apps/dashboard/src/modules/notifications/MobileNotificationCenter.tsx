@@ -23,6 +23,7 @@ import {
 } from '../../domain/notifications/notification-contract'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { enablePush, readPushStatus, type PushStatus } from '../../domain/notifications/push-subscription'
+import { resolveNotificationDestination } from './notification-destination'
 import './mobile-notification-center.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
@@ -66,18 +67,7 @@ const SEVERITY_WORD: Partial<Record<NotificationSeverity, string>> = { critical:
 const TIME_GROUP_LABEL: Record<NotificationTimeGroup, string> = { today: 'Today', yesterday: 'Yesterday', earlier: 'Earlier' }
 const PAGE = 30
 
-export const resolveNotificationDestination = (event: NotificationEvent): string | null => {
-  const primary = event.actions.find((action) => action.primary) ?? event.actions[0]
-  if (primary?.href) return primary.href
-  if (event.threadKey) return `/inbox?thread=${encodeURIComponent(event.threadKey)}`
-  if (event.propertyId) return `/deal-intelligence?property=${encodeURIComponent(event.propertyId)}`
-  if (event.campaignId) return `/campaign-command?campaign=${encodeURIComponent(event.campaignId)}`
-  if (event.contractId) return '/closing-desk'
-  if (event.queueId) return '/queue'
-  if (event.domain === 'workflow') return '/workflow-studio'
-  if (event.domain === 'markets') return '/map'
-  return null
-}
+export { resolveNotificationDestination }
 
 /** "+14047518576" → "(404) 751-8576", anywhere in a string. */
 const readablePhones = (text: string) =>
@@ -145,7 +135,12 @@ function NotificationCard({ item, index, onOpen, onDismiss }: { item: Notificati
     if (!d) return
     const mx = e.clientX - d.x
     const my = e.clientY - d.y
-    if (!d.axis && (Math.abs(mx) > 8 || Math.abs(my) > 8)) d.axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y'
+    if (!d.axis && (Math.abs(mx) > 8 || Math.abs(my) > 8)) {
+      d.axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y'
+      // Once it is a horizontal swipe, keep the pointer: without capture the
+      // drag died the moment the finger/cursor left the card, snapping it back.
+      if (d.axis === 'x') { try { (e.currentTarget as Element).setPointerCapture(e.pointerId) } catch { /* not capturable */ } }
+    }
     if (d.axis !== 'x') return
     d.dx = Math.min(0, mx)
     setDx(d.dx)

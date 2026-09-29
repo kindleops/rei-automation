@@ -1,7 +1,7 @@
 {
-  "name": "NEXUS Command Center",
-  "short_name": "NEXUS",
-  "description": "Wholesale acquisition command center for inbox, pipeline, map, and automation operations.",
+  "name": "LeadCommand",
+  "short_name": "LeadCommand",
+  "description": "LeadCommand \u2014 acquisition command center for inbox, pipeline, map, and automation operations.",
   "start_url": "/inbox",
   "scope": "/",
   "display": "standalone",
@@ -23,6 +23,12 @@
     },
     {
       "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

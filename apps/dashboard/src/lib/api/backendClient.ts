@@ -229,7 +229,10 @@ const GET_CACHE_TTL_MS: Record<string, number> = {
   '/api/cockpit/inbox/thread-hydration': 5_000,
   '/api/cockpit/inbox/property-participants': 30_000,
   '/api/cockpit/deal-intelligence/thread': 45_000,
-  '/api/cockpit/notifications': 30_000,
+  // The notification list is NOT cached: the centre polls it itself, and a
+  // cached copy re-added every item the operator had just swiped away (the
+  // post-dismiss refresh read the pre-dismiss list). Preferences only; push
+  // config (…/notifications/push) must stay live too, so no prefix entry.
   '/api/cockpit/notifications/preferences': 120_000,
   '/api/cockpit/templates/list': 60_000,
   '/api/cockpit/dev/runtime-identity': 300_000,

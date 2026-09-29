@@ -1,4 +1,5 @@
 import { callBackend } from '../../lib/api/backendClient'
+import { ALERT_TYPES, PUSH_DEFAULTS, type AlertType } from './alert-types'
 
 /**
  * WEB PUSH — the client half.
@@ -209,4 +210,40 @@ export async function disablePush(): Promise<PushStatus> {
     /* Local teardown is best-effort; the server row is what decides delivery. */
   }
   return { state: 'prompt', detail: null }
+}
+
+/* ── Which alert types reach THIS device ───────────────────────────────────
+   Stored server-side per subscription (push_subscriptions.alert_types), because
+   the server decides who a push goes to. Missing type = PUSH_DEFAULTS. */
+
+async function currentEndpoint(): Promise<string | null> {
+  if (resolvePlatformSupport()) return null
+  try {
+    const registration = await navigator.serviceWorker.getRegistration()
+    const subscription = await registration?.pushManager.getSubscription()
+    return subscription?.endpoint ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function readDevicePushAlertTypes(): Promise<Record<AlertType, boolean> | null> {
+  const endpoint = await currentEndpoint()
+  if (!endpoint) return null
+  const res = await callBackend<{ ok: boolean; device: { subscribed: boolean; alert_types: Partial<Record<AlertType, boolean>> | null } | null }>(
+    `${PUSH_PATH}?endpoint=${encodeURIComponent(endpoint)}`,
+  )
+  if (!res.ok || !res.data?.device?.subscribed) return null
+  const stored = res.data.device.alert_types ?? {}
+  return Object.fromEntries(ALERT_TYPES.map((t) => [t, typeof stored[t] === 'boolean' ? stored[t] : PUSH_DEFAULTS[t]])) as Record<AlertType, boolean>
+}
+
+export async function saveDevicePushAlertTypes(alertTypes: Record<AlertType, boolean>): Promise<boolean> {
+  const endpoint = await currentEndpoint()
+  if (!endpoint) return false
+  const res = await callBackend(PUSH_PATH, {
+    method: 'PATCH',
+    body: JSON.stringify({ endpoint, alert_types: alertTypes }),
+  })
+  return res.ok
 }
