@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import './styles/closing-desk.css'
 import { useClosingDesk } from './hooks/useClosingDesk'
 import type { ClosingBoardColumn, ClosingCase } from '../../domain/closing-desk/closing-desk.types'
@@ -20,7 +21,25 @@ import { ClosingDeskEnvironment } from './components/ClosingDeskEnvironment'
 import { ClosingDeskDiagnosticsPanel } from './components/ClosingDeskDiagnosticsPanel'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
 
+const ClosingSurface = lazy(() => import('./mobile/ClosingSurface').then((m) => ({ default: m.ClosingSurface })))
+
+/**
+ * Mobile renders the execution surface (mobile/ClosingSurface): attention-first,
+ * transaction rooms, server-derived states only. Desktop keeps the board.
+ */
 export function ClosingDeskView() {
+  const { isMobile } = useBreakpoint()
+  if (isMobile) {
+    return (
+      <Suspense fallback={null}>
+        <ClosingSurface />
+      </Suspense>
+    )
+  }
+  return <ClosingDeskDesktop />
+}
+
+function ClosingDeskDesktop() {
   const fixtureQuery = useMemo(() => {
     if (typeof window === 'undefined') return false
     const p = new URLSearchParams(window.location.search)

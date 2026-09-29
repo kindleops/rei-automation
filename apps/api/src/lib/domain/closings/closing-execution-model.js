@@ -90,6 +90,9 @@ export function describeWhen(value, tz) {
   return { at, date, time: hm, tz }
 }
 
+/** "2026-09-28" → "Sep 28" (server-written sentences read like sentences). */
+const humanDate = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+
 function dayDiff(fromDate, toDate) {
   return Math.round((Date.parse(`${toDate}T12:00:00Z`) - Date.parse(`${fromDate}T12:00:00Z`)) / DAY)
 }
@@ -304,15 +307,15 @@ export function deriveClosingExecution({
   const blockers = []
   const block = (key, what, why, owner, action) => blockers.push({ key, what, why, owner, ownerLabel: OWNER_LABEL[owner], action })
   if (!terminal && !closed) {
-    if (buyerEmd?.state === 'overdue') block('emd_overdue', `Buyer EMD overdue${buyerEmd.amount ? ` · $${buyerEmd.amount.toLocaleString('en-US')}` : ''}`, `Was due ${buyerEmd.due.date}. Without it the buyer is not bound.`, 'buyer', 'chase_emd')
+    if (buyerEmd?.state === 'overdue') block('emd_overdue', `Buyer EMD overdue${buyerEmd.amount ? ` · $${buyerEmd.amount.toLocaleString('en-US')}` : ''}`, `Was due ${humanDate(buyerEmd.due.date)}. Without it the buyer is not bound.`, 'buyer', 'chase_emd')
     if (buyerEmd && ['failed', 'disputed'].includes(buyerEmd.state)) block('emd_failed', `Buyer EMD ${buyerEmd.state}`, 'The deposit did not clear; the buyer is not bound.', 'you', 'resolve_emd')
-    if (contractEmd?.state === 'overdue') block('contract_emd_overdue', `Contract EMD — no receipt recorded`, `Due ${contractEmd.due.date} under the seller contract.`, 'you', 'record_contract_emd')
+    if (contractEmd?.state === 'overdue') block('contract_emd_overdue', `Contract EMD — no receipt recorded`, `Due ${humanDate(contractEmd.due.date)} under the seller contract.`, 'you', 'record_contract_emd')
     if (buyerFailed) block('buyer_failed', 'Buyer fell through', `Offer ${offerStatus || commitment}. The deal needs a replacement buyer.`, 'you', 'replace_buyer')
     if (agreement && DEAD_AGREEMENT.has(agreementStatus)) block('agreement_dead', `Buyer agreement ${agreementStatus}`, 'No executed buyer contract.', 'you', 'resend_buyer_agreement')
     if (routeStatus === 'title_route_unavailable') block('no_title', 'No title company for this market', 'Title cannot open until a company is chosen.', 'you', 'choose_title')
-    if (commitmentDue && commitmentDue.date < today && !clearToClose) block('title_late', 'Title commitment late', `Was due ${commitmentDue.date}.`, 'title', 'email_title')
+    if (commitmentDue && commitmentDue.date < today && !clearToClose) block('title_late', 'Title commitment late', `Was due ${humanDate(commitmentDue.date)}.`, 'title', 'email_title')
     if (settlementFailed) block('settlement_failed', `Settlement ${lower(settlementFailed.settlement_status)}`, 'Funds did not settle.', 'title', 'email_title')
-    if (when && when.date < today) block('date_passed', 'Closing date passed — not closed', `${confirmed ? 'Scheduled' : 'Target'} ${when.date}. Nothing records a close.`, 'title', 'email_title')
+    if (when && when.date < today) block('date_passed', 'Closing date passed — not closed', `${confirmed ? 'Scheduled' : 'Target'} ${humanDate(when.date)}. Nothing records a close.`, 'title', 'email_title')
     else if (confirmed && daysOut !== null && daysOut <= 3 && !ready) block('at_risk', `Closing ${daysOut === 0 ? 'today' : daysOut === 1 ? 'tomorrow' : `in ${daysOut} days`} — ${openRequirements.length} open`, openRequirements.map((r) => r.label).join(' · '), 'you', 'review')
     if ((caseStage === 'prepared_to_close') && !when) block('no_date', 'Closing date missing', 'Stage is Prepared to Close with no date on record.', 'you', 'schedule_closing')
   }
@@ -451,7 +454,7 @@ export function deriveClosingExecution({
     closed,
     ready,
     state,
-    closing: when ? { ...when, confirmed, daysOut: confirmed && !closed ? daysOut : null } : null,
+    closing: when ? { ...when, confirmed, daysOut: confirmed && !closed ? daysOut : null, past: when.date < today } : null,
     rail,
     requirements,
     blockers,
@@ -510,7 +513,8 @@ export function summarizePortfolio(items = [], { now = Date.now() } = {}) {
   const needsYou = active.filter((x) => x.state.tone === 'blocked' || x.state.tone === 'attention')
   const external = active.filter((x) => x.state.tone === 'external')
   const ready = active.filter((x) => x.ready)
-  const upcoming = active.filter((x) => x.closing?.at && Date.parse(x.closing.at) >= now - DAY)
+  // Next closing = the soonest date not yet passed (a passed date is a blocker, not "next").
+  const upcoming = active.filter((x) => x.closing?.at && !x.closing.past)
     .sort((a, b) => Date.parse(a.closing.at) - Date.parse(b.closing.at))
   return {
     counts: { active: active.length, needsYou: needsYou.length, waitingExternal: external.length, ready: ready.length, closed: recentClosed.length, cancelled: items.filter((x) => x.terminal).length },

@@ -1,3 +1,16 @@
+> **Current truth (2026-09-29) — read this first.** Parts of this audit are
+> stale: closing tables DO exist (closing_cases, closing_milestones,
+> closing_activity_events, buyer_offers, buyer_agreements, emd_receipts,
+> settlement_records, title_companies) and Podio is dead. Mobile Closing Desk
+> renders `mobile/ClosingSurface.tsx` over GET /api/cockpit/closing-desk/execution,
+> derived by `apps/api/src/lib/domain/closings/closing-execution-model.js`
+> (rail, owner, blockers, explicit ready-to-close requirements, estimated vs
+> actual money; truth rules pinned in tests/critical/closing-execution-model.test.mjs).
+> Production holds no live closings, so `?demo=1` shows the same derivation over
+> raw scenario rows (regenerate with apps/api/scripts/gen-closing-demo.mjs).
+> The desk is read-only: no route writes EMD, settlement, buyer commitment,
+> schedule or S8–S10 today.
+
 # Closing Desk — Foundation Audit, Architecture & Integration Contract
 
 Read-only / shadow-first build. **Nothing here sends, signs, contacts a counterparty,

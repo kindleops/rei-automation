@@ -405,7 +405,8 @@ export async function executeNotificationAction(notificationId, actionType, oper
         result = navigationPayload(notification, `/workflow-studio/${notification.workflow_id || ''}`)
         break
       case 'open_closing_case':
-        result = navigationPayload(notification, `/closing-desk/${notification.closing_id || ''}`)
+        // /closing-desk/:id is not a route; ?case= opens the transaction room.
+        result = navigationPayload(notification, notification.closing_id ? `/closing-desk?case=${encodeURIComponent(notification.closing_id)}` : '/closing-desk')
         break
       case 'navigate':
         result = inspectRoute(notification.domain, notification)
