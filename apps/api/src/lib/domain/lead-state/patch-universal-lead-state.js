@@ -403,6 +403,7 @@ export async function patchUniversalLeadState({
   // Operators (change_source=manual) may still move a lead anywhere.
   const stageGuards = [];
   const changeSource = meta.change_source || STATE_SOURCE_CODES.MANUAL;
+  let closingBlocked = null;
   // Temperature lock mirror of the stage guard: the lock was written on
   // every manual temperature change but never READ, so automated scoring
   // silently overwrote operator-set temperatures. Operators (and an explicit
@@ -496,6 +497,42 @@ export async function patchUniversalLeadState({
           delete canonicalPatch.lifecycle_stage;
           stageGuards.push(validation.reason);
         }
+      }
+    }
+
+    /**
+     * CLOSED-WON GATE. A manual move of a live deal to `closed` is a closing,
+     * not a stage edit: it goes through the closing authority FIRST. If the
+     * closing guard refuses, the stage change is dropped from this patch (the
+     * thread must not say Closed while the deal is not) and the structured
+     * blockers are returned. Closed-lost (a dead/suppressed/lost deal) is
+     * unaffected.
+     */
+    if (canonicalPatch.lifecycle_stage === 'closed' && changeSource === STATE_SOURCE_CODES.MANUAL) {
+      try {
+        const bare = String(key || '').replace(/^\+1/, '');
+        const { data: oppRows } = await supabase
+          .from('acquisition_opportunities')
+          .select('id, opportunity_status')
+          .in('primary_thread_key', [...new Set([key, bare].filter(Boolean))])
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        const opp = Array.isArray(oppRows) ? oppRows[0] : oppRows;
+        const lost = ['dead', 'suppressed', 'lost', 'archived'].includes(String(opp?.opportunity_status || '').toLowerCase());
+        if (opp?.id && !lost) {
+          const { finalizeClosing } = await import('@/lib/domain/closings/closing-authority.js');
+          const closing = await finalizeClosing({ opportunityId: opp.id, actor: meta.operator_id || meta.updated_by || 'operator', source: 'lead_state_patch' }, { supabase });
+          if (!closing.ok) {
+            delete canonicalPatch.lifecycle_stage;
+            stageGuards.push('closing_blocked');
+            closingBlocked = { code: closing.code || 'CLOSING_BLOCKED', blockers: closing.blockers || [], missing: closing.missing || [], closing_case_id: closing.closingCaseId || null, open: closing.closingCaseId ? `/closing-desk?case=${encodeURIComponent(closing.closingCaseId)}` : '/closing-desk' };
+          }
+        }
+      } catch (gateError) {
+        // Fail closed: never let an unverifiable Closed through.
+        delete canonicalPatch.lifecycle_stage;
+        stageGuards.push('closing_guard_unavailable');
+        closingBlocked = { code: 'CLOSING_GUARD_UNAVAILABLE', blockers: [], missing: [], message: gateError?.message || 'closing guard unavailable' };
       }
     }
   }
@@ -789,6 +826,7 @@ export async function patchUniversalLeadState({
     thread_key: key,
     row: data,
     opportunity_stage_sync,
+    ...(closingBlocked ? { closing_blocked: closingBlocked } : {}),
     stage_guards: stageGuards,
     suppression_guards: suppressionGuards,
     suppression_cancellation,

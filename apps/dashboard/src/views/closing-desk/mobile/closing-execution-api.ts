@@ -70,6 +70,10 @@ export interface Closing {
   documents: ClosingDoc[]
   timeline: TimelineEvent[]
   deadlines: Deadline[]
+  titleIssues?: Array<{ id: string; type: string; description: string | null; status: string; owner: string | null; source: string | null; evidence: string | null; openedAt: string | null; resolvedAt: string | null }>
+  automation?: { paused: boolean; pausedReason: string | null; escalations: Array<{ category: string; at: string | null; message: string | null }>; pendingEmails: number; emails: Array<{ action: string; category: string; sequence: number; status: string; recipientRole: string; requestedAt: string | null; sentAt: string | null; reason: string | null }> }
+  terminalOutcome?: string | null
+  finalize?: { ok: boolean; code: string; missing: string[]; blockers: Array<{ code: string; message: string; owner: string }> } | null
   updatedAt: string | null
   lastActivityAt: string | null
 }
@@ -114,3 +118,20 @@ export async function fetchDemoRoom(id: string): Promise<Room> {
   return { closing, activity: demo.activity[id] ?? [], activityMore: false, degraded: [] }
 }
 export const demoNow = async () => Date.parse((await loadDemo()).now)
+
+/* ── writes: one authoritative server action each (closing-authority.js) ── */
+export interface ActionResult { ok: boolean; code?: string; message?: string; blockers?: Array<{ code: string; message?: string; owner?: string }>; missing?: string[]; [k: string]: unknown }
+
+export async function postClosingAction(id: string, action: string, fields: Record<string, unknown> = {}): Promise<ActionResult> {
+  const res = await callBackend<{ ok: boolean; data: ActionResult }>(`${BASE}/${encodeURIComponent(id)}/actions`, {
+    method: 'POST',
+    body: JSON.stringify({ action, ...fields }),
+    timeoutMs: 30_000,
+  })
+  if (!res.ok) {
+    // A refused action (422) carries its structured reason in the upstream body.
+    const body = (res.upstream as { data?: ActionResult } | undefined)?.data
+    return body ?? { ok: false, code: 'REQUEST_FAILED', message: res.message || res.error || 'The server did not accept this action' }
+  }
+  return res.data?.data ?? { ok: false, code: 'EMPTY_RESPONSE' }
+}

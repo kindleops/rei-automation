@@ -51,7 +51,10 @@ export async function POST(request, { params }) {
     const { error } = await supabase
       .from('buyer_match_candidates')
       .update({ selected: true })
-      .eq('candidate_id', candidate_id)
+      // The column is buyer_match_candidate_id; `candidate_id` does not exist, so
+      // every selection failed. (Buyer Match shortlist flag — the canonical closing
+      // buyer selection is buyer_offers via the closing authority.)
+      .eq('buyer_match_candidate_id', candidate_id)
 
     if (error) throw error
 

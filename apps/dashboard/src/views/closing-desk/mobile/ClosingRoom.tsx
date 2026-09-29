@@ -10,6 +10,7 @@ import {
   countdown, DOC_STATUS, docTone, EMD_WORD, emdTone, money, OWNER_LABEL, shortDate, stamp, titleCase, weekdayDate, whenLabel,
 } from './closing-format'
 import { actionLink, linkAvailable, openLink, type LinkKind } from './closing-links'
+import { ActionForm, actionForNext, availableActions, type ActionSpec } from './ClosingActions'
 
 /**
  * THE TRANSACTION ROOM — one closing, under glass. Hero → next action →
@@ -21,14 +22,16 @@ import { actionLink, linkAvailable, openLink, type LinkKind } from './closing-li
 
 const STEP_ICON: Record<string, IconName> = { complete: 'check', blocked: 'alert', waiting: 'clock', active: 'target', not_started: 'more' }
 
-export function ClosingRoom({ id, demo, fallback, onClose }: { id: string; demo: boolean; fallback: Closing | null; onClose: () => void; onChanged?: () => void }) {
+export function ClosingRoom({ id, demo, fallback, onClose, onChanged }: { id: string; demo: boolean; fallback: Closing | null; onClose: () => void; onChanged?: () => void }) {
   const [room, setRoom] = useState<Room | null>(fallback ? { closing: fallback, activity: [], activityMore: false, degraded: [] } : null)
   const [roomError, setRoomError] = useState<string | null>(null)
   const [activityLoaded, setActivityLoaded] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [sheet, setSheet] = useState<{ kind: 'doc'; doc: ClosingDoc } | { kind: 'more' } | { kind: 'event'; label: string; rows: Array<[string, string]> } | null>(null)
+  const [form, setForm] = useState<ActionSpec | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
-  useBackHandler(true, 'closing-room', 'Close transaction room', () => { if (sheet) setSheet(null); else onClose(); return true })
+  useBackHandler(true, 'closing-room', 'Close transaction room', () => { if (form) setForm(null); else if (sheet) setSheet(null); else onClose(); return true })
 
   useEffect(() => {
     const ac = new AbortController()
@@ -36,7 +39,14 @@ export function ClosingRoom({ id, demo, fallback, onClose }: { id: string; demo:
       .then((r) => { setRoom(r); setActivityLoaded(true); setRoomError(null) })
       .catch((err) => { if ((err as Error)?.name !== 'AbortError') setRoomError((err as Error)?.message || 'unavailable') })
     return () => ac.abort()
-  }, [id, demo])
+  }, [id, demo, reloadKey])
+
+  const afterWrite = useCallback(() => {
+    setForm(null)
+    setSheet(null)
+    setReloadKey((k) => k + 1)
+    onChanged?.()
+  }, [onChanged])
 
   const loadMore = useCallback(async () => {
     if (!room || demo) return
@@ -52,7 +62,7 @@ export function ClosingRoom({ id, demo, fallback, onClose }: { id: string; demo:
   const c = room?.closing ?? null
   const body = !c ? (
     <div className="cd2-room__state">{roomError ? <><Icon name="alert" /><strong>{roomError === 'closing_not_found' ? 'This closing no longer exists' : 'Could not open this closing'}</strong></> : <span className="cd2-skel__card"><i /><i /><i /></span>}</div>
-  ) : <RoomBody c={c} room={room!} activityLoaded={activityLoaded} loadingMore={loadingMore} onMore={loadMore} openSheet={setSheet} />
+  ) : <RoomBody c={c} room={room!} activityLoaded={activityLoaded} loadingMore={loadingMore} onMore={loadMore} openSheet={setSheet} openForm={setForm} />
 
   const primary = c ? primaryAction(c) : null
 
@@ -73,7 +83,8 @@ export function ClosingRoom({ id, demo, fallback, onClose }: { id: string; demo:
           <button type="button" className="cd2-act" onClick={() => setSheet({ kind: 'more' })}><Icon name="more" />More</button>
         </nav>
       ) : null}
-      {c && sheet ? <RoomSheet c={c} sheet={sheet} onClose={() => setSheet(null)} /> : null}
+      {c && sheet ? <RoomSheet c={c} sheet={sheet} onClose={() => setSheet(null)} onRecord={(spec) => { setSheet(null); setForm(spec) }} /> : null}
+      {c && form ? <ActionForm c={c} spec={form} demo={demo} onClose={() => setForm(null)} onDone={afterWrite} /> : null}
     </div>,
     document.body,
   )
@@ -89,9 +100,10 @@ function primaryAction(c: Closing): { label: string; kind: LinkKind } | null {
   return null
 }
 
-function RoomBody({ c, room, activityLoaded, loadingMore, onMore, openSheet }: {
+function RoomBody({ c, room, activityLoaded, loadingMore, onMore, openSheet, openForm }: {
   c: Closing; room: Room; activityLoaded: boolean; loadingMore: boolean; onMore: () => void
   openSheet: (s: { kind: 'doc'; doc: ClosingDoc } | { kind: 'event'; label: string; rows: Array<[string, string]> }) => void
+  openForm: (spec: ActionSpec) => void
 }) {
   const closingDay = !c.closed && c.closing?.confirmed && c.closing.daysOut !== null && c.closing.daysOut >= 0 && c.closing.daysOut <= 1
   const met = c.requirements.filter((r) => r.met).length
@@ -101,7 +113,7 @@ function RoomBody({ c, room, activityLoaded, loadingMore, onMore, openSheet }: {
       {room.degraded.length ? <p className="cd2-degraded"><Icon name="alert" />{room.degraded.map((d) => d.source.replace(/_/g, ' ')).join(', ')} unavailable — shown as unknown, not empty.</p> : null}
       {c.stage?.diverged ? <p className="cd2-degraded"><Icon name="alert" />Pipeline shows {titleCase(c.stage.opportunityStage)} while the closing record is {c.stage.label}. The closing record is shown.</p> : null}
 
-      {c.next ? <NextAction c={c} /> : null}
+      {c.next ? <NextAction c={c} onRecord={openForm} /> : null}
 
       {c.blockers.length ? (
         <section className="cd2-block" aria-label="Blockers">
@@ -119,7 +131,7 @@ function RoomBody({ c, room, activityLoaded, loadingMore, onMore, openSheet }: {
         </section>
       ) : null}
 
-      {closingDay || c.ready ? <Requirements c={c} met={met} emphasis /> : null}
+      {closingDay || c.ready ? <Requirements c={c} met={met} emphasis onFinalize={c.finalize?.ok ? () => { const f = availableActions(c).find((a) => a.action === 'finalize_closing'); if (f) openForm(f) } : undefined} /> : null}
 
       {!c.terminal ? (
         <Section title="Execution" icon="activity" open>
@@ -139,7 +151,7 @@ function RoomBody({ c, room, activityLoaded, loadingMore, onMore, openSheet }: {
         </Section>
       ) : null}
 
-      {!c.closed && !c.terminal && !closingDay && !c.ready ? <Requirements c={c} met={met} /> : null}
+      {!c.closed && !c.terminal && !closingDay && !c.ready ? <Requirements c={c} met={met} onFinalize={c.finalize?.ok ? () => { const f = availableActions(c).find((a) => a.action === 'finalize_closing'); if (f) openForm(f) } : undefined} /> : null}
 
       {c.closed ? <FinalSettlement c={c} /> : null}
 
@@ -227,7 +239,14 @@ function RoomBody({ c, room, activityLoaded, loadingMore, onMore, openSheet }: {
         ) : <p className="cd2-muted">No dated events yet.</p>}
       </Section>
 
-      <Section title="Activity" icon="list" hint={activityLoaded ? `${room.activity.length}${room.activityMore ? '+' : ''}` : '…'}>
+      <Section title="Activity" icon="list" hint={c.automation?.paused ? 'Automation paused' : activityLoaded ? `${room.activity.length}${room.activityMore ? '+' : ''}` : '…'}>
+        {c.automation ? (
+          <p className="cd2-auto">
+            <b>Automation</b> {c.automation.paused ? `paused — ${c.automation.pausedReason || 'by operator'}` : 'running'}
+            {c.automation.pendingEmails ? ` · ${c.automation.pendingEmails} email${c.automation.pendingEmails === 1 ? '' : 's'} waiting for the email system` : ''}
+            {c.automation.escalations.length ? ` · ${c.automation.escalations.length} escalated to you` : ''}
+          </p>
+        ) : null}
         {room.activity.length ? (
           <ul className="cd2-activity">
             {room.activity.map((a) => <ActivityRow key={a.id} a={a} tz={c.property.tz} />)}
@@ -289,23 +308,25 @@ function Hero({ c }: { c: Closing }) {
   )
 }
 
-function NextAction({ c }: { c: Closing }) {
+function NextAction({ c, onRecord }: { c: Closing; onRecord: (spec: ActionSpec) => void }) {
   const n = c.next!
   const link = actionLink(n.action, c)
+  const record = actionForNext(n.action, c)
   return (
     <section className={`cd2-nextact${n.blocker ? ' is-bad' : ''}`} aria-label="Next action">
       <small>Next action</small>
       <strong>{n.what}</strong>
       <footer>
         <span className="cd2-owner">{n.ownerLabel ?? 'You'} has the ball</span>
-        {link ? <button type="button" className="cd2-link" onClick={() => openLink(link.kind, c)}>{link.label}<Icon name="chevron-right" /></button>
-          : <span className="cd2-muted">{n.owner === 'you' ? 'Done outside LeadCommand today' : 'Nothing to do here'}</span>}
+        {record ? <button type="button" className="cd2-link" onClick={() => onRecord(record)}>{record.label}<Icon name="chevron-right" /></button>
+          : link ? <button type="button" className="cd2-link" onClick={() => openLink(link.kind, c)}>{link.label}<Icon name="chevron-right" /></button>
+            : <span className="cd2-muted">{n.owner === 'you' ? 'Record it from More' : 'Automation is following up'}</span>}
       </footer>
     </section>
   )
 }
 
-function Requirements({ c, met, emphasis = false }: { c: Closing; met: number; emphasis?: boolean }) {
+function Requirements({ c, met, emphasis = false, onFinalize }: { c: Closing; met: number; emphasis?: boolean; onFinalize?: () => void }) {
   return (
     <section className={`cd2-block cd2-reqs${emphasis ? ' is-emphasis' : ''}${c.ready ? ' is-ready' : ''}`} aria-label="Ready to close">
       <h2 className="cd2-h2">{c.ready ? 'Ready to close' : 'Before this can close'}<span>{met} of {c.requirements.length}</span></h2>
@@ -318,6 +339,7 @@ function Requirements({ c, met, emphasis = false }: { c: Closing; met: number; e
           </li>
         ))}
       </ul>
+      {onFinalize ? <button type="button" className="cd2-act is-primary cd2-finalize" onClick={onFinalize}><Icon name="check" />Finalize closing</button> : null}
     </section>
   )
 }
@@ -450,7 +472,8 @@ function Row({ k, v, mono = false, big = false }: { k: string; v: string | null 
   return <div><dt>{k}</dt><dd className={`${mono ? 'is-mono' : ''}${big ? ' is-big' : ''}`}>{v}</dd></div>
 }
 
-function RoomSheet({ c, sheet, onClose }: { c: Closing; sheet: { kind: 'doc'; doc: ClosingDoc } | { kind: 'more' } | { kind: 'event'; label: string; rows: Array<[string, string]> }; onClose: () => void }) {
+function RoomSheet({ c, sheet, onClose, onRecord }: { c: Closing; sheet: { kind: 'doc'; doc: ClosingDoc } | { kind: 'more' } | { kind: 'event'; label: string; rows: Array<[string, string]> }; onClose: () => void; onRecord: (spec: ActionSpec) => void }) {
+  const records = useMemo(() => availableActions(c), [c])
   const links = useMemo(() => (['conversation', 'email', 'pipeline', 'buyer_match', 'underwriting', 'entity_property', 'entity_owner', 'map', 'calendar'] as LinkKind[]).filter((k) => linkAvailable(k, c)), [c])
   return (
     <div className="cd2-sheet" role="dialog" aria-modal="true">
@@ -473,12 +496,33 @@ function RoomSheet({ c, sheet, onClose }: { c: Closing; sheet: { kind: 'doc'; do
           </>
         ) : sheet.kind === 'more' ? (
           <>
+            {records.length ? (
+              <>
+                <span className="cd2-eyebrow"><i />Record</span>
+                <div className="cd2-records">
+                  {(['Buyer', 'EMD', 'Title', 'Closing', 'Money', 'Control'] as const).map((g) => {
+                    const list = records.filter((r) => r.group === g)
+                    return list.length ? (
+                      <div key={g} className="cd2-records__group">
+                        <small>{g}</small>
+                        {list.map((r) => (
+                          <button key={r.action + (r.fixed ? JSON.stringify(r.fixed) : '')} type="button" className={`cd2-record${r.danger ? ' is-danger' : ''}${r.action === 'finalize_closing' && !c.finalize?.ok ? ' is-locked' : ''}`} onClick={() => onRecord(r)}>
+                            <span>{r.label}</span>
+                            {r.action === 'finalize_closing' && !c.finalize?.ok ? <em>{c.finalize?.missing.length ?? 0} open</em> : <Icon name="chevron-right" />}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null
+                  })}
+                </div>
+              </>
+            ) : null}
             <span className="cd2-eyebrow"><i />Open elsewhere</span>
             <h3>{c.property.line || c.property.address}</h3>
             <div className="cd2-linkgrid">
               {links.map((k) => <button key={k} type="button" className="cd2-act" onClick={() => { onClose(); openLink(k, c) }}>{LINK_LABEL[k]}</button>)}
             </div>
-            <p className="cd2-muted">Closing Desk is read-only: contract, title, EMD and settlement are recorded by their own systems.</p>
+            <p className="cd2-muted">Every record is written by the closing authority with your identity and evidence. Closed happens only through Finalize, after every requirement is met.</p>
           </>
         ) : (
           <>

@@ -9,9 +9,25 @@ import type {
 
 const BASE = '/api/cockpit/pipeline'
 
+/** A move to Closed refused by the closing authority — carries the exact blockers + where to finish them. */
+export class ClosingBlockedError extends Error {
+  readonly blockers: Array<{ code: string; message?: string; owner?: string }>
+  readonly open: string
+  constructor(blockers: Array<{ code: string; message?: string; owner?: string }>, open: string) {
+    const items = blockers.map((b) => b.message || b.code.replace(/_/g, ' '))
+    super(`Can't close yet — ${items.length} requirement${items.length === 1 ? '' : 's'} open${items.length ? `: ${items.slice(0, 4).join('; ')}${items.length > 4 ? '…' : ''}` : ''}. Finish them in Closing Desk.`)
+    this.name = 'ClosingBlockedError'
+    this.blockers = blockers
+    this.open = open
+  }
+}
+
 function unwrap<T>(result: Awaited<ReturnType<typeof callBackend>>): T {
   if (!result.ok) {
     const upstream = result.upstream as Record<string, unknown> | undefined
+    if (upstream && (upstream.code === 'CLOSING_BLOCKED' || upstream.error === 'closing_blocked')) {
+      throw new ClosingBlockedError((upstream.blockers as Array<{ code: string; message?: string; owner?: string }>) || [], String(upstream.open || '/closing-desk'))
+    }
     const traceId = typeof upstream?.trace_id === 'string' ? upstream.trace_id : undefined
     const sanitized = sanitizePipelineError(result.message || result.error, traceId)
     throw new Error(sanitized.message)

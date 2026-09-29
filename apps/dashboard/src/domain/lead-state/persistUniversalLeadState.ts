@@ -40,6 +40,8 @@ export interface UniversalLeadStateMutationResult {
   mutationPayload: AnyRecord | null
   writeTarget: 'inbox_thread_state' | 'none'
   data?: unknown
+  /** Set when a manual move to Closed was refused by the closing authority. */
+  closingBlocked?: { code: string; blockers: Array<{ code: string; message?: string; owner?: string }>; open: string } | null
 }
 
 function buildMutationPayload(threadKey: string, patch: UniversalLeadStatePatch): AnyRecord {
@@ -52,6 +54,20 @@ function toMutationResult(
   result: Awaited<ReturnType<typeof backendClient.patchUniversalLeadState>>,
 ): UniversalLeadStateMutationResult {
   const mutationPayload = buildMutationPayload(threadKey, patch)
+  // Closed is a closing, not a stage edit: a refused close comes back as a
+  // failure with the exact blockers, never as a silent "saved".
+  const blocked = result.ok ? (result.data as { closing_blocked?: UniversalLeadStateMutationResult['closingBlocked'] } | undefined)?.closing_blocked : null
+  if (blocked) {
+    const items = (blocked.blockers || []).map((b) => b.message || b.code.replace(/_/g, ' '))
+    return {
+      ok: false,
+      threadKey,
+      errorMessage: `Can't close yet — ${items.length} requirement${items.length === 1 ? '' : 's'} open${items.length ? `: ${items.slice(0, 4).join('; ')}${items.length > 4 ? '…' : ''}` : ''}. Finish them in Closing Desk.`,
+      mutationPayload,
+      writeTarget: 'none',
+      closingBlocked: blocked,
+    }
+  }
   if (result.ok) {
     return {
       ok: true,
