@@ -452,7 +452,8 @@ const CLOSED_CASE = /^(closed|funded|completed|cancelled|canceled|voided|void|te
 export function buildClosingEvents(rows = [], { from, to, today } = {}) {
   const out = []
   for (const c of rows) {
-    const done = CLOSED_CASE.test(clean(c.closing_status))
+    // A closed or cancelled/failed/withdrawn closing has no open deadlines.
+    const done = CLOSED_CASE.test(clean(c.closing_status)) || Boolean(c.closed_at) || Boolean(c.terminal_outcome)
     for (const [field, title, kind, priority] of CLOSING_DATES) {
       const day = clean(c[field]).slice(0, 10)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < from || day > to) continue
@@ -487,9 +488,12 @@ export function buildClosingEvents(rows = [], { from, to, today } = {}) {
   return out
 }
 
+/** Deadlines met by explicit closing-authority records (never by the date passing). */
 function milestoneMet(c, field) {
-  if (field === 'emd_due_date') return /received|verified|complete/.test(clean(c.escrow_status))
-  if (field === 'title_commitment_date' || field === 'cure_deadline') return /clear|complete|committed/.test(clean(c.title_status))
+  if (field === 'emd_due_date') return Boolean(c.__contract_emd_deposited) || /received|verified|complete/.test(clean(c.escrow_status))
+  if (field === 'title_commitment_date') return Boolean(c.title_commitment_received_at || c.clear_to_close_at) || /clear|complete|committed/.test(clean(c.title_status))
+  if (field === 'cure_deadline') return Boolean(c.clear_to_close_at) || /clear|complete/.test(clean(c.title_status))
+  if (field === 'scheduled_closing_date' || field === 'signing_date') return Boolean(c.closed_at)
   return false
 }
 
@@ -649,12 +653,20 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null } = 
     }),
     source('closing_cases', status, async () => {
       let q = supabase.from('closing_cases')
-        .select('id,closing_case_id,opportunity_id,property_id,property_address,thread_key,signer_name,closing_status,closing_substage,title_status,escrow_status,title_company_name,emd_due_date,inspection_deadline,title_commitment_date,cure_deadline,signing_date,scheduled_closing_date,funding_date,recording_date,title_opened_date,contract_signed_date,effective_date')
+        .select('id,closing_case_id,opportunity_id,property_id,property_address,thread_key,signer_name,closed_at,terminal_outcome,title_commitment_received_at,clear_to_close_at,closing_status,closing_substage,title_status,escrow_status,title_company_name,emd_due_date,inspection_deadline,title_commitment_date,cure_deadline,signing_date,scheduled_closing_date,funding_date,recording_date,title_opened_date,contract_signed_date,effective_date')
         .limit(500)
       if (prop) q = q.eq('property_id', prop)
       const { data, error } = await q
       if (error) throw error
-      return data || []
+      const rows = data || []
+      // The seller-contract EMD's canonical record is an audited deposit event.
+      const ids = rows.map((r) => r.closing_case_id).filter(Boolean)
+      if (ids.length) {
+        const { data: dep } = await supabase.from('closing_activity_events').select('closing_case_id').in('closing_case_id', ids).eq('event_type', 'contract_emd_deposited').limit(1000)
+        const paid = new Set((dep || []).map((d) => d.closing_case_id))
+        for (const r of rows) r.__contract_emd_deposited = paid.has(r.closing_case_id)
+      }
+      return rows
     }),
     source('seller_offers', status, async () => {
       let q = supabase.from('seller_offers')

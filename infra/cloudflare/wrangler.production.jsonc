@@ -113,6 +113,7 @@
     // under every operator brake, is still the only sender.
     "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED": "true",
     "CRON_CAMPAIGN_FEED_ENABLED": "true",
+    "CRON_CLOSING_AUTOMATION_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",

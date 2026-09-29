@@ -53,7 +53,13 @@ const CAMPAIGN_EXECUTION_JOB_PATHS = [
   "/api/internal/campaigns/feed",
 ];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS];
+/**
+ * Closing automation: writes closing_email_requests (never sends), cancels,
+ * escalates, notifies. Not send-capable, no stage/money writes.
+ */
+const CLOSING_AUTOMATION_JOB_PATHS = ["/api/internal/closings/automation"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -208,6 +214,7 @@ test("production declares the reconciliation and send schedules, and only approv
       // Campaign execution, operator-commissioned 2026-09-28.
       "CRON_CAMPAIGN_ACTIVATE_DUE_ENABLED",
       "CRON_CAMPAIGN_FEED_ENABLED",
+      "CRON_CLOSING_AUTOMATION_ENABLED",
       "CRON_DELIVERY_RECONCILE_ENABLED",
       "CRON_ENABLED",
       // PRODUCTION-COMMISSIONING-1. Both send-incapable; see

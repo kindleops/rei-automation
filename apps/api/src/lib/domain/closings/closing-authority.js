@@ -368,7 +368,7 @@ export async function openTitleIssue(input = {}, deps = {}) {
   if (!clean(input.source)) return fail('SOURCE_REQUIRED', 'Where did this issue come from?')
   const c = await loadClosingCase(env.db, input.closingCaseId); if (!c) return fail('CLOSING_NOT_FOUND', 'No such closing')
   const issueId = `title_issue:${c.closing_case_id}:${clean(input.idempotencyKey) || `${lower(input.issueType)}:${clean(input.description).slice(0, 40)}`}`
-  const row = { issue_id: issueId, closing_case_id: c.closing_case_id, issue_type: lower(input.issueType), description: clean(input.description) || null, owner: lower(input.owner) || 'title', source: clean(input.source), evidence_reference: clean(input.evidenceReference) || null, notes: clean(input.notes) || null, opened_by: clean(input.actor) }
+  const row = { issue_id: issueId, closing_case_id: c.closing_case_id, issue_type: lower(input.issueType), status: 'open', description: clean(input.description) || null, owner: lower(input.owner) || 'title', source: clean(input.source), evidence_reference: clean(input.evidenceReference) || null, notes: clean(input.notes) || null, opened_by: clean(input.actor) }
   const { error } = await env.db.from('closing_title_issues').insert(row)
   if (error && !isDuplicate(error)) throw error
   if (!error) {

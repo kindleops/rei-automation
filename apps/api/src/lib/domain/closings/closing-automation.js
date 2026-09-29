@@ -138,9 +138,13 @@ export function planClosingAutomation({ closingCase: c = {}, offers = [], agreem
   if (ack || commitment || ctc) stop(['title_ack'], 'title_acknowledged')
   else actions.push(...followUpLoop({ category: 'title_ack', start: titleSentAt === null ? null : titleSentAt + cadence.title_ack.afterHours * H, spec: cadence.title_ack, now, cadence, requests: reqs, escalated: escalations.title_ack, recipientEmail: titleEmail }))
 
+  // Title has gone silent and the operator owns it: later title chases stand
+  // down (they would only escalate the same silence again).
+  const titleUnresponsive = Boolean(escalations.title_ack)
+
   // 3 · Title commitment.
   if (commitment || ctc) stop(['title_commitment'], 'commitment_received')
-  else if (ack || titleSentAt !== null) {
+  else if (!titleUnresponsive && (ack || titleSentAt !== null)) {
     const due = ts(c.title_commitment_date)
     const start = due !== null ? due - cadence.title_commitment.beforeDueHours * H
       : (ts(c.title_opened_date) ?? ts(c.title_acknowledged_at) ?? titleSentAt) + cadence.title_commitment.fallbackAfterOpenHours * H
@@ -150,13 +154,13 @@ export function planClosingAutomation({ closingCase: c = {}, offers = [], agreem
 
   // 4 · Clear to close — once the commitment is in and a date exists.
   if (ctc) stop(['clear_to_close'], 'clear_to_close_received')
-  else if (commitment && closeAt !== null) {
+  else if (!titleUnresponsive && commitment && closeAt !== null) {
     actions.push(...followUpLoop({ category: 'clear_to_close', start: closeAt - cadence.clear_to_close.beforeCloseHours * H, spec: cadence.clear_to_close, now, cadence, requests: reqs, escalated: escalations.clear_to_close, recipientEmail: titleEmail }))
   }
 
   // 5 · Settlement statement — confirmed date, title clear, no statement yet.
   if (c.__has_statement) stop(['settlement'], 'statement_received')
-  else if (ctc && confirmed && closeAt !== null) {
+  else if (!titleUnresponsive && ctc && confirmed && closeAt !== null) {
     actions.push(...followUpLoop({ category: 'settlement', start: closeAt - cadence.settlement.beforeCloseHours * H, spec: cadence.settlement, now, cadence, requests: reqs, escalated: escalations.settlement, recipientEmail: titleEmail }))
   }
 

@@ -27,6 +27,7 @@
 
 import { deriveTimezoneFromGeography } from '../campaigns/contact-window-timezone.js'
 import { displayableCompanyName } from '../entity-graph/buyer-name-privacy.js'
+import { evaluateClosingGuard } from './closing-guard.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -173,6 +174,9 @@ export function deriveClosingExecution({
   settlements = [],
   milestones = [],
   opportunity = null,
+  titleIssues = [],
+  emailRequests = [],
+  activity = [],
   now = Date.now(),
 } = {}) {
   const addr = parseAddress(c.property_address)
@@ -184,7 +188,8 @@ export function deriveClosingExecution({
   const closingStatus = lower(c.closing_status)
   const caseStage = lower(c.universal_stage) || null
   const voided = Boolean(c.provenance && typeof c.provenance === 'object' && c.provenance.voided === true)
-  const terminal = TERMINAL_CONTRACT.has(contractStatus) || voided
+  const terminalOutcome = lower(c.terminal_outcome) || null
+  const terminal = TERMINAL_CONTRACT.has(contractStatus) || voided || Boolean(terminalOutcome)
   const closed = !terminal && (closingStatus === 'closed' || caseStage === 'closed')
   const contractExecuted = contractStatus === 'fully_executed' || Boolean(c.contract_signed_date && !terminal && caseStage && caseStage !== 'formal_contract')
 
@@ -198,7 +203,9 @@ export function deriveClosingExecution({
 
   /* closing date */
   const when = describeWhen(c.scheduled_closing_date, tz)
-  const confirmed = Boolean(when) && (closingStatus === 'scheduled' || closingStatus === 'closed')
+  // Confirmed = explicitly confirmed through the closing authority (or the
+  // legacy workflow's scheduled/closed state). A date alone is a target.
+  const confirmed = Boolean(when) && (Boolean(c.closing_date_confirmed_at) || closingStatus === 'scheduled' || closingStatus === 'closed')
   const daysOut = when ? dayDiff(today, when.date) : null
 
   /* buyer */
@@ -215,17 +222,26 @@ export function deriveClosingExecution({
   const buyerEmd = buyerSelected
     ? emdLine({ kind: 'buyer', amount: offer.emd_amount, dueAt: offer.emd_due_date, receipt: bestReceipt(buyerReceipts), required: buyerEmdRequired, now, today, tz })
     : null
+  // Seller-contract EMD (our deposit): emd_receipts is buyer-only by schema,
+  // so the canonical record is the audited `contract_emd_deposited` event.
   const contractEmdRequired = pos(c.earnest_money) !== null
+  const deposit = arr(activity).find((a) => a.event_type === 'contract_emd_deposited' || a.type === 'contract_emd_deposited')
+  const depositReceipt = deposit ? { receipt_id: deposit.idempotency_key || deposit.id || null, status: 'verified', amount: deposit.detail?.amount, received_at: deposit.detail?.deposited_at, verified_at: deposit.detail?.deposited_at, verified_by: deposit.actor, verification_method: deposit.source, evidence_reference: deposit.detail?.evidence, escrow_destination: deposit.detail?.escrow, source: 'contract_emd_deposit' } : bestReceipt(contractReceipts)
   const contractEmd = contractEmdRequired
-    ? emdLine({ kind: 'contract', amount: c.earnest_money, dueAt: c.emd_due_date, receipt: bestReceipt(contractReceipts), required: true, now, today, tz })
+    ? emdLine({ kind: 'contract', amount: c.earnest_money, dueAt: c.emd_due_date, receipt: depositReceipt, required: true, now, today, tz })
     : null
   const emdDone = (line) => !line || line.state === 'verified' || line.state === 'not_required'
 
   /* title */
   const titleStatus = lower(c.title_status)
   const routeStatus = lower(c.title_route_status)
-  const clearToClose = c.readiness && typeof c.readiness === 'object' && c.readiness.clear_to_close === true
+  // Clear to close is explicit (clear_to_close_at carries source + evidence by CHECK).
+  const clearToClose = Boolean(c.clear_to_close_at) || (c.readiness && typeof c.readiness === 'object' && c.readiness.clear_to_close === true)
   const commitmentDue = describeWhen(c.title_commitment_date, tz)
+  const commitmentReceived = Boolean(c.title_commitment_received_at)
+  const acknowledged = Boolean(c.title_acknowledged_at)
+  const openIssues = arr(titleIssues).filter((i) => ['open', 'in_progress'].includes(lower(i.status)))
+  const escalations = (c.automation_state && typeof c.automation_state === 'object' && c.automation_state.escalations) || {}
 
   /* ── rail ── */
   const rail = []
@@ -264,8 +280,11 @@ export function deriveClosingExecution({
   else step('emd', 'EMD', 'waiting', 'buyer', buyerEmd.due ? 'Due' : 'Required', buyerEmd.due?.at, 'chase_emd')
 
   // TITLE
-  if (clearToClose) step('title', 'Title', 'complete', null, 'Clear to close')
+  if (clearToClose) step('title', 'Title', 'complete', null, 'Clear to close', iso(c.clear_to_close_at))
   else if (!contractExecuted) step('title', 'Title', 'not_started', null, 'After contract')
+  else if (openIssues.length) step('title', 'Title', 'blocked', openIssues[0].owner || 'title', `${openIssues.length} open title issue${openIssues.length === 1 ? '' : 's'}`, iso(openIssues[0].opened_at), 'email_title')
+  else if (commitmentReceived) step('title', 'Title', 'waiting', 'title', 'Commitment received — awaiting clear to close', iso(c.title_commitment_received_at), 'email_title')
+  else if (acknowledged) step('title', 'Title', 'waiting', 'title', commitmentDue ? 'Acknowledged — commitment due' : 'Acknowledged — awaiting commitment', iso(c.title_acknowledged_at), 'email_title')
   else if (routeStatus === 'title_route_unavailable') step('title', 'Title', 'blocked', 'you', 'No title company routes this market', null, 'choose_title')
   else if (!clean(c.title_company_key) && !clean(c.title_company_name)) step('title', 'Title', 'active', 'system', 'Routing title company')
   else if (!c.title_intro_sent_at && !titleStatus) step('title', 'Title', 'active', 'you', 'Title company chosen — intro not sent', iso(c.title_company_selected_at), 'email_title')
@@ -296,6 +315,7 @@ export function deriveClosingExecution({
     { key: 'buyer', label: 'Buyer committed', met: buyerCommitted },
     { key: 'agreement', label: 'Buyer agreement executed', met: agreementExecuted },
     { key: 'emd', label: 'Buyer EMD verified', met: Boolean(buyerEmd) && emdDone(buyerEmd), detail: buyerEmd?.state === 'received' ? 'Received — not verified' : null },
+    { key: 'issues', label: 'No open title issues', met: openIssues.length === 0 },
     { key: 'title', label: 'Title clear to close', met: clearToClose },
     { key: 'schedule', label: 'Closing scheduled', met: confirmed },
     { key: 'statement', label: 'Settlement statement received', met: Boolean(statementRef) },
@@ -313,6 +333,9 @@ export function deriveClosingExecution({
     if (buyerFailed) block('buyer_failed', 'Buyer fell through', `Offer ${offerStatus || commitment}. The deal needs a replacement buyer.`, 'you', 'replace_buyer')
     if (agreement && DEAD_AGREEMENT.has(agreementStatus)) block('agreement_dead', `Buyer agreement ${agreementStatus}`, 'No executed buyer contract.', 'you', 'resend_buyer_agreement')
     if (routeStatus === 'title_route_unavailable') block('no_title', 'No title company for this market', 'Title cannot open until a company is chosen.', 'you', 'choose_title')
+    for (const i of openIssues) block(`title_issue:${i.issue_id}`, `Title issue: ${clean(i.issue_type).replace(/_/g, ' ')}`, clean(i.description) || 'Reported by title — must be resolved or waived with evidence.', lower(i.owner) || 'title', 'email_title')
+    // Automation ran its full cadence and stopped: the operator has the ball.
+    for (const [category, e] of Object.entries(escalations)) block(`escalated:${category}`, clean(e?.message) || 'Automation escalated', 'Routine follow-ups are exhausted; this needs you.', 'you', category.startsWith('buyer') ? 'nudge_buyer' : 'email_title')
     if (commitmentDue && commitmentDue.date < today && !clearToClose) block('title_late', 'Title commitment late', `Was due ${humanDate(commitmentDue.date)}.`, 'title', 'email_title')
     if (settlementFailed) block('settlement_failed', `Settlement ${lower(settlementFailed.settlement_status)}`, 'Funds did not settle.', 'title', 'email_title')
     if (when && when.date < today) block('date_passed', 'Closing date passed — not closed', `${confirmed ? 'Scheduled' : 'Target'} ${humanDate(when.date)}. Nothing records a close.`, 'title', 'email_title')
@@ -323,7 +346,7 @@ export function deriveClosingExecution({
   /* ── state (one label, derived — the first matching rule wins) ── */
   const firstOpen = rail.find((r) => r.status === 'active' || r.status === 'waiting' || r.status === 'blocked') || null
   let state
-  if (terminal) state = { key: 'cancelled', label: 'Cancelled', tone: 'terminated' }
+  if (terminal) state = { key: terminalOutcome || 'cancelled', label: { failed: 'Failed', withdrawn: 'Withdrawn' }[terminalOutcome] || 'Cancelled', tone: 'terminated' }
   else if (closed) state = { key: 'closed', label: settled.length ? 'Closed' : 'Closed — settlement not recorded', tone: 'closed' }
   else if (blockers.some((b) => b.key === 'emd_overdue')) state = { key: 'emd_overdue', label: 'EMD overdue', tone: 'blocked' }
   else if (blockers.some((b) => b.key === 'at_risk' || b.key === 'date_passed')) state = { key: 'closing_at_risk', label: 'Closing date at risk', tone: 'blocked' }
@@ -391,6 +414,8 @@ export function deriveClosingExecution({
     if (clean(s.settlement_statement_reference)) documents.push({ key: `statement:${clean(s.settlement_id)}`, label: { alta: 'ALTA settlement statement', hud1: 'HUD-1', closing_statement: 'Closing statement' }[lower(s.settlement_statement_type)] || 'Settlement statement', party: 'Title', status: lower(s.settlement_status) === 'settled' ? 'final' : 'received', source: clean(s.closing_provider) || 'Settlement records', reference: clean(s.settlement_statement_reference), at: iso(s.closed_at || s.created_at) })
     if (clean(s.recording_evidence_reference) || clean(s.recording_instrument_id)) documents.push({ key: `recording:${clean(s.settlement_id)}`, label: 'Recorded deed', party: 'County', status: lower(s.recording_status) === 'recorded' ? 'final' : 'received', source: clean(s.recording_jurisdiction) || 'Recording', reference: clean(s.recording_instrument_id) || clean(s.recording_evidence_reference), at: iso(s.recorded_at) })
   }
+  if (c.title_commitment_received_at) documents.push({ key: 'title_commitment', label: 'Title commitment', party: 'Title', status: 'received', source: clean(c.title_company_name) || 'Title', reference: clean(c.title_commitment_evidence) || null, at: iso(c.title_commitment_received_at) })
+  if (c.clear_to_close_at) documents.push({ key: 'clear_to_close', label: 'Clear-to-close confirmation', party: 'Title', status: 'received', source: clean(c.clear_to_close_source) || 'Title', reference: clean(c.clear_to_close_evidence) || null, at: iso(c.clear_to_close_at) })
   if (confirmed && daysOut !== null && daysOut <= 3 && !statementRef && !closed) documents.push({ key: 'statement:missing', label: 'Settlement statement', party: 'Title', status: 'missing', source: null, reference: null, at: null })
   if (offer && clean(offer.pof_reference)) documents.push({ key: 'pof', label: 'Proof of funds', party: 'Buyer', status: lower(offer.pof_status) === 'verified' ? 'verified' : 'received', source: clean(offer.pof_verified_by) || 'Buyer offer', reference: clean(offer.pof_reference), at: iso(offer.pof_verified_at) })
 
@@ -404,6 +429,18 @@ export function deriveClosingExecution({
   ev(c.title_company_selected_at, `Title routed${clean(c.title_company_name) ? ` · ${clean(c.title_company_name)}` : ''}`, 'Title router')
   ev(c.title_intro_sent_at, 'Title order sent', 'Title intro email')
   if (!milestoneTypes.has('title_opened')) ev(c.title_opened_date, 'Title opened', 'Closing case')
+  ev(c.title_acknowledged_at, 'Title acknowledged the order', clean(c.title_acknowledged_source) || 'Closing authority')
+  ev(c.title_commitment_received_at, 'Title commitment received', clean(c.title_commitment_evidence) || 'Closing authority')
+  if (!milestoneTypes.has('clear_to_close')) ev(c.clear_to_close_at, 'Clear to close', `${clean(c.clear_to_close_source).replace(/_/g, ' ') || 'title'}${clean(c.clear_to_close_actor) ? ` · ${clean(c.clear_to_close_actor)}` : ''}`)
+  for (const i of arr(titleIssues)) {
+    ev(i.opened_at, `Title issue opened · ${clean(i.issue_type).replace(/_/g, ' ')}`, clean(i.source) || 'Title')
+    if (i.resolved_at) ev(i.resolved_at, `Title issue ${lower(i.status)} · ${clean(i.issue_type).replace(/_/g, ' ')}`, clean(i.resolved_by) || 'Closing authority')
+  }
+  for (const a of arr(activity).filter((x) => (x.event_type || x.type) === 'closing_date_changed')) {
+    const d = a.detail || {}
+    ev(a.created_at || a.at, `Closing ${d.before?.at ? `moved ${humanDate(String(d.before.at).slice(0, 10))} → ${humanDate(String(d.after?.at || '').slice(0, 10))}` : `set ${humanDate(String(d.after?.at || '').slice(0, 10))}`}${d.after?.confirmed ? ' (confirmed)' : ''}`, `${a.source || 'operator'}${d.reason ? ` · ${d.reason}` : ''}`)
+  }
+  if (c.terminal_at) ev(c.terminal_at, `Closing ${terminalOutcome || 'ended'}${c.terminal_reason ? ` · ${clean(c.terminal_reason)}` : ''}`, clean(c.terminal_actor) || 'Closing authority')
   const MILESTONE_LABEL = { contract_fully_executed: 'Contract fully executed', title_opened: 'Title opened', escrow_funded: 'Escrow funded', closing_scheduled: 'Closing scheduled', closed: 'Closed' }
   for (const m of arr(milestones)) ev(m.occurred_at || m.recorded_at, MILESTONE_LABEL[lower(m.milestone_type)] || clean(m.milestone_type).replace(/_/g, ' '), `Closing workflow${clean(m.actor) ? ` · ${clean(m.actor)}` : ''}`)
   if (offer) {
@@ -501,6 +538,17 @@ export function deriveClosingExecution({
     documents,
     timeline,
     deadlines,
+    titleIssues: arr(titleIssues).map((i) => ({ id: i.issue_id, type: i.issue_type, description: i.description || null, status: i.status, owner: i.owner || null, source: i.source || null, evidence: i.evidence_reference || null, openedAt: iso(i.opened_at), resolvedAt: iso(i.resolved_at) })),
+    automation: {
+      paused: Boolean(c.automation_paused_at),
+      pausedReason: clean(c.automation_paused_reason) || null,
+      escalations: Object.entries(escalations).map(([category, e]) => ({ category, at: iso(e?.at), message: clean(e?.message) || null })),
+      pendingEmails: arr(emailRequests).filter((r) => r.status === 'pending_transport').length,
+      emails: arr(emailRequests).slice(0, 20).map((r) => ({ action: r.action, category: r.category, sequence: r.sequence, status: r.status, recipientRole: r.recipient_role, requestedAt: iso(r.requested_at), sentAt: iso(r.sent_at), reason: r.status_reason || null })),
+    },
+    terminalOutcome,
+    // The S10 guard, as finalize_closing will evaluate it (a finalize button shows only when ok).
+    finalize: closed || terminal ? null : evaluateClosingGuard({ closingCase: c, offers, agreements, emdReceipts, settlements, titleIssues }),
     updatedAt: iso(c.updated_at),
     lastActivityAt: iso(c.last_activity_at),
   }

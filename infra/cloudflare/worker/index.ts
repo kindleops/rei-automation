@@ -635,6 +635,18 @@ const CAMPAIGN_FEED: CronJob = {
 };
 
 /**
+ * Closing automation (2026-09-29): routine title / buyer follow-ups,
+ * stop conditions, escalation. It never sends — it writes
+ * closing_email_requests for the email system — and never moves a stage or
+ * money. Kill switch: system_control closing_automation_enabled.
+ */
+const CLOSING_AUTOMATION: CronJob = {
+  id: "closing_automation",
+  enabledBy: "CRON_CLOSING_AUTOMATION_ENABLED",
+  path: "/api/internal/closings/automation",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -667,6 +679,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     QUEUE_RECONCILE,
     CAMPAIGN_ACTIVATE_DUE,
     CAMPAIGN_FEED,
+    CLOSING_AUTOMATION,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

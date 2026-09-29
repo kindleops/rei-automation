@@ -26,6 +26,11 @@ const CASE_COLUMNS = [
   'seller_contract_price', 'earnest_money', 'buyer_price', 'assignment_fee', 'closing_costs', 'title_fees', 'expected_gross_revenue',
   'escrow_file_number', 'title_company_key', 'title_company_name', 'title_company_email', 'title_route_market', 'title_route_status',
   'title_company_selected_at', 'title_intro_sent_at', 'readiness', 'provenance', 'last_activity_at', 'created_at', 'updated_at',
+  // closing authority (20260929090000_closing_authority.sql)
+  'closing_tz', 'closing_date_confirmed_at', 'closing_date_source', 'title_acknowledged_at', 'title_acknowledged_source',
+  'title_commitment_received_at', 'title_commitment_evidence', 'clear_to_close_at', 'clear_to_close_source', 'clear_to_close_evidence',
+  'clear_to_close_actor', 'closed_at', 'closed_by', 'terminal_outcome', 'terminal_reason', 'terminal_at', 'terminal_actor',
+  'automation_paused_at', 'automation_paused_reason', 'automation_paused_by', 'automation_state',
 ].join(',')
 
 const clean = (v) => String(v ?? '').trim()
@@ -57,16 +62,28 @@ async function hydrate(db, cases, { now }) {
   const degraded = []
   const caseIds = cases.map((c) => c.closing_case_id).filter(Boolean)
   const oppIds = cases.map((c) => c.opportunity_id).filter((id) => UUID_RE.test(String(id || '')))
-  const [offers, agreements, receipts, settlements, milestones, opps] = await Promise.all([
+  const [offers, agreements, receipts, settlements, milestones, opps, issues, emails, activity] = await Promise.all([
     childRows(db, 'buyer_offers', 'opportunity_id', oppIds, degraded),
     childRows(db, 'buyer_agreements', 'opportunity_id', oppIds, degraded),
     childRows(db, 'emd_receipts', 'closing_case_id', caseIds, degraded),
     childRows(db, 'settlement_records', 'closing_case_id', caseIds, degraded),
     childRows(db, 'closing_milestones', 'closing_case_id', caseIds, degraded),
     childRows(db, 'acquisition_opportunities', 'id', oppIds, degraded, 'id, acquisition_stage, opportunity_status, primary_thread_key, seller_display_name, market'),
+    childRows(db, 'closing_title_issues', 'closing_case_id', caseIds, degraded),
+    childRows(db, 'closing_email_requests', 'closing_case_id', caseIds, degraded, 'closing_case_id, action, category, sequence, status, status_reason, recipient_role, requested_at, sent_at'),
+    // Only the activity the model needs (deposit record + date history); the
+    // full operational feed stays paginated in the room.
+    (async () => {
+      if (!caseIds.length) return []
+      try {
+        const { data, error } = await db.from('closing_activity_events').select('closing_case_id, event_type, actor, source, detail, idempotency_key, created_at').in('closing_case_id', caseIds).in('event_type', ['contract_emd_deposited', 'closing_date_changed']).limit(2000)
+        if (error) throw error
+        return data || []
+      } catch (err) { degraded.push({ source: 'closing_activity_events', error: String(err?.message || err) }); return [] }
+    })(),
   ])
   const byOpp = { offers: groupBy(offers, 'opportunity_id'), agreements: groupBy(agreements, 'opportunity_id'), opps: groupBy(opps, 'id') }
-  const byCase = { receipts: groupBy(receipts, 'closing_case_id'), settlements: groupBy(settlements, 'closing_case_id'), milestones: groupBy(milestones, 'closing_case_id') }
+  const byCase = { receipts: groupBy(receipts, 'closing_case_id'), settlements: groupBy(settlements, 'closing_case_id'), milestones: groupBy(milestones, 'closing_case_id'), issues: groupBy(issues, 'closing_case_id'), emails: groupBy(emails, 'closing_case_id'), activity: groupBy(activity, 'closing_case_id') }
   const items = cases.map((c) => deriveClosingExecution({
     closingCase: c,
     offers: byOpp.offers.get(clean(c.opportunity_id)) || [],
@@ -75,6 +92,9 @@ async function hydrate(db, cases, { now }) {
     settlements: byCase.settlements.get(clean(c.closing_case_id)) || [],
     milestones: byCase.milestones.get(clean(c.closing_case_id)) || [],
     opportunity: (byOpp.opps.get(clean(c.opportunity_id)) || [])[0] || null,
+    titleIssues: byCase.issues.get(clean(c.closing_case_id)) || [],
+    emailRequests: byCase.emails.get(clean(c.closing_case_id)) || [],
+    activity: byCase.activity.get(clean(c.closing_case_id)) || [],
     now,
   }))
   return { items, degraded }
