@@ -539,3 +539,73 @@ html[data-nexus-theme='light'] :is(.em2-sys-hero, .em2-hero)::after { background
 }
 .em2-search input { -webkit-appearance: none; appearance: none; background: transparent !important; box-shadow: none !important; }
 .em2-ticker__body em { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ════════════════════════ POLISH + LIQUID GLASS CONTROLS ════════════════════════
+   Every glass surface here follows Settings → Liquid Glass (preset / blur /
+   transparency / sheen): --lg-fill (tint), --lg-alpha (opacity), --lg-blur,
+   --lg-sat, --lg-sheen. With the "Theme" preset the vars are absent and the
+   defaults below apply. */
+.em2, .em2-room, .em2-sheet {
+  --k-glass: rgb(var(--lg-fill, 13 17 25) / var(--lg-alpha, 0.62));
+  --k-glass-hi: rgb(var(--lg-fill, 17 22 31) / min(0.96, calc(var(--lg-alpha, 0.62) + 0.26)));
+  --k-blur: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.65));
+  --k-blur-deep: blur(calc(var(--lg-blur, 22px) * 1.35)) saturate(calc(var(--lg-sat, 1.65) * 1.15)) brightness(1.05);
+  --k-sheen: var(--lg-sheen, 1);
+}
+html[data-nexus-theme='light'] :is(.em2, .em2-room, .em2-sheet) {
+  --k-glass: rgb(var(--lg-fill, 255 255 255) / max(0.86, var(--lg-alpha, 0.86)));
+  --k-glass-hi: rgb(var(--lg-fill, 255 255 255) / 0.97);
+  /* Light: glass must separate from the page, not melt into it. */
+  --k-edge: rgb(11 21 32 / 0.11); --k-edge-hi: rgb(11 21 32 / 0.2);
+}
+.em2-sys-hero, .em2-hero, .em2-needs, .em2-row.is-attention { -webkit-backdrop-filter: var(--k-blur-deep) !important; backdrop-filter: var(--k-blur-deep) !important; }
+.em2-sheen::after { opacity: var(--k-sheen); }
+.em2-sys-hero::after, .em2-hero::after { opacity: var(--k-sheen); }
+.em2-sys-hero::before, .em2-hero::before, .em2-needs::after, .em2-row.is-attention::after { opacity: calc(0.85 * min(1.4, var(--k-sheen))); }
+html[data-liquid-glass='smoke'] :is(.em2, .em2-room) .em2-liquid { opacity: 0.45; }
+html[data-liquid-glass='crystal'] :is(.em2, .em2-room) .em2-liquid { opacity: 1; }
+
+/* 1 · Ambient bloom yields to text: full colour behind the hero, receding
+   behind the conversation list so the email hierarchy leads. */
+.em2 > .em2-liquid { -webkit-mask-image: linear-gradient(180deg, #000 0, #000 28%, rgb(0 0 0 / 0.38) 52%, rgb(0 0 0 / 0.22) 100%); mask-image: linear-gradient(180deg, #000 0, #000 28%, rgb(0 0 0 / 0.38) 52%, rgb(0 0 0 / 0.22) 100%); }
+.em2-liquid i:nth-child(3) { opacity: 0.6; }
+.em2-row { background: var(--k-spec) padding-box, linear-gradient(var(--k-glass-hi), var(--k-glass-hi)) padding-box, var(--k-rim) border-box !important; }
+
+/* 2 · Hero ~15% shorter: more conversations above the fold. */
+.em2-sys-hero { gap: 10px; padding: 14px 14px 12px; border-radius: 24px; }
+.em2-sys-hero__top { gap: 12px; }
+.em2-orb { width: 46px; height: 46px; }
+.em2-orb i:nth-child(2) { inset: 6px; } .em2-orb i:nth-child(3) { inset: 12px; }
+.em2-sys-hero__copy strong { font-size: 22px; }
+.em2-sys-hero__copy small { font-size: 12.5px; }
+.em2-instr__seg { min-height: 52px; padding: 8px 11px 10px; }
+.em2-instr__seg b { font-size: 22px; }
+.em2-ticker { min-height: 42px; padding: 6px 11px; }
+
+/* 3 · Light: stronger glass/background separation. */
+html[data-nexus-theme='light'] :is(.em2-row, .em2-sys-hero, .em2-hero, .em2-needs, .em2-bubble.is-in, .em2-compose, .em2-search) {
+  box-shadow: 0 0 0 1px rgb(11 21 32 / 0.08), 0 1px 0 rgb(255 255 255 / 0.95) inset, 0 12px 30px -16px rgb(11 21 32 / 0.32) !important;
+}
+html[data-nexus-theme='light'] .em2 { background: #e8ecf3; }
+html[data-nexus-theme='light'] .em2-room { background: #e8ecf3; }
+
+/* 4 · Message bodies are calm and neutral; context carries the colour. */
+.em2-bubble.is-out { animation: none !important; background: var(--k-glass-hi) !important; border: 1px solid var(--k-edge-hi) !important; box-shadow: inset 2px 0 0 color-mix(in srgb, var(--k-cobalt) 55%, transparent), 0 12px 26px -20px rgb(0 0 0 / 0.7) !important; }
+.em2-bubble.is-in { background: var(--k-glass) !important; }
+html[data-nexus-theme='light'] .em2-bubble.is-out { background: #f6f8fc !important; }
+.em2-text { color: var(--k-text); }
+
+/* 5 · Telemetry chain reads as a door into the event sheet. */
+.em2-telbtn { padding: 4px 8px 4px 0; border-radius: 8px; }
+.em2-telbtn:active { background: var(--k-track); }
+
+/* 7 · Take over: the handoff is felt — machine → operator. */
+.em2-room.is-owned { --k-amb: var(--k-gold); }
+.em2-ball-track.is-owned li:nth-child(2) { opacity: 0.45; text-decoration: line-through; text-decoration-thickness: 1px; }
+.em2-handoff { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 16px; font-size: 13.5px; font-weight: 650;
+  color: var(--k-text); background: color-mix(in srgb, var(--k-gold) 12%, var(--k-glass-hi)); border: 1px solid color-mix(in srgb, var(--k-gold) 38%, transparent); animation: em2-lift 0.6s var(--k-spring, cubic-bezier(0.34, 1.45, 0.64, 1)) both; }
+.em2-handoff svg { color: var(--k-gold); }
+.em2-handoff small { display: block; font-size: 12px; font-weight: 550; color: var(--k-text-2); }
+.em2-handoff::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--k-gold) 30%, transparent) 50%, transparent 80%); background-size: 250% 100%; animation: em2-flow 1.4s linear 1 both; pointer-events: none; }
+.em2-actionbar .is-owner { color: #1a1300; background: var(--k-gold); border-color: transparent; }
+.em2-search input { border: 0 !important; outline: 0 !important; border-radius: 0 !important; padding: 0 !important; }

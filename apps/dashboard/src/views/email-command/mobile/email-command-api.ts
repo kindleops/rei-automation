@@ -110,10 +110,11 @@ export const fetchMessage = async (id: string): Promise<MessageTelemetry> => {
 }
 const DEMO_REFUSAL = { ok: false, code: 'DEMO_READ_ONLY', message: 'Demo data — nothing is written or sent.' }
 
-export interface ActionResult { ok: boolean; code?: string; message?: string; stopped?: number; duplicate?: boolean }
+export interface ActionResult { ok: boolean; code?: string; message?: string; stopped?: number; duplicate?: boolean; demo?: boolean }
 
 export async function postThreadAction(id: string, action: string, fields: Record<string, unknown> = {}): Promise<ActionResult> {
-  if (isDemoMode()) return action === 'mark_read' ? { ok: true } : DEMO_REFUSAL
+  // Demo: the handoff is shown locally (nothing is written); every other write is refused.
+  if (isDemoMode()) return ['mark_read', 'take_over', 'return_to_system'].includes(action) ? { ok: true, demo: true } : DEMO_REFUSAL
   const res = await callBackend<ActionResult>(`${BASE}/threads/${encodeURIComponent(id)}/actions`, { method: 'POST', body: JSON.stringify({ action, ...fields }) })
   if (!res.ok) {
     const body = (res.upstream as { data?: ActionResult } | undefined)?.data ?? (res.upstream as ActionResult | undefined)

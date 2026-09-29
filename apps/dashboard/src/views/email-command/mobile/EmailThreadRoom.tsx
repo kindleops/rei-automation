@@ -44,17 +44,25 @@ export function EmailThreadRoom({ id, fallback, onClose, onChanged }: { id: stri
 
   const act = useCallback(async (action: string, fields: Record<string, unknown> = {}, ok = 'Done') => {
     setBusy(action)
+    // The handoff is felt immediately; the server confirms (or reverts) it.
+    const before = room
+    if (room && (action === 'take_over' || action === 'return_to_system')) {
+      const owned = action === 'take_over'
+      setRoom({ ...room, thread: { ...room.thread, automation: owned ? 'paused_you_own_it' : 'on', ball: owned ? 'you' : room.thread.ball === 'you' ? 'leadcommand' : room.thread.ball, next: owned ? null : room.thread.next } })
+    }
     const r = await postThreadAction(id, action, fields)
+    if (!r.ok && before) setRoom(before)
     setBusy(null)
     setNotice(r.ok ? { tone: 'good', text: action === 'take_over' ? `You own this conversation${r.stopped ? ` · ${r.stopped} scheduled email${r.stopped === 1 ? '' : 's'} stopped` : ''}` : ok } : { tone: 'bad', text: r.message || human(r.code) || 'Not accepted' })
-    if (r.ok) { setReloadKey((k) => k + 1); onChanged?.() }
-  }, [id, onChanged])
+    if (r.ok && !r.demo) { setReloadKey((k) => k + 1); onChanged?.() }
+  }, [id, onChanged, room])
 
   const t = room?.thread ?? null
   const tone = t ? STATE_TONE[t.state] : 'active'
+  const owned = t?.automation === 'paused_you_own_it'
 
   return createPortal(
-    <div className={`em2-room is-${tone}`} role="dialog" aria-modal="true" aria-label={t ? who(t) : 'Conversation'} data-testid="email-room">
+    <div className={`em2-room is-${tone}${owned ? ' is-owned' : ''}`} role="dialog" aria-modal="true" aria-label={t ? who(t) : 'Conversation'} data-testid="email-room">
       <LiquidField needs={t?.state === 'needs_you'} live={t?.state === 'system_handling'} />
       <div className="em2-room__scroll" ref={scrollRef}>
         <header className="em2-room__bar">
@@ -87,7 +95,10 @@ export function EmailThreadRoom({ id, fallback, onClose, onChanged }: { id: stri
                 </div>
               </section>
             ))}
-            {notice ? <p className={`em2-notice is-${notice.tone}`} role="status">{notice.text}</p> : null}
+            {owned ? (
+              <div className="em2-handoff" role="status"><Icon name="user" /><span>You own this conversation<small>Automation is paused for this thread only. Return it to LeadCommand when you're done.</small></span></div>
+            ) : null}
+            {notice && !(owned && notice.tone === 'good') ? <p className={`em2-notice is-${notice.tone}`} role="status">{notice.text}</p> : null}
             <Timeline items={room?.items ?? []} loaded={loaded} openMessage={(mid) => setSheet({ kind: 'message', id: mid })} openWhy={(why, title) => setSheet({ kind: 'why', title, why })} onReview={(a, decision) => act('review_attachment', { attachment_id: a.id, decision }, decision === 'reviewed' ? 'Marked reviewed' : 'Rejected')} />
           </>
         )}
@@ -101,7 +112,7 @@ export function EmailThreadRoom({ id, fallback, onClose, onChanged }: { id: stri
           {t.context?.kind === 'seller' && t.context.open_sms ? <button type="button" onClick={() => pushRoutePath(t.context!.kind === 'seller' ? (t.context as { open_sms: string }).open_sms : '/inbox')}><Icon name="message" />Open SMS</button> : null}
           {t.context?.kind === 'seller' && t.context.open_deal ? <button type="button" onClick={() => pushRoutePath((t.context as { open_deal: string }).open_deal)}><Icon name="target" />Deal</button> : null}
           {t.automation === 'paused_you_own_it'
-            ? <button type="button" disabled={busy !== null} onClick={() => act('return_to_system', {}, 'Returned to LeadCommand')}><Icon name="play" />Return to system</button>
+            ? <button type="button" className="is-owner" disabled={busy !== null} onClick={() => act('return_to_system', {}, 'Returned to LeadCommand')}><Icon name="play" />Return to LeadCommand</button>
             : <button type="button" disabled={busy !== null} onClick={() => act('take_over')}><Icon name="user" />Take over</button>}
         </nav>
       ) : null}
@@ -116,7 +127,7 @@ function BallTrack({ t }: { t: ThreadSummary }) {
   const them = ROLE_LABEL[t.counterparty.role] || 'Them'
   const nodes: Array<[string, string]> = [['you', 'You'], ['leadcommand', 'LeadCommand'], ['them', them]]
   return (
-    <ol className={`em2-ball-track is-${t.ball || 'none'}`} aria-label={`Ball: ${t.ball || 'nobody'}`}>
+    <ol className={`em2-ball-track is-${t.ball || 'none'}${t.automation === 'paused_you_own_it' ? ' is-owned' : ''}`} aria-label={`Ball: ${t.ball || 'nobody'}`}>
       {nodes.map(([k, label]) => <li key={k} className={t.ball === k ? 'is-on' : ''}><i aria-hidden /><span>{label}</span></li>)}
     </ol>
   )
