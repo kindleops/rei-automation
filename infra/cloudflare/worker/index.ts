@@ -169,6 +169,22 @@ export class ApiContainer extends Container<Env> {
       ...(env.SCOPED_CANARY_EXECUTION_SECRET
         ? { SCOPED_CANARY_EXECUTION_SECRET: env.SCOPED_CANARY_EXECUTION_SECRET }
         : {}),
+
+      // EMAIL TRANSPORT (Brevo) -- forwarded by explicit operator decision
+      // 2026-09-29 ("Brevo" as the one email transport, brand domains).
+      // Conditional like everything above: staging holds none of these.
+      // Sending still requires ALL of: EMAIL_SEND_ENABLED=true here (default
+      // deny), system_control.email_enabled='true' (operator kill switch), an
+      // active email_senders row, and the per-message send-safety gates.
+      // The two secrets are verifiers only (webhook + inbound authenticity).
+      EMAIL_SEND_ENABLED: env.EMAIL_SEND_ENABLED === "true" ? "true" : "false",
+      ...(env.BREVO_API_KEY ? { BREVO_API_KEY: env.BREVO_API_KEY } : {}),
+      ...(env.BREVO_REIVESTI_API_KEY ? { BREVO_REIVESTI_API_KEY: env.BREVO_REIVESTI_API_KEY } : {}),
+      ...(env.BREVO_PROMINENT_API_KEY ? { BREVO_PROMINENT_API_KEY: env.BREVO_PROMINENT_API_KEY } : {}),
+      ...(env.BREVO_EVERLINE_API_KEY ? { BREVO_EVERLINE_API_KEY: env.BREVO_EVERLINE_API_KEY } : {}),
+      ...(env.BREVO_WEBHOOK_SECRET ? { BREVO_WEBHOOK_SECRET: env.BREVO_WEBHOOK_SECRET } : {}),
+      ...(env.EMAIL_INBOUND_SECRET ? { EMAIL_INBOUND_SECRET: env.EMAIL_INBOUND_SECRET } : {}),
+      ...(env.EMAIL_INBOUND_DOMAIN ? { EMAIL_INBOUND_DOMAIN: env.EMAIL_INBOUND_DOMAIN } : {}),
     };
   }
 }
@@ -211,6 +227,15 @@ interface Env {
   ENABLE_LIVE_SENDING?: string;
   AUTOMATION_LIVE_SENDS_ENABLED?: string;
   WORKFLOW_LIVE_SENDS_ENABLED?: string;
+  // Email (Brevo transport + inbound verification).
+  EMAIL_SEND_ENABLED?: string;
+  BREVO_API_KEY?: string;
+  BREVO_REIVESTI_API_KEY?: string;
+  BREVO_PROMINENT_API_KEY?: string;
+  BREVO_EVERLINE_API_KEY?: string;
+  BREVO_WEBHOOK_SECRET?: string;
+  EMAIL_INBOUND_SECRET?: string;
+  EMAIL_INBOUND_DOMAIN?: string;
 }
 
 async function forwardToApi(request: Request, env: Env): Promise<Response> {
@@ -381,6 +406,40 @@ export default {
     // lives in apps/dashboard/static/_headers, which Cloudflare applies to
     // asset responses -- one source of truth, not two.
     return env.ASSETS.fetch(request);
+  },
+
+  /**
+   * Cloudflare Email Routing entrypoint (inbound email → Email Command).
+   *
+   * The raw RFC 822 message is forwarded to the API, which parses, dedupes,
+   * resolves and routes it. Authenticated with EMAIL_INBOUND_SECRET; without
+   * it the message is rejected at SMTP time rather than silently dropped, so
+   * the sender learns it did not arrive.
+   */
+  async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
+    if (!env.EMAIL_INBOUND_SECRET) {
+      message.setReject("Inbound email is not configured");
+      return;
+    }
+    if (message.rawSize > 25 * 1024 * 1024) {
+      message.setReject("Message too large");
+      return;
+    }
+    const raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < raw.length; i += 0x8000) binary += String.fromCharCode(...raw.subarray(i, i + 0x8000));
+    const res = await forwardToApi(
+      new Request("https://internal.invalid/api/webhooks/email/inbound", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-email-inbound-secret": env.EMAIL_INBOUND_SECRET },
+        body: JSON.stringify({ source: "cloudflare", envelope_from: message.from, envelope_to: message.to, raw_base64: btoa(binary) }),
+      }),
+      env
+    );
+    if (res.status >= 500) {
+      // Temporary failure: reject so the sending server retries later instead of losing the reply.
+      message.setReject("Temporary failure, try again later");
+    }
   },
 
   /**
@@ -647,6 +706,20 @@ const CLOSING_AUTOMATION: CronJob = {
 };
 
 /**
+ * Email dispatch (2026-09-29): the ONE email sender. Bridges Closing
+ * Authority requests into the outbox, revalidates every due message against
+ * live business state, sends through the brand's provider, fetches inbound
+ * attachments, evaluates email health, writes a heartbeat. Send-capable, so it
+ * lives on the send lane; it sends nothing unless EMAIL_SEND_ENABLED=true AND
+ * system_control.email_enabled='true'.
+ */
+const EMAIL_DISPATCH: CronJob = {
+  id: "email_dispatch",
+  enabledBy: "CRON_EMAIL_DISPATCH_ENABLED",
+  path: "/api/internal/email/dispatch",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -684,7 +757,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule
   // is send-capable.
-  "* * * * *": [QUEUE_RUN],
+  "* * * * *": [QUEUE_RUN, EMAIL_DISPATCH],
 };
 
 /**

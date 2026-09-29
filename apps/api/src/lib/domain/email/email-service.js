@@ -862,7 +862,7 @@ function buildEmailQueueKey({ recipient, subject, body, idempotencyKey }) {
 }
 
 async function insertEmailMessage(db, row) {
-  const queueRow = {
+  const queueRow = row.queue_status ? { ...row } : {
     queue_key: row.queue_key,
     queue_status: row.status,
     to_email: row.to_email,
@@ -874,15 +874,7 @@ async function insertEmailMessage(db, row) {
     property_id: row.property_id || null,
     master_owner_id: row.master_owner_id || null,
     scheduled_for: row.scheduled_for || null,
-    metadata: {
-      ...(row.metadata || {}),
-      thread_id: row.thread_id,
-      direction: row.direction,
-      from_name: row.from_name,
-      reply_to_email: row.reply_to_email,
-      template_key: row.template_key || null,
-      text_body: row.text_body || null,
-    },
+    metadata: { ...(row.metadata || {}), thread_id: row.thread_id, direction: row.direction, from_name: row.from_name, reply_to_email: row.reply_to_email, template_key: row.template_key || null, text_body: row.text_body || null },
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -1055,183 +1047,91 @@ export async function sendManualEmail(payload = {}, options = {}) {
     return { ok: false, sent: false, error: sender.reason || "sender_identity_missing" };
   }
 
+  /**
+   * ONE DISPATCHER. A manual send is an email_queue row (source 'manual') on
+   * the counterparty's thread; the email dispatcher sends it with the same
+   * identity, threading, telemetry and suppression as every automated email.
+   * Nothing here calls the provider directly any more.
+   */
   const db = getDb();
-  const threadId = clean(payload.thread_id) || `email:${recipient.email}`;
   const sendEnabled = bool(process.env.EMAIL_SEND_ENABLED);
-  const dryRun = Boolean(options.dry_run || !sendEnabled);
+  let thread = null;
+  const requestedThread = clean(payload.thread_id);
+  if (/^[0-9a-f-]{36}$/i.test(requestedThread)) {
+    const { data } = await db.from("email_threads").select("*").eq("id", requestedThread).maybeSingle();
+    thread = data || null;
+  }
+  if (!thread) {
+    const { ensureThread, threadKeyFor } = await import("./email-identity.js");
+    thread = await ensureThread(db, {
+      thread_key: threadKeyFor({ email: recipient.email }),
+      category: clean(payload.category) || "other",
+      counterparty_email: recipient.email,
+      master_owner_id: clean(payload.master_owner_id) || null,
+      property_id: clean(payload.property_id) || null,
+      prospect_id: clean(payload.prospect_id) || null,
+      subject,
+      resolution_method: "manual",
+    });
+  }
   const queueKey = buildEmailQueueKey({
     recipient: recipient.email,
     subject,
     body: htmlBody || textBody || "",
     idempotencyKey: payload.idempotency_key || payload.idempotencyKey,
   });
-  const messageRow = {
+  const scheduledFor = clean(payload.scheduled_for) && Number.isFinite(Date.parse(payload.scheduled_for))
+    ? new Date(Date.parse(payload.scheduled_for)).toISOString()
+    : nowIso();
+  const row = {
     queue_key: queueKey,
-    thread_id: threadId,
-    direction: "outbound",
-    status: dryRun ? "no_send" : "pending_send",
-    provider: "brevo",
-    email_address: recipient.email,
+    queue_status: scheduledFor > nowIso() ? "scheduled" : "pending_send",
+    scheduled_for: scheduledFor,
     to_email: recipient.email,
     from_email: sender.sender.email,
     from_name: sender.sender.name,
-    reply_to_email: sender.sender.reply_to_email,
     subject,
+    email_body: htmlBody || null,
     html_body: htmlBody || null,
     text_body: textBody || null,
-    prospect_id: clean(payload.prospect_id) || null,
-    property_id: clean(payload.property_id) || null,
-    master_owner_id: clean(payload.master_owner_id) || null,
     template_id: clean(payload.template_id) || null,
-    template_key: clean(payload.template_key) || null,
-    metadata: {
-      ...(maybeJson(payload.metadata)),
-      manual_send: true,
-      dry_run: dryRun,
-      sender_source: sender.source,
-    },
-    created_at: nowIso(),
-    updated_at: nowIso(),
+    prospect_id: clean(payload.prospect_id) || thread.prospect_id || null,
+    property_id: clean(payload.property_id) || thread.property_id || null,
+    master_owner_id: clean(payload.master_owner_id) || thread.master_owner_id || null,
+    thread_id: thread.id,
+    source: "manual",
+    origin: "manual",
+    lane: "manual",
+    action_key: "manual.email",
+    sequence: 1,
+    brand_key: clean(payload.brand_key) || thread.brand_key || null,
+    requested_by: clean(options.actor || payload.actor) || "operator",
+    reason: { why: "Operator sent this email", actor: clean(options.actor || payload.actor) || null },
+    metadata: { ...(maybeJson(payload.metadata)), manual_send: true, sender_source: sender.source },
   };
-
-  const inserted = await insertEmailMessage(db, messageRow);
+  const inserted = await insertEmailMessage(db, row);
   if (!inserted.ok) {
-    return {
-      ok: false,
-      sent: false,
-      error: "email_message_insert_failed",
-      message: clean(inserted.error?.message) || "email_message_insert_failed",
-    };
+    return { ok: false, sent: false, error: "email_message_insert_failed", message: clean(inserted.error?.message) || "email_message_insert_failed" };
   }
-
   const messageId = clean(inserted.message?.id);
-  // A duplicate submit is reported honestly and does NOT proceed to dispatch.
   if (inserted.already_queued) {
-    return {
-      ok: true,
-      sent: false,
-      duplicate: true,
-      already_queued: true,
-      message_id: messageId,
-      thread_id: threadId,
-      queue_key: queueKey,
-      status: clean(inserted.message?.queue_status) || "queued",
-      reason: "already_queued",
-    };
+    return { ok: true, sent: false, duplicate: true, already_queued: true, message_id: messageId, thread_id: thread.id, queue_key: queueKey, status: clean(inserted.message?.queue_status) || "queued", reason: "already_queued" };
   }
-  const requestedEvent = {
-    event_key: eventKey("manual_email_requested", {
-      messageId,
-      to: recipient.email,
-      subject,
-      at: nowIso(),
-    }),
-    provider: "brevo",
-    direction: "outbound",
-    queue_id: messageId || null,
-    to_email: recipient.email,
-    from_email: sender.sender.email,
-    event_type: dryRun ? "manual_send_no_send" : "manual_send_requested",
-    subject,
-    template_key: clean(payload.template_key) || null,
-    campaign_key: clean(payload.campaign_key) || null,
-    raw_payload: { dry_run: dryRun, no_send: dryRun },
-    metadata: { manual_send: true },
-    event_at: nowIso(),
-    created_at: nowIso(),
-    updated_at: nowIso(),
-  };
-
-  const eventInsert = await upsertEmailEvent(db, requestedEvent);
-  if (!eventInsert.ok) {
-    return {
-      ok: false,
-      sent: false,
-      error: "email_event_insert_failed",
-      message: clean(eventInsert.error?.message) || "email_event_insert_failed",
-      // The queue row was already written. Leaving it at no_send/pending would
-      // strand a row that looks actionable, so it is marked failed with the
-      // reason rather than left to be picked up or counted as pending.
-      queue_row_marked_failed: (
-        await updateEmailMessage(db, messageId, {
-          status: "failed",
-          failure_reason: clean(eventInsert.error?.message) || "email_event_insert_failed",
-        })
-      ).ok,
-      message_id: messageId || null,
-    };
+  try {
+    const { recordEmailEvent } = await import("./email-telemetry.js");
+    await recordEmailEvent(db, { type: row.queue_status === "scheduled" ? "scheduled" : "queued", source: "manual_operator", message: { ...row, id: messageId }, key: `manual:queued:${messageId}` });
+  } catch {
+    // Telemetry is append-only history; a failed append never blocks the send.
   }
-
-  if (dryRun) {
-    return {
-      ok: true,
-      sent: false,
-      dry_run: true,
-      no_send: true,
-      reason: "email_send_disabled",
-      message_id: messageId || null,
-      thread_id: threadId,
-    };
-  }
-
-  const sendResult = await getSendBrevo()({
-    to: recipient.email,
-    subject,
-    htmlContent: htmlBody,
-    textContent: textBody,
-    sender: { name: sender.sender.name, email: sender.sender.email },
-    replyTo: sender.sender.reply_to_email ? { email: sender.sender.reply_to_email } : null,
-    tags: ["manual_email", clean(payload.template_key)].filter(Boolean),
-    params: maybeJson(payload.params),
-  });
-
-  if (!sendResult?.ok || !sendResult?.sent) {
-    await updateEmailMessage(db, messageId, {
-      status: "failed",
-      failure_reason: clean(sendResult?.error?.code || sendResult?.reason) || "brevo_send_failed",
-      updated_at: nowIso(),
-    });
-    await upsertEmailEvent(db, {
-      ...requestedEvent,
-      event_key: eventKey("manual_email_failed", { messageId, sendResult, at: nowIso() }),
-      event_type: "manual_send_failed",
-      raw_payload: sendResult || {},
-      updated_at: nowIso(),
-    });
-    return {
-      ok: false,
-      sent: false,
-      error: clean(sendResult?.error?.code || sendResult?.reason) || "brevo_send_failed",
-      provider_error: sendResult?.error || null,
-      message_id: messageId || null,
-    };
-  }
-
-  await updateEmailMessage(db, messageId, {
-    status: "sent",
-    provider_message_id: clean(sendResult.message_id) || null,
-    brevo_message_id: clean(sendResult.message_id) || null,
-    sent_at: nowIso(),
-    updated_at: nowIso(),
-  });
-  await upsertEmailEvent(db, {
-    ...requestedEvent,
-    event_key: eventKey("manual_email_sent", { messageId, provider: sendResult.message_id, at: nowIso() }),
-    provider_message_id: clean(sendResult.message_id) || null,
-    brevo_message_id: clean(sendResult.message_id) || null,
-    event_type: "sent",
-    raw_payload: sendResult.raw_response || {},
-    updated_at: nowIso(),
-  });
-
   return {
     ok: true,
-    sent: true,
-    dry_run: false,
-    provider: "brevo",
-    provider_message_id: clean(sendResult.message_id) || null,
+    sent: false,
+    queued: true,
+    send_enabled: sendEnabled,
+    status: row.queue_status,
     message_id: messageId || null,
-    thread_id: threadId,
+    thread_id: thread.id,
+    reason: sendEnabled ? "queued_for_dispatch" : "email_send_disabled",
   };
 }
 
@@ -1366,59 +1266,12 @@ async function updateMessageForEvent(db, normalized) {
   return { ok: !error, error };
 }
 
+/** Brevo webhook → the canonical telemetry ledger (provider adapter #1). */
 export async function handleBrevoWebhookEvents(events = []) {
-  const db = getDb();
   const list = Array.isArray(events) ? events : events ? [events] : [];
-  const results = [];
-
-  for (const event of list) {
-    const normalized = normalizeEmailEvent(event);
-    const eventRow = {
-      event_key: normalized.event_key,
-      provider: "brevo",
-      provider_event_id: normalized.provider_event_id,
-      provider_message_id: normalized.provider_message_id,
-      brevo_message_id: normalized.provider_message_id,
-      email_address: normalized.email_address,
-      event_type: normalized.event_type,
-      subject: normalized.subject,
-      template_key: normalized.template_key,
-      campaign_key: normalized.campaign_key,
-      raw_payload: normalized.raw_payload,
-      metadata: normalized.metadata,
-      event_at: normalized.event_at,
-      created_at: nowIso(),
-      updated_at: nowIso(),
-    };
-
-    const eventInsert = await upsertEmailEvent(db, eventRow);
-    const messageUpdate = await updateMessageForEvent(db, normalized);
-    let suppression = { ok: true, skipped: true };
-    if (SUPPRESSION_EVENT_TYPES.has(normalized.event_type)) {
-      suppression = await upsertSuppression(db, normalized);
-    }
-
-    results.push({
-      ok: eventInsert.ok,
-      event_key: normalized.event_key,
-      event_type: normalized.event_type,
-      email_address: normalized.email_address,
-      provider_message_id: normalized.provider_message_id,
-      message_updated: Boolean(messageUpdate.ok && !messageUpdate.skipped),
-      suppressed: Boolean(suppression.ok && !suppression.skipped),
-      warnings: [
-        eventInsert.ok ? null : clean(eventInsert.error?.message) || "email_event_upsert_failed",
-        messageUpdate.ok ? null : clean(messageUpdate.error?.message) || "email_message_update_failed",
-        suppression.ok ? null : clean(suppression.error?.message) || "email_suppression_upsert_failed",
-      ].filter(Boolean),
-    });
-  }
-
-  return {
-    ok: results.every((result) => result.ok),
-    events_received: list.length,
-    results,
-  };
+  const { ingestProviderEvents } = await import("./email-provider-events.js");
+  const result = await ingestProviderEvents("brevo", list, { supabase: getDb() });
+  return { ...result, events_received: list.length };
 }
 
 export async function getEmailTemplates(filters = {}) {

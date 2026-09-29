@@ -59,7 +59,17 @@ const CAMPAIGN_EXECUTION_JOB_PATHS = [
  */
 const CLOSING_AUTOMATION_JOB_PATHS = ["/api/internal/closings/automation"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS];
+/**
+ * THE ONE EMAIL SENDER, commissioned 2026-09-29 by explicit operator request
+ * (Email Command: "use canonical Cloudflare scheduling … Do NOT create Vercel
+ * cron jobs"; Brevo chosen as the one transport). A different channel from
+ * SMS, so it is counted separately: the SMS invariant below stays "exactly
+ * queue/run". It transmits only with EMAIL_SEND_ENABLED=true (default deny,
+ * forwarded unconditionally as "false") AND system_control.email_enabled.
+ */
+const EMAIL_SEND_CAPABLE_JOB_PATHS = ["/api/internal/email/dispatch"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -148,6 +158,16 @@ test("EXACTLY ONE send-capable job is registered, and it is the canonical runner
   const registered = [...code.matchAll(/path:\s*"([^"]+)"/g)].map((m) => m[1]);
   const sendCapable = registered.filter((p) => SEND_CAPABLE_JOB_PATHS.includes(p));
   assert.deepEqual(sendCapable, ["/api/internal/queue/run"]);
+  // Email is its own, singular sender.
+  assert.deepEqual(registered.filter((p) => EMAIL_SEND_CAPABLE_JOB_PATHS.includes(p)), ["/api/internal/email/dispatch"]);
+});
+
+test("the email sender is default-deny: EMAIL_SEND_ENABLED is forwarded as 'false' unless explicitly 'true'", async () => {
+  const code = await workerCode();
+  assert.match(code, /EMAIL_SEND_ENABLED:\s*env\.EMAIL_SEND_ENABLED === "true" \? "true" : "false"/);
+  for (const k of ["BREVO_API_KEY", "BREVO_WEBHOOK_SECRET", "EMAIL_INBOUND_SECRET"]) {
+    assert.match(code, new RegExp(`env\\.${k}\\s*\\?`), `${k} must be forwarded conditionally`);
+  }
 });
 
 test("the queue runner carries NO body, so system_control owns throughput", async () => {
@@ -216,6 +236,8 @@ test("production declares the reconciliation and send schedules, and only approv
       "CRON_CAMPAIGN_FEED_ENABLED",
       "CRON_CLOSING_AUTOMATION_ENABLED",
       "CRON_DELIVERY_RECONCILE_ENABLED",
+      // Email Command dispatcher, operator-commissioned 2026-09-29.
+      "CRON_EMAIL_DISPATCH_ENABLED",
       "CRON_ENABLED",
       // PRODUCTION-COMMISSIONING-1. Both send-incapable; see
       // RECONCILIATION_JOB_PATHS for the structural reason each one is.
@@ -240,7 +262,10 @@ test("the send lane sits on its OWN expression, not bolted onto reconciliation",
   assert.ok(!fiveMin[1].includes("QUEUE_RUN"), "the send lane must not ride the reconciliation schedule");
   const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
   assert.ok(oneMin, "the one-minute send entry must be declared");
-  assert.equal(oneMin[1].trim(), "QUEUE_RUN", "the send schedule carries the runner and nothing else");
+  // The send lane carries the senders and nothing else: the SMS runner and
+  // (2026-09-29) the email dispatcher. No reconciler or feeder rides it.
+  assert.deepEqual(oneMin[1].split(",").map((x) => x.trim()).filter(Boolean), ["QUEUE_RUN", "EMAIL_DISPATCH"], "the send schedule carries the senders and nothing else");
+  assert.ok(!fiveMin[1].includes("EMAIL_DISPATCH"), "the email sender must not ride the reconciliation schedule");
 });
 
 test("STAGING declares no schedule and registers no job at all", async () => {

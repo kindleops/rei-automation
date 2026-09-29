@@ -27,6 +27,8 @@ import { evaluateSendSafety, DEFAULT_STALE_AFTER_MS } from './email-send-safety.
 import { resolveBrandSender, mintMessageId, threadingHeaders, replyAddressFor } from './email-identity.js'
 import { bridgeClosingEmailRequests, revalidateClosingEmail, writeBackClosingRequest } from './email-closing-bridge.js'
 import { emitNotificationFromBusinessEvent } from '@/lib/domain/notifications/notification-emitter.js'
+import { recordEmailEvent, laneFor } from './email-telemetry.js'
+import { applyTracking } from './email-tracking.js'
 
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
@@ -69,24 +71,20 @@ async function priorMessageIds(db, threadId, excludeId) {
   ].sort((a, b) => String(a.at).localeCompare(String(b.at))).map((x) => x.id)
 }
 
+const EVENT_ALIASES = { send_failed: 'failed', send_retry_scheduled: 'retry_scheduled' }
+
+/** Every dispatcher outcome is a canonical, append-only telemetry event. */
 async function logEvent(db, row, eventType, extra = {}) {
-  const at = new Date().toISOString()
-  await db.from('email_events').upsert({
-    event_key: `${eventType}:${row.id}:${extra.attempt ?? row.retry_count ?? 0}`,
-    event_type: eventType,
-    direction: 'outbound',
-    to_email: row.to_email,
-    from_email: extra.from_email || row.from_email || null,
-    subject: row.subject,
-    queue_id: row.id,
-    thread_id: row.thread_id || null,
-    provider_message_id: extra.provider_message_id || null,
-    created_at: at,
-    sent_at: eventType === 'sent' ? at : null,
-    failed_at: eventType === 'send_failed' ? at : null,
-    error_message: extra.error || null,
-    metadata: { source: row.source, action_key: row.action_key, sequence: row.sequence, code: extra.code || null },
-  }, { onConflict: 'event_key' })
+  const type = EVENT_ALIASES[eventType] || eventType
+  const attempt = extra.attempt ?? row.retry_count ?? 0
+  await recordEmailEvent(db, {
+    type,
+    source: extra.source || 'dispatcher',
+    message: { ...row, from_email: extra.from_email || row.from_email, provider_message_id: extra.provider_message_id || row.provider_message_id },
+    key: `dispatcher:${type}:${row.id}:${attempt}`,
+    providerMessageId: extra.provider_message_id || null,
+    reason: extra.code || extra.error || null,
+  })
 }
 
 async function flagThread(db, threadId, code, reason, now) {
@@ -229,12 +227,17 @@ async function processRow(db, row, { now, send, notify, env, controls, summary }
   if (references) headers.References = references
   const subject = inReplyTo && !/^re:/i.test(row.subject) && row.sequence > 1 ? `Re: ${row.subject}` : row.subject
 
-  await db.from('email_queue').update({ message_id_header: messageId, in_reply_to: inReplyTo, references_header: references, from_email: s.email, from_name: s.name, reply_to_email: replyTo, sender_key: s.sender_key }).eq('id', row.id)
+  // Own tracking (signed-by-unguessability tokens, destinations pre-recorded)
+  // when this sender has a tracking host; otherwise provider telemetry only.
+  const tracked = await applyTracking(db, row, s.tracking_base_url)
+  const lineage = { lane: laneFor(row), sending_domain: s.domain, provider: 'brevo', origin: row.source === 'manual' ? 'manual' : 'automation', template_version: row.template_version || row.metadata?.template_version || row.reason?.template_version || null }
+  await db.from('email_queue').update({ message_id_header: messageId, in_reply_to: inReplyTo, references_header: references, from_email: s.email, from_name: s.name, reply_to_email: replyTo, sender_key: s.sender_key, ...lineage, ...(tracked.token ? { tracking_token: tracked.token } : {}) }).eq('id', row.id)
+  Object.assign(row, lineage, { sender_key: s.sender_key, from_email: s.email })
 
   const result = await send({
     to: row.to_email,
     subject,
-    htmlContent: row.html_body || row.email_body,
+    htmlContent: tracked.html || row.html_body || row.email_body,
     textContent: row.text_body || undefined,
     sender: { name: s.name, email: s.email },
     replyTo: replyTo ? { email: replyTo } : null,
@@ -246,6 +249,8 @@ async function processRow(db, row, { now, send, notify, env, controls, summary }
     const providerMessageId = clean(result.message_id) || null
     await db.from('email_queue').update({ ...release, queue_status: 'sent', sent_at: nowIso, provider_message_id: providerMessageId, failed_reason: null, next_retry_at: null }).eq('id', row.id)
     await logEvent(db, { ...row, from_email: s.email }, 'sent', { provider_message_id: providerMessageId, from_email: s.email })
+    // The provider's 2xx with a message id IS acceptance; delivery only comes from provider events.
+    await logEvent(db, { ...row, from_email: s.email }, 'accepted', { provider_message_id: providerMessageId, from_email: s.email, source: 'provider_api' })
     await writeBackClosingRequest(db, row, { status: 'sent', providerMessageId }, now)
     await db.from('email_senders').update({ messages_sent_today: (s.messages_sent_today || 0) + 1, last_sent_at: nowIso }).eq('sender_key', s.sender_key)
     summary.sent++

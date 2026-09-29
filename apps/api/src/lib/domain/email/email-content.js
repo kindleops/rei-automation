@@ -53,6 +53,8 @@ export function normalizeInboundEmail(item = {}) {
     size_bytes: Number(a.ContentLength ?? a.size ?? a.size_bytes) || null,
     download_token: clean(a.DownloadToken || a.downloadToken) || null,
     content_id: clean(a.ContentID || a.contentId) || null,
+    // Raw bytes when the source carries them (Cloudflare Email Routing MIME).
+    content: a.content && typeof a.content === 'object' ? a.content : null,
   }))
   const plain = text || htmlToText(html)
   return {

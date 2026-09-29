@@ -136,6 +136,9 @@ export async function resolveBrandSender(db, brandKey, env = process.env) {
       reply_to_email: lower(s.reply_to_email) || null,
       domain,
       inbound_domain: clean(s.metadata?.inbound_domain) || clean(env.EMAIL_INBOUND_DOMAIN) || null,
+      // e.g. https://track.reivesti.com — a host that routes to LeadCommand's
+      // public tracking endpoints. Absent → provider telemetry only.
+      tracking_base_url: clean(s.metadata?.tracking_base_url) || null,
       api_key: apiKey,
       daily_limit: s.daily_limit ?? null,
       messages_sent_today: s.messages_sent_today ?? 0,

@@ -16,10 +16,15 @@ const UNIQUE = {
   email_events: [['event_key']],
   email_suppression: [['email_address']],
   email_senders: [['sender_key']],
+  email_links: [['token'], ['queue_id', 'link_index']],
   system_control: [['key']],
 }
 
-function check(table, row) {
+function check(table, row, old) {
+  if (table === 'email_events' && old) {
+    const strip = (r) => { const { raw_payload, ...rest } = r; return JSON.stringify(rest) }
+    if (strip(row) !== strip(old)) return { code: 'P0001', message: 'EMAIL_EVENTS_APPEND_ONLY' }
+  }
   if (table === 'email_queue') {
     if (row.queue_status && !STATUSES.has(row.queue_status)) return { code: '23514', message: `email_queue_status_check ${row.queue_status}` }
     if (['required', 'rejected'].includes(row.approval_status) && !['draft', 'awaiting_approval', 'cancelled', 'superseded'].includes(row.queue_status)) return { code: '23514', message: 'email_queue_approval_gate' }
@@ -102,7 +107,7 @@ function reap(_args, state) {
 export function makeEmailDb(seed = {}, extraRpc = {}) {
   const base = {
     email_threads: [], email_queue: [], email_inbound_messages: [], email_attachments: [], email_events: [],
-    email_suppression: [], email_senders: [], email_templates: [], emails: [], inbox_thread_state: [],
+    email_suppression: [], email_senders: [], email_templates: [], emails: [], inbox_thread_state: [], email_links: [],
     ...seed,
   }
   return makeClosingDb(base, {

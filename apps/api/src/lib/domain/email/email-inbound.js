@@ -25,6 +25,8 @@ import { normalizeInboundEmail, inboundDedupeKey, isAutomatedMail } from './emai
 import { classifyCounterpartyEmail, classifyAttachment } from './email-inbound-classify.js'
 import { ensureThread, threadKeyFor, parseReplyToken } from './email-identity.js'
 import { submitClosingAssertions } from './email-closing-intake.js'
+import { recordEmailEvent } from './email-telemetry.js'
+import { storeAttachmentBytes } from './email-attachments.js'
 
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
@@ -117,6 +119,17 @@ export async function resolveInboundThread(db, msg) {
   return { unresolved: true, method: 'no_match' }
 }
 
+async function findAnsweredMessage(db, threadId, msg) {
+  const refs = [...new Set([msg.in_reply_to, ...msg.references_headers].filter(Boolean))]
+  if (refs.length) {
+    const { data } = await db.from('email_queue').select('*').in('message_id_header', refs)
+    const hit = (data || []).sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0]
+    if (hit) return hit
+  }
+  const { data: sent } = await db.from('email_queue').select('*').eq('thread_id', threadId).in('queue_status', ['sent', 'delivered'])
+  return (sent || []).filter((q) => !q.sent_at || q.sent_at <= msg.received_at).sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)))[0] || null
+}
+
 async function flagThread(db, thread, needs, now) {
   if (!thread?.id || !needs) return
   await db.from('email_threads').update({ needs_operator: true, needs_code: needs.code, needs_reason: needs.reason, needs_since: new Date(now).toISOString(), updated_at: new Date(now).toISOString() }).eq('id', thread.id)
@@ -180,10 +193,25 @@ export async function ingestInboundEmail(item, deps = {}) {
       review_state: cls.review_state,
     }
     const r = await db.from('email_attachments').insert(att).select('*').maybeSingle()
-    attachments.push(r.data || att)
+    const stored = r.data || att
+    if (a.content && stored.id && stored.fetch_status === 'pending') {
+      const up = await storeAttachmentBytes(db, stored, a.content).catch((e) => ({ ok: false, error: e.message }))
+      if (up.ok) Object.assign(stored, { fetch_status: 'stored', storage_path: up.path, sha256: up.sha256 })
+    }
+    attachments.push(stored)
   }
 
   const result = { ok: true, id: inbound.id, thread_id: thread.id, resolution: resolution.method, category: thread.category, actions: [] }
+
+  // REPLIED — a canonical event on the outbound message this answers, so the
+  // reply carries that message's campaign / step / template / sender lineage.
+  if (resolution.thread && !automated) {
+    const answered = await findAnsweredMessage(db, thread.id, msg)
+    if (answered) {
+      await recordEmailEvent(db, { type: 'replied', source: deps.source || 'brevo_inbound', message: answered, at: msg.received_at, key: `replied:${inbound.id}`, extra: { metadata: { inbound_id: inbound.id } } })
+      result.answered_message_id = answered.id
+    }
+  }
 
   if (automated) return { ...result, ignored: automated }
   if (!resolution.thread) {

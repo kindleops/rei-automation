@@ -68,6 +68,7 @@ export function makeClosingDb(seed = {}, ext = {}) {
     let orderBy = null
     let upsertOn = null
     let one = false
+    let ignoreDup = false
     const shape = (res) => (one && res && !res.error && Array.isArray(res.data) ? { ...res, data: res.data[0] ?? null } : res)
     const api = {
       select() { wantRows = true; return api },
@@ -86,7 +87,7 @@ export function makeClosingDb(seed = {}, ext = {}) {
       limit(n) { limitN = n; return api },
       insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return api },
       update(patch) { op = 'update'; payload = patch; return api },
-      upsert(rows, o = {}) { op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows]; upsertOn = String(o.onConflict || 'id').split(','); return api },
+      upsert(rows, o = {}) { op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows]; upsertOn = String(o.onConflict || 'id').split(','); ignoreDup = Boolean(o.ignoreDuplicates); return api },
       single() { limitN = 1; one = true; return api },
       maybeSingle() { limitN = 1; one = true; return api },
       then(resolve, reject) { return Promise.resolve(shape(run())).then(resolve, reject) },
@@ -109,6 +110,7 @@ export function makeClosingDb(seed = {}, ext = {}) {
         const outRows = []
         for (const r of payload) {
           const hit = rows.find((x) => upsertOn.every((c) => x[c] === r[c]))
+          if (hit && ignoreDup) continue
           if (hit) {
             const before = { ...hit }
             const next = { ...hit, ...r }
