@@ -18,6 +18,7 @@ export type NotificationDomain =
   | 'workflow'
   | 'platform'
   | 'intelligence'
+  | 'email'
 
 export type NotificationSeverity = 'positive' | 'neutral' | 'warning' | 'critical'
 
@@ -236,7 +237,7 @@ export interface ApiNotificationScanResponse {
 // ── Normalizers ─────────────────────────────────────────────────────────
 
 const DOMAIN_SET = new Set<NotificationDomain>([
-  'campaigns', 'templates', 'numbers', 'markets', 'inbox', 'acquisition', 'closing', 'workflow', 'platform', 'intelligence',
+  'campaigns', 'templates', 'numbers', 'markets', 'inbox', 'acquisition', 'closing', 'workflow', 'platform', 'intelligence', 'email',
 ])
 
 const SEVERITY_SET = new Set<NotificationSeverity>(['positive', 'neutral', 'warning', 'critical'])
@@ -530,7 +531,7 @@ export function groupNotificationsByTime(notifications: NotificationEvent[]): Re
 }
 
 export const NOTIFICATION_DOMAINS: NotificationDomain[] = [
-  'campaigns', 'templates', 'numbers', 'markets', 'inbox', 'acquisition', 'closing', 'workflow', 'platform', 'intelligence',
+  'campaigns', 'templates', 'numbers', 'markets', 'inbox', 'acquisition', 'closing', 'workflow', 'platform', 'intelligence', 'email',
 ]
 
 export const NOTIFICATION_SEVERITIES: NotificationSeverity[] = [

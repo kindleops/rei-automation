@@ -39,6 +39,7 @@ const DOMAIN_LABELS: Record<NotificationDomain, string> = {
   workflow: 'Workflow',
   platform: 'Platform',
   intelligence: 'Intelligence',
+  email: 'Email',
 }
 
 const TIME_GROUP_LABELS: Record<NotificationTimeGroup, string> = {

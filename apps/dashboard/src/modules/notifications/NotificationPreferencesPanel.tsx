@@ -20,6 +20,7 @@ const DOMAIN_LABELS: Record<NotificationDomain, string> = {
   workflow: 'Workflow',
   platform: 'Platform',
   intelligence: 'Intelligence',
+  email: 'Email',
 }
 
 const SOUND_LABELS: Record<SoundCategory, string> = {

@@ -17,6 +17,7 @@ export const NOTIFICATION_DOMAINS = Object.freeze([
   'workflow',
   'platform',
   'intelligence',
+  'email',
 ])
 
 export const NOTIFICATION_SEVERITIES = Object.freeze([
@@ -1241,6 +1242,39 @@ export const EVENT_CATALOG = Object.freeze({
     soundCategory: 'alert',
     defaultActions: ['navigate', 'acknowledge'],
     titleTemplate: 'Automation alert — {{pattern_name}}',
+  },
+
+  // ── Email Command ─────────────────────────────────────────────────────────
+  // Only judgment and failure notify. Routine email the system handles does
+  // not. Seller email replies go through the seller brain and emit the same
+  // inbox_* types as SMS (one seller-reply alert taxonomy).
+  email_needs_operator: {
+    domain: 'email',
+    defaultSeverity: 'warning',
+    soundCategory: 'alert',
+    defaultActions: ['navigate'],
+    titleTemplate: 'Email needs you — {{counterparty}}',
+  },
+  email_automation_failed: {
+    domain: 'email',
+    defaultSeverity: 'critical',
+    soundCategory: 'alert',
+    defaultActions: ['navigate'],
+    titleTemplate: 'Email failed — {{counterparty}}',
+  },
+  email_attachment_review: {
+    domain: 'email',
+    defaultSeverity: 'neutral',
+    soundCategory: 'ops',
+    defaultActions: ['navigate'],
+    titleTemplate: 'Document needs review — {{counterparty}}',
+  },
+  email_delivery_degraded: {
+    domain: 'email',
+    defaultSeverity: 'critical',
+    soundCategory: 'alert',
+    defaultActions: ['navigate'],
+    titleTemplate: 'Email delivery degraded — {{reason}}',
   },
 })
 

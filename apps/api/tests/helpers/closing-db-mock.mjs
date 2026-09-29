@@ -21,7 +21,7 @@ const UNIQUE = {
 
 const LOST = new Set(['dead', 'suppressed', 'lost', 'archived'])
 
-export function makeClosingDb(seed = {}) {
+export function makeClosingDb(seed = {}, ext = {}) {
   const state = {
     closing_cases: [], closing_activity_events: [], closing_milestones: [], buyer_offers: [], buyer_agreements: [],
     emd_receipts: [], settlement_records: [], closing_title_issues: [], closing_email_requests: [], acquisition_opportunities: [],
@@ -51,7 +51,8 @@ export function makeClosingDb(seed = {}) {
         if (!ok) return { code: 'P0001', message: 'CLOSING_BLOCKED: closed-won requires a finalized closing' }
       }
     }
-    for (const cols of UNIQUE[table] || []) {
+    if (ext.check) { const e = ext.check(table, row, old, state); if (e) return e }
+    for (const cols of [...(UNIQUE[table] || []), ...((ext.unique || {})[table] || [])]) {
       const dup = state[table].some((r) => r !== old && cols.every((c) => r[c] !== undefined && r[c] !== null && r[c] === row[c]))
       if (dup) return { code: '23505', message: `duplicate key value violates unique constraint on ${table}(${cols.join(',')})` }
     }
@@ -64,39 +65,81 @@ export function makeClosingDb(seed = {}) {
     let payload = null
     let limitN = Infinity
     let wantRows = false
+    let orderBy = null
+    let upsertOn = null
+    let one = false
+    const shape = (res) => (one && res && !res.error && Array.isArray(res.data) ? { ...res, data: res.data[0] ?? null } : res)
     const api = {
       select() { wantRows = true; return api },
       eq(c, v) { filters.push((r) => r[c] === v); return api },
+      lte(c, v) { filters.push((r) => r[c] !== null && r[c] !== undefined && r[c] <= v); return api },
+      lt(c, v) { filters.push((r) => r[c] !== null && r[c] !== undefined && r[c] < v); return api },
+      gte(c, v) { filters.push((r) => r[c] !== null && r[c] !== undefined && r[c] >= v); return api },
+      gt(c, v) { filters.push((r) => r[c] !== null && r[c] !== undefined && r[c] > v); return api },
+      ilike(c, v) { const re = new RegExp('^' + String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i'); filters.push((r) => re.test(String(r[c] ?? ''))); return api },
+      contains(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.every((x) => r[c].includes(x))); return api },
+      overlaps(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.some((x) => r[c].includes(x))); return api },
       neq(c, v) { filters.push((r) => r[c] !== v); return api },
       in(c, arr) { filters.push((r) => arr.includes(r[c])); return api },
       is(c, v) { filters.push((r) => (v === null ? r[c] === null || r[c] === undefined : r[c] === v)); return api },
-      order() { return api },
+      order(c, o = {}) { orderBy = { c, asc: o.ascending !== false }; return api },
       limit(n) { limitN = n; return api },
       insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return api },
       update(patch) { op = 'update'; payload = patch; return api },
-      single() { limitN = 1; return api },
-      maybeSingle() { limitN = 1; return api },
-      then(resolve, reject) { return Promise.resolve(run()).then(resolve, reject) },
+      upsert(rows, o = {}) { op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows]; upsertOn = String(o.onConflict || 'id').split(','); return api },
+      single() { limitN = 1; one = true; return api },
+      maybeSingle() { limitN = 1; one = true; return api },
+      then(resolve, reject) { return Promise.resolve(shape(run())).then(resolve, reject) },
     }
     const run = () => {
       const rows = state[table] || (state[table] = [])
       if (op === 'insert') {
+        const inserted = []
         for (const r of payload) {
           const row = { id: `${table}-${rows.length + 1}`, created_at: new Date().toISOString(), ...r }
           const err = checkRow(table, row)
           if (err) return { data: null, error: err }
           rows.push(row)
+          ext.afterWrite?.(table, row, null, state)
+          inserted.push({ ...row })
         }
-        return { data: wantRows ? payload : null, error: null }
+        return { data: wantRows ? inserted : null, error: null }
       }
-      const matched = rows.filter((r) => filters.every((f) => f(r))).slice(0, limitN)
+      if (op === 'upsert') {
+        const outRows = []
+        for (const r of payload) {
+          const hit = rows.find((x) => upsertOn.every((c) => x[c] === r[c]))
+          if (hit) {
+            const before = { ...hit }
+            const next = { ...hit, ...r }
+            const err = checkRow(table, next, hit)
+            if (err) return { data: null, error: err }
+            Object.assign(hit, r)
+            ext.afterWrite?.(table, hit, before, state)
+            outRows.push({ ...hit })
+          } else {
+            const row = { id: `${table}-${rows.length + 1}`, created_at: new Date().toISOString(), ...r }
+            const err = checkRow(table, row)
+            if (err) return { data: null, error: err }
+            rows.push(row)
+            ext.afterWrite?.(table, row, null, state)
+            outRows.push({ ...row })
+          }
+        }
+        return { data: wantRows ? outRows : null, error: null }
+      }
+      let matched = rows.filter((r) => filters.every((f) => f(r)))
+      if (orderBy) matched = [...matched].sort((a, b) => ((a[orderBy.c] ?? '') < (b[orderBy.c] ?? '') ? -1 : (a[orderBy.c] ?? '') > (b[orderBy.c] ?? '') ? 1 : 0) * (orderBy.asc ? 1 : -1))
+      matched = matched.slice(0, limitN)
       if (op === 'update') {
         const out = []
         for (const r of matched) {
           const next = { ...r, ...payload }
           const err = checkRow(table, next, r)
           if (err) return { data: null, error: err }
+          const before = { ...r }
           Object.assign(r, payload)
+          ext.afterWrite?.(table, r, before, state)
           out.push({ ...r })
         }
         return { data: out, error: null }
@@ -141,6 +184,7 @@ export function makeClosingDb(seed = {}) {
     state,
     from: (t) => query(t),
     rpc: async (name, args) => {
+      if (ext.rpc?.[name]) return ext.rpc[name](args, state)
       if (name !== 'finalize_closing_case') return { data: null, error: { message: `unknown rpc ${name}` } }
       return { data: finalize(args), error: null }
     },

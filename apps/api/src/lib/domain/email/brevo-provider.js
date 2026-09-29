@@ -180,7 +180,10 @@ export async function sendBrevoTransactionalEmail(payload = {}, options = {}) {
   if (!sender.email) {
     return { ok: false, sent: false, dry_run: dryRun, reason: "sender_identity_missing" };
   }
-  if (!configStatus.configured) {
+  // A brand sender carries its own key (email_senders.provider_api_key_name);
+  // the env key is the single-account fallback.
+  const apiKey = clean(options.api_key) || config.api_key;
+  if (!apiKey || (!clean(options.api_key) && !configStatus.configured)) {
     return {
       ok: false,
       sent: false,
@@ -201,6 +204,10 @@ export async function sendBrevoTransactionalEmail(payload = {}, options = {}) {
       ? { tags: asArray(payload.tags).map((tag) => clean(tag).slice(0, 64)).filter(Boolean) }
       : {}),
     ...(payload.params && typeof payload.params === "object" ? { params: payload.params } : {}),
+    // Threading (Message-Id / In-Reply-To / References) rides as headers.
+    ...(payload.headers && typeof payload.headers === "object" && Object.keys(payload.headers).length
+      ? { headers: payload.headers }
+      : {}),
   };
 
   if (dryRun) {
@@ -226,7 +233,7 @@ export async function sendBrevoTransactionalEmail(payload = {}, options = {}) {
       headers: {
         accept: "application/json",
         "content-type": "application/json",
-        "api-key": config.api_key,
+        "api-key": apiKey,
       },
       body: JSON.stringify(brevoPayload),
       signal: options.signal,

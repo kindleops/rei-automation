@@ -48,6 +48,7 @@ const DOMAIN_STYLE: Record<NotificationDomain, { label: string; icon: IconName; 
   workflow: { label: 'Workflows', icon: 'layers', hue: '#c084fc' },
   platform: { label: 'System', icon: 'cpu', hue: '#94a3b8' },
   intelligence: { label: 'Intelligence', icon: 'spark', hue: '#a78bfa' },
+  email: { label: 'Email', icon: 'mail', hue: '#60a5fa' },
 }
 
 /** The event itself picks the tile when it says what happened: a hot lead is not a message. */
