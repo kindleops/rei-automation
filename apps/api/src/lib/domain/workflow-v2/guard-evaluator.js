@@ -67,17 +67,18 @@ async function evaluateSuppression(enrollment, deps) {
 
   try {
     const client = db(deps);
-    const { count } = await client
+    const { count, error } = await client
       .from('message_events')
       .select('id', { count: 'exact', head: true })
       .eq('master_owner_id', masterOwnerId)
       .eq('is_opt_out', true)
       .limit(1);
+    if (error) return guardResult(false, 'suppression_check_unavailable');
     return (count ?? 0) === 0
       ? guardResult(true, 'not_suppressed')
       : guardResult(false, 'message_events_opt_out');
   } catch {
-    return guardResult(true, 'suppression_check_degraded_pass');
+    return guardResult(false, 'suppression_check_unavailable');
   }
 }
 
@@ -225,6 +226,7 @@ export async function evaluateGuardNode(node, enrollment, definition, deps = {})
     case 'guard.max_touches':
       return evaluateMaxTouches(node, enrollment);
     default:
-      return guardResult(true, `unsupported_guard_pass_through:${nodeType}`);
+      // An unknown guard is a guard nobody evaluated — it holds, it does not pass.
+      return guardResult(false, `unsupported_guard:${nodeType}`);
   }
 }

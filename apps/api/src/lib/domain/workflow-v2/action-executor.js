@@ -223,7 +223,6 @@ async function executeUpdateStage(node, enrollment, deps) {
 }
 
 async function executeUpdateStatus(node, enrollment, deps) {
-  const client = db(deps);
   const targetStatus = clean(
     node.config?.status ?? node.config?.target_status ?? node.config?.value ?? '',
   );
@@ -237,24 +236,10 @@ async function executeUpdateStatus(node, enrollment, deps) {
     deps,
   );
 
-  let crmUpdate = { attempted: false };
-  const masterOwnerId = clean(enrollment.context?.master_owner_id ?? '');
-  if (masterOwnerId && client?.from) {
-    try {
-      const { error } = await client
-        .from('master_owners')
-        .update({ contact_status: targetStatus })
-        .eq('id', masterOwnerId);
-      crmUpdate = {
-        attempted: true,
-        table: 'master_owners',
-        column: 'contact_status',
-        error: error?.message ?? null,
-      };
-    } catch (err) {
-      crmUpdate = { attempted: true, error: err?.message ?? 'crm_update_failed' };
-    }
-  }
+  // Workflows do not write CRM columns directly: master_owners.contact_status is a
+  // legacy signal column owned by its importer, and lead state belongs to the
+  // lifecycle authority. The status is recorded on the enrollment only.
+  const crmUpdate = { attempted: false, reason: 'crm_writes_owned_by_canonical_authority' };
 
   return {
     ...baseResult(node, 'completed', enrollment),

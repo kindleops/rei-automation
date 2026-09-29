@@ -372,8 +372,8 @@ test('proof 6-8: partial multifamily answer and underwriting readiness enrollmen
       }),
     ],
     workflow_definitions: [
-      { id: 'def-uw', definition_key: 'system_underwriting_collection' },
-      { id: 'def-acq', definition_key: 'system_acquisition_engine_orchestration' },
+      { id: 'def-uw', definition_key: 'system_underwriting_collection', status: 'published' },
+      { id: 'def-acq', definition_key: 'system_acquisition_engine_orchestration', status: 'active' },
     ],
   });
   const enrollment = supabase.rows.workflow_enrollments[0];
@@ -395,6 +395,12 @@ test('proof 6-8: partial multifamily answer and underwriting readiness enrollmen
   });
   const enrollResult = await executeActionNode(enrollNode, enrollment, definition, { supabase });
   assert.equal(enrollResult.status, 'completed');
+
+  // A subworkflow is not a way around the arm gate: a definition that is not
+  // `active` (published / draft / paused) refuses the enrollment.
+  const unarmed = makeNode('action.enroll_subworkflow', { subworkflow_definition_key: 'system_underwriting_collection' });
+  const refused = await executeActionNode(unarmed, enrollment, definition, { supabase });
+  assert.equal(refused.status, 'failed');
 });
 
 // ── Acquisition engine proofs ──

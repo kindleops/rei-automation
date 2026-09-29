@@ -115,6 +115,7 @@ export async function findReadyEnrollments(limit = 50, deps = {}) {
     .from('workflow_enrollments')
     .select('*')
     .or(`status.eq.active,and(status.eq.waiting,next_execution_at.lte.${now})`)
+    .is('paused_at', null)
     .limit(limit)
     .order('enrolled_at', { ascending: true });
   if (error) throw error;
@@ -129,6 +130,11 @@ export async function enrollSubject(definitionId, payload = {}, deps = {}) {
   const defCheck = await db(deps).from('workflow_definitions').select('id, status').eq('id', definitionId).maybeSingle();
   if (defCheck.error) throw defCheck.error;
   if (!defCheck.data) return { ok: false, status: 404, error: 'workflow_definition_not_found' };
+  // Only a live definition accepts enrollments — the event matcher already
+  // filters, but enroll_subworkflow reached drafts/paused/archived directly.
+  if (clean(defCheck.data.status) !== 'active') {
+    return { ok: false, status: 409, error: 'workflow_definition_not_active', definition_status: defCheck.data.status ?? null };
+  }
 
   const incomingContext = payload.context && typeof payload.context === 'object' ? payload.context : {};
 

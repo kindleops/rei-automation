@@ -36,6 +36,7 @@ const MAX_STEPS_PER_TICK = 50;
 
 const SELLER_REPLY_EVENT_TYPES = new Set([
   'seller_replied',
+  'inbound_reply',
   'inbound_message_received',
   'inbound_sms',
   'inbound_sms_received',
@@ -248,7 +249,7 @@ export async function runEnrollment(enrollmentId, deps = {}) {
   let enrollment = await loadEnrollmentFull(enrollmentId, client);
   if (!enrollment) return { ok: false, error: 'enrollment_not_found', enrollment_id: enrollmentId };
 
-  if (enrollment.status === 'paused') {
+  if (enrollment.status === 'paused' || enrollment.paused_at) {
     return { ok: false, skipped: true, reason: 'enrollment_paused', status: enrollment.status };
   }
 

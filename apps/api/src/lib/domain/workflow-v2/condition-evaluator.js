@@ -79,7 +79,7 @@ async function hasWorkflowEventReply(subjectId, afterIso, client) {
     .from('workflow_events')
     .select('id', { count: 'exact', head: true })
     .eq('subject_id', subjectId)
-    .in('event_type', ['seller_replied', 'inbound_message', 'inbound_sms', 'inbound_message_received'])
+    .in('event_type', ['seller_replied', 'inbound_reply', 'inbound_message', 'inbound_sms', 'inbound_message_received'])
     .gte('created_at', afterIso);
   if (error) return null;
   return (count ?? 0) > 0;
