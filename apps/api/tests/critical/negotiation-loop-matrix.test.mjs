@@ -446,9 +446,15 @@ test("§2: offers ledger enforces ceiling bookkeeping and records violations", (
 
 // ─── §4 underwriting sufficiency ────────────────────────────────────────────
 
-test("§4: SFR with reliable valuation skips unnecessary seller questions", () => {
+test("§4: SFR with reliable valuation still asks the SELLER about condition, but skips occupancy", () => {
+  // Operator direction 2026-09-28: price -> condition -> the rest. Comps price
+  // the street, not this house; a seller who named "$305K" must be asked
+  // about condition before an expectation reset.
   const s = evaluateUnderwritingSufficiency({ asset_class: "sfr", facts: { asking_price: { value: 100000 } }, ade_snapshot: ADE });
-  assert.equal(s.sufficient, true);
+  assert.equal(s.sufficient, false);
+  assert.deepEqual(s.missing_facts, ["condition_summary"]);
+  const described = evaluateUnderwritingSufficiency({ asset_class: "sfr", facts: { asking_price: { value: 100000 }, condition_disclosed: true }, ade_snapshot: ADE });
+  assert.equal(described.sufficient, true, "once the seller has described condition, nothing else is asked");
 });
 
 test("§4: SFR without valuation needs occupancy + condition", () => {
@@ -649,4 +655,17 @@ test("§7: every routed decision carries exactly one strategy and a next action"
     assert.ok(d.next_action, `strategy ${d.strategy} must always produce a next action`);
     assert.ok(d.reason_code);
   }
+});
+
+test("large gap with condition unknown → ask the seller about condition before any expectation reset", () => {
+  // 2026-09-28: "$305K" and "$350K firm" were routed to expectation_reset with
+  // no condition in hand, and that step rendered nothing — silence.
+  const state = stateWith({ ask: 250000 });
+  const zone = zoneFor(state, POLICY);
+  assert.equal(zone.zone, NEGOTIATION_ZONES.LARGE_GAP);
+  const d = routeNegotiationStrategy({ zone, state, policy: POLICY, sufficiency: { sufficient: false, next_discovery: "condition_summary" } });
+  assert.equal(d.strategy, S.CONDITION_DISCOVERY);
+  assert.equal(d.reason_code, "LARGE_GAP_DISCOVERY_CONDITION");
+  const known = routeNegotiationStrategy({ zone, state, policy: POLICY, sufficiency: { sufficient: true } });
+  assert.notEqual(known.strategy, S.CONDITION_DISCOVERY, "once condition is known the large-gap path proceeds as before");
 });

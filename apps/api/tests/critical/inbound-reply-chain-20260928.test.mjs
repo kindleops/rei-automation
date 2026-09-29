@@ -60,3 +60,36 @@ test("an operator-blocked template leaves the rotation pool; the seller gets an 
   const id = String(blocked.template_id ?? blocked.template?.template_id ?? blocked.selected_template_id ?? "")
   assert.notEqual(id, "204705", "a blocked template is never chosen")
 });
+
+import { evaluateAutoReplySuperseded } from "@/lib/domain/queue/process-send-queue.js";
+
+function eventsDb(events) {
+  return {
+    from() {
+      const f = []
+      let one = false
+      const b = {
+        select() { return b }, order() { return b }, limit() { return b },
+        eq(c, v) { f.push((r) => r[c] === v); return b }, gt(c, v) { f.push((r) => r[c] > v); return b },
+        maybeSingle() { one = true; return Promise.resolve({ data: events.filter((r) => f.every((x) => x(r)))[0] || null }) },
+        then(res) { return Promise.resolve({ data: events.filter((r) => f.every((x) => x(r))) }).then(res) },
+      }
+      return b
+    },
+  }
+}
+
+test("an auto-reply is superseded when anything went out to the seller after the inbound it answers", async () => {
+  const events = [
+    { id: "in1", thread_key: "+1612", direction: "inbound", created_at: "2026-09-28T17:34:59Z" },
+    { id: "op1", thread_key: "+1612", direction: "outbound", created_at: "2026-09-28T19:40:05Z", queue_id: "manual" },
+  ]
+  const row = { id: "auto1", thread_key: "+1612", metadata: { inbound_message_event_id: "in1" } }
+  const r = await evaluateAutoReplySuperseded({ supabase: eventsDb(events), queue_row: row })
+  assert.equal(r.superseded, true)
+  assert.equal(r.newer_outbound_id, "op1")
+  const fresh = await evaluateAutoReplySuperseded({ supabase: eventsDb(events.slice(0, 1)), queue_row: row })
+  assert.equal(fresh.superseded, false, "nothing sent since → the reply goes")
+  const campaign = await evaluateAutoReplySuperseded({ supabase: eventsDb(events), queue_row: { id: "c1", thread_key: "+1612", metadata: {} } })
+  assert.equal(campaign.superseded, false, "rows that answer no inbound (campaign/manual) are never checked")
+})

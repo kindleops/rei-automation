@@ -487,6 +487,26 @@ export function routeNegotiationStrategy({
     concession.reason_code === "MAX_MONETARY_TURNS_REACHED" ||
     concession.reason_code === "MINIMUM_MARGIN_REACHED" ||
     concession.reason_code === "CEILING_REACHED";
+  // Discovery before the money talk in a LARGE gap too. A seller who just
+  // named a price we can't meet ("$305K", "$350K firm") was sent straight to an
+  // expectation reset — before we knew the condition that sets our number —
+  // and on 2026-09-28 that step had no approved template, so both sellers got
+  // silence. Price → condition → the rest, in every gap size.
+  if (
+    zoneKey === NEGOTIATION_ZONES.LARGE_GAP &&
+    !ceilingExhausted &&
+    sufficiency &&
+    sufficiency.sufficient !== true &&
+    !flags.refuses_condition
+  ) {
+    if (sufficiency.next_discovery === "occupancy_status") {
+      return decision(S.OCCUPANCY_DISCOVERY, { reason_code: "LARGE_GAP_DISCOVERY_OCCUPANCY", trace, events: ["strategy_selected"] });
+    }
+    if (sufficiency.next_discovery && sufficiency.next_discovery !== "commercial_review") {
+      return decision(S.CONDITION_DISCOVERY, { reason_code: "LARGE_GAP_DISCOVERY_CONDITION", trace, events: ["strategy_selected"] });
+    }
+  }
+
   if (ceilingExhausted || zoneKey === NEGOTIATION_ZONES.LARGE_GAP) {
     if (!finalOfferMade && ceilingExhausted && ask !== null) {
       // The final authorized offer is the most we can pay while KEEPING the

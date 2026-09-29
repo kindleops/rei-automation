@@ -230,8 +230,15 @@ function inferQuestionType(useCase) {
 // full certainty of the question it answers, so these must cover how sellers
 // actually reply — not just the canonical dictionary form. Kept as explicit
 // alternations (not a fuzzy matcher) so every accepted token is auditable.
-const AFFIRMATIVE_TOKENS =
-  '(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅)';
+// 2026-09-28 Minneapolis: "I am" (to "are you still the owner?"), "Yes is
+// what's up?" and "I am and I am selling it now" all fell to unclear@0.6 and
+// got no reply. An owner answers "I am" as often as "I do"; a yes followed by
+// a curious or selling tail is still a yes.
+const AFFIRMATIVE_HEAD =
+  "(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅)";
+const AFFIRMATIVE_TAIL =
+  "(?:\\s+(?:is\\s+)?(?:what'?s up|whats up|why|what about it|what do you want|who is this|who'?s this|who are you)|\\s+and\\s+(?:i am|i'm|im)\\s+(?:selling it now|selling it|selling|looking to sell|trying to sell))?";
+const AFFIRMATIVE_TOKENS = `(?:${AFFIRMATIVE_HEAD}${AFFIRMATIVE_TAIL})`;
 const NEGATIVE_TOKENS =
   '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|no i dont|i do not|no i am not|not really|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|👎|👎🏻|👎🏼|👎🏽|👎🏾|👎🏿|❌)';
 

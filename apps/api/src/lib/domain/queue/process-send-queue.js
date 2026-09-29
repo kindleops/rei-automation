@@ -2145,6 +2145,43 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       }
     }
 
+    // ── Stale auto-reply guard ───────────────────────────────────────────
+    // An auto-reply answers ONE inbound. If anything went out to this seller
+    // after that inbound — usually the operator answering by hand — the
+    // auto-reply is stale and sending it asks the same question twice (Gene,
+    // 2026-09-28: operator asked at 2:40, the held auto-reply repeated it at
+    // 3:07). Cancel it; the conversation has already moved on.
+    const superseded = await evaluateAutoReplySuperseded({ supabase: getSupabase(deps), queue_row, deps });
+    if (superseded.superseded) {
+      await getSupabase(deps)
+        .from(QUEUE_TABLE)
+        .update({
+          queue_status: "cancelled",
+          is_locked: false,
+          locked_at: null,
+          lock_token: null,
+          updated_at: now,
+          metadata: {
+            ...(queue_row.metadata ?? {}),
+            skip_reason: "superseded_by_newer_outbound",
+            final_queue_status: "cancelled",
+            superseded_by_message_event_id: superseded.newer_outbound_id,
+            finalized_at: now,
+          },
+        })
+        .eq("id", queue_row_id);
+      info("send.cancelled_superseded_auto_reply", { queue_row_id, newer_outbound_id: superseded.newer_outbound_id });
+      return {
+        ok: false,
+        skipped: true,
+        reason: "superseded_by_newer_outbound",
+        queue_status: "cancelled",
+        final_queue_status: "cancelled",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
     const sms_health_guard = evaluateSmsHealthGuard({
       from_phone_number: message_fields.from,
       template_id: resolveQueueTemplateId(queue_row),
@@ -2670,6 +2707,36 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       });
       return toFailureResult(queue_row, error);
     }
+  }
+}
+
+/**
+ * Has anything gone out to this seller since the inbound this auto-reply
+ * answers? Only rows that name their triggering inbound are checked; campaign
+ * and manual sends never are. A read failure never cancels (fail open to the
+ * existing behaviour, which every other guard still protects).
+ */
+export async function evaluateAutoReplySuperseded({ supabase, queue_row = {}, deps = {} } = {}) {
+  if (typeof deps.evaluateAutoReplySuperseded === "function") return deps.evaluateAutoReplySuperseded(queue_row);
+  const meta = queue_row?.metadata && typeof queue_row.metadata === "object" ? queue_row.metadata : {};
+  const inbound_id = String(meta.inbound_message_event_id || queue_row?.inbound_message_id || "").trim();
+  const thread_key = String(queue_row?.thread_key || meta.thread_key || "").trim();
+  if (!inbound_id || !thread_key || !supabase?.from) return { superseded: false };
+  try {
+    const { data: inbound } = await supabase.from("message_events").select("id,created_at").eq("id", inbound_id).maybeSingle();
+    if (!inbound?.created_at) return { superseded: false };
+    const { data: newer } = await supabase
+      .from("message_events")
+      .select("id,created_at,queue_id")
+      .eq("thread_key", thread_key)
+      .eq("direction", "outbound")
+      .gt("created_at", inbound.created_at)
+      .order("created_at", { ascending: true })
+      .limit(5);
+    const other = (newer || []).find((row) => String(row.queue_id || "") !== String(queue_row?.id || ""));
+    return other ? { superseded: true, newer_outbound_id: other.id } : { superseded: false };
+  } catch {
+    return { superseded: false };
   }
 }
 

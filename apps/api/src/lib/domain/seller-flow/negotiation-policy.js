@@ -677,12 +677,13 @@ export function evaluateUnderwritingSufficiency({
       missing.push("commercial_review");
       break;
     default:
-      // SFR / mobile home: occupancy plus condition, unless the internal
-      // valuation is already reliable enough to price without them.
-      if (!valuationReliable) {
-        if (!occupancyKnown) missing.push("occupancy_status");
-        if (!conditionKnown) missing.push("condition_summary");
-      }
+      // SFR / mobile home. Condition comes from the SELLER, always: a reliable
+      // comp set prices the street, not this house, and skipping the question
+      // sent "$305K" / "$350K firm" straight to an expectation reset with no
+      // condition in hand (2026-09-28). Price → condition → the rest.
+      // Occupancy is still only asked when the valuation can't carry it.
+      if (!conditionKnown) missing.push("condition_summary");
+      if (!valuationReliable && !occupancyKnown) missing.push("occupancy_status");
       break;
   }
 
