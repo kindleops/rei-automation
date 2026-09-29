@@ -134,6 +134,11 @@ export async function advanceClosingWorkflow({
   const resolved = resolveClosingWorkflowStep({ event_type });
   if (!resolved.ok) return { ok: false, advanced: false, reason: resolved.reason };
   const step = resolved.step;
+  // S10 is not a workflow step any more: only the closing authority
+  // (finalizeClosing → finalize_closing_case) may close, after the full guard.
+  if (step.milestone_type === "closed") {
+    return { ok: false, advanced: false, reason: "use_finalize_closing" };
+  }
 
   let case_row = closing_case;
   if (!case_row && clean(closing_case_id)) {

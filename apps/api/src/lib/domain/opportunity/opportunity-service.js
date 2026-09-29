@@ -519,6 +519,13 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
     last_updated_by: options.actor || null,
   };
 
+  // A thread maps to `closed` only when it is terminal (dead / suppressed /
+  // opted out) — that is closed-LOST, and the status must say so, or it would
+  // read as an (unauthorised) win.
+  if (row.acquisition_stage === 'closed' && !CLOSED_LOST_STATUSES.has(String(row.opportunity_status || '').toLowerCase())) {
+    row.opportunity_status = 'dead';
+  }
+
   const existing = await client.from(TABLE).select('id,version').eq('dedupe_key', dedupeKey).maybeSingle();
   if (existing.data?.id) {
     const update = await client.from(TABLE).update({
@@ -553,10 +560,43 @@ export async function promoteThreadToOpportunity(thread = {}, options = {}, deps
   return { ok: true, opportunity: normalizeOpportunityRow(insert.data), created: true };
 }
 
+const CLOSED_LOST_STATUSES = new Set(['dead', 'suppressed', 'lost', 'archived']);
+
 export async function transitionOpportunityStage(id, input = {}, deps = {}) {
   const client = db(deps);
   const { data: current, error } = await client.from(TABLE).select('*').eq('id', id).single();
   if (error) throw error;
+
+  /**
+   * S10 CLOSED-WON IS NOT A STAGE MOVE. A live deal reaches `closed` only
+   * through the closing authority, which checks the canonical closing guard
+   * (executed contract, committed buyer, verified EMD, clear to close,
+   * confirmed date, settled settlement) and finalizes atomically. A reason is
+   * not evidence. Closed-LOST (dead / suppressed / lost / archived, or
+   * outcome:'lost') remains an ordinary transition. The database trigger
+   * enforce_closed_won_authority backs this up for every other writer.
+   */
+  const requestedStage = normalizeAcquisitionStageCode(input.to_stage ?? input.stage);
+  const closingAsLost = String(input.outcome || '').toLowerCase() === 'lost';
+  if (requestedStage === 'closed' && !closingAsLost && !CLOSED_LOST_STATUSES.has(String(current.opportunity_status || '').toLowerCase())) {
+    const { finalizeClosing } = await import('@/lib/domain/closings/closing-authority.js');
+    const closing = await finalizeClosing({ opportunityId: id, actor: input.actor || 'operator', source: input.source || 'pipeline' }, deps);
+    if (!closing.ok) {
+      return {
+        ok: false,
+        error: 'closing_blocked',
+        code: closing.code || 'CLOSING_BLOCKED',
+        message: 'A deal becomes Closed only when its closing is finalized.',
+        missing: closing.missing || [],
+        blockers: closing.blockers || [],
+        closing_case_id: closing.closingCaseId || null,
+        open: closing.closingCaseId ? `/closing-desk?case=${encodeURIComponent(closing.closingCaseId)}` : '/closing-desk',
+      };
+    }
+    const { data: after, error: afterError } = await client.from(TABLE).select('*').eq('id', id).single();
+    if (afterError) throw afterError;
+    return { ok: true, opportunity: normalizeOpportunityRow(after), closed_via: 'closing_authority', closing };
+  }
 
   const validation = validateStageTransition({
     fromStage: current.acquisition_stage,
@@ -579,6 +619,10 @@ export async function transitionOpportunityStage(id, input = {}, deps = {}) {
   };
   if (input.next_action) updates.next_action = clean(input.next_action);
   if (input.next_action_due) updates.next_action_due = input.next_action_due;
+  // Closing as LOST is explicit: the status says so, so it can never read as a win.
+  if (validation.to === 'closed' && closingAsLost && !CLOSED_LOST_STATUSES.has(String(current.opportunity_status || '').toLowerCase())) {
+    updates.opportunity_status = 'lost';
+  }
 
   const { data, error: updateError } = await client
     .from(TABLE)
@@ -805,6 +849,10 @@ export async function updateOpportunity(id, patch = {}, deps = {}) {
     if (key in patch) updates[key] = patch[key];
   }
   if (!Object.keys(updates).length) return { ok: false, error: 'no_updates' };
+  // "Won" is written only by finalize_closing_case (closing authority).
+  if (String(updates.opportunity_status || '').toLowerCase() === 'won') {
+    return { ok: false, error: 'closing_blocked', code: 'CLOSING_BLOCKED', message: 'Won is set only when the closing is finalized in Closing Desk.' };
+  }
 
   const { data: current, error: fetchError } = await client.from(TABLE).select('*').eq('id', id).single();
   if (fetchError) throw fetchError;

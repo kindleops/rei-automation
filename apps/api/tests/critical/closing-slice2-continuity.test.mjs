@@ -241,14 +241,13 @@ test("milestone keys are deterministic per (case, type, source event)", () => {
   assert.notEqual(a, buildMilestoneKey({ closing_case_id: "c1", milestone_type: "title_opened", source_event_id: "e2" }));
 });
 
-test("the full post-signature chain advances on authoritative events to CLOSED", async () => {
+test("the post-signature chain advances on authoritative events up to scheduled — CLOSED only via finalize", async () => {
   const supabase = makeSupabase();
   const seq = [
     [CLOSING_EVENTS.CONTRACT_FULLY_EXECUTED, "title_pending"],
     [CLOSING_EVENTS.TITLE_OPENED, "in_title"],
     [CLOSING_EVENTS.ESCROW_FUNDED, "in_title"],
     [CLOSING_EVENTS.CLOSING_SCHEDULED, "scheduled"],
-    [CLOSING_EVENTS.CLOSED, "closed"],
   ];
   for (const [event_type, expected_status] of seq) {
     const r = await advanceClosingWorkflow({
@@ -261,9 +260,14 @@ test("the full post-signature chain advances on authoritative events to CLOSED",
     assert.equal(r.advanced, true, `${event_type} advanced`);
     assert.equal(supabase._state.cases[0].closing_status, expected_status, `${event_type} -> ${expected_status}`);
   }
-  assert.equal(supabase._state.cases[0].universal_stage, "closed");
+  assert.equal(supabase._state.cases[0].universal_stage, "prepared_to_close");
   assert.equal(supabase._state.cases[0].funding_date != null, true, "funding recorded from a real event");
-  assert.equal(supabase._state.milestones.length, 5);
+  assert.equal(supabase._state.milestones.length, 4);
+  // S10 is not a workflow event: it requires the closing authority's guard.
+  const closed = await advanceClosingWorkflow({ closing_case_id: CASE.closing_case_id, event_type: CLOSING_EVENTS.CLOSED, source_event_id: "src-closed", allowExternalEffects: false, supabase });
+  assert.equal(closed.advanced, false);
+  assert.equal(closed.reason, "use_finalize_closing");
+  assert.equal(supabase._state.cases[0].closing_status, "scheduled", "a workflow event never closes a deal");
 });
 
 // ── 5) seller closing communication ──────────────────────────────────────────
@@ -351,7 +355,7 @@ test("DORMANT END-TO-END: accepted offer -> case -> email -> envelope ready -> s
       insertSendQueueRowImpl: async (row) => { queued.push(row); return { ok: true }; },
     });
   }
-  assert.equal(supabase._state.cases[0].universal_stage, "closed", "closed state reached");
+  assert.equal(supabase._state.cases[0].universal_stage, "prepared_to_close", "close-ready reached; CLOSED only via finalizeClosing");
   assert.ok(
     queued.some((q) => q.use_case_template === "closing_scheduled_update"),
     "seller is kept informed through closing, not abandoned after signature"
