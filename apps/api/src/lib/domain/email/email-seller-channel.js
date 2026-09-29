@@ -152,7 +152,14 @@ export async function handleSellerEmail({ inbound, thread, resolution }, deps = 
   const review = auto.should_mark_human_review || auto.reply_mode === 'manual_review' || intent === 'hostile_or_legal'
   return {
     ok: Boolean(result?.ok),
-    classification: { primary_intent: result?.classification?.primary_intent || null, stage_before: result?.stage_before || null, facts: result?.fact_extraction?.facts || result?.fact_extraction || null },
+    classification: {
+      primary_intent: result?.classification?.primary_intent || null,
+      facts: result?.fact_extraction?.facts || null,
+      stage_after: result?.decision?.stage_after || null,
+      next_use_case: result?.execution?.selected_template?.use_case || null,
+      replied_by: result?.execution?.queued ? 'email' : null,
+      sms_followups_cancelled: Number(result?.followup_cancellation?.cancelled) || 0,
+    },
     queued: Boolean(result?.execution?.queued),
     email_cancellation: result?.email_cancellation || null,
     followup_cancellation: result?.followup_cancellation || null,

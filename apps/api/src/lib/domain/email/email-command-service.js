@@ -102,13 +102,15 @@ export async function getEmailCommandThread(threadId, deps = {}) {
   if (error) return { ok: false, error: 'thread_unreadable' }
   if (!thread) return { ok: false, error: 'not_found', status: 404 }
   const [summary] = await hydrate(db, [thread])
-  const [out, inb, atts, events, closingEvents] = await Promise.all([
+  const [out, inb, atts, closingEvents] = await Promise.all([
     db.from('email_queue').select('*').eq('thread_id', threadId).order('created_at', { ascending: true }).limit(200),
     db.from('email_inbound_messages').select('*').eq('thread_id', threadId).order('received_at', { ascending: true }).limit(200),
     db.from('email_attachments').select('*').eq('thread_id', threadId).limit(200),
-    db.from('email_events').select('queue_id, event_type, event_at, signal_class, reason, event_source').eq('thread_id', threadId).limit(2000),
     thread.closing_case_id ? db.from('closing_activity_events').select('event_type, actor, source, detail, created_at').eq('closing_case_id', thread.closing_case_id).limit(200) : { data: [] },
   ])
+  // Events by MESSAGE id: provider events may arrive before a message is threaded.
+  const outIds = (out.data || []).map((q) => q.id)
+  const events = outIds.length ? await db.from('email_events').select('queue_id, event_type, event_at, signal_class, reason, event_source').in('queue_id', outIds).limit(3000) : { data: [] }
   const evBy = new Map()
   for (const e of events.data || []) (evBy.get(e.queue_id) || evBy.set(e.queue_id, []).get(e.queue_id)).push(e)
   const attBy = new Map()
@@ -152,6 +154,23 @@ export async function getEmailCommandThread(threadId, deps = {}) {
     if (!SYSTEM[e.event_type]) continue
     if (e.created_at && thread.created_at && e.created_at < thread.created_at) continue
     items.push({ kind: 'system', at: e.created_at, label: SYSTEM[e.event_type], source: e.source || null, detail: e.detail || null })
+  }
+  const STAGE_NAME = { ownership_confirmation: 'S1 Ownership', offer_interest: 'S2 Offer interest', asking_price: 'S3 Asking price', property_condition: 'S4 Condition', offer: 'S5 Offer', formal_contract: 'S6 Contract' }
+  const FACT_LINE = (k, f) => {
+    const v = f?.value
+    if (k === 'asking_price' && v?.amount) return `Asking price captured · $${Number(v.amount).toLocaleString('en-US')}`
+    if (v === null || v === undefined || typeof v === 'object') return `${k.replace(/_/g, ' ')} captured`
+    return `${k.replace(/_/g, ' ')} · ${v}`
+  }
+  for (const m of inb.data || []) {
+    const c = m.classification || {}
+    if (thread.category === 'seller' && (c.facts || c.stage_after)) {
+      const at = m.handled_at || m.received_at
+      for (const [k, f] of Object.entries(c.facts || {})) items.push({ kind: 'system', at, label: FACT_LINE(k, f), source: 'seller_brain' })
+      if (c.stage_after) items.push({ kind: 'system', at, label: `Seller stage → ${STAGE_NAME[c.stage_after] || c.stage_after.replace(/_/g, ' ')}`, source: 'seller_brain' })
+      if (c.sms_followups_cancelled) items.push({ kind: 'system', at, label: `Pending SMS follow-up stopped — seller answered by email`, source: 'seller_brain' })
+      if (c.next_use_case) items.push({ kind: 'system', at, label: `Next: ${c.next_use_case.replace(/_probe|_/g, (x) => (x === '_probe' ? '' : ' ')).trim()}`, source: 'seller_brain' })
+    }
   }
   for (const m of inb.data || []) {
     const applied = m.classification?.applied || []

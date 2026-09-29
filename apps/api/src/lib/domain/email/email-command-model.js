@@ -63,6 +63,12 @@ export function deriveThreadState(thread = {}, { outbound = [], inboundUnhandled
   }
 }
 
+// A commitment date is a calendar date (stored at 00:00Z): format it in UTC so it never slips a day.
+const dueLabel = (v) => {
+  const t = ts(v)
+  return t === null ? String(v).slice(0, 10) : new Date(t).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+}
+
 /** Human line for "what are we waiting for / why are we talking" on a closing thread. */
 export function closingContext(c = {}, leg = 'title') {
   if (!c || !c.closing_case_id) return null
@@ -72,7 +78,7 @@ export function closingContext(c = {}, leg = 'title') {
   else if (has('closed_at')) waitingFor = 'Closed'
   else if (leg === 'buyer') waitingFor = 'Buyer agreement / earnest money'
   else if (!has('title_acknowledged_at')) waitingFor = 'Title to acknowledge the order'
-  else if (!has('title_commitment_received_at')) waitingFor = c.title_commitment_date ? `Title commitment · due ${c.title_commitment_date.slice(0, 10)}` : 'Title commitment'
+  else if (!has('title_commitment_received_at')) waitingFor = c.title_commitment_date ? `Title commitment · due ${dueLabel(c.title_commitment_date)}` : 'Title commitment'
   else if (!has('clear_to_close_at')) waitingFor = 'Clear to close'
   else if (!has('closing_date_confirmed_at')) waitingFor = 'Closing date confirmation'
   else waitingFor = 'Settlement statement / funding'

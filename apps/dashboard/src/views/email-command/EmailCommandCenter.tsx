@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { lazy, Suspense, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { Icon } from '../../shared/icons'
 import {
   LOADING,
@@ -1262,11 +1262,33 @@ const MOBILE_INTELLIGENCE_TABS: { id: EmailTab; label: string; detail: string }[
   { id: 'brevo-health', label: 'Brevo health', detail: 'Sending account, domain and API state' },
 ]
 
+const EmailSurface = lazy(() => import('./mobile/EmailSurface').then((m) => ({ default: m.EmailSurface })))
+
 const MOBILE_INTELLIGENCE_IDS = new Set<EmailTab>(MOBILE_INTELLIGENCE_TABS.map((tab) => tab.id))
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+/**
+ * Phone: the Email Command control plane (mobile/EmailSurface) — Needs you,
+ * System handling, Waiting, conversation rooms. Desktop keeps this workspace.
+ */
 export const EmailCommandCenter = ({
+  paneWidth = '100',
+}: {
+  paneWidth?: ViewWidthPercent
+}) => {
+  const { isMobile: phone } = useBreakpoint()
+  if (phone && paneWidth === '100') {
+    return (
+      <Suspense fallback={null}>
+        <EmailSurface />
+      </Suspense>
+    )
+  }
+  return <EmailCommandWorkspace paneWidth={paneWidth} />
+}
+
+const EmailCommandWorkspace = ({
   paneWidth = '100',
 }: {
   paneWidth?: ViewWidthPercent

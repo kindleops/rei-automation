@@ -46,7 +46,7 @@ test("delivery status never claims more than was proven", () => {
 });
 
 test("closing context says what we are waiting for", () => {
-  assert.equal(closingContext({ closing_case_id: "c1", title_acknowledged_at: iso(NOW), title_commitment_date: "2026-10-01T00:00:00Z" }).waiting_for, "Title commitment · due 2026-10-01");
+  assert.equal(closingContext({ closing_case_id: "c1", title_acknowledged_at: iso(NOW), title_commitment_date: "2026-10-01T00:00:00Z" }).waiting_for, "Title commitment · due Thu, Oct 1");
   assert.equal(closingContext({ closing_case_id: "c1", title_acknowledged_at: iso(NOW), title_commitment_received_at: iso(NOW) }).waiting_for, "Clear to close");
 });
 
