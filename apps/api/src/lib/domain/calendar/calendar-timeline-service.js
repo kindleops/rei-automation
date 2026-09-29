@@ -479,7 +479,7 @@ export function buildClosingEvents(rows = [], { from, to, today } = {}) {
         attention: overdue,
         reason: overdue ? `${title} passed on ${day}` : null,
         count: 1,
-        links: { closing_case_id: String(c.id), opportunity_id: c.opportunity_id ? String(c.opportunity_id) : null, property_id: c.property_id ? String(c.property_id) : null, thread_key: clean(c.thread_key) || null },
+        links: { closing_case_id: clean(c.closing_case_id) || null, opportunity_id: c.opportunity_id ? String(c.opportunity_id) : null, property_id: c.property_id ? String(c.property_id) : null, thread_key: clean(c.thread_key) || null },
         detail: { closing_status: c.closing_status || null, substage: c.closing_substage || null, title_status: c.title_status || null, escrow_status: c.escrow_status || null, title_company: c.title_company_name || null },
       })
     }
@@ -649,7 +649,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null } = 
     }),
     source('closing_cases', status, async () => {
       let q = supabase.from('closing_cases')
-        .select('id,opportunity_id,property_id,property_address,thread_key,signer_name,closing_status,closing_substage,title_status,escrow_status,title_company_name,emd_due_date,inspection_deadline,title_commitment_date,cure_deadline,signing_date,scheduled_closing_date,funding_date,recording_date,title_opened_date,contract_signed_date,effective_date')
+        .select('id,closing_case_id,opportunity_id,property_id,property_address,thread_key,signer_name,closing_status,closing_substage,title_status,escrow_status,title_company_name,emd_due_date,inspection_deadline,title_commitment_date,cure_deadline,signing_date,scheduled_closing_date,funding_date,recording_date,title_opened_date,contract_signed_date,effective_date')
         .limit(500)
       if (prop) q = q.eq('property_id', prop)
       const { data, error } = await q
