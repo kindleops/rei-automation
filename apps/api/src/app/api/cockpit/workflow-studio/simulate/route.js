@@ -9,6 +9,6 @@ export async function POST(request) {
   const auth = requireAuth(request)
   if (!auth.ok) return auth.response
   const body = await request.json().catch(() => ({}))
-  const result = validateAndSimulate({ graph: body.graph, scenario: body.scenario, previous: body.previous })
+  const result = validateAndSimulate({ graph: body.graph, blueprint: body.blueprint || null, params: body.params || {}, scenario: body.scenario, previous: body.previous })
   return withCors(request, result, result.ok ? 200 : 400)
 }

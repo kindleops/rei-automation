@@ -108,7 +108,7 @@ function beat(at, now, staleMs) {
  * the Inbox's canonical buckets (needs review / new reply). Once the operator
  * answered or cleared it, it is history, not attention.
  */
-async function openThreads(db, threadKeys) {
+export async function openThreads(db, threadKeys) {
   const keys = [...new Set(threadKeys.filter(Boolean))]
   if (!keys.length) return new Set()
   const { data, error } = await db.from('v_inbox_thread_state_buckets').select('thread_key, in_needs_review, in_new_replies').in('thread_key', keys.slice(0, 500))
@@ -157,7 +157,7 @@ async function sellerNodeAggregates(db, wf, now, days = 7) {
   return counts
 }
 
-async function hydrateSellerRuns(db, execs) {
+export async function hydrateSellerRuns(db, execs) {
   if (!execs.length) return []
   const ids = execs.map((e) => e.id)
   const threads = [...new Set(execs.map((e) => e.thread_id).filter(Boolean))]
@@ -367,7 +367,7 @@ export async function getWorkflowOverview(deps = {}) {
 }
 
 function pick(wf) {
-  return { key: wf.key, name: wf.name, domain: wf.domain, kind: wf.kind, lock: wf.lock, owner: wf.owner, version: wf.version, trigger: wf.trigger, runtime: wf.runtime }
+  return { key: wf.key, name: wf.name, domain: wf.domain, kind: wf.kind, lock: wf.lock, owner: wf.owner, version: wf.version, trigger: wf.trigger, runtime: wf.runtime, steps: wf.nodes.filter((n) => !n.optional).map((n) => ({ id: n.id, kind: n.family, label: n.label })) }
 }
 
 export async function getWorkflowDetail(key, { status = null, limit = 40, cursor = null } = {}, deps = {}) {

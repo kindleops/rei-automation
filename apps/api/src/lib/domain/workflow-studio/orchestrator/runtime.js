@@ -56,7 +56,7 @@ export async function publishVersion(db, { workflow_key, name, domain = null, gr
   const existing = await db.from('wf_workflows').select('*').eq('workflow_key', workflow_key).maybeSingle()
   if (existing.error) return { ok: false, code: 'read_failed', error: existing.error.message }
   if (!existing.data) {
-    const ins = await db.from('wf_workflows').insert({ workflow_key, name: clean(name) || workflow_key, domain, owner: actor, ...(reentry ? { reentry } : {}) })
+    const ins = await db.from('wf_workflows').insert({ workflow_key, name: clean(name) || workflow_key, domain, owner: actor, status: 'draft', ...(reentry ? { reentry } : {}) })
     if (ins.error && ins.error.code !== '23505') return { ok: false, code: 'write_failed', error: ins.error.message }
   }
   const prev = await db.from('wf_versions').select('version, graph, graph_hash').eq('workflow_key', workflow_key).order('version', { ascending: false }).limit(1).maybeSingle()
@@ -312,6 +312,7 @@ async function execNode(db, run, node, deps, now) {
           await addStep(db, run, { node_id: node.id, kind: 'wait', status: 'waiting', reason: `until ${timers[node.id]}` }, now)
         }
         if (Date.parse(timers[node.id]) > nowMs) return { park: { state: 'waiting', wake_at: timers[node.id] } }
+        await addStep(db, run, { node_id: node.id, kind: 'wait', status: 'resolved', exit: 'Next', reason: `elapsed ${timers[node.id]}` }, now)
         delete timers[node.id]
         return { exit: 'Next' }
       }

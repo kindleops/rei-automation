@@ -106,7 +106,7 @@ test('happy path: review requested → wait 4h → still open → one notificati
   assert.equal(run.outcome, 'escalated')
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0].i.entity, { kind: 'seller_thread', id: '+16125550101' })
-  assert.deepEqual(db.state.wf_run_steps.map((s) => `${s.node_id}:${s.status}${s.exit ? ':' + s.exit : ''}`), ['grace:waiting', 'still_open:resolved:Open', 'escalate:succeeded'])
+  assert.deepEqual(db.state.wf_run_steps.map((s) => `${s.node_id}:${s.status}${s.exit ? ':' + s.exit : ''}`), ['grace:waiting', 'grace:resolved:Next', 'still_open:resolved:Open', 'escalate:succeeded'])
   assert.equal(run.lease_owner, null)
 })
 
@@ -353,4 +353,33 @@ test('notify capability: a write that did not land is retryable, never success',
   await cap.invoke(i, ctx(async (o) => { seen = o; return { ok: true } }))
   assert.deepEqual(seen.titleVars, { thread_key: '+1' })
   assert.equal(seen.deduplicationKey, 'wf:r:n:notify')
+})
+
+test('blueprints: every build validates clean; create makes a NEW draft v1, arming is an explicit opt-in', async () => {
+  const { BLUEPRINTS, buildBlueprint } = await import('@/lib/domain/workflow-studio/orchestrator/definitions.js')
+  const { applyOrchestratorAction, validateAndSimulate } = await import('@/lib/domain/workflow-studio/orchestrator/studio-service.js')
+  for (const key of Object.keys(BLUEPRINTS)) {
+    assert.deepEqual(validateGraph(buildBlueprint(key, {})).errors, [], key)
+    const p = validateAndSimulate({ blueprint: key, params: {} })
+    assert.equal(p.validation.ok, true, key)
+    assert.equal(p.simulation.writes, 0)
+  }
+  // bounds are enforced server-side, never trusted from the client
+  assert.equal(buildBlueprint('review_escalation', { hours: 9999 }).params.hours, 48)
+  assert.equal(buildBlueprint('review_escalation', { hours: -3 }).params.hours, 1)
+  assert.equal(buildBlueprint('nope', {}), null)
+  // previews walk the acting branch
+  assert.match(validateAndSimulate({ blueprint: 'review_escalation', params: { hours: 6 } }).simulation.actions[0].preview, /6 hours/)
+
+  const db = makeWfDb()
+  const a = await applyOrchestratorAction('create', { blueprint: 'failed_send_alert', params: {}, name: 'My failure alert' }, { actor: 'op-1', supabase: db })
+  assert.equal(a.ok, true)
+  assert.equal(a.status, 'draft')
+  assert.match(a.workflow_key, /^my_failure_alert_[a-z0-9]+$/)
+  assert.equal(db.state.wf_workflows.find((w) => w.workflow_key === a.workflow_key).status, 'draft')
+  const b = await applyOrchestratorAction('create', { blueprint: 'failed_send_alert', params: {}, name: 'My failure alert', arm: true }, { actor: 'op-1', supabase: db })
+  assert.notEqual(b.workflow_key, a.workflow_key)
+  assert.equal(b.status, 'armed')
+  assert.equal((await applyOrchestratorAction('create', { blueprint: 'x' }, { actor: 'op-1', supabase: db })).error, 'unknown_blueprint')
+  assert.equal((await applyOrchestratorAction('create', { blueprint: 'failed_send_alert' }, { actor: '', supabase: db })).error, 'operator_identity_required')
 })

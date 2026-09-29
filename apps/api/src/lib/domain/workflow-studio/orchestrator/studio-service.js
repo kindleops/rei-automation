@@ -8,7 +8,7 @@ import { capabilityCatalog } from './capabilities.js'
 import { TRIGGERS, CONDITIONS } from './catalog.js'
 import { validateGraph, describeGraph, outlineGraph, diffGraphs, NODE_KINDS } from './graph.js'
 import { simulateGraph } from './simulator.js'
-import { BOUNDED_WORKFLOWS } from './definitions.js'
+import { BOUNDED_WORKFLOWS, BLUEPRINTS, buildBlueprint } from './definitions.js'
 import { publishVersion, setWorkflowStatus, decideApproval, resumeRun, cancelRun, LIVE_STATES } from './runtime.js'
 
 const clean = (v) => String(v ?? '').trim()
@@ -26,10 +26,15 @@ export function getStudioCatalog(env = studioEnv()) {
     triggers: Object.entries(TRIGGERS).map(([key, t]) => ({ key, ...t })),
     conditions: Object.entries(CONDITIONS).map(([key, c]) => ({ key, ...c })),
     bounded: BOUNDED_WORKFLOWS.map((g) => ({ key: g.key, name: g.name, description: describeGraph(g), outline: outlineGraph(g) })),
+    blueprints: Object.entries(BLUEPRINTS).map(([key, b]) => ({ key, name: b.name, domain: b.domain, reach: b.reach, icon: b.icon, summary: b.summary, params: b.params })),
   }
 }
 
-export function validateAndSimulate({ graph, scenario = {}, previous = null } = {}, env = studioEnv()) {
+export function validateAndSimulate({ graph, blueprint = null, params = {}, scenario = {}, previous = null } = {}, env = studioEnv()) {
+  if (blueprint) {
+    graph = buildBlueprint(blueprint, params)
+    if (!graph) return { ok: false, error: 'unknown_blueprint' }
+  }
   if (!graph || typeof graph !== 'object') return { ok: false, error: 'graph_required' }
   const validation = validateGraph(graph, env)
   return {
@@ -38,7 +43,10 @@ export function validateAndSimulate({ graph, scenario = {}, previous = null } = 
     description: describeGraph(graph),
     outline: outlineGraph(graph),
     diff: previous ? diffGraphs(previous, graph) : [],
-    simulation: simulateGraph(graph, scenario, env),
+    graph,
+    nodes: (graph.nodes || []).filter((n) => n.kind !== 'annotation').map((n) => ({ id: n.id, kind: n.kind, label: n.label || n.id })),
+    edges: graph.edges || [],
+    simulation: simulateGraph(graph, { pick: 'first', ...scenario }, env),
   }
 }
 
@@ -78,6 +86,22 @@ export async function applyOrchestratorAction(action, fields = {}, { actor, env 
   const db = supabase || getDefaultSupabaseClient()
   if (!clean(actor)) return { ok: false, status: 401, error: 'operator_identity_required' }
   switch (action) {
+    case 'create': {
+      // New workflow from a blueprint: always a NEW key, v1, left in draft
+      // unless the operator explicitly asked to arm it in the same act.
+      const graph = buildBlueprint(clean(fields.blueprint), fields.params || {})
+      if (!graph) return { ok: false, status: 400, error: 'unknown_blueprint' }
+      const name = clean(fields.name) || BLUEPRINTS[fields.blueprint].name
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'workflow'
+      const workflow_key = `${slug}_${Date.now().toString(36).slice(-5)}`
+      const pub = await publishVersion(db, { workflow_key, name, domain: BLUEPRINTS[fields.blueprint].domain, graph, actor, note: clean(fields.note) || `Created from blueprint “${BLUEPRINTS[fields.blueprint].name}”`, env })
+      if (!pub.ok) return pub
+      if (fields.arm === true) {
+        const arm = await setWorkflowStatus(db, workflow_key, 'armed', actor)
+        return { ...pub, workflow_key, status: arm.ok ? 'armed' : 'draft', arm_error: arm.ok ? null : arm.code }
+      }
+      return { ...pub, workflow_key, status: 'draft' }
+    }
     case 'publish': {
       const bounded = BOUNDED_WORKFLOWS.find((g) => g.key === fields.workflow_key)
       const graph = fields.graph || bounded

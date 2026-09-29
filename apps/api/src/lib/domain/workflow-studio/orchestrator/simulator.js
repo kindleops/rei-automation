@@ -49,7 +49,9 @@ export function simulateGraph(graph, scenario = {}, env = {}) {
       if (r.status !== 'SUCCESS' && !exitsOf(n).includes('Failed')) { outcome = 'needs_operator'; break }
     } else if (n.kind === 'condition') {
       const facts = { now: Date.now(), ...(scenario.facts?.[n.id] || scenario.facts?.[c.condition] || {}) }
-      const exit = CONDITIONS[c.condition] ? evaluateCondition(c.condition, facts) : null
+      const given = scenario.facts?.[n.id] || scenario.facts?.[c.condition]
+      // pick:'first' (previews) walks each decision's first exit — the branch where the workflow acts.
+      const exit = !CONDITIONS[c.condition] ? null : scenario.pick === 'first' && !given ? CONDITIONS[c.condition].exits[0] : evaluateCondition(c.condition, facts)
       path.push({ node: n.id, kind: 'condition', label: n.label || CONDITIONS[c.condition]?.label, exit, at_hours: clock, why: `${CONDITIONS[c.condition]?.reads || 'condition'} → ${exit}` })
       cursor = next(n.id, exit)
     } else if (n.kind === 'wait') {

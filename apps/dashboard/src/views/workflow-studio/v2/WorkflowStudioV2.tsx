@@ -102,12 +102,12 @@ interface WorkflowStudioV2Props {
   layoutMode?: ViewLayoutMode
 }
 
-const WorkflowSurface = lazy(() => import('../mobile/WorkflowSurface').then((m) => ({ default: m.WorkflowSurface })))
+const StudioSurface = lazy(() => import('../mobile/StudioSurface').then((m) => ({ default: m.StudioSurface })))
 
 /**
- * Phone: the observatory (mobile/WorkflowSurface) — what runs, what waits, what
- * needs you, and why. The node editor stays on larger screens; ?view=editor
- * still opens it on a phone.
+ * Phone: Workflow Studio (mobile/StudioSurface) — overview, workflows (create
+ * from blueprints), leads in flight, live activity. The node editor stays on
+ * larger screens; ?view=editor still opens it on a phone.
  */
 export const WorkflowStudioV2 = (props: Parameters<typeof WorkflowStudioWorkspace>[0]) => {
   const { isMobile } = useBreakpoint()
@@ -115,7 +115,7 @@ export const WorkflowStudioV2 = (props: Parameters<typeof WorkflowStudioWorkspac
   if (isMobile && !editor) {
     return (
       <Suspense fallback={null}>
-        <WorkflowSurface />
+        <StudioSurface />
       </Suspense>
     )
   }

@@ -206,7 +206,7 @@ function nodeSentence(n) {
   switch (n.kind) {
     case 'action': return (CAPABILITIES[c.capability]?.label || c.capability || 'act').replace(/^./, (x) => x.toLowerCase())
     case 'condition': return `check “${CONDITIONS[c.condition]?.label || c.condition}”`
-    case 'wait': return c.mode === 'event' ? `wait up to ${hours(Number(c.timeout_hours))} for “${TRIGGERS[c.event]?.label || c.event}”` : c.mode === 'duration' ? `wait ${hours(Number(c.duration_hours))}${c.anchor === 'trigger' ? ' from the triggering event' : ''}` : c.mode === 'contact_window' ? 'wait for the contact window' : `wait until ${c.until}`
+    case 'wait': return c.mode === 'event' ? `wait up to ${hours(Number(c.timeout_hours))} for ${TRIGGERS[c.event]?.awaits || `“${TRIGGERS[c.event]?.label || c.event}”`}` : c.mode === 'duration' ? `wait ${hours(Number(c.duration_hours))}${c.anchor === 'trigger' ? ' from the triggering event' : ''}` : c.mode === 'contact_window' ? 'wait for the contact window' : `wait until ${c.until}`
     case 'approval': return `ask for operator approval (“${c.title}”)`
     case 'follow_up_loop': return `${(CAPABILITIES[c.action?.capability]?.label || 'follow up').toLowerCase()} every ${hours(Number(c.cadence_hours))}, up to ${c.max_attempts} time${Number(c.max_attempts) === 1 ? '' : 's'}, stopping when ${c.stop?.label || CONDITIONS[c.stop?.condition]?.label || TRIGGERS[c.stop?.event]?.label || 'its stop condition is met'}`
     case 'transform': return `${String(c.op).replace(/_/g, ' ')}`
@@ -217,12 +217,12 @@ function nodeSentence(n) {
 
 /** Plain-English description generated from topology — deterministic, no AI prose. */
 export function describeGraph(graph = {}) {
-  const trig = TRIGGERS[graph.trigger?.type]?.label || graph.trigger?.type || 'triggered'
+  const trig = TRIGGERS[graph.trigger?.type]?.when || TRIGGERS[graph.trigger?.type]?.label?.toLowerCase() || graph.trigger?.type || 'triggered'
   const order = topoOrder(graph).map((id) => graph.nodes.find((n) => n.id === id)).filter((n) => n && n.kind !== 'annotation' && n.kind !== 'terminate')
   const parts = order.map(nodeSentence).filter(Boolean)
-  if (!parts.length) return `When ${trig.toLowerCase()}, this workflow does nothing yet.`
+  if (!parts.length) return `When ${trig}, this workflow does nothing yet.`
   const last = parts.length > 1 ? `, and ${parts.pop()}` : ''
-  return `When ${trig.toLowerCase()}, this workflow will ${parts.join(', ')}${last}.`
+  return `When ${trig}, this workflow will ${parts.join(', ')}${last}.`
 }
 
 export function topoOrder(graph = {}) {
@@ -243,7 +243,7 @@ export function topoOrder(graph = {}) {
 /** Numbered outline for mobile / accessibility. */
 export function outlineGraph(graph = {}) {
   const out = walk(graph)
-  const lines = [{ n: 1, id: 'trigger', text: `When ${(TRIGGERS[graph.trigger?.type]?.label || graph.trigger?.type || '—').toLowerCase()}` }]
+  const lines = [{ n: 1, id: 'trigger', text: `When ${TRIGGERS[graph.trigger?.type]?.when || (TRIGGERS[graph.trigger?.type]?.label || graph.trigger?.type || '—').toLowerCase()}` }]
   topoOrder(graph).forEach((id, i) => {
     const node = graph.nodes.find((x) => x.id === id)
     if (!node || node.kind === 'annotation') return

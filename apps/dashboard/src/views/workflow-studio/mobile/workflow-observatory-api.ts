@@ -17,6 +17,7 @@ export interface SystemWorkflow {
   status: 'live' | 'paused' | 'off' | 'not_deployed'
   live: Record<string, number> | null
   health: Beat
+  steps?: Array<{ id: string; kind: string; label: string }>
 }
 export interface StudioWorkflow { id: string; key: string; name: string; kind: 'studio'; lock: string; status: string; runtime_note: string | null; trigger: string | null; version: number | null; runs_30d: number; test: boolean; updated_at: string | null }
 export interface Overview {
