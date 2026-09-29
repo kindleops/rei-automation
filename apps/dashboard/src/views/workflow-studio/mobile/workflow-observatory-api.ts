@@ -65,3 +65,23 @@ export const fetchWorkflow = (key: string, params: { status?: string; cursor?: s
   return read<WorkflowDetail>(`${BASE}/workflows/${encodeURIComponent(key)}${qs ? `?${qs}` : ''}`, signal)
 }
 export const fetchRun = (key: string, id: string, signal?: AbortSignal) => read<RunDetail>(`${BASE}/workflows/${encodeURIComponent(key)}/runs/${encodeURIComponent(id)}`, signal)
+
+// ── Orchestrator (durable Studio runtime) ──────────────────────────────────
+export interface OrchestratorRun { id: string; workflow_key: string; version: number; subject_kind: string; subject_id: string; state: string; cursor: string | null; wake_at: string | null; outcome: string | null; reason: string | null; started_at: string; updated_at: string }
+export interface OrchestratorApproval { id: string; run_id: string; node_id: string; title: string | null; subject_kind: string | null; subject_id: string | null; timeout_at: string | null; created_at: string }
+export interface OrchestratorWorkflow { workflow_key: string; name: string; status: 'draft' | 'armed' | 'paused' | 'archived'; live_version: number | null }
+export type OrchestratorState =
+  | { ok: true; available: false; reason: 'migration_pending'; migration: string }
+  | { ok: true; available: true; enabled: boolean; heartbeat_at: string | null; workflows: OrchestratorWorkflow[]; counts: Record<string, number>; live_runs: OrchestratorRun[]; recent_finished: OrchestratorRun[]; approvals: OrchestratorApproval[] }
+
+export const fetchOrchestrator = (signal?: AbortSignal) => read<OrchestratorState>(`${BASE}/orchestrator`, signal)
+
+export type OrchestratorAction = 'approve' | 'reject' | 'resume' | 'cancel' | 'arm' | 'pause'
+export async function orchestratorAction(action: OrchestratorAction, fields: Record<string, string>): Promise<{ ok: boolean; code?: string; error?: string }> {
+  const res = await callBackend<{ ok: boolean; code?: string; error?: string }>(`${BASE}/orchestrator/actions`, { method: 'POST', body: JSON.stringify({ action, ...fields }) })
+  if (!res.ok) {
+    const body = res.upstream as { ok?: boolean; code?: string; error?: string } | undefined
+    return body && typeof body === 'object' && 'ok' in body ? { ok: false, code: body.code, error: body.error } : { ok: false, error: res.error || 'request_failed' }
+  }
+  return (res.data as { ok: boolean }) ?? { ok: false, error: 'empty_response' }
+}

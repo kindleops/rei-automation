@@ -138,6 +138,8 @@ export function validateGraph(graph = {}, env = {}) {
       if (Number(c.max_attempts) > (graph.limits?.max_loop_attempts ?? DEFAULT_LIMITS.max_loop_attempts)) err('loop_unbounded', n.id, `At most ${DEFAULT_LIMITS.max_loop_attempts} attempts`)
       if (!(Number(c.cadence_hours) > 0)) err('loop_cadence', n.id, 'Follow-up loop needs a cadence')
       if (!c.stop?.condition && !c.stop?.event) err('loop_stop', n.id, 'Follow-up loop needs a stop condition or stop event')
+      if (c.stop?.event && !TRIGGERS[c.stop.event]) err('loop_stop', n.id, `Unknown stop event “${c.stop.event}”`)
+      if (c.stop?.condition && !(CONDITIONS[c.stop.condition]?.exits || []).includes(c.stop.when)) err('loop_stop', n.id, 'Stop condition needs the outcome that stops the loop (e.g. “Replied”)')
     }
     if (n.kind === 'approval' && !clean(c.title)) err('approval_title', n.id, 'Approval needs a title the operator will see')
     if (n.kind === 'transform' && !TRANSFORMS.has(c.op)) err('transform_op', n.id, `Unknown transform “${c.op || '—'}” (no custom code in workflows)`)
@@ -183,6 +185,7 @@ export function validateGraph(graph = {}, env = {}) {
   for (const s of ['seller', 'property', 'opportunity', 'closing', 'campaign', 'recipient']) scope.add(`trigger.${s}`)
   for (const n of nodes) {
     for (const v of varsIn(n.config || {})) {
+      if (v === 'trigger') continue
       if (v.startsWith('trigger.')) { if (!scope.has(v) && !scope.has(v.split('.').slice(0, 2).join('.'))) err('var_unknown', n.id, `Unknown variable ${v}`) }
       else if (v.startsWith('nodes.')) { const [, id] = v.split('.'); if (!byId.has(id)) err('var_unknown', n.id, `Variable ${v} refers to a missing step`) }
       else if (!v.startsWith('system.')) err('var_unknown', n.id, `Unknown variable ${v}`)

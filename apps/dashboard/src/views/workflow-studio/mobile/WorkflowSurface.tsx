@@ -3,6 +3,7 @@ import { Icon } from '../../../shared/icons'
 import { replaceRoutePath } from '../../../app/router'
 import { fetchAttention, fetchOverview, type Overview, type RunSummary, type StudioWorkflow, type SystemWorkflow } from './workflow-observatory-api'
 import { ago, beatLabel, domainIcon, human } from './workflow-format'
+import { OrchestratorSection } from './OrchestratorSection'
 import './workflow-surface.css'
 
 const WorkflowRoom = lazy(() => import('./WorkflowRoom').then((m) => ({ default: m.WorkflowRoom })))
@@ -107,6 +108,8 @@ export function WorkflowSurface() {
             </ul>
             {tests.length ? <p className="wf3-note is-small">{tests.length} test fixture{tests.length === 1 ? '' : 's'} hidden ({tests.map((t) => t.name).join(', ')}).</p> : null}
           </section>
+
+          <OrchestratorSection />
 
           <section className="wf3-sec" aria-label="Runtime health">
             <h2 className="wf3-h2">Runtime</h2>
