@@ -59,12 +59,12 @@ export const SYSTEM_WORKFLOWS = Object.freeze({
       n('reply', 'decision', 'Reply warranted?', { match: ['automatic_reply_selected'], optional: true, exits: ['Reply', 'No reply'] }),
       n('render', 'action', 'Render approved template', { match: ['template_rendered'], optional: true }),
       n('contact', 'decision', 'Contactable now?', { match: ['contactability_checked'], exits: ['Clear', 'Blocked'], summary: 'Suppression · opt-out · autopilot policy' }),
-      n('blocked', 'approval', 'Held for operator', { match: ['automation_blocked'], optional: true, tone: 'attention' }),
+      n('blocked', 'approval', 'Held for operator', { match: ['automation_blocked'], optional: true, tone: 'attention', branch: 'Blocked' }),
       n('dupe', 'action', 'Duplicate-send check', { match: ['duplicate_send_check'], optional: true }),
       n('queued', 'action', 'Queue reply', { match: ['message_queued'], optional: true, capability: 'outbound_sms.enqueue' }),
       // Send truth is the send_queue outcome, never a ledger label (derived in the observatory).
       n('sent', 'action', 'Reply delivered', { match: [], optional: true, derived: 'send_queue' }),
-      n('failed', 'action', 'Send failed', { match: ['message_failed'], optional: true, tone: 'bad' }),
+      n('failed', 'action', 'Send failed', { match: ['message_failed'], optional: true, tone: 'bad', branch: 'Failed' }),
       n('followup', 'wait', 'Schedule follow-up', { match: ['follow_up_scheduled'], optional: true, summary: 'Cancelled on any reply' }),
       n('stage', 'state', 'Advance seller stage', { match: ['stage_advanced'], optional: true, summary: 'Lifecycle authority' }),
       n('status', 'state', 'Update lead state', { match: ['operational_status_changed', 'temperature_changed', 'disposition_changed', 'contactability_changed'], optional: true }),
@@ -108,10 +108,10 @@ export const SYSTEM_WORKFLOWS = Object.freeze({
       n('commitment', 'wait', 'Wait for title commitment', { match: ['title_commitment'], loop: { max: 3, cadenceHours: 24, stop: 'commitment received' } }),
       n('ctc', 'wait', 'Wait for clear to close', { match: ['clear_to_close'], loop: { max: 3, cadenceHours: 24, stop: 'clear to close recorded' } }),
       n('settlement', 'wait', 'Request settlement statement', { match: ['settlement'], loop: { max: 3, cadenceHours: 12, stop: 'statement received' } }),
-      n('emd', 'wait', 'Buyer earnest money', { match: ['buyer_emd'], loop: { max: 3, cadenceHours: 24, stop: 'EMD received' } }),
+      n('emd', 'wait', 'Buyer earnest money', { lane: 'Buyer · in parallel', match: ['buyer_emd'], loop: { max: 3, cadenceHours: 24, stop: 'EMD received' } }),
       n('agreement', 'wait', 'Buyer agreement signature', { match: ['buyer_agreement'], loop: { max: 3, cadenceHours: 24, stop: 'agreement executed' } }),
       n('confirm', 'action', 'Confirm closing with title', { match: ['closing_confirmation'] }),
-      n('escalate', 'approval', 'Escalate to operator', { match: ['escalated'], tone: 'attention', summary: 'Cadence exhausted · stale · no recipient' }),
+      n('escalate', 'approval', 'Escalate to operator', { match: ['escalated'], tone: 'attention', summary: 'Cadence exhausted · stale · no recipient', branch: 'Silent / overdue' }),
       n('finalize', 'state', 'Finalize closing (S10)', { match: ['closed'], summary: 'Closing Authority only' }),
     ],
     edges: [
@@ -137,10 +137,10 @@ export const SYSTEM_WORKFLOWS = Object.freeze({
     nodes: [
       n('trigger', 'trigger', 'Campaign scheduled', { match: ['scheduled'] }),
       n('activate', 'decision', 'Start time reached?', { match: ['active'], exits: ['Activate', 'Missed'] }),
-      n('missed', 'end', 'Marked missed', { match: ['missed'], tone: 'attention' }),
+      n('missed', 'end', 'Marked missed', { match: ['missed'], tone: 'attention', branch: 'Missed' }),
       n('feed', 'action', 'Feed eligible targets', { match: ['feeding'], capability: 'campaign.feed', summary: 'Contact window · daily cap' }),
       n('queue', 'action', 'Outbound queue', { match: ['queued'], summary: 'Queue runner sends' }),
-      n('pause', 'approval', 'Paused', { match: ['paused'], tone: 'attention' }),
+      n('pause', 'approval', 'Paused', { match: ['paused'], tone: 'attention', branch: 'Paused' }),
       n('done', 'end', 'Completed', { match: ['completed'] }),
     ],
     edges: [e('trigger', 'activate'), e('activate', 'feed', 'Activate'), e('activate', 'missed', 'Missed'), e('feed', 'queue'), e('queue', 'feed', 'Refill'), e('feed', 'pause', 'Paused'), e('feed', 'done', 'Exhausted')],
@@ -164,26 +164,30 @@ export const SYSTEM_WORKFLOWS = Object.freeze({
       n('claim', 'action', 'Claim once', { match: ['sending'] }),
       n('revalidate', 'decision', 'Still right to send?', { exits: ['Send', 'Supersede', 'Escalate'] }),
       n('send', 'action', 'Send via brand sender', { match: ['sent', 'delivered'] }),
-      n('superseded', 'end', 'Superseded / cancelled', { match: ['superseded', 'cancelled'] }),
-      n('escalate', 'approval', 'Needs operator', { match: ['failed'], tone: 'attention' }),
+      n('superseded', 'end', 'Superseded / cancelled', { match: ['superseded', 'cancelled'], branch: 'Supersede' }),
+      n('escalate', 'approval', 'Needs operator', { match: ['failed'], tone: 'attention', branch: 'Escalate' }),
     ],
     edges: [e('trigger', 'claim'), e('claim', 'revalidate'), e('revalidate', 'send', 'Send'), e('revalidate', 'superseded', 'Supersede'), e('revalidate', 'escalate', 'Escalate')],
   },
 })
 
-/** Deterministic outline from topology (spec §106) — breadth-first along primary edges. */
+/**
+ * Deterministic outline from topology (spec §106): the authored step order
+ * (nodes are written in execution order), exception branches indented one
+ * level under the decision that routes to them, decision exits listed as
+ * business-readable labels.
+ */
 export function outlineOf(wf) {
-  const byId = new Map(wf.nodes.map((x) => [x.id, x]))
-  const seen = new Set()
-  const out = []
-  const walk = (id, depth) => {
-    if (seen.has(id) || !byId.has(id)) return
-    seen.add(id)
-    const node = byId.get(id)
-    const exits = wf.edges.filter((x) => x.from === id)
-    out.push({ id, depth, label: node.label, family: node.family, branch: exits.length > 1 ? exits.map((x) => x.label || byId.get(x.to)?.label).filter(Boolean) : null })
-    for (const x of exits) walk(x.to, exits.length > 1 ? depth + 1 : depth)
-  }
-  walk('trigger', 0)
-  return out
+  return wf.nodes.map((node) => {
+    const exits = wf.edges.filter((x) => x.from === node.id)
+    return {
+      id: node.id,
+      depth: node.branch ? 1 : 0,
+      label: node.label,
+      family: node.family,
+      branch: exits.length > 1 ? exits.map((x) => x.label || wf.nodes.find((y) => y.id === x.to)?.label).filter(Boolean) : null,
+      via: node.branch || null,
+      lane: node.lane || null,
+    }
+  })
 }

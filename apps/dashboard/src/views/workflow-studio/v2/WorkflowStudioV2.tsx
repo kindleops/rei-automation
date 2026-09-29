@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import type { ViewLayoutMode, ViewWidthPercent } from '../../../domain/inbox/view-layout'
 import { buildWorkflowStepPayload } from '../WorkflowBuilder'
@@ -102,7 +102,27 @@ interface WorkflowStudioV2Props {
   layoutMode?: ViewLayoutMode
 }
 
-export const WorkflowStudioV2 = ({
+const WorkflowSurface = lazy(() => import('../mobile/WorkflowSurface').then((m) => ({ default: m.WorkflowSurface })))
+
+/**
+ * Phone: the observatory (mobile/WorkflowSurface) — what runs, what waits, what
+ * needs you, and why. The node editor stays on larger screens; ?view=editor
+ * still opens it on a phone.
+ */
+export const WorkflowStudioV2 = (props: Parameters<typeof WorkflowStudioWorkspace>[0]) => {
+  const { isMobile } = useBreakpoint()
+  const editor = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'editor'
+  if (isMobile && !editor) {
+    return (
+      <Suspense fallback={null}>
+        <WorkflowSurface />
+      </Suspense>
+    )
+  }
+  return <WorkflowStudioWorkspace {...props} />
+}
+
+const WorkflowStudioWorkspace = ({
   data,
   paneWidth = '100',
   layoutMode = 'full',

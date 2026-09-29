@@ -216,7 +216,10 @@ export async function getSellerRun(db, id) {
     const val = v?.value?.amount ?? v?.value ?? v
     if (val !== null && val !== undefined && typeof val !== 'object') why.push({ k: `Fact · ${k.replace(/_/g, ' ')}`, v: k === 'asking_price' ? `$${Number(val).toLocaleString('en-US')}` : String(val) })
   }
-  if (decision.stage_before || decision.stage_after) why.push({ k: 'Seller stage', v: `${humanReason(decision.stage_before) || '—'} → ${humanReason(decision.stage_after) || '—'}` })
+  if (decision.stage_before || decision.stage_after) {
+    const same = decision.stage_before && decision.stage_before === decision.stage_after
+    why.push({ k: 'Seller stage', v: same ? `Stayed at ${humanReason(decision.stage_after)}` : `${humanReason(decision.stage_before) || '—'} → ${humanReason(decision.stage_after) || '—'}` })
+  }
   const tpl = find('automatic_reply_selected')?.selected_template
   if (tpl) why.push({ k: 'Chosen reply', v: humanReason(tpl) })
   if (block) why.push({ k: 'Held because', v: humanReason(block.block_reason) })
