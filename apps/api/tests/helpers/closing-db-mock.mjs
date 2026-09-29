@@ -78,6 +78,11 @@ export function makeClosingDb(seed = {}, ext = {}) {
       gte(c, v) { filters.push((r) => r[c] !== null && r[c] !== undefined && r[c] >= v); return api },
       gt(c, v) { filters.push((r) => r[c] !== null && r[c] !== undefined && r[c] > v); return api },
       ilike(c, v) { const re = new RegExp('^' + String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i'); filters.push((r) => re.test(String(r[c] ?? ''))); return api },
+      or(expr) {
+        const clauses = String(expr).split(',').map((c) => { const [col, op, ...rest] = c.split('.'); return { col, op, v: rest.join('.') } })
+        filters.push((r) => clauses.some(({ col, op, v }) => op === 'ilike' ? new RegExp('^' + v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i').test(String(r[col] ?? '')) : op === 'eq' ? String(r[col]) === v : false))
+        return api
+      },
       contains(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.every((x) => r[c].includes(x))); return api },
       overlaps(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.some((x) => r[c].includes(x))); return api },
       neq(c, v) { filters.push((r) => r[c] !== v); return api },
