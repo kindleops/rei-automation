@@ -174,7 +174,7 @@ export async function getEmailCommandThread(threadId, deps = {}) {
   }
   for (const m of inb.data || []) {
     const applied = m.classification?.applied || []
-    for (const a of applied.filter((x) => x.ok && !x.duplicate)) items.push({ kind: 'system', at: m.handled_at || m.received_at, label: `From this email: ${a.type.replace(/_/g, ' ')}${a.value ? ` · ${a.value}` : ''}`, source: 'email_command' })
+    for (const a of applied.filter((x) => x.ok && !x.duplicate)) items.push({ kind: 'system', at: m.handled_at || m.received_at, label: `From this email: ${a.type.replace(/_/g, ' ')}${a.value ? ` · ${String(a.value).replace(/_/g, ' ')}` : ''}`, source: 'email_command' })
   }
   items.sort((a, b) => String(a.at).localeCompare(String(b.at)))
   return { ok: true, thread: summary, sms_thread_key: thread.sms_thread_key || null, items }

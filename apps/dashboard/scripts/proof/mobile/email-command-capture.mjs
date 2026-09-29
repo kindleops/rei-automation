@@ -56,6 +56,9 @@ if (!QUICK) {
   R.open3 = await openThread('David Larson'); await page.waitForTimeout(1000); await page.evaluate(() => document.querySelector('.em2-room__scroll')?.scrollTo(0, 0)); await shot('07-room-seller')
   R.roomSeller = await page.locator('.em2-hero').innerText().catch(() => null)
   await page.evaluate(() => { const r = document.querySelector('.em2-room__scroll'); r?.scrollTo(0, r.scrollHeight) }); await page.waitForTimeout(300); await shot('08-room-seller-thread')
+  // Settings → Liquid Glass = Clear (the top-bar menu control) drives the composer.
+  await page.evaluate(() => { const r = document.documentElement; r.setAttribute('data-liquid-glass', 'clear'); r.style.setProperty('--lg-blur', '18px'); r.style.setProperty('--lg-alpha', '0.2'); r.style.setProperty('--lg-sat', '1.9'); r.style.setProperty('--lg-sheen', '1.2'); r.style.setProperty('--lg-fill', '12 18 30') }); await page.waitForTimeout(400); await shot('08b-liquid-glass-clear')
+  await page.evaluate(() => { const r = document.documentElement; r.removeAttribute('data-liquid-glass'); for (const v of ['--lg-blur', '--lg-alpha', '--lg-sat', '--lg-sheen', '--lg-fill']) r.style.removeProperty(v) })
   await page.evaluate(() => document.querySelector('.em2-telbtn')?.click()); await page.waitForTimeout(700); await shot('09-message-sheet')
   R.sheet = await page.locator('.em2-sheet').innerText().catch(() => null)
   await page.evaluate(() => document.querySelector('.em2-sheet__close')?.click()); await page.waitForTimeout(300)

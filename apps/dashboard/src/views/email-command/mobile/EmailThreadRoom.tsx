@@ -79,9 +79,7 @@ export function EmailThreadRoom({ id, fallback, onClose, onChanged }: { id: stri
               <section className="em2-needs" role="alert">
                 <span className="em2-needs__eyebrow">Needs you</span>
                 <p>{t.needs.reason}</p>
-                <div className="em2-needs__acts">
-                  <button type="button" className="em2-btn" disabled={busy !== null} onClick={() => act('resolve_needs', {}, 'Marked handled')}>Mark handled</button>
-                </div>
+                <button type="button" className="em2-needs__act" disabled={busy !== null} onClick={() => act('resolve_needs', {}, 'Marked handled')}>Mark handled</button>
               </section>
             ) : null}
             {t.approvals.map((a) => (
@@ -159,10 +157,10 @@ function ContextHero({ t, onWhy }: { t: ThreadSummary; onWhy: (why: Why | null, 
     <section className={`em2-hero is-${STATE_TONE[t.state]}`}>
       <span className="em2-sheen" aria-hidden />
       <span className="em2-hero__id">
-        <Monogram t={t} size="lg" />
+        <Monogram t={t} />
         <span>
           <span className="em2-hero__who">{who(t)}</span>
-          {t.counterparty.email && who(t) !== t.counterparty.email ? <span className="em2-hero__addr">{t.counterparty.email}</span> : null}
+          <span className="em2-hero__addr">{ROLE_LABEL[t.counterparty.role] || t.category}</span>
         </span>
         <span className={`em2-pill is-${STATE_TONE[t.state]}`}>{STATE_LABEL[t.state]}</span>
       </span>
@@ -283,6 +281,7 @@ function AttachmentCard({ a, onReview }: { a: Attachment; onReview: (a: Attachme
 
 function Composer({ t, onSent }: { t: ThreadSummary; onSent: (text: string, tone: 'good' | 'bad' | 'muted') => void }) {
   const [text, setText] = useState('')
+
   const [sending, setSending] = useState(false)
   const key = useMemo(() => `ec:${t.id}:${Date.now().toString(36)}`, [t.id])
   const canSend = Boolean(t.counterparty.email) && t.resolution === 'resolved' && text.trim().length > 0 && !sending
