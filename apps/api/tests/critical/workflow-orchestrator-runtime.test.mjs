@@ -375,7 +375,7 @@ test('blueprints: every build validates clean; create makes a NEW draft v1, armi
   const a = await applyOrchestratorAction('create', { blueprint: 'failed_send_alert', params: {}, name: 'My failure alert' }, { actor: 'op-1', supabase: db })
   assert.equal(a.ok, true)
   assert.equal(a.status, 'draft')
-  assert.match(a.workflow_key, /^my_failure_alert_[a-z0-9]+$/)
+  assert.match(a.workflow_key, /^my_failure_alert_[0-9a-f]{8}$/)
   assert.equal(db.state.wf_workflows.find((w) => w.workflow_key === a.workflow_key).status, 'draft')
   const b = await applyOrchestratorAction('create', { blueprint: 'failed_send_alert', params: {}, name: 'My failure alert', arm: true }, { actor: 'op-1', supabase: db })
   assert.notEqual(b.workflow_key, a.workflow_key)

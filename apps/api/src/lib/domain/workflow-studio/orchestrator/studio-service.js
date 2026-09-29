@@ -3,6 +3,7 @@
  * orchestrator state, and operator actions. Reads tolerate the wf_* schema not
  * being applied yet — the surface says "migration pending", never "no runs".
  */
+import { randomBytes } from 'node:crypto'
 import { getDefaultSupabaseClient } from '@/lib/supabase/default-client.js'
 import { capabilityCatalog } from './capabilities.js'
 import { TRIGGERS, CONDITIONS } from './catalog.js'
@@ -93,7 +94,11 @@ export async function applyOrchestratorAction(action, fields = {}, { actor, env 
       if (!graph) return { ok: false, status: 400, error: 'unknown_blueprint' }
       const name = clean(fields.name) || BLUEPRINTS[fields.blueprint].name
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'workflow'
-      const workflow_key = `${slug}_${Date.now().toString(36).slice(-5)}`
+      // A random suffix, never the clock: two creates in the same millisecond must
+      // not collide into one workflow. A key that already exists is refused.
+      const workflow_key = `${slug}_${randomBytes(4).toString('hex')}`
+      const taken = await db.from('wf_workflows').select('workflow_key').eq('workflow_key', workflow_key).maybeSingle()
+      if (taken.data) return { ok: false, status: 409, error: 'workflow_key_collision' }
       const pub = await publishVersion(db, { workflow_key, name, domain: BLUEPRINTS[fields.blueprint].domain, graph, actor, note: clean(fields.note) || `Created from blueprint “${BLUEPRINTS[fields.blueprint].name}”`, env })
       if (!pub.ok) return pub
       if (fields.arm === true) {
