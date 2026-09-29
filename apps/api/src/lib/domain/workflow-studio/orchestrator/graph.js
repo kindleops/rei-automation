@@ -128,6 +128,7 @@ export function validateGraph(graph = {}, env = {}) {
     if (n.kind === 'wait') {
       if (!['duration', 'until', 'event', 'contact_window'].includes(c.mode)) err('wait_mode', n.id, 'Wait needs a mode (duration, until, event, contact window)')
       if (c.mode === 'duration' && !(Number(c.duration_hours) > 0)) err('wait_duration', n.id, 'Wait duration must be positive')
+      if (c.anchor && !['run', 'trigger'].includes(c.anchor)) err('wait_anchor', n.id, 'A wait counts from the run or from the triggering event')
       if (c.mode === 'event') {
         if (!TRIGGERS[c.event]) err('wait_event', n.id, `Unknown event “${c.event || '—'}”`)
         if (!(Number(c.timeout_hours) > 0)) err('wait_timeout_missing', n.id, 'Waiting for an event needs a timeout — nothing may wait forever')
@@ -205,7 +206,7 @@ function nodeSentence(n) {
   switch (n.kind) {
     case 'action': return (CAPABILITIES[c.capability]?.label || c.capability || 'act').replace(/^./, (x) => x.toLowerCase())
     case 'condition': return `check “${CONDITIONS[c.condition]?.label || c.condition}”`
-    case 'wait': return c.mode === 'event' ? `wait up to ${hours(Number(c.timeout_hours))} for “${TRIGGERS[c.event]?.label || c.event}”` : c.mode === 'duration' ? `wait ${hours(Number(c.duration_hours))}` : c.mode === 'contact_window' ? 'wait for the contact window' : `wait until ${c.until}`
+    case 'wait': return c.mode === 'event' ? `wait up to ${hours(Number(c.timeout_hours))} for “${TRIGGERS[c.event]?.label || c.event}”` : c.mode === 'duration' ? `wait ${hours(Number(c.duration_hours))}${c.anchor === 'trigger' ? ' from the triggering event' : ''}` : c.mode === 'contact_window' ? 'wait for the contact window' : `wait until ${c.until}`
     case 'approval': return `ask for operator approval (“${c.title}”)`
     case 'follow_up_loop': return `${(CAPABILITIES[c.action?.capability]?.label || 'follow up').toLowerCase()} every ${hours(Number(c.cadence_hours))}, up to ${c.max_attempts} time${Number(c.max_attempts) === 1 ? '' : 's'}, stopping when ${c.stop?.label || CONDITIONS[c.stop?.condition]?.label || TRIGGERS[c.stop?.event]?.label || 'its stop condition is met'}`
     case 'transform': return `${String(c.op).replace(/_/g, ' ')}`

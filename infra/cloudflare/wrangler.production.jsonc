@@ -115,6 +115,12 @@
     "CRON_CAMPAIGN_FEED_ENABLED": "true",
     "CRON_CLOSING_AUTOMATION_ENABLED": "true",
     "CRON_EMAIL_DISPATCH_ENABLED": "true",
+    // WORKFLOW ORCHESTRATOR COMMISSIONED (operator authorization 2026-09-29).
+    // The job flag lets the scheduler call the tick; the env flag lets the tick
+    // run. system_control.workflow_orchestrator_enabled is the operator kill
+    // switch that outranks both. Arming a workflow is a separate operator act.
+    "CRON_WORKFLOW_ORCHESTRATOR_ENABLED": "true",
+    "WORKFLOW_ORCHESTRATOR_ENABLED": "true",
     "DEPLOYMENT_ENV": "production",
     "DEPLOYMENT_PROVIDER": "cloudflare",
     "DEPLOY_GIT_SHA": "GIT_SHA_PLACEHOLDER",

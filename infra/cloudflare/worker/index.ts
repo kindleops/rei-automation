@@ -55,6 +55,10 @@ export class ApiContainer extends Container<Env> {
         env.AUTOMATION_LIVE_SENDS_ENABLED === "true" ? "true" : "false",
       WORKFLOW_LIVE_SENDS_ENABLED:
         env.WORKFLOW_LIVE_SENDS_ENABLED === "true" ? "true" : "false",
+      // Workflow orchestrator (2026-09-29). Runs nothing unless this is "true"
+      // AND system_control.workflow_orchestrator_enabled='true'.
+      WORKFLOW_ORCHESTRATOR_ENABLED:
+        env.WORKFLOW_ORCHESTRATOR_ENABLED === "true" ? "true" : "false",
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -227,6 +231,7 @@ interface Env {
   ENABLE_LIVE_SENDING?: string;
   AUTOMATION_LIVE_SENDS_ENABLED?: string;
   WORKFLOW_LIVE_SENDS_ENABLED?: string;
+  WORKFLOW_ORCHESTRATOR_ENABLED?: string;
   // Email (Brevo transport + inbound verification).
   EMAIL_SEND_ENABLED?: string;
   BREVO_API_KEY?: string;
@@ -720,6 +725,24 @@ const EMAIL_DISPATCH: CronJob = {
 };
 
 /**
+ * Workflow orchestrator (2026-09-29, operator-commissioned: "Wire the Workflow
+ * Orchestrator into the canonical Cloudflare scheduler behind its explicit
+ * production flag and enable it"). Ingests workflow_events past a durable
+ * cursor, starts runs of ARMED studio workflows, steps due runs under a lease,
+ * writes a heartbeat. It transmits nothing itself: every action is a typed
+ * capability over a canonical domain function; the only send capability
+ * (outbound.send_sms) requires an operator Approval on every path and then
+ * only writes a send_queue row that queue/run sends under every brake.
+ * Double gate: WORKFLOW_ORCHESTRATOR_ENABLED + system_control
+ * workflow_orchestrator_enabled.
+ */
+const WORKFLOW_ORCHESTRATOR: CronJob = {
+  id: "workflow_orchestrator",
+  enabledBy: "CRON_WORKFLOW_ORCHESTRATOR_ENABLED",
+  path: "/api/internal/workflow-studio/orchestrator/tick",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -753,6 +776,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     CAMPAIGN_ACTIVATE_DUE,
     CAMPAIGN_FEED,
     CLOSING_AUTOMATION,
+    WORKFLOW_ORCHESTRATOR,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

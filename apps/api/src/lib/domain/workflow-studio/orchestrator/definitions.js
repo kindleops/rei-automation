@@ -13,7 +13,7 @@ export const SELLER_REVIEW_ESCALATION = Object.freeze({
   domain: 'seller',
   trigger: { type: 'seller_needs_review' },
   nodes: [
-    { id: 'grace', kind: 'wait', label: 'Give the team 4 hours', config: { mode: 'duration', duration_hours: 4 } },
+    { id: 'grace', kind: 'wait', label: 'Give the team 4 hours', config: { mode: 'duration', duration_hours: 4, anchor: 'trigger' } },
     { id: 'still_open', kind: 'condition', label: 'Still needs a human?', config: { condition: 'seller.conversation_open' } },
     {
       id: 'escalate', kind: 'action', label: 'Escalate to operator',

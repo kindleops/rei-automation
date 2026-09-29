@@ -329,3 +329,28 @@ test('studio service: migration pending is explicit; actions need the verified o
   assert.equal(sim.simulation.outcome, 'escalated')
   assert.ok(getStudioCatalog({}).capabilities.find((c) => c.key === 'email.send').availability.state === 'CONFIG_REQUIRED')
 })
+
+test('a trigger-anchored wait counts from the event, so a late start still fires on time', async () => {
+  const db = makeWfDb({ system_control: [...clone(ENABLED), { key: 'workflow_orchestrator_cursor', value: JSON.stringify({ at: at(-10), ids: [] }) }], workflow_events: [reviewEvent('late', '+16125550109', at(-5))] })
+  await armed(db)
+  const c = caps()
+  await tick(db, T0, { ...c, readFacts: async () => ({ in_needs_review: true }) })
+  const run = db.state.wf_runs[0]
+  assert.equal(run.outcome, 'escalated', 'review asked 5h ago: the 4h grace is already over')
+  assert.equal(c.calls.length, 1)
+})
+
+test('notify capability: a write that did not land is retryable, never success', async () => {
+  const { CAPABILITIES } = await import('@/lib/domain/workflow-studio/orchestrator/capabilities.js')
+  const cap = CAPABILITIES['notify.operator']
+  const ctx = (notify) => ({ runId: 'r', nodeId: 'n', workflowKey: 'w', version: 1, deps: { notify } })
+  const i = { event_type: 'inbox_needs_call', title: 't', entity: { kind: 'seller_thread', id: '+1' } }
+  assert.equal((await cap.invoke(i, ctx(async () => ({ ok: true, id: 'x' })))).status, 'SUCCESS')
+  assert.equal((await cap.invoke(i, ctx(async () => ({ ok: false, skipped: true, reason: 'emit_exception' })))).status, 'RETRYABLE_FAILURE')
+  assert.equal((await cap.invoke(i, ctx(async () => ({ ok: false, error: 'db down' })))).status, 'RETRYABLE_FAILURE')
+  assert.equal((await cap.invoke(i, ctx(async () => ({ ok: false, skipped: true, reason: 'unknown_event_type' })))).status, 'PERMANENT_FAILURE')
+  let seen
+  await cap.invoke(i, ctx(async (o) => { seen = o; return { ok: true } }))
+  assert.deepEqual(seen.titleVars, { thread_key: '+1' })
+  assert.equal(seen.deduplicationKey, 'wf:r:n:notify')
+})

@@ -54,8 +54,13 @@ export const CAPABILITIES = Object.freeze({
     availability: () => ({ state: 'AVAILABLE' }),
     async invoke(i, ctx) {
       const { emitNotificationFromBusinessEvent } = await import('@/lib/domain/notifications/notification-emitter.js')
-      const r = await (ctx.deps?.notify || emitNotificationFromBusinessEvent)({ eventType: i.event_type, title: i.title, description: i.description, sourceEntityType: i.entity?.kind || 'workflow_run', sourceEntityId: i.entity?.id || ctx.runId, deduplicationKey: this.idempotencyKey(i, ctx) })
-      return r?.skipped && r.reason === 'unknown_event_type' ? { status: STATUS.PERMANENT, reason: 'unknown_event_type' } : { status: STATUS.SUCCESS, outputs: { notification_id: r?.id || null }, reason: r?.skipped ? r.reason : null }
+      const r = await (ctx.deps?.notify || emitNotificationFromBusinessEvent)({ eventType: i.event_type, title: i.title, description: i.description, sourceEntityType: i.entity?.kind || 'workflow_run', sourceEntityId: i.entity?.id || ctx.runId, titleVars: i.entity?.kind === 'seller_thread' ? { thread_key: i.entity.id } : {}, recommendation: `Raised by workflow ${ctx.workflowKey} v${ctx.version}`, deduplicationKey: this.idempotencyKey(i, ctx) })
+      if (r?.ok) return { status: STATUS.SUCCESS, outputs: { notification_id: r.id || null } }
+      // Same per-run key already emitted inside the rate window: the notification exists.
+      if (r?.skipped && r.reason === 'rate_limited') return { status: STATUS.SUCCESS, outputs: { notification_id: null }, reason: 'rate_limited_duplicate' }
+      if (r?.skipped && ['unknown_event_type', 'missing_event_type'].includes(r.reason)) return { status: STATUS.PERMANENT, reason: r.reason }
+      // A write that did not land is not a notification: retry, never record success.
+      return { status: STATUS.RETRYABLE, reason: r?.reason || r?.error || 'notification_write_failed' }
     },
     simulate: (i) => ({ status: STATUS.SUCCESS, outputs: { notification_id: 'simulated' }, preview: `Notification: ${i.title}` }),
   },

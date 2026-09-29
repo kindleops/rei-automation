@@ -69,7 +69,16 @@ const CLOSING_AUTOMATION_JOB_PATHS = ["/api/internal/closings/automation"];
  */
 const EMAIL_SEND_CAPABLE_JOB_PATHS = ["/api/internal/email/dispatch"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS];
+/**
+ * Workflow orchestrator, commissioned 2026-09-29 by explicit operator request
+ * ("Wire the Workflow Orchestrator into the canonical Cloudflare scheduler
+ * behind its explicit production flag and enable it"). Not a transport: its
+ * only send capability requires an operator Approval on every path and then
+ * writes a send_queue row that only queue/run can send.
+ */
+const WORKFLOW_ORCHESTRATOR_JOB_PATHS = ["/api/internal/workflow-studio/orchestrator/tick"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -244,6 +253,8 @@ test("production declares the reconciliation and send schedules, and only approv
       "CRON_QUEUE_RECONCILE_ENABLED",
       "CRON_QUEUE_RUN_ENABLED",
       "CRON_SELLER_STATE_RECONCILE_ENABLED",
+      // Workflow orchestrator, operator-commissioned 2026-09-29.
+      "CRON_WORKFLOW_ORCHESTRATOR_ENABLED",
       "CRON_WORKFLOW_RUNTIME_ENABLED",
     ],
     `unexpected enabled cron flags: ${enabled.join(", ")}`
@@ -354,4 +365,18 @@ test("campaign execution jobs are registered on the */5 lane, carry no body, and
   const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
   const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
   assert.ok(fiveMin[1].includes("CAMPAIGN_ACTIVATE_DUE") && fiveMin[1].includes("CAMPAIGN_FEED"));
+});
+
+test("the workflow orchestrator rides the reconciliation cadence, never the send lane, and its env gate is default-deny", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
+  const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(fiveMin[1].includes("WORKFLOW_ORCHESTRATOR"));
+  assert.ok(!oneMin[1].includes("WORKFLOW_ORCHESTRATOR"));
+  assert.match(code, /WORKFLOW_ORCHESTRATOR_ENABLED:\s*\n?\s*env\.WORKFLOW_ORCHESTRATOR_ENABLED === "true" \? "true" : "false"/);
+  const vars = await configVars(PRODUCTION);
+  assert.equal(vars.WORKFLOW_ORCHESTRATOR_ENABLED, "true");
+  const staging = await configVars(STAGING);
+  assert.notEqual(staging.WORKFLOW_ORCHESTRATOR_ENABLED, "true", "staging shares the production DB: no orchestrator");
 });

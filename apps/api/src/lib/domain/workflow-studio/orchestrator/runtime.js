@@ -303,7 +303,10 @@ async function execNode(db, run, node, deps, now) {
       if (c.mode === 'duration' || c.mode === 'until') {
         const timers = (run.context.timers ||= {})
         if (!timers[node.id]) {
-          const until = c.mode === 'duration' ? nowMs + Number(c.duration_hours) * HOUR : Date.parse(resolveInputs(c.until, run, now))
+          // anchor 'trigger': the duration counts from the triggering event, so a run
+          // that starts late (outage, catch-up) still fires at the right moment.
+          const base = c.anchor === 'trigger' && Date.parse(run.context.event?.at) ? Date.parse(run.context.event.at) : nowMs
+          const until = c.mode === 'duration' ? base + Number(c.duration_hours) * HOUR : Date.parse(resolveInputs(c.until, run, now))
           if (!Number.isFinite(until)) return { hold: 'wait_until_unresolved' }
           timers[node.id] = iso(until)
           await addStep(db, run, { node_id: node.id, kind: 'wait', status: 'waiting', reason: `until ${timers[node.id]}` }, now)
