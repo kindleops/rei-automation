@@ -34,7 +34,9 @@ function hmacMatches(rawBody, secret, signature) {
 
 function verifyWebhookSecret(request, rawBody) {
   const secret = clean(process.env.BREVO_WEBHOOK_SECRET);
-  if (!secret) return { ok: true, configured: false };
+  // Fail closed: this route is outside the operator session gate and writes
+  // suppression + delivery state, so an unset secret must never mean "open".
+  if (!secret) return { ok: false, configured: false, reason: "brevo_webhook_secret_not_configured", status: 503 };
 
   const url = new URL(request.url);
   const directCandidates = [
@@ -85,7 +87,7 @@ export async function POST(request) {
     if (!secret.ok) {
       return NextResponse.json(
         { ok: false, error: secret.reason || "brevo_webhook_unauthorized" },
-        { status: 401 }
+        { status: secret.status || 401 }
       );
     }
 
