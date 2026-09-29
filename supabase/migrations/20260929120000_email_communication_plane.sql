@@ -218,6 +218,13 @@ alter table public.email_events add column if not exists thread_id uuid;
 create index if not exists email_events_to_email_idx on public.email_events (lower(to_email));
 create index if not exists email_events_queue_idx on public.email_events (queue_id);
 
+-- ── seller identity by address ──────────────────────────────────────────────
+-- Inbound seller email resolves address → master_owner. The only existing
+-- index leads with master_key, so an address lookup scanned 165k rows.
+-- 7,346 addresses are shared by more than one owner: resolution treats those
+-- as ambiguous unless exactly one of the owners has a live conversation.
+create index if not exists emails_email_normalized_idx on public.emails (email_normalized);
+
 -- ── thread projection maintenance ──────────────────────────────────────────
 -- The thread row carries last-activity fields so the list is one bounded read
 -- (no per-thread N+1). Maintained here so every writer — processor, webhook,

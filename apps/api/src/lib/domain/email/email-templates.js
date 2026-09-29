@@ -21,6 +21,22 @@ const clean = (v) => String(v ?? '').trim()
 const SIGN_OFF = '\n\nThank you,\n{{sender_name}}'
 
 export const TEMPLATES = Object.freeze({
+  // ── seller (S1–S6) ───────────────────────────────────────────────────────
+  // The seller brain chooses WHAT to say (the same sms_templates selection,
+  // stage rules and facts as SMS); these only frame it as an email.
+  'seller.reply': {
+    version: 'v1', family: 'seller', role: 'seller', stage: 'S1-S6', purpose: 'Seller-brain reply delivered by email',
+    required: ['message', 'sender_name'],
+    subject: '{{subject}}',
+    body: '{{#if first_name}}Hi {{first_name}},\n\n{{/if}}{{message}}' + '\n\n{{sender_name}}',
+  },
+  'seller.followup': {
+    version: 'v1', family: 'seller', role: 'seller', stage: 'S1-S6', purpose: 'Gentle email follow-up when a seller goes quiet',
+    required: ['sender_name', 'property_address'],
+    subject: 'Re: {{property_address}}',
+    body: '{{#if first_name}}Hi {{first_name}},\n\n{{/if}}Just checking back on {{property_address}}. Whenever you have a moment, I would be glad to pick up where we left off.' + '\n\n{{sender_name}}',
+  },
+
   // ── closing / title ──────────────────────────────────────────────────────
   'closing.title_open': {
     version: 'v1', family: 'title', role: 'title', stage: 'S7', purpose: 'Open title on a contracted property',

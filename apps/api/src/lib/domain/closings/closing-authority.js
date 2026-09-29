@@ -358,6 +358,21 @@ export async function recordTitleCommitment(input = {}, deps = {}) {
   return { ok: true }
 }
 
+/** Expected title-commitment date (a promise from title, not the commitment itself). Feeds the follow-up cadence + Calendar. */
+export async function setTitleCommitmentDue(input = {}, deps = {}) {
+  const env = ctx(deps)
+  const bad = requireActor(input.actor); if (bad) return bad
+  if (!clean(input.source)) return fail('SOURCE_REQUIRED', 'Who gave this date (title email / operator)?')
+  const due = iso(input.dueDate); if (!due) return fail('DATE_REQUIRED', 'A commitment date is required')
+  const c = await loadClosingCase(env.db, input.closingCaseId); if (!c) return fail('CLOSING_NOT_FOUND', 'No such closing')
+  if (isTerminal(c) || c.closed_at) return fail('CLOSING_NOT_OPEN', 'Closing is not open')
+  if (c.title_commitment_received_at) return fail('COMMITMENT_ALREADY_RECEIVED', 'The commitment is already in')
+  if (iso(c.title_commitment_date) === due) return { ok: true, duplicate: true }
+  const next = await updateCase(env.db, c, { title_commitment_date: due })
+  await audit(env.db, next, { type: 'title_commitment_date_set', actor: input.actor, source: clean(input.source), detail: { before: c.title_commitment_date || null, after: due, evidence: clean(input.evidenceReference) || null }, key: `title_commitment_date:${c.closing_case_id}:${due}` })
+  return { ok: true }
+}
+
 const ISSUE_TYPES = new Set(['open_lien', 'probate', 'name_discrepancy', 'hoa_balance', 'missing_release', 'tax', 'judgment', 'easement', 'survey', 'other'])
 
 /** A real transaction title issue (reported by title / found in the commitment) — not property intelligence. */

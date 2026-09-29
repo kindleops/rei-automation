@@ -2213,6 +2213,14 @@ export async function executeInboundAutomationDecision({
   strategyDirective = null,
   transitionDirective = null,
   effectiveStageBefore = null,
+  // ONE BRAIN, TWO TRANSPORTS. Every decision above is channel-free; only the
+  // last step differs. channel='email' hands the rendered reply to Email
+  // Command (emailReplyImpl → email_queue) instead of send_queue, and lets
+  // Email Command answer the suppression question for the email address
+  // (channelSuppressionCheck). Default 'sms' leaves this function unchanged.
+  channel = "sms",
+  emailReplyImpl = null,
+  channelSuppressionCheck = null,
   now = new Date().toISOString(),
   supabaseClient = null,
   getSystemValue: getSystemValueImpl = null,
@@ -2646,7 +2654,9 @@ export async function executeInboundAutomationDecision({
   const active_suppression =
     proofRun && queue_permission.internal_test_phone
       ? { suppressed: false, reason: "proof_internal_test_phone" }
-      : await checkInboundAutoReplySuppression({
+      : channel === "email" && typeof channelSuppressionCheck === "function"
+        ? await channelSuppressionCheck({ threadKey, ownerId, propertyId, classification })
+        : await checkInboundAutoReplySuppression({
           supabaseClient: supabase,
           phoneNumber: inboundFrom || threadKey,
           threadKey,
@@ -3182,7 +3192,24 @@ export async function executeInboundAutomationDecision({
     persisted_offer = offer_result;
   }
 
-  const queue_result = await insertSupabaseSendQueueRow({
+  const email_channel = channel === "email" && typeof emailReplyImpl === "function";
+  const queue_result = email_channel
+    ? await emailReplyImpl({
+        rendered_message_text,
+        selected_template,
+        selected_use_case,
+        scheduled_for,
+        queue_key,
+        inbound_event_id: inboundEventId,
+        owner_id: ownerId,
+        property_id: propertyId,
+        prospect_id: prospectId,
+        classification,
+        decision: base_decision,
+        offer: persisted_offer,
+        language: clean(selected_template.language) || clean(classification?.language) || "English",
+      })
+    : await insertSupabaseSendQueueRow({
     queue_key,
     queue_id: queue_key,
     dedupe_key: buildSendQueueDedupeKey({
@@ -3311,7 +3338,8 @@ export async function executeInboundAutomationDecision({
   });
 
   // Close the loop: the offer now points at the exact queue row carrying it.
-  if (persisted_offer?.offer_id && queue_result?.ok) {
+  // The offer back-pointer names a send_queue row; an email reply lives in email_queue.
+  if (persisted_offer?.offer_id && queue_result?.ok && !email_channel) {
     try {
       await bindOfferToQueueRowImpl({
         offer_id: persisted_offer.offer_id,

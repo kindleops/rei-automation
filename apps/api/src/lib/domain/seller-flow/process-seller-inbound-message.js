@@ -79,6 +79,7 @@ import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { getDealContextByThread } from "@/lib/domain/deal-context/deal-context-service.js";
 import { info, warn } from "@/lib/logging/logger.js";
+import { cancelPendingSellerEmails } from "@/lib/domain/email/email-seller-cancel.js";
 
 const defaultDeps = {
   classify,
@@ -94,6 +95,7 @@ const defaultDeps = {
   resolveSellerAutoReplyPlan,
   scheduleFollowUp,
   cancelPendingFollowUpsForThread,
+  cancelPendingSellerEmails,
   patchUniversalLeadState,
   emitAutomationEvent,
   // Canonical ADE runner — injectable for tests/proofs; defaults to the lazy
@@ -674,6 +676,13 @@ export async function processSellerInboundMessage({
   supabaseClient = null,
   getSystemValue = null,
   burstContext = null,
+  // Transport of THIS inbound + the reply. 'email' comes from Email Command
+  // with the seller's SMS thread key, so facts, stage, lead state, follow-up
+  // cancellation and notifications land on the one seller conversation.
+  channel = "sms",
+  emailReplyImpl = null,
+  emailFollowUpImpl = null,
+  channelSuppressionCheck = null,
 } = {}) {
   const supabase = supabaseClient || runtimeDeps.getSupabaseClient?.();
 
@@ -856,6 +865,23 @@ export async function processSellerInboundMessage({
         cancelled: 0,
         reason: cancel_error?.message || "cancel_failed",
       };
+    }
+  }
+
+  // Cross-channel stop: a seller reply on ANY channel withdraws pending
+  // automated seller email for this owner/property (the email dispatcher also
+  // revalidates at send time; this makes the stop immediate).
+  let email_cancellation = { ok: true, cancelled: 0, reason: "not_attempted" };
+  if (!writes_suppressed && cancellation_client_available && runtimeDeps.cancelPendingSellerEmails && (ownerId || propertyId)) {
+    try {
+      email_cancellation = await runtimeDeps.cancelPendingSellerEmails({
+        master_owner_id: ownerId || null,
+        property_id: propertyId || null,
+        reason: channel === "email" ? "seller_replied_email" : "seller_replied_sms",
+        supabase,
+      });
+    } catch (email_cancel_error) {
+      email_cancellation = { ok: false, cancelled: 0, reason: email_cancel_error?.message || "email_cancel_failed" };
     }
   }
 
@@ -1738,6 +1764,9 @@ export async function processSellerInboundMessage({
     timezoneOverride,
     contactWindowOverride,
     dealAuthority: deal_authority,
+    channel,
+    emailReplyImpl,
+    channelSuppressionCheck,
     strategyDirective:
       negotiation?.strategy_decision && !authority_gate_applied
         ? {
@@ -1819,7 +1848,16 @@ export async function processSellerInboundMessage({
 
     if (should_schedule_followup && execution_allowed && !writes_suppressed) {
       try {
-        follow_up_result = await runtimeDeps.scheduleFollowUp(follow_up_intent, threadKey || inboundFrom, {
+        follow_up_result = channel === "email" && typeof emailFollowUpImpl === "function"
+          ? await emailFollowUpImpl({
+              intent: follow_up_intent,
+              follow_up_at: canonical_decision?.follow_up_at || null,
+              master_owner_id: ownerId,
+              property_id: propertyId,
+              is_suppressed: Boolean(canonical_decision?.should_suppress_contact),
+              inbound_event_id: inboundEventId,
+            })
+          : await runtimeDeps.scheduleFollowUp(follow_up_intent, threadKey || inboundFrom, {
           is_suppressed: Boolean(canonical_decision?.should_suppress_contact),
           source: "seller_inbound_orchestrator",
           inbound_message_event_id: inboundEventId,
@@ -2513,6 +2551,8 @@ export async function processSellerInboundMessage({
     execution: execution_view.execution,
     follow_up: execution_view.follow_up,
     followup_cancellation,
+    email_cancellation,
+    channel,
     decision,
     seller_stage_reply,
     universal_state_patch,
