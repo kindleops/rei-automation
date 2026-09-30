@@ -78,13 +78,14 @@ function reconcileAutomationState(row = {}) {
   let automation = clean(row.automation_state).toLowerCase() || 'inactive';
   let blocker = clean(row.blocker) || null;
 
+  // "Not interested" used to turn an active deal into `suppressed`, the same
+  // status an opt-out gets. Owner rule (2026-09-30): "A not interested is a 30
+  // day follow up." The deal stays active; the seller flow's nurture follow-up
+  // carries it.
   if (intent.includes('not_interested') || intent === 'negative') {
     if (automation === 'active') {
       automation = 'cancelled';
       blocker = blocker || 'Intent is not interested but automation was active — reconciled.';
-    }
-    if (status === 'active') {
-      row.opportunity_status = 'suppressed';
     }
   }
   if (row.opt_out || status === 'suppressed') {
@@ -719,6 +720,139 @@ async function syncThreadStateFromOpportunity(client, opportunity = {}, patch = 
       operator_id: patch.actor || null,
     },
   });
+}
+
+/**
+ * RE-ENGAGEMENT REOPEN (thread +16122720901, 2026-09-30).
+ *
+ * 347 opportunities were backfilled on 2026-05-26 as dead at stage `closed`.
+ * When a new campaign reached one of those owners and she answered "Yes." to
+ * "Do you still own ...?", the autopilot carried the conversation on to S2, but
+ * the deal could not follow: stage advancement is monotonic, and nothing is
+ * above `closed`. The thread showed "S10 · Closed", which reads as a won deal,
+ * and the Pipeline kept a live seller filed as dead.
+ *
+ * Only a closed-LOST deal whose seller answers a NEW campaign text reopens (the
+ * caller proves that). It goes to the stage the conversation is actually at.
+ * `suppressed` never reopens: that status carries opt-outs, and it cannot tell
+ * them apart from anything else. `won` never reopens: that is the closing
+ * authority's. The version and the status are both re-checked in the UPDATE, so
+ * a concurrent writer wins and this reports a conflict instead of overwriting.
+ */
+export const REOPENABLE_CLOSED_LOST_STATUSES = Object.freeze(['dead', 'lost']);
+/** A reopened deal is live (`active`) or a follow-up (`nurture`, e.g. "not interested"). */
+const REOPEN_TARGET_STATUSES = Object.freeze(['active', 'nurture']);
+
+export async function reopenClosedLostOpportunity(id, input = {}, deps = {}) {
+  const client = db(deps);
+  const { data: current, error } = await client.from(TABLE).select('*').eq('id', id).single();
+  if (error) throw error;
+
+  const fromStatus = clean(current.opportunity_status).toLowerCase();
+  if (!REOPENABLE_CLOSED_LOST_STATUSES.includes(fromStatus)) {
+    return { ok: false, error: 'not_reopenable', status: fromStatus || null };
+  }
+  const toStatus = clean(input.to_status || 'active').toLowerCase();
+  if (!REOPEN_TARGET_STATUSES.includes(toStatus)) return { ok: false, error: 'invalid_reopen_status' };
+  const toStage = normalizeAcquisitionStageCode(input.to_stage, null);
+  if (!toStage || toStage === UNIVERSAL_STAGE_CODES.CLOSED) {
+    return { ok: false, error: 'invalid_reopen_stage' };
+  }
+  const reason = clean(input.reason);
+  if (!reason) return { ok: false, error: 'reopen_reason_required' };
+
+  const source = input.source || 'system';
+  const actor = input.actor || null;
+  const evidence = input.evidence && typeof input.evidence === 'object' ? input.evidence : {};
+  const evidenceKey = clean(input.idempotency_key) || clean(evidence.queue_id) || clean(evidence.inbound_event_id);
+  if (!evidenceKey) return { ok: false, error: 'reopen_evidence_required' };
+
+  const fromStage = normalizeAcquisitionStageCode(current.acquisition_stage);
+  const now = new Date().toISOString();
+  const version = current.version ?? 1;
+  let update = client
+    .from(TABLE)
+    .update({
+      opportunity_status: toStatus,
+      acquisition_stage: toStage,
+      stage_entered_at: now,
+      last_updated_source: source,
+      last_updated_by: actor,
+      version: version + 1,
+      updated_at: now,
+    })
+    .eq('id', id)
+    .eq('opportunity_status', current.opportunity_status);
+  update = current.version == null ? update.is('version', null) : update.eq('version', version);
+  const { data, error: updateError } = await update.select('*').maybeSingle();
+  if (updateError) throw updateError;
+  if (!data) return { ok: false, error: 'reopen_conflict' };
+
+  const historyBase = { opportunity_id: id, reason, actor, source, metadata: { reopen: true, ...evidence } };
+  await appendHistory(client, {
+    ...historyBase,
+    event_type: 'opportunity_status_changed',
+    field_name: 'opportunity_status',
+    previous_value: fromStatus,
+    new_value: toStatus,
+    idempotency_key: `reopen-status:${id}:${evidenceKey}`,
+  });
+  await appendHistory(client, {
+    ...historyBase,
+    event_type: 'stage_transition',
+    field_name: 'acquisition_stage',
+    previous_value: fromStage,
+    new_value: toStage,
+    idempotency_key: `reopen-stage:${id}:${evidenceKey}`,
+  });
+
+  await emitOpportunityWorkflowEvent({
+    event_type: 'opportunity_stage_changed',
+    opportunity_id: id,
+    subject_id: data.primary_thread_key,
+    dedupe_key: `wfv2-opp-reopen:${id}:${evidenceKey}`,
+    payload: {
+      from_stage: fromStage,
+      to_stage: toStage,
+      from_status: fromStatus,
+      to_status: toStatus,
+      reopened: true,
+      reason,
+      actor,
+    },
+    source,
+  }, deps);
+
+  // The thread mirrors the canonical stage. Moving it back from `closed` is a
+  // correction of the mirror, so it goes through the explicit reconciliation
+  // path (the monotonic guard refuses automated regressions).
+  let thread = { ok: false, skipped: true, reason: 'missing_thread_key' };
+  const threadKey = clean(data.primary_thread_key);
+  if (threadKey) {
+    thread = await patchUniversalLeadState({
+      threadKey,
+      patch: { lifecycle_stage: normalizeLifecycleStage(toStage) },
+      supabase: client,
+      meta: {
+        change_source: STATE_SOURCE_CODES.SYSTEM,
+        source_view: 'opportunity_reopen',
+        projection_reconciliation: true,
+        canonical_acquisition_stage: toStage,
+        updated_by: actor,
+        reason,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    opportunity: normalizeOpportunityRow(data),
+    from_stage: fromStage,
+    to_stage: toStage,
+    from_status: fromStatus,
+    to_status: toStatus,
+    thread_synced: Boolean(thread?.ok && !thread?.blocked),
+  };
 }
 
 export async function transitionOpportunityStatus(id, input = {}, deps = {}) {

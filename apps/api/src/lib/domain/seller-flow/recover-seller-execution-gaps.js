@@ -466,6 +466,27 @@ async function recoverTransitionWithoutStatePatch(supabase, { limit, dryRun, now
   return outcome;
 }
 
+/**
+ * When the reply that scheduled this follow-up arrived, in ms: the later of its
+ * created_at and received_at. null when the row names no triggering reply (a
+ * no-reply follow-up), undefined when the named reply could not be read (leave
+ * the row alone).
+ */
+async function replyThatScheduled(supabase, row) {
+  const eventId = clean(row?.metadata?.inbound_message_event_id);
+  if (!eventId) return null;
+  const { data, error } = await supabase
+    .from("message_events")
+    .select("created_at,received_at")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error || !data) return undefined;
+  const times = [data.created_at, data.received_at]
+    .map((value) => (value ? new Date(value).getTime() : NaN))
+    .filter(Number.isFinite);
+  return times.length ? Math.max(...times) : null;
+}
+
 /** Gap 5 — seller replied but an older reply-pending follow-up is still scheduled. */
 async function recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now }) {
   const outcome = { gap: "stale_followup_after_reply", scanned: 0, repaired: 0, results: [] };
@@ -500,6 +521,18 @@ async function recoverStaleFollowupsAfterReply(supabase, { limit, dryRun, now })
       const lastInbound = state?.last_inbound_at ? new Date(state.last_inbound_at).getTime() : null;
       const createdAt = row.created_at ? new Date(row.created_at).getTime() : null;
       if (!lastInbound || !createdAt || lastInbound <= createdAt) return;
+
+      // A nurture follow-up is scheduled BY a reply, and last_inbound_at is that
+      // reply's received_at, stamped a few seconds after the follow-up row. So
+      // "a reply after the follow-up" was always true of the reply that created
+      // it: 30 not-interested follow-ups were cancelled this way with no second
+      // reply. Only a reply newer than the one that scheduled it is stale-making.
+      const triggerAt = await replyThatScheduled(supabase, row);
+      if (triggerAt === undefined) {
+        outcome.results.push({ queue_row_id: row.id, ok: false, reason: "trigger_reply_unreadable" });
+        return;
+      }
+      if (triggerAt !== null && lastInbound <= triggerAt) return;
 
       outcome.scanned += 1;
       if (dryRun) {

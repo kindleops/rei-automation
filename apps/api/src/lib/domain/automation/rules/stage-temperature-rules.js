@@ -51,7 +51,7 @@ export const stageTemperatureRules = [
     priority: 22,
     dry_run_default: false,
     description:
-      "Not-interested language cools the thread and cancels pending queue work.",
+      "Not-interested language cools the thread and cancels pending outreach. The 30-day follow-up the seller flow scheduled for this reply is kept.",
     condition: { matcher: "not_interested" },
     actions: [
       {
@@ -65,7 +65,8 @@ export const stageTemperatureRules = [
       },
       {
         action_type: "cancel_pending_queue",
-        params: { reason: "not_interested" },
+        // Owner rule (2026-09-30): "A not interested is a 30 day follow up."
+        params: { reason: "not_interested", keep_nurture_follow_ups: true },
       },
     ],
   },
