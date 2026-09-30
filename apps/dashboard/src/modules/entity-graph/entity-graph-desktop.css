@@ -355,7 +355,7 @@ html.is-desktop-modern .egm .egq__group { gap: 8px; }
 /* Section labels: small, sentence case, a breath of tracking. */
 html.is-desktop-modern .egm .egq__group-label {
   padding: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -422,8 +422,8 @@ html.is-desktop-modern .egm .egq__col-bar i {
 html.is-desktop-modern .egm .egq__col:hover .egq__col-bar i { background: color-mix(in srgb, var(--dsk-ink) 24%, transparent); }
 html.is-desktop-modern .egm .egq__col.is-muted .egq__col-bar i { background: color-mix(in srgb, var(--dsk-ink) 8%, transparent); }
 html.is-desktop-modern .egm .egq__col.is-on .egq__col-bar i { background: color-mix(in srgb, var(--dsk-accent) 45%, transparent); box-shadow: none; }
-html.is-desktop-modern .egm .egq__col-val { font-size: 11px; color: var(--dsk-ink-3); animation: none; }
-html.is-desktop-modern .egm .egq__col-label { font-size: 11px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egq__col-val { font-size: 11.5px; color: var(--dsk-ink-3); animation: none; }
+html.is-desktop-modern .egm .egq__col-label { font-size: 11.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .egm .egq__tip { border-radius: 6px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow); }
 html.is-desktop-modern .egm .egq__ghost { height: 32px; margin-bottom: 4px; border-radius: 10px; background: var(--dsk-tile); animation: egk-breathe 2.4s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 120ms); }
 @keyframes egk-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
@@ -432,12 +432,16 @@ html.is-desktop-modern .egm .egq__error button { min-height: 32px !important; pa
 html.is-desktop-modern .egm .egq__note { margin: 10px 4px 0; font-size: 11.5px; line-height: 1.45; color: var(--dsk-ink-3); }
 
 /* ══ LIST + TOOLBAR ══════════════════════════════════════════════════════ */
+/* --egk-pad: the list's inline padding; --egk-gut: how far row plates reach
+   back into it (rows sit 8px in from the list edge, their text on the pad). */
 html.is-desktop-modern .egm .egm-list {
+  --egk-pad: 22px;
+  --egk-gut: 14px;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
   column-gap: 12px;
-  padding: 0 20px 0;
+  padding: 0 var(--egk-pad) 0;
   container: egm-list / inline-size;
 }
 html.is-desktop-modern .egm .egm-list > * { flex: 0 0 100%; min-width: 0; }
@@ -449,15 +453,15 @@ html.is-desktop-modern .egm .egm-toolbar.is-sticky {
   position: sticky;
   top: 0;
   /* Sticky insets resolve against the scroller's content box; the list has
-     20px of inline padding, so the full-bleed bar pins at -20px. */
-  left: -20px;
+     --egk-pad of inline padding, so the full-bleed bar pins at minus that. */
+  left: calc(var(--egk-pad) * -1);
   z-index: 6;
   box-sizing: border-box;
-  flex: 0 0 calc(100% + 40px);
+  flex: 0 0 calc(100% + var(--egk-pad) * 2);
   gap: 8px;
   height: 56px;
-  margin: 0 -20px;
-  padding: 0 20px;
+  margin: 0 calc(var(--egk-pad) * -1);
+  padding: 0 var(--egk-pad);
   background: color-mix(in srgb, var(--dsk-bg) 55%, transparent);
   -webkit-backdrop-filter: var(--dsk-blur);
   backdrop-filter: var(--dsk-blur);
@@ -467,7 +471,7 @@ html.is-desktop-modern .egm .egm-toolbar__count { font-size: 13px; font-weight: 
 /* Narrow pane: the count takes its own line above the controls. */
 @container pane (max-width: 719px) {
   html.is-desktop-modern .egm .egm-toolbar,
-  html.is-desktop-modern .egm .egm-toolbar.is-sticky { flex-wrap: wrap; height: auto; padding: 10px 20px; row-gap: 8px; }
+  html.is-desktop-modern .egm .egm-toolbar.is-sticky { flex-wrap: wrap; height: auto; padding: 12px var(--egk-pad); row-gap: 8px; }
   html.is-desktop-modern .egm .egm-toolbar__count { flex: 1 0 100%; }
 }
 html.is-desktop-modern .egm .egm-toolbar__count b { color: var(--dsk-ink); font-weight: 600; }
@@ -494,7 +498,7 @@ html.is-desktop-modern .egm .egm-tool.is-on {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent);
 }
 html.is-desktop-modern .egm .egm-tool.is-on svg { color: var(--dsk-ink); }
-html.is-desktop-modern .egm .egm-tool__badge { min-width: 16px; height: 16px; font-size: 10.5px; font-weight: 600; background: var(--dsk-accent); color: #fff; }
+html.is-desktop-modern .egm .egm-tool__badge { min-width: 16px; height: 16px; font-size: 11.5px; font-weight: 600; background: var(--dsk-accent); color: #fff; }
 
 /* View switch: a quiet segmented control, sized to its labels. */
 html.is-desktop-modern .egm .egm-views,
@@ -533,7 +537,7 @@ html.is-desktop-modern .egm .egm-list > .egm-views { margin-top: 12px; }
 
 /* ══ TABLE — a real data table: flexible identity column, sticky header ══ */
 /* Rows are floating plates: 8px from the list edge, text on the 20px line. */
-html.is-desktop-modern .egm .egm-list .egt { flex: 0 0 calc(100% + 24px); width: auto; margin: 0 -12px; padding-top: 4px; }
+html.is-desktop-modern .egm .egm-list .egt { flex: 0 0 calc(100% + var(--egk-gut) * 2); width: auto; margin: 0 calc(var(--egk-gut) * -1); padding-top: 4px; }
 html.is-desktop-modern .egm .egt-grid { min-width: calc(240px + var(--egt-body-width, 600px)); }
 /* A wide pane scrolls the list itself in both axes, so the header can stay
    pinned under the toolbar and the identity column pinned at the left. */
@@ -542,7 +546,7 @@ html.is-desktop-modern .egm .egt-grid { min-width: calc(240px + var(--egt-body-w
   html.is-desktop-modern .egm .egt-row.is-head { top: 56px; }
   /* sticky insets resolve against the list's content box (20px padding):
      the pinned column rests where the plates begin */
-  html.is-desktop-modern .egm .egt-cell.is-identity { left: -12px; }
+  html.is-desktop-modern .egm .egt-cell.is-identity { left: calc(var(--egk-gut) * -1); }
 }
 html.is-desktop-modern .egm .egt-row {
   border-bottom: 0;
@@ -575,7 +579,7 @@ html.is-desktop-modern .egm .egt-cell.is-identity {
   flex: 1 0 240px;
   width: auto;
   min-width: 240px;
-  padding-left: 12px;
+  padding-left: var(--egk-gut);
   gap: 10px;
   border-right: 0;
   border-radius: 10px 0 0 10px;
@@ -583,7 +587,7 @@ html.is-desktop-modern .egm .egt-cell.is-identity {
   animation: egk-pin linear both;
   animation-timeline: scroll(nearest inline);
 }
-html.is-desktop-modern .egm .egt-cell:last-child { padding-right: 12px; }
+html.is-desktop-modern .egm .egt-cell:last-child { padding-right: var(--egk-gut); }
 html.is-desktop-modern .egm .egt-row .egt-cell.is-identity:focus-visible { outline: none; box-shadow: var(--egk-focus) !important; border-radius: 10px; }
 html.is-desktop-modern .egm .egt-cell__identity { gap: 2px; }
 html.is-desktop-modern .egm .egt-cell__identity strong { font-size: 14px; font-weight: 550; letter-spacing: -0.005em; color: var(--dsk-ink); }
@@ -706,7 +710,7 @@ html.is-desktop-modern .egm .egm-row__box { border-radius: 5px; }
 html.is-desktop-modern .egm .egm-skeleton { padding-top: 6px; }
 html.is-desktop-modern .egm .egm-skeleton__row {
   height: 48px;
-  margin: 0 -12px 2px;
+  margin: 0 calc(var(--egk-gut) * -1) 2px;
   border: 0;
   border-radius: 10px;
   background: var(--dsk-tile);
@@ -963,7 +967,7 @@ html.is-desktop-modern .egm .egi-section__icon { color: var(--dsk-ink-2); backgr
 html.is-desktop-modern .egm .egi-section__count { font-size: 11.5px; color: var(--dsk-ink-3); background: var(--dsk-tile-hi); }
 html.is-desktop-modern .egm .egi-fieldhead span { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink); }
 html.is-desktop-modern .egm .egi-fieldhead small { font-size: 12px; color: var(--dsk-ink-3); }
-html.is-desktop-modern .egm .egi-chainblock h5 { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egi-chainblock h5 { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .egm .egi-fields dt { font-size: 11.5px; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .egm .egi-fields dd { font-size: 13px; color: var(--dsk-ink); }
 html.is-desktop-modern .egm .egi-search { height: 32px; margin: 0; border-radius: 8px; }
@@ -1095,7 +1099,7 @@ html.is-desktop-modern .egm-insp .egd-ring { width: 72px; height: 72px; }
 html.is-desktop-modern .egm-insp .egd-ring svg { filter: none; }
 html.is-desktop-modern .egm-insp .egd-ring__arc { stroke: var(--dsk-ink-2); animation-duration: 0.5s; }
 html.is-desktop-modern .egm-insp .egd-ring__label b { font-size: 16px; font-weight: 600; }
-html.is-desktop-modern .egm-insp .egd-ring__label small { font-size: 10.5px; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .egm-insp .egd-ring__label small { font-size: 11.5px; letter-spacing: 0; text-transform: none; }
 /* Signals: neutral pills; the tone lives in the dot. */
 html.is-desktop-modern .egm-insp .egd-signals { gap: 6px; }
 html.is-desktop-modern .egm-insp .egd-signals span,
@@ -1195,7 +1199,7 @@ html.is-desktop-modern .egm :is(.egu__icon, .egu__insight-icon) svg { width: 14p
 html.is-desktop-modern .egm .egu__count { margin-top: 16px; font-size: 28px; font-weight: 600; line-height: 1.05; letter-spacing: -0.02em; }
 html.is-desktop-modern .egm .egu__label { margin-top: 2px; font-size: 14px; font-weight: 600; }
 html.is-desktop-modern .egm .egu__line { font-size: 12.5px; color: var(--dsk-ink-3); }
-html.is-desktop-modern .egm .egu__eyebrow { margin: 32px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egu__eyebrow { margin: 32px 0 12px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .egm .egu__insights { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 8px 16px; }
 html.is-desktop-modern .egm .egu__insight {
   min-height: 56px !important;
@@ -1216,7 +1220,7 @@ html.is-desktop-modern .egm .egu__dots { background: var(--dsk-tile-hi); animati
 html.is-desktop-modern .nx-mobile-sheet.egm-sheet:not(.egd-sheet) { font-family: var(--dsk-font); }
 html.is-desktop-modern .egm-sheet .egm-filters h4,
 html.is-desktop-modern .egm-sheet :is(.egf-presets h4, .egf-browse h4, .egf-segments h4, .egc-block > h4) {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -1270,7 +1274,7 @@ html.is-desktop-modern .egm-sheet .nx-mobile-sheet__close svg { width: 14px; hei
 html.is-desktop-modern .egm-sheet .nx-mobile-sheet__body { padding: 0 24px; }
 html.is-desktop-modern .egm-sheet .egm-fsection > h4,
 html.is-desktop-modern .egm-sheet .eg-ff__head strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -1613,3 +1617,442 @@ html.is-desktop-modern .egb .egb-grip { display: none; }
   html.is-desktop-modern .egm-insp :is(.egd-skel > div, .egd-skel__row i),
   html.is-desktop-modern .egx .egx-sheet.nx-mobile-bottom-sheet { animation: none !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMIUM v2 — liquid-glass plates on the pane's glass.
+   Sections are plates in the shared material (--dsk-card-bg / -shadow: a lit
+   top edge, an inner gradient, a deep soft shadow); blocks inside a plate use
+   the glass-chip material. One hero figure glows (the cohort size); charts
+   carry soft accent light; plates rise in on first paint. The pane blurs once,
+   so plates tint rather than re-blur.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-desktop-modern :is(.egm, .egm-sheet, .egx, .egx-sheet, .egb) {
+  --egk-plate-r: 16px;
+  --egk-lit: rgb(255 255 255 / 0.09);
+  --egk-sticky: color-mix(in srgb, rgb(var(--dsk-fill)) 80%, transparent);
+  --egk-hero-glow: 0 0 26px color-mix(in srgb, var(--dsk-accent) 42%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet, .egx, .egx-sheet, .egb) {
+  --egk-lit: rgb(255 255 255 / 1);
+  --egk-sticky: rgb(255 255 255 / 0.84);
+  --egk-hero-glow: 0 0 22px color-mix(in srgb, var(--dsk-accent) 30%, transparent);
+}
+@keyframes egk-rise { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+
+/* ── Page header: a 28px title over one live line ───────────────────────── */
+html.is-desktop-modern .egm .egm-header { padding: 32px 36px 0; column-gap: 28px; border-bottom: 0; }
+html.is-desktop-modern .egm .egm-header__id { gap: 6px; }
+html.is-desktop-modern .egm .egm-header__id h1 { font-size: var(--dsk-title-size, 28px); font-weight: 650; line-height: 1.1; letter-spacing: -0.028em; }
+html.is-desktop-modern .egm .egm-header__total { font-size: 13px; font-weight: 450; }
+html.is-desktop-modern .egm .egm-header .egm-search {
+  height: 38px;
+  padding: 0 10px 0 14px;
+  border-radius: 11px;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+}
+html.is-desktop-modern .egm .egm-header .egm-search:hover { box-shadow: var(--dsk-chip-shadow), 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egm .egm-search:focus-within { box-shadow: var(--dsk-chip-shadow), var(--egk-focus); }
+/* Universe tabs: quiet pills; the active one a raised glass chip. */
+html.is-desktop-modern .egm .egm-scopes { gap: 4px; margin: 22px -4px 0; padding: 2px 4px 4px; }
+html.is-desktop-modern .egm .egm-scope {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+html.is-desktop-modern .egm .egm-scope:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .egm .egm-scope.is-active,
+html.is-desktop-modern .egm .egm-scope.is-all.is-active { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+
+/* ── Body: plates with room around them ─────────────────────────────────── */
+html.is-desktop-modern .egm .egm-body { gap: 18px; padding: 18px 20px 28px; }
+html.is-desktop-modern .egm .egm-rail { padding: 0; }
+html.is-desktop-modern .egm .egm-rail .egq { padding: 22px 22px 18px; }
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egm-body { padding: 18px 36px 32px; }
+  html.is-desktop-modern .egm .egm-rail {
+    padding: 24px 22px 26px;
+    border-right: 0;
+    border-radius: var(--egk-plate-r);
+    background: var(--dsk-card-bg);
+    box-shadow: var(--dsk-card-shadow);
+    animation: egk-rise 0.38s var(--dsk-ease) backwards;
+  }
+  html.is-desktop-modern .egm .egm-rail .egq { padding: 0; }
+  html.is-desktop-modern .egm .egm-body > .egm-insp {
+    border-radius: var(--egk-plate-r);
+    background: var(--dsk-card-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: var(--dsk-card-shadow);
+    overflow: hidden;
+    animation: egk-rise 0.38s var(--dsk-ease) 80ms backwards;
+  }
+}
+/* A mid-width pane floats the inspector as a solid glass panel. */
+@container pane (min-width: 720px) and (max-width: 999px) {
+  html.is-desktop-modern .egm .egm-insp { inset: 12px 12px 12px auto; border-left: 0; border-radius: var(--egk-plate-r); box-shadow: var(--dsk-card-shadow-hover); }
+}
+/* The list is a plate for the table; cards float on the glass on their own. */
+html.is-desktop-modern .egm .egm-body > .egm-list:not(:has(> .egm-row)) {
+  border-radius: var(--egk-plate-r);
+  background: var(--dsk-card-bg);
+  box-shadow: var(--dsk-card-shadow);
+  padding-bottom: 8px;
+  animation: egk-rise 0.38s var(--dsk-ease) 40ms backwards;
+}
+/* Sticky bands: near-opaque over the plate, one small blur, a lit top edge. */
+html.is-desktop-modern .egm .egm-toolbar,
+html.is-desktop-modern .egm .egm-toolbar.is-sticky {
+  height: 60px;
+  border-bottom: 0;
+  border-radius: var(--egk-plate-r) var(--egk-plate-r) 0 0;
+  background: var(--egk-sticky);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: inset 0 1px 0 var(--egk-lit), inset 0 -1px 0 var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egm-list:has(> .egm-row) > .egm-toolbar { margin-bottom: 2px; border-radius: 12px; }
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egt-row.is-head { top: 60px; }
+}
+html.is-desktop-modern .egm .egt-row.is-head {
+  background: var(--egk-sticky);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+html.is-desktop-modern .egm .egm-toolbar__count { font-size: 13px; }
+html.is-desktop-modern .egm .egm-tool { height: 34px; padding: 0 12px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egm-tool:hover { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egm .egm-tool.is-on { background: color-mix(in srgb, var(--dsk-accent) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent), 0 0 18px -8px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
+html.is-desktop-modern .egm .egm-tool__badge { min-width: 17px; height: 17px; font-size: 11.5px; color: var(--dsk-primary-ink); background: var(--dsk-primary-bg); box-shadow: var(--dsk-primary-shadow); }
+html.is-desktop-modern .egm .egm-views,
+html.is-desktop-modern .egm .egm-list > .egm-views { padding: 3px; border-radius: 11px; }
+html.is-desktop-modern .egm .egm-view { height: 28px; border-radius: 8px; }
+html.is-desktop-modern .egm .egm-view.is-active { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 1px 2px rgb(0 0 0 / 0.22); }
+html.is-desktop-modern .egm .egt-cell { min-height: 52px; }
+html.is-desktop-modern .egm .egt-cell.is-head { min-height: 38px; font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .egm .egt-cell__identity strong { font-size: 14px; }
+html.is-desktop-modern .egm .egt-cell__identity em { font-size: 12px; }
+
+/* ── Cards view: record plates, lifting on hover ────────────────────────── */
+html.is-desktop-modern .egm .egm-list:has(> .egm-row) { row-gap: 18px; column-gap: 18px; }
+html.is-desktop-modern .egm .egm-list .egm-row {
+  border-radius: var(--egk-plate-r);
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  animation: egk-rise 0.38s var(--dsk-ease) backwards;
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease);
+}
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(2 of .egm-row) { animation-delay: 40ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(3 of .egm-row) { animation-delay: 80ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(4 of .egm-row) { animation-delay: 120ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(5 of .egm-row) { animation-delay: 160ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(6 of .egm-row) { animation-delay: 200ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(7 of .egm-row) { animation-delay: 240ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:nth-child(n + 8 of .egm-row) { animation-delay: 280ms; }
+html.is-desktop-modern .egm .egm-list .egm-row:hover { background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+html.is-desktop-modern .egm .egm-list .egm-row:is(.is-active, .is-selected) {
+  background: var(--dsk-card-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), var(--dsk-card-shadow-hover);
+}
+html.is-desktop-modern .egm .egm-row__rail { margin: 22px 0; }
+html.is-desktop-modern .egm .egm-row__body { gap: 6px; padding: 20px 22px 20px 20px; }
+html.is-desktop-modern .egm .egm-row__title,
+html.is-desktop-modern .egm .egm-row__value { font-size: 15px; font-weight: 600; }
+
+/* ── Lens: the cohort size is the page's one glowing figure ─────────────── */
+html.is-desktop-modern .egm .egq {
+  border-radius: var(--egk-plate-r);
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+}
+html.is-desktop-modern .egm .egq__head { padding: 2px 0 20px; row-gap: 8px; }
+html.is-desktop-modern .egm .egq__total {
+  font-size: var(--dsk-figure-size, 40px);
+  font-weight: 560;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  text-shadow: var(--egk-hero-glow);
+}
+html.is-desktop-modern .egm .egq__noun b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm .egq__noun small { font-size: 12px; }
+html.is-desktop-modern .egm .egq__chev { width: 30px; height: 30px; border-radius: 9px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egq__picker { gap: 16px; padding-bottom: 18px; }
+html.is-desktop-modern .egm .egq__group-label { font-size: 12px; font-weight: 500; letter-spacing: 0; }
+html.is-desktop-modern .egm .egq__chips { gap: 6px; }
+html.is-desktop-modern .egm .egq__chip {
+  height: 28px;
+  min-height: 28px !important;
+  padding: 0 11px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--dsk-ink-2);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egq__chip:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .egm .egq__chip.is-on { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+/* Ranked bars: a soft accent fill with a lit leading edge. */
+html.is-desktop-modern .egm .egq__bars { gap: 4px; }
+html.is-desktop-modern .egm .egq__bar { height: 36px; min-height: 36px !important; padding: 0 12px; border-radius: 11px; }
+html.is-desktop-modern .egm .egq__bar-fill {
+  border-radius: 11px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 30%, transparent), color-mix(in srgb, var(--dsk-accent) 9%, transparent));
+  box-shadow: inset -1.5px 0 0 color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern .egm .egq__bar.is-muted .egq__bar-fill { background: color-mix(in srgb, var(--dsk-ink) 7%, transparent); box-shadow: none; }
+html.is-desktop-modern .egm .egq__bar.is-on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 20px -8px color-mix(in srgb, var(--dsk-accent) 75%, transparent); }
+html.is-desktop-modern .egm .egq__bar.is-on .egq__bar-fill { background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 48%, transparent), color-mix(in srgb, var(--dsk-accent) 16%, transparent)); }
+html.is-desktop-modern .egm .egq__bar-on { color: var(--dsk-primary-ink); background: var(--dsk-primary-bg); box-shadow: var(--dsk-primary-shadow); }
+/* Histogram: vertical accent fills, rounded tops, a soft glow above. */
+html.is-desktop-modern .egm .egq__col-bar i {
+  border-radius: 7px 7px 3px 3px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--dsk-accent) 72%, transparent), color-mix(in srgb, var(--dsk-accent) 14%, transparent));
+  box-shadow: 0 -8px 18px -10px color-mix(in srgb, var(--dsk-accent) 70%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.25);
+}
+html.is-desktop-modern .egm .egq__col:hover .egq__col-bar i { filter: brightness(1.15); }
+html.is-desktop-modern .egm .egq__col.is-muted .egq__col-bar i { background: color-mix(in srgb, var(--dsk-ink) 10%, transparent); box-shadow: none; }
+html.is-desktop-modern .egm .egq__col.is-on .egq__col-bar i { box-shadow: 0 0 0 1.5px var(--dsk-ink), 0 -8px 22px -8px color-mix(in srgb, var(--dsk-accent) 80%, transparent); }
+html.is-desktop-modern .egm :is(.egq__col-val, .egq__col-label) { font-size: 11.5px; }
+html.is-desktop-modern .egm .egq__note { font-size: 12px; }
+html.is-desktop-modern .egm .egq__ghost { height: 36px; border-radius: 11px; background: var(--dsk-chip-bg); }
+
+/* ── Inspector: a plate; blocks inside are glass chips ──────────────────── */
+html.is-desktop-modern .egm .egm-insp__head { min-height: 64px; padding: 14px 14px 12px 22px; }
+html.is-desktop-modern .egm .egm-insp__title strong { font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .egm .egm-insp__title small { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egm .egm-insp__close { width: 30px; height: 30px; border-radius: 9px; }
+html.is-desktop-modern .egm .egm-insp__body { padding: 20px 22px 26px; }
+html.is-desktop-modern .egm .egm-insp.egd-sheet .egm-insp__body { padding: 18px 0 22px; }
+html.is-desktop-modern .egm .egm-insp__foot { padding: 14px 18px; background: transparent; }
+html.is-desktop-modern .egm .egm-detail { gap: 18px; }
+html.is-desktop-modern .egm .egm-detail__title { font-size: 20px; font-weight: 620; letter-spacing: -0.02em; }
+html.is-desktop-modern .egm .egm-detail__stats { gap: 10px; background: none; box-shadow: none; overflow: visible; }
+html.is-desktop-modern .egm .egm-stat { padding: 14px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egm-stat strong { font-size: 22px; font-weight: 560; letter-spacing: -0.03em; }
+html.is-desktop-modern .egm .egm-stat em { font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .egm .egm-act { min-height: 34px; padding: 6px 12px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egm-act:hover:not(:disabled) { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egm .egi-section { border-radius: 14px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egi-section + .egi-section { margin-top: 10px; }
+html.is-desktop-modern .egm .egi-section__head { min-height: 50px; padding: 0 16px 0 12px; font-size: 13.5px; }
+html.is-desktop-modern .egm .egi-fieldhead span { font-size: 15px; }
+html.is-desktop-modern .egm .egi-chainblock h5 { font-size: 12px; font-weight: 500; letter-spacing: 0; }
+html.is-desktop-modern .egm .egi-fields dt { font-size: 12px; font-weight: 500; }
+/* Icons sit in 28px glass chips, monochrome. */
+html.is-desktop-modern .egm :is(.egi-section__icon, .egm-node__icon, .egm-node__icon.is-person, .egm-node__icon.is-contact),
+html.is-desktop-modern .egm-insp :is(.egd-sec__icon),
+html.is-desktop-modern .egm :is(.egu__icon, .egu__insight-icon) {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+}
+html.is-desktop-modern .egm .egm-node { min-height: 52px; border-radius: 12px; background: transparent; }
+html.is-desktop-modern .egm button.egm-node:hover { background: var(--dsk-hover); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egm .egm-chain__empty { border-radius: 12px; }
+
+/* ── Dossier: glass-chip blocks, a 28px value, glossy primary ───────────── */
+html.is-desktop-modern .egm-insp .egd { gap: 14px; padding: 0 22px 18px; }
+html.is-desktop-modern .egm-insp .egd-hero { border-radius: 14px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 0 0 1px var(--dsk-edge), 0 14px 32px -22px rgb(0 0 0 / 0.8); }
+html.is-desktop-modern .egm-insp :is(.egd-owner, .egd-value, .egd-sec) { border-radius: 14px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm-insp .egd-owner { padding: 14px; }
+html.is-desktop-modern .egm-insp .egd-owner__avatar { width: 36px; height: 36px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm-insp .egd-owner__body strong { font-size: 15px; }
+html.is-desktop-modern .egm-insp .egd-owner__body em { font-size: 12px; }
+html.is-desktop-modern .egm-insp .egd-value { padding: 20px; }
+html.is-desktop-modern .egm-insp .egd-value__main > strong { font-size: 28px; font-weight: 560; letter-spacing: -0.03em; }
+html.is-desktop-modern .egm-insp .egd-value__grid b { font-size: 15px; font-weight: 560; }
+html.is-desktop-modern .egm-insp :is(.egd-value__main > em, .egd-value__grid em) { font-size: 12px; font-weight: 500; }
+/* the equity ring: an accent line with a soft glow */
+html.is-desktop-modern .egm-insp .egd-ring svg { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--dsk-accent) 45%, transparent)); }
+html.is-desktop-modern .egm-insp .egd-ring__arc { stroke: var(--dsk-accent); }
+html.is-desktop-modern .egm-insp .egd-ring__label small { font-size: 11.5px; }
+html.is-desktop-modern .egm-insp .egd-signals span,
+html.is-desktop-modern .egm-insp .egd-signals :is(.is-alert, .is-warn, .is-info, .is-good) { height: 26px; padding: 0 10px; border: 0; border-radius: 8px; font-size: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm-insp .egd-signals :is(.is-alert, .is-warn)::before { box-shadow: 0 0 8px currentColor; }
+html.is-desktop-modern .egm-insp .egd-signals .is-alert::before { color: var(--egk-alert); }
+html.is-desktop-modern .egm-insp .egd-signals .is-warn::before { color: var(--egk-warn); }
+html.is-desktop-modern .egm-insp .egd .egd-sec__head { min-height: 52px !important; padding: 0 16px 0 12px; }
+html.is-desktop-modern .egm-insp .egd-sec__label { font-size: 13.5px; }
+html.is-desktop-modern .egm-insp .egd-bar button { min-height: 36px !important; border-radius: 10px; }
+html.is-desktop-modern .egm-insp .egd-bar__btn { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm-insp .egd-bar__btn:hover:not(:disabled) { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 0 0 1px var(--dsk-edge-hi); }
+/* Glossy accent primaries, everywhere on the surface. */
+html.is-desktop-modern .egm-insp .egd-bar__primary,
+html.is-desktop-modern[data-nexus-theme='light'] .egm-insp .egd-bar__primary,
+html.is-desktop-modern .egm .egm-act.is-primary,
+html.is-desktop-modern[data-nexus-theme='light'] .egm .egm-act.is-primary,
+html.is-desktop-modern .egm .egm-dock__act.is-primary,
+html.is-desktop-modern[data-nexus-theme='light'] .egm .egm-dock__act.is-primary,
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn.is-primary,
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet) .egm-btn.is-primary,
+html.is-desktop-modern .egx .egx-dock__btn.is-primary {
+  color: var(--dsk-primary-ink);
+  background: var(--dsk-primary-bg);
+  box-shadow: var(--dsk-primary-shadow);
+}
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn.is-primary:hover:not(:disabled),
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet) .egm-btn.is-primary:hover:not(:disabled) { background: var(--dsk-primary-bg); filter: brightness(1.06); }
+html.is-desktop-modern .egm-insp .egd-bar__primary svg,
+html.is-desktop-modern .egm .egm-act.is-primary svg,
+html.is-desktop-modern .egm .egm-dock__act.is-primary svg { color: currentColor; }
+
+/* ── Selection dock: a floating plate ───────────────────────────────────── */
+html.is-desktop-modern .egm .egm-dock {
+  margin: 0 20px 20px;
+  padding: 12px 14px 12px 20px;
+  border-top: 0;
+  border-radius: var(--egk-plate-r);
+  background: var(--dsk-card-bg);
+  box-shadow: var(--dsk-card-shadow-hover);
+  animation: egk-rise 0.3s var(--dsk-ease) backwards;
+}
+@container pane (min-width: 1000px) { html.is-desktop-modern .egm .egm-dock { margin: 0 36px 24px; } }
+html.is-desktop-modern .egm .egm-dock__act { height: 34px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egm-dock__cohort { height: 34px; min-height: 34px !important; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egm-toast { border-radius: 12px; box-shadow: var(--dsk-card-shadow-hover); }
+html.is-desktop-modern .egm .egm-more button { height: 36px; padding: 0 18px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+
+/* ── Universe (All): plates with secondary figures ──────────────────────── */
+html.is-desktop-modern .egm .egu { padding: 18px 36px 40px; }
+html.is-desktop-modern .egm .egu__families { gap: 18px; }
+html.is-desktop-modern .egm .egu__family {
+  min-height: 164px !important;
+  padding: 22px 24px;
+  border-radius: var(--egk-plate-r);
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  animation: egk-rise 0.38s var(--dsk-ease) backwards;
+  animation-delay: calc(min(var(--i, 0), 7) * 40ms);
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease);
+}
+html.is-desktop-modern .egm .egu__family:hover { background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+html.is-desktop-modern .egm .egu__count { margin-top: 18px; font-size: 28px; font-weight: 560; letter-spacing: -0.03em; }
+html.is-desktop-modern .egm .egu__label { font-size: 15px; font-weight: 600; }
+html.is-desktop-modern .egm .egu__line { font-size: 12.5px; }
+html.is-desktop-modern .egm .egu__eyebrow { margin: 34px 0 14px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egu__insights { gap: 10px 18px; }
+html.is-desktop-modern .egm .egu__insight { min-height: 60px !important; padding: 12px 16px 12px 12px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm .egu__insight:hover:not(:disabled) { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egm .egu__insight-num { font-size: 17px; font-weight: 560; }
+
+/* ── Sheets over the desk ───────────────────────────────────────────────── */
+html.is-desktop-modern .nx-mobile-sheet.egm-sheet { border-radius: var(--egk-plate-r) !important; }
+html.is-desktop-modern .egm-sheet :is(.egf-presets h4, .egf-browse h4, .egf-segments h4, .egc-block > h4, .egm-fsection > h4, .eg-ff__head strong),
+html.is-desktop-modern .egm-sheet .egm-filters h4 { font-size: 12px; font-weight: 500; letter-spacing: 0; }
+html.is-desktop-modern .egm-sheet :is(.egf-browse__group, .egf-segment) { border-radius: 14px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egm-sheet .egf-preset { height: 28px; min-height: 28px !important; padding: 0 11px; border-radius: 9px; }
+html.is-desktop-modern .egm-sheet .egf-preset.is-on { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent); }
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn { height: 36px; border-radius: 10px; }
+html.is-desktop-modern .egm-sheet .egm-cohorthead__count strong { font-size: 28px; font-weight: 560; letter-spacing: -0.03em; }
+
+/* ── Network: page title, glass controls, calm discs that glow on focus ─── */
+html.is-desktop-modern .egx .egx-top-bar { padding: 28px 36px 14px 26px; gap: 12px; box-shadow: none; }
+html.is-desktop-modern .egx .egx-top-bar__title strong { font-size: var(--dsk-title-size, 28px); font-weight: 650; letter-spacing: -0.028em; }
+html.is-desktop-modern .egx .egx-icon-btn { width: 34px; height: 34px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egx .egx-icon-btn:hover { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egx .egx-layers { gap: 6px; padding: 6px 36px 14px; }
+html.is-desktop-modern .egx .egx-layer { height: 30px; min-height: 30px; padding: 0 11px; border-radius: 9px; background: transparent; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egx .egx-layer.is-on { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egx .egx-layer.is-on i { box-shadow: 0 0 8px currentColor; }
+html.is-desktop-modern .egx .egx-layer.is-select.is-on { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent); }
+html.is-desktop-modern .egx .egx-node:hover .egx-node__orb { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--tone) 85%, transparent), 0 0 18px -3px color-mix(in srgb, var(--tone) 70%, transparent) !important; }
+html.is-desktop-modern .egx .egx-node.is-focus .egx-node__orb { box-shadow: inset 0 0 0 2px var(--tone), 0 0 0 5px color-mix(in srgb, var(--tone) 16%, transparent), 0 0 26px -4px color-mix(in srgb, var(--tone) 75%, transparent) !important; }
+html.is-desktop-modern .egx .egx-node.is-selected .egx-node__orb { box-shadow: inset 0 0 0 2px var(--dsk-accent), 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 22%, transparent), 0 0 22px -4px color-mix(in srgb, var(--dsk-accent) 80%, transparent) !important; }
+html.is-desktop-modern .egx .egx-edge.is-lit { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--tone, var(--dsk-accent)) 65%, transparent)); }
+html.is-desktop-modern .egx .egx-node__label strong { font-size: 12px; }
+html.is-desktop-modern .egx .egx-node__label em { font-size: 11.5px; }
+html.is-desktop-modern .egx .egx-node.is-hub .egx-node__label strong { font-size: 14px; }
+html.is-desktop-modern .egx .egx-ctl { width: 34px; height: 34px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), 0 8px 18px -12px rgb(0 0 0 / 0.7); }
+html.is-desktop-modern .egx .egx-dock { border-radius: var(--egk-plate-r); background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow-hover); }
+@container pane (min-width: 860px) {
+  html.is-desktop-modern .egx .egx-sheet.nx-mobile-bottom-sheet {
+    top: 150px !important;
+    right: 36px !important;
+    bottom: 28px !important;
+    border-radius: var(--egk-plate-r) !important;
+    background: var(--dsk-card-bg), color-mix(in srgb, rgb(var(--dsk-fill)) 55%, transparent) !important;
+    box-shadow: var(--dsk-card-shadow-hover) !important;
+  }
+  html.is-desktop-modern .egx .egx-stage { margin-right: 452px; }
+}
+html.is-desktop-modern .egx-sheet .egx-insp { padding: 22px 24px 26px; }
+html.is-desktop-modern .egx-sheet .egx-insp__head h2 { font-size: 17px; font-weight: 600; }
+html.is-desktop-modern .egx-sheet .egx-insp__eyebrow { font-size: 12px; }
+html.is-desktop-modern .egx-sheet .egx-insp__icon { width: 36px; height: 36px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egx-sheet .egx-kpis { gap: 10px; }
+html.is-desktop-modern .egx-sheet .egx-kpi { padding: 14px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egx-sheet .egx-kpi strong { font-size: 22px; font-weight: 560; letter-spacing: -0.03em; }
+html.is-desktop-modern .egx-sheet .egx-kpi span { font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .egx-sheet .egx-sec { margin-bottom: 26px; }
+html.is-desktop-modern .egx-sheet .egx-sec h3 { font-size: 15px; font-weight: 600; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__track { height: 8px; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__debt { box-shadow: 0 0 10px -2px var(--egk-mailing); }
+html.is-desktop-modern .egx-sheet .egx-ltv__fill { stroke: var(--dsk-accent); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--dsk-accent) 50%, transparent)); }
+html.is-desktop-modern .egx-sheet :is(.egx-prow, .egx-rcard) { border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egx-sheet .egx-more { min-height: 36px; border-radius: 10px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .egb .egb-sheet { border-radius: var(--egk-plate-r) !important; box-shadow: var(--dsk-card-shadow-hover) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .egm :is(.egm-rail, .egm-body > .egm-list, .egm-body > .egm-insp, .egm-list .egm-row, .egu__family, .egm-dock) { animation: none !important; transition: none !important; }
+  html.is-desktop-modern .egm :is(.egm-list .egm-row, .egu__family):hover { transform: none; }
+}
+
+/* v2 · the wide rail leads with the chart: figure → composition → note, and
+   the "break down by" chips settle beneath as a quiet control group. */
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egm-rail .egq { display: flex; flex-direction: column; }
+  html.is-desktop-modern .egm .egm-rail .egq__head { order: 0; }
+  html.is-desktop-modern .egm .egm-rail .egq__chart { order: 1; }
+  html.is-desktop-modern .egm .egm-rail .egq__note { order: 2; }
+  html.is-desktop-modern .egm .egm-rail .egq__picker { order: 3; margin-top: 22px; padding-top: 20px; box-shadow: inset 0 1px 0 var(--dsk-edge); }
+}
+/* v2 · a list narrowed by the open inspector: the count takes its own line
+   rather than being cut off, and the pinned table header follows it. */
+html.is-desktop-modern .egm .egm-toolbar__count { line-height: 20px; }
+@container egm-list (max-width: 740px) {
+  html.is-desktop-modern .egm .egm-toolbar,
+  html.is-desktop-modern .egm .egm-toolbar.is-sticky { flex-wrap: wrap; height: auto; padding: 14px var(--egk-pad) 12px; row-gap: 10px; }
+  html.is-desktop-modern .egm .egm-toolbar__count { flex: 1 0 100%; }
+  html.is-desktop-modern .egm .egt-row.is-head { top: 90px; }
+}
+
+/* v2 · narrow panes: the header stacks (title, then a full-width search) and
+   the list's view switch drops to icons so its controls keep one row. */
+@container pane (max-width: 859px) {
+  html.is-desktop-modern .egm .egm-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'id' 'search' 'scopes';
+    row-gap: 16px;
+    padding: 26px 20px 0;
+  }
+  html.is-desktop-modern .egm .egm-header .egm-search { justify-self: stretch; }
+  html.is-desktop-modern .egm .egm-scopes { margin-top: 4px; }
+}
+@container egm-list (max-width: 560px) {
+  html.is-desktop-modern .egm .egm-view { gap: 0; padding: 0 9px; font-size: 0; }
+  html.is-desktop-modern .egm .egm-view svg { width: 14px; height: 14px; }
+}
+
+/* v2 · network inspector: a little wider, and its three KPI tiles sized so a
+   value like $111.4M is never cut. */
+@container pane (min-width: 860px) {
+  html.is-desktop-modern .egx .egx-sheet.nx-mobile-bottom-sheet { width: 420px !important; }
+  html.is-desktop-modern .egx .egx-stage { margin-right: 472px; }
+}
+html.is-desktop-modern .egx-sheet .egx-kpi { padding: 12px; }
+html.is-desktop-modern .egx-sheet .egx-kpi strong { font-size: 18px; }
+html.is-desktop-modern .egx-sheet .egx-kpi span { font-size: 12px; }
