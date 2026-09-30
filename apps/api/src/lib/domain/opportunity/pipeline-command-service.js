@@ -269,10 +269,41 @@ export function urgencyScore(opp, lane, stall, now = Date.now()) {
   return Math.round(score)
 }
 
+/**
+ * Every opportunity column except `metadata`. Nothing on this path reads it
+ * (the offer view selects negotiation_state on its own), and it is the weight:
+ * 273 active deals shipped 6.9 MB of JSON with it (engine snapshots, up to
+ * 225 KB a deal), 1.55 s against 0.14 s without (measured 2026-09-30).
+ */
+export const PIPELINE_SCOPE_COLUMNS = [
+  'id', 'dedupe_key', 'master_owner_id', 'decision_maker_ids', 'primary_property_id', 'portfolio_group_id',
+  'portfolio_property_ids', 'primary_thread_key', 'related_thread_keys', 'campaign_ids', 'workflow_enrollment_ids',
+  'workflow_run_ids', 'acquisition_engine_run_id', 'acquisition_stage', 'opportunity_status', 'conversation_state',
+  'queue_state', 'workflow_state', 'priority', 'temperature', 'strategy', 'aos', 'confidence', 'estimated_value',
+  'arv', 'asking_price', 'recommended_offer', 'current_offer', 'seller_counter', 'offer_to_ask_gap',
+  'motivation_score', 'cooperation_score', 'assigned_operator', 'automation_state', 'next_action', 'next_action_due',
+  'blocker', 'approval_state', 'latest_intent', 'latest_message_preview', 'asset_class', 'market',
+  'property_address_full', 'seller_display_name', 'portfolio_property_count', 'stage_entered_at', 'last_activity_at',
+  'last_contact_at', 'last_updated_source', 'last_updated_by', 'promotion_reason', 'version', 'created_at',
+  'updated_at', 'universal_status', 'property_state', 'property_type', 'active_offer_id', 'accepted_offer_id',
+  'source_application', 'source_channel', 'source_submission_id', 'strategy_status', 'strategy_started_at',
+  'strategy_resolved_at', 'strategy_resolution_reason', 'cash_attempted_at', 'cash_rejected_at',
+  'creative_attempted_at', 'creative_rejected_at', 'novation_attempted_at', 'novation_rejected_at',
+  'creative_ineligible_reason', 'novation_ineligible_reason', 'last_presented_terms_id', 'favorable_spread',
+].join(',')
+
 async function loadScope(client, params) {
-  let query = client.from('acquisition_opportunities').select('*')
-  query = applyFilters(query, { ...params, scope: clean(params.scope) || 'active' })
-  const { data, error } = await query.order('last_activity_at', { ascending: false, nullsFirst: false }).limit(SCOPE_CAP)
+  const run = (columns) => {
+    let query = client.from('acquisition_opportunities').select(columns)
+    query = applyFilters(query, { ...params, scope: clean(params.scope) || 'active' })
+    return query.order('last_activity_at', { ascending: false, nullsFirst: false }).limit(SCOPE_CAP)
+  }
+  let { data, error } = await run(PIPELINE_SCOPE_COLUMNS)
+  // One unknown column fails the whole PostgREST query; a renamed or dropped
+  // column must cost this page its speed, never the page.
+  if (error && (error.code === '42703' || /column/i.test(String(error.message || '')))) {
+    ;({ data, error } = await run('*'))
+  }
   if (error) throw error
   return (data || []).map(normalizeOpportunityRow).filter(Boolean)
 }

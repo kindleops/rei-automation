@@ -16,6 +16,7 @@ import {
   movementFromHistory,
   isSyntheticHistory,
   DORMANT_DAYS,
+  PIPELINE_SCOPE_COLUMNS,
 } from '../../src/lib/domain/opportunity/pipeline-command-service.js'
 
 const NOW = Date.parse('2026-09-27T12:00:00Z')
@@ -88,4 +89,13 @@ test('movement: real stage advances read as S→S; certification history is drop
   assert.equal(movementFromHistory(cert), null)
   assert.equal(movementFromHistory({ event_type: 'next_action_changed' }), null)
   assert.equal(movementFromHistory({ id: 'h2', opportunity_id: 'o1', event_type: 'asking_price_changed', new_value: '150000', created_at: ago(1) }).detail, '$150K')
+})
+
+test('the board never downloads the deals\' metadata (6.9 MB of engine snapshots for 273 deals)', () => {
+  const columns = PIPELINE_SCOPE_COLUMNS.split(',')
+  assert.equal(columns.includes('metadata'), false)
+  for (const needed of ['id', 'acquisition_stage', 'opportunity_status', 'primary_thread_key', 'primary_property_id', 'latest_intent', 'next_action', 'last_activity_at', 'stage_entered_at']) {
+    assert.ok(columns.includes(needed), needed)
+  }
+  assert.equal(new Set(columns).size, columns.length, 'no duplicate columns')
 })
