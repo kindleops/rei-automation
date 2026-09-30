@@ -96,6 +96,10 @@ export function DesktopHome() {
     closings: dataOf(signals.closings), notifications, now: now.getTime(),
   }), [inbox, signals.queue, signals.campaigns, signals.pipeline, signals.closings, notifications, now])
   const activity = useMemo(() => buildActivity(notifications, inbox, 10), [notifications, inbox])
+  // "Nothing is waiting on you" is a claim about every source the list reads — only make it when they all loaded.
+  const focusSources = [['Inbox', signals.inbox], ['Queue', signals.queue], ['Campaigns', signals.campaigns], ['Pipeline', signals.pipeline], ['Closings', signals.closings]] as const
+  const focusDown = focusSources.filter(([, s]) => s.status === 'unavailable').map(([label]) => label)
+  const focusLoading = focusSources.some(([, s]) => s.status === 'loading')
 
   // FLIP: widgets glide to their new place after a reorder or resize.
   const gridRef = useRef<HTMLDivElement | null>(null)
@@ -148,13 +152,30 @@ export function DesktopHome() {
           )}</Gate>
         )
       case 'focus':
-        return focus.length ? (
-          <div className="dh-list">
-            {focus.slice(0, 7).map((f) => (
-              <Row key={f.id} icon={f.icon} title={f.title} detail={`${f.app} · ${f.detail}`} meta={relativeTime(f.at, now.getTime()) || null} tone={f.tone} onClick={() => openTarget(f.target)} />
-            ))}
-          </div>
-        ) : <p className="dh-empty"><Icon name="check" size={14} /> Nothing is waiting on you.</p>
+        if (focus.length) {
+          return (
+            <>
+              <div className="dh-list">
+                {focus.slice(0, 7).map((f) => (
+                  <Row key={f.id} icon={f.icon} title={f.title} detail={`${f.app} · ${f.detail}`} meta={relativeTime(f.at, now.getTime()) || null} tone={f.tone} onClick={() => openTarget(f.target)} />
+                ))}
+              </div>
+              {focusDown.length ? <p className="dh-foot">{focusDown.join(', ')} didn’t load — there may be more.</p> : null}
+            </>
+          )
+        }
+        if (focusLoading) return <div className="dh-skel"><i /><i /><i /></div>
+        if (focusDown.length) {
+          return (
+            <div className="dh-unavail" role="status">
+              <Icon name="alert-circle" size={18} />
+              <strong>Couldn’t check everything</strong>
+              <small>{focusDown.join(', ')} didn’t load</small>
+              <button type="button" className="dh-btn is-ghost dh-unavail__retry" onClick={() => refresh()}>Try again</button>
+            </div>
+          )
+        }
+        return <p className="dh-empty"><Icon name="check" size={14} /> Nothing is waiting on you.</p>
       case 'replies':
         return (
           <Gate load={signals.inbox}>{(i) => i.threads.length ? (
