@@ -152,7 +152,7 @@ const messageTimestampMs = (message: ThreadMessage): number => {
   return Number.isFinite(ts) ? ts : 0
 }
 
-type DeliveryBadge = 'sending' | 'sent' | 'delivered' | 'failed' | 'scheduled' | 'cancelled'
+type DeliveryBadge = 'sending' | 'sent' | 'delivered' | 'failed' | 'scheduled' | 'cancelled' | 'unconfirmed'
 
 const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   const status = String(message.deliveryStatusDisplay || message.deliveryStatus || '').toLowerCase()
@@ -168,6 +168,11 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   const statusEvidence = [status, raw].filter(Boolean)
 
   if (statusEvidence.some((value) => value.includes('cancel'))) return 'cancelled'
+
+  // The composer lost the send-now response and the server could not confirm
+  // the outcome: neither "failed" (a Retry invites a duplicate SMS) nor the
+  // "delivered" fallback below. The canonical message_events row replaces it.
+  if (statusEvidence.includes('unconfirmed')) return 'unconfirmed'
 
   const hasFailure = isFinalFailure
     || Boolean(failedAt)
@@ -214,6 +219,7 @@ const deliveryBadgeMeta = (badge: DeliveryBadge): { icon: string; label: string 
     case 'failed': return { icon: '!', label: 'Failed' }
     case 'scheduled': return { icon: '◷', label: 'Scheduled' }
     case 'cancelled': return { icon: '×', label: 'Cancelled' }
+    case 'unconfirmed': return { icon: '?', label: 'Not confirmed' }
     default: return { icon: '•', label: badge }
   }
 }

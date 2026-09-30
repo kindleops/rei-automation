@@ -981,6 +981,18 @@ export function sendInboxMessageNow(payload: Record<string, unknown>): Promise<B
   })
 }
 
+// GET /api/cockpit/inbox/send-status — READ ONLY. What happened to one composer
+// send, looked up by the client_send_id it carried. Used when the send-now
+// response itself was lost (dropped connection / timed-out request), so a send
+// that went out is confirmed instead of being reported as failed.
+export function fetchInboxSendStatus(
+  clientSendId: string,
+  threadKey: string,
+): Promise<BackendResult<Record<string, unknown>>> {
+  const query = new URLSearchParams({ client_send_id: clientSendId, thread_key: threadKey }).toString()
+  return callBackend<Record<string, unknown>>(`/api/cockpit/inbox/send-status?${query}`, { timeoutMs: 10_000 })
+}
+
 // GET /api/cockpit/inbox/live — used by inboxData.getLiveInbox so all secret
 // management stays inside callBackend and never leaks into data layer files.
 export function fetchLiveInbox(

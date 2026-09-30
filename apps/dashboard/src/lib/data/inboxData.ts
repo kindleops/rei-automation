@@ -31,6 +31,12 @@ import {
 import { isEntityName } from '../identity/entityDetection'
 import { getDealContextByThread, normalizeDealContext, type DealContext } from './dealContext'
 import { commitDashboardMessages, commitDashboardThreads } from './dashboardEntityStore'
+import {
+  confirmSendOutcome,
+  isIndeterminateSendFailure,
+  verdictFromConfirmation,
+  type SendStatusSnapshot,
+} from '../../domain/inbox/send-outcome-confirmation'
 import { dataLayerNow, loadDashboardViewModel, logHydrationPhaseDone } from './dashboardDataLayer'
 
 const TEXTGRID_NUMBERS = new Set([
@@ -295,6 +301,14 @@ export interface SendNowResult {
   sendRouteUsed: 'provider_immediate' | 'send_queue_queued' | 'none'
   queueProcessorEligible: boolean
   proof?: ManualSendProof | null
+  /**
+   * The send-now response was lost and the server could not confirm the outcome
+   * in time: the send may or may not have gone out. Show "not confirmed", never
+   * "failed", and never offer a blind retry.
+   */
+  outcomeUnknown?: boolean
+  /** The send-now response was lost, and the server then confirmed the send by client_send_id. */
+  confirmedAfterTransportError?: boolean
 }
 
 interface InboxTemplateSendOptions {
@@ -321,6 +335,8 @@ interface InboxSendOptions extends InboxTemplateSendOptions {
   propertyAddress?: string
   language?: string
   renderedMessage?: string
+  /** Called once if the send-now response was lost and the outcome is being confirmed by client_send_id. */
+  onConfirmingSend?: () => void
 }
 
 export interface QueueProcessorHealth {
@@ -5352,6 +5368,58 @@ export const sendInboxMessageNow = async (
       : null,
   }
   emitManualSendProof(proof)
+
+  /*
+   * A LOST RESPONSE IS NOT A FAILED SEND (2026-09-30 14:51Z).
+   *
+   * The phone reported "backend_network_error ... Load failed" -- plus a Retry
+   * button -- for a message the API had already sent and the seller received.
+   * When the call ends without an authoritative answer from the API, ask the
+   * server what happened to THIS click (by its client_send_id) and report only
+   * what it confirms. An API refusal (423/400/JSON 5xx) is authoritative and
+   * keeps the path below.
+   */
+  const confirmClientSendId = options?.clientSendId ?? null
+  const confirmThreadKey = asString(insertPayload.thread_key, '') || sellerPhone || ''
+  if (!sendResult.ok && confirmClientSendId && confirmThreadKey && isIndeterminateSendFailure(sendResult)) {
+    options?.onConfirmingSend?.()
+    const confirmation = await confirmSendOutcome({
+      clientSendId: confirmClientSendId,
+      threadKey: confirmThreadKey,
+      fetchStatus: async (clientSendId, threadKey) => {
+        const status = await backendClient.fetchInboxSendStatus(clientSendId, threadKey)
+        return status.ok ? (status.data as unknown as SendStatusSnapshot) : null
+      },
+    })
+    const verdict = verdictFromConfirmation(confirmation)
+    console.warn('[sendInboxMessageNow] send-now response lost; outcome confirmed by client_send_id', {
+      transportError: sendResult.error,
+      state: confirmation.state,
+      confirmed: confirmation.confirmed,
+      attempts: confirmation.attempts,
+      clientSendId: confirmClientSendId,
+    })
+    return {
+      ok: verdict.ok,
+      clientSendId: confirmClientSendId,
+      queueId: verdict.queueId || proof.queueRowId,
+      messageEventId: null,
+      providerMessageSid: verdict.providerMessageSid,
+      deliveryStatus: verdict.deliveryStatus,
+      errorMessage: verdict.message,
+      guardReason: verdict.ok ? null : verdict.reason,
+      backendReason: verdict.ok ? null : verdict.reason,
+      hardBlock: false,
+      operatorOverrideAllowed: false,
+      insertPayloadKeys,
+      suppressionBlocked: false,
+      sendRouteUsed: 'provider_immediate',
+      queueProcessorEligible: verdict.ok,
+      proof,
+      outcomeUnknown: verdict.outcomeUnknown,
+      confirmedAfterTransportError: verdict.ok,
+    }
+  }
 
   if (!sendResult.ok) {
     const simplified = simplifyBackendError(sendResult as any)

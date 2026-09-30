@@ -4916,6 +4916,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         selectedTemplate: template ?? null,
         threadContext,
         clientSendId,
+        // The send-now response was lost: say so, and that we are checking --
+        // the message may already be out, so this is not the moment to resend.
+        onConfirmingSend: () => emitNotification({
+          title: 'Confirming Send…',
+          detail: 'The connection dropped before the server answered. Checking whether the message went out — do not resend.',
+          severity: 'info',
+        }),
       })
       const overrideAllowed = !result.ok && result.operatorOverrideAllowed === true
       if (overrideAllowed) {
@@ -4938,18 +4945,27 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       emitNotification({
         title: result.ok
           ? 'Message Sent'
-          : 'Send Failed',
+          : result.outcomeUnknown
+            ? 'Send Not Confirmed'
+            : 'Send Failed',
         detail: result.ok
-          ? (result.deliveryStatus === 'delivered'
-            ? 'Message delivered.'
-            : 'Provider accepted the message.')
+          ? (result.confirmedAfterTransportError
+            ? 'Confirmed on the server after the connection dropped.'
+            : result.deliveryStatus === 'delivered'
+              ? 'Message delivered.'
+              : 'Provider accepted the message.')
           : (result.errorMessage ?? 'Could not queue message for send'),
         severity: result.ok
           ? 'success'
-          : 'critical',
+          : result.outcomeUnknown
+            ? 'warning'
+            : 'critical',
       })
 
       if (!result.ok) {
+        // An unknown outcome is not a failure: no error text (which would paint
+        // the bubble "Failed" with a Retry button) until the server says so.
+        const outcomeUnknown = result.outcomeUnknown === true
         setPendingMessagesByThread((current) => ({
           ...current,
           [selected.id]: dedupeMessages((current[selected.id] ?? []).map((pending) => (
@@ -4957,9 +4973,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               ? pending
               : {
                   ...pending,
-                  deliveryStatus: 'failed',
-                  rawStatus: 'failed',
-                  error: result.errorMessage,
+                  deliveryStatus: outcomeUnknown ? 'unconfirmed' : 'failed',
+                  rawStatus: outcomeUnknown ? 'unconfirmed' : 'failed',
+                  error: outcomeUnknown ? null : result.errorMessage,
                   metadata: { ...(pending.metadata ?? {}), client_send_id: clientSendId },
                   developerMeta: {
                     ...(pending.developerMeta ?? {}),
