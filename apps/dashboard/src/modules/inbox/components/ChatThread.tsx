@@ -13,6 +13,8 @@ import type { PropertyParticipant } from '../utils/participantLabels'
 import { ThreadStateBar } from './ThreadStateBar'
 import { usePhase3Intelligence } from '../hooks/usePhase3Intelligence'
 import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
+import { buildAutomationTrail } from '../message-automation-trail'
+import { MessageAutomationTrail } from './MessageAutomationTrail'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -940,6 +942,67 @@ export const ChatThread = ({
     ))
   ), [messages])
 
+  // The latest seller message opens its automation trail; older ones fold.
+  const latestInboundId = useMemo(() => {
+    for (let i = timelineMessages.length - 1; i >= 0; i -= 1) {
+      if (timelineMessages[i].direction === 'inbound') return timelineMessages[i].id
+    }
+    return null
+  }, [timelineMessages])
+
+  /*
+   * TYPING, THEN THE REPLY. When a seller's message has just landed and the
+   * automation queued a reply to it, the conversation types for a beat and
+   * then the queued reply appears (as scheduled). Driven only by the
+   * automation's own record on that message — its auto-reply queue id or a
+   * queued status — so an operator's own message is never held back, and a
+   * message that queued nothing never shows dots.
+   */
+  const TYPING_MIN_MS = 6500
+  const TYPING_MAX_MS = 10_000
+  const [autoTyping, setAutoTyping] = useState<{ inboundId: string; queueId: string | null; startedAt: number } | null>(null)
+  const [, setTypingTick] = useState(0)
+  const typedInboundRef = useRef(new Set<string>())
+  const latestInboundIndex = useMemo(() => {
+    for (let i = timelineMessages.length - 1; i >= 0; i -= 1) if (timelineMessages[i].direction === 'inbound') return i
+    return -1
+  }, [timelineMessages])
+  useEffect(() => {
+    if (latestInboundIndex < 0) return
+    const inbound = timelineMessages[latestInboundIndex]
+    if (typedInboundRef.current.has(inbound.id)) return
+    const age = Date.now() - messageTimestampMs(inbound)
+    if (age < 0 || age > 60_000) { typedInboundRef.current.add(inbound.id); return }
+    const meta = (inbound.metadata ?? {}) as Record<string, unknown>
+    const payload = (meta.payload && typeof meta.payload === 'object' ? meta.payload : {}) as Record<string, unknown>
+    const queueId = String(payload.auto_reply_queue_id ?? meta.auto_reply_queue_id ?? '').trim() || null
+    const status = String(meta.auto_reply_status ?? payload.auto_reply_status ?? '').toLowerCase()
+    if (!queueId && !['queued', 'processing', 'sending'].includes(status)) return
+    typedInboundRef.current.add(inbound.id)
+    setAutoTyping({ inboundId: inbound.id, queueId, startedAt: Date.now() })
+  }, [latestInboundIndex, timelineMessages])
+  useEffect(() => {
+    if (!autoTyping) return
+    const reveal = window.setTimeout(() => setTypingTick((n) => n + 1), TYPING_MIN_MS + 30)
+    const stop = window.setTimeout(() => setAutoTyping(null), TYPING_MAX_MS)
+    return () => { window.clearTimeout(reveal); window.clearTimeout(stop) }
+  }, [autoTyping])
+  const isAutoReplyTo = (message: ThreadMessage, queueId: string | null) => (
+    message.direction === 'outbound'
+    && Boolean(queueId)
+    && (String(message.developerMeta?.queue_id ?? '') === queueId || message.id === queueId)
+  )
+  const typingElapsed = autoTyping ? Date.now() - autoTyping.startedAt : Number.POSITIVE_INFINITY
+  const heldReplyPresent = autoTyping
+    ? timelineMessages.some((m, i) => i > latestInboundIndex && isAutoReplyTo(m, autoTyping.queueId))
+    : false
+  const replyInFlight = Boolean(autoTyping)
+    && (typingElapsed < TYPING_MIN_MS || (!heldReplyPresent && typingElapsed < TYPING_MAX_MS))
+  // The composer mirrors the dots while the conversation types.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('nx:auto-reply-typing', { detail: { threadId: thread?.id ?? null, active: replyInFlight } }))
+  }, [replyInFlight, thread?.id])
+
   useEffect(() => {
     const outboundMessages = timelineMessages.filter((message) => message.direction === 'outbound')
     const deliveredCount = outboundMessages.filter((message) => normalizeDeliveryBadge(message) === 'delivered').length
@@ -1330,6 +1393,7 @@ export const ChatThread = ({
           }
 
           return timelineMessages.map((msg, index) => {
+            if (replyInFlight && autoTyping && index > latestInboundIndex && isAutoReplyTo(msg, autoTyping.queueId)) return null
             const isOutbound = msg.direction === 'outbound'
             const deliveryBadge = normalizeDeliveryBadge(msg)
             const isFailed = deliveryBadge === 'failed'
@@ -1427,6 +1491,11 @@ export const ChatThread = ({
                     )}
                   </div>
 
+                  {!isOutbound ? (() => {
+                    const steps = buildAutomationTrail(msg.metadata)
+                    return steps.length ? <MessageAutomationTrail steps={steps} defaultOpen={msg.id === latestInboundId} /> : null
+                  })() : null}
+
                   {!isOutbound && (
                     isTranslatingThread ? (
                       <div className="nx-msg__translate is-translating" aria-live="polite">
@@ -1443,7 +1512,7 @@ export const ChatThread = ({
                         </span>
                         <button type="button" onClick={() => onTranslateThread?.()}>Show Original</button>
                       </div>
-                    ) : sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' ? (
+                    ) : sellerLanguageLabel && sellerLanguageLabel !== 'Unknown' && sellerLanguageLabel !== 'English' ? (
                       <div className="nx-msg__translate is-available">
                         <Icon name="globe" />
                         <span>{sellerLanguageLabel}</span>
@@ -1467,6 +1536,17 @@ export const ChatThread = ({
             )
           })
         })()}
+
+        {replyInFlight ? (
+          <div className="nx-msg-lane is-outbound nx-typing-lane" aria-live="polite">
+            <div className="nx-msg is-outbound is-typing">
+              <div className="nx-msg__bubble nx-typing" role="status" aria-label="Automation is replying">
+                <i /><i /><i />
+              </div>
+              <div className="nx-msg__meta"><span className="nx-msg__time">Automation is replying…</span></div>
+            </div>
+          </div>
+        ) : null}
 
         {messages.length === 0 && !loading && (
           <div className="nx-inbox__messages-empty">

@@ -61,13 +61,21 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
     }
     const prevBaseline = 0
 
+    // Replies and deliveries counted in one window are different people once
+    // sending slows: sellers keep answering older sends, and the ratio read
+    // 200–400% in the bar. Below 20 delivered (the Analytics floor) or over
+    // 100% it is not a rate, so it is withheld rather than shown.
+    const replyRateMeaningful = Number(metrics.delivered_count) >= 20 && Number(metrics.reply_rate) <= 100
+    const optOutRateMeaningful = Number(metrics.delivered_count) >= 20 && Number(metrics.opt_out_rate) <= 100
+    const withheld = 'Too few delivered messages in this window to state a rate'
+
     const messaging: OperationalKpi[] = [
-      { id: 'reply-rate', label: 'Reply Rate', value: metrics.reply_rate.toFixed(1), unit: '%', description: 'Inbound replies / delivered outbound', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.reply_rate, prevBaseline), status: metrics.reply_rate > 15 ? 'good' : 'warning' },
+      { id: 'reply-rate', label: 'Reply Rate', value: replyRateMeaningful ? metrics.reply_rate.toFixed(1) : '—', unit: replyRateMeaningful ? '%' : '', description: replyRateMeaningful ? 'Inbound replies / delivered outbound' : withheld, category: 'messaging', timeWindow, isAvailable: replyRateMeaningful, trend: replyRateMeaningful ? getTrend(metrics.reply_rate, prevBaseline) : 'neutral', status: !replyRateMeaningful ? 'neutral' : metrics.reply_rate > 15 ? 'good' : 'warning' },
       { id: 'pos-reply-rate', label: 'Positive Rate', value: metrics.positive_rate.toFixed(1), unit: '%', description: 'Interested replies from inbound flow', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.positive_rate, prevBaseline), status: metrics.positive_rate > 10 ? 'good' : 'neutral' },
       { id: 'negative-rate', label: 'Negative Rate', value: metrics.negative_rate.toFixed(1), unit: '%', description: 'Negative or blocking replies from inbound flow', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.negative_rate), status: metrics.negative_rate < 8 ? 'good' : metrics.negative_rate < 18 ? 'warning' : 'critical' },
       { id: 'delivery-rate', label: 'Delivery Rate', value: metrics.delivery_rate.toFixed(1), unit: '%', description: 'Carrier-delivered / accepted outbound', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(metrics.delivery_rate, prevBaseline), status: metrics.delivery_rate > 95 ? 'good' : 'critical' },
       { id: 'failure-rate', label: 'Failure Rate', value: metrics.failure_rate.toFixed(1), unit: '%', description: 'Final provider/carrier failures', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.failure_rate), status: metrics.failure_rate < 5 ? 'good' : 'critical' },
-      { id: 'opt-out-rate', label: 'Opt-Out Rate', value: metrics.opt_out_rate.toFixed(1), unit: '%', description: 'Opt-outs across delivered sends', category: 'messaging', timeWindow, isAvailable: true, trend: getTrend(prevBaseline, metrics.opt_out_rate), status: metrics.opt_out_rate < 3 ? 'good' : 'warning' }
+      { id: 'opt-out-rate', label: 'Opt-Out Rate', value: optOutRateMeaningful ? metrics.opt_out_rate.toFixed(1) : '—', unit: optOutRateMeaningful ? '%' : '', description: optOutRateMeaningful ? 'Opt-outs across delivered sends' : withheld, category: 'messaging', timeWindow, isAvailable: optOutRateMeaningful, trend: optOutRateMeaningful ? getTrend(prevBaseline, metrics.opt_out_rate) : 'neutral', status: !optOutRateMeaningful ? 'neutral' : metrics.opt_out_rate < 3 ? 'good' : 'warning' }
     ]
 
     const volume: Array<{ id: string; label: string; value: number; tone: OperationalVolumeTone }> = [
@@ -82,10 +90,11 @@ export const fetchOperationalKpis = async (timeWindow: OperationalKpi['timeWindo
       { id: 'queue-failed', label: 'Queue Failures', value: metrics.queue_failed_today_count, description: 'Failed send_queue rows (ops failures)', category: 'automation', timeWindow, isAvailable: true, status: metrics.queue_failed_today_count > 0 ? 'critical' : 'good' }
     ]
 
-    const noVerifiedData = metrics.metric_source_debug?.message_rows === 0
+    // Nothing in this feed carries hot-lead or acquisition-score data; these
+    // used to read a literal 0 whenever messages existed.
     const quality: OperationalKpi[] = [
-      { id: 'hot-leads', label: 'Hot Leads', value: noVerifiedData ? 'No verified data yet' : 0, description: 'Threads flagged with high intent', category: 'quality', timeWindow, isAvailable: !noVerifiedData, status: 'neutral' },
-      { id: 'avg-acq-score', label: 'Avg Acq Score', value: noVerifiedData ? 'No verified data yet' : '0', description: 'Mean acquisition score across inbox', category: 'quality', timeWindow, isAvailable: !noVerifiedData, status: 'neutral' }
+      { id: 'hot-leads', label: 'Hot Leads', value: 'No verified data yet', description: 'Threads flagged with high intent', category: 'quality', timeWindow, isAvailable: false, status: 'neutral' },
+      { id: 'avg-acq-score', label: 'Avg Acq Score', value: 'No verified data yet', description: 'Mean acquisition score across inbox', category: 'quality', timeWindow, isAvailable: false, status: 'neutral' }
     ]
 
     const pipeline: OperationalKpi[] = [

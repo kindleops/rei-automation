@@ -706,7 +706,8 @@ export const InboxKpiOrb = () => {
   // What the bar shows: the pinned metric (kept live), else reply rate.
   const readout = useMemo(() => {
     if (pin) return flat[pin.id] ?? pin
-    return headlineKpi ? { id: `kpi:${headlineKpi.id}`, label: headlineKpi.label, value: `${headlineKpi.value}${headlineKpi.unit ?? '%'}` } : null
+    // A withheld metric reads "—", never "—%".
+    return headlineKpi ? { id: `kpi:${headlineKpi.id}`, label: headlineKpi.label, value: headlineKpi.isAvailable === false ? '—' : `${headlineKpi.value}${headlineKpi.unit ?? '%'}` } : null
   }, [pin, flat, headlineKpi])
 
   const orbTone = useMemo(() => {
@@ -968,7 +969,7 @@ export const InboxKpiOrb = () => {
             <Icon name={isLive ? 'zap' : 'activity'} />
           </div>
           {headlineKpi && (
-            <span className="nx-kpi-orb__mini-value">{headlineKpi.value}{headlineKpi.unit || '%'}</span>
+            <span className="nx-kpi-orb__mini-value">{headlineKpi.isAvailable === false ? '—' : `${headlineKpi.value}${headlineKpi.unit || '%'}`}</span>
           )}
           {readout && (
             <span className={cls('nx-kpi-orb__readout', pin && 'is-pinned')} key={readout.id}>

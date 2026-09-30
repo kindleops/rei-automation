@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon, type IconName } from '../../../shared/icons'
 import { useNotificationIntelligence } from '../../../domain/notifications/useNotificationIntelligence'
 import { useOperatorName } from '../../../shared/useOperatorName'
@@ -29,10 +29,23 @@ function useMinute() {
   return now
 }
 
+/** The board's refresh, so a widget that could not load can offer to try again. */
+const HomeRetry = createContext<(() => void) | null>(null)
+
 /** Loading / unavailable envelope for a widget body. */
 function Gate<T>({ load, children }: { load: HomeLoad<T>; children: (data: T) => ReactNode }) {
+  const retry = useContext(HomeRetry)
   if (load.status === 'loading') return <div className="dh-skel"><i /><i /><i /></div>
-  if (load.status === 'unavailable') return <p className="dh-unavail"><Icon name="slash" size={13} /> Unavailable — {load.reason}</p>
+  if (load.status === 'unavailable') {
+    return (
+      <div className="dh-unavail" role="status">
+        <Icon name="alert-circle" size={18} />
+        <strong>Couldn’t load</strong>
+        <small>{load.reason}</small>
+        {retry ? <button type="button" className="dh-btn is-ghost dh-unavail__retry" onClick={() => retry()}>Try again</button> : null}
+      </div>
+    )
+  }
   return <>{children(load.data)}</>
 }
 
@@ -259,6 +272,7 @@ export function DesktopHome() {
   const link: Partial<Record<WidgetId, string>> = { replies: '/inbox', pipeline: '/pipeline', campaigns: '/campaign-command', agenda: '/calendar', closings: '/closing-desk', markets: '/analytics', status: '/queue', windows: '/map' }
 
   return (
+    <HomeRetry.Provider value={refresh}>
     <div className={cls('dh', editing && 'is-editing')}>
       <header className="dh-head">
         <div>
@@ -337,5 +351,6 @@ export function DesktopHome() {
         {!slots.length ? <p className="dh-empty dh-empty--board">Your board is empty. Choose <b>Customize → Add widget</b>.</p> : null}
       </div>
     </div>
+    </HomeRetry.Provider>
   )
 }

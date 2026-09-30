@@ -35,8 +35,8 @@ html.is-desktop-modern[data-nexus-theme='light'] {
   --dsk-edge-hi: rgba(15, 17, 22, 0.13);
   --dsk-bg: #f4f4f5;
   --dsk-fill: var(--lg-fill, 255 255 255);
-  --dsk-glass: rgb(var(--dsk-fill) / calc(0.82 * var(--lg-alpha, 1)));
-  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.97 * var(--lg-alpha, 1)));
+  --dsk-glass: rgb(var(--dsk-fill) / calc(0.56 * var(--lg-alpha, 1)));
+  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.84 * var(--lg-alpha, 1)));
   --dsk-shadow: 0 18px 44px -28px rgba(20, 24, 34, 0.28), 0 2px 8px -4px rgba(20, 24, 34, 0.12);
   --dsk-tile: rgba(15, 17, 22, 0.04);
   --dsk-tile-hi: rgba(15, 17, 22, 0.07);
@@ -178,6 +178,9 @@ html[data-nexus-theme='light'] .dsk-side__glyph { background: linear-gradient(18
 .dsk-top__live { top: 7px; right: 7px; width: 5px; height: 5px; box-shadow: none; }
 .dsk-top__q { width: 20px; height: 20px; font-size: 10.5px; font-weight: 700; background: transparent; box-shadow: inset 0 0 0 1.5px var(--q, #6f7078); }
 .dsk-top__btn--queue .dsk-top__q::after { display: none; }
+/* queue: the same glyph language as its neighbours, state as a small dot */
+.dsk-top__qdot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--q, #6f7078); box-shadow: 0 0 0 2px rgb(var(--dsk-fill)); }
+.dsk-top__btn--queue.is-live .dsk-top__qdot { box-shadow: 0 0 0 2px rgb(var(--dsk-fill)), 0 0 6px color-mix(in srgb, var(--q) 70%, transparent); }
 .dsk-top__sep { height: 20px; margin: 0 6px; background: var(--dsk-edge-hi); }
 .dsk-top__profile { height: 34px; border-radius: 9px; padding: 0 6px 0 3px; }
 .dsk-top__avatar, .dsk-prof__avatar {
@@ -320,3 +323,11 @@ html[data-nexus-theme='light'] .dsk-side__mark { background: linear-gradient(180
 .dsk-side__mark svg { width: 17px !important; height: 17px !important; }
 .dsk-side__word b { font-weight: 620; letter-spacing: -0.015em; }
 .dsk-cmd__alt { margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--dsk-edge-hi); color: var(--dsk-ink-3); font-weight: 500; }
+.dsk-top__btn--queue:has(.dsk-top__badge) .dsk-top__qdot { display: none; }
+
+/* light: the chrome is frosted glass with a specular top edge, so the colour
+   flowing underneath reads through the sidebar and the bar too */
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-side__glass,
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-top__glass {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(255 255 255 / 0.55), 0 0 0 1px rgb(15 17 22 / 0.05), 0 18px 44px -30px rgb(30 40 90 / 0.28);
+}

@@ -1716,7 +1716,7 @@ html.is-mobile-layout .nx-premium-inbox .nx-row25__addr {
    on the mobile shell. Overriding inline style requires !important, which is
    this file's documented escape hatch.
    ══════════════════════════════════════════════════════════════════════════ */
-html.is-mobile-layout .nx-quick-actions-popover {
+html.is-mobile-layout:not(.is-desktop-modern) .nx-quick-actions-popover {
   left: 0 !important;
   right: 0 !important;
   bottom: 0 !important;

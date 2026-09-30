@@ -112,7 +112,11 @@ export const Composer = ({
   autoTranslateDraft = false,
   layoutMode = 'full',
 }: ComposerProps) => {
-  const { isMobile } = useBreakpoint()
+  // Every use below is a DEVICE decision (soft keyboard inset, auto-focus,
+  // sheet vs popover, tools in the field): a phone, not "the modern product" —
+  // the modern desktop gets the full desktop composer (polish, translate,
+  // schedule, voice) in the field.
+  const { isPhone: isMobile } = useBreakpoint()
   const keyboardInset = useMobileKeyboardInset(isMobile)
 
   const [localDraft, setLocalDraft] = useState(draftText)
@@ -196,6 +200,45 @@ export const Composer = ({
       setIsPolishing(false)
     }
   }, [])
+
+  // The conversation announces when the automation is typing a reply to the
+  // seller (ChatThread → 'nx:auto-reply-typing'); the composer shows the dots too.
+  const [autoReplyTyping, setAutoReplyTyping] = useState(false)
+  useEffect(() => {
+    setAutoReplyTyping(false)
+    const onTyping = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId: string | null; active: boolean }>).detail
+      if (!detail) return
+      if (detail.threadId && thread?.id && detail.threadId !== thread.id) return
+      setAutoReplyTyping(Boolean(detail.active))
+    }
+    window.addEventListener('nx:auto-reply-typing', onTyping)
+    return () => window.removeEventListener('nx:auto-reply-typing', onTyping)
+  }, [thread?.id])
+
+  // Typing energy: each keystroke lifts the composer's glow (--nx-type, 0–1 on
+  // the dock); it settles back to a slow breathe ~1.5s after the last key.
+  const energyRef = useRef(0)
+  const energyRafRef = useRef(0)
+  const pumpTypingEnergy = useCallback(() => {
+    energyRef.current = Math.min(1, energyRef.current + 0.16)
+    if (energyRafRef.current) return
+    let last = performance.now()
+    const tick = (now: number) => {
+      const dt = Math.min(0.1, (now - last) / 1000)
+      last = now
+      energyRef.current = Math.max(0, energyRef.current - dt * 0.65)
+      dockRef.current?.style.setProperty('--nx-type', energyRef.current.toFixed(3))
+      if (energyRef.current > 0.002) {
+        energyRafRef.current = requestAnimationFrame(tick)
+      } else {
+        energyRafRef.current = 0
+        dockRef.current?.style.setProperty('--nx-type', '0')
+      }
+    }
+    energyRafRef.current = requestAnimationFrame(tick)
+  }, [])
+  useEffect(() => () => { if (energyRafRef.current) cancelAnimationFrame(energyRafRef.current) }, [])
 
   const runOperatorPolish = useCallback(async () => {
     const text = localDraft.trim()
@@ -816,6 +859,12 @@ export const Composer = ({
           </div>
         </div>
       )}
+      {autoReplyTyping && !isListening && !voiceStage ? (
+        <div className="nx-voice-status is-auto-reply" role="status" aria-live="polite">
+          <span className="nx-voice-status__dot" aria-hidden="true" />
+          Automation is replying…
+        </div>
+      ) : null}
       {(voiceStage || (isTranslatingDraft && micState !== 'idle')) && !isListening ? (
         <div className="nx-voice-status" role="status" aria-live="polite">
           <span className="nx-voice-status__dot" aria-hidden="true" />
@@ -848,6 +897,7 @@ export const Composer = ({
               onChange={(e) => {
                 setLocalDraft(e.target.value)
                 setPolishPreview(null)
+                pumpTypingEnergy()
               }}
               rows={1}
               disabled={composerDisabled}

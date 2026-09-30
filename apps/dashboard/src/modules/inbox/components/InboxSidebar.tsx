@@ -653,15 +653,17 @@ const renderBadge = (label: string, key: string) => (
   <span key={key} className="nx-ops75-badge">{label}</span>
 )
 
-const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }: {
+const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default', listAll = false }: {
   flags: string[]
   maxVisible?: number
   density?: 'compact' | 'default' | 'rich'
+  /** Hover card lists every signal (the desktop row shows only the top one). */
+  listAll?: boolean
 }) => {
   if (flags.length === 0) return null
   const visible = flags.slice(0, maxVisible)
   const overflow = flags.length - visible.length
-  const hidden = flags.slice(maxVisible)
+  const hidden = listAll ? flags : flags.slice(maxVisible)
 
   return (
     <div
@@ -678,8 +680,9 @@ const PropertyFlagBadges = memo(({ flags, maxVisible = 2, density = 'default' }:
       </div>
       {overflow > 0 && (
         <div className="nx-prop-flags__popover" role="tooltip">
-          {hidden.map((flag) => (
-            <span key={flag} className="nx-prop-flags__badge">{flag}</span>
+          {listAll ? <span className="nx-prop-flags__popover-title">{flags.length} signals</span> : null}
+          {hidden.map((flag, i) => (
+            <span key={flag} className={cls('nx-prop-flags__badge', listAll && i === 0 && 'is-top')}>{flag}</span>
           ))}
         </div>
       )}
@@ -1201,7 +1204,24 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
    * all. The full set still travels in the row's aria-label.
    */
   const cardSignalChips = prioritizeCardSignals(rowDisplayFlags, rowDisplayFlags.length)
-  const flagMaxVisible = MAX_SIDEBAR_PROPERTY_FLAGS
+  // The desktop row leads with the single most actionable signal and counts
+  // the rest ("+3"); hovering lists them all.
+  const { isModernDesktop } = useBreakpoint()
+
+  // Typing dots on the row for the moments after a seller writes and the
+  // automation has queued a reply (the thread's queue row), then back to the text.
+  const inboundMs = thread.lastInboundAt ? Date.parse(thread.lastInboundAt) : Number.NaN
+  const replyQueued = ['queued', 'scheduled', 'approval', 'pending', 'processing'].includes(String(thread.queueStatus ?? '').toLowerCase())
+  const typingUntil = latestDirection === 'inbound' && replyQueued && Number.isFinite(inboundMs) ? inboundMs + 10_000 : 0
+  const [, bumpRow] = useState(0)
+  useEffect(() => {
+    const left = typingUntil - Date.now()
+    if (left <= 0) return
+    const timer = window.setTimeout(() => bumpRow((n) => n + 1), left + 50)
+    return () => window.clearTimeout(timer)
+  }, [typingUntil])
+  const rowTyping = typingUntil > Date.now()
+  const flagMaxVisible = isModernDesktop ? 1 : MAX_SIDEBAR_PROPERTY_FLAGS
   const flagDensity = inboxMode === 'full100' ? 'rich' : 'compact'
 
   return (
@@ -1238,7 +1258,9 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
           <time className="nx-row25__time" dateTime={timestamp.fullLabel}>{dateTimeLabel}</time>
         </div>
         <span className="nx-row25__addr">{address}</span>
-        <span className="nx-row25__preview">{latestMessageBody}</span>
+        <span className="nx-row25__preview">
+          {rowTyping ? <span className="nx-row25__typing" aria-label="Automation is replying"><i /><i /><i /><em>Replying</em></span> : latestMessageBody}
+        </span>
         <div className="nx-row25__footer">
           {messageState ? (
             <span className={cls('nx-card-state', `is-${messageState.tone}`)} aria-label={messageState.label}>
@@ -1275,7 +1297,7 @@ const CompactRow25 = memo(({ thread, selected, decision, onSelect, inboxMode = '
             SIGNALS only, ordered by actionability (preforeclosure and tax
             delinquency ahead of "long term owner"). */}
         {showPropertyFlags && cardSignalChips.length > 0 && (
-          <PropertyFlagBadges flags={cardSignalChips} maxVisible={flagMaxVisible} density={flagDensity} />
+          <PropertyFlagBadges flags={cardSignalChips} maxVisible={flagMaxVisible} density={flagDensity} listAll={isModernDesktop} />
         )}
       </div>
 

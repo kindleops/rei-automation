@@ -1157,7 +1157,7 @@ html.is-mobile-layout .nx-qap-backdrop {
   backdrop-filter: blur(8px) !important;
 }
 html.is-mobile-layout[data-nexus-theme='light'] .nx-qap-backdrop { background: rgba(11, 18, 32, 0.2) !important; }
-html.is-mobile-layout .nx-qap-anchor.nx-quick-actions-popover {
+html.is-mobile-layout:not(.is-desktop-modern) .nx-qap-anchor.nx-quick-actions-popover {
   font-family: var(--ix-font) !important;
   left: 8px !important;
   right: 8px !important;
@@ -1808,3 +1808,85 @@ html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-active-
   white-space: nowrap;
   min-width: 0;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TYPING — dots for work that is really happening: an auto-reply the
+   automation queued for the latest seller message (ChatThread), and the
+   composer's polish / translate step. Phone and desktop.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-outbound .nx-msg__bubble.nx-typing {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 13px 15px !important;
+  color: var(--ix-out-ink) !important;
+  background: color-mix(in srgb, var(--ix-accent) 16%, var(--ix-in)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 30%, transparent) !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ix-accent);
+  opacity: 0.35;
+  animation: nx-typing-dot 1.25s ease-in-out infinite;
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-typing i:nth-child(2) { animation-delay: 0.16s; }
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-typing i:nth-child(3) { animation-delay: 0.32s; }
+@keyframes nx-typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+html.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-typing-lane .nx-msg__time { color: var(--ix-ink-3) !important; font-style: normal; }
+
+/* the composer's own working state: three dots instead of a spinner */
+html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot {
+  position: relative;
+  width: 5px !important;
+  height: 5px !important;
+  margin: 0 10px !important;
+  border-radius: 50% !important;
+  background: var(--ix-accent) !important;
+  box-shadow: none !important;
+  animation: nx-typing-dot 1.25s ease-in-out 0.16s infinite !important;
+}
+html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot::before,
+html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ix-accent);
+  animation: nx-typing-dot 1.25s ease-in-out infinite;
+}
+html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot::before { left: -9px; }
+html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot::after { left: 9px; animation-delay: 0.32s; }
+@media (prefers-reduced-motion: reduce) {
+  html.is-mobile-layout #nx-inbox-root .nx-typing i,
+  html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot,
+  html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot::before,
+  html.is-mobile-layout #nx-inbox-root .nx-voice-status__dot::after { animation: none !important; opacity: 0.8; }
+}
+
+/* the Inbox row, while the automation types a reply to that seller */
+html.is-mobile-layout #nx-inbox-root .nx-row25__typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ix-accent);
+}
+html.is-mobile-layout #nx-inbox-root .nx-row25__typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: nx-typing-dot 1.25s ease-in-out infinite;
+}
+html.is-mobile-layout #nx-inbox-root .nx-row25__typing i:nth-child(2) { animation-delay: 0.16s; }
+html.is-mobile-layout #nx-inbox-root .nx-row25__typing i:nth-child(3) { animation-delay: 0.32s; }
+html.is-mobile-layout #nx-inbox-root .nx-row25__typing em { margin-left: 4px; font-style: normal; font-weight: 600; font-size: 0.92em; }

@@ -177,7 +177,8 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
               aria-expanded={panel === 'queue'}
               data-tip={queueLabel(queue)}
             >
-              <span className="dsk-top__q" aria-hidden>Q</span>
+              <Icon name="send" size={16} strokeWidth={1.7} />
+              <span className="dsk-top__qdot" aria-hidden />
               {failed > 0 ? <span className="dsk-top__badge is-warn">{failed > 99 ? '99+' : failed}</span> : null}
             </button>
             <span className="dsk-top__sep" aria-hidden />

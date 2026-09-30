@@ -341,6 +341,37 @@ const LANGUAGE_LABELS: Record<string, string> = {
   zh: 'Chinese',
   ja: 'Japanese',
   ko: 'Korean',
+  vi: 'Vietnamese',
+  so: 'Somali',
+  hmn: 'Hmong',
+  om: 'Oromo',
+  am: 'Amharic',
+  ar: 'Arabic',
+  tl: 'Tagalog',
+  ht: 'Haitian Creole',
+  pl: 'Polish',
+  uk: 'Ukrainian',
+  hi: 'Hindi',
+  ur: 'Urdu',
+  bn: 'Bengali',
+  fa: 'Persian',
+  tr: 'Turkish',
+  sw: 'Swahili',
+  km: 'Khmer',
+  lo: 'Lao',
+  th: 'Thai',
+  ne: 'Nepali',
+  my: 'Burmese',
+  el: 'Greek',
+  he: 'Hebrew',
+  ro: 'Romanian',
+  nl: 'Dutch',
+}
+
+/** Classifier language names ("Somali", "Mandarin") → the codes the translator takes. */
+const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(LANGUAGE_LABELS).map(([code, label]) => [label.toLowerCase(), code])),
+  mandarin: 'zh', cantonese: 'zh', farsi: 'fa', filipino: 'tl', creole: 'ht', 'haitian': 'ht',
 }
 
 type ThreadTranslateViewMode = 'original' | 'translated'
@@ -357,10 +388,14 @@ const DEFAULT_QUEUE_COMMAND_CAPS: QueueCommandCaps = {
 const normalizeLanguageCode = (value: unknown): string | null => {
   if (typeof value !== 'string') return null
   const cleaned = value.trim().toLowerCase().replace('_', '-')
-  if (!cleaned) return null
+  if (!cleaned || cleaned === 'unknown' || cleaned === 'und') return null
   if (cleaned.startsWith('english')) return 'en'
   if (cleaned.startsWith('spanish')) return 'es'
-  return cleaned
+  if (LANGUAGE_NAME_TO_CODE[cleaned]) return LANGUAGE_NAME_TO_CODE[cleaned]
+  const firstWord = cleaned.split(/[\s(]/)[0]
+  if (LANGUAGE_NAME_TO_CODE[firstWord]) return LANGUAGE_NAME_TO_CODE[firstWord]
+  // A code already ("so", "vi", "zh-cn"); anything else is not a language we can target.
+  return /^[a-z]{2,3}(-[a-z0-9]{2,4})?$/.test(cleaned) ? cleaned : null
 }
 
 const languageLabelFor = (languageCode: string | null): string => {
@@ -1641,6 +1676,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     [activityFeed, autonomyControls, liveCommandFeed, queueModel, templateInventory, threads],
   )
 
+  // The classifier records the language of every seller message; the latest
+  // one is the most direct evidence of what the seller reads.
+  const inboundMessageLanguage = useMemo(() => {
+    for (let i = selectedMessages.length - 1; i >= 0; i -= 1) {
+      const message = selectedMessages[i]
+      if (message.direction !== 'inbound') continue
+      const meta = (message.metadata ?? {}) as Record<string, unknown>
+      const payload = (meta.payload && typeof meta.payload === 'object' ? meta.payload : {}) as Record<string, unknown>
+      const inner = (payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}) as Record<string, unknown>
+      const code = normalizeLanguageCode(meta.language ?? payload.language ?? inner.language)
+      if (code) return code
+    }
+    return null
+  }, [selectedMessages])
+
   const sellerLanguageCode = useMemo(() => {
     if (!selected && !threadIntelligence) return null
 
@@ -1657,6 +1707,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       intelligenceRecord.language_code,
       intelligenceRecord.language,
       intelligenceRecord.preferred_language,
+      inboundMessageLanguage,
       detectedThreadLanguage,
     ]
 
@@ -1665,7 +1716,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (normalized) return normalized
     }
     return null
-  }, [detectedThreadLanguage, selected, threadIntelligence])
+  }, [detectedThreadLanguage, inboundMessageLanguage, selected, threadIntelligence])
 
   const sellerLanguageLabel = useMemo(
     () => languageLabelFor(sellerLanguageCode),
@@ -3014,9 +3065,30 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setDraftTranslationLoading(true)
 
     try {
-      const targetLanguage = sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode)
-        ? sellerLanguageCode
-        : 'es'
+      // Translate into the seller's language, detected — never assumed. The
+      // thread's known language first; otherwise ask the translator to detect
+      // it from the seller's own latest words (any language it knows).
+      let detected = sellerLanguageCode
+      if (!detected) {
+        const latestInbound = [...selectedMessages].reverse().find((m) => m.direction === 'inbound' && m.body.trim())
+        if (latestInbound) {
+          try {
+            const probe = await translateText({ text: latestInbound.body.slice(0, 500), sourceLanguage: 'auto', targetLanguage: 'en', mode: 'thread' })
+            detected = normalizeLanguageCode(probe.detectedLanguage)
+            if (detected) setDetectedThreadLanguage((current) => current ?? detected)
+          } catch { /* detection failed — handled below */ }
+        }
+      }
+      if (detected && isEnglishLanguage(detected)) {
+        emitNotification({ title: 'The seller writes in English', detail: 'Nothing to translate.', severity: 'info' })
+        return
+      }
+      // Only when the seller has never written back is the language unknown;
+      // then say so rather than translating silently.
+      const targetLanguage = detected ?? 'es'
+      if (!detected) {
+        emitNotification({ title: 'Translated to Spanish', detail: 'The seller hasn’t replied yet, so their language isn’t known.', severity: 'info' })
+      }
 
       const result = await translateText({
         text: trimmed,
@@ -3040,7 +3112,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     } finally {
       setDraftTranslationLoading(false)
     }
-  }, [sellerLanguageCode, setDraftText])
+  }, [sellerLanguageCode, selectedMessages, setDraftText])
 
 
   useEffect(() => {
