@@ -62,6 +62,48 @@ export type MatchedBuyer = {
   contact: { state: 'available' | 'company_identity_only' | 'none' | 'suppressed'; label: string }
 }
 
+/**
+ * One located purchase behind the evidence — a recorded transaction inside the
+ * subject's radius/window by a buyer on the page (`include=transactions`).
+ * The server sends no party names; buyers are named once, on MatchedBuyer.
+ */
+export type WindowTransaction = {
+  txnId: number | null
+  buyerId: string
+  propertyId: string | null
+  lat: number
+  lng: number
+  address: string | null
+  city: string | null
+  zip: string | null
+  date: string | null
+  price: number | null
+  /** a $1–$10K transfer or a price far below value — recorded, but not a market price */
+  nominal: boolean
+  family: string | null
+  sameFamily: boolean
+  beds: number | null
+  baths: number | null
+  sqft: number | null
+  yearBuilt: number | null
+  cash: boolean | null
+  docType: string | null
+  miles: number | null
+}
+
+export type WorkspaceTransactions = {
+  available: boolean
+  reason: 'no_subject_location' | 'query_failed' | null
+  radiusMiles: number
+  months: number
+  /** every recorded transaction inside the window (any buyer) */
+  total: number
+  /** rows the bounded read returned (≤ 400, same type first, then nearest) */
+  returned: number
+  truncated: boolean
+  rows: WindowTransaction[]
+}
+
 export type BuyerMatchWorkspace = {
   generatedAt: string
   query: { radiusMiles: number; months: number; radiusOptions: number[]; monthOptions: number[] }
@@ -83,13 +125,16 @@ export type BuyerMatchWorkspace = {
   contactability: { verified: number; outreachAvailable: boolean; note: string }
   buyers: MatchedBuyer[]
   excluded: MatchedBuyer[]
+  /** present only when requested with `include: 'transactions'` */
+  transactions?: WorkspaceTransactions
   lineage: { identity: string; evidence: string; window: string }
 }
 
-export async function fetchBuyerMatchWorkspace(params: { propertyId: string; radius?: number; months?: number }, signal?: AbortSignal): Promise<BuyerMatchWorkspace> {
+export async function fetchBuyerMatchWorkspace(params: { propertyId: string; radius?: number; months?: number; include?: 'transactions' }, signal?: AbortSignal): Promise<BuyerMatchWorkspace> {
   const qs = new URLSearchParams({ property_id: params.propertyId })
   if (params.radius) qs.set('radius', String(params.radius))
   if (params.months) qs.set('months', String(params.months))
+  if (params.include) qs.set('include', params.include)
   const res = await callBackend<{ ok: boolean; data: BuyerMatchWorkspace }>(`/api/cockpit/buyer-match/workspace?${qs.toString()}`, { signal })
   if (!res.ok) {
     const upstream = (res as { upstream?: { error?: string } }).upstream

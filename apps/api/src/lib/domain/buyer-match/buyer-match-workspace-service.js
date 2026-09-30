@@ -9,6 +9,10 @@
  *   near     buyers with recorded purchases inside the radius/window
  *   county   buyers active in the subject's county in the last 24 months
  *
+ * On request (`include=transactions`, the desktop cockpit) the located
+ * purchases behind that evidence ride along, from the bounded market read
+ * Comps already uses (comps_market_evidence) — see shapeWindowTransactions.
+ *
  * Every tier, exclusion and evidence line below is a rule over measured facts
  * (counts, dates, observed price percentiles, deed types). There is no
  * composite "match %": the tiers are the explanation, and the rules are shown
@@ -320,6 +324,70 @@ function shapeBuyer(b, c, ctx, contacts) {
   }
 }
 
+/* ── in-window transactions (the evidence itself) ─────────────────────── */
+
+/** Cap of the bounded market read (comps_market_evidence clamps to 400). */
+export const WINDOW_TX_LIMIT = 400
+
+/** The market read's family vocabulary is the transaction corpus's; it adds condo / mobile home. */
+const TX_FAMILY_LABEL = { ...FAMILY_LABEL, condo: 'Condo', mobile_home: 'Mobile home' }
+
+export const wantsTransactions = (include) => String(include ?? '').split(',').map((s) => s.trim().toLowerCase()).includes('transactions')
+
+/**
+ * The recorded purchases behind the evidence: every transaction inside the
+ * subject's radius and window that resolves to a LISTED buyer, from the same
+ * bounded market read Comps uses (comps_market_evidence — ≤ 400 rows, same
+ * type first, then nearest, with the exact count inside the window).
+ *
+ * Explicit fields only. The read also carries buyer/seller company names and
+ * party kinds; none of that leaves here — buyers are named once, from the W8C
+ * index with the personal-name guard (shapeBuyer), and sellers are not part of
+ * Buyer Match. A row without coordinates or without a listed buyer is dropped:
+ * every row returned is a located purchase by a buyer on the page.
+ */
+export function shapeWindowTransactions(raw, { family, buyerIds, radius = null, months = null } = {}) {
+  const r = obj(raw)
+  const all = arr(r.rows)
+  const total = num(r.total_in_radius) ?? all.length
+  const returned = num(r.returned) ?? all.length
+  const ids = buyerIds instanceof Set ? buyerIds : new Set(arr(buyerIds).map(clean))
+  const rows = []
+  for (const x of all) {
+    const buyerId = clean(x?.buyer_id)
+    if (!buyerId || !ids.has(buyerId)) continue
+    const lat = num(x.lat)
+    const lng = num(x.lng)
+    if (lat === null || lng === null) continue
+    const fam = clean(x.family)
+    const miles = num(x.distance_miles)
+    rows.push({
+      txnId: num(x.txn_id),
+      buyerId,
+      propertyId: clean(x.property_id) || null,
+      lat: Math.round(lat * 1e6) / 1e6,
+      lng: Math.round(lng * 1e6) / 1e6,
+      address: clean(x.address) || null,
+      city: clean(x.city) || null,
+      zip: clean(x.zip) || null,
+      date: clean(x.event_date) || null,
+      price: pos(x.price),
+      nominal: x.nominal_price === true,
+      family: TX_FAMILY_LABEL[fam] || fam || null,
+      sameFamily: !!fam && fam === family,
+      beds: num(x.beds),
+      baths: num(x.baths),
+      sqft: pos(x.sqft),
+      yearBuilt: pos(x.year_built),
+      cash: x.is_cash_purchase === true ? true : x.is_cash_purchase === false ? false : null,
+      docType: clean(x.doc_type) || null,
+      miles: miles === null ? null : Math.round(miles * 100) / 100,
+    })
+  }
+  rows.sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')) || (b.txnId ?? 0) - (a.txnId ?? 0))
+  return { available: true, reason: null, radiusMiles: radius, months, total, returned, truncated: returned < total, rows }
+}
+
 /* ── disposition state (read, never inferred) ─────────────────────────── */
 
 async function readDispositionState(client, pid) {
@@ -351,13 +419,20 @@ async function readDispositionState(client, pid) {
 
 /* ── workspace ────────────────────────────────────────────────────────── */
 
-export async function getBuyerMatchWorkspace({ propertyId, radius = 5, months = 36 } = {}, deps = {}) {
+/**
+ * `include: 'transactions'` adds the located purchases behind the evidence
+ * (shapeWindowTransactions) — opt-in, so the phone's payload and reads are
+ * unchanged. A failed transactions read degrades to `available: false`; it
+ * never fails the workspace.
+ */
+export async function getBuyerMatchWorkspace({ propertyId, radius = 5, months = 36, include = null } = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
   const now = new Date(deps.now ?? Date.now())
   const pid = clean(propertyId)
   if (!pid) return null
   const radiusMiles = Math.min(25, Math.max(1, num(radius) ?? 5))
   const monthsBack = Math.min(60, Math.max(12, Math.round(num(months) ?? 36)))
+  const withTransactions = wantsTransactions(include)
 
   const raw = await loadSubjectProperty(pid, { supabase: client })
   if (!raw) return null
@@ -370,13 +445,19 @@ export async function getBuyerMatchWorkspace({ propertyId, radius = 5, months = 
   const lat = num(features.latitude ?? raw.latitude)
   const lng = num(features.longitude ?? raw.longitude)
 
-  const [scoreRes, oppRes, evidenceRes, disposition] = await Promise.all([
+  const located = lat !== null && lng !== null
+  const [scoreRes, oppRes, evidenceRes, disposition, txRes] = await Promise.all([
     client.from('property_acquisition_scores').select('valuation_mid, recommended_cash_offer, computed_at').eq('property_id', pid).order('computed_at', { ascending: false }).limit(1),
     client.from('acquisition_opportunities').select('id, acquisition_stage, asking_price, current_offer, recommended_offer').eq('primary_property_id', pid).order('updated_at', { ascending: false }).limit(1),
-    lat !== null && lng !== null
+    located
       ? client.rpc('buyer_match_evidence', { p_lat: lat, p_lng: lng, p_family: family, p_county_key: countyKey, p_zip: zip, p_radius_miles: radiusMiles, p_months: monthsBack, p_limit: 120 })
       : Promise.resolve({ data: null, error: null }),
     readDispositionState(client, pid),
+    withTransactions && located
+      ? Promise.resolve()
+        .then(() => client.rpc('comps_market_evidence', { p_lat: lat, p_lng: lng, p_radius_miles: radiusMiles, p_months: monthsBack, p_family: family, p_limit: WINDOW_TX_LIMIT }))
+        .catch((error) => ({ data: null, error }))
+      : Promise.resolve(null),
   ])
   if (evidenceRes.error) throw evidenceRes.error
 
@@ -433,6 +514,19 @@ export async function getBuyerMatchWorkspace({ propertyId, radius = 5, months = 
   const bandLow = median(fitBand.map((b) => b.buyBox.priceLow))
   const bandHigh = median(fitBand.map((b) => b.buyBox.priceHigh))
 
+  const listed = [...matched.slice(0, 60), ...excluded.slice(0, 24)]
+  let transactions
+  if (withTransactions) {
+    const empty = (reason) => ({ available: false, reason, radiusMiles, months: monthsBack, total: 0, returned: 0, truncated: false, rows: [] })
+    if (!located) transactions = empty('no_subject_location')
+    else if (!txRes || txRes.error) {
+      if (txRes?.error) console.warn('buyer_match.transactions_unavailable', txRes.error?.message || txRes.error)
+      transactions = empty('query_failed')
+    } else {
+      transactions = shapeWindowTransactions(txRes.data, { family, buyerIds: new Set(listed.map((b) => b.id)), radius: radiusMiles, months: monthsBack })
+    }
+  }
+
   return {
     generatedAt: now.toISOString(),
     query: { radiusMiles, months: monthsBack, radiusOptions: RADIUS_OPTIONS, monthOptions: MONTH_OPTIONS },
@@ -464,6 +558,7 @@ export async function getBuyerMatchWorkspace({ propertyId, radius = 5, months = 
     },
     buyers: matched.slice(0, 60),
     excluded: excluded.slice(0, 24),
+    ...(withTransactions ? { transactions } : {}),
     lineage: {
       identity: 'W8C canonical buyer entities (shared with Entity Graph)',
       evidence: 'Recorded transactions resolved to buyers (comp_private)',

@@ -1,6 +1,7 @@
 /**
  * BUYER MATCH — observed-behaviour buyer workspace for one subject.
  * Read-only; ranks and explains W8C-resolved buyers (Entity Graph identity).
+ * `?include=transactions` adds the located purchases behind the evidence.
  */
 import { NextResponse } from 'next/server.js'
 import { getBuyerMatchWorkspace } from '@/lib/domain/buyer-match/buyer-match-workspace-service.js'
@@ -27,6 +28,8 @@ export async function GET(request) {
       propertyId,
       radius: url.searchParams.get('radius'),
       months: url.searchParams.get('months'),
+      // opt-in: `transactions` adds the located purchases behind the evidence
+      include: (url.searchParams.get('include') || '').slice(0, 64),
     })
     if (!data) return NextResponse.json({ ok: false, error: 'property_not_found' }, { status: 404, headers })
     return NextResponse.json({ ok: true, data }, { status: 200, headers })

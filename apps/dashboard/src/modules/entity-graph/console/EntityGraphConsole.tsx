@@ -80,6 +80,10 @@ export function EntityGraphConsole(props: Props) {
   const [buyerId, setBuyerId] = useState<string | null>(() => {
     try { return new URLSearchParams(window.location.search).get('buyer') || null } catch { return null }
   })
+  // `&section=owned` (Buyer Match "View portfolio") opens that part of the deep-linked buyer.
+  const [buyerSection, setBuyerSection] = useState<string | null>(() => {
+    try { return new URLSearchParams(window.location.search).get('section') || null } catch { return null }
+  })
   const [anchor, setAnchor] = useState<Anchor | null>(() => anchorFromContext(universalContext))
   const [trail, setTrail] = useState<Array<{ anchor: Anchor; name: string }>>([])
   const [network, setNetwork] = useState<EntityNetwork | null>(null)
@@ -202,7 +206,7 @@ export function EntityGraphConsole(props: Props) {
     showOnMap: (propertyId) => onAction?.('show_on_map', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: 'property', entityId: propertyId, propertyId }),
     openConversation: (threadKey) => openInboxThread({ threadKey }),
     addToCampaign: (ids) => setCampaignFor(ids),
-    openBuyer: (id) => setBuyerId(id),
+    openBuyer: (id) => { setBuyerSection(null); setBuyerId(id) },
   }
 
   // ── Cross-surface handoffs ────────────────────────────────────────────────
@@ -231,10 +235,11 @@ export function EntityGraphConsole(props: Props) {
     <BuyerInspectorSheet
       buyerId={buyerId}
       open={Boolean(buyerId)}
-      onClose={() => setBuyerId(null)}
-      onOpenProperty={(propertyId) => { setBuyerId(null); setTrail([]); go({ type: 'property', id: propertyId }, false) }}
-      onOpenBuyer={(id) => setBuyerId(id)}
-      onShowOnMap={(points: BuyerMapPoint[]) => { setBuyerId(null); showSetOnMap('from this buyer', 'buyer', points) }}
+      focusSection={buyerSection}
+      onClose={() => { setBuyerId(null); setBuyerSection(null) }}
+      onOpenProperty={(propertyId) => { setBuyerId(null); setBuyerSection(null); setTrail([]); go({ type: 'property', id: propertyId }, false) }}
+      onOpenBuyer={(id) => { setBuyerSection(null); setBuyerId(id) }}
+      onShowOnMap={(points: BuyerMapPoint[]) => { setBuyerId(null); setBuyerSection(null); showSetOnMap('from this buyer', 'buyer', points) }}
       onOpenBuyerMatch={(propertyId) => onAction?.('open_buyer_match', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: propertyId ? 'property' : null, entityId: propertyId ?? null, propertyId: propertyId ?? null })}
     />
   )
@@ -280,7 +285,7 @@ export function EntityGraphConsole(props: Props) {
         <EntityGraphMobile
           {...props}
           onOpenNetwork={openNetworkFor}
-          onOpenBuyer={(id) => setBuyerId(id)}
+          onOpenBuyer={(id) => { setBuyerSection(null); setBuyerId(id) }}
           onShowOnMap={(points) => showSetOnMap(`propert${points.length === 1 ? 'y' : 'ies'} from Entity Graph`, 'property', points)}
         />
         {buyerSheet}

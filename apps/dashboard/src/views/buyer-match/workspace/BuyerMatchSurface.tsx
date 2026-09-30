@@ -20,6 +20,7 @@ import { fetchBuyerMatchWorkspace, readShortlist, writeShortlist } from '../../.
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import { BuyerCard, MarketSignals, MatchHero, StateRail, SubjectHero, WhyNot, cls } from './BuyerMatchParts'
 import { BuyerInspector, CompareSheet, ControlsSheet, DEFAULT_FILTERS, type Filters } from './BuyerMatchSheets'
+import { BuyerMatchCockpit } from './BuyerMatchCockpit'
 import './buyer-match-surface.css'
 
 type View = 'best' | 'shortlist' | 'nearby' | 'active' | 'repeat' | 'cash' | 'flip' | 'hold'
@@ -55,12 +56,15 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
   const [shortlist, setShortlist] = useState<string[]>(() => readShortlist(propertyId))
   const [theme, setTheme] = useState(readTheme)
   /**
-   * DESK. The same evidence recomposed for width (buyer-match-desktop.css): a
-   * compact subject header over the ranked buyers, with the match overview —
-   * or the open buyer's inspector — beside the list instead of over it. Every
-   * phone keeps the single-column flow below, element for element.
+   * DESK. The disposition cockpit (BuyerMatchCockpit, buyer-match-desktop.css):
+   * a context strip over three planes — the buyer universe, the selected
+   * buyer, and the evidence. It asks the server for the located purchases
+   * behind the evidence (`include: 'transactions'`); the phone does not, and
+   * keeps the single-column flow below, element for element.
    */
   const { isModernDesktop } = useBreakpoint()
+  // the cockpit's selected buyer (the phone's `inspect` is a sheet with a back handler)
+  const [deskSel, setDeskSel] = useState<string | null>(null)
 
   useEffect(() => {
     const mo = new MutationObserver(() => setTheme(readTheme()))
@@ -72,11 +76,11 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
     const ctl = new AbortController()
     setLoading(true)
     setError(null)
-    fetchBuyerMatchWorkspace({ propertyId, radius, months }, ctl.signal)
+    fetchBuyerMatchWorkspace({ propertyId, radius, months, include: isModernDesktop ? 'transactions' : undefined }, ctl.signal)
       .then((data) => { if (!ctl.signal.aborted) { setW(data); setLoading(false) } })
       .catch((e) => { if (!ctl.signal.aborted) { setError(String(e?.message || e)); setLoading(false) } })
     return () => ctl.abort()
-  }, [propertyId, radius, months, nonce])
+  }, [propertyId, radius, months, nonce, isModernDesktop])
 
   useBackHandler(Boolean(inspect), 'bmx:inspect', 'Buyer', () => { setInspect(null); return true })
   useBackHandler(sheet !== null, 'bmx:sheet', 'Buyer Match', () => { setSheet(null); return true })
@@ -111,7 +115,7 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
   const openGraph = () => pushRoutePath(`/entity-graph/property/${encodeURIComponent(pid)}`)
   const openPipeline = w?.subject.opportunityId ? () => pushRoutePath(`/pipeline?opp=${encodeURIComponent(w.subject.opportunityId as string)}`) : null
   const openProperty = (id: string) => pushRoutePath(`/entity-graph/property/${encodeURIComponent(id)}`)
-  const openBuyerGraph = (id: string) => pushRoutePath(`/entity-graph?buyer=${encodeURIComponent(id)}`)
+  const openBuyerGraph = (id: string, section?: string) => pushRoutePath(`/entity-graph?buyer=${encodeURIComponent(id)}${section ? `&section=${encodeURIComponent(section)}` : ''}`)
   const toMap = (label: string, tone: 'buyer' | 'portfolio' | 'property', points: Array<{ lat: number | null | undefined; lng: number | null | undefined; label?: string | null; id?: string }>) => {
     const pts = points.filter((p) => typeof p.lat === 'number' && typeof p.lng === 'number').map((p) => ({ lat: p.lat as number, lng: p.lng as number, label: p.label ?? null, id: p.id }))
     if (w?.subject.lat && w.subject.lng) pts.unshift({ lat: w.subject.lat, lng: w.subject.lng, label: w.subject.address, id: pid })
@@ -125,6 +129,21 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
     setFocusId(id)
     setView('best')
     requestAnimationFrame(() => document.querySelector(`.bmx-card[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  }
+
+  if (!w && isModernDesktop && loading) {
+    return (
+      <div className="bmx is-desk is-cockpit is-boot" data-theme={theme} aria-busy="true">
+        <div className="bmc-strip is-boot"><p>Resolving buyers who bought near this property…</p></div>
+        <div className="bmc-planes">
+          <div className="bmc-plane bmc-universe is-boot"><i /><i /><i /><i /><i /></div>
+          <div className="bmc-detail">
+            <div className="bmc-plane bmc-selected is-boot"><i /><i /><i /></div>
+            <div className="bmc-plane bmc-evidence is-boot"><i /><i /><i /><i /></div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (!w) {
@@ -249,7 +268,7 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
 
   const sheets = (
     <>
-      {sheet === 'compare' && compared.length ? <CompareSheet buyers={compared} w={w} theme={theme} onClose={() => setSheet(null)} onOpen={(b) => { setSheet(null); setInspect(b) }} /> : null}
+      {sheet === 'compare' && compared.length ? <CompareSheet buyers={compared} w={w} theme={theme} onClose={() => setSheet(null)} onOpen={(b) => { setSheet(null); if (isModernDesktop) setDeskSel(b.id); else setInspect(b) }} /> : null}
       {sheet === 'controls' ? (
         <ControlsSheet w={w} theme={theme} filters={filters} setFilters={setFilters} onRadius={(r) => setRadius(r)} onMonths={(m) => setMonths(m)} onClose={() => setSheet(null)} />
       ) : null}
@@ -258,27 +277,22 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
 
   if (isModernDesktop) {
     return (
-      <div className={cls('bmx', 'is-desk', loading && 'is-refreshing', inspect && 'has-inspector')} data-theme={theme}>
-        {subjectHero}
-        <div className="bmx-desk">
-          <div className="bmx-desk__main">
-            {noneSection}
-            {buyersSection}
-            {/* Evidence in blocks, so a wide pane can set Market beside Disposition. */}
-            <div className="bmx-desk__evidence">
-              <section className="bmx-desk__block is-market">{marketBlock}</section>
-              <section className="bmx-desk__block is-disposition">{dispositionBlock}</section>
-              <section className="bmx-desk__block is-whynot">{whyNotBlock}</section>
-            </div>
-          </div>
-          <aside className="bmx-desk__side" aria-label={inspect ? 'Buyer inspector' : 'Match overview'}>
-            {matchHero}
-            {inspector}
-          </aside>
-        </div>
-        {compareDock}
-        {sheets}
-      </div>
+      <BuyerMatchCockpit
+        w={w} loading={loading} theme={theme}
+        visible={visible}
+        views={[...VIEWS.map(([k, label]) => ({ key: k, label, count: viewCounts[k] })), { key: 'shortlist', label: 'Shortlist', count: shortlist.filter((id) => w.buyers.some((b) => b.id === id)).length }]}
+        view={view} onView={(k) => setView(k as View)}
+        sorts={SORTS} sort={sort} onSort={(k) => setSort(k as Sort)}
+        filtersOn={filtersOn} onResetFilters={() => setFilters(DEFAULT_FILTERS)}
+        onControls={() => setSheet('controls')} onRefresh={() => setNonce((n) => n + 1)}
+        shortlist={shortlist} onShortlist={toggleShort}
+        compare={compare} onCompare={toggleCompare}
+        selectedId={deskSel} onSelect={setDeskSel}
+        onDeal={openDeal} onComps={openComps} onGraph={openGraph} onMatchedMap={openMatchedOnMap} onPipeline={openPipeline}
+        onProperty={openProperty} onBuyerGraph={openBuyerGraph} toMap={toMap}
+        onRadius={(r) => setRadius(r)} onMonths={(m) => setMonths(m)}
+        compareDock={compareDock} sheets={sheets}
+      />
     )
   }
 

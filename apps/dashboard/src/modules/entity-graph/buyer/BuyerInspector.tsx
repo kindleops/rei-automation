@@ -44,6 +44,8 @@ export type BuyerInspectorProps = {
   onShowOnMap: (points: BuyerMapPoint[]) => void
   onOpenBuyerMatch: (propertyId?: string) => void
   onSaveSegment?: (profile: BuyerProfile) => void
+  /** Deep link (`?section=owned`): open this section and bring it into view once the profile loads. */
+  focusSection?: string | null
 }
 
 /* ── Formatting ──────────────────────────────────────────────────────────── */
@@ -158,7 +160,7 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className={cls('egb-sec', open && 'is-open')} style={{ '--i': index } as CSSProperties}>
+    <section className={cls('egb-sec', open && 'is-open')} data-sec={id} style={{ '--i': index } as CSSProperties}>
       <button type="button" className="egb-sec__head" aria-expanded={open} onClick={() => onToggle(id)}>
         <span className="egb-sec__glyph"><Icon name={icon} /></span>
         <span className="egb-sec__title">{title}</span>
@@ -386,6 +388,7 @@ export function BuyerInspectorSheet({
   onShowOnMap,
   onOpenBuyerMatch,
   onSaveSegment,
+  focusSection = null,
 }: BuyerInspectorProps) {
   const [load, setLoad] = useState<LoadState>({ key: '', status: 'loading', profile: null })
   const [attempt, setAttempt] = useState(0)
@@ -422,6 +425,17 @@ export function BuyerInspectorSheet({
     window.addEventListener('keydown', onKey)
     return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
   }, [open, onClose])
+
+  // A deep-linked section (Buyer Match → "View portfolio") opens and scrolls into view.
+  useEffect(() => {
+    if (!open || !focusSection || status !== 'ready') return
+    setOpenSections((cur) => (cur.has(focusSection) ? cur : new Set(cur).add(focusSection)))
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const raf = requestAnimationFrame(() => {
+      bodyRef.current?.querySelector(`[data-sec="${CSS.escape(focusSection)}"]`)?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [open, focusSection, status, buyerId])
 
   const { offset, handlers } = useSheetDrag(snap, setSnap, onClose)
 
