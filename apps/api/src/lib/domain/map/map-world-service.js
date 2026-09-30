@@ -89,6 +89,8 @@ async function loadAreas(db, now) {
   return areaCache.rows
 }
 export function _resetAreaCache() { areaCache = null }
+/** The same cached geography, for other map services (camera-local timezones). */
+export const loadMapAreas = (db, now = Date.now()) => loadAreas(db, now)
 
 const km = (aLat, aLng, bLat, bLng) => {
   const r = Math.PI / 180

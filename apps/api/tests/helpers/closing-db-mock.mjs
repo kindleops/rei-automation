@@ -81,7 +81,12 @@ export function makeClosingDb(seed = {}, ext = {}) {
       ilike(c, v) { const re = new RegExp('^' + String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i'); filters.push((r) => re.test(String(r[c] ?? ''))); return api },
       or(expr) {
         const clauses = String(expr).split(',').map((c) => { const [col, op, ...rest] = c.split('.'); return { col, op, v: rest.join('.') } })
-        filters.push((r) => clauses.some(({ col, op, v }) => op === 'ilike' ? new RegExp('^' + v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i').test(String(r[col] ?? '')) : op === 'eq' ? String(r[col]) === v : false))
+        const unq = (v) => v.replace(/^"|"$/g, '')
+        const cmp = (a, op, v) => a !== null && a !== undefined && (op === 'lt' ? a < v : op === 'lte' ? a <= v : op === 'gt' ? a > v : a >= v)
+        filters.push((r) => clauses.some(({ col, op, v }) => op === 'ilike' ? new RegExp('^' + v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i').test(String(r[col] ?? ''))
+          : op === 'eq' ? String(r[col]) === unq(v)
+            : op === 'is' ? (v === 'null' ? r[col] === null || r[col] === undefined : String(r[col]) === v)
+              : ['lt', 'lte', 'gt', 'gte'].includes(op) ? cmp(r[col], op, unq(v)) : false))
         return api
       },
       contains(c, arr) { filters.push((r) => Array.isArray(r[c]) && arr.every((x) => r[c].includes(x))); return api },
