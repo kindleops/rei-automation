@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
+import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { buildEntityGraphActions } from '../../../domain/entity-graph/entity-graph-actions'
 import {
   fetchEntityGraphDossier,
@@ -198,6 +199,24 @@ export function EntityGraphMobile({
 
   const listRef = useRef<HTMLDivElement | null>(null)
   const listGenerationRef = useRef(0)
+
+  /**
+   * DESKTOP COMPOSITION. On a wide screen the same surface recomposes for
+   * width: the Lens moves into a left rail, the record inspector docks beside
+   * the list instead of covering it, and a pane with room opens on the table.
+   * Phones never take this path (isModernDesktop is false on every phone), so
+   * their DOM is exactly what it was.
+   */
+  const { isModernDesktop } = useBreakpoint()
+  const rootRef = useRef<HTMLElement | null>(null)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    // Decided once, before first paint, from the pane this surface actually
+    // has: a desk pane with room for columns opens on the data table; a narrow
+    // split pane keeps the phone's cards.
+    if (isModernDesktop && (rootRef.current?.clientWidth ?? 0) >= 720) setViewMode('table')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const dossierGenerationRef = useRef(0)
   /**
    * The entity id whose universal-context arrival has already been acted on.
@@ -278,6 +297,8 @@ export function EntityGraphMobile({
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0
+    // A narrow desk pane scrolls the body (Lens + list together), as the phone does.
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
   }, [querySignature])
 
   /* ── Composition ───────────────────────────────────────────────────────── */
@@ -734,8 +755,90 @@ export function EntityGraphMobile({
     ? ' matching'
     : unrankedCount !== null && unrankedCount > 0 ? ' ranked' : ''
 
+  const viewSwitch = (
+    <div className="egm-views" role="tablist" aria-label="View mode">
+      {VIEW_MODES.map((entry) => (
+        <button
+          key={entry.key}
+          type="button"
+          role="tab"
+          aria-selected={viewMode === entry.key}
+          className={cls('egm-view', viewMode === entry.key && 'is-active')}
+          onClick={() => {
+            // The graph is the relationship network of a record. With a
+            // network host available it opens full-bleed for the open
+            // record (or the first in the cohort) instead of a thumbnail.
+            if (entry.key === 'graph' && onOpenNetwork) {
+              const anchor = openResult ?? results[0]
+              if (anchor) onOpenNetwork(anchor)
+              return
+            }
+            setViewMode(entry.key)
+          }}
+        >
+          <Icon name={entry.icon} />
+          {entry.label}
+        </button>
+      ))}
+      {viewMode === 'table' ? (
+        <button type="button" className="egm-view is-aux" onClick={() => setColumnsOpen(true)} aria-label="Columns">
+          <Icon name="settings" />
+        </button>
+      ) : null}
+    </div>
+  )
+
+  const lens = compositionTab && !selectionMode ? (
+    <EntityGraphComposition
+      scopeNoun={scopeTotalNoun}
+      total={searching ? total : (composition?.total ?? total)}
+      dimensions={scopeDimensions}
+      dimensionKey={dimensionKey}
+      composition={searching ? null : composition}
+      loading={compositionLoading}
+      error={compositionError}
+      collapsed={compositionCollapsed || searching}
+      fieldFilters={fieldFilters}
+      cohortLabel={searching ? `matching “${debouncedQuery}”` : activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} · tap a bar to refine` : 'Tap a bar to filter'}
+      onToggleCollapsed={() => setCompositionCollapsed((c) => !c)}
+      onPickDimension={(key) => setDimensionByScope((current) => ({ ...current, [compositionTab]: key }))}
+      onToggleFilter={toggleFieldFilter}
+      onRetry={() => setCompositionRetry((n) => n + 1)}
+    />
+  ) : null
+
+  const detailSheet = (
+    <EntityGraphMobileDetailSheet
+      open={Boolean(openResult)}
+      docked={isModernDesktop}
+      scope={scope}
+      result={openResult}
+      dossier={dossier}
+      loading={dossierLoading}
+      actions={actions}
+      onClose={closeRecord}
+      onAction={handleAction}
+      onOpenEntity={handleOpenEntity}
+      onOpenBuyer={onOpenBuyer}
+      onOpenGraph={openResult && onOpenNetwork ? () => { const r = openResult; closeRecord(); onOpenNetwork(r) } : undefined}
+    />
+  )
+
+  /**
+   * The desk body: Lens rail · list · docked inspector, laid out by the pane's
+   * width (entity-graph-desktop.css). On a phone the list renders bare, as it
+   * always has.
+   */
+  const deskBody = (list: ReactNode) => (isModernDesktop ? (
+    <div ref={bodyRef} className={cls('egm-body', lens && 'has-rail', openResult && 'has-inspector')}>
+      {lens ? <aside className="egm-rail" aria-label="Composition">{lens}</aside> : null}
+      {list}
+      {detailSheet}
+    </div>
+  ) : list)
+
   return (
-    <section className={cls('egm', `is-${resolvedTheme}`)}>
+    <section ref={rootRef} className={cls('egm', `is-${resolvedTheme}`, isModernDesktop && 'is-desk')}>
       <header className="egm-header">
         <div className="egm-header__id">
           <h1>Entity Graph</h1>
@@ -830,58 +933,12 @@ export function EntityGraphMobile({
         />
       ) : null}
 
-      {!universeAll || debouncedQuery ? (
-        <>
+      {!universeAll || debouncedQuery ? deskBody(
       <div className="egm-list" ref={listRef}>
-          {compositionTab && !selectionMode ? (
-            <EntityGraphComposition
-              scopeNoun={scopeTotalNoun}
-              total={searching ? total : (composition?.total ?? total)}
-              dimensions={scopeDimensions}
-              dimensionKey={dimensionKey}
-              composition={searching ? null : composition}
-              loading={compositionLoading}
-              error={compositionError}
-              collapsed={compositionCollapsed || searching}
-              fieldFilters={fieldFilters}
-              cohortLabel={searching ? `matching “${debouncedQuery}”` : activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} · tap a bar to refine` : 'Tap a bar to filter'}
-              onToggleCollapsed={() => setCompositionCollapsed((c) => !c)}
-              onPickDimension={(key) => setDimensionByScope((current) => ({ ...current, [compositionTab]: key }))}
-              onToggleFilter={toggleFieldFilter}
-              onRetry={() => setCompositionRetry((n) => n + 1)}
-            />
-          ) : null}
+          {/* On a desk the Lens lives in the left rail instead (deskBody). */}
+          {isModernDesktop ? null : lens}
 
-          <div className="egm-views" role="tablist" aria-label="View mode">
-            {VIEW_MODES.map((entry) => (
-              <button
-                key={entry.key}
-                type="button"
-                role="tab"
-                aria-selected={viewMode === entry.key}
-                className={cls('egm-view', viewMode === entry.key && 'is-active')}
-                onClick={() => {
-                  // The graph is the relationship network of a record. With a
-                  // network host available it opens full-bleed for the open
-                  // record (or the first in the cohort) instead of a thumbnail.
-                  if (entry.key === 'graph' && onOpenNetwork) {
-                    const anchor = openResult ?? results[0]
-                    if (anchor) onOpenNetwork(anchor)
-                    return
-                  }
-                  setViewMode(entry.key)
-                }}
-              >
-                <Icon name={entry.icon} />
-                {entry.label}
-              </button>
-            ))}
-            {viewMode === 'table' ? (
-              <button type="button" className="egm-view is-aux" onClick={() => setColumnsOpen(true)} aria-label="Columns">
-                <Icon name="settings" />
-              </button>
-            ) : null}
-          </div>
+          {isModernDesktop ? null : viewSwitch}
 
       <div className="egm-toolbar is-sticky">
         <span className="egm-toolbar__count">
@@ -899,6 +956,9 @@ export function EntityGraphMobile({
             </>
           )}
         </span>
+
+        {/* Desk: one toolbar row — count, view, sort, filter, select. */}
+        {isModernDesktop ? viewSwitch : null}
 
         {scope === 'contact_methods' ? (
           <button
@@ -1053,8 +1113,7 @@ export function EntityGraphMobile({
             </small>
           </div>
         ) : null}
-      </div>
-        </>
+      </div>,
       ) : null}
 
       {selectionMode ? (
@@ -1111,19 +1170,8 @@ export function EntityGraphMobile({
         onChange={(next) => setVisibleColumns((current) => ({ ...current, [scope]: next }))}
       />
 
-      <EntityGraphMobileDetailSheet
-        open={Boolean(openResult)}
-        scope={scope}
-        result={openResult}
-        dossier={dossier}
-        loading={dossierLoading}
-        actions={actions}
-        onClose={closeRecord}
-        onAction={handleAction}
-        onOpenEntity={handleOpenEntity}
-        onOpenBuyer={onOpenBuyer}
-        onOpenGraph={openResult && onOpenNetwork ? () => { const r = openResult; closeRecord(); onOpenNetwork(r) } : undefined}
-      />
+      {/* On a desk with the list showing, the inspector docks inside the body. */}
+      {isModernDesktop && (!universeAll || debouncedQuery) ? null : detailSheet}
     </section>
   )
 }

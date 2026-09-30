@@ -6,6 +6,8 @@ import { Icon } from '../../shared/icons'
 import { resolveBuyerMatchSubject, type BuyerMatchSubject } from './buyer-match-subject'
 import { readSelectedContext } from '../../domain/locator/active-context'
 import './mobile/buyer-match-mobile.css'
+// The desk recomposition (html.is-desktop-modern only; phones never match it).
+import './buyer-match-desktop.css'
 
 /**
  * THE PRODUCTION BUYER MATCH ROUTE.

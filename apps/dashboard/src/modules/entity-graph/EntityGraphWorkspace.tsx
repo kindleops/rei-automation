@@ -46,6 +46,8 @@ import { EntityGraphTableView } from './EntityGraphTableView'
 import { useBreakpoint } from '../mobile/useBreakpoint'
 import { EntityGraphConsole } from './console/EntityGraphConsole'
 import './entity-graph.css'
+// Last: the desk recomposition (html.is-desktop-modern only) over every EG layer above.
+import './entity-graph-desktop.css'
 
 type LayoutMode = 'peek' | 'explorer' | 'workspace' | 'command'
 

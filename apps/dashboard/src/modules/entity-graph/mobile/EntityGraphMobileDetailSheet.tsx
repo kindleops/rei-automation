@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon, type IconName } from '../../../shared/icons'
 import { MobileSheet } from '../../mobile/MobileSheet'
 import type {
@@ -158,8 +158,83 @@ function FieldGrid({ section }: { section: RecordSection }) {
   )
 }
 
+/**
+ * Escape belongs to this inspector only when the key was pressed inside its
+ * own pane (or with nothing focused), and not while typing in a field
+ * elsewhere — split panes and the command bar all listen for Escape too.
+ */
+function escapeIsOurs(event: KeyboardEvent, root: HTMLElement | null): boolean {
+  if (!root) return false
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (!target || target === document.body) return true
+  if (root.contains(target)) return true
+  if (target.closest('input, textarea, select, [contenteditable="true"]')) return false
+  const pane = root.closest('.dsk-pane')
+  return pane ? pane.contains(target) : true
+}
+
+/**
+ * THE SAME INSPECTOR, DOCKED.
+ *
+ * On a phone the inspector is a full-height sheet over the list. On a desk it
+ * sits beside the list instead (inline, not portalled), so the operator can
+ * keep scanning rows while a record is open. Same header, body and footer as
+ * the sheet; the pane's width decides whether it docks or overlays
+ * (entity-graph-desktop.css). Escape closes it unless a sheet is on top.
+ */
+function DockedInspector({
+  open,
+  title,
+  subtitle,
+  className,
+  footer,
+  onClose,
+  children,
+}: {
+  open: boolean
+  title: string
+  subtitle?: string
+  className?: string
+  footer?: ReactNode
+  onClose: () => void
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      // A sheet opened over the desk (filters, campaign, columns) owns Escape.
+      if (document.querySelector('.nx-mobile-sheet, .egb-sheet')) return
+      if (!escapeIsOurs(event, ref.current)) return
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  if (!open) return null
+  return (
+    <aside ref={ref} className={cls('egm-insp', className)} aria-label={subtitle ? `${title}: ${subtitle}` : title}>
+      <header className="egm-insp__head">
+        <div className="egm-insp__title">
+          <strong>{title}</strong>
+          {subtitle ? <small>{subtitle}</small> : null}
+        </div>
+        <button type="button" className="egm-insp__close" onClick={onClose} aria-label="Close">
+          <Icon name="close" />
+        </button>
+      </header>
+      <div className="egm-insp__body">{children}</div>
+      {footer ? <div className="egm-insp__foot">{footer}</div> : null}
+    </aside>
+  )
+}
+
 type Props = {
   open: boolean
+  /** Desk: render inline beside the list instead of as a full-height sheet. */
+  docked?: boolean
   scope: EntityScope
   result: EntitySearchResult | null
   dossier: EntityGraphDossier | null
@@ -185,6 +260,7 @@ type Props = {
  */
 export function EntityGraphMobileDetailSheet({
   open,
+  docked = false,
   scope,
   result,
   dossier,
@@ -199,6 +275,13 @@ export function EntityGraphMobileDetailSheet({
   const [openSections, setOpenSections] = useState<Set<FieldSectionKey>>(new Set(DEFAULT_OPEN))
   const [chainOpen, setChainOpen] = useState(true)
   const [fieldQuery, setFieldQuery] = useState('')
+
+  /** Phone: the full-height sheet. Desk: the same content docked beside the list. */
+  const shell = (props: { title: string; subtitle?: string; className: string; footer?: ReactNode; children: ReactNode }) => (
+    docked
+      ? <DockedInspector open={open} onClose={onClose} {...props} />
+      : <MobileSheet open={open} height="full" onClose={onClose} {...props} />
+  )
 
   const summary = (dossier?.summary ?? null) as Row | null
   const allSections = useMemo(() => buildRecordSections(summary), [summary])
@@ -237,16 +320,12 @@ export function EntityGraphMobileDetailSheet({
   if (result.entityType === 'property') {
     const openBuyer = onOpenBuyer ?? (() => undefined)
     const openGraph = onOpenGraph ?? (() => onAction('show_on_map'))
-    return (
-      <MobileSheet
-        open={open}
-        title="Property"
-        subtitle={result.title}
-        height="full"
-        className="egm-sheet egd-sheet"
-        onClose={onClose}
-        footer={<PropertyDossierActionBar actions={actions} onAction={onAction} onOpenGraph={openGraph} />}
-      >
+    return shell({
+      title: 'Property',
+      subtitle: result.title,
+      className: 'egm-sheet egd-sheet',
+      footer: <PropertyDossierActionBar actions={actions} onAction={onAction} onOpenGraph={openGraph} />,
+      children: (
         <PropertyDossier
           result={result}
           dossier={dossier}
@@ -257,8 +336,8 @@ export function EntityGraphMobileDetailSheet({
           onOpenBuyer={openBuyer}
           onOpenGraph={openGraph}
         />
-      </MobileSheet>
-    )
+      ),
+    })
   }
 
   const identity = resolveIdentity(scope, result)
@@ -297,15 +376,11 @@ export function EntityGraphMobileDetailSheet({
   const lat = num(summary?.latitude)
   const lng = num(summary?.longitude)
 
-  return (
-    <MobileSheet
-      open={open}
-      title={SCOPE_LABEL[scope]}
-      subtitle={identity.primary}
-      height="full"
-      className="egm-sheet"
-      onClose={onClose}
-    >
+  return shell({
+    title: SCOPE_LABEL[scope],
+    subtitle: identity.primary,
+    className: 'egm-sheet',
+    children: (
       <div className="egm-detail">
         <header className="egm-detail__hero">
           <div className="egm-detail__title">{identity.primary}</div>
@@ -524,8 +599,8 @@ export function EntityGraphMobileDetailSheet({
           </div>
         ) : null}
       </div>
-    </MobileSheet>
-  )
+    ),
+  })
 }
 
 function ContactNode({

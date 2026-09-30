@@ -17,6 +17,7 @@ import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
 import { useBackHandler } from '../../../domain/navigation/useBackHandler'
 import type { BuyerMatchWorkspace, MatchedBuyer } from '../../../domain/buyer-match/buyer-match-workspace-api'
 import { fetchBuyerMatchWorkspace, readShortlist, writeShortlist } from '../../../domain/buyer-match/buyer-match-workspace-api'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import { BuyerCard, MarketSignals, MatchHero, StateRail, SubjectHero, WhyNot, cls } from './BuyerMatchParts'
 import { BuyerInspector, CompareSheet, ControlsSheet, DEFAULT_FILTERS, type Filters } from './BuyerMatchSheets'
 import './buyer-match-surface.css'
@@ -53,6 +54,13 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
   const [sheet, setSheet] = useState<'controls' | 'compare' | null>(null)
   const [shortlist, setShortlist] = useState<string[]>(() => readShortlist(propertyId))
   const [theme, setTheme] = useState(readTheme)
+  /**
+   * DESK. The same evidence recomposed for width (buyer-match-desktop.css): a
+   * compact subject header over the ranked buyers, with the match overview —
+   * or the open buyer's inspector — beside the list instead of over it. Every
+   * phone keeps the single-column flow below, element for element.
+   */
+  const { isModernDesktop } = useBreakpoint()
 
   useEffect(() => {
     const mo = new MutationObserver(() => setTheme(readTheme()))
@@ -121,7 +129,7 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
 
   if (!w) {
     return (
-      <div className="bmx" data-theme={theme}>
+      <div className={cls('bmx', isModernDesktop && 'is-desk')} data-theme={theme}>
         {loading ? (
           <div className="bmx-boot" aria-busy="true">
             <div className="bmx-boot__hero"><p><i />Resolving buyers who bought near this property…</p></div>
@@ -138,64 +146,72 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
   const compared = compare.map((id) => w.buyers.find((b) => b.id === id)).filter(Boolean) as MatchedBuyer[]
   const viewCounts = Object.fromEntries(VIEWS.map(([k, , f]) => [k, w.buyers.filter(f).length])) as Record<View, number>
 
-  return (
-    <div className={cls('bmx', loading && 'is-refreshing')} data-theme={theme}>
-      <SubjectHero w={w} onDeal={openDeal} onComps={openComps} onGraph={openGraph} onMap={openMatchedOnMap} onPipeline={openPipeline} />
+  const subjectHero = <SubjectHero w={w} onDeal={openDeal} onComps={openComps} onGraph={openGraph} onMap={openMatchedOnMap} onPipeline={openPipeline} />
 
-      <MatchHero w={w} onFocus={focusFromOrbit} focusId={focusId} />
+  const matchHero = <MatchHero w={w} onFocus={focusFromOrbit} focusId={focusId} />
 
-      {w.counts.matched === 0 ? (
-        <section className="bmx-panel bmx-none">
-          <div className="bmx-panel__head"><span>No buyers fit yet</span><em>{w.query.radiusMiles} mi · {w.query.months} mo</em></div>
-          <p>{w.market.buyersInRadius
-            ? `${w.market.buyersInRadius} resolved buyers purchased within ${w.query.radiusMiles} mi, but none bought ${w.subject.familyLabel.toLowerCase()} at a price and recency that fits this deal — every one is explained under “Why not”.`
-            : `No resolved buyer has a recorded purchase within ${w.query.radiusMiles} mi in the last ${w.query.months} months.`}</p>
-          <div className="bmx-chiprow">
-            {w.query.radiusMiles < 25 ? <button type="button" className="bmx-chip is-on" onClick={() => setRadius(w.query.radiusOptions.find((r) => r > w.query.radiusMiles) ?? 25)}>Expand radius</button> : null}
-            {w.query.months < 60 ? <button type="button" className="bmx-chip" onClick={() => setMonths(w.query.monthOptions.find((m) => m > w.query.months) ?? 60)}>Longer window</button> : null}
-          </div>
-        </section>
-      ) : null}
+  const noneSection = w.counts.matched === 0 ? (
+    <section className="bmx-panel bmx-none">
+      <div className="bmx-panel__head"><span>No buyers fit yet</span><em>{w.query.radiusMiles} mi · {w.query.months} mo</em></div>
+      <p>{w.market.buyersInRadius
+        ? `${w.market.buyersInRadius} resolved buyers purchased within ${w.query.radiusMiles} mi, but none bought ${w.subject.familyLabel.toLowerCase()} at a price and recency that fits this deal — every one is explained under “Why not”.`
+        : `No resolved buyer has a recorded purchase within ${w.query.radiusMiles} mi in the last ${w.query.months} months.`}</p>
+      <div className="bmx-chiprow">
+        {w.query.radiusMiles < 25 ? <button type="button" className="bmx-chip is-on" onClick={() => setRadius(w.query.radiusOptions.find((r) => r > w.query.radiusMiles) ?? 25)}>Expand radius</button> : null}
+        {w.query.months < 60 ? <button type="button" className="bmx-chip" onClick={() => setMonths(w.query.monthOptions.find((m) => m > w.query.months) ?? 60)}>Longer window</button> : null}
+      </div>
+    </section>
+  ) : null
 
-      {w.counts.matched > 0 ? (
-        <>
-          <div className="bmx-chapter"><span className="n">01</span><span className="t">Buyers</span><i /><em>{visible.length} shown</em></div>
-          <nav className="bmx-views" aria-label="Buyer views">
-            {VIEWS.filter(([k]) => k === 'best' || viewCounts[k] > 0).map(([k, label]) => (
-              <button key={k} type="button" className={cls('bmx-chip', view === k && 'is-on')} onClick={() => setView(k)}>{label}<b>{viewCounts[k]}</b></button>
-            ))}
-            {shortlist.length ? <button type="button" className={cls('bmx-chip', 'is-gold', view === 'shortlist' && 'is-on')} onClick={() => setView('shortlist')}><Icon name="star" />Shortlist<b>{shortlist.filter((id) => w.buyers.some((b) => b.id === id)).length}</b></button> : null}
-          </nav>
-          <div className="bmx-toolbar">
-            <div className="bmx-sorts">{SORTS.map(([k, l]) => <button key={k} type="button" className={cls(sort === k && 'is-on')} onClick={() => setSort(k)}>{l}</button>)}</div>
-            <button type="button" className={cls('bmx-chip', filtersOn && 'is-on')} onClick={() => setSheet('controls')}><Icon name="filter" />{w.query.radiusMiles} mi</button>
-            <button type="button" className="bmx-chip is-ghost" onClick={() => setNonce((n) => n + 1)} aria-label="Refresh evidence"><Icon name="refresh-cw" /></button>
-          </div>
-          <div className="bmx-list">
-            {visible.map((b, i) => (
-              <BuyerCard
-                key={b.id} b={b} w={w} rank={i} focus={focusId === b.id}
-                shortlisted={shortlist.includes(b.id)} comparing={compare.includes(b.id)}
-                onOpen={() => { setFocusId(b.id); setInspect(b) }}
-                onShortlist={() => toggleShort(b.id)}
-                onCompare={() => toggleCompare(b.id)}
-              />
-            ))}
-            {!visible.length ? <div className="bmx-panel bmx-none"><p>No buyers in this view with the current filters.</p><div className="bmx-chiprow"><button type="button" className="bmx-chip is-on" onClick={() => { setView('best'); setFilters(DEFAULT_FILTERS) }}>Show all matches</button></div></div> : null}
-          </div>
-        </>
-      ) : null}
+  const buyersSection = w.counts.matched > 0 ? (
+    <>
+      <div className="bmx-chapter"><span className="n">01</span><span className="t">Buyers</span><i /><em>{visible.length} shown</em></div>
+      <nav className="bmx-views" aria-label="Buyer views">
+        {VIEWS.filter(([k]) => k === 'best' || viewCounts[k] > 0).map(([k, label]) => (
+          <button key={k} type="button" className={cls('bmx-chip', view === k && 'is-on')} onClick={() => setView(k)}>{label}<b>{viewCounts[k]}</b></button>
+        ))}
+        {shortlist.length ? <button type="button" className={cls('bmx-chip', 'is-gold', view === 'shortlist' && 'is-on')} onClick={() => setView('shortlist')}><Icon name="star" />Shortlist<b>{shortlist.filter((id) => w.buyers.some((b) => b.id === id)).length}</b></button> : null}
+      </nav>
+      <div className="bmx-toolbar">
+        <div className="bmx-sorts">{SORTS.map(([k, l]) => <button key={k} type="button" className={cls(sort === k && 'is-on')} onClick={() => setSort(k)}>{l}</button>)}</div>
+        <button type="button" className={cls('bmx-chip', filtersOn && 'is-on')} onClick={() => setSheet('controls')}><Icon name="filter" />{w.query.radiusMiles} mi</button>
+        <button type="button" className="bmx-chip is-ghost" onClick={() => setNonce((n) => n + 1)} aria-label="Refresh evidence"><Icon name="refresh-cw" /></button>
+      </div>
+      <div className="bmx-list">
+        {visible.map((b, i) => (
+          <BuyerCard
+            key={b.id} b={b} w={w} rank={i} focus={focusId === b.id}
+            shortlisted={shortlist.includes(b.id)} comparing={compare.includes(b.id)}
+            onOpen={() => { setFocusId(b.id); setInspect(b) }}
+            onShortlist={() => toggleShort(b.id)}
+            onCompare={() => toggleCompare(b.id)}
+          />
+        ))}
+        {!visible.length ? <div className="bmx-panel bmx-none"><p>No buyers in this view with the current filters.</p><div className="bmx-chiprow"><button type="button" className="bmx-chip is-on" onClick={() => { setView('best'); setFilters(DEFAULT_FILTERS) }}>Show all matches</button></div></div> : null}
+      </div>
+    </>
+  ) : null
 
+  const marketBlock = (
+    <>
       <div className="bmx-chapter"><span className="n">02</span><span className="t">Market</span><i /><em>observed demand</em></div>
       <MarketSignals w={w} />
+    </>
+  )
 
+  const dispositionBlock = (
+    <>
       <div className="bmx-chapter"><span className="n">03</span><span className="t">Disposition</span><i /><em>buyer-side states</em></div>
       <StateRail w={w} shortlisted={shortlist.filter((id) => w.buyers.some((b) => b.id === id)).length} />
       <section className="bmx-panel bmx-outreach">
         <div className="bmx-panel__head"><span>Buyer outreach</span><em>{w.contactability.verified} verified contacts</em></div>
         <p>{w.contactability.note}</p>
       </section>
+    </>
+  )
 
+  const whyNotBlock = (
+    <>
       <div className="bmx-chapter"><span className="n">04</span><span className="t">Why not</span><i /><em>explained exclusions</em></div>
       <WhyNot w={w} onOpen={(b) => { setFocusId(b.id); setInspect(b) }} />
 
@@ -211,26 +227,73 @@ export function BuyerMatchSurface({ propertyId }: { propertyId: string }) {
           <div><dt>Computed</dt><dd>{new Date(w.generatedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} — live on every visit, no stored run</dd></div>
         </dl>
       </details>
+    </>
+  )
 
-      {compare.length ? (
-        <div className="bmx-dock" style={{ '--n': compare.length } as CSSProperties}>
-          <span><b>{compare.length}</b> to compare</span>
-          <button type="button" className="bmx-btn is-primary" onClick={() => setSheet('compare')} disabled={compare.length < 2}><Icon name="layout-split" />Compare</button>
-          <button type="button" className="bmx-x" onClick={() => setCompare([])} aria-label="Clear compare"><Icon name="close" /></button>
-        </div>
-      ) : null}
+  const compareDock = compare.length ? (
+    <div className="bmx-dock" style={{ '--n': compare.length } as CSSProperties}>
+      <span><b>{compare.length}</b> to compare</span>
+      <button type="button" className="bmx-btn is-primary" onClick={() => setSheet('compare')} disabled={compare.length < 2}><Icon name="layout-split" />Compare</button>
+      <button type="button" className="bmx-x" onClick={() => setCompare([])} aria-label="Clear compare"><Icon name="close" /></button>
+    </div>
+  ) : null
 
-      {inspect ? (
-        <BuyerInspector
-          b={inspect} w={w} theme={theme} shortlisted={shortlist.includes(inspect.id)}
-          onShortlist={() => toggleShort(inspect.id)} onClose={() => setInspect(null)}
-          onGraph={() => openBuyerGraph(inspect.id)} onMap={toMap} onProperty={openProperty}
-        />
-      ) : null}
+  const inspector = inspect ? (
+    <BuyerInspector
+      b={inspect} w={w} theme={theme} shortlisted={shortlist.includes(inspect.id)}
+      docked={isModernDesktop}
+      onShortlist={() => toggleShort(inspect.id)} onClose={() => setInspect(null)}
+      onGraph={() => openBuyerGraph(inspect.id)} onMap={toMap} onProperty={openProperty}
+    />
+  ) : null
+
+  const sheets = (
+    <>
       {sheet === 'compare' && compared.length ? <CompareSheet buyers={compared} w={w} theme={theme} onClose={() => setSheet(null)} onOpen={(b) => { setSheet(null); setInspect(b) }} /> : null}
       {sheet === 'controls' ? (
         <ControlsSheet w={w} theme={theme} filters={filters} setFilters={setFilters} onRadius={(r) => setRadius(r)} onMonths={(m) => setMonths(m)} onClose={() => setSheet(null)} />
       ) : null}
+    </>
+  )
+
+  if (isModernDesktop) {
+    return (
+      <div className={cls('bmx', 'is-desk', loading && 'is-refreshing', inspect && 'has-inspector')} data-theme={theme}>
+        {subjectHero}
+        <div className="bmx-desk">
+          <div className="bmx-desk__main">
+            {noneSection}
+            {buyersSection}
+            {/* Evidence in blocks, so a wide pane can set Market beside Disposition. */}
+            <div className="bmx-desk__evidence">
+              <section className="bmx-desk__block is-market">{marketBlock}</section>
+              <section className="bmx-desk__block is-disposition">{dispositionBlock}</section>
+              <section className="bmx-desk__block is-whynot">{whyNotBlock}</section>
+            </div>
+          </div>
+          <aside className="bmx-desk__side" aria-label={inspect ? 'Buyer inspector' : 'Match overview'}>
+            {matchHero}
+            {inspector}
+          </aside>
+        </div>
+        {compareDock}
+        {sheets}
+      </div>
+    )
+  }
+
+  return (
+    <div className={cls('bmx', loading && 'is-refreshing')} data-theme={theme}>
+      {subjectHero}
+      {matchHero}
+      {noneSection}
+      {buyersSection}
+      {marketBlock}
+      {dispositionBlock}
+      {whyNotBlock}
+      {compareDock}
+      {inspector}
+      {sheets}
     </div>
   )
 }

@@ -1,0 +1,1051 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   BUYER MATCH · DESKTOP
+   One property, its ranked buyers, and the evidence — recomposed for a desk:
+   a compact subject header, the ranked list on the left, and the match
+   overview (or the open buyer's inspector) docked beside it.
+
+   Calm language: transparent root over the pane's glass, translucent panels
+   with hairlines, 13px sentence-case type, monochrome icons, no gradient
+   text, no glows, no looping motion. Tier colour stays — it encodes the
+   server's evidence tier — but muted.
+
+   Scoped to html.is-desktop-modern (phones never see it) and laid out by the
+   PANE (container: pane). Under 1000px the phone's single column is kept.
+   The surface stylesheet loads later (lazy chunk), so these selectors carry
+   the extra specificity they need rather than relying on order.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tokens (the sheets are portalled, so they carry them too) ─────────── */
+html.is-desktop-modern body :is(.bmx, .bmx-sheet) {
+  --bmx-ink: var(--dsk-bg);
+  --bmx-text: var(--dsk-ink);
+  --bmx-text-2: var(--dsk-ink-2);
+  --bmx-text-3: var(--dsk-ink-3);
+  --bmx-edge: var(--dsk-edge);
+  --bmx-edge-hi: var(--dsk-edge-hi);
+  --bmx-glass: var(--dsk-glass);
+  --bmx-glass-hi: var(--dsk-glass-strong);
+  --bmx-track: var(--dsk-tile);
+  --bmx-blur: var(--dsk-blur);
+  --bmx-spec: linear-gradient(transparent, transparent);
+  --bmx-rim: linear-gradient(var(--dsk-edge), var(--dsk-edge));
+  --bmx-sweep: transparent;
+  --bmx-liquid: linear-gradient(var(--dsk-ink), var(--dsk-ink));
+  --bmx-accent: var(--dsk-accent);
+  --bmx-display: var(--dsk-font);
+  /* tier colour encodes evidence — kept, muted */
+  --bmx-emerald: #6fbf98;
+  --bmx-aqua: #7fb3c4;
+  --bmx-cobalt: #a195c4;
+  --bmx-gold: #cfae66;
+  --bmx-slate: #7d8190;
+  --bmx-bad: #e8808a;
+  /* shared desk primitives: one card, one control, one focus ring */
+  --bmd-card-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  --bmd-focus: 0 0 0 1px var(--dsk-accent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --bmd-raised: var(--dsk-tile-hi);
+  --bmd-raised-shadow: 0 1px 2px rgb(0 0 0 / 0.28), inset 0 0 0 1px var(--dsk-edge-hi);
+  --bmd-solid: color-mix(in srgb, var(--dsk-bg) 72%, rgb(var(--dsk-fill)));
+  font-family: var(--dsk-font);
+  font-variant-numeric: tabular-nums;
+}
+html.is-desktop-modern[data-nexus-theme='light'] body :is(.bmx, .bmx-sheet) {
+  --bmd-card-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
+  --bmd-raised: #fff;
+  --bmd-raised-shadow: 0 1px 2px rgb(15 17 22 / 0.1), inset 0 0 0 1px var(--dsk-edge);
+  --bmx-emerald: #2f8a5e;
+  --bmx-aqua: #3b7a8c;
+  --bmx-cobalt: #66589a;
+  --bmx-gold: #8a6b24;
+  --bmx-slate: #6b7280;
+  --bmx-bad: #c2414d;
+}
+
+/* Keyboard focus: 1px accent and a quiet 3px halo. */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) :is(button, [role='button'], [role='tab'], a, summary):focus-visible {
+  outline: none;
+  box-shadow: var(--bmd-focus) !important;
+}
+
+/* ── Root: the pane is the glass ───────────────────────────────────────── */
+html.is-desktop-modern .bmx.is-desk {
+  gap: 16px;
+  padding: 24px 24px 40px;
+  background: transparent;
+  scrollbar-width: thin;
+}
+html.is-desktop-modern .bmx.is-desk::before,
+html.is-desktop-modern .bmx.is-desk::after { display: none; }
+html.is-desktop-modern .bmm { background: transparent; }
+/* The select-a-property state and the route's own loading fallback (which
+   renders outside .bmm) share one calm card. */
+/* Empty / loading: a centred calm state — no card, a quiet glyph over one
+   ink-3 line (never a bare "Loading…"). */
+html.is-desktop-modern .bmm__state,
+html.is-desktop-modern .bmm .bmm__state {
+  max-width: 440px;
+  margin: 18vh auto 0;
+  padding: 0 24px;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  text-align: center;
+  font-family: var(--dsk-font);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .bmm .bmm__state svg { width: 28px !important; height: 28px !important; margin-bottom: 6px; color: var(--dsk-ink); opacity: 0.35; }
+/* the route's loading fallback has no icon of its own */
+html.is-desktop-modern .bmm__state:not(:has(svg))::before {
+  content: '';
+  width: 28px;
+  height: 28px;
+  margin-bottom: 6px;
+  background: var(--dsk-ink);
+  opacity: 0.35;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='8' r='3.2'/%3E%3Ccircle cx='17' cy='9' r='2.4'/%3E%3Cpath d='M3.5 19c.6-3.2 2.9-5 5.5-5s4.9 1.8 5.5 5'/%3E%3Cpath d='M15 14.3c2.6-.4 4.6 1.2 5.3 4.2'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='8' r='3.2'/%3E%3Ccircle cx='17' cy='9' r='2.4'/%3E%3Cpath d='M3.5 19c.6-3.2 2.9-5 5.5-5s4.9 1.8 5.5 5'/%3E%3Cpath d='M15 14.3c2.6-.4 4.6 1.2 5.3 4.2'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+html.is-desktop-modern .bmm__state strong { font-size: 14px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .bmm__state p { max-width: 60ch; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-3); }
+
+/* Narrow desk pane: the desk wrappers dissolve and the phone order returns
+   (subject, match overview, buyers, evidence). */
+html.is-desktop-modern .bmx.is-desk :is(.bmx-desk, .bmx-desk__main, .bmx-desk__side, .bmx-desk__evidence, .bmx-desk__block) { display: contents; }
+/* the phone's `.bmx > * { flex-shrink: 0 }`, restated for items the desk
+   wrappers now hold (they are flex items of .bmx but not its children) */
+html.is-desktop-modern .bmx.is-desk :is(.bmx-desk__main, .bmx-desk__side, .bmx-desk__block) > * { flex-shrink: 0; }
+html.is-desktop-modern .bmx.is-desk > .bmx-subject { order: -2; }
+html.is-desktop-modern .bmx.is-desk .bmx-desk__side > .bmx-hero { order: -1; }
+
+/* ══ WIDE PANE: header over two independently scrolling columns ═══════════ */
+@container pane (min-width: 1000px) {
+  /* (the loading / failed states have no desk wrapper and keep the padded flow) */
+  html.is-desktop-modern .bmx.is-desk:has(> .bmx-desk) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 400px);
+    min-height: 0;
+  }
+  html.is-desktop-modern .bmx.is-desk :is(.bmx-desk__main, .bmx-desk__side) {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  html.is-desktop-modern .bmx.is-desk :is(.bmx-desk__main, .bmx-desk__side) > * { flex-shrink: 0; }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__main { padding: 20px 24px 48px; }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__side { padding: 20px 20px 28px; border-left: 1px solid var(--dsk-edge); container: bmside / inline-size; }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__evidence { display: flex; flex-direction: column; gap: 16px; }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__block { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__block > * { flex-shrink: 0; }
+  /* A buyer open: the inspector takes the column; the overview steps aside. */
+  html.is-desktop-modern .bmx.is-desk.has-inspector .bmx-desk__side > .bmx-hero { display: none; }
+}
+/* Wider panes: the list holds a reading width and the inspector takes the
+   rest (capped), so there is never a dead band between them. */
+@container pane (min-width: 1480px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-desk { grid-template-columns: minmax(0, 1fr) minmax(440px, min(36%, 640px)); }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__main > * { width: 100%; max-width: 1080px; }
+  /* Use the width: Market beside Disposition; the exclusions span both. */
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__block.is-whynot { grid-column: 1 / -1; }
+}
+/* A wall: two ranked columns of buyers; the evidence keeps a reading width. */
+@container pane (min-width: 2100px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-desk { grid-template-columns: minmax(0, 1fr) minmax(520px, 640px); }
+  html.is-desktop-modern .bmx.is-desk .bmx-desk__main > :is(.bmx-list, .bmx-views, .bmx-toolbar, .bmx-chapter:first-child) { max-width: none; }
+  html.is-desktop-modern .bmx.is-desk .bmx-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  html.is-desktop-modern .bmx.is-desk .bmx-list > .bmx-none { grid-column: 1 / -1; }
+}
+
+/* ══ SUBJECT — the page hero: the property at a glance ════════════════════ */
+html.is-desktop-modern .bmx.is-desk .bmx-subject {
+  display: grid;
+  grid-template-columns: 144px minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject::before,
+html.is-desktop-modern .bmx.is-desk .bmx-subject::after { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__photo {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: 144px;
+  height: 96px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsk-tile);
+  box-shadow: var(--bmd-card-shadow);
+}
+html.is-desktop-modern .bmx.is-desk :is(.bmx-subject__mesh, .bmx-subject__scrim, .bmx-subject__sweep) { display: none; }
+/* No street imagery (or still loading): a quiet house glyph, not a blank tile. */
+html.is-desktop-modern .bmx.is-desk .bmx-subject__photo::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 22px;
+  height: 22px;
+  background: var(--dsk-ink-3);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10.5 12 3l9 7.5'/%3E%3Cpath d='M5 9.5V21h14V9.5'/%3E%3Cpath d='M10 21v-6h4v6'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10.5 12 3l9 7.5'/%3E%3Cpath d='M5 9.5V21h14V9.5'/%3E%3Cpath d='M10 21v-6h4v6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__photo.is-ready::after { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__photo img { z-index: 1; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__photo img { transform: none; transition: opacity 0.3s ease; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__photo.is-ready img { animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'top values'
+    'title values'
+    'sub actions'
+    'specs actions';
+  align-items: center;
+  column-gap: 32px;
+  row-gap: 4px;
+  min-height: 0;
+  padding: 0;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__top { grid-area: top; position: static; display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject h2 {
+  grid-area: title;
+  font-family: var(--dsk-font);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-shadow: none;
+  animation: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject p { grid-area: sub; font-size: 13px; color: var(--dsk-ink-3); animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__specs { grid-area: specs; gap: 0; margin: 2px 0 0; animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__specs span {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-size: 12.5px;
+  font-weight: 450;
+  color: var(--dsk-ink-2);
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__specs span + span::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__values {
+  grid-area: values;
+  display: flex;
+  justify-content: flex-end;
+  gap: 28px;
+  margin: 0;
+  animation: none;
+}
+/* Figures: the value large and tabular, its label beneath. */
+html.is-desktop-modern .bmx.is-desk .bmx-subject__values > div,
+html.is-desktop-modern .bmx.is-desk .bmx-subject__values > div.is-lead {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation: none;
+  text-align: right;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__values span { font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__values b,
+html.is-desktop-modern .bmx.is-desk .bmx-subject__values > div.is-lead b {
+  font-family: var(--dsk-font);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__actions {
+  grid-area: actions;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 10px 0 0;
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__actions button {
+  min-height: 32px !important;
+  height: 32px;
+  padding: 0 12px;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12.5px !important;
+  font-weight: 500;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-subject__actions button:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__actions button:active { transform: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__actions svg { width: 14px !important; height: 14px !important; color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx.is-desk .bmx-subject__top .bmx-eyebrow,
+html.is-desktop-modern .bmx.is-desk .bmx-stage {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-stage {
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-subject { padding: 22px 24px 20px; border-bottom: 1px solid var(--dsk-edge); }
+}
+/* A narrower pane stacks the values and actions under the address. */
+@container pane (max-width: 859px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-subject { grid-template-columns: 104px minmax(0, 1fr); gap: 16px; }
+  html.is-desktop-modern .bmx.is-desk .bmx-subject__photo { width: 104px; height: 76px; }
+  html.is-desktop-modern .bmx.is-desk .bmx-subject__body { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'top' 'title' 'sub' 'specs' 'values' 'actions'; }
+  html.is-desktop-modern .bmx.is-desk .bmx-subject h2 { white-space: normal; }
+  html.is-desktop-modern .bmx.is-desk .bmx-subject__values { justify-content: flex-start; margin-top: 10px; }
+  html.is-desktop-modern .bmx.is-desk .bmx-subject__values > div { align-items: flex-start; text-align: left; }
+  html.is-desktop-modern .bmx.is-desk .bmx-subject__actions { justify-content: flex-start; flex-wrap: wrap; }
+}
+
+/* ══ TYPE: eyebrows, chapters, panels ════════════════════════════════════ */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-eyebrow,
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-eyebrow.is-aqua {
+  gap: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-eyebrow i { display: none; }
+/* Section headings: a 15px title and an ink-3 hint; no rule, no numbering. */
+html.is-desktop-modern .bmx.is-desk .bmx-chapter { margin: 20px 0 0; gap: 10px; align-items: baseline; animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-desk__main > .bmx-chapter:first-child { margin-top: 0; }
+html.is-desktop-modern .bmx.is-desk .bmx-chapter .n { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-chapter .t { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; text-transform: none; color: var(--dsk-ink); }
+html.is-desktop-modern .bmx.is-desk .bmx-chapter i { flex: 0 0 auto; width: 0; min-width: 0; background: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-chapter em { font-size: 12.5px; font-weight: 450; letter-spacing: 0; color: var(--dsk-ink-3); }
+
+/* Cards: radius 14, glass, a hairline and a 1px lift; header = 13/600 title
+   + ink-3 hint. */
+html.is-desktop-modern .bmx.is-desk :is(.bmx-panel, .bmx-hero) {
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--bmd-card-shadow);
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk :is(.bmx-panel, .bmx-hero)::after { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-panel { padding: 18px 20px; }
+html.is-desktop-modern .bmx.is-desk .bmx-panel__head { margin-bottom: 14px; gap: 2px 12px; }
+html.is-desktop-modern .bmx.is-desk .bmx-panel__head span { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; letter-spacing: 0; }
+html.is-desktop-modern .bmx.is-desk .bmx-panel__head em { font-size: 12px; font-weight: 450; letter-spacing: 0; color: var(--dsk-ink-3); }
+/* Prose keeps a reading measure. */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-note,
+html.is-desktop-modern .bmx.is-desk .bmx-foot { max-width: 72ch; font-size: 12px; line-height: 1.55; color: var(--dsk-ink-3); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-sub { margin: 20px 0 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+
+/* ══ MATCH OVERVIEW (count · tiers · orbit) ══════════════════════════════ */
+html.is-desktop-modern .bmx.is-desk .bmx-hero { padding: 18px 20px 20px; }
+html.is-desktop-modern .bmx.is-desk .bmx-hero__glow { display: none; }
+/* card header: 13px/600 title + ink-3 hint */
+html.is-desktop-modern .bmx.is-desk .bmx-hero__head .bmx-eyebrow { font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .bmx.is-desk .bmx-hero__window { font-size: 12px; font-weight: 450; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-hero__count { gap: 12px; margin: 14px 0 16px; align-items: flex-end; }
+html.is-desktop-modern .bmx.is-desk .bmx-hero__count strong {
+  font-family: var(--dsk-font);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+  filter: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-hero__count span { padding: 0 0 2px; font-size: 12.5px; font-weight: 450; line-height: 1.35; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-flow { gap: 2px; height: 6px; border-radius: 3px; }
+html.is-desktop-modern .bmx.is-desk .bmx-flow i { border-radius: 2px; background-image: none; box-shadow: none; animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-flow .t-strong { background: var(--bmx-emerald); }
+html.is-desktop-modern .bmx.is-desk .bmx-flow .t-moderate { background: var(--bmx-aqua); }
+html.is-desktop-modern .bmx.is-desk .bmx-flow .t-exploratory { background: var(--bmx-cobalt); opacity: 1; }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers {
+  gap: 1px;
+  margin-top: 14px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx.is-desk .bmx-tiers > div { min-width: 0; padding: 12px; border-radius: 0; background: var(--dsk-glass-strong); box-shadow: none; }
+/* the tier figures in ink; the tier's colour lives in a small dot */
+html.is-desktop-modern .bmx.is-desk .bmx-tiers b { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; color: var(--dsk-ink); }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers span { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; white-space: nowrap; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers span::before { flex: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--bmx-slate); }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers .t-strong span::before { background: var(--bmx-emerald); }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers .t-moderate span::before { background: var(--bmx-aqua); }
+html.is-desktop-modern .bmx.is-desk .bmx-tiers .t-exploratory span::before { background: var(--bmx-cobalt); }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit { margin-top: 16px; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit svg { max-height: 300px; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__sweep { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__halo { animation: none; opacity: 0.5; stroke: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__edge { stroke: var(--dsk-edge-hi); }
+/* the subject at the centre: a plain ink point, not a gold jewel */
+html.is-desktop-modern .bmx.is-desk .bmx-orbit circle[fill='url(#bmx-core)'] { fill: var(--dsk-ink); stroke: var(--dsk-bg); stroke-width: 2; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit svg > circle:first-of-type { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__lbl { font-family: var(--dsk-font); font-size: 9px; font-weight: 500; letter-spacing: 0; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__dot { animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__dot .dot { stroke: rgb(0 0 0 / 0.35); stroke-width: 1; filter: none !important; }
+html.is-desktop-modern[data-nexus-theme='light'] .bmx.is-desk .bmx-orbit__dot .dot { stroke: rgb(255 255 255 / 0.9); }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__dot:hover .dot { stroke: var(--dsk-ink); stroke-width: 1.5; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit__dot.is-focus .dot { stroke: var(--dsk-accent); stroke-width: 2.4; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit figcaption { gap: 6px 14px; font-size: 12px; font-weight: 450; color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit figcaption i { width: 7px; height: 7px; box-shadow: none !important; }
+html.is-desktop-modern .bmx.is-desk .bmx-orbit figcaption em { font-size: 11.5px; color: var(--dsk-ink-3); }
+
+/* ══ VIEWS · SORT · LIST ══════════════════════════════════════════════════ */
+html.is-desktop-modern .bmx.is-desk .bmx-views { flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; overflow: visible; }
+/* Filter chips: 24px, tile + hairline; accent only when on. */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip {
+  min-height: 24px !important;
+  height: 24px;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 12.5px !important;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip:active { transform: none; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip b { font-family: var(--dsk-font); font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); opacity: 1; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent);
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-on b,
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-on svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-gold { color: var(--bmx-gold); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-gold svg { color: var(--bmx-gold); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-gold.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--bmx-gold) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-gold) 45%, transparent);
+}
+/* In the toolbar the radius control and refresh are 32px controls. */
+html.is-desktop-modern .bmx.is-desk .bmx-toolbar .bmx-chip { min-height: 32px !important; height: 32px; padding: 0 11px; border-radius: 8px; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-ghost,
+html.is-desktop-modern .bmx.is-desk .bmx-toolbar .bmx-chip.is-ghost { width: 32px; padding: 0; justify-content: center; background: transparent; box-shadow: none; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-chip.is-ghost:hover { background: var(--dsk-hover); }
+html.is-desktop-modern .bmx.is-desk .bmx-toolbar { gap: 8px; }
+/* Sort: a segmented control with a raised active segment. */
+html.is-desktop-modern .bmx.is-desk .bmx-sorts {
+  flex: 0 1 auto;
+  gap: 2px;
+  margin-right: auto;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx.is-desk .bmx-sorts button {
+  min-height: 26px !important;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px !important;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-sorts button:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .bmx.is-desk .bmx-sorts button.is-on { color: var(--dsk-ink); background: var(--bmd-raised); box-shadow: var(--bmd-raised-shadow); }
+
+/* Buyer cards: ranked, quiet, the evidence one glance away. */
+html.is-desktop-modern .bmx.is-desk .bmx-list { gap: 12px; }
+html.is-desktop-modern .bmx.is-desk .bmx-card,
+html.is-desktop-modern .bmx.is-desk .bmx-card.t-strong {
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--bmd-card-shadow);
+  animation: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-card:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .bmx.is-desk .bmx-card:active { transform: none; }
+/* Open (selected): plate + inner hairline + a 2px accent bar. The tier is in
+   its chip, so the rail no longer carries colour at rest. */
+html.is-desktop-modern .bmx.is-desk .bmx-card::before { top: 18px; bottom: 18px; left: 0; width: 2px; border-radius: 0 2px 2px 0; background: transparent; box-shadow: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-card.is-focus {
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 1px 2px rgb(0 0 0 / 0.12);
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-card.is-focus::before { background: var(--dsk-accent); }
+html.is-desktop-modern .bmx.is-desk .bmx-card.is-short:not(.is-focus) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-gold) 45%, transparent), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .bmx.is-desk .bmx-card__open { padding: 18px 20px 12px; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__open:focus-visible { outline: none; box-shadow: var(--bmd-focus) !important; border-radius: 14px; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__top { gap: 12px; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-mono {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.bmx, .bmx-sheet) .bmx-mono { background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(15, 17, 22, 0.03)); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-mono i { font-family: var(--dsk-font); font-size: 11.5px; font-weight: 600; letter-spacing: 0; color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx.is-desk .bmx-card__id h3 { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__id p { margin-top: 2px; font-size: 11.5px; font-weight: 450; color: var(--dsk-ink-3); }
+/* Status chip: 22px, tile + hairline; the tier's colour is a small dot. */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-tier::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--tc, var(--dsk-ink-3)); }
+/* Figures: the number first and large, its label and note beneath. */
+html.is-desktop-modern .bmx.is-desk .bmx-card__metrics {
+  gap: 1px;
+  margin-top: 14px;
+  border-radius: 12px;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx.is-desk .bmx-card__metrics > div { display: flex; flex-direction: column; gap: 1px; padding: 10px 14px; background: var(--dsk-glass-strong); }
+html.is-desktop-modern .bmx.is-desk .bmx-card__metrics dd { order: 0; margin: 0 0 1px; font-family: var(--dsk-font); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__metrics dt { order: 1; font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-card__metrics em { order: 2; font-size: 11.5px; color: var(--dsk-ink-3); }
+/* Fit verdicts as one spec line: a coloured dot per verdict, no pill. */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-fits { flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-fits span {
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: none;
+  box-shadow: none;
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-fits i { width: 6px; height: 6px; box-shadow: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__why { gap: 4px; margin-top: 12px; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__why li { padding-left: 12px; font-size: 13px; font-weight: 450; line-height: 1.45; color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx.is-desk .bmx-card__why li i { width: 4px; height: 4px; top: 0.62em; background: var(--dsk-ink-3); box-shadow: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-card__why em { color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-card__foot { padding: 0 14px 14px 20px; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-contact { gap: 6px; font-size: 11.5px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-contact i { box-shadow: none !important; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-iconbtn {
+  width: 32px;
+  height: 32px;
+  min-height: 32px !important;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsk-ink-3);
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-iconbtn:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-iconbtn:active { transform: none; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-iconbtn svg { width: 14px !important; height: 14px !important; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-iconbtn.is-on { color: var(--dsk-ink); background: color-mix(in srgb, var(--dsk-accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-iconbtn.is-gold { color: var(--bmx-gold); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-gold) 40%, transparent); }
+
+/* ══ MARKET · DISPOSITION · WHY NOT · METHOD ═════════════════════════════ */
+html.is-desktop-modern .bmx.is-desk .bmx-market__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+/* four across while Market has the full column; two when it sits beside Disposition */
+@container pane (min-width: 1200px) and (max-width: 1479px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-market__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+html.is-desktop-modern .bmx.is-desk .bmx-market__grid > div { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; border-radius: 0; background: var(--dsk-glass-strong); box-shadow: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-market__grid b {
+  font-family: var(--dsk-font);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-market__grid span { font-size: 11.5px; font-weight: 450; line-height: 1.35; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-band { margin-top: 18px; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-band__row { font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-2); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-band__row b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-pricebar__band {
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bmx-aqua) 55%, transparent);
+  box-shadow: none;
+  animation: none;
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-pricebar__win { border: 1px solid var(--dsk-ink-2); border-radius: 5px; background: transparent; box-shadow: none; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-pricebar__win em { font-size: 10.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+/* Disposition: figures on quiet tiles; a state with nothing yet steps back. */
+html.is-desktop-modern .bmx.is-desk .bmx-rail ol { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+html.is-desktop-modern .bmx.is-desk .bmx-rail li {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--dsk-tile);
+  box-shadow: none;
+  opacity: 0.55;
+  animation: none;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-rail li.is-on { opacity: 1; background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx.is-desk .bmx-rail li b { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+html.is-desktop-modern .bmx.is-desk .bmx-rail li span { margin-top: 2px; font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-rail li em { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk :is(.bmx-outreach, .bmx-none) p { max-width: 72ch; font-size: 13px; line-height: 1.55; color: var(--dsk-ink-2); }
+/* Exclusion counts read as one spec line: "26 price band far · 17 lenders…". */
+html.is-desktop-modern .bmx.is-desk .bmx-whynot__reasons { gap: 6px 0; }
+html.is-desktop-modern .bmx.is-desk .bmx-whynot__reasons span { gap: 5px; padding: 0; border-radius: 0; font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-2); background: none; box-shadow: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-whynot__reasons span + span::before { content: '·'; margin: 0 9px 0 4px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-whynot__reasons b { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+/* Excluded acquirers: floating plates, a hover plate, no rules. */
+html.is-desktop-modern .bmx.is-desk .bmx-whynot ul { gap: 2px; margin-top: 14px; }
+html.is-desktop-modern .bmx.is-desk .bmx-whynot li button {
+  min-height: 48px !important;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: transparent;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-whynot li button:hover { background: var(--dsk-hover); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx.is-desk .bmx-whynot li strong { font-size: 14px; font-weight: 550; }
+html.is-desktop-modern .bmx.is-desk .bmx-whynot li span { font-size: 12px; color: var(--dsk-ink-3); }
+@container pane (min-width: 1480px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-whynot ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
+}
+html.is-desktop-modern .bmx.is-desk .bmx-lineage summary { min-height: 24px; font-family: var(--dsk-font); font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .bmx.is-desk .bmx-lineage summary svg { color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-lineage dl { display: grid; grid-template-columns: 120px minmax(0, 72ch); gap: 10px 20px; margin-top: 16px; }
+html.is-desktop-modern .bmx.is-desk .bmx-lineage dl > div { display: contents; }
+html.is-desktop-modern .bmx.is-desk .bmx-lineage dt { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-lineage dd { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-2); }
+
+/* ══ INSPECTOR — docked in the side column ═══════════════════════════════ */
+html.is-desktop-modern .bmx-sheet.is-docked {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: block;
+  overflow-y: auto;
+  padding: 20px;
+  /* an overlay must be legible whatever the glass settings: solid */
+  background: var(--bmd-solid);
+  scrollbar-width: thin;
+}
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .bmx.is-desk .bmx-sheet.is-docked {
+    position: static;
+    inset: auto;
+    z-index: auto;
+    overflow: visible;
+    padding: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    animation: bmd-in 0.2s var(--dsk-ease) both;
+  }
+}
+@keyframes bmd-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
+html.is-desktop-modern .bmx-sheet.is-docked .bmx-sheet__panel {
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  animation: none;
+}
+html.is-desktop-modern .bmx-sheet .bmx-insp__head { gap: 12px; }
+html.is-desktop-modern .bmx-sheet h3 { margin: 10px 0 0; font-family: var(--dsk-font); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+html.is-desktop-modern .bmx-sheet .bmx-insp__head p { margin-top: 4px; font-size: 11.5px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-x {
+  width: 32px;
+  height: 32px;
+  min-height: 32px !important;
+  border-radius: 8px;
+  color: var(--dsk-ink-3);
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-x:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-x:active { transform: none; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-x svg { width: 14px !important; height: 14px !important; }
+html.is-desktop-modern .bmx-sheet .bmx-insp__kpis {
+  gap: 1px;
+  margin-top: 16px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx-sheet .bmx-insp__kpis > div { padding: 12px 14px; border-radius: 0; background: var(--dsk-glass-strong); box-shadow: none; }
+html.is-desktop-modern .bmx-sheet .bmx-insp__kpis b {
+  font-family: var(--dsk-font);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .bmx-sheet .bmx-insp__kpis span { font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+/* A standard-width inspector column: the four figures as a 2 × 2 grid. */
+@container bmside (max-width: 520px) {
+  html.is-desktop-modern .bmx-sheet .bmx-insp__kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+html.is-desktop-modern .bmx-sheet .bmx-tabs {
+  top: -20px;
+  gap: 0;
+  margin: 16px -20px 0;
+  padding: 0 14px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 -1px 0 var(--dsk-edge);
+}
+html.is-desktop-modern .bmx-sheet .bmx-tabs button {
+  min-height: 40px !important;
+  padding: 0 6px;
+  border-radius: 0;
+  font-size: 12.5px !important;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+  transition: color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .bmx-sheet .bmx-tabs button:hover { color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx-sheet .bmx-tabs button.is-on { color: var(--dsk-ink); background: none; box-shadow: inset 0 -2px 0 var(--dsk-accent); }
+html.is-desktop-modern .bmx-sheet .bmx-insp__body { padding-top: 8px; animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-callout,
+html.is-desktop-modern .bmx-sheet .bmx-callout:is(.is-not, .is-contact) {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx-sheet .bmx-callout b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-callout :is(p, ul) { max-width: 72ch; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-2); }
+/* Evidence: quiet plates, one line each, a neutral bullet. */
+html.is-desktop-modern .bmx-sheet .bmx-evidence { gap: 4px; }
+html.is-desktop-modern .bmx-sheet .bmx-evidence li,
+html.is-desktop-modern .bmx-sheet .bmx-evidence li:nth-child(odd) { padding: 10px 12px; border-radius: 10px; background: var(--dsk-tile); animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-evidence i { width: 5px; height: 5px; background: var(--dsk-ink-3); box-shadow: none; }
+html.is-desktop-modern .bmx-sheet .bmx-evidence b { font-size: 13px; font-weight: 500; }
+html.is-desktop-modern .bmx-sheet .bmx-evidence em { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx-sheet .bmx-fittable { border-radius: 12px; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx-sheet .bmx-fittable__head { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; background: var(--dsk-tile); }
+html.is-desktop-modern .bmx-sheet .bmx-fitrow { animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-fitrow .k { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-fitrow :is(.s, .b) { font-size: 12.5px; font-weight: 500; }
+html.is-desktop-modern .bmx-sheet .bmx-fitrow em { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-fitrow em i { box-shadow: none; }
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx, .bmx-timeline, .bmx-holdings) { gap: 2px; }
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx button, .bmx-timeline button, .bmx-holdings button, .bmx-holdings li > div) {
+  min-height: 48px !important;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: transparent;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx button, .bmx-timeline button, .bmx-holdings button):hover:not(:disabled) { background: var(--dsk-hover); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx .d, .bmx-timeline .d) { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx .a b, .bmx-timeline .a b, .bmx-holdings b) { font-size: 13px; font-weight: 550; }
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx .a em, .bmx-timeline .a em, .bmx-holdings em) { font-size: 11.5px; }
+html.is-desktop-modern .bmx-sheet :is(.bmx-tx .p, .bmx-timeline .p, .bmx-holdings span) { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-tx .p em { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx-sheet .bmx-timeline::before { background: var(--dsk-edge-hi); }
+html.is-desktop-modern .bmx-sheet .bmx-timeline li { animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-timeline li::before { width: 6px; height: 6px; margin-top: -3px; left: -11px; background: var(--dsk-ink-3); box-shadow: none; }
+html.is-desktop-modern .bmx-sheet .bmx-cadence {
+  gap: 1px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx-sheet .bmx-cadence > div { padding: 12px 10px; border-radius: 0; background: var(--dsk-glass-strong); box-shadow: none; }
+html.is-desktop-modern .bmx-sheet .bmx-cadence b { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .bmx-sheet .bmx-cadence span { font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-years i { border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--dsk-ink) 22%, transparent); box-shadow: none; animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-years b { font-family: var(--dsk-font); font-size: 12px; font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-bars li { padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 450; animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-bars li i { background: color-mix(in srgb, var(--dsk-ink) 9%, transparent); animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-bars li b { font-family: var(--dsk-font); font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-box { gap: 8px; }
+html.is-desktop-modern .bmx-sheet .bmx-box__cell { padding: 14px 16px; border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx-sheet .bmx-box__cell > span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-box__cell > b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-box__cell > em { font-size: 12px; }
+html.is-desktop-modern .bmx-sheet .bmx-big {
+  font-size: 22px !important;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+}
+/* Markets / asset types: facts, so one spec line rather than a pill row. */
+html.is-desktop-modern .bmx-sheet .bmx-chips { gap: 2px 0; }
+html.is-desktop-modern .bmx-sheet .bmx-chips i { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; font-size: 13px; font-weight: 450; color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx-sheet .bmx-chips i + i::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx-sheet .bmx-gauge__ring { background: conic-gradient(var(--dsk-ink-2) calc(var(--v) * 360deg), var(--dsk-tile-hi) 0); }
+html.is-desktop-modern .bmx-sheet .bmx-gauge__ring b { font-size: 12px; font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-gauge > .bmx-gauge__ring + span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-idcard { gap: 6px; padding: 14px 16px; border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx-sheet .bmx-idcard b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .bmx-sheet .bmx-idtier { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: 0; border-radius: 7px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx-sheet .bmx-skel { height: 96px; border-radius: 12px; background: var(--dsk-tile); animation: bmd-breathe 2.4s ease-in-out infinite; }
+html.is-desktop-modern .bmx-sheet .bmx-skel::after { display: none; }
+@keyframes bmd-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+html.is-desktop-modern .bmx-sheet .bmx-insp__actions { gap: 8px; margin-top: 20px; }
+
+/* Buttons: tile by default, accent only for the primary action. */
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn {
+  min-height: 34px !important;
+  height: 34px;
+  margin-top: 14px;
+  padding: 0 14px;
+  gap: 7px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 13px !important;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  animation: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn:hover:not(:disabled) { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn:active { transform: none; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn svg { width: 14px !important; height: 14px !important; color: var(--dsk-ink-2); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.bmx, .bmx-sheet) .bmx-btn.is-primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn.is-primary svg { color: currentColor; }
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn.is-gold {
+  color: var(--bmx-gold);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bmx-gold) 40%, transparent);
+}
+html.is-desktop-modern :is(.bmx, .bmx-sheet) .bmx-btn.is-gold svg { color: currentColor; }
+/* Segmented controls: one tray, a raised active segment. */
+html.is-desktop-modern .bmx-sheet .bmx-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .bmx-sheet .bmx-seg button {
+  min-height: 28px !important;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 12.5px !important;
+  font-weight: 500;
+  color: var(--dsk-ink-3);
+  background: transparent;
+  box-shadow: none;
+  transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .bmx-sheet .bmx-seg button:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .bmx-sheet .bmx-seg button:active { transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-seg button.is-on { color: var(--dsk-ink); background: var(--bmd-raised); box-shadow: var(--bmd-raised-shadow); }
+
+/* ══ MODAL SHEETS (compare, search area) — a centred panel ════════════════ */
+html.is-desktop-modern .bmx-sheet:not(.is-docked) { align-items: center; justify-content: center; padding: 24px; }
+html.is-desktop-modern .bmx-sheet:not(.is-docked) .bmx-sheet__scrim { background: rgba(2, 4, 8, 0.42); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.is-desktop-modern[data-nexus-theme='light'] .bmx-sheet:not(.is-docked) .bmx-sheet__scrim { background: rgba(15, 17, 22, 0.18); }
+html.is-desktop-modern .bmx-sheet:not(.is-docked) .bmx-sheet__panel {
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 22px 24px 24px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  animation: bmd-rise 0.22s var(--dsk-ease) both;
+  scrollbar-width: thin;
+}
+@keyframes bmd-rise { from { opacity: 0; transform: translateY(8px) scale(0.99); } to { opacity: 1; transform: none; } }
+html.is-desktop-modern .bmx-sheet .bmx-sheet__grab { display: none; }
+html.is-desktop-modern .bmx-sheet .bmx-compare { margin-top: 18px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .bmx-sheet .bmx-compare__row { padding: 10px 14px; }
+html.is-desktop-modern .bmx-sheet .bmx-compare__row { animation: none; }
+html.is-desktop-modern .bmx-sheet .bmx-compare__row.is-head { background: var(--dsk-tile); }
+html.is-desktop-modern .bmx-sheet .bmx-compare__row > span { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .bmx-sheet .bmx-compare__row > b { font-size: 12.5px; font-weight: 500; }
+html.is-desktop-modern .bmx-sheet .bmx-compare__row.is-head button { font-family: var(--dsk-font); font-size: 13px !important; font-weight: 600; }
+
+/* ══ COMPARE DOCK · LOADING ══════════════════════════════════════════════ */
+html.is-desktop-modern .bmx.is-desk .bmx-dock {
+  position: absolute;
+  left: 24px;
+  right: auto;
+  bottom: 20px;
+  gap: 12px;
+  padding: 6px 6px 6px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  animation: bmd-rise 0.2s var(--dsk-ease) both;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-dock span { font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-2); }
+html.is-desktop-modern .bmx.is-desk .bmx-dock span b { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .bmx.is-desk .bmx-dock .bmx-btn { margin: 0; }
+/* Loading: soft tile plates breathing slowly (reduced-motion safe). */
+html.is-desktop-modern .bmx.is-desk .bmx-boot { gap: 16px; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot > div {
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-tile);
+  box-shadow: none;
+  animation: bmd-breathe 2.4s ease-in-out infinite;
+}
+html.is-desktop-modern .bmx.is-desk .bmx-boot > div:nth-child(2) { animation-delay: 0.3s; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot > div:nth-child(n + 3) { animation-delay: 0.6s; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot > div::after { display: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot__hero { height: 120px; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot__hero p { left: 20px; bottom: 18px; font-size: 13px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-boot__hero p i { background: var(--dsk-ink-3); box-shadow: none; animation: none; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot__orbit { height: 220px; }
+html.is-desktop-modern .bmx.is-desk .bmx-boot__orbit span { animation: none; border-color: var(--dsk-edge-hi); }
+html.is-desktop-modern .bmx.is-desk .bmx-boot__row { height: 120px; }
+html.is-desktop-modern .bmx.is-desk .bmx-empty { padding: 18vh 24px 40px; gap: 14px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .bmx.is-desk .bmx-empty svg { width: 28px !important; height: 28px !important; color: var(--dsk-ink); opacity: 0.35; }
+html.is-desktop-modern .bmx.is-desk .bmx-empty p { max-width: 60ch; font-size: 13px; color: var(--dsk-ink-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .bmx-sheet.is-docked,
+  html.is-desktop-modern .bmx-sheet .bmx-sheet__panel,
+  html.is-desktop-modern .bmx-sheet .bmx-skel,
+  html.is-desktop-modern .bmx .bmx-boot > div,
+  html.is-desktop-modern .bmx .bmx-dock { animation: none !important; }
+}

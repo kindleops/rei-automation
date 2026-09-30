@@ -1,0 +1,1615 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   ENTITY GRAPH · DESKTOP
+   The same surface, recomposed for a desk: a records browser with the Lens as
+   a left filter rail, one toolbar, a real data table, and the record
+   inspector docked beside the list instead of a full-screen sheet.
+
+   Calm language (desktop-calm.css): transparent roots over the pane's glass,
+   translucent panels with 1px hairlines, 13px type in sentence case,
+   monochrome icons in clear-glass chips, accent only for active / primary /
+   focus. Semantic colour survives only where it encodes data, muted.
+
+   Every rule is scoped to html.is-desktop-modern — phones never see it.
+   Layout follows the PANE (container: pane), so a split pane gets a narrower
+   composition rather than a squeezed one; under ~720px the phone flow stays.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tokens: every root this app renders into ─────────────────────────── */
+html.is-desktop-modern :is(.egm, .egm-sheet, .egx, .egx-sheet, .egx-landing, .egx-listmode, .egb) {
+  /* muted data hues — colour that encodes a type, never decoration */
+  --egk-property: #7fb3c4;
+  --egk-owner: #c4a86a;
+  --egk-buyer: #74b3a2;
+  --egk-entity: #a195c4;
+  --egk-person: #7fb393;
+  --egk-contact: #8ba6c4;
+  --egk-mailing: #c48b9b;
+  --egk-related: #c49a6a;
+  --egk-alert: #e8808a;
+  --egk-warn: #d9aa5c;
+  --egk-good: #6fbf98;
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet, .egx, .egx-sheet, .egx-landing, .egx-listmode, .egb) {
+  --egk-property: #3b7a8c;
+  --egk-owner: #8a6b24;
+  --egk-buyer: #2e7a68;
+  --egk-entity: #66589a;
+  --egk-person: #3b7a57;
+  --egk-contact: #496b92;
+  --egk-mailing: #9a4f63;
+  --egk-related: #8f6428;
+  --egk-alert: #c2414d;
+  --egk-warn: #a36d14;
+  --egk-good: #2f8a5e;
+}
+
+/* Shared desk primitives: one card, one plate, one control, one focus ring. */
+html.is-desktop-modern :is(.egm, .egm-sheet, .egx, .egx-sheet, .egx-landing, .egb) {
+  --egk-card-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  --egk-focus: 0 0 0 1px var(--dsk-accent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --egk-raised: var(--dsk-tile-hi);
+  --egk-raised-shadow: 0 1px 2px rgb(0 0 0 / 0.28), inset 0 0 0 1px var(--dsk-edge-hi);
+  --egk-solid: color-mix(in srgb, var(--dsk-bg) 72%, rgb(var(--dsk-fill)));
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet, .egx, .egx-sheet, .egx-landing, .egb) {
+  --egk-card-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
+  --egk-raised: #fff;
+  --egk-raised-shadow: 0 1px 2px rgb(15 17 22 / 0.1), inset 0 0 0 1px var(--dsk-edge);
+}
+/* Keyboard focus: 1px accent and a quiet 3px halo, everywhere on the surface. */
+html.is-desktop-modern :is(.egm, .egm-sheet, .egx, .egx-sheet) :is(button, [role='button'], [role='tab'], a, select, summary):focus-visible {
+  outline: none;
+  box-shadow: var(--egk-focus) !important;
+}
+
+html.is-desktop-modern .egm,
+html.is-desktop-modern .egm-sheet {
+  /* legacy phone tokens → the desk palette */
+  --text-0: var(--dsk-ink);
+  --text-1: var(--dsk-ink-2);
+  --text-2: var(--dsk-ink-3);
+  --border: var(--dsk-edge);
+  --accent-blue: var(--dsk-accent);
+  --nexus-panel: transparent;
+  --bg-panel-solid: rgb(var(--dsk-fill));
+  --egl-text: var(--dsk-ink);
+  --egl-text-2: var(--dsk-ink-2);
+  --egl-text-3: var(--dsk-ink-3);
+  --egl-edge: var(--dsk-edge);
+  --egl-edge-hi: var(--dsk-edge-hi);
+  --egl-glass: var(--dsk-glass);
+  --egl-glass-hi: var(--dsk-tile-hi);
+  --egl-track: var(--dsk-tile);
+  --egl-blur: var(--dsk-blur);
+  --egl-alert: var(--egk-alert);
+  --egl-warn: var(--egk-warn);
+  --hue-properties: var(--egk-property);
+  --hue-master_owners: var(--egk-owner);
+  --hue-buyers: var(--egk-buyer);
+  --hue-organizations: var(--egk-entity);
+  --hue-people: var(--egk-person);
+  --hue-contact_methods: var(--egk-contact);
+  font-family: var(--dsk-font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The pane is the glass: the surface itself is transparent. */
+html.is-desktop-modern .egm,
+html.is-desktop-modern .egx-listmode {
+  background: transparent;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .egm::before { display: none; }
+/* Desk pointers need no 44px tap repayment; the ::after bands only overlap. */
+html.is-desktop-modern .egm .egm-hit::after { content: none; }
+
+/* ══ HEADER ══════════════════════════════════════════════════════════════ */
+html.is-desktop-modern .egm .egm-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 400px);
+  grid-template-areas: 'id search' 'scopes scopes';
+  align-items: center;
+  column-gap: 24px;
+  padding: 22px 24px 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-bottom: 1px solid var(--dsk-edge);
+}
+/* Page title over one live summary line (the universe's real size). */
+html.is-desktop-modern .egm .egm-header__id { grid-area: id; flex-direction: column; align-items: flex-start; gap: 4px; }
+html.is-desktop-modern .egm .egm-header__id h1 {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .egm .egm-header__total { font-size: 13px; font-weight: 450; color: var(--dsk-ink-3); }
+
+html.is-desktop-modern .egm .egm-header .egm-search {
+  grid-area: search;
+  justify-self: end;
+  width: 100%;
+  height: 34px;
+  margin: 0;
+  padding: 0 8px 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-header .egm-search:hover { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egm .egm-search:focus-within {
+  background: var(--dsk-tile-hi);
+  box-shadow: var(--egk-focus);
+}
+html.is-desktop-modern .egm .egm-search__icon,
+html.is-desktop-modern .egm .egm-search__icon svg { width: 14px; height: 14px; color: var(--dsk-ink-3); }
+/* (outranks the global light-theme input fill, which is !important too) */
+html.is-desktop-modern .egm .egm-search input,
+html.is-desktop-modern .egm .egm-search input[type='search']:not([type='range']) {
+  height: 100%;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .egm .egm-search input::placeholder { font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-search__clear {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile-hi);
+}
+
+/* Universe tabs: a flat tab strip resting on the header hairline. */
+html.is-desktop-modern .egm .egm-scopes {
+  grid-area: scopes;
+  gap: 4px;
+  margin: 14px -10px 0;
+  padding: 0;
+  overflow-x: auto;
+  scroll-snap-type: none;
+}
+html.is-desktop-modern .egm .egm-scope {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dsk-ink-3);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  transition: color 0.15s ease, box-shadow 0.2s ease;
+}
+html.is-desktop-modern .egm .egm-scope:hover { color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egm-scope:active { transform: none; }
+html.is-desktop-modern .egm .egm-scope.is-active,
+html.is-desktop-modern .egm .egm-scope.is-all.is-active {
+  color: var(--dsk-ink);
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--dsk-accent);
+}
+html.is-desktop-modern .egm .egm-scope__count { margin: 0; font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-scope.is-active .egm-scope__count { color: var(--dsk-ink-2); }
+
+/* ══ BODY: rail · list · inspector ════════════════════════════════════════
+   Narrow desk pane (< 1000px): the body scrolls as one, Lens above the list,
+   exactly the phone's flow; the inspector overlays. Wider: three columns. */
+html.is-desktop-modern .egm .egm-body {
+  position: static;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+html.is-desktop-modern .egm .egm-body > .egm-list { flex: none; min-height: auto; overflow: visible; }
+html.is-desktop-modern .egm .egm-rail { flex: none; padding: 16px 20px 0; }
+html.is-desktop-modern .egm .egm-rail .egq { padding: 8px 16px 16px; }
+
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egm-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+  html.is-desktop-modern .egm .egm-body.has-rail { grid-template-columns: 288px minmax(0, 1fr); }
+  html.is-desktop-modern .egm .egm-body.has-inspector { grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); }
+  /* A record open on a mid-width pane borrows the rail's room. */
+  html.is-desktop-modern .egm .egm-body.has-rail.has-inspector { grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); }
+  html.is-desktop-modern .egm .egm-body.has-rail.has-inspector > .egm-rail { display: none; }
+  html.is-desktop-modern .egm .egm-body > .egm-list {
+    min-height: 0;
+    overflow: auto;
+    scrollbar-width: thin;
+  }
+  html.is-desktop-modern .egm .egm-rail {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 16px 28px 24px;
+    border-right: 1px solid var(--dsk-edge);
+    scrollbar-width: thin;
+  }
+}
+@container pane (min-width: 1480px) {
+  html.is-desktop-modern .egm .egm-body.has-rail { grid-template-columns: 300px minmax(0, 1fr); }
+  html.is-desktop-modern .egm .egm-body.has-rail.has-inspector { grid-template-columns: 300px minmax(0, 1fr) 420px; }
+  html.is-desktop-modern .egm .egm-body.has-rail.has-inspector > .egm-rail { display: block; }
+  html.is-desktop-modern .egm .egm-body.has-inspector { grid-template-columns: minmax(0, 1fr) 420px; }
+}
+@container pane (min-width: 2200px) {
+  html.is-desktop-modern .egm .egm-body.has-rail { grid-template-columns: 320px minmax(0, 1fr); }
+  html.is-desktop-modern .egm .egm-body.has-rail.has-inspector { grid-template-columns: 320px minmax(0, 1fr) 480px; }
+  html.is-desktop-modern .egm .egm-body.has-inspector { grid-template-columns: minmax(0, 1fr) 480px; }
+}
+
+/* ══ LENS (composition) — in the rail it is the rail, not a card ═════════ */
+html.is-desktop-modern .egm .egq {
+  --egq-text: var(--dsk-ink);
+  --egq-text-2: var(--dsk-ink-2);
+  --egq-text-3: var(--dsk-ink-3);
+  --egq-edge: var(--dsk-edge);
+  --egq-glass: var(--dsk-glass-strong);
+  --egq-track: var(--dsk-tile);
+  --egq-hue: var(--dsk-ink-2) !important;
+  margin: 0;
+  padding: 4px 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--egk-card-shadow);
+  font-family: var(--dsk-font);
+}
+/* In the wide rail the Lens is the rail itself; on a narrow pane it stays a
+   calm card above the list, as on the phone. */
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egm-rail .egq {
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+}
+/* The Lens header: the cohort figure large, its noun and hint beneath. */
+html.is-desktop-modern .egm .egq__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'total chev' 'noun noun';
+  align-items: center;
+  min-height: 0;
+  gap: 6px 12px;
+  padding: 4px 0 18px;
+}
+html.is-desktop-modern .egm .egq__total { grid-area: total; }
+html.is-desktop-modern .egm .egq__noun { grid-area: noun; flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
+html.is-desktop-modern .egm .egq__chev { grid-area: chev; }
+/* The cohort size is the rail's one hero figure. */
+html.is-desktop-modern .egm .egq__total {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .egm .egq__noun { gap: 2px; }
+html.is-desktop-modern .egm .egq__noun b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm .egq__noun small { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egq__chev {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsk-ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .egm .egq__head:hover .egq__chev { background: var(--dsk-hover); color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egq__chev svg { width: 14px; height: 14px; }
+
+/* Dimension picker: the phone's single scrolling line on a narrow pane; in
+   the rail every group is visible, wrapped — nothing hides off-rail. */
+html.is-desktop-modern .egm .egq__picker { gap: 14px; padding: 0 0 16px; -webkit-mask-image: none; mask-image: none; scrollbar-width: none; }
+html.is-desktop-modern .egm .egq__group { gap: 8px; }
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egm-rail .egq__picker {
+    flex-wrap: wrap;
+    padding: 0 0 18px;
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  html.is-desktop-modern .egm .egm-rail .egq__group { flex: 1 1 100%; }
+  html.is-desktop-modern .egm .egm-rail .egq__chips { flex-wrap: wrap; }
+}
+/* Section labels: small, sentence case, a breath of tracking. */
+html.is-desktop-modern .egm .egq__group-label {
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .egm .egq__chips { gap: 4px; }
+html.is-desktop-modern .egm .egq__chip {
+  height: 24px;
+  min-height: 24px !important;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egq__chip:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm .egq__chip:active { transform: none; }
+html.is-desktop-modern .egm .egq__chip.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
+}
+
+html.is-desktop-modern .egm .egq__chart { padding: 0 4px; }
+html.is-desktop-modern .egm .egq__bars { gap: 2px; }
+html.is-desktop-modern .egm .egq__bars li { animation: none; }
+html.is-desktop-modern .egm .egq__bar {
+  height: 32px;
+  min-height: 32px !important;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: transparent;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egq__bar:not(:disabled):hover { background: var(--dsk-hover); }
+html.is-desktop-modern .egm .egq__bar:not(:disabled):active { transform: none; }
+html.is-desktop-modern .egm .egq__bar-fill {
+  top: 0;
+  bottom: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--dsk-ink) 9%, transparent);
+  box-shadow: none;
+  animation-duration: 0.3s;
+}
+html.is-desktop-modern .egm .egq__bar-fill::after { content: none; }
+html.is-desktop-modern .egm .egq__bar.is-muted .egq__bar-fill { background: color-mix(in srgb, var(--dsk-ink) 5%, transparent); }
+html.is-desktop-modern .egm .egq__bar.is-on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+html.is-desktop-modern .egm .egq__bar.is-on .egq__bar-fill { background: color-mix(in srgb, var(--dsk-accent) 22%, transparent); }
+html.is-desktop-modern .egm .egq__bar-label { font-size: 13px; font-weight: 450; color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egq__bar-num b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm .egq__bar-num small { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egq__bar-on { width: 16px; height: 16px; background: var(--dsk-accent); color: #fff; }
+html.is-desktop-modern .egm .egq__hist { height: 150px; gap: 4px; }
+html.is-desktop-modern .egm .egq__col-bar i {
+  border-radius: 4px 4px 2px 2px;
+  background: color-mix(in srgb, var(--dsk-ink) 16%, transparent);
+  box-shadow: none;
+  animation-duration: 0.35s;
+}
+html.is-desktop-modern .egm .egq__col:hover .egq__col-bar i { background: color-mix(in srgb, var(--dsk-ink) 24%, transparent); }
+html.is-desktop-modern .egm .egq__col.is-muted .egq__col-bar i { background: color-mix(in srgb, var(--dsk-ink) 8%, transparent); }
+html.is-desktop-modern .egm .egq__col.is-on .egq__col-bar i { background: color-mix(in srgb, var(--dsk-accent) 45%, transparent); box-shadow: none; }
+html.is-desktop-modern .egm .egq__col-val { font-size: 11px; color: var(--dsk-ink-3); animation: none; }
+html.is-desktop-modern .egm .egq__col-label { font-size: 11px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egq__tip { border-radius: 6px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow); }
+html.is-desktop-modern .egm .egq__ghost { height: 32px; margin-bottom: 4px; border-radius: 10px; background: var(--dsk-tile); animation: egk-breathe 2.4s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 120ms); }
+@keyframes egk-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+html.is-desktop-modern .egm .egq__error { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egq__error button { min-height: 32px !important; padding: 0 12px; border-radius: 8px; font-size: 12.5px; }
+html.is-desktop-modern .egm .egq__note { margin: 10px 4px 0; font-size: 11.5px; line-height: 1.45; color: var(--dsk-ink-3); }
+
+/* ══ LIST + TOOLBAR ══════════════════════════════════════════════════════ */
+html.is-desktop-modern .egm .egm-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  column-gap: 12px;
+  padding: 0 20px 0;
+  container: egm-list / inline-size;
+}
+html.is-desktop-modern .egm .egm-list > * { flex: 0 0 100%; min-width: 0; }
+
+/* One toolbar row: count · view · sort · filter · select. Pinned while the
+   list scrolls under it, and in both axes so a wide table never carries it. */
+html.is-desktop-modern .egm .egm-toolbar,
+html.is-desktop-modern .egm .egm-toolbar.is-sticky {
+  position: sticky;
+  top: 0;
+  /* Sticky insets resolve against the scroller's content box; the list has
+     20px of inline padding, so the full-bleed bar pins at -20px. */
+  left: -20px;
+  z-index: 6;
+  box-sizing: border-box;
+  flex: 0 0 calc(100% + 40px);
+  gap: 8px;
+  height: 56px;
+  margin: 0 -20px;
+  padding: 0 20px;
+  background: color-mix(in srgb, var(--dsk-bg) 55%, transparent);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  border-bottom: 1px solid var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egm-toolbar__count { font-size: 13px; font-weight: 450; color: var(--dsk-ink-3); }
+/* Narrow pane: the count takes its own line above the controls. */
+@container pane (max-width: 719px) {
+  html.is-desktop-modern .egm .egm-toolbar,
+  html.is-desktop-modern .egm .egm-toolbar.is-sticky { flex-wrap: wrap; height: auto; padding: 10px 20px; row-gap: 8px; }
+  html.is-desktop-modern .egm .egm-toolbar__count { flex: 1 0 100%; }
+}
+html.is-desktop-modern .egm .egm-toolbar__count b { color: var(--dsk-ink); font-weight: 600; }
+
+html.is-desktop-modern .egm .egm-tool {
+  height: 32px;
+  gap: 6px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  color: var(--dsk-ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-tool:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egm .egm-tool svg { width: 14px; height: 14px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-tool:hover svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egm-tool.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent);
+}
+html.is-desktop-modern .egm .egm-tool.is-on svg { color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egm-tool__badge { min-width: 16px; height: 16px; font-size: 10.5px; font-weight: 600; background: var(--dsk-accent); color: #fff; }
+
+/* View switch: a quiet segmented control, sized to its labels. */
+html.is-desktop-modern .egm .egm-views,
+html.is-desktop-modern .egm .egm-list > .egm-views {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  margin: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .egm .egm-view {
+  flex: 0 0 auto;
+  height: 26px;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dsk-ink-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-view:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egm-view svg { width: 13px; height: 13px; }
+html.is-desktop-modern .egm .egm-view.is-active { color: var(--dsk-ink); background: var(--egk-raised); box-shadow: var(--egk-raised-shadow); }
+html.is-desktop-modern .egm .egm-view.is-aux { width: auto; padding: 0 8px; }
+/* Narrow desk pane: the phone keeps the switch as its own row above the toolbar. */
+html.is-desktop-modern .egm .egm-list > .egm-views { margin-top: 12px; }
+
+/* ══ TABLE — a real data table: flexible identity column, sticky header ══ */
+/* Rows are floating plates: 8px from the list edge, text on the 20px line. */
+html.is-desktop-modern .egm .egm-list .egt { flex: 0 0 calc(100% + 24px); width: auto; margin: 0 -12px; padding-top: 4px; }
+html.is-desktop-modern .egm .egt-grid { min-width: calc(240px + var(--egt-body-width, 600px)); }
+/* A wide pane scrolls the list itself in both axes, so the header can stay
+   pinned under the toolbar and the identity column pinned at the left. */
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egt-scroll { overflow: visible; }
+  html.is-desktop-modern .egm .egt-row.is-head { top: 56px; }
+  /* sticky insets resolve against the list's content box (20px padding):
+     the pinned column rests where the plates begin */
+  html.is-desktop-modern .egm .egt-cell.is-identity { left: -12px; }
+}
+html.is-desktop-modern .egm .egt-row {
+  border-bottom: 0;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+/* (the header row stays position: sticky; only body rows anchor the accent bar) */
+html.is-desktop-modern .egm .egt-row:not(.is-head) { position: relative; margin-bottom: 2px; border-radius: 10px; cursor: default; }
+html.is-desktop-modern .egm .egt-row.is-head { position: sticky; }
+html.is-desktop-modern .egm .egt-row:not(.is-head):hover { background: var(--dsk-hover); }
+html.is-desktop-modern .egm .egt-row.is-head {
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--dsk-bg) 70%, transparent);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+}
+html.is-desktop-modern .egm .egt-cell {
+  padding: 0 12px;
+  min-height: 48px;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--dsk-ink-2);
+}
+html.is-desktop-modern .egm .egt-cell.is-empty { color: var(--dsk-ink-3); opacity: 0.6; }
+/* The pinned address column is only solid once the table has been scrolled
+   sideways (a scroll-driven fill); at rest it is the same glass as its row.
+   Browsers without scroll timelines simply keep it solid. */
+@property --egk-pin { syntax: '<color>'; inherits: false; initial-value: transparent; }
+@keyframes egk-pin { from { --egk-pin: transparent; } 3%, to { --egk-pin: var(--dsk-glass-strong); } }
+html.is-desktop-modern .egm .egt-cell.is-identity {
+  flex: 1 0 240px;
+  width: auto;
+  min-width: 240px;
+  padding-left: 12px;
+  gap: 10px;
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  background: var(--egk-pin);
+  animation: egk-pin linear both;
+  animation-timeline: scroll(nearest inline);
+}
+html.is-desktop-modern .egm .egt-cell:last-child { padding-right: 12px; }
+html.is-desktop-modern .egm .egt-row .egt-cell.is-identity:focus-visible { outline: none; box-shadow: var(--egk-focus) !important; border-radius: 10px; }
+html.is-desktop-modern .egm .egt-cell__identity { gap: 2px; }
+html.is-desktop-modern .egm .egt-cell__identity strong { font-size: 14px; font-weight: 550; letter-spacing: -0.005em; color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egt-cell__identity em { font-size: 11.5px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egt-cell.is-head {
+  min-height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .egm .egt-cell.is-head.is-sortable { color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egt-cell.is-head.is-sortable:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egt-cell.is-head[aria-sort] { color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egt-row.is-head .egt-cell.is-identity { background: transparent; animation: none; }
+/* Open or selected: the plate, an inner hairline and a 2px accent bar. */
+html.is-desktop-modern .egm .egt-row:is(.is-active, .is-selected) { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egm .egt-row:is(.is-active, .is-selected)::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 14px;
+  bottom: 14px;
+  z-index: 3;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--dsk-accent);
+}
+html.is-desktop-modern .egm .egt-cell__check { border-radius: 5px; border: 1.5px solid var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egt-cell__check.is-on { background: var(--dsk-accent); border-color: var(--dsk-accent); }
+
+/* ══ CARDS — calm tiles that share the width ══════════════════════════════ */
+/* Cards breathe under the toolbar and between rows; the table stays flush. */
+html.is-desktop-modern .egm .egm-list:has(> .egm-row) { row-gap: 16px; column-gap: 16px; padding-bottom: 8px; }
+html.is-desktop-modern .egm .egm-list .egm-row {
+  margin: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--egk-card-shadow);
+  animation: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-row:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .egm .egm-row:active { transform: none; }
+html.is-desktop-modern .egm .egm-row:is(.is-active, .is-selected) {
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 1px 2px rgb(0 0 0 / 0.12);
+}
+/* The rail only speaks for exceptions (recorded distress / delinquency). */
+html.is-desktop-modern .egm .egm-row__rail { flex-basis: 2px; margin: 18px 0; box-shadow: none !important; animation: none; }
+html.is-desktop-modern .egm .egm-row__rail:is(.is-cool, .is-none, .is-buyer) { background: transparent; }
+html.is-desktop-modern .egm .egm-row__body { gap: 5px; padding: 16px 18px 16px 16px; }
+html.is-desktop-modern .egm .egm-row__title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egm .egm-row__value { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egm .egm-row__meta,
+html.is-desktop-modern .egm .egm-row__owner { font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egm-row__owner svg { opacity: 1; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-rec { font-size: 11.5px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-rec__item svg { color: var(--dsk-ink-3); opacity: 1; }
+/* Facts as one spec line with dot separators, not a row of pills; colour
+   only for the exceptions (a recorded warning or alert). */
+html.is-desktop-modern .egm .egm-tags { flex-wrap: wrap; gap: 0; margin-top: 2px; }
+html.is-desktop-modern .egm .egm-tag,
+html.is-desktop-modern .egm .egm-tag:is(.is-signal, .is-record) {
+  height: auto;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .egm .egm-tag + .egm-tag::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-tag:is(.is-signal, .is-record.is-warn) { color: var(--egk-warn); }
+html.is-desktop-modern .egm .egm-tag.is-record.is-alert { color: var(--egk-alert); }
+/* Status chips: 20px, tile + hairline, the state in a small dot. */
+html.is-desktop-modern .egm :is(.egm-pill, .egm-buyerbadge),
+html.is-desktop-modern .egm :is(.egm-pill, .egm-buyerbadge):is(.is-reachable, .is-unreachable, .is-blocked, .is-active, .is-observed) {
+  height: 20px;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  opacity: 1;
+}
+html.is-desktop-modern .egm :is(.egm-pill, .egm-buyerbadge)::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-pill.is-reachable::before,
+html.is-desktop-modern .egm .egm-buyerbadge.is-active::before { background: var(--egk-good); }
+html.is-desktop-modern .egm .egm-pill.is-blocked::before { background: var(--egk-alert); }
+html.is-desktop-modern .egm .egm-buyerbadge::before { background: var(--egk-buyer); }
+html.is-desktop-modern .egm .egm-buyerbadge.is-observed { box-shadow: inset 0 0 0 1px var(--dsk-edge); border-style: none; }
+html.is-desktop-modern .egm .egm-activity { padding: 1px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 500; background: var(--dsk-tile); color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egm-activity.is-slowing { color: var(--egk-warn); background: var(--dsk-tile); }
+html.is-desktop-modern .egm .egm-activity.is-active { color: var(--dsk-ink); background: var(--dsk-tile); }
+html.is-desktop-modern .egm .egm-row__box { border-radius: 5px; }
+/* Two tiles a row once the list is wide enough to read two; three on a wall. */
+@container egm-list (min-width: 820px) {
+  html.is-desktop-modern .egm .egm-list > .egm-row { flex-basis: calc(50% - 8px); }
+}
+@container egm-list (min-width: 1320px) {
+  html.is-desktop-modern .egm .egm-list > .egm-row { flex-basis: calc(33.333% - 11px); }
+}
+
+/* ══ LIST STATES ═════════════════════════════════════════════════════════ */
+/* Loading: soft tile plates breathing slowly (no sweep, reduced-motion safe). */
+html.is-desktop-modern .egm .egm-skeleton { padding-top: 6px; }
+html.is-desktop-modern .egm .egm-skeleton__row {
+  height: 48px;
+  margin: 0 -12px 2px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  animation: egk-breathe 2.4s ease-in-out infinite;
+}
+html.is-desktop-modern .egm .egm-skeleton__row:nth-child(2n) { animation-delay: 0.3s; }
+html.is-desktop-modern .egm .egm-skeleton__row:nth-child(3n) { animation-delay: 0.6s; }
+/* Empty / failed: a centred calm state — a quiet glyph over one ink-3 line. */
+html.is-desktop-modern .egm .egm-empty { padding: 72px 24px; gap: 6px; }
+html.is-desktop-modern .egm .egm-empty::before {
+  content: '';
+  width: 28px;
+  height: 28px;
+  margin-bottom: 10px;
+  background: var(--dsk-ink);
+  opacity: 0.35;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+html.is-desktop-modern .egm .egm-empty strong { font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .egm .egm-empty span { max-width: 60ch; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-more { padding: 16px 0 28px; gap: 8px; }
+html.is-desktop-modern .egm .egm-more button {
+  width: auto;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  color: var(--dsk-ink);
+  font-size: 12.5px;
+  font-weight: 550;
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-more button:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm .egm-more small { font-size: 12px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-toast {
+  left: 50%;
+  right: auto;
+  bottom: 20px;
+  max-width: min(520px, calc(100% - 40px));
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  font-size: 12.5px;
+  font-weight: 500;
+  animation: none;
+}
+html.is-desktop-modern .egm .egm-note { border-radius: 8px; font-size: 12px; }
+
+/* ══ SELECTION DOCK — one quiet bar ══════════════════════════════════════ */
+html.is-desktop-modern .egm .egm-dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 0;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--dsk-edge);
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: none;
+  animation: none;
+}
+html.is-desktop-modern .egm .egm-dock__top { flex: 0 1 auto; gap: 12px; padding: 0; }
+html.is-desktop-modern .egm .egm-dock__cohort { order: 1; }
+html.is-desktop-modern .egm .egm-dock__actions { order: 2; }
+html.is-desktop-modern .egm .egm-dock__note { order: 3; }
+html.is-desktop-modern .egm .egm-dock__count { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm .egm-dock__count em { font-size: 12px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-dock__link { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egm-dock__link:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egm-dock__actions { display: flex; flex: 1 1 auto; justify-content: flex-end; gap: 6px; }
+html.is-desktop-modern .egm .egm-dock__act {
+  flex-direction: row;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  color: var(--dsk-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+html.is-desktop-modern .egm .egm-dock__act:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm .egm-dock__act svg { width: 14px; height: 14px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm .egm-dock__act.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .egm .egm-dock__act.is-primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern .egm .egm-dock__act.is-primary svg { color: currentColor; }
+html.is-desktop-modern .egm .egm-dock__cohort {
+  width: auto;
+  height: 32px;
+  min-height: 32px !important;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egm-dock__note { flex-basis: 100%; margin: 0; font-size: 12px; font-weight: 450; color: var(--egk-warn); }
+
+/* ══ INSPECTOR — docked beside the list ═══════════════════════════════════ */
+html.is-desktop-modern .egm .egm-insp {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* An overlay must be legible whatever the glass settings: solid. */
+  background: var(--egk-solid);
+  color: var(--dsk-ink);
+  font-family: var(--dsk-font);
+  animation: egk-in 0.22s var(--dsk-ease) both;
+}
+@keyframes egk-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+/* Mid pane: the inspector floats over the right of the list. */
+@container pane (min-width: 720px) {
+  html.is-desktop-modern .egm .egm-insp {
+    inset: 0 0 0 auto;
+    width: min(420px, 92%);
+    border-left: 1px solid var(--dsk-edge);
+    box-shadow: var(--dsk-shadow);
+  }
+}
+/* Wide pane: a real column — the list reflows beside it. */
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .egm .egm-body > .egm-insp {
+    position: relative;
+    inset: auto;
+    width: auto;
+    z-index: 1;
+    background: var(--dsk-glass);
+    -webkit-backdrop-filter: var(--dsk-blur);
+    backdrop-filter: var(--dsk-blur);
+    box-shadow: none;
+  }
+}
+/* Card-style header: the type as meta, the record as a 13px/600 title. */
+html.is-desktop-modern .egm .egm-insp__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 12px 10px 20px;
+  border-bottom: 1px solid var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egm-insp__title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+html.is-desktop-modern .egm .egm-insp__title strong { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-insp__title small { font-size: 13px; font-weight: 600; color: var(--dsk-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .egm .egm-insp__close {
+  all: unset;
+  box-sizing: border-box;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--dsk-ink-3);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-insp__close:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .egm .egm-insp__close:focus-visible { box-shadow: var(--egk-focus); }
+html.is-desktop-modern .egm .egm-insp__close svg { width: 14px; height: 14px; }
+html.is-desktop-modern .egm .egm-insp__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 18px 20px 24px;
+  scrollbar-width: thin;
+}
+html.is-desktop-modern .egm .egm-insp.egd-sheet .egm-insp__body { padding: 16px 0 20px; }
+html.is-desktop-modern .egm .egm-insp__foot {
+  flex: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--dsk-edge);
+  background: var(--dsk-glass-strong);
+}
+
+/* Record inspector content (owners, people, companies, contacts). */
+html.is-desktop-modern .egm .egm-detail { gap: 16px; padding-bottom: 8px; }
+html.is-desktop-modern .egm .egm-detail__hero { gap: 6px; }
+html.is-desktop-modern .egm .egm-detail__title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+/* Facts under the title read as one spec line. */
+html.is-desktop-modern .egm .egm-detail__sub { gap: 0; font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-detail__sub > span + span::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); }
+/* Figures: the number large and tabular, its label small underneath. */
+html.is-desktop-modern .egm .egm-detail__stats {
+  gap: 1px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egm-stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 0; border-radius: 0; background: var(--dsk-glass-strong); }
+html.is-desktop-modern .egm .egm-stat strong { order: 0; margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egm .egm-stat em { order: 1; font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-stat__note { order: 2; font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egm-detail__actions { gap: 8px; }
+html.is-desktop-modern .egm .egm-act {
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-act:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm .egm-act svg { color: var(--dsk-ink-2); opacity: 1; }
+html.is-desktop-modern .egm .egm-act.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .egm .egm-act.is-primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern .egm .egm-act.is-primary svg { color: currentColor; }
+html.is-desktop-modern .egm .egi-section {
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egi-section + .egi-section { margin-top: 8px; }
+html.is-desktop-modern .egm .egi-section__head { min-height: 44px; padding: 0 14px; font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm .egi-section__icon { color: var(--dsk-ink-2); background: transparent; box-shadow: none; }
+html.is-desktop-modern .egm .egi-section__count { font-size: 11.5px; color: var(--dsk-ink-3); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm .egi-fieldhead span { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egi-fieldhead small { font-size: 12px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egi-chainblock h5 { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egi-fields dt { font-size: 11.5px; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egi-fields dd { font-size: 13px; color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egi-search { height: 32px; margin: 0; border-radius: 8px; }
+/* Related records: floating plates, a hover plate, no rules between them. */
+html.is-desktop-modern .egm .egm-node {
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egm-node + .egm-node { margin-top: 4px; }
+html.is-desktop-modern .egm button.egm-node:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egm .egm-node__icon,
+html.is-desktop-modern .egm .egm-node__icon.is-person,
+html.is-desktop-modern .egm .egm-node__icon.is-contact {
+  flex-basis: 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm .egm-node__icon svg { width: 13px; height: 13px; }
+html.is-desktop-modern .egm .egm-node__title { font-size: 13px; font-weight: 550; }
+html.is-desktop-modern .egm .egm-node__meta { font-size: 11.5px; font-weight: 450; }
+html.is-desktop-modern .egm .egm-chain__empty { padding: 14px 12px; border-radius: 10px; border-color: var(--dsk-edge-hi); font-size: 12.5px; font-weight: 450; color: var(--dsk-ink-3); }
+
+/* ══ PROPERTY DOSSIER — the same record, calm ═════════════════════════════ */
+html.is-desktop-modern :is(.egm-insp.egd-sheet, .egm-sheet.egd-sheet) {
+  --egd-cyan: var(--egk-property);
+  --egd-aqua: var(--egk-buyer);
+  --egd-gold: var(--egk-owner);
+  --egd-violet: var(--egk-entity);
+  --egd-amber: var(--egk-warn);
+  --egd-red: var(--egk-alert);
+  --egd-ink: var(--dsk-bg);
+  --egd-text: var(--dsk-ink);
+  --egd-text-2: var(--dsk-ink-2);
+  --egd-text-3: var(--dsk-ink-3);
+  --egd-glass: var(--dsk-tile);
+  --egd-glass-2: var(--dsk-tile);
+  --egd-edge: var(--dsk-edge);
+  --egd-edge-hi: var(--dsk-edge-hi);
+  --egd-blur: none;
+  --egd-r: 12px;
+}
+html.is-desktop-modern .egm-insp .egd {
+  --egd-cyan: var(--egk-property);
+  --egd-aqua: var(--egk-buyer);
+  --egd-gold: var(--egk-owner);
+  --egd-violet: var(--egk-entity);
+  --egd-amber: var(--egk-warn);
+  --egd-red: var(--egk-alert);
+  --egd-ink: var(--dsk-bg);
+  --egd-text: var(--dsk-ink);
+  --egd-text-2: var(--dsk-ink-2);
+  --egd-text-3: var(--dsk-ink-3);
+  --egd-glass: var(--dsk-tile);
+  --egd-glass-2: var(--dsk-tile);
+  --egd-edge: var(--dsk-edge);
+  --egd-edge-hi: var(--dsk-edge-hi);
+  --egd-blur: none;
+  --egd-r: 12px;
+  gap: 12px;
+  padding: 0 20px 16px;
+  font-family: var(--dsk-font);
+}
+html.is-desktop-modern .egm-insp .egd-rise { animation: none; }
+html.is-desktop-modern .egm-insp .egd-hero { min-height: 208px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--dsk-edge); animation: none; }
+html.is-desktop-modern .egm-insp .egd-hero.is-none { min-height: 150px; background: var(--dsk-tile); }
+html.is-desktop-modern .egm-insp .egd-hero__id h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; text-shadow: 0 1px 12px rgb(0 0 0 / 0.45); }
+html.is-desktop-modern .egm-insp .egd-hero__id p { font-size: 12.5px; }
+html.is-desktop-modern .egm-insp .egd-hero__badge { font-size: 11.5px; font-weight: 500; border-radius: 7px; }
+/* The facts over the photo: one spec line, not a row of pills. */
+html.is-desktop-modern .egm-insp .egd-hero__chips { gap: 0; }
+html.is-desktop-modern .egm-insp .egd-hero__chips span {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(247 249 253 / 0.86);
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
+}
+html.is-desktop-modern .egm-insp .egd-hero__chips span + span::before { content: '·'; margin: 0 7px; opacity: 0.7; }
+html.is-desktop-modern .egm-insp .egd .egd-glassbtn { min-height: 28px !important; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .egm-insp .egd .egd-glassbtn.is-on { background: rgb(10 14 22 / 0.72); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.4); }
+html.is-desktop-modern .egm-insp .egd-owner,
+html.is-desktop-modern .egm-insp .egd-sec { border: 0; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--dsk-edge); animation: none; }
+html.is-desktop-modern .egm-insp .egd-owner { padding: 12px; }
+html.is-desktop-modern .egm-insp .egd-owner__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsk-ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+}
+html.is-desktop-modern .egm-insp .egd-owner__body em,
+html.is-desktop-modern .egm-insp .egd-value__main > em,
+html.is-desktop-modern .egm-insp .egd-value__grid em { font-size: 11.5px; font-weight: 450; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm-insp .egd-owner__body strong { font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .egm-insp .egd .egd-alsobuyer { min-height: 32px !important; border-radius: 8px; font-size: 12.5px; font-weight: 500; background: var(--dsk-tile); }
+html.is-desktop-modern .egm-insp .egd-value {
+  gap: 16px;
+  padding: 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+/* The value is the dossier's key figure: large, tabular, label beneath. */
+html.is-desktop-modern .egm-insp .egd-value__main { display: flex; flex-direction: column; }
+html.is-desktop-modern .egm-insp .egd-value__main > strong { order: 0; margin: 0 0 2px; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .egm-insp .egd-value__main > em { order: 1; }
+html.is-desktop-modern .egm-insp .egd-value__grid { order: 2; margin-top: 14px; gap: 12px; }
+html.is-desktop-modern .egm-insp .egd-value__grid > span { display: flex; flex-direction: column-reverse; gap: 2px; }
+html.is-desktop-modern .egm-insp .egd-value__grid b { margin: 0; font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .egm-insp .egd-ring { width: 72px; height: 72px; }
+html.is-desktop-modern .egm-insp .egd-ring svg { filter: none; }
+html.is-desktop-modern .egm-insp .egd-ring__arc { stroke: var(--dsk-ink-2); animation-duration: 0.5s; }
+html.is-desktop-modern .egm-insp .egd-ring__label b { font-size: 16px; font-weight: 600; }
+html.is-desktop-modern .egm-insp .egd-ring__label small { font-size: 10.5px; letter-spacing: 0; text-transform: none; }
+/* Signals: neutral pills; the tone lives in the dot. */
+html.is-desktop-modern .egm-insp .egd-signals { gap: 6px; }
+html.is-desktop-modern .egm-insp .egd-signals span,
+html.is-desktop-modern .egm-insp .egd-signals :is(.is-alert, .is-warn, .is-info, .is-good) {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  border-color: var(--dsk-edge);
+}
+html.is-desktop-modern .egm-insp .egd-signals span::before { background: var(--dsk-ink-3); }
+html.is-desktop-modern .egm-insp .egd-signals .is-alert::before { background: var(--egk-alert); }
+html.is-desktop-modern .egm-insp .egd-signals .is-warn::before { background: var(--egk-warn); }
+html.is-desktop-modern .egm-insp .egd-signals .is-info::before { background: var(--egk-property); }
+html.is-desktop-modern .egm-insp .egd-signals .is-good::before { background: var(--egk-good); }
+html.is-desktop-modern .egm-insp .egd .egd-sec__head { min-height: 48px !important; padding: 0 14px; }
+html.is-desktop-modern .egm-insp .egd-sec__icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm-insp .egd-sec__icon svg { width: 13px; height: 13px; }
+html.is-desktop-modern .egm-insp .egd-sec__label { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm-insp .egd-sec__meta { font-size: 12px; }
+
+html.is-desktop-modern .egm-insp .egd-bar { gap: 8px; }
+html.is-desktop-modern .egm-insp .egd-bar button {
+  flex: 1 1 auto;
+  min-height: 34px !important;
+  gap: 6px !important;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 500;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .egm-insp .egd-bar svg { width: 14px; height: 14px; }
+html.is-desktop-modern .egm-insp .egd-bar__primary {
+  flex: 1.3 1 auto;
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .egm-insp .egd-bar__primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern .egm-insp .egd-bar__btn {
+  flex-direction: row;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm-insp .egd-bar__btn:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm-insp .egd-bar__btn svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm-insp .egd-bar__btn span { font-size: 12.5px; color: var(--dsk-ink); }
+html.is-desktop-modern .egm-insp .egd-skel > div,
+html.is-desktop-modern .egm-insp .egd-skel__row i { border-radius: 12px; background: var(--dsk-tile); animation: egk-breathe 2.4s ease-in-out infinite; }
+html.is-desktop-modern .egm-insp .egd-skel__hero { height: 208px; border-radius: 12px !important; }
+html.is-desktop-modern .egm-insp .egd-skel > .egd-skel__row { background: none; animation: none; }
+html.is-desktop-modern .egm-insp .egd-skel__row i { height: 52px; }
+
+/* ══ UNIVERSE (All) ══════════════════════════════════════════════════════ */
+html.is-desktop-modern .egm .egu { padding: 24px 24px 40px; scrollbar-width: thin; }
+html.is-desktop-modern .egm .egu__families { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 16px; }
+html.is-desktop-modern .egm .egu__family {
+  min-height: 148px !important;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--egk-card-shadow);
+  animation: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egu__family:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .egm .egu__family:active { transform: none; }
+html.is-desktop-modern .egm .egu__glow { display: none; }
+html.is-desktop-modern .egm :is(.egu__icon, .egu__insight-icon) {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .egm :is(.egu__icon, .egu__insight-icon) { background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(15, 17, 22, 0.03)); }
+html.is-desktop-modern .egm :is(.egu__icon, .egu__insight-icon) svg { width: 14px; height: 14px; }
+/* Each universe's size is a hero figure; the name and a one-line gloss under it. */
+html.is-desktop-modern .egm .egu__count { margin-top: 16px; font-size: 28px; font-weight: 600; line-height: 1.05; letter-spacing: -0.02em; }
+html.is-desktop-modern .egm .egu__label { margin-top: 2px; font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .egm .egu__line { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egu__eyebrow { margin: 32px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm .egu__insights { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 8px 16px; }
+html.is-desktop-modern .egm .egu__insight {
+  min-height: 56px !important;
+  padding: 10px 14px 10px 12px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: none;
+  animation: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .egm .egu__insight:hover:not(:disabled) { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egm .egu__insight-text b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm .egu__insight-text small { font-size: 11.5px; }
+html.is-desktop-modern .egm .egu__insight-num { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--dsk-ink); }
+html.is-desktop-modern .egm .egu__dots { background: var(--dsk-tile-hi); animation: egk-breathe 2.4s ease-in-out infinite; }
+
+/* ══ SHEETS over the desk (filters, campaign, columns, compare) ══════════ */
+html.is-desktop-modern .nx-mobile-sheet.egm-sheet:not(.egd-sheet) { font-family: var(--dsk-font); }
+html.is-desktop-modern .egm-sheet .egm-filters h4,
+html.is-desktop-modern .egm-sheet :is(.egf-presets h4, .egf-browse h4, .egf-segments h4, .egc-block > h4) {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .egm-sheet .egf-preset {
+  --tone: var(--dsk-accent);
+  height: 24px;
+  min-height: 24px !important;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egm-sheet .egf-preset:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egm-sheet .egf-preset.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
+}
+html.is-desktop-modern .egm-sheet .egf-preset svg,
+html.is-desktop-modern .egm-sheet .egf-segment__open svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern .egm-sheet :is(.egf-browse__group, .egf-segment) { border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egm-sheet .egf-browse__head { min-height: 44px !important; font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egm-sheet .egf-field { min-height: 34px !important; border-radius: 8px; font-size: 13px; }
+html.is-desktop-modern .egm-sheet .egf-field:hover { background: var(--dsk-hover); }
+html.is-desktop-modern .egm-sheet .egf-field.is-used,
+html.is-desktop-modern .egm-sheet .egf-field.is-used svg { color: var(--dsk-accent); }
+
+/* Sheet chrome and controls, desk-sized. */
+html.is-desktop-modern .nx-mobile-sheet.egm-sheet { border-radius: 14px !important; font-family: var(--dsk-font); }
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__header { padding: 18px 16px 14px 24px; }
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__title-wrap strong { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__title-wrap small { font-size: 12px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__close {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--dsk-ink-3) !important;
+}
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__close:hover { background: var(--dsk-hover) !important; color: var(--dsk-ink) !important; }
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__close svg { width: 14px; height: 14px; }
+html.is-desktop-modern .egm-sheet .nx-mobile-sheet__body { padding: 0 24px; }
+html.is-desktop-modern .egm-sheet .egm-fsection > h4,
+html.is-desktop-modern .egm-sheet .eg-ff__head strong {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .egm-sheet .eg-ff__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+html.is-desktop-modern .egm-sheet .eg-ff__head span { font-size: 12px; opacity: 1; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm-sheet .egm-field > span { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egm-sheet :is(.egm-field input, .egm-field select, .eg-ff-row__operator, .eg-ff-row__value, .eg-ff-row__range input) {
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  font-size: 13px;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .egm-sheet :is(.egm-field input, .egm-field select):focus {
+  outline: 0;
+  box-shadow: var(--egk-focus);
+}
+html.is-desktop-modern .egm-sheet .egm-chip {
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 40%, transparent);
+}
+html.is-desktop-modern .egm-sheet .egm-toggle { border-radius: 8px; font-size: 13px; }
+html.is-desktop-modern .egm-sheet .egm-cohorthead__count strong { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .egm-sheet .egm-filters__footer { padding: 14px 0 20px; }
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn {
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet) .egm-btn.is-primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern :is(.egm, .egm-sheet) .egm-btn.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsk-accent) 44%, #16171a); }
+html.is-desktop-modern[data-nexus-theme='light'] :is(.egm, .egm-sheet) .egm-btn.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsk-accent) 28%, #fff); }
+
+/* ══ CONSOLE: the list host and the relationship network ═════════════════ */
+html.is-desktop-modern .egx,
+html.is-desktop-modern .egx-landing { background: transparent; }
+html.is-desktop-modern :is(.egx, .egx-sheet, .egx-landing) {
+  --egx-owner: var(--egk-owner);
+  --egx-property: var(--egk-property);
+  --egx-entity: var(--egk-entity);
+  --egx-person: var(--egk-person);
+  --egx-contact: var(--egk-contact);
+  --egx-mailing: var(--egk-mailing);
+  --egx-related: var(--egk-related);
+  --egx-convo: var(--egk-good);
+  --egx-buyer: var(--egk-buyer);
+  --egx-text: var(--dsk-ink);
+  --egx-text-2: var(--dsk-ink-2);
+  --egx-text-3: var(--dsk-ink-3);
+  --egx-glass: var(--dsk-glass);
+  --egx-glass-strong: var(--dsk-glass-strong);
+  --egx-edge: var(--dsk-edge);
+  --egx-edge-hi: var(--dsk-edge-hi);
+  --egx-blur: var(--dsk-blur);
+  --egx-radius: 12px;
+  font-family: var(--dsk-font);
+}
+html.is-desktop-modern .egx .egx-fx,
+html.is-desktop-modern .egx-landing .egx-landing-fx { display: none; }
+html.is-desktop-modern .egx .egx-stage { background: transparent; }
+html.is-desktop-modern .egx .egx-stage::before { opacity: 0.5; }
+html.is-desktop-modern .egx-eyebrow { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+
+/* The network's page hero: back · title over one live line · tools. */
+html.is-desktop-modern .egx .egx-top-bar {
+  margin: 0;
+  padding: 18px 20px 14px 14px;
+  gap: 10px;
+  border-radius: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 -1px 0 var(--dsk-edge);
+}
+html.is-desktop-modern .egx .egx-top-bar__title { display: flex; flex-direction: column-reverse; gap: 4px; }
+html.is-desktop-modern .egx .egx-top-bar__title strong { font-size: 22px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+html.is-desktop-modern .egx .egx-top-bar__title .egx-eyebrow { font-size: 13px; }
+html.is-desktop-modern .egx .egx-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--dsk-ink-2);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .egx .egx-icon-btn:hover { background: var(--dsk-hover); color: var(--dsk-ink); }
+html.is-desktop-modern .egx .egx-icon-btn svg { width: 16px; height: 16px; }
+html.is-desktop-modern .egx .egx-layers { gap: 6px; padding: 12px 20px; }
+html.is-desktop-modern .egx .egx-layer {
+  height: 24px;
+  min-height: 24px;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  color: var(--dsk-ink-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .egx .egx-layer.is-on { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egx .egx-layer.is-on i { box-shadow: none; }
+html.is-desktop-modern .egx .egx-layer.is-select.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
+}
+/* Nodes keep their type colour (it encodes data) as a flat, muted disc:
+   no glossy orb, no spinning rim, no sheen, no molten core, no halo. */
+html.is-desktop-modern .egx .egx-node { animation: none; }
+html.is-desktop-modern .egx .egx-node .egx-node__orb,
+html.is-desktop-modern .egx .egx-node:not(.is-hub) .egx-node__orb,
+html.is-desktop-modern .egx .egx-node.is-hub .egx-node__orb {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--tone) 22%, rgb(var(--dsk-fill)));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--tone) 70%, transparent) !important;
+  animation: none !important;
+}
+html.is-desktop-modern .egx .egx-node__orb svg { color: color-mix(in srgb, var(--tone) 55%, var(--dsk-ink)); filter: none; }
+html.is-desktop-modern .egx :is(.egx-node__rim, .egx-node__sheen, .egx-hub-core, .egx-hub-sats) { display: none; }
+html.is-desktop-modern .egx .egx-edges circle[fill='url(#egx-halo)'] { display: none; }
+html.is-desktop-modern .egx .egx-node.is-hub .egx-node__orb { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--tone) 80%, transparent) !important; }
+html.is-desktop-modern .egx .egx-node.is-focus .egx-node__orb { box-shadow: inset 0 0 0 2px var(--tone), 0 0 0 5px color-mix(in srgb, var(--tone) 18%, transparent) !important; }
+html.is-desktop-modern .egx .egx-node.is-selected .egx-node__orb { box-shadow: inset 0 0 0 2px var(--dsk-accent), 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 22%, transparent) !important; }
+html.is-desktop-modern .egx .egx-node.is-anchor .egx-node__orb::after { animation: none; inset: -6px; border-width: 1px; opacity: 0.45; }
+html.is-desktop-modern .egx .egx-node__burst { display: none; }
+html.is-desktop-modern .egx .egx-node__label {
+  font-family: var(--dsk-font);
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+}
+html.is-desktop-modern .egx .egx-node.is-focus .egx-node__label { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egx .egx-node__label strong { font-weight: 550; }
+html.is-desktop-modern .egx .egx-node__label em { font-weight: 550; color: color-mix(in srgb, var(--tone) 70%, var(--dsk-ink)); }
+html.is-desktop-modern .egx .egx-node.is-hub .egx-node__label strong { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .egx .egx-node__flag { box-shadow: none !important; }
+/* Edges keep their one-time draw-in (they start at a full dash offset); a lit
+   edge stops flowing and glowing, its dashes simply hold still. */
+html.is-desktop-modern .egx .egx-edge.is-lit { animation: none; filter: none; stroke-width: 1.8; }
+html.is-desktop-modern .egx .egx-layer.is-on { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .egx .egx-ctl {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  color: var(--dsk-ink-2);
+}
+html.is-desktop-modern .egx .egx-ctl:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egx .egx-ctl svg { width: 15px; height: 15px; }
+html.is-desktop-modern .egx .egx-dock {
+  border-radius: 10px;
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+}
+html.is-desktop-modern .egx .egx-dock__btn { border-radius: 7px; }
+html.is-desktop-modern .egx .egx-dock__btn.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern .egx .egx-tracing__orb { animation: none; box-shadow: none; }
+
+/* The network inspector: a right-hand panel beside the stage, not a sheet. */
+@container pane (min-width: 860px) {
+  html.is-desktop-modern .egx .egx-sheet.nx-mobile-bottom-sheet {
+    position: absolute !important;
+    top: 132px !important;
+    right: 16px !important;
+    bottom: 16px !important;
+    left: auto !important;
+    width: 400px !important;
+    max-width: calc(100% - 32px) !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 14px !important;
+    transform: none !important;
+    animation: egk-in 0.22s var(--dsk-ease) both !important;
+    background: var(--dsk-glass-strong) !important;
+    -webkit-backdrop-filter: var(--dsk-blur) !important;
+    backdrop-filter: var(--dsk-blur) !important;
+    box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow) !important;
+  }
+  html.is-desktop-modern .egx .egx-sheet .nx-mobile-bottom-sheet__handle { display: none !important; }
+  html.is-desktop-modern .egx .egx-sheet .nx-mobile-bottom-sheet__body { height: 100%; overflow-y: auto; scrollbar-width: thin; }
+  html.is-desktop-modern .egx .egx-stage { margin-right: 424px; }
+}
+html.is-desktop-modern .egx-sheet .egx-insp { padding: 18px 20px 24px; }
+html.is-desktop-modern .egx-sheet .egx-insp__head h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egx-sheet .egx-insp__eyebrow { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .egx-sheet .egx-insp__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .egx-sheet .egx-insp__icon svg { width: 15px; height: 15px; }
+html.is-desktop-modern .egx-sheet .egx-kpi { padding: 12px 14px; border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egx-sheet .egx-kpi strong { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .egx-sheet .egx-kpi span { font-size: 11.5px; font-weight: 450; }
+html.is-desktop-modern .egx-sheet .egx-sec h3 { font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .egx-sheet .egx-sec h3 span { font-weight: 500; background: var(--dsk-tile-hi); }
+html.is-desktop-modern .egx-sheet :is(.egx-prow, .egx-rcard) { border-radius: 10px; }
+html.is-desktop-modern .egx-sheet .egx-more { min-height: 34px; border-radius: 9px; font-size: 12.5px; font-weight: 550; }
+html.is-desktop-modern .egx-sheet .egx-link { color: var(--dsk-ink); text-decoration: underline; text-decoration-color: var(--dsk-edge-hi); text-underline-offset: 3px; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__debt,
+html.is-desktop-modern .egx-sheet .egx-ltv__fill { box-shadow: none; filter: none; }
+html.is-desktop-modern .egx-sheet .egx-tl__dot { box-shadow: 0 0 0 2px var(--dsk-ink-3) !important; }
+
+/* The network inspector's cinematic layer, quieted: no liquid head, no
+   gradient text, no sheens, no underglows — the numbers carry it. */
+html.is-desktop-modern .egx-sheet .egx-insp__liquid { display: none; }
+html.is-desktop-modern .egx-sheet .egx-insp__head { animation: none; }
+html.is-desktop-modern .egx-sheet .egx-insp__head h2 {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .egx-sheet .egx-insp__head p { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egx-sheet :is(.egx-insp__icon, .egx-kpi, .egx-act.is-primary)::after { content: none; }
+html.is-desktop-modern .egx-sheet .egx-kpi::before { display: none; }
+html.is-desktop-modern .egx-sheet :is(.egx-kpi, .egx-sec, .egx-prow, .egx-rcard, .egx-person, .egx-entity, .egx-tl) { animation: none; }
+html.is-desktop-modern .egx-sheet .egx-kpi.is-eq strong,
+html.is-desktop-modern .egx-sheet .egx-kpi.is-debt strong { color: var(--dsk-ink); }
+html.is-desktop-modern .egx-sheet .egx-eqbar__track { height: 6px; background: var(--dsk-tile-hi); box-shadow: none; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__debt { background: var(--egk-mailing); animation: none; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__equity { background: color-mix(in srgb, var(--dsk-ink) 30%, transparent); background-image: none; animation: none; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__legend { font-size: 12px; font-weight: 450; }
+html.is-desktop-modern .egx-sheet .egx-eqbar__legend i.is-equity { background: color-mix(in srgb, var(--dsk-ink) 30%, transparent); }
+html.is-desktop-modern .egx-sheet .egx-ltv__fill { stroke: var(--dsk-ink-2); animation: none; }
+html.is-desktop-modern .egx-sheet .egx-ltv strong { font-size: 17px; font-weight: 600; }
+html.is-desktop-modern .egx-sheet .egx-facts { font-size: 12.5px; }
+html.is-desktop-modern .egx-sheet .egx-chip { height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 500; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .egx-sheet .egx-chip.is-warn { color: var(--egk-warn); background: var(--dsk-tile); }
+/* Tags as one spec line. */
+html.is-desktop-modern .egx-sheet .egx-tags { gap: 0; }
+html.is-desktop-modern .egx-sheet .egx-tags span { padding: 0; border-radius: 0; background: none; box-shadow: none; font-size: 12px; font-weight: 450; color: var(--dsk-ink-3); }
+html.is-desktop-modern .egx-sheet .egx-tags span + span::before { content: '·'; margin: 0 7px; }
+html.is-desktop-modern .egx-sheet .egx-tl__head strong { font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .egx-sheet .egx-tl__dot { animation: none !important; background: var(--dsk-bg); }
+html.is-desktop-modern .egx-sheet .egx-tl__dot::after { display: none; }
+html.is-desktop-modern .egx-sheet .egx-timeline::before { background: var(--dsk-edge-hi); opacity: 1; }
+html.is-desktop-modern .egx-sheet .egx-hero { height: 140px; border-radius: 12px; }
+html.is-desktop-modern .egx .egx-dock__count strong { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--dsk-ink); -webkit-text-fill-color: currentColor; }
+html.is-desktop-modern .egx .egx-dock__btn.is-primary::after { content: none; }
+
+/* Landing (search + largest networks) */
+html.is-desktop-modern .egx-landing .egx-landing__head { max-width: 720px; }
+html.is-desktop-modern .egx-landing .egx-landing__head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .egx-landing .egx-landing__head p { font-size: 13px; line-height: 1.55; color: var(--dsk-ink-2); }
+html.is-desktop-modern :is(.egx, .egx-landing) .egx-search__field {
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern :is(.egx, .egx-landing) .egx-net,
+html.is-desktop-modern :is(.egx, .egx-landing) .egx-result {
+  border-radius: 10px;
+  background: var(--dsk-glass);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  animation: none;
+}
+html.is-desktop-modern :is(.egx, .egx-landing) .egx-net__ring { animation: none; }
+html.is-desktop-modern :is(.egx, .egx-landing) .egx-result__icon { color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+
+/* ══ BUYER INSPECTOR (portalled) — a right-hand drawer on a desk ══════════ */
+html.is-desktop-modern .egb {
+  --egb-aqua: var(--egk-buyer);
+  --egb-green: var(--egk-good);
+  --egb-cyan: var(--egk-property);
+  --egb-amber: var(--egk-warn);
+  --egb-rose: var(--egk-alert);
+  --egb-violet: var(--egk-entity);
+  --egb-text: var(--dsk-ink);
+  --egb-text-2: var(--dsk-ink-2);
+  --egb-text-3: var(--dsk-ink-3);
+  --egb-glass: var(--dsk-glass-strong);
+  --egb-glass-strong: var(--dsk-glass-strong);
+  --egb-card: var(--dsk-tile);
+  --egb-card-hi: var(--dsk-tile-hi);
+  --egb-edge: var(--dsk-edge);
+  --egb-edge-hi: var(--dsk-edge-hi);
+  --egb-blur: var(--dsk-blur);
+  --egb-radius: 10px;
+  font-family: var(--dsk-font);
+}
+html.is-desktop-modern .egb .egb-field { display: none; }
+html.is-desktop-modern .egb .egb-sheet {
+  left: auto !important;
+  right: var(--dsk-gap, 10px) !important;
+  top: calc(var(--dsk-gap, 10px) * 2 + var(--dsk-top-h, 52px)) !important;
+  bottom: var(--dsk-gap, 10px) !important;
+  width: min(460px, calc(100vw - 40px)) !important;
+  height: auto !important;
+  max-height: none !important;
+  border-radius: 14px !important;
+  transform: none !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow) !important;
+}
+html.is-desktop-modern .egb .egb-grip { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .egm .egm-insp,
+  html.is-desktop-modern .egm :is(.egm-skeleton__row, .egq__ghost, .egu__dots),
+  html.is-desktop-modern .egm-insp :is(.egd-skel > div, .egd-skel__row i),
+  html.is-desktop-modern .egx .egx-sheet.nx-mobile-bottom-sheet { animation: none !important; }
+}

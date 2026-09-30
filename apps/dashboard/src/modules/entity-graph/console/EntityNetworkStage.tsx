@@ -99,7 +99,16 @@ export function EntityNetworkStage({ nodes, edges, anchorId, focusId, selected, 
   const band = useCallback(() => {
     const s = stageRef.current!.getBoundingClientRect()
     const sheet = document.querySelector('.egx-sheet') as HTMLElement | null
-    const sheetTop = sheet ? sheet.getBoundingClientRect().top - s.top : s.height * 0.66
+    const sr = sheet ? sheet.getBoundingClientRect() : null
+    // Desk: the inspector is a panel BESIDE the stage (entity-graph-desktop.css),
+    // not a sheet beneath it, so the band is the stage's full height, under the
+    // layer chips and left of the panel. A phone's sheet always spans the width.
+    if (sr && sr.width > 0 && sr.left >= s.left + s.width * 0.5) {
+      const chips = document.querySelector('.egx-layers') as HTMLElement | null
+      const top = chips ? Math.max(24, chips.getBoundingClientRect().bottom - s.top + 20) : 186
+      return { left: 24, right: Math.min(s.width - 58, sr.left - s.left - 24), top, bottom: Math.max(top + 200, s.height - 24), width: s.width, height: s.height }
+    }
+    const sheetTop = sr ? sr.top - s.top : s.height * 0.66
     return { left: 12, right: s.width - 58, top: 186, bottom: Math.max(260, Math.min(s.height, sheetTop) - 14), width: s.width, height: s.height }
   }, [])
 

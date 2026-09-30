@@ -3,7 +3,7 @@
  * compare, and search/filter controls. Portaled to <body>, so each root
  * carries the theme tokens itself (.bmx-sheet).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
@@ -49,8 +49,10 @@ function Gauge({ value, label }: { value: number | null; label: string }) {
   )
 }
 
-export function BuyerInspector({ b, w, theme, shortlisted, onShortlist, onClose, onGraph, onMap, onProperty }: {
+export function BuyerInspector({ b, w, theme, shortlisted, docked = false, onShortlist, onClose, onGraph, onMap, onProperty }: {
   b: MatchedBuyer; w: BuyerMatchWorkspace; theme: string; shortlisted: boolean
+  /** Desk: render inline beside the buyer list (not portalled, no scrim). */
+  docked?: boolean
   onShortlist: () => void; onClose: () => void; onGraph: () => void
   onMap: (label: string, tone: 'buyer' | 'portfolio', points: Array<{ lat: number | null | undefined; lng: number | null | undefined; label?: string | null; id?: string }>) => void
   onProperty: (propertyId: string) => void
@@ -67,15 +69,44 @@ export function BuyerInspector({ b, w, theme, shortlisted, onShortlist, onClose,
     return () => ctl.abort()
   }, [b.id])
 
+  // Docked on a desk there is no scrim to click away: Escape closes it, unless
+  // a modal sheet (compare, filters) is on top, or the key was meant for
+  // another pane / a field elsewhere (split panes all listen for Escape).
+  const dockRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!docked) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (document.querySelector('.bmx-sheet:not(.is-docked)')) return
+      const root = dockRef.current
+      const target = e.target instanceof HTMLElement ? e.target : null
+      if (root && target && target !== document.body && !root.contains(target)) {
+        if (target.closest('input, textarea, select, [contenteditable="true"]')) return
+        const pane = root.closest('.dsk-pane')
+        if (pane && !pane.contains(target)) return
+      }
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [docked, onClose])
+
+  // Docked, the inspector stays mounted while the operator walks the list, so
+  // a different buyer starts at its evidence (and the top), not where the
+  // previous buyer was left.
+  useEffect(() => {
+    if (!docked) return
+    setTab('why')
+    dockRef.current?.parentElement?.scrollTo({ top: 0 })
+  }, [b.id, docked])
+
   const title = buyerTitle(b)
   const purchases = [...(profile?.purchases ?? [])].sort((x, y) => String(y.date ?? '').localeCompare(String(x.date ?? '')))
   const win = w.subject.window
 
-  return createPortal(
-    <div className="bmx-sheet is-inspector" data-theme={theme} role="dialog" aria-label={`${title} — buyer intelligence`}>
-      <button type="button" className="bmx-sheet__scrim" aria-label="Close" onClick={onClose} />
+  const panel = (
       <div className="bmx-sheet__panel">
-        <div className="bmx-sheet__grab" />
+        {docked ? null : <div className="bmx-sheet__grab" />}
         <div className={cls('bmx-insp__head', `t-${b.tier}`)}>
           <div>
             <span className={cls('bmx-tier', `t-${b.tier}`)}>{TIER_LABEL[b.tier]}</span>
@@ -234,6 +265,20 @@ export function BuyerInspector({ b, w, theme, shortlisted, onShortlist, onClose,
           <button type="button" className="bmx-btn" onClick={onGraph}><Icon name="radar" />Entity Graph</button>
         </div>
       </div>
+  )
+
+  if (docked) {
+    return (
+      <div ref={dockRef} className="bmx-sheet is-inspector is-docked" data-theme={theme} role="region" aria-label={`${title} — buyer intelligence`}>
+        {panel}
+      </div>
+    )
+  }
+
+  return createPortal(
+    <div className="bmx-sheet is-inspector" data-theme={theme} role="dialog" aria-label={`${title} — buyer intelligence`}>
+      <button type="button" className="bmx-sheet__scrim" aria-label="Close" onClick={onClose} />
+      {panel}
     </div>,
     document.body,
   )
