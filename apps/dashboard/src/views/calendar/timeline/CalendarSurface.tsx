@@ -9,6 +9,7 @@ import {
 } from '../../../domain/calendar/calendar-timeline-api'
 import { AttentionList, DayStrip, DayTimeline, EventSheet, MonthGrid, WeekList, cls } from './CalendarParts'
 import './calendar-surface.css'
+import './calendar-desktop.css'
 
 /**
  * CALENDAR — the acquisition operation organised through time (mobile).

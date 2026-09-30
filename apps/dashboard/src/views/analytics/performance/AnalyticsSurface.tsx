@@ -20,6 +20,7 @@ import { RANGES, fetchAnalyticsPerformance } from '../../../domain/analytics/ana
 import { AnalyticsGeo, type GeoSelection, type GeoView, type GeoViz } from './AnalyticsGeo'
 import { Campaigns, Changes, CohortSheet, Count, DownFunnel, Flow, Hero, MarketInspector, Method, Operations, Story, Trend, cls, periodLabel, type CohortItem } from './AnalyticsParts'
 import './analytics-surface.css'
+import './analytics-desktop.css'
 
 const readTheme = () => (typeof document === 'undefined' ? 'dark' : document.documentElement.getAttribute('data-nexus-theme') || 'dark')
 const RANGE_KEY = 'anx:range:v1'

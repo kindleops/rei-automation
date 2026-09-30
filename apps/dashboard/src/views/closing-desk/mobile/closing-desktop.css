@@ -1,0 +1,691 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   CLOSING DESK · DESKTOP
+   The execution surface, finished for a desk: the desk's figures in the
+   header, the next closing beside what needs attention, every live closing
+   as a grid of glass cards (radius 14, hairline + a 1px contact shadow), and
+   the transaction room as a right-side panel that floats inside the desk's
+   own pane (anchored to it — the room is portaled to <body>). Rows are
+   floating plates without rule lines; status reads by word and a small dot;
+   colour only marks exceptions. Scoped to :root.is-desktop-modern so a phone
+   never matches; composition follows the desk's own width (container: cd2)
+   and its pane (container: pane); under ~700px of pane the phone composition
+   stays.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) {
+  --cdd-good: #4ade9a;
+  --cdd-warn: #f0b64a;
+  --cdd-bad: #ff7b86;
+  --cdd-info: #8fb0e0;
+  --cdd-solid: color-mix(in srgb, var(--dsk-bg) 55%, rgb(var(--dsk-fill)));
+  --cdd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  --cdd-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12);
+  --cdd-halo: 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --cdd-primary: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  --cdd-primary-hi: color-mix(in srgb, var(--dsk-accent) 44%, #16171a);
+  --cdd-primary-ink: #fff;
+  --cdd-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --k-ink: var(--dsk-bg);
+  --k-text: var(--dsk-ink);
+  --k-text-2: var(--dsk-ink-2);
+  --k-text-3: var(--dsk-ink-3);
+  --k-edge: var(--dsk-edge);
+  --k-edge-hi: var(--dsk-edge-hi);
+  --k-glass: var(--dsk-glass);
+  --k-glass-hi: var(--dsk-glass-strong);
+  --k-track: var(--dsk-tile);
+  --k-blur: var(--dsk-blur);
+  --k-display: var(--dsk-font);
+  --k-cobalt: var(--dsk-ink-2);
+  --k-violet: var(--dsk-ink-2);
+  --k-gold: var(--cdd-warn);
+  --k-good: var(--cdd-good);
+  --k-bad: var(--cdd-bad);
+  --k-ext: var(--cdd-info);
+  --k-spec: none;
+  --k-rim: none;
+  font-family: var(--dsk-font);
+  font-size: 13px;
+  letter-spacing: -0.003em;
+}
+:root.is-desktop-modern[data-nexus-theme='light'] :is(.cd2, .cd2-room, .cd2-sheet) {
+  --cdd-good: #15803d;
+  --cdd-warn: #a16207;
+  --cdd-bad: #c43b3b;
+  --cdd-info: #3d6aa8;
+  --cdd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
+  --cdd-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(15 17 22 / 0.08);
+  --cdd-primary: color-mix(in srgb, var(--dsk-accent) 20%, #fff);
+  --cdd-primary-hi: color-mix(in srgb, var(--dsk-accent) 28%, #fff);
+  --cdd-primary-ink: #0b0c0e;
+}
+
+/* ── the surface ─────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .cd2 {
+  --cdd-cap: 1320px;
+  container: cd2 / inline-size;
+  background: transparent;
+  gap: 16px;
+  padding: 24px max(28px, calc((100cqw - var(--cdd-cap)) / 2)) 56px;
+  scrollbar-width: thin;
+  transition: padding-right 0.22s var(--dsk-ease);
+}
+:root.is-desktop-modern .cd2::before,
+:root.is-desktop-modern .cd2-room::before { display: none; }
+:root.is-desktop-modern .cd2 > .cd2-room.is-loading { display: none; }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) :is(.cd2-next, .cd2-list > li, .cd2-sec__body) { animation: cdd-in 0.2s var(--dsk-ease) both !important; animation-delay: 0s !important; }
+@keyframes cdd-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* one glass for every card */
+:root.is-desktop-modern :is(.cd2, .cd2-room) :is(.cd2-next, .cd2-card, .cd2-hero, .cd2-block, .cd2-sec, .cd2-nextact, .cd2-final, .cd2-state) {
+  border: 0 !important;
+  border-radius: 14px;
+  background: var(--dsk-glass) !important;
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--cdd-card);
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room) :is(.cd2-next, .cd2-card) { transition: box-shadow 0.15s ease, background 0.15s ease; }
+:root.is-desktop-modern :is(.cd2, .cd2-room) :is(.cd2-next, .cd2-card):hover { background: color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-hover)) !important; box-shadow: var(--cdd-card-hi); }
+/* focus: a 1px accent line and a soft 3px halo */
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) :is(button, select, summary):focus-visible {
+  outline: 1px solid var(--dsk-accent);
+  outline-offset: 0;
+  box-shadow: var(--cdd-halo) !important;
+}
+
+/* ── page header: title, and the desk's figures ─────────────────────────── */
+:root.is-desktop-modern .cd2-head { gap: 8px; padding: 0; }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-eyebrow {
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-eyebrow i { width: 6px; height: 6px; background: var(--dsk-ink-3); box-shadow: none; }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-demo {
+  margin-left: 2px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0;
+  color: var(--cdd-warn);
+  background: color-mix(in srgb, var(--cdd-warn) 12%, transparent);
+}
+:root.is-desktop-modern .cd2-head h1 { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; }
+:root.is-desktop-modern .cd2-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin-top: 8px; }
+/* each count: a big tabular figure with its label under it (and a filter) */
+:root.is-desktop-modern .cd2 .cd2-count {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px 16px 12px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-3);
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--cdd-card);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+:root.is-desktop-modern .cd2 .cd2-count:hover { background: color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-hover)); box-shadow: var(--cdd-card-hi); }
+:root.is-desktop-modern .cd2 .cd2-count b { font-family: var(--dsk-font); font-size: 28px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--dsk-ink); }
+:root.is-desktop-modern .cd2 :is(.cd2-count.is-ext, .cd2-count.is-good, .cd2-count.is-gold):not(.is-zero) b { color: var(--dsk-ink); }
+:root.is-desktop-modern .cd2 .cd2-count.is-bad:not(.is-zero) b { color: var(--cdd-warn); }
+:root.is-desktop-modern .cd2 .cd2-count.is-zero { opacity: 1; }
+:root.is-desktop-modern .cd2 .cd2-count.is-zero b { color: var(--dsk-ink-3); }
+@container cd2 (min-width: 720px) {
+  :root.is-desktop-modern .cd2-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: end; column-gap: 24px; row-gap: 6px; }
+  :root.is-desktop-modern .cd2-head > .cd2-eyebrow { grid-column: 1; grid-row: 1; }
+  :root.is-desktop-modern .cd2-head > h1 { grid-column: 1; grid-row: 2; }
+  :root.is-desktop-modern .cd2-head > .cd2-counts { grid-column: 2; grid-row: 1 / span 2; display: flex; justify-content: flex-end; margin-top: 0; }
+  :root.is-desktop-modern .cd2-head > .cd2-counts .cd2-count { min-width: 112px; }
+}
+
+/* ── headings, text, links ───────────────────────────────────────────────── */
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-h2 {
+  margin: 0 2px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--dsk-ink);
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-h2 span { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-h2.is-bad { color: var(--cdd-bad); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-h2.is-gold { color: var(--dsk-ink); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-muted { max-width: 72ch; margin: 2px; font-size: 12.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2 .cd2-none { margin: 0; padding: 28px 16px; text-align: center; font-size: 13px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-prov { max-width: 72ch; margin: 4px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-degraded {
+  gap: 8px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cdd-warn) 26%, var(--dsk-edge));
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-degraded svg { color: var(--cdd-warn); width: 14px !important; height: 14px !important; margin-top: 1px; }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-link {
+  min-height: 0;
+  gap: 3px;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-link:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-link svg { width: 13px !important; height: 13px !important; }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-btn {
+  min-height: 0;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+}
+
+/* ── status chips (20px), stage facts, mini rail ─────────────────────────── */
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill {
+  --pc: var(--dsk-ink-3);
+  gap: 6px;
+  height: 20px;
+  padding: 0 7px 0 6px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill::before { width: 6px; height: 6px; background: var(--pc); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill.is-blocked { --pc: var(--cdd-bad); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill.is-attention { --pc: var(--cdd-warn); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill.is-external { --pc: var(--cdd-info); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill.is-active { --pc: var(--dsk-ink-2); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill.is-ready { --pc: var(--cdd-good); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-pill.is-closed { --pc: var(--dsk-ink-2); }
+:root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) .cd2-stage { font-size: 12.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini { gap: 4px; }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini li { gap: 6px; }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini i { height: 3px; border-radius: 3px; background: var(--dsk-tile-hi); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini li.is-complete i { background: color-mix(in srgb, var(--dsk-ink-2) 70%, transparent); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) :is(.cd2-mini li.is-active, .cd2-mini li.is-waiting) i { background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 75%, transparent) 50%, var(--dsk-tile-hi) 50%); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini li.is-blocked i { background: var(--cdd-bad); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini span { font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini li.is-complete span { color: var(--dsk-ink-2); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-mini li.is-blocked span { color: var(--cdd-bad); font-weight: 550; }
+
+/* ── the next closing ────────────────────────────────────────────────────── */
+:root.is-desktop-modern .cd2 .cd2-next { gap: 2px; padding: 20px; border-radius: 14px; }
+:root.is-desktop-modern .cd2-next__eyebrow { font-size: 12.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-next.is-blocked .cd2-next__eyebrow { color: var(--cdd-bad); }
+:root.is-desktop-modern .cd2-next.is-attention .cd2-next__eyebrow { color: var(--cdd-warn); }
+:root.is-desktop-modern .cd2-next__when { margin-top: 6px; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cd2-next__alt { font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-next__addr { margin-top: 14px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+:root.is-desktop-modern .cd2-next__city { margin-bottom: 12px; font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-next .cd2-pill { margin-bottom: 16px; }
+:root.is-desktop-modern .cd2-next__action { margin-top: auto; padding-top: 0; border-top: 0; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2 .cd2-next .cd2-mini + .cd2-next__action { margin-top: 16px; }
+:root.is-desktop-modern .cd2-next__action em { margin-right: 8px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-next__action b { color: var(--dsk-ink-2); font-weight: 500; }
+
+/* ── needs attention: one card, floating row plates, a dot per row ──────── */
+:root.is-desktop-modern .cd2 .cd2-attn {
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--cdd-card);
+}
+:root.is-desktop-modern .cd2 .cd2-attn__row {
+  grid-template-columns: 6px minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 0 !important;
+  border-radius: 10px;
+  background: transparent !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  transition: background 0.12s ease;
+}
+:root.is-desktop-modern .cd2 .cd2-attn__row:hover { background: var(--dsk-hover) !important; }
+:root.is-desktop-modern .cd2 .cd2-attn__row > i { width: 6px; height: 6px; background: var(--cdd-warn); box-shadow: none; }
+:root.is-desktop-modern .cd2 .cd2-attn__row.is-bad > i { background: var(--cdd-bad); box-shadow: none; }
+:root.is-desktop-modern .cd2 .cd2-attn__row span { gap: 2px; }
+:root.is-desktop-modern .cd2 .cd2-attn__row b { font-size: 14px; font-weight: 550; line-height: 1.35; }
+:root.is-desktop-modern .cd2 .cd2-attn__row small { font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2 .cd2-attn__row em { padding: 0; border-radius: 0; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); background: none; }
+
+/* ── toolbar, search, filter chips ───────────────────────────────────────── */
+:root.is-desktop-modern .cd2 .cd2-toolbar { gap: 12px; }
+:root.is-desktop-modern .cd2 .cd2-toolbar .cd2-h2 { margin-bottom: 0; }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-icon {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-icon:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-icon.is-on { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-icon svg { width: 14px !important; height: 14px !important; }
+:root.is-desktop-modern .cd2 .cd2-sort select {
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 0;
+  border-radius: 8px;
+  font-family: var(--dsk-font);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink);
+  /* !important: the light theme's global form rule paints every select with !important */
+  background: var(--dsk-tile) var(--cdd-chevron) no-repeat right 10px center !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi) !important;
+  cursor: pointer;
+}
+:root.is-desktop-modern .cd2 .cd2-search {
+  height: 34px;
+  margin: 12px 0 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  font-family: var(--dsk-font);
+  font-size: 13px;
+  background: var(--dsk-tile) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi) !important;
+}
+:root.is-desktop-modern .cd2 .cd2-search:focus { outline: none; box-shadow: inset 0 0 0 1px var(--dsk-accent), var(--cdd-halo) !important; }
+:root.is-desktop-modern .cd2 .cd2-chips { flex-wrap: wrap; gap: 6px; margin: 12px 0 16px; padding: 0; overflow: visible; }
+:root.is-desktop-modern .cd2 .cd2-chip {
+  min-height: 0;
+  height: 24px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+:root.is-desktop-modern .cd2 .cd2-chip:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+:root.is-desktop-modern .cd2 .cd2-chip.is-on { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, var(--dsk-edge-hi)); }
+
+/* ── closing cards ───────────────────────────────────────────────────────── */
+:root.is-desktop-modern .cd2 .cd2-list { gap: 12px; }
+:root.is-desktop-modern .cd2 .cd2-card { gap: 2px; padding: 18px; border-radius: 14px; }
+:root.is-desktop-modern .cd2 .cd2-card::after { display: none; }
+:root.is-desktop-modern .cd2 .cd2-card.is-terminated { opacity: 0.62; }
+:root.is-desktop-modern .cd2-card__top { margin-bottom: 10px; }
+:root.is-desktop-modern .cd2-card__addr { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+:root.is-desktop-modern .cd2-card__city { font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-card__when { margin: 10px 0 12px; font-size: 13px; font-weight: 500; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cd2-card__when b { font-family: var(--dsk-font); font-weight: 600; color: var(--dsk-ink); }
+:root.is-desktop-modern .cd2-card__when em { color: var(--cdd-warn); }
+:root.is-desktop-modern .cd2-card__next { gap: 8px; margin-top: auto; padding-top: 0; border-top: 0; font-size: 13px; }
+:root.is-desktop-modern .cd2 .cd2-card .cd2-mini + .cd2-card__next,
+:root.is-desktop-modern .cd2 .cd2-card .cd2-card__when + .cd2-card__next { margin-top: 16px; }
+:root.is-desktop-modern .cd2-card__next em { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-card__next span { color: var(--dsk-ink-2); line-height: 1.45; }
+:root.is-desktop-modern .cd2-card__next b { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-card__next.is-bad span { color: var(--cdd-bad); font-weight: 550; }
+
+/* ── calm states ─────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .cd2 .cd2-state { gap: 8px; padding: 48px 24px; }
+:root.is-desktop-modern .cd2 .cd2-state strong { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+:root.is-desktop-modern .cd2 .cd2-state p { max-width: 52ch; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2 .cd2-empty-mark { width: 28px; height: 28px; margin-bottom: 6px; border-radius: 0; color: var(--dsk-ink); background: none; box-shadow: none; opacity: 0.35; }
+:root.is-desktop-modern .cd2 .cd2-empty-mark svg { width: 28px !important; height: 28px !important; }
+:root.is-desktop-modern .cd2 .cd2-state.is-error > svg { width: 28px !important; height: 28px !important; margin-bottom: 6px; color: var(--dsk-ink); opacity: 0.35; }
+:root.is-desktop-modern .cd2 .cd2-state .cd2-btn { margin-top: 8px; }
+:root.is-desktop-modern .cd2 :is(.cd2-skel__hero, .cd2-skel__card) { border-radius: 14px; background: var(--dsk-glass); box-shadow: var(--cdd-card); }
+:root.is-desktop-modern .cd2 .cd2-skel__hero { height: 200px; background: linear-gradient(90deg, var(--dsk-glass), color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-tile-hi)), var(--dsk-glass)); background-size: 200% 100%; animation: cdd-shimmer 2.4s ease-in-out infinite !important; }
+:root.is-desktop-modern .cd2 .cd2-skel__card { gap: 10px; padding: 18px; }
+:root.is-desktop-modern :is(.cd2, .cd2-room) .cd2-skel__card i { border-radius: 5px; background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 200% 100%; animation: cdd-shimmer 2.4s ease-in-out infinite !important; }
+@keyframes cdd-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* ══ composition by width ══════════════════════════════════════════════════
+   Cards wrap by the desk's own width (container: cd2); the two-column desk
+   needs a wide pane with no room open — an open room takes its width. */
+@container cd2 (min-width: 640px) {
+  :root.is-desktop-modern .cd2 .cd2-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: stretch; }
+  :root.is-desktop-modern .cd2 .cd2-list > li { display: flex; min-width: 0; }
+  :root.is-desktop-modern .cd2 .cd2-list .cd2-card { flex: 1; }
+  :root.is-desktop-modern .cd2 .cd2-search { max-width: 440px; }
+}
+@container pane (min-width: 1100px) {
+  /* list and detail side by side: the open room's width is reserved */
+  :root.is-desktop-modern:has(body > .cd2-room) .cd2 { padding-right: calc(min(640px, 100cqw - 20px) + 34px); }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-auto-rows: max-content;
+    column-gap: 16px;
+    row-gap: 16px;
+    align-content: start;
+    align-items: start;
+  }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 > * { grid-column: 1 / -1; min-width: 0; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 > .cd2-head { margin-bottom: 8px; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 > .cd2-next { grid-column: 1; align-self: stretch; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 > section[aria-label='Needs attention'] { grid-column: 2; align-self: stretch; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 > section[aria-label='Needs attention'] .cd2-attn { flex: 1; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2:not(:has(> .cd2-next)) > section[aria-label='Needs attention'],
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2:not(:has(> section[aria-label='Needs attention'])) > .cd2-next { grid-column: 1 / -1; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2:not(:has(> .cd2-next)) > section[aria-label='Needs attention'] .cd2-attn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
+  :root.is-desktop-modern:not(:has(body > .cd2-room)) .cd2 > .cd2-state.is-empty { padding: 64px 24px; }
+}
+
+/* ══ TRANSACTION ROOM — portaled; it floats inside the desk's own pane ═════ */
+:root.is-desktop-modern .dsk-pane__body:has(.cd2) { anchor-name: --cd2-pane; }
+
+:root.is-desktop-modern .cd2-room {
+  position: fixed;
+  position-anchor: --cd2-pane;
+  inset: auto;
+  top: calc(anchor(--cd2-pane top, calc(var(--dsk-top-h) + var(--dsk-gap) * 2)) + 10px);
+  right: calc(anchor(--cd2-pane right, var(--dsk-gap)) + 10px);
+  bottom: calc(anchor(--cd2-pane bottom, var(--dsk-gap)) + 10px);
+  left: auto;
+  width: min(640px, calc(anchor-size(--cd2-pane width, calc(100vw - var(--dsk-inset-left) - var(--dsk-gap))) - 20px));
+  /* it lives inside its pane: above the panes, below the desktop chrome (170–190),
+     so the ⌘K palette and the top-bar popovers still open over it */
+  z-index: 160;
+  border-radius: 14px;
+  overflow: hidden;
+  contain: layout;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 28px 70px -30px rgb(0 0 0 / 0.75), 0 2px 10px -4px rgb(0 0 0 / 0.45);
+  animation: cdd-panel-in 0.22s var(--dsk-ease) both;
+}
+:root.is-desktop-modern[data-nexus-theme='light'] .cd2-room { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 28px 70px -34px rgb(20 24 34 / 0.3), 0 2px 10px -4px rgb(20 24 34 / 0.12); }
+@keyframes cdd-panel-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+
+:root.is-desktop-modern .cd2-room .cd2-room__scroll { gap: 12px; padding: 0 20px 84px; scrollbar-width: thin; }
+:root.is-desktop-modern .cd2-room .cd2-room__bar {
+  top: 0;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  margin: 0 -20px 4px;
+  padding: 10px 16px 10px 12px;
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--dsk-glass-strong) 88%, transparent);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 -1px 0 var(--dsk-edge);
+}
+:root.is-desktop-modern .cd2-room .cd2-room__bar .cd2-eyebrow { justify-self: start; }
+:root.is-desktop-modern .cd2-room .cd2-room__bar .cd2-stage { padding: 0 7px; height: 20px; line-height: 20px; border-radius: 6px; font-size: 11.5px; color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .cd2-room .cd2-room__state { color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-room__state > svg { width: 28px !important; height: 28px !important; opacity: 0.35; color: var(--dsk-ink); }
+:root.is-desktop-modern .cd2-room .cd2-skel__card { display: flex; flex-direction: column; gap: 10px; width: 100%; padding: 18px; border-radius: 14px; background: var(--dsk-glass); box-shadow: var(--cdd-card); }
+:root.is-desktop-modern .cd2-room .cd2-skel__card i { height: 10px; }
+
+:root.is-desktop-modern .cd2-room .cd2-hero { gap: 4px; padding: 20px; }
+:root.is-desktop-modern .cd2-room .cd2-hero__lead { font-size: 12.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-hero__lead.is-blocked { color: var(--cdd-bad); }
+:root.is-desktop-modern .cd2-room .cd2-hero__lead.is-attention { color: var(--cdd-warn); }
+:root.is-desktop-modern .cd2-room .cd2-hero h1 { margin: 4px 0 0; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -0.02em; }
+:root.is-desktop-modern .cd2-room .cd2-hero__city { margin: 2px 0 12px; font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-hero__row { gap: 10px; }
+:root.is-desktop-modern .cd2-room .cd2-hero__when { gap: 2px; margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .cd2-room .cd2-hero__when b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cd2-room .cd2-hero__when span { font-size: 12.5px; color: var(--dsk-ink-3); }
+/* facts as a spec line, dot-separated */
+:root.is-desktop-modern .cd2-room .cd2-hero__facts { gap: 0; margin-top: 14px; }
+:root.is-desktop-modern .cd2-room .cd2-hero__facts li { gap: 0; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-hero__facts li + li::before { content: '·'; margin: 0 8px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-hero__facts svg { display: none; }
+
+:root.is-desktop-modern .cd2-room .cd2-nextact { gap: 8px; padding: 18px; }
+:root.is-desktop-modern .cd2-room .cd2-nextact small { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-nextact strong { font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: -0.01em; }
+:root.is-desktop-modern .cd2-room .cd2-nextact.is-bad strong { color: var(--cdd-bad); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-owner { gap: 6px; font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-owner::before { width: 6px; height: 6px; background: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room.is-blocked .cd2-owner::before { background: var(--cdd-bad); }
+:root.is-desktop-modern .cd2-room.is-attention .cd2-owner::before { background: var(--cdd-warn); }
+
+:root.is-desktop-modern .cd2-room .cd2-block { gap: 8px; padding: 18px; }
+:root.is-desktop-modern .cd2-room .cd2-blocker {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cdd-bad) 5%, var(--dsk-tile));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cdd-bad) 24%, transparent);
+}
+:root.is-desktop-modern .cd2-room .cd2-blocker strong { font-size: 14px; font-weight: 600; }
+:root.is-desktop-modern .cd2-room .cd2-blocker p { max-width: 72ch; font-size: 13px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-reqs ul { gap: 2px; }
+:root.is-desktop-modern .cd2-room .cd2-reqs li { min-height: 36px; gap: 2px 10px; padding: 6px 4px; font-size: 13px; border: 0; }
+:root.is-desktop-modern .cd2-room .cd2-reqs li i { width: 18px; height: 18px; border-width: 1px; border-color: var(--dsk-edge-hi); }
+:root.is-desktop-modern .cd2-room .cd2-reqs li.is-met i { background: color-mix(in srgb, var(--dsk-ink-2) 85%, transparent); color: var(--cdd-solid); }
+:root.is-desktop-modern .cd2-room .cd2-reqs li.is-met i svg { width: 11px !important; height: 11px !important; }
+:root.is-desktop-modern .cd2-room .cd2-reqs li:not(.is-met) span { font-weight: 550; }
+:root.is-desktop-modern .cd2-room .cd2-reqs li small { font-size: 12.5px; color: var(--cdd-warn); }
+:root.is-desktop-modern .cd2-room .cd2-reqs.is-emphasis { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12); }
+:root.is-desktop-modern .cd2-room .cd2-reqs.is-ready .cd2-h2 { color: var(--cdd-good); }
+
+/* disclosure sections: cards with a quiet header */
+:root.is-desktop-modern .cd2-room .cd2-sec { border-radius: 14px; }
+:root.is-desktop-modern .cd2-room .cd2-sec__head { grid-template-columns: 16px auto minmax(0, 1fr) 14px; gap: 12px; min-height: 48px; padding: 12px 18px; border-radius: 14px; transition: background 0.12s ease; }
+:root.is-desktop-modern .cd2-room .cd2-sec__head:hover { background: var(--dsk-hover); }
+:root.is-desktop-modern .cd2-room .cd2-sec.is-open .cd2-sec__head { border-radius: 14px 14px 0 0; }
+:root.is-desktop-modern .cd2-room .cd2-sec__head svg:first-child { width: 14px !important; height: 14px !important; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-sec__head b { font-size: 13px; font-weight: 600; }
+:root.is-desktop-modern .cd2-room .cd2-sec__head span { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-sec__head svg:last-child { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); transition: transform 0.2s var(--dsk-ease); }
+:root.is-desktop-modern .cd2-room .cd2-sec__body { padding: 0 18px 18px; }
+
+:root.is-desktop-modern .cd2-room .cd2-rail li { grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; padding: 6px 0 12px; }
+:root.is-desktop-modern .cd2-room .cd2-rail li::before { left: 10.5px; top: 30px; width: 1px; background: var(--dsk-edge-hi); }
+:root.is-desktop-modern .cd2-room .cd2-rail li.is-complete::before { background: color-mix(in srgb, var(--dsk-ink-2) 40%, transparent); }
+:root.is-desktop-modern .cd2-room .cd2-rail li > i { width: 22px; height: 22px; border-width: 1px; border-color: var(--dsk-edge-hi); color: var(--dsk-ink-3); background: var(--cdd-solid); }
+:root.is-desktop-modern .cd2-room .cd2-rail li > i svg { width: 11px !important; height: 11px !important; }
+:root.is-desktop-modern .cd2-room .cd2-rail li.is-complete > i { background: color-mix(in srgb, var(--dsk-ink-2) 85%, transparent); border-color: transparent; color: var(--cdd-solid); }
+:root.is-desktop-modern .cd2-room .cd2-rail li.is-active > i { border-color: var(--dsk-accent); color: var(--dsk-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent); }
+:root.is-desktop-modern .cd2-room .cd2-rail li.is-waiting > i { border-color: var(--dsk-ink-2); color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-rail li.is-blocked > i { background: var(--cdd-bad); border-color: transparent; color: var(--cdd-solid); }
+:root.is-desktop-modern .cd2-room .cd2-rail li > div { gap: 2px; }
+:root.is-desktop-modern .cd2-room .cd2-rail b { font-size: 13px; font-weight: 600; }
+:root.is-desktop-modern .cd2-room .cd2-rail span { font-size: 12.5px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-rail time { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+
+/* key/value specs: aligned rows, no rule lines */
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-dl > div { gap: 16px; padding: 6px 0; border: 0; }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-dl dt { font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-dl dt small { font-size: 11.5px; }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-dl dd { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-dl dd.is-big { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-dl dd.is-mono { font-size: 11.5px; }
+:root.is-desktop-modern .cd2-room .cd2-money dd { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; }
+:root.is-desktop-modern .cd2-room .cd2-badge { padding: 0; border-radius: 0; font-size: 12.5px; font-weight: 500; }
+:root.is-desktop-modern .cd2-room .cd2-badge.is-est { color: var(--dsk-ink-3); background: none; }
+:root.is-desktop-modern .cd2-room .cd2-buyer { font-size: 15px; font-weight: 600; }
+:root.is-desktop-modern .cd2-room .cd2-steps { gap: 8px; }
+:root.is-desktop-modern .cd2-room .cd2-steps li { gap: 4px; padding: 10px 12px; border-radius: 10px; border: 0; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .cd2-room .cd2-steps li span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-steps li b { font-size: 13px; font-weight: 550; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-steps li.is-on { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+:root.is-desktop-modern .cd2-room .cd2-steps li.is-on b { color: var(--dsk-ink); }
+:root.is-desktop-modern .cd2-room .cd2-emd { gap: 4px; padding: 14px 16px; border: 0; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .cd2-room .cd2-emd.is-bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cdd-bad) 32%, transparent); }
+:root.is-desktop-modern .cd2-room .cd2-emd header small { font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-emd header em { font-size: 12.5px; font-weight: 550; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .cd2-room .cd2-emd.is-good header em { color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-emd__amt { font-family: var(--dsk-font); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cd2-room .cd2-emd__due { font-size: 12.5px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-emd__prov { max-width: 72ch; font-size: 12.5px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-docs { gap: 4px; }
+:root.is-desktop-modern .cd2-room .cd2-doc { min-height: 48px; gap: 12px; padding: 8px 12px; border: 0; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); transition: background 0.12s ease; }
+:root.is-desktop-modern .cd2-room .cd2-doc:hover { background: var(--dsk-tile-hi); }
+:root.is-desktop-modern .cd2-room .cd2-doc > svg { width: 14px !important; height: 14px !important; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-doc b { font-size: 13px; font-weight: 550; }
+:root.is-desktop-modern .cd2-room .cd2-doc small { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-doc em { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .cd2-room .cd2-doc.is-good em { color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-doc.is-bad { border-style: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cdd-bad) 32%, transparent); }
+:root.is-desktop-modern .cd2-room .cd2-deadlines li { padding: 6px 0; font-size: 13px; border: 0; }
+:root.is-desktop-modern .cd2-room .cd2-deadlines b { font-weight: 550; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cd2-room .cd2-deadlines em { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .cd2-room .cd2-deadlines li.is-good em { color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-timeline::before { width: 1px; background: var(--dsk-edge-hi); }
+:root.is-desktop-modern .cd2-room .cd2-timeline li::before { width: 8px; height: 8px; top: 12px; left: -15px; background: var(--cdd-solid); border: 1.5px solid var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-timeline li.is-planned::before { border-style: dashed; border-color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-timeline time { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-timeline b { font-size: 13px; font-weight: 550; }
+:root.is-desktop-modern .cd2-room .cd2-timeline small { font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-timeline li.is-planned b { color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-room .cd2-activity li { gap: 2px; padding: 6px 0; border: 0; }
+:root.is-desktop-modern .cd2-room .cd2-activity b { font-size: 13px; font-weight: 500; }
+:root.is-desktop-modern .cd2-room .cd2-activity small { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-auto { padding: 10px 12px; border-radius: 10px; font-size: 12.5px; color: var(--dsk-ink-2); background: var(--dsk-tile); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-auto b { font-weight: 600; }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-linkgrid { gap: 8px; }
+
+:root.is-desktop-modern .cd2-room .cd2-final { gap: 12px; padding: 20px; }
+:root.is-desktop-modern .cd2-room .cd2-final__net small,
+:root.is-desktop-modern .cd2-room .cd2-final__cmp small { font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-room .cd2-final__net b { font-family: var(--dsk-font); font-size: 34px; font-weight: 600; letter-spacing: -0.02em; color: var(--dsk-ink); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cd2-room .cd2-final__cmp span { gap: 4px; padding: 12px 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .cd2-room .cd2-final__cmp b { font-family: var(--dsk-font); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* the action bar: the panel's own footer */
+:root.is-desktop-modern .cd2-room .cd2-actionbar {
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--dsk-glass-strong) 92%, transparent);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 1px 0 var(--dsk-edge);
+}
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-act {
+  min-height: 0;
+  height: 34px;
+  gap: 7px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-act:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-act svg { width: 14px !important; height: 14px !important; }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-act.is-primary {
+  color: var(--cdd-primary-ink);
+  background: var(--cdd-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 1px 2px rgb(0 0 0 / 0.12);
+}
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-act.is-primary:hover:not(:disabled) { background: var(--cdd-primary-hi); }
+:root.is-desktop-modern :is(.cd2-room, .cd2-sheet) .cd2-act.is-danger { color: #fff; background: color-mix(in srgb, var(--cdd-bad) 55%, #16171a) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cdd-bad) 60%, transparent); }
+:root.is-desktop-modern .cd2-room .cd2-finalize { margin-top: 12px; }
+
+/* sheets live inside the room (it is their containing block) */
+:root.is-desktop-modern .cd2-room .cd2-sheet { z-index: 20; justify-content: flex-end; }
+:root.is-desktop-modern .cd2-sheet .cd2-sheet__scrim { background: rgb(4 5 7 / 0.34); -webkit-backdrop-filter: none; backdrop-filter: none; animation: cdd-fade 0.16s ease both; }
+:root.is-desktop-modern[data-nexus-theme='light'] .cd2-sheet .cd2-sheet__scrim { background: rgb(15 17 22 / 0.14); }
+@keyframes cdd-fade { from { opacity: 0; } to { opacity: 1; } }
+:root.is-desktop-modern .cd2-sheet .cd2-sheet__panel {
+  margin: 0 12px 12px;
+  max-height: calc(100% - 64px);
+  padding: 18px 18px 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 24px 60px -24px rgb(0 0 0 / 0.7);
+  animation: cdd-rise 0.2s var(--dsk-ease) both;
+  scrollbar-width: thin;
+}
+@keyframes cdd-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+:root.is-desktop-modern .cd2-sheet .cd2-sheet__grab { display: none; }
+:root.is-desktop-modern .cd2-sheet h3 { margin: 6px 0 4px; font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+:root.is-desktop-modern .cd2-sheet .cd2-docstatus { font-size: 12.5px; font-weight: 550; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .cd2-sheet .cd2-records { gap: 14px; margin: 10px 0 18px; }
+:root.is-desktop-modern .cd2-sheet .cd2-records__group { gap: 4px; }
+:root.is-desktop-modern .cd2-sheet .cd2-records__group small { margin: 0 2px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-sheet .cd2-record {
+  min-height: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.12s ease;
+}
+:root.is-desktop-modern .cd2-sheet .cd2-record:hover { background: var(--dsk-hover); }
+:root.is-desktop-modern .cd2-sheet .cd2-record svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-sheet .cd2-record em { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--cdd-warn); }
+:root.is-desktop-modern .cd2-sheet .cd2-form { gap: 12px; margin-top: 12px; }
+:root.is-desktop-modern .cd2-sheet .cd2-field > span { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cd2-sheet .cd2-field small { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cd2-sheet .cd2-field :is(input, select, textarea) {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  font-family: var(--dsk-font);
+  font-size: 13px;
+  background: var(--dsk-tile) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi) !important;
+}
+:root.is-desktop-modern .cd2-sheet .cd2-field :is(input, select, textarea):focus { outline: none; box-shadow: inset 0 0 0 1px var(--dsk-accent), var(--cdd-halo) !important; }
+:root.is-desktop-modern .cd2-sheet .cd2-field select { padding-right: 28px; background: var(--dsk-tile) var(--cdd-chevron) no-repeat right 10px center !important; }
+:root.is-desktop-modern .cd2-sheet .cd2-field.is-toggle { min-height: 34px; }
+:root.is-desktop-modern .cd2-sheet .cd2-field.is-toggle input { width: 16px; height: 16px; min-height: 16px; background: transparent !important; box-shadow: none !important; accent-color: var(--dsk-accent); }
+:root.is-desktop-modern .cd2-sheet .cd2-form__acts { gap: 8px; margin-top: 16px; }
+:root.is-desktop-modern .cd2-sheet .cd2-result { padding: 12px 14px; border-radius: 10px; border-color: var(--dsk-edge); }
+:root.is-desktop-modern .cd2-sheet .cd2-result strong { font-size: 13px; font-weight: 600; }
+:root.is-desktop-modern .cd2-sheet .cd2-result p { font-size: 12.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet),
+  :root.is-desktop-modern :is(.cd2, .cd2-room, .cd2-sheet) * { animation: none !important; transition: none !important; }
+}

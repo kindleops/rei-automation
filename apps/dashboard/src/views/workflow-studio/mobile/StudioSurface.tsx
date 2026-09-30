@@ -7,6 +7,7 @@ import { CountUp, FlowRibbon, LEAD_LABEL, LiquidBackdrop, Orb, PlusGlyph, ReachB
 import { ago, beatLabel, domainIcon, human } from './workflow-format'
 import './workflow-surface.css'
 import './studio.css'
+import './studio-desktop.css'
 
 const WorkflowRoom = lazy(() => import('./WorkflowRoom').then((m) => ({ default: m.WorkflowRoom })))
 const RunRoom = lazy(() => import('./RunRoom').then((m) => ({ default: m.RunRoom })))

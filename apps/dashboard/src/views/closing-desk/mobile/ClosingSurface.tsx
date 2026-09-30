@@ -7,6 +7,7 @@ import {
 } from './closing-execution-api'
 import { countdown, money, OWNER_LABEL, shortDate, whenLabel } from './closing-format'
 import './closing-surface.css'
+import './closing-desktop.css'
 
 const ClosingRoom = lazy(() => import('./ClosingRoom').then((m) => ({ default: m.ClosingRoom })))
 
