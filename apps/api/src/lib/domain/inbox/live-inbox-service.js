@@ -2474,30 +2474,6 @@ export async function getLiveCounts(params = {}, deps = {}) {
   return result.counts;
 }
 
-async function countThreadsMatchingTab(supabase, tab, { pageSize = 1000, nowMs = Date.now() } = {}) {
-  let offset = 0;
-  let total = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from("inbox_thread_state")
-      .select(INBOX_THREAD_STATE_SELECT_FIELDS)
-      .range(offset, offset + pageSize - 1);
-
-    if (error) throw error;
-    const rows = Array.isArray(data) ? data : [];
-    if (!rows.length) break;
-
-    for (const row of rows) {
-      if (threadMatchesInboxTab(row, tab, nowMs)) total += 1;
-    }
-
-    offset += rows.length;
-    if (rows.length < pageSize) break;
-  }
-
-  return total;
-}
-
 async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmptyCounts()) {
   const PAGE_SIZE = 1000;
   let offset = 0;
@@ -2530,6 +2506,68 @@ async function augmentCountsWithDerivedNullBuckets(supabase, counts = buildEmpty
   return counts;
 }
 
+/**
+ * Every tab in ONE pass over inbox_thread_state. This used to page the whole
+ * table once per tab (9 passes, ~100 requests per poll), and it is exactly the
+ * path polls fall into when the count views time out, so load bred more load.
+ * Stable order by the primary key so pages neither skip nor repeat rows while
+ * the table is being written.
+ */
+export async function countThreadsForTabs(supabase, tabs, { pageSize = 1000, nowMs = Date.now() } = {}) {
+  const totals = Object.fromEntries(tabs.map((tab) => [tab, 0]));
+  let offset = 0;
+  while (true) {
+    let query = supabase.from("inbox_thread_state").select(INBOX_THREAD_STATE_SELECT_FIELDS);
+    if (typeof query.order === "function") query = query.order("thread_key", { ascending: true });
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (!rows.length) break;
+
+    for (const row of rows) {
+      for (const tab of tabs) {
+        if (threadMatchesInboxTab(row, tab, nowMs)) totals[tab] += 1;
+      }
+    }
+
+    offset += rows.length;
+    if (rows.length < pageSize) break;
+  }
+  return totals;
+}
+
+/**
+ * Concurrent polls share one authoritative computation, and its result serves
+ * the next 15 s. Keyed by client so each process (and each test double) has
+ * its own.
+ */
+const AUTHORITATIVE_COUNTS_TTL_MS = 15_000;
+const authoritativeCountsShared = new WeakMap();
+
+function fetchAuthoritativeInboxCountsShared(supabase) {
+  const key = supabase && typeof supabase === "object" ? supabase : authoritativeCountsShared;
+  let slot = authoritativeCountsShared.get(key);
+  if (!slot) {
+    slot = { at: 0, counts: null, inFlight: null };
+    authoritativeCountsShared.set(key, slot);
+  }
+  if (slot.counts && Date.now() - slot.at < AUTHORITATIVE_COUNTS_TTL_MS) {
+    return Promise.resolve({ ...slot.counts });
+  }
+  if (slot.inFlight) return slot.inFlight.then((counts) => ({ ...counts }));
+  slot.inFlight = fetchAuthoritativeInboxCounts(supabase)
+    .then((counts) => {
+      slot.counts = counts;
+      slot.at = Date.now();
+      return counts;
+    })
+    .finally(() => {
+      slot.inFlight = null;
+    });
+  return slot.inFlight.then((counts) => ({ ...counts }));
+}
+
 async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
   await transitionStaleWaitingThreads(supabase, nowMs);
 
@@ -2546,9 +2584,7 @@ async function fetchAuthoritativeInboxCounts(supabase, nowMs = Date.now()) {
     "all_messages",
   ];
 
-  for (const tab of executionTabs) {
-    counts[tab] = await countThreadsMatchingTab(supabase, tab, { nowMs });
-  }
+  Object.assign(counts, await countThreadsForTabs(supabase, executionTabs, { nowMs }));
 
   const { count: allCount, error: allError } = await supabase
     .from("inbox_thread_state")
@@ -2737,7 +2773,7 @@ async function getLiveCountsWithMeta(params = {}, deps = {}) {
   }
 
   try {
-    const authoritativeCounts = await fetchAuthoritativeInboxCounts(supabase);
+    const authoritativeCounts = await fetchAuthoritativeInboxCountsShared(supabase);
     console.log("[INBOX_COUNTS_UPDATED]", authoritativeCounts);
     return {
       counts: authoritativeCounts,
