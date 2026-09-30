@@ -6617,6 +6617,46 @@ function toE164(value) {
   return raw.startsWith('+') ? raw : raw
 }
 
+/**
+ * SENDER PERSONA. Each owner record carries the agent persona the operator
+ * assigned (master_owners.agent_persona, e.g. "Michael Hargrove"); a campaign
+ * target does not. Without this lookup every campaign text rendered the
+ * feeder's literal fallback, so 652 texts said "this is Alex" (2026-09-19..30),
+ * including owners whose record names someone else.
+ *
+ * Fail-soft by design: a read error leaves the map empty and rendering behaves
+ * exactly as before, rather than holding the whole plan.
+ */
+export async function loadOwnerPersonas(supabase, ownerIds = [], { chunkSize = 200 } = {}) {
+  const ids = [...new Set(ownerIds.map((id) => clean(id)).filter(Boolean))]
+  const personas = new Map()
+  try {
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      const { data, error } = await supabase
+        .from('master_owners')
+        .select('master_owner_id,agent_persona')
+        .in('master_owner_id', ids.slice(i, i + chunkSize))
+      if (error) throw error
+      for (const row of data || []) {
+        const persona = clean(row.agent_persona)
+        if (persona) personas.set(clean(row.master_owner_id), persona)
+      }
+    }
+  } catch (error) {
+    console.warn('[CAMPAIGN_OWNER_PERSONA_READ_FAILED]', error?.message || error)
+    return new Map()
+  }
+  return personas
+}
+
+/** The owner's persona, unless the candidate already names one. */
+export function applyOwnerPersona(candidate = {}, personas = new Map()) {
+  if (!candidate || clean(candidate.agent_persona)) return candidate
+  const persona = personas.get(clean(candidate.master_owner_id))
+  if (persona) candidate.agent_persona = persona
+  return candidate
+}
+
 export function launchCandidateFromTarget(target = {}, campaign = {}) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
@@ -7021,7 +7061,7 @@ export function buildQueueRowForLaunch({ campaign, target, candidate, routing, r
     thread_key: candidate.canonical_e164,
     seller_first_name: candidate.seller_first_name || null,
     seller_display_name: candidate.seller_full_name || candidate.owner_display_name || null,
-    agent_name: clean(campaign.agent_persona) || null,
+    agent_name: clean(campaign.agent_persona) || clean(candidate.agent_persona) || null,
     language: candidate.language || null,
     routing_reason: routing.selection_reason || routing.routing_rule_name || null,
     campaign_id: campaign.id,
@@ -7417,6 +7457,10 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const dispatchBlocked = await (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)()
     .catch(() => ({ template_ids: new Set(), sender_numbers: new Set() }))
   launchOptions.blocked_template_ids = dispatchBlocked.template_ids
+  // An explicit campaign persona wins; otherwise each owner's own (see loadOwnerPersonas).
+  const ownerPersonas = clean(campaign.agent_persona)
+    ? new Map()
+    : await (deps.loadOwnerPersonas || loadOwnerPersonas)(supabase, readyTargets.map((target) => target.master_owner_id))
   let planLoopCounter = 0
   for (const target of readyTargets) {
     if (plannedItems.length >= caps.effective_limit) break
@@ -7425,7 +7469,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     if (executionLock.token && (planLoopCounter++ % 250) === 0) {
       await renewCampaignExecutionLock(supabase, campaignId, executionLock.token)
     }
-    const candidate = launchCandidateFromTarget(target, campaign)
+    const candidate = applyOwnerPersona(launchCandidateFromTarget(target, campaign), ownerPersonas)
     const phone = clean(candidate.canonical_e164)
     if (!phone) {
       recordSkip('missing_to_phone_number', target)
