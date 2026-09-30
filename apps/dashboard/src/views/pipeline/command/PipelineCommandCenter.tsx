@@ -12,10 +12,11 @@
  * Nothing here moves a stage. Stages advance only through the autopilot and
  * the authority registry; this surface reads them.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon, type IconName } from '../../../shared/icons'
 import { CountUp } from '../../../shared/motion/CountUp'
-import { pushRoutePath } from '../../../app/router'
+import { PaneRouteContext, pushRoutePath } from '../../../app/router'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import { routeEntityGraphAction } from '../../../domain/entity-graph/entity-graph-route-actions'
 import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/universal-entity-context'
 import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
@@ -36,6 +37,19 @@ import {
   type PipelineMovement,
 } from '../../../domain/pipeline/pipeline-command-api'
 import { PipelineDealInspector } from './PipelineDealInspector'
+import {
+  OffersOverviewCard,
+  PipelineBoard,
+  PipelineModeSwitch,
+  PipelineOffersView,
+  PipelineTable,
+  readPipelineMode,
+  useAllPipelineRows,
+  useNow,
+  writePipelineMode,
+  type PipelineMode,
+} from './PipelineDesktopViews'
+import { fetchPipelineOffers, type PipelineOffers } from './pipeline-offers-api'
 import './pipeline-command-tokens.css'
 import './pipeline-command.css'
 import './pipeline-desktop.css'
@@ -114,6 +128,24 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
   const feedRef = useRef<HTMLDivElement | null>(null)
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
+  /*
+   * Desktop views. Phones never see the switch: they keep the command center
+   * exactly as it is. A secondary split pane reads and keeps its own view
+   * (localStorage) and never writes the main window's URL.
+   */
+  const { isModernDesktop } = useBreakpoint()
+  const pane = useContext(PaneRouteContext)
+  const [modeState, setModeState] = useState<PipelineMode>(() => readPipelineMode(pane ? pane.location : undefined))
+  const mode: PipelineMode = isModernDesktop ? modeState : 'overview'
+  const pickMode = (next: PipelineMode) => { setModeState(next); writePipelineMode(next, !pane) }
+  const [liveTick, setLiveTick] = useState(0)
+  const now = useNow(30_000)
+  const [offers, setOffers] = useState<{ key: string; data: PipelineOffers | null; error: string | null } | null>(null)
+  const [offersAttempt, setOffersAttempt] = useState(0)
+  // Movement that arrived after first paint slides in with a glow that fades.
+  const seenMoves = useRef<Set<string> | null>(null)
+  const [freshMoves, setFreshMoves] = useState<Set<string>>(() => new Set())
+
   // Debounced server-side search.
   useEffect(() => {
     const t = window.setTimeout(() => setParams((p) => ({ ...p, q: query.trim() || undefined })), 320)
@@ -159,11 +191,39 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
     let timer: number | null = null
     const bump = () => {
       if (timer) window.clearTimeout(timer)
-      timer = window.setTimeout(() => { void loadOverview(undefined, true); void loadFeed() }, 1800)
+      timer = window.setTimeout(() => { void loadOverview(undefined, true); void loadFeed(); setLiveTick((n) => n + 1) }, 1800)
     }
     const subs = ['inbox_thread_state', 'message_events'].map((t) => subscribeToTableChanges(t, bump))
     return () => { if (timer) window.clearTimeout(timer); subs.forEach((s) => s.unsubscribe()) }
   }, [loadFeed, loadOverview])
+
+  // Desktop: the offer picture (Overview card + Offers view). Read-only.
+  const offersKey = JSON.stringify(params)
+  const wantsOffers = isModernDesktop && (mode === 'overview' || mode === 'offers')
+  useEffect(() => {
+    if (!wantsOffers) return
+    const c = new AbortController()
+    fetchPipelineOffers(params, c.signal)
+      .then((data) => setOffers({ key: offersKey, data, error: null }))
+      .catch((e: unknown) => { if (!c.signal.aborted) setOffers((cur) => ({ key: offersKey, data: cur?.key === offersKey ? cur.data : null, error: e instanceof Error ? e.message : 'failed' })) })
+    return () => c.abort()
+  }, [wantsOffers, offersKey, offersAttempt]) // eslint-disable-line react-hooks/exhaustive-deps -- offersKey encodes params
+  const offersCurrent = offers && offers.key === offersKey ? offers : null
+
+  // Desktop: every deal in the current view, for the Board and the Table.
+  const allRows = useAllPipelineRows(isModernDesktop && (mode === 'board' || mode === 'table'), params, effectiveView, sort, liveTick)
+
+  useEffect(() => {
+    const ids = overview?.movement.map((m) => m.id) ?? []
+    if (!ids.length) return
+    if (!seenMoves.current) { seenMoves.current = new Set(ids); return }
+    const fresh = ids.filter((id) => !seenMoves.current?.has(id))
+    ids.forEach((id) => seenMoves.current?.add(id))
+    if (!fresh.length) return
+    setFreshMoves(new Set(fresh))
+    const t = window.setTimeout(() => setFreshMoves(new Set()), 2600)
+    return () => window.clearTimeout(t)
+  }, [overview?.movement])
 
   useEffect(() => {
     if (!toast) return
@@ -216,9 +276,13 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
   const working = o?.totals.working ?? 0
   const laneTotal = LANE_ORDER.reduce((n, k) => n + (o?.lanes[k] ?? 0), 0)
   const activeStage = o?.stages.find((s) => s.code === stage) ?? null
+  const validateOffer = (card: PipelineCommandCard) => {
+    if (card.threadKey) onOpenDealIntelligence(card.threadKey)
+    else if (card.propertyId) pushRoutePath(`/deal-intelligence?property_id=${encodeURIComponent(card.propertyId)}`)
+  }
 
   return (
-    <section className="plc" data-scope={params.scope}>
+    <section className={cls('plc', isModernDesktop && `is-mode-${mode}`)} data-scope={params.scope}>
       <div className="plc__liquid" aria-hidden="true"><i /><i /><i /></div>
 
       <div className="plc__scroll">
@@ -226,6 +290,9 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
         <header className="plc-hero">
           <div className="plc-hero__top">
             <span className="plc-eyebrow">Pipeline</span>
+            {isModernDesktop ? (
+              <PipelineModeSwitch mode={mode} onPick={pickMode} badges={{ offers: offersCurrent?.data?.totals.deals ?? null }} />
+            ) : null}
             <span className="plc-live" title="Live — replies and automation stream in">
               <i key={pulseKey} />Live{o ? ` · ${relTime(o.generatedAt) === 'now' ? 'just now' : relTime(o.generatedAt)}` : ''}
             </span>
@@ -285,6 +352,7 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
           )}
         </header>
 
+        {mode === 'overview' ? (<>
         {/* ── The lifecycle flow: exact S1–S10, grouped ─────────────────── */}
         <section className="plc-flow" aria-label="Lifecycle">
           <div className="plc-flow__stream" aria-hidden="true"><i /><i /><i /></div>
@@ -303,7 +371,7 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
                   disabled={!o}
                   aria-label={`${s.short} ${s.label}: ${s.count} (${s.working} being worked, ${s.dormant} dormant)`}
                 >
-                  <span className="plc-col__count">{o ? (s.count ? <CountUp value={s.count} format={fmt} /> : '0') : ''}</span>
+                  <span className="plc-col__count" data-attention={s.attention || undefined}>{o ? (s.count ? <CountUp value={s.count} format={fmt} /> : '0') : ''}</span>
                   <span className="plc-col__bar">
                     <i className="plc-col__dormant" />
                     <i className="plc-col__working" />
@@ -348,6 +416,17 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
           </section>
         ) : null}
 
+        {/* ── Offers (desktop) — the offer picture, a click from the view ─ */}
+        {isModernDesktop ? (
+          <OffersOverviewCard
+            data={offersCurrent?.data ?? null}
+            loading={!offersCurrent}
+            error={offersCurrent?.error ?? null}
+            onOpenOffers={() => pickMode('offers')}
+            onOpen={openDeal}
+          />
+        ) : null}
+
         {/* ── Exceptions — only what the automation handed back ────────── */}
         {o ? (
           o.totals.attention === 0 ? (
@@ -362,7 +441,7 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
                 <small>Only what the automation handed back</small>
                 <button type="button" className="plc-link" onClick={() => pickView('attention')}>All {o.totals.attention}</button>
               </header>
-              {o.attentionTop.slice(0, 3).map((c, i) => (
+              {o.attentionTop.slice(0, isModernDesktop ? 6 : 3).map((c, i) => (
                 <button key={c.id} type="button" className="plc-exception" style={{ ['--tone' as string]: LANE_META[c.lane.key].tone, ['--i' as string]: i }} onClick={() => openDeal(c)}>
                   <span className="plc-exception__icon"><Icon name={(LANE_META[c.lane.key].icon as IconName)} /></span>
                   <span className="plc-exception__body">
@@ -382,26 +461,46 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
             <header>
               <span className="plc-eyebrow">Movement</span>
               <small>Last 7 days</small>
+              <span className="plc-moves__live" aria-hidden="true" />
               <button type="button" className="plc-link" onClick={() => pickView('moving')}>Deals</button>
             </header>
             <ol>
-              {o.movement.slice(0, 6).map((m, i) => (
-                <li key={m.id} style={{ ['--i' as string]: i, ['--tone' as string]: STAGE_TONE[m.toStage ?? m.stage] ?? 'var(--plc-s-early)' }}>
+              {o.movement.slice(0, isModernDesktop ? 8 : 6).map((m, i) => (
+                <li
+                  key={m.id}
+                  className={cls(freshMoves.has(m.id) && 'is-fresh', now - Date.parse(m.at) < 3_600_000 && 'is-recent')}
+                  style={{ ['--i' as string]: i, ['--tone' as string]: STAGE_TONE[m.toStage ?? m.stage] ?? 'var(--plc-s-early)' }}
+                >
                   <button type="button" className={cls('plc-move', `is-${m.kind}`)} onClick={() => openDeal({ id: m.opportunityId })}>
                     <span className="plc-move__icon"><Icon name={MOVE_ICON[m.kind]} /></span>
                     <span className="plc-move__body">
                       <b>{m.title}{m.detail && m.kind !== 'reply' ? <em> · {m.detail}</em> : null}</b>
                       <small>{m.kind === 'reply' && m.detail ? `“${m.detail}” — ` : ''}{m.address || m.seller || 'Deal'}</small>
                     </span>
-                    <span className="plc-move__at">{relTime(m.at)}</span>
+                    <span className="plc-move__at">{relTime(m.at, now)}</span>
                   </button>
                 </li>
               ))}
             </ol>
           </section>
         ) : null}
+        </>) : null}
+
+        {/* ── Offers view (desktop) ───────────────────────────────────── */}
+        {mode === 'offers' ? (
+          <PipelineOffersView
+            data={offersCurrent?.data ?? null}
+            loading={!offersCurrent}
+            error={offersCurrent?.error ?? null}
+            onRetry={() => setOffersAttempt((a) => a + 1)}
+            onOpen={openDeal}
+            onValidate={validateOffer}
+            now={now}
+          />
+        ) : null}
 
         {/* ── Deals ─────────────────────────────────────────────────────── */}
+        {mode !== 'offers' ? (
         <div className="plc-feedhead" ref={feedRef}>
           <div className="plc-tabs" role="tablist" aria-label="Pipeline view">
             {stage && activeStage ? (
@@ -417,13 +516,20 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
           </div>
           <div className="plc-feedhead__bar">
             <span>{feedCurrent ? <><b>{fmt(feedCurrent.total)}</b> {params.q ? `matching “${params.q}”` : 'deals'}</> : 'Loading…'}</span>
-            <button type="button" className="plc-chip" onClick={() => setSort((cur) => SORTS[(SORTS.findIndex((s) => s.key === cur) + 1) % SORTS.length].key)}>
-              <Icon name="trending-up" />{SORTS.find((s) => s.key === sort)?.label}
-            </button>
+            {mode !== 'table' ? (
+              <button type="button" className="plc-chip" onClick={() => setSort((cur) => SORTS[(SORTS.findIndex((s) => s.key === cur) + 1) % SORTS.length].key)}>
+                <Icon name="trending-up" />{SORTS.find((s) => s.key === sort)?.label}
+              </button>
+            ) : null}
             <button type="button" className="plc-chip" onClick={() => void showViewOnMap()} aria-label="Show this view on the Map"><Icon name="map" />Map</button>
           </div>
         </div>
+        ) : null}
 
+        {mode === 'board' ? <PipelineBoard data={allRows} stages={o?.stages ?? null} onOpen={openDeal} /> : null}
+        {mode === 'table' ? <PipelineTable data={allRows} onOpen={openDeal} /> : null}
+
+        {mode === 'overview' ? (
         <div className="plc-feed">
           {!feedCurrent ? (
             Array.from({ length: 4 }).map((_, i) => <div key={i} className="plc-card is-ghost" style={{ ['--i' as string]: i }} />)
@@ -442,6 +548,7 @@ export function PipelineCommandCenter({ onOpenCommandView, onOpenDealIntelligenc
             <button type="button" className="plc-more" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : `Show more · ${fmt(feedCurrent.total - rows.length)} left`}</button>
           ) : null}
         </div>
+        ) : null}
       </div>
 
       {filtersOpen ? (

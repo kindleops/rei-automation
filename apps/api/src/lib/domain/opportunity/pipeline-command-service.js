@@ -36,6 +36,7 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { applyFilters, normalizeOpportunityRow } from './opportunity-service.js'
 import { batchHydrateOpportunityProperties } from './opportunity-property-hydration.js'
 import { UNIVERSAL_STAGE_ORDER, UNIVERSAL_STAGE_LABELS } from './universal-pipeline-registry.js'
+import { NON_SPENDABLE_REASONS, resolveValuationSpendability } from '../seller-flow/valuation-offer-authority.js'
 
 const clean = (v) => String(v ?? '').trim()
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
@@ -682,5 +683,217 @@ export async function getPipelineDealStory(id, deps = {}) {
       top: buyers.slice(0, 3).map((b) => ({ name: b.buyer_display_name, grade: b.match_grade, score: num(b.match_score), status: b.buyer_response_status || null })),
     },
     closing: card.closing,
+  }
+}
+
+/* ══ OFFERS ══════════════════════════════════════════════════════════════════
+ * The offer picture per deal — read-only, like everything in this module.
+ *
+ *   which deals    the Offer stage, any current offer, any Decision Engine
+ *                  recommendation, any seller_offers row
+ *   engine         property_acquisition_scores (tier, confidence, comp count,
+ *                  valuation range, recommended / floor offer)
+ *   offer          the binding seller_offers row (sent/presented/pending/
+ *                  countered/accepted, not superseded) — else the latest one
+ *   authorization  metadata.negotiation_state — the negotiation's own verdict
+ *   readiness      the canonical spendability rule (valuation-offer-authority)
+ *                  over the stored engine row; a verdict the negotiation
+ *                  already persisted always wins over the recomputation
+ *
+ * Nothing here computes a price: every figure is the engine's or the seller's.
+ * Nothing here can authorize, send or accept an offer.
+ */
+const OFFER_TIER_LABEL = Object.freeze({
+  AUTO_HARD_OFFER: 'Hard offer authorized', AUTO_RANGE_OFFER: 'Range offer authorized', REVIEW_REQUIRED: 'Review required',
+  CREATIVE_TERMS: 'Creative terms', NURTURE: 'Nurture', PASS: 'Pass', REJECT: 'Pass',
+})
+const OFFER_READINESS_TEXT = Object.freeze({
+  [NON_SPENDABLE_REASONS.NO_VALUATION]: 'No offer-authoritative valuation yet',
+  [NON_SPENDABLE_REASONS.NO_RECOMMENDATION]: 'The engine computed no offer',
+  [NON_SPENDABLE_REASONS.TIER_NOT_AUTHORITATIVE]: 'The engine tier is not offer-authoritative',
+  [NON_SPENDABLE_REASONS.UNDEFENDED_LOW_N]: 'Too few comps to defend the valuation',
+  ask_out_of_band: 'Seller ask is outside the authorized band',
+})
+const OFFER_GATE_LABELS = Object.freeze({
+  aos_at_least_780: 'Acquisition score ≥ 780',
+  comp_count_at_least_4: '4+ qualified comps',
+  confidence_at_least_85: 'Confidence ≥ 85',
+  valuation_confidence_at_least_80: 'Valuation confidence ≥ 80',
+  assignment_fee_meets_minimum_economics: 'Assignment fee clears minimum',
+  recommended_offer_available: 'Offer computed',
+})
+/** The engine's own coverage gate (comp_count_at_least_4). */
+export const OFFER_COMP_COVERAGE_MIN = 4
+const BINDING_OFFER_STATUSES = new Set(['sent', 'accepted', 'countered', 'pending', 'presented'])
+const OFFER_ROWS_CAP = 200
+
+/** A seller number the conversation captured wrongly (same rule Deal Intelligence uses). */
+export function isImplausibleSellerNumber(value, reference) {
+  const v = num(value)
+  if (!v || v <= 0) return false
+  const ref = num(reference)
+  return v < 5000 || Boolean(ref && v < ref * 0.05)
+}
+
+/**
+ * Is this deal's offer ready to be spent, and if not, why? Pure.
+ *   authorized        spendable under the canonical rule
+ *   needs_validation  priced, but policy will not spend it (or coverage is thin)
+ *   not_priced        the Decision Engine has not priced the property
+ */
+export function deriveOfferReadiness({ score = null, negotiation = null } = {}) {
+  const tier = clean(score?.decision_tier).toUpperCase() || null
+  const compCount = num(score?.comp_count)
+  const gates = Object.entries(score?.gates && typeof score.gates === 'object' ? score.gates : {})
+    .map(([key, pass]) => ({ key, label: OFFER_GATE_LABELS[key] || key.replace(/_/g, ' '), pass: pass === true }))
+  if (!score) {
+    return { state: 'not_priced', spendable: false, source: null, reason: NON_SPENDABLE_REASONS.NO_VALUATION, reasons: ['The Decision Engine has not priced this property'], tier: null, tierLabel: null, compCount: null, thinCoverage: false, gates: [] }
+  }
+  const computed = resolveValuationSpendability({ valuation: score })
+  const persisted = negotiation && typeof negotiation.valuation_spendable === 'boolean' ? negotiation.valuation_spendable : null
+  const persistedReason = clean(negotiation?.recommended_offer_withheld_reason || negotiation?.valuation_non_spendable_reason) || null
+  const spendable = persisted ?? computed.spendable
+  const reason = persisted === null ? computed.reason : (persisted ? 'valuation_offer_authoritative' : (persistedReason || computed.reason))
+  const thinCoverage = compCount !== null && compCount < OFFER_COMP_COVERAGE_MIN
+  const reasons = []
+  if (!spendable) reasons.push(OFFER_READINESS_TEXT[reason] || reason.replace(/_/g, ' '))
+  if (thinCoverage) reasons.push(`Thin comp coverage — ${compCount} qualified comp${compCount === 1 ? '' : 's'}`)
+  for (const g of gates) if (!g.pass && !(g.key === 'comp_count_at_least_4' && thinCoverage)) reasons.push(`Gate not met: ${g.label}`)
+  return {
+    state: spendable && !thinCoverage ? 'authorized' : 'needs_validation',
+    spendable: Boolean(spendable),
+    source: persisted === null ? 'engine_row' : 'negotiation',
+    reason,
+    reasons: [...new Set(reasons)],
+    tier,
+    tierLabel: tier ? OFFER_TIER_LABEL[tier] || tier : null,
+    compCount,
+    thinCoverage,
+    gates,
+  }
+}
+
+export async function getPipelineCommandOffers(params = {}, deps = {}) {
+  const client = deps.supabase || defaultSupabase
+  const { cards, capped } = await scopeCards(client, params)
+  const propertyIds = [...new Set(cards.map((c) => c.propertyId).filter(Boolean))]
+  const oppIds = cards.map((c) => c.id)
+  const [scores, offers] = await Promise.all([
+    inChunks(propertyIds, async (ids) => (await client.from('property_acquisition_scores')
+      .select('property_id, decision_tier, confidence, valuation_confidence, comp_count, best_strategy, valuation_low, valuation_mid, valuation_high, recommended_cash_offer, minimum_acceptable_offer, expected_assignment_fee, computed_at, gates:evidence->decision_tier_reasoning->hard_gate_checks, cds:evidence->comp_data_status->status')
+      .in('property_id', ids)).data),
+    inChunks(oppIds, async (ids) => (await client.from('seller_offers')
+      .select('offer_id, opportunity_id, offer_version, direction, purchase_price, status, created_at, sent_at, accepted_at, accepted_price, superseded_at')
+      .in('opportunity_id', ids).order('created_at', { ascending: false }).limit(1000)).data),
+  ])
+  const scoreBy = new Map()
+  for (const s of scores) {
+    const prev = scoreBy.get(clean(s.property_id))
+    if (!prev || Date.parse(s.computed_at || 0) > Date.parse(prev.computed_at || 0)) scoreBy.set(clean(s.property_id), s)
+  }
+  const offersBy = new Map()
+  for (const o of offers) {
+    const key = clean(o.opportunity_id)
+    if (!offersBy.has(key)) offersBy.set(key, [])
+    offersBy.get(key).push(o)
+  }
+  const candidates = cards.filter((c) => c.stage === 'offer' || c.money.offer || (c.propertyId && scoreBy.has(c.propertyId)) || offersBy.has(c.id))
+  const negotiations = await inChunks(candidates.map((c) => c.id), async (ids) => (await client.from('acquisition_opportunities')
+    .select('id, ns:metadata->negotiation_state').in('id', ids)).data)
+  const nsBy = new Map(negotiations.map((r) => [clean(r.id), r.ns && typeof r.ns === 'object' ? r.ns : null]))
+
+  const rows = candidates.map((card) => {
+    const s = card.propertyId ? scoreBy.get(card.propertyId) || null : null
+    const ns = nsBy.get(card.id) || null
+    const history = offersBy.get(card.id) || []
+    const binding = history.find((o) => !o.superseded_at && BINDING_OFFER_STATUSES.has(clean(o.status).toLowerCase())) || null
+    const last = binding || history[0] || null
+    const readiness = deriveOfferReadiness({ score: s, negotiation: ns })
+    const valueRef = num(s?.valuation_mid) || card.money.value
+    return {
+      card,
+      engine: s ? {
+        tier: readiness.tier,
+        tierLabel: readiness.tierLabel,
+        strategy: clean(s.best_strategy) || null,
+        confidence: num(s.confidence),
+        valuationConfidence: num(s.valuation_confidence),
+        compCount: num(s.comp_count),
+        compStatus: clean(s.cds) || null,
+        low: num(s.valuation_low),
+        mid: num(s.valuation_mid),
+        high: num(s.valuation_high),
+        recommended: num(s.recommended_cash_offer),
+        floor: num(s.minimum_acceptable_offer),
+        assignmentFee: num(s.expected_assignment_fee),
+        computedAt: s.computed_at || null,
+      } : null,
+      offer: last ? {
+        price: num(last.purchase_price),
+        status: clean(last.status) || null,
+        binding: Boolean(binding),
+        version: num(last.offer_version),
+        direction: clean(last.direction) || null,
+        createdAt: last.created_at || null,
+        sentAt: last.sent_at || null,
+        acceptedAt: last.accepted_at || null,
+        acceptedPrice: num(last.accepted_price),
+      } : null,
+      offersCount: history.length,
+      authorization: ns ? {
+        presentable: typeof ns.valuation_spendable === 'boolean' ? ns.valuation_spendable : null,
+        withheldReason: clean(ns.recommended_offer_withheld_reason || ns.valuation_non_spendable_reason) || null,
+        zone: clean(ns.negotiation_zone) || null,
+      } : null,
+      readiness,
+      askImplausible: isImplausibleSellerNumber(card.money.asking, valueRef),
+      counterImplausible: isImplausibleSellerNumber(card.money.counter, valueRef),
+    }
+  })
+  const STATE_RANK = { needs_validation: 0, authorized: 1, not_priced: 2 }
+  rows.sort((a, b) => (b.card.stageIndex ?? 0) - (a.card.stageIndex ?? 0)
+    || STATE_RANK[a.readiness.state] - STATE_RANK[b.readiness.state]
+    || (b.engine?.recommended ?? -1) - (a.engine?.recommended ?? -1))
+
+  const byMarket = new Map()
+  for (const r of rows) {
+    const key = r.card.market || [r.card.city, r.card.state].filter(Boolean).join(', ') || 'Market unknown'
+    const m = byMarket.get(key) || { market: key, deals: 0, priced: 0, needsValidation: 0, authorized: 0, comps: [] }
+    m.deals += 1
+    if (r.engine) m.priced += 1
+    if (r.readiness.state === 'needs_validation') m.needsValidation += 1
+    if (r.readiness.state === 'authorized') m.authorized += 1
+    if (r.engine?.compCount !== null && r.engine?.compCount !== undefined) m.comps.push(r.engine.compCount)
+    byMarket.set(key, m)
+  }
+  const markets = [...byMarket.values()].map(({ comps, ...m }) => {
+    const sorted = [...comps].sort((a, b) => a - b)
+    return { ...m, medianComps: sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] : null, thinCoverage: sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] < OFFER_COMP_COVERAGE_MIN : null }
+  }).sort((a, b) => b.deals - a.deals)
+
+  const sentStatuses = new Set(['sent', 'presented', 'pending', 'countered', 'accepted'])
+  return {
+    scope: clean(params.scope) || 'active',
+    generatedAt: new Date().toISOString(),
+    capped,
+    totals: {
+      deals: rows.length,
+      atOfferStage: rows.filter((r) => r.card.stage === 'offer').length,
+      priced: rows.filter((r) => r.engine).length,
+      withEngineOffer: rows.filter((r) => r.engine?.recommended).length,
+      engineOfferValue: rows.reduce((s, r) => s + (r.engine?.recommended || 0), 0) || null,
+      authorized: rows.filter((r) => r.readiness.state === 'authorized').length,
+      needsValidation: rows.filter((r) => r.readiness.state === 'needs_validation').length,
+      notPriced: rows.filter((r) => r.readiness.state === 'not_priced').length,
+      thinCoverage: rows.filter((r) => r.readiness.thinCoverage).length,
+      sent: rows.filter((r) => r.offer && sentStatuses.has(clean(r.offer.status).toLowerCase())).length,
+      countered: rows.filter((r) => clean(r.offer?.status).toLowerCase() === 'countered' || r.card.money.counter).length,
+      accepted: rows.filter((r) => clean(r.offer?.status).toLowerCase() === 'accepted' || r.offer?.acceptedAt).length,
+      offerRecords: offers.length,
+    },
+    thresholds: { compCoverageMin: OFFER_COMP_COVERAGE_MIN },
+    markets,
+    rows: rows.slice(0, OFFER_ROWS_CAP),
+    truncated: rows.length > OFFER_ROWS_CAP,
   }
 }
