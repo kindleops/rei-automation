@@ -1,6 +1,9 @@
 import { Icon } from '../../../shared/icons'
 import {
   describeAutoReplyMode,
+  describeHeldReason,
+  describeNotSchedulable,
+  describePace,
   describeQueueHold,
   formatLaunchWhen,
   friendlyTimezone,
@@ -32,22 +35,23 @@ const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean
 
 export interface LaunchPlanDisplay {
   dailyVolume: number
+  /** The campaign's daily cap setting. */
+  dailyCap?: number | null
   spacingSeconds: number
   maxTargets: number
-  runLimit: number | null
 }
 
-const NOT_SCHEDULABLE_COPY: Record<string, string> = {
-  TEMPLATE_RENDER_LINT_FAILURE: 'Message personalization incomplete',
-  NO_TEMPLATE: 'No approved message for this audience',
-  MISSING_FIRST_NAME: 'Seller first name missing',
-}
+type RoutingBlocks = Record<string, { targets: number; reason: string; senders: Array<{ phone_number: string | null; state: string }> }>
 
 export function CampaignLaunchMobile({
   ready,
   schedulable,
   schedulableLoading,
   schedulableBlockers,
+  routingBlocks = null,
+  preflightError = null,
+  buildHeld = null,
+  eligibleInAudience = null,
   plan,
   display,
   scheduledAt,
@@ -68,6 +72,14 @@ export function CampaignLaunchMobile({
   schedulable: number | null
   schedulableLoading: boolean
   schedulableBlockers: Record<string, number> | null
+  /** Per market: why no sender could carry these sellers, number by number. */
+  routingBlocks?: RoutingBlocks | null
+  /** The preflight's own failure message (build refused, request failed). */
+  preflightError?: string | null
+  /** Sellers the preflight build held back, by reason. */
+  buildHeld?: Record<string, number> | null
+  /** Queue-eligible sellers in the whole audience, before the send limit. */
+  eligibleInAudience?: number | null
   plan: LaunchPlan
   display: LaunchPlanDisplay
   scheduledAt: string
@@ -85,7 +97,10 @@ export function CampaignLaunchMobile({
 }) {
   const blocked = issues.length > 0
   const zeroSchedulable = plan.schedulableKnown && schedulable === 0
-  const personalizationGap = plan.schedulableKnown && ready != null && (schedulable ?? 0) < ready
+  const notSchedulable = plan.schedulableKnown ? describeNotSchedulable(schedulableBlockers, routingBlocks) : []
+  const heldLines = Object.entries(buildHeld ?? {}).filter(([, n]) => Number(n) > 0).sort((a, b) => Number(b[1]) - Number(a[1]))
+  const heldTotal = heldLines.reduce((sum, [, n]) => sum + Number(n), 0)
+  const firstSend = plan.firstSendAt
   const queueHold = describeQueueHold(queueMode)
   const autoReply = describeAutoReplyMode(autoMode)
   const tz = friendlyTimezone(campaignTimezone)
@@ -105,20 +120,24 @@ export function CampaignLaunchMobile({
         sub: issues.length === 1 ? 'Sort this out and the campaign is ready to launch.' : 'Sort these out and the campaign is ready to launch.',
       }
     : schedulableLoading && !plan.schedulableKnown
-      ? { tone: 'checking' as const, title: 'Checking your messages', sub: 'Rendering a message for every seller to confirm it can send.' }
-      : zeroSchedulable
-        ? { tone: 'blocked' as const, title: 'Messages need attention', sub: 'None of the audience has a message that renders cleanly.' }
-        : plan.schedulableKnown
+      ? { tone: 'checking' as const, title: 'Checking every seller', sub: 'Choosing a sender and rendering a message for each seller to confirm it can send.' }
+      : preflightError && !plan.schedulableKnown
+        ? { tone: 'blocked' as const, title: 'This audience couldn’t be checked', sub: preflightError }
+        : zeroSchedulable
           ? {
-              tone: 'ready' as const,
-              title: 'Ready to launch',
-              sub: plan.now
-                ? `${nf(plan.willQueue)} ${plan.willQueue === 1 ? 'seller' : 'sellers'} will be messaged, starting now.`
-                : `${nf(plan.willQueue)} ${plan.willQueue === 1 ? 'seller' : 'sellers'} will be messaged from ${formatLaunchWhen(scheduledAt)}.`,
+              tone: 'blocked' as const,
+              title: notSchedulable.length ? 'No seller can be messaged yet' : 'No seller is ready to message',
+              sub: notSchedulable[0] ? `${notSchedulable[0].label} (${nf(notSchedulable[0].count)}).` : 'Every seller in this audience is held back — see below.',
             }
-          : ready != null
-            ? { tone: 'checking' as const, title: `${nf(ready)} ready`, sub: 'Messages are verified when the draft saves.' }
-            : { tone: 'checking' as const, title: 'Counting your audience', sub: 'This takes a few seconds.' }
+          : plan.schedulableKnown
+            ? {
+                tone: 'ready' as const,
+                title: 'Ready to launch',
+                sub: `${nf(plan.willQueue)} ${plan.willQueue === 1 ? 'seller' : 'sellers'} will be messaged${plan.now ? ', starting now' : ` from ${formatLaunchWhen(scheduledAt)}`}${plan.days && plan.days > 1 ? `, over about ${plan.days} days` : ''}.`,
+              }
+            : ready != null
+              ? { tone: 'checking' as const, title: `${nf(ready)} ready`, sub: 'Messages are verified when the draft saves.' }
+              : { tone: 'checking' as const, title: 'Counting your audience', sub: 'This takes a few seconds.' }
 
   return (
     <div className="clv">
@@ -176,16 +195,16 @@ export function CampaignLaunchMobile({
         <button type="button" className="clv-row" onClick={onEditPacing}>
           <span className="clv-row__label">Pace</span>
           <span className="clv-row__value">
-            {nf(display.dailyVolume)} a day
-            <small>one every {display.spacingSeconds}s</small>
+            {describePace(plan)}
+            <small>one every {display.spacingSeconds}s{display.dailyCap && plan.paceBinding !== 'daily_cap' ? ` · daily cap ${nf(display.dailyCap)}` : ''}</small>
           </span>
           <Icon name="chevron-right" size={14} />
         </button>
         <button type="button" className={cls('clv-row', plan.capBinds && 'is-capped')} onClick={onEditLimit}>
-          <span className="clv-row__label">Sending to</span>
+          <span className="clv-row__label">Sellers</span>
           <span className="clv-row__value">
-            {nf(plan.willQueue)} {plan.willQueue === 1 ? 'seller' : 'sellers'}
-            {ready != null && ready > 0 && <small>of {nf(ready)} ready</small>}
+            {ready != null && plan.willQueue === ready && ready > 0 ? `All ${nf(plan.willQueue)}` : nf(plan.willQueue)}
+            {ready != null && ready > 0 && plan.willQueue !== ready && <small>of {nf(ready)} ready</small>}
           </span>
           <Icon name="chevron-right" size={14} />
         </button>
@@ -195,12 +214,21 @@ export function CampaignLaunchMobile({
             <span className="clv-row__value">{plan.durationLabel}</span>
           </div>
         )}
+        {firstSend && plan.willQueue > 0 && (
+          <div className="clv-row is-static">
+            <span className="clv-row__label">First text</span>
+            <span className="clv-row__value">{formatLaunchWhen(firstSend)}</span>
+          </div>
+        )}
 
-        {plan.capBinds && (
+        {plan.willQueue > 0 && (
+          <p className="clv-card__note">
+            Every seller above is messaged — the queue refills itself in small batches until the audience is done.
+          </p>
+        )}
+        {plan.capBinds && eligibleInAudience != null && (
           <p className="clv-card__note is-warn">
-            {plan.systemBound
-              ? `A system limit of ${nf(display.runLimit ?? 0)} per run applies, so this launch sends to ${nf(plan.willQueue)} of the ${nf(ready ?? 0)} ready. The rest can go in a later launch.`
-              : `This campaign is capped at ${nf(display.maxTargets)}, so ${nf((ready ?? 0) - plan.willQueue)} ready sellers won’t be included. Raise the limit to reach them.`}
+            {`This campaign’s send limit is ${nf(display.maxTargets)}, so ${nf(Math.max(0, eligibleInAudience - display.maxTargets))} more eligible sellers in the audience aren’t included. Raise the limit to reach them.`}
           </p>
         )}
         {/* Only relevant to a launch that starts now: a campaign scheduled for
@@ -238,22 +266,33 @@ export function CampaignLaunchMobile({
         </section>
       )}
 
-      {/* ── why some ready sellers won't be scheduled ──────────────────── */}
-      {personalizationGap && schedulableBlockers && (
+      {/* ── why some ready sellers won't be messaged, with the fix named ── */}
+      {notSchedulable.length > 0 && (
         <section className="clv-card" aria-label="Not scheduled">
-          <h4 className="clv-card__h">Won’t be scheduled</h4>
-          {Object.entries(schedulableBlockers)
-            .filter(([, n]) => Number(n) > 0)
-            .sort((a, b) => Number(b[1]) - Number(a[1]))
-            .slice(0, 5)
-            .map(([reason, n]) => (
-              <div key={reason} className="clv-row is-static">
-                <span className="clv-row__label is-wide">
-                  {NOT_SCHEDULABLE_COPY[reason] ?? reason.toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())}
-                </span>
-                <span className="clv-row__value">{nf(Number(n))}</span>
+          <h4 className="clv-card__h">Won’t be messaged</h4>
+          {notSchedulable.slice(0, 6).map((line) => (
+            <div key={line.reason}>
+              <div className="clv-row is-static">
+                <span className="clv-row__label is-wide">{line.label}</span>
+                <span className="clv-row__value">{nf(line.count)}</span>
               </div>
-            ))}
+              {line.details.map((detail) => (
+                <p key={detail} className="clv-card__note">{detail}</p>
+              ))}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {heldTotal > 0 && (
+        <section className="clv-card" aria-label="Held back at build">
+          <h4 className="clv-card__h">Held back at build<span className="clv-card__badge is-quiet">{nf(heldTotal)}</span></h4>
+          {heldLines.slice(0, 5).map(([reason, n]) => (
+            <div key={reason} className="clv-row is-static">
+              <span className="clv-row__label is-wide">{describeHeldReason(reason)}</span>
+              <span className="clv-row__value">{nf(Number(n))}</span>
+            </div>
+          ))}
         </section>
       )}
 

@@ -96,6 +96,8 @@ test("controlled hydration warns on brakes but does not block auto_send false", 
           eq: () => terminal,
           order: () => ({
             limit: async () => ({ data: [], count: 0, error: null }),
+            // readiness pages its targets (PostgREST caps a bare limit at 1,000)
+            range: async () => ({ data: [], count: 0, error: null }),
           }),
           limit: async () => ({ data: [], count: 0, error: null }),
           head: true,

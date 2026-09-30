@@ -18,7 +18,7 @@ import {
   blockedRuntimeBrakeResult,
   evaluateQueueCreationRuntimeBrakes,
 } from "@/lib/domain/queue/queue-control-safety.js";
-import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import { evaluateSmsHealthGuard, isSenderDispatchBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
 import { checkOutreachSuppression, checkPhoneLevelCooldown } from "@/lib/domain/outreach/outreach-service.js";
 import { calculateOwnerProspectAlignment, isIdentityEligibleForLiveOutbound } from "@/lib/identity/ownerProspectAlignment.js";
 import {
@@ -1674,6 +1674,90 @@ async function getRecentTemplateIds(candidate = {}, selector = {}, options = {},
   return { ok: true, template_ids, errors: [] };
 }
 
+const HISTORY_PREFETCH_OWNER_CHUNK = 100;
+const HISTORY_PREFETCH_PAGE = 1000;
+const HISTORY_PREFETCH_MAX_ROWS = 20000;
+const HISTORY_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * getRecentTemplateIds, answered for a whole cohort in a few batched reads.
+ *
+ * The campaign planner renders one message per target, and each render asked
+ * send_queue and message_events for that owner's history — two round trips per
+ * seller, which is most of why a dry-run plan of a few hundred sellers ran past
+ * the dashboard's two-minute request limit ("Couldn't verify messages").
+ *
+ * Same tables, same 30-day window, same selector matching
+ * (collectRecentTemplateIdsFromRows). Returns null — callers then fall back to
+ * the per-owner reads — when a read fails or the history is too large to hold.
+ */
+export async function prefetchRecentTemplateHistory(masterOwnerIds = [], deps = {}) {
+  const ids = [...new Set((masterOwnerIds || []).map((value) => clean(value)).filter(Boolean))];
+  const rowsByOwner = new Map(ids.map((id) => [id, []]));
+  if (!ids.length) return rowsByOwner;
+  let supabase;
+  try {
+    supabase = getSupabase(deps);
+  } catch {
+    return null;
+  }
+  const cutoff_iso = new Date(Date.now() - HISTORY_LOOKBACK_MS).toISOString();
+  const sources = [
+    [SEND_QUEUE_TABLE, `${SEND_QUEUE_HISTORY_SELECT},master_owner_id`],
+    ["message_events", MESSAGE_EVENTS_HISTORY_SELECT],
+  ];
+  let total = 0;
+  for (const [table, select] of sources) {
+    for (let index = 0; index < ids.length; index += HISTORY_PREFETCH_OWNER_CHUNK) {
+      const chunk = ids.slice(index, index + HISTORY_PREFETCH_OWNER_CHUNK);
+      for (let offset = 0; offset < HISTORY_PREFETCH_MAX_ROWS; offset += HISTORY_PREFETCH_PAGE) {
+        const result = await supabase
+          .from(table)
+          .select(select)
+          .in("master_owner_id", chunk)
+          .gte("created_at", cutoff_iso)
+          .order("created_at", { ascending: false })
+          .range(offset, offset + HISTORY_PREFETCH_PAGE - 1);
+        if (isPostgrestQueryError(result)) return null;
+        const rows = Array.isArray(result?.data) ? result.data : [];
+        for (const row of rows) {
+          const owner = clean(row?.master_owner_id);
+          if (rowsByOwner.has(owner)) rowsByOwner.get(owner).push(row);
+        }
+        total += rows.length;
+        if (total > HISTORY_PREFETCH_MAX_ROWS) return null;
+        if (rows.length < HISTORY_PREFETCH_PAGE) break;
+      }
+    }
+  }
+  return rowsByOwner;
+}
+
+/**
+ * A deps.getRecentTemplateIds that answers from prefetchRecentTemplateHistory.
+ * An owner outside the prefetched set is read the ordinary way (`baseDeps`
+ * must not itself carry this hook).
+ */
+export function recentTemplateIdsFromHistory(rowsByOwner, baseDeps = {}) {
+  return async (candidate = {}, selector = {}, options = {}) => {
+    const owner = clean(candidate.master_owner_id);
+    if (owner && !rowsByOwner.has(owner)) {
+      const { getRecentTemplateIds: _hook, ...readerDeps } = baseDeps;
+      return getRecentTemplateIds(candidate, selector, options, readerDeps);
+    }
+    const rows = (owner && rowsByOwner.get(owner)) || [];
+    return {
+      ok: true,
+      template_ids: collectRecentTemplateIdsFromRows(rows, {
+        cutoff_ms: Date.now() - HISTORY_LOOKBACK_MS,
+        selector: { ...selector, canonical_e164: candidate.canonical_e164 },
+        normalizePhoneFn: normalizePhone,
+      }),
+      errors: [],
+    };
+  };
+}
+
 function buildRotationPool(sorted_templates = [], selector = {}) {
   const is_s1_ownership_rotation = isS1OwnershipCheckRotation(selector);
   const strategy = is_s1_ownership_rotation
@@ -2949,39 +3033,121 @@ function byUsageThenRecency(left, right) {
   return left_ts - right_ts;
 }
 
-export async function chooseTextgridNumber(candidate = {}, options = {}, deps = {}) {
-  if (typeof deps.chooseTextgridNumber === "function") {
-    return deps.chooseTextgridNumber(candidate, options);
-  }
-
+/**
+ * The sender fleet (public.textgrid_numbers — a dozen rows). A caller that
+ * routes many candidates in one pass (the campaign planner) reads it once and
+ * hands it back as `deps.textgridNumberRows`; the router used to re-read the
+ * whole table for every single target, which made a dry-run plan of a few
+ * hundred targets outlive the dashboard's request timeout.
+ */
+export async function loadTextgridNumberFleet(deps = {}) {
+  if (Array.isArray(deps.textgridNumberRows)) return deps.textgridNumberRows;
   const supabase = getSupabase(deps);
   const { data, error } = await supabase
     .from(TEXTGRID_NUMBERS_TABLE)
     .select("*")
     .limit(200);
-
   if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
+function operatorBlockedSenderSet(options = {}) {
+  const blocked = options.blocked_sender_numbers;
+  if (blocked instanceof Set) return blocked;
+  if (Array.isArray(blocked)) return new Set(blocked.map((value) => normalizePhone(value)).filter(Boolean));
+  return null;
+}
+
+/**
+ * Why a fleet number cannot carry a message right now, or null when it can.
+ *
+ * Eligibility is evaluated on the RAW fleet row. It used to be evaluated on the
+ * normalized routing row, which carries no health_state, cooling_until or
+ * daily_limit — so only `status` was ever checked here, and a number that was
+ * `health_state: cooling` still won routing and was then refused at dispatch.
+ *
+ * The operator blocklist (system_control.sms_blocked_sender_numbers) is
+ * honoured when the caller passes it. Without that, a blocked number never
+ * sends, so it always has the lowest usage, so byUsageThenRecency always picks
+ * it — every target in its market was routed onto the one number that could
+ * not send (Miami, 2026-09-30: 84 of 84 targets).
+ */
+function senderUnavailableReason(row, blockedSenders, now, { ignoreDailyLimit = false } = {}) {
+  if (blockedSenders && isSenderDispatchBlocked(row.phone_number, { sender_numbers: blockedSenders })) {
+    return "blocked_by_operator";
+  }
+  const eligibility = evaluateOutboundNumberEligibility(
+    {
+      ...row.raw,
+      status: row.status,
+      messages_sent_today: row.messages_sent_today,
+      // A readiness question ("can this campaign send at all?") is not
+      // answered by today's cap, which resets at midnight.
+      // (undefined, not null: the evaluator reads null as a limit of 0)
+      ...(ignoreDailyLimit ? { daily_limit: undefined } : {}),
+    },
+    now
+  );
+  return eligibility.ok ? null : String(eligibility.reason || "unavailable").replace(/^outbound_number_/, "");
+}
+
+function describeLocalSenderInventory(fleet = [], seller_market = "") {
+  return fleet
+    .filter((entry) => entry.row.market_normalized === seller_market)
+    .map((entry) => ({
+      phone_number: entry.row.phone_number,
+      market: entry.row.market || null,
+      unavailable_reason: entry.unavailable_reason,
+    }));
+}
+
+/**
+ * How many fleet numbers could carry a message in each market right now —
+ * the same availability rule the router applies (status, health, cooling,
+ * daily limit, operator blocklist). Used to size a campaign's rolling plan.
+ */
+export function countSendableSendersByMarket(rows = [], markets = [], options = {}) {
+  const blocked_senders = operatorBlockedSenderSet(options);
+  const now = options.now ? new Date(options.now) : new Date();
+  const fleet = (Array.isArray(rows) ? rows : [])
+    .map(normalizeTextgridNumberRow)
+    .filter((row) => row.id && row.phone_number);
+  const out = {};
+  for (const market of markets || []) {
+    const key = normalizeMarket(market);
+    out[market] = fleet.filter((row) => row.market_normalized === key && !senderUnavailableReason(row, blocked_senders, now)).length;
+  }
+  return out;
+}
+
+export async function chooseTextgridNumber(candidate = {}, options = {}, deps = {}) {
+  if (typeof deps.chooseTextgridNumber === "function") {
+    return deps.chooseTextgridNumber(candidate, options);
+  }
+
+  const data = await loadTextgridNumberFleet(deps);
 
   /**
-   * §43 — the same eligibility rule the other two selectors use.
-   *
-   * This filter checked STATUS ONLY. Campaign materialization also checked the
-   * daily cap, and dispatch checks cap plus health and cooling — so the feeder
-   * could route a candidate to a number that was already at its ceiling, or
-   * cooling, and dispatch would then block the row it had just created. Safe,
-   * because dispatch revalidates, but the work parks instead of going to a
-   * sender that could carry it.
+   * §43 — the same eligibility rule the other two selectors use: status,
+   * health, cooling and daily cap (see senderUnavailableReason), plus the
+   * operator blocklist when the caller supplies it.
    */
   const eligibility_now = new Date();
-  const numbers = (Array.isArray(data) ? data : [])
+  const blocked_senders = operatorBlockedSenderSet(options);
+  const ignoreDailyLimit = asBoolean(options.ignore_daily_limit, false);
+  const fleet = (Array.isArray(data) ? data : [])
     .map(normalizeTextgridNumberRow)
     .filter((row) => row.id && row.phone_number)
-    .filter((row) => evaluateOutboundNumberEligibility(row, eligibility_now).ok);
+    .map((row) => ({ row, unavailable_reason: senderUnavailableReason(row, blocked_senders, eligibility_now, { ignoreDailyLimit }) }));
+  const numbers = fleet.filter((entry) => !entry.unavailable_reason).map((entry) => entry.row);
 
   if (!numbers.length) {
+    // Nothing in the whole fleet can send; still say what the seller's own
+    // market has and why, so the fix is named.
+    const local_sender_inventory = describeLocalSenderInventory(fleet, normalizeMarket(candidate.market));
     return {
       ok: false,
-      reason_code: REASON_CODES.NO_VALID_TEXTGRID_NUMBER,
+      reason_code: local_sender_inventory.length ? REASON_CODES.ROUTING_BLOCKED : REASON_CODES.NO_VALID_TEXTGRID_NUMBER,
       routing_allowed: false,
       routing_tier: "none",
       selection_reason: null,
@@ -2990,7 +3156,12 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       selected_textgrid_number: null,
       seller_market: candidate.market || null,
       seller_state: candidate.state || null,
-      routing_block_reason: "NO_ACTIVE_TEXTGRID_NUMBERS",
+      routing_block_reason: !local_sender_inventory.length
+        ? "NO_ACTIVE_TEXTGRID_NUMBERS"
+        : local_sender_inventory.some((entry) => entry.unavailable_reason === "blocked_by_operator")
+          ? "LOCAL_NUMBERS_BLOCKED_BY_OPERATOR"
+          : "LOCAL_NUMBERS_UNAVAILABLE",
+      local_sender_inventory,
       selected: null,
     };
   }
@@ -3048,6 +3219,17 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
   }
 
   if (exact_market_required) {
+    /**
+     * Say WHICH local numbers exist and why none can carry the message, so a
+     * plan that places nothing names the fix (unblock / unpause / wait out a
+     * cooldown) instead of a bare "routing blocked".
+     */
+    const local_sender_inventory = describeLocalSenderInventory(fleet, seller_market);
+    const routing_block_reason = !local_sender_inventory.length
+      ? "NO_VALID_LOCAL_TEXTGRID_NUMBER"
+      : local_sender_inventory.some((entry) => entry.unavailable_reason === "blocked_by_operator")
+        ? "LOCAL_NUMBERS_BLOCKED_BY_OPERATOR"
+        : "LOCAL_NUMBERS_UNAVAILABLE";
     return {
       ok: false,
       reason_code: REASON_CODES.ROUTING_BLOCKED,
@@ -3060,7 +3242,8 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       seller_market: candidate.market || null,
       seller_state: candidate.state || null,
       rejected_candidate_count: numbers.length,
-      routing_block_reason: "NO_VALID_LOCAL_TEXTGRID_NUMBER",
+      routing_block_reason,
+      local_sender_inventory,
       selected: null,
       diagnostics: {
         require_local_routing,
@@ -3123,6 +3306,7 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
       seller_state: candidate.state || null,
       rejected_candidate_count: numbers.length,
       routing_block_reason: "NO_APPROVED_ROUTING_PATH",
+      local_sender_inventory: describeLocalSenderInventory(fleet, seller_market),
       selected: null,
     };
 }
@@ -3204,19 +3388,28 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
   } else {
     const supabase = getSupabase(deps);
 
-    let primary_query = supabase
-      .from("sms_templates")
-      .select("*")
-      .eq("is_active", true)
-      .eq("use_case", selector.use_case);
+    /**
+     * The same two queries, answered once per (use case, language, limit) for
+     * a caller that renders many candidates in one pass: the campaign planner
+     * passes `deps.templateFetchCache` (a Map). Rows are read, never mutated.
+     */
+    const fetchTemplateQuery = (withUseCase) => {
+      const cache = deps.templateFetchCache instanceof Map ? deps.templateFetchCache : null;
+      const key = [withUseCase ? clean(selector.use_case) : "*", lower(fetch_language || ""), fetch_limit].join("|");
+      if (cache?.has(key)) return cache.get(key);
+      let query = supabase.from("sms_templates").select("*").eq("is_active", true);
+      if (withUseCase) query = query.eq("use_case", selector.use_case);
+      if (fetch_language) query = query.ilike("language", fetch_language);
+      const pending = Promise.resolve(query.limit(fetch_limit)).then((result) => {
+        // A failed read is not remembered: the next candidate asks again.
+        if (result?.error && cache) cache.delete(key);
+        return result;
+      });
+      if (cache) cache.set(key, pending);
+      return pending;
+    };
 
-    if (fetch_language) {
-      primary_query = primary_query.ilike("language", fetch_language);
-    }
-
-    primary_query = primary_query.limit(fetch_limit);
-
-    const { data, error } = await primary_query;
+    const { data, error } = await fetchTemplateQuery(true);
 
     if (error) {
       return {
@@ -3238,18 +3431,7 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
     templates = primary_rows;
 
     if (!templates.length) {
-      let fallback_query = supabase
-        .from("sms_templates")
-        .select("*")
-        .eq("is_active", true);
-
-      if (fetch_language) {
-        fallback_query = fallback_query.ilike("language", fetch_language);
-      }
-
-      fallback_query = fallback_query.limit(fetch_limit);
-
-      const fallback_any_use_case = await fallback_query;
+      const fallback_any_use_case = await fetchTemplateQuery(false);
       const fallback_rows = Array.isArray(fallback_any_use_case?.data) ? fallback_any_use_case.data : [];
 
       if (fallback_rows.length) {

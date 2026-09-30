@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import type { CampaignPreviewResult } from '../campaignWizardAdapter'
+import { describeHeldReason } from '../campaign-launch-plan'
 
 /**
  * Campaign Creator — REACH, mobile 393pt.
@@ -245,7 +246,9 @@ export function CampaignReachMobile({
    * the partition shows the ready figure it does have.
    */
   const counted = Boolean(preview) && !loading
-  const partitionMissing = counted && !model
+  // What Build will produce with these filters and this send limit.
+  const sim = preview?.build_simulation?.ok ? preview.build_simulation : null
+  const partitionMissing = counted && !model && !sim
   const shownReady = model ? (ready ?? 0) : (counted && readyFallback != null ? readyFallback : null)
   const countedAgo = (() => {
     if (!updatedAt) return null
@@ -277,7 +280,9 @@ export function CampaignReachMobile({
         </span>
         <span className="crx__summary-unit">ready to message</span>
         <span className="crx__summary-sub">
-          {model && readyPct != null
+          {!loading && sim
+            ? `of ${nf(sim.eligible_in_audience ?? 0)} eligible · built exactly as Schedule builds it (limit ${nf(sim.requested_limit ?? sim.simulated_limit ?? 0)})`
+            : model && readyPct != null
             ? `${readyPct.toFixed(1)}% of the ${nf(matched)} sellers targeted`
             : loading
               ? 'Counting your audience…'
@@ -287,6 +292,71 @@ export function CampaignReachMobile({
         </span>
       </section>
 
+      {!loading && (preview?.inapplicable_filters?.length || preview?.filter_notes?.length) ? (
+        <section className="cdb__band" aria-label="Filters">
+          <div className="cdb__key">Filters</div>
+          {(preview?.inapplicable_filters ?? []).map((item) => (
+            <p key={`x-${item.field_key}`} className="crx__note is-warn">
+              <strong>{item.label}</strong> isn’t applied — {item.message.replace(/^Not applied: /, '')} Remove it to schedule.
+            </p>
+          ))}
+          {(preview?.filter_notes ?? []).map((note) => (
+            <p key={`n-${note.field_key}-${note.message}`} className="crx__note">{note.message}</p>
+          ))}
+        </section>
+      ) : null}
+
+      {sim && !loading && (
+        <section className={`cdb__band crx__build${stale ? ' is-stale' : ''}`} aria-label="What Schedule will build">
+          <div className="cdb__key">
+            What Schedule builds
+            <span className="cdb__count">{nf(sim.ready)} ready</span>
+          </div>
+          <div className="cdb__rows">
+            <div className="cdb__row">
+              <span className="cdb__row-label">Eligible in this audience</span>
+              <span className="cdb__row-value">{nf(sim.eligible_in_audience ?? 0)}</span>
+            </div>
+            <div className="cdb__row">
+              <span className="cdb__row-label">Taken by the send limit</span>
+              <span className="cdb__row-value">{nf(sim.queue_eligible_rows_read ?? 0)}</span>
+            </div>
+            {Number(sim.duplicate_phones_collapsed ?? 0) > 0 && (
+              <div className="cdb__row">
+                <span className="cdb__row-label">Same phone, messaged once</span>
+                <span className="cdb__row-value">−{nf(sim.duplicate_phones_collapsed ?? 0)}</span>
+              </div>
+            )}
+            {Object.entries(sim.held_by_reason ?? {})
+              .filter(([, n]) => Number(n) > 0)
+              .sort((a, b) => Number(b[1]) - Number(a[1]))
+              .map(([reason, n]) => (
+                <div key={reason} className="cdb__row">
+                  <span className="cdb__row-label">Held: {describeHeldReason(reason)}</span>
+                  <span className="cdb__row-value">−{nf(Number(n))}</span>
+                </div>
+              ))}
+            <div className="cdb__row is-total">
+              <span className="cdb__row-label">Ready to message</span>
+              <span className="cdb__row-value">{nf(sim.ready)}</span>
+            </div>
+          </div>
+          {sim.sendable_now != null && (
+            <p className={`crx__note${Number(sim.no_sendable_number ?? 0) > 0 ? ' is-warn' : ''}`}>
+              {Number(sim.no_sendable_number ?? 0) > 0
+                ? `${nf(sim.sendable_now)} can be texted today; ${nf(sim.no_sendable_number ?? 0)} have no sendable number in their market.`
+                : `All ${nf(sim.sendable_now)} have a sender number today.`}
+            </p>
+          )}
+          {(sim.sender_markets ?? []).filter((m) => m.sendable === false && m.summary).slice(0, 4).map((m) => (
+            <p key={m.market} className="crx__note">{m.summary}</p>
+          ))}
+          {sim.capped_by_preview && (
+            <p className="crx__note">Counted over the first {nf(sim.simulated_limit ?? 0)}; the build reads up to {nf(sim.requested_limit ?? 0)}.</p>
+          )}
+        </section>
+      )}
+
       {gap > 0 && (
         <section className="cdb__band">
           <div className="cdb__key">Data coverage</div>
@@ -294,7 +364,7 @@ export function CampaignReachMobile({
         </section>
       )}
 
-      <section className={`cdb__band crx__funnel${stale ? ' is-stale' : ''}${model ? '' : ' is-counting'}`}>
+      {!(sim && !model) && <section className={`cdb__band crx__funnel${stale ? ' is-stale' : ''}${model ? '' : ' is-counting'}`}>
         <div className="cdb__key">How the audience narrows</div>
 
         {partitionMissing && (
@@ -397,10 +467,12 @@ export function CampaignReachMobile({
             <Icon name={openLosses ? 'chevron-up' : 'chevron-down'} size={13} />
           </button>
         )}
-      </section>
+      </section>}
 
-      {/* Routing as capacity intelligence, read horizontally. */}
-      <section className="cdb__band crx__routing">
+      {/* Routing as capacity intelligence, read horizontally. The graph's
+          routing tiers are computed at refresh time; when Reach has simulated
+          the build, the live sender check above is the answer instead. */}
+      {!sim && <section className="cdb__band crx__routing">
         {/* Scope is explicit: routing is evaluated across the whole targeted
             audience, so LOCAL 11,756 is not the funnel's Sender-routed 8,975. */}
         <div className="cdb__key">
@@ -433,7 +505,7 @@ export function CampaignReachMobile({
           ))}
         </div>
         )}
-      </section>
+      </section>}
 
       {openLosses && losses.length > 0 && (
         <section className="cdb__band is-last">

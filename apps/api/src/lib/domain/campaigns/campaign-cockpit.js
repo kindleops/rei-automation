@@ -577,6 +577,8 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
           active_live_rows: Number(feederLast.active_live_rows ?? 0),
           last_refill_at: iso(feederLast.last_refill_at),
           skipped_counts_by_reason: obj(feederLast.skipped_counts_by_reason),
+          skip_summary: clean(feederLast.skip_summary) || null,
+          routing_blocks_by_market: obj(feederLast.routing_blocks_by_market),
         }
         : null,
     },

@@ -17,6 +17,7 @@ import { requiredMergeFields } from '@/lib/domain/campaigns/template-render-vali
 import { OUTBOUND_MERGE_KEYS } from '@/lib/domain/campaigns/outbound-agent-identity.js'
 import { governanceApplies } from '@/lib/domain/campaigns/template-governance.js'
 import { loadDispatchBlockedSets, isTemplateDispatchBlocked } from '@/lib/domain/delivery/sms-health-guard.js'
+import { isLanguagePolicyToken } from '@/lib/sms/language_aliases.js'
 
 function clean(value) {
   return String(value ?? '').trim()
@@ -124,10 +125,36 @@ function pickDeterministicTemplate(candidates, seed) {
   return sorted[index]
 }
 
+/**
+ * The language a target is messaged in — the documented default is ENGLISH.
+ *
+ * The target's own language wins, then its snapshot's. A policy token ('auto',
+ * 'unknown', …) or nothing at all means "not stated", which is English — the
+ * same chain the plan uses (launchCandidateFromTarget) and the same rule
+ * renderOutboundTemplate applies at send time. Assignment fell back to
+ * `campaign.language_policy`, which is the token 'auto' by default, so every
+ * target with no stated language was looked up as the language "auto", found
+ * no templates and sat `awaiting_template` — reported by readiness as "N
+ * targets awaiting template assignment" although the plan rendered them in
+ * English. (`campaign` stays in the signature for callers; the campaign's
+ * policy is deliberately not a language.)
+ */
+export const DEFAULT_TARGET_LANGUAGE = 'English'
+
+export function resolveTargetMessageLanguage(target = {}, _campaign = {}) {
+  const snapshot = metadataObject(metadataObject(target.metadata).candidate_snapshot)
+  for (const value of [target.language, snapshot.language]) {
+    const text = clean(value)
+    if (!text || isLanguagePolicyToken(text)) continue
+    return text
+  }
+  return DEFAULT_TARGET_LANGUAGE
+}
+
 export function assignTemplateForTargetFast(target, campaign, templateCatalog, governedPool = false) {
   const metadata = metadataObject(target.metadata)
   const snapshot = metadataObject(metadata.candidate_snapshot)
-  const languageRaw = clean(target.language || snapshot.language || campaign.language_policy || 'English')
+  const languageRaw = resolveTargetMessageLanguage(target, campaign)
   const languageResolved = resolveLanguage(languageRaw)
   const catalogLanguage = templateCatalogLanguage(languageRaw)
 

@@ -3442,6 +3442,27 @@
   color: var(--text-0, #f4f4f5);
 }
 
+/* A field the campaign audience can't filter on: visible, explained, inert. */
+.cmp-field-picker-item.is-disabled,
+.cmp-field-picker-item.is-disabled:hover {
+  cursor: not-allowed;
+  background: none;
+  color: var(--text-2, #71717a);
+  opacity: 0.72;
+}
+
+.cmp-field-picker-item.is-disabled .cmp-field-picker-label {
+  white-space: normal;
+}
+
+.cmp-field-picker-reason {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-2, #71717a);
+}
+
 .cmp-field-picker-label {
   flex: 1;
   min-width: 0;

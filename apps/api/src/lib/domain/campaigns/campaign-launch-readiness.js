@@ -1,15 +1,45 @@
 /**
  * Truthful launch readiness — evaluates execution gates before live send.
+ *
+ * CURRENT TRUTH, NOT STORED ROLL-UPS (2026-09-30).
+ *
+ * Readiness used to answer three questions from columns that were stale by
+ * construction:
+ *
+ *   • Templates — a per-language roll-up of `template_status !== 'ready'` over
+ *     EVERY target, blocked ones included. template_status is 'pending' from
+ *     build until activation assigns templates, so before activation every
+ *     campaign read "N English targets awaiting template assignment"; held
+ *     targets never leave that state, so the line never went away; and targets
+ *     with no stated language on an `auto` campaign were assigned the language
+ *     "auto" and parked forever.
+ *   • Senders — "is there any status='active' number whose market equals the
+ *     campaign market (or one of seven hardcoded Los Angeles aliases)". It
+ *     ignored the operator blocklist, health, cooling and the other markets in
+ *     the audience, so Miami — one paused, one cooling and one operator-blocked
+ *     number — passed, and its plan then placed 0 of 84.
+ *   • Nothing looked at what the plan actually did.
+ *
+ * Now every answer comes from the path the plan itself runs:
+ *
+ *   • Templates — per language of the READY targets (no stated language →
+ *     English, the documented default), a sample of that language is rendered
+ *     with the planner's renderer and options. "No approved Spanish message"
+ *     is said plainly, with how many sellers it affects.
+ *   • Senders — per market of the READY targets, the planner's router
+ *     (chooseTextgridNumber, first touch, operator blocklist applied) is asked
+ *     for a sender, and every local number's state is reported when it can't.
+ *   • The last real plan — for a campaign that has run, the feeder's last
+ *     outcome (placed nothing, and why) is surfaced.
  */
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { getSystemValue } from '@/lib/system-control.js'
-import { renderOutboundTemplate } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import { chooseTextgridNumber, loadTextgridNumberFleet, renderOutboundTemplate } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
-import {
-  canonicalLanguageLabel,
-  resolveLanguage,
-} from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import { canonicalLanguageLabel, resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
+import { resolveTargetMessageLanguage } from '@/lib/domain/campaigns/campaign-target-template-assignment.js'
+import { loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import {
   asBoolean,
   isEmergencyStopActive,
@@ -18,9 +48,14 @@ import {
 import { evaluateGlobalSendBrakeState } from '@/lib/domain/queue/queue-send-brake-state.js'
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
 
-async function launchCandidateFromTarget(target, campaign) {
-  const { launchCandidateFromTarget: resolve } = await import('@/lib/domain/campaigns/campaign-automation-service.js')
-  return resolve(target, campaign)
+async function campaignServiceHelpers() {
+  const service = await import('@/lib/domain/campaigns/campaign-automation-service.js')
+  return {
+    launchCandidateFromTarget: service.launchCandidateFromTarget,
+    loadOwnerPersonas: service.loadOwnerPersonas,
+    applyOwnerPersona: service.applyOwnerPersona,
+    describePlanSkips: service.describePlanSkips,
+  }
 }
 
 function clean(value) {
@@ -30,6 +65,8 @@ function clean(value) {
 function metadataObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
+
+const nf = (value) => Number(value || 0).toLocaleString('en-US')
 
 const BLOCKER_LABELS = {
   emergency_stop: 'Emergency stop is active',
@@ -45,20 +82,63 @@ const BLOCKER_LABELS = {
   missing_per_sender_cap: 'Per-sender cap is missing',
   missing_send_window: 'Send window is not configured',
   routing_zero: 'No routable recipients (routing allowed = 0)',
-  template_required: 'No approved template resolved for scenario/stage/language',
-  language_template_gap: 'Targets missing language template assignment',
+  template_required: 'No approved message renders for this audience',
   no_ready_recipients: 'No ready recipients in target snapshot',
-  no_launch_ready_recipients: 'No launch-ready recipients after template and routing gates',
-  missing_canonical_phone: 'Recipient missing canonical phone',
-  suppression_blocked: 'Active suppression on ready recipients',
-  routing_blocked: 'Sender route unavailable for ready recipients',
-  identity_blocked: 'Identity confidence too low for activation',
-  duplicate_queue_row: 'Duplicate active queue row exists',
+  no_launch_ready_recipients: 'No seller in this audience can be sent right now',
   campaign_not_queueable: 'Campaign lifecycle does not allow activation',
-  missing_launch_caps: 'Campaign missing required pacing caps',
   provider_disabled: 'Outbound SMS provider is disabled',
-  zero_valid_senders: 'No active sender route covers this campaign market',
+  zero_valid_senders: 'No sendable number covers this audience',
 }
+
+const SENDER_STATE_LABELS = {
+  blocked_by_operator: 'blocked by operator',
+  status_paused: 'paused',
+  status_inactive: 'inactive',
+  status_disabled: 'disabled',
+  status_suspended: 'suspended',
+  status_released: 'released',
+  status_retired: 'retired',
+  health_cooling: 'cooling',
+  health_blocked: 'health-blocked',
+  health_quarantined: 'quarantined',
+  health_spam_flagged: 'spam-flagged',
+  health_suspended: 'suspended',
+  cooling_until: 'cooling',
+  daily_limit_reached: 'at its daily limit (resets tomorrow)',
+}
+
+const RENDER_FAILURE_LABELS = {
+  NO_TEMPLATE: 'no approved message',
+  TEMPLATE_RENDER_LINT_FAILURE: 'the message failed the template check',
+  TEMPLATE_RENDER_FAILED: 'the message could not be rendered',
+  NAME_HYDRATION_FAILURE: 'the seller name is missing',
+  OUTREACH_HISTORY_UNAVAILABLE: 'message history could not be read',
+}
+
+/** Languages rendered per readiness check, and samples per language. */
+const MAX_LANGUAGES_SAMPLED = 12
+const SAMPLES_PER_LANGUAGE = 3
+
+/** Render failures that are about one seller's data, not the language's templates. */
+const SELLER_LEVEL_RENDER_FAILURES = new Set([
+  'TEMPLATE_RENDER_LINT_FAILURE',
+  'NAME_HYDRATION_FAILURE',
+  'OUTREACH_HISTORY_UNAVAILABLE',
+])
+
+function renderedTemplateId(result = {}) {
+  return clean(
+    result.selected_template_id ||
+      result.template_rotation?.selected_template_id ||
+      result.template?.template_id ||
+      result.template?.id
+  ) || null
+}
+const MAX_MARKETS_ROUTED = 40
+const TARGET_PAGE = 1000
+const TARGET_PAGE_LIMIT = 50
+// Narrow projection: counting needs no candidate snapshot.
+const TARGET_COLUMNS = 'id,target_status,routing_status,suppression_status,template_status,identity_status,language,market,state,block_reason'
 
 function isTargetRoutingReady(row = {}) {
   return (
@@ -66,19 +146,6 @@ function isTargetRoutingReady(row = {}) {
     clean(row.routing_status) === 'ready' &&
     clean(row.suppression_status) !== 'blocked'
   )
-}
-
-function isTargetLaunchReady(row = {}) {
-  return (
-    isTargetRoutingReady(row) &&
-    clean(row.template_status) === 'ready' &&
-    clean(row.identity_status) !== 'blocked'
-  )
-}
-
-function isSenderCoveredTarget(row = {}) {
-  const metadata = metadataObject(row.metadata)
-  return metadata.sender_covered === true || metadata.candidate_snapshot?.sender_covered === true
 }
 
 export function resolveLaunchReadinessContext(options = {}) {
@@ -100,12 +167,262 @@ export function resolveLaunchReadinessContext(options = {}) {
   }
 }
 
+/**
+ * Every target of the campaign, paged. `.limit(50000)` is clamped to
+ * PostgREST's 1,000 max-rows, so a larger campaign was judged on its first
+ * thousand rows.
+ */
+async function fetchReadinessTargets(supabase, campaignId) {
+  const rows = []
+  const seen = new Set()
+  for (let page = 0; page < TARGET_PAGE_LIMIT; page += 1) {
+    const from = page * TARGET_PAGE
+    const { data, error } = await supabase
+      .from('campaign_targets')
+      .select(TARGET_COLUMNS)
+      .eq('campaign_id', campaignId)
+      .order('id', { ascending: true })
+      .range(from, from + TARGET_PAGE - 1)
+    if (error) throw error
+    const batch = Array.isArray(data) ? data : []
+    let fresh = 0
+    for (const row of batch) {
+      const key = clean(row?.id) || `row:${rows.length}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push(row)
+      fresh += 1
+    }
+    if (batch.length < TARGET_PAGE || fresh === 0) break
+  }
+  return rows
+}
+
+async function fetchFullTargets(supabase, ids = []) {
+  if (!ids.length) return []
+  const { data, error } = await supabase.from('campaign_targets').select('*').in('id', ids)
+  if (error) throw error
+  return Array.isArray(data) ? data : []
+}
+
+function describeSenders(inventory = []) {
+  return (Array.isArray(inventory) ? inventory : [])
+    .map((entry) => `${entry.phone_number} ${SENDER_STATE_LABELS[entry.unavailable_reason] || clean(entry.unavailable_reason).replace(/_/g, ' ') || 'available'}`)
+    .join('; ')
+}
+
+/**
+ * Per market of the routing-ready targets: can the planner's router place a
+ * first touch there right now? Same function, same options as the plan.
+ */
+async function evaluateSenderCoverage(routingReady, deps, blockedSenders) {
+  const byMarket = new Map()
+  for (const row of routingReady) {
+    const market = clean(row.market) || 'Unknown market'
+    const entry = byMarket.get(market) || { market, state: clean(row.state) || null, sellers: 0 }
+    entry.sellers += 1
+    byMarket.set(market, entry)
+  }
+  const markets = [...byMarket.values()].sort((left, right) => right.sellers - left.sellers)
+  const routeDeps = { ...deps }
+  if (!Array.isArray(deps.textgridNumberRows) && typeof deps.chooseTextgridNumber !== 'function') {
+    routeDeps.textgridNumberRows = await loadTextgridNumberFleet(deps).catch(() => [])
+  }
+  const routeOptions = {
+    first_touch: true,
+    routing_safe_only: true,
+    blocked_sender_numbers: blockedSenders,
+    // Today's per-number cap resets tomorrow; it paces, it doesn't block.
+    ignore_daily_limit: true,
+  }
+  const results = []
+  for (const entry of markets.slice(0, MAX_MARKETS_ROUTED)) {
+    const routing = await chooseTextgridNumber(
+      { market: entry.market === 'Unknown market' ? null : entry.market, state: entry.state, is_first_touch: true, touch_number: 1 },
+      routeOptions,
+      routeDeps,
+    ).catch((error) => ({ ok: false, routing_block_reason: 'ROUTER_ERROR', error: error?.message }))
+    results.push({
+      market: entry.market,
+      sellers: entry.sellers,
+      sendable: routing.ok === true,
+      sender: routing.ok ? routing.selected_textgrid_number || routing.selected?.phone_number || null : null,
+      route_tier: routing.ok ? routing.routing_tier || null : null,
+      block_reason: routing.ok ? null : routing.routing_block_reason || routing.reason_code || 'routing_blocked',
+      senders: Array.isArray(routing.local_sender_inventory)
+        ? routing.local_sender_inventory.map((sender) => ({ phone_number: sender.phone_number, state: sender.unavailable_reason || 'available' }))
+        : [],
+    })
+  }
+  // Markets past the routing budget are reported, not guessed.
+  for (const entry of markets.slice(MAX_MARKETS_ROUTED)) {
+    results.push({ market: entry.market, sellers: entry.sellers, sendable: null, sender: null, route_tier: null, block_reason: 'not_evaluated', senders: [] })
+  }
+  return results
+}
+
+/**
+ * For any set of target-shaped rows (market/state): how many sellers a sender
+ * can reach today, and per market why not. Reach uses it on the simulated
+ * build, readiness on the stored targets — the same router either way.
+ */
+export async function evaluateAudienceSenderCoverage(rows = [], deps = {}) {
+  const dispatchBlocked = await (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)()
+    .catch(() => ({ template_ids: new Set(), sender_numbers: new Set() }))
+  const markets = rows.length ? await evaluateSenderCoverage(rows, deps, dispatchBlocked.sender_numbers) : []
+  const total = (predicate) => markets.filter(predicate).reduce((sum, entry) => sum + entry.sellers, 0)
+  return {
+    sendable_now: total((entry) => entry.sendable === true),
+    no_sendable_number: total((entry) => entry.sendable === false),
+    not_evaluated: total((entry) => entry.sendable === null),
+    markets: markets.map((entry) => ({ ...entry, summary: entry.sendable === false ? describeUnsendableMarket(entry) : null })),
+  }
+}
+
+function describeUnsendableMarket(entry) {
+  const senders = describeSenders(entry.senders.map((sender) => ({ phone_number: sender.phone_number, unavailable_reason: sender.state })))
+  const why = entry.block_reason === 'NO_VALID_LOCAL_TEXTGRID_NUMBER'
+    ? 'there is no sender number in this market'
+    : senders || 'no sender route'
+  return `${entry.market} (${nf(entry.sellers)} ${entry.sellers === 1 ? 'seller' : 'sellers'}): ${why}`
+}
+
+/**
+ * Per language of the routing-ready targets: does the planner's renderer
+ * produce an approved message? No stated language → English (documented
+ * default, resolveTargetMessageLanguage).
+ */
+async function evaluateLanguageCoverage(routingReady, campaign, deps, context) {
+  const groups = new Map()
+  for (const row of routingReady) {
+    const stated = resolveTargetMessageLanguage(row, campaign)
+    const resolved = resolveLanguage(stated)
+    const language = canonicalLanguageLabel(stated) || 'English'
+    const group = groups.get(language) || { language, sellers: 0, unsupported: resolved.unsupported === true, sample_ids: [], assigned: 0 }
+    group.sellers += 1
+    if (clean(row.template_status) === 'ready') group.assigned += 1
+    if (group.sample_ids.length < SAMPLES_PER_LANGUAGE) group.sample_ids.push(row.id)
+    groups.set(language, group)
+  }
+  const ordered = [...groups.values()].sort((left, right) => right.sellers - left.sellers)
+  const sampled = ordered.filter((group) => !group.unsupported).slice(0, MAX_LANGUAGES_SAMPLED)
+  const sampleRows = await fetchFullTargets(context.supabase, sampled.flatMap((group) => group.sample_ids)).catch(() => [])
+  const rowsById = new Map(sampleRows.map((row) => [clean(row.id), row]))
+  const helpers = await campaignServiceHelpers()
+  const personas = clean(campaign.agent_persona)
+    ? new Map()
+    : await helpers.loadOwnerPersonas(context.supabase, sampleRows.map((row) => row.master_owner_id)).catch(() => new Map())
+  // A sample render only asks "does an approved message exist and render?".
+  // Recent-template history changes WHICH variant rotation picks, never
+  // whether one exists (all-recent falls back to the full pool), so the two
+  // history reads per render are skipped here.
+  const renderDeps = {
+    ...deps,
+    templateFetchCache: deps.templateFetchCache instanceof Map ? deps.templateFetchCache : new Map(),
+    getRecentTemplateIds: typeof deps.getRecentTemplateIds === 'function'
+      ? deps.getRecentTemplateIds
+      : async () => ({ ok: true, template_ids: [], errors: [] }),
+  }
+
+  let rendered = 0
+  let failed = 0
+  const results = []
+  for (const group of ordered) {
+    if (group.unsupported) {
+      results.push({ language: group.language, sellers: group.sellers, renders: false, reason: 'unsupported_language', samples: 0, assigned: group.assigned })
+      continue
+    }
+    if (!sampled.includes(group)) {
+      results.push({ language: group.language, sellers: group.sellers, renders: null, reason: 'not_evaluated', samples: 0, assigned: group.assigned })
+      continue
+    }
+    /**
+     * The question is whether an approved message EXISTS for the language. A
+     * sample that picked a template and then failed on that seller's own data
+     * (no first name → "Hi ," is refused) proves the language is covered; the
+     * seller-level miss shows up in the plan's own skip counts. Only "no
+     * template at all" makes a language gap.
+     */
+    let covered = false
+    let reason = null
+    let sellerLevel = null
+    let samples = 0
+    for (const id of group.sample_ids) {
+      const target = rowsById.get(clean(id))
+      if (!target) continue
+      samples += 1
+      const candidate = helpers.applyOwnerPersona(helpers.launchCandidateFromTarget(target, campaign), personas)
+      candidate.stage_code = context.stageCode
+      const result = await renderOutboundTemplate(candidate, {
+        template_use_case: context.templateUseCase,
+        stage_code: context.stageCode,
+        first_touch: true,
+        campaign_template_assignment: true,
+        allow_identity_unknown: true,
+        blocked_template_ids: context.blockedTemplates,
+        campaign_session_id: campaign.id,
+      }, renderDeps).catch((error) => ({ ok: false, reason_code: 'TEMPLATE_RENDER_FAILED', reason: error?.message }))
+      const code = clean(result.reason_code || result.reason) || 'render_failed'
+      if (result.ok && renderedTemplateId(result)) {
+        covered = true
+        rendered += 1
+        break
+      }
+      failed += 1
+      if (renderedTemplateId(result) && SELLER_LEVEL_RENDER_FAILURES.has(code)) {
+        covered = true
+        sellerLevel = sellerLevel || code
+        break
+      }
+      reason = reason || code
+    }
+    results.push({
+      language: group.language,
+      sellers: group.sellers,
+      renders: samples ? covered : null,
+      reason: covered ? null : reason,
+      seller_level_failure: sellerLevel,
+      samples,
+      assigned: group.assigned,
+    })
+  }
+  return { languages: results, rendered, failed }
+}
+
+function describeLanguageGap(entry) {
+  const who = `${nf(entry.sellers)} ${entry.language}-speaking ${entry.sellers === 1 ? 'seller' : 'sellers'}`
+  if (entry.reason === 'unsupported_language') return `${entry.language} isn’t a supported message language — ${who} can’t be messaged`
+  const why = RENDER_FAILURE_LABELS[entry.reason] || clean(entry.reason).replace(/_/g, ' ').toLowerCase() || 'no approved message'
+  return `No approved ${entry.language} message (${why}) — ${who} can’t be messaged`
+}
+
+/** What the last real plan did, from the feeder's own heartbeat on the campaign. */
+async function describeLastPlan(campaign) {
+  const last = metadataObject(metadataObject(campaign.metadata).feeder_last)
+  if (!clean(last.at)) return null
+  const skipped = metadataObject(last.skipped_counts_by_reason)
+  const { describePlanSkips } = await campaignServiceHelpers()
+  return {
+    at: last.at,
+    inserted: Number(last.inserted || 0),
+    ready_remaining: Number(last.ready_remaining || 0),
+    reason: last.reason || null,
+    stalled: last.stalled === true,
+    skipped_counts_by_reason: skipped,
+    summary: clean(last.skip_summary) || describePlanSkips(skipped, metadataObject(last.routing_blocks_by_market)),
+  }
+}
+
 export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, options = {}) {
   const supabase = deps.supabase || defaultSupabase
   const blockers = []
   const blockerCodes = []
   const warnings = []
   const context = resolveLaunchReadinessContext(options)
+  const block = (code, text = BLOCKER_LABELS[code]) => {
+    blockers.push(text)
+    blockerCodes.push(code)
+  }
 
   const { data: campaign } = await supabase.from('campaigns').select('*').eq('id', campaignId).maybeSingle()
   if (!campaign) return { ok: false, error: 'campaign_not_found' }
@@ -120,15 +437,15 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     processorModeRaw,
     globalAutoEnqueue,
     outboundSms,
-    targetRowsRes,
-    senderRowsRes,
+    targets,
+    dispatchBlocked,
   ] = await Promise.all([
     loadSystemValue('queue_emergency_stop_at'),
     loadSystemValue('queue_processor_mode'),
     loadSystemValue('queue_auto_enqueue_enabled'),
     loadSystemValue('outbound_sms_enabled'),
-    supabase.from('campaign_targets').select('*').eq('campaign_id', campaignId).limit(50000),
-    supabase.from('textgrid_numbers').select('id,market,status').eq('status', 'active').limit(500),
+    fetchReadinessTargets(supabase, campaignId),
+    (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)().catch(() => ({ template_ids: new Set(), sender_numbers: new Set() })),
   ])
 
   const brakeState = evaluateGlobalSendBrakeState({
@@ -144,51 +461,26 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
       warnings.push('Queue processor is paused — rows will hydrate but will not transmit until processor resumes')
     }
   } else {
-    if (isEmergencyStopActive(emergencyStop)) {
-      blockers.push(BLOCKER_LABELS.emergency_stop)
-      blockerCodes.push('emergency_stop')
-    }
+    if (isEmergencyStopActive(emergencyStop)) block('emergency_stop')
     const processorMode = normalizeQueueProcessorMode(processorModeRaw, 'off')
-    if (processorMode === 'off') {
-      blockers.push(BLOCKER_LABELS.queue_processor_disabled)
-      blockerCodes.push('queue_processor_disabled')
-    }
+    if (processorMode === 'off') block('queue_processor_disabled')
   }
 
   if (!context.controlled_hydration) {
-    if (!asBoolean(globalAutoEnqueue, false)) {
-      blockers.push(BLOCKER_LABELS.global_auto_enqueue_disabled)
-      blockerCodes.push('global_auto_enqueue_disabled')
-    }
-    if (!campaign.auto_queue_enabled) {
-      blockers.push(BLOCKER_LABELS.campaign_auto_queue_disabled)
-      blockerCodes.push('campaign_auto_queue_disabled')
-    }
-    if (!campaign.auto_send_enabled) {
-      blockers.push(BLOCKER_LABELS.transmission_disabled)
-      blockerCodes.push('transmission_disabled')
-    }
+    if (!asBoolean(globalAutoEnqueue, false)) block('global_auto_enqueue_disabled')
+    if (!campaign.auto_queue_enabled) block('campaign_auto_queue_disabled')
+    if (!campaign.auto_send_enabled) block('transmission_disabled')
   } else if (
     asBoolean(campaign.auto_send_enabled, false) &&
     !context.guarded_live_launch &&
     !asBoolean(campaign.metadata?.production_launch, false)
   ) {
-    blockers.push(BLOCKER_LABELS.unrestricted_auto_send)
-    blockerCodes.push('unrestricted_auto_send')
+    block('unrestricted_auto_send')
   }
 
-  if (!asBoolean(outboundSms, false)) {
-    blockers.push(BLOCKER_LABELS.provider_disabled)
-    blockerCodes.push('provider_disabled')
-  }
-
-  if (!campaign.daily_cap) {
-    blockers.push(BLOCKER_LABELS.missing_daily_cap)
-    blockerCodes.push('missing_daily_cap')
-  }
-  if (!campaign.total_cap) {
-    warnings.push('Total send cap is not set')
-  }
+  if (!asBoolean(outboundSms, false)) block('provider_disabled')
+  if (!campaign.daily_cap) block('missing_daily_cap')
+  if (!campaign.total_cap) warnings.push('Total send cap is not set')
   /**
    * batch_max and market_cap are NOT launch requirements. batch_max is the
    * worker's hydration chunk (the feeder owns its own chunk/buffer and never
@@ -198,150 +490,97 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
    */
   // per_sender_cap is an optional override: absent, system_control
   // queue_per_number_cap governs (sender-capacity.js). Not a launch blocker.
-  if (!campaign.contact_window_start || !campaign.contact_window_end) {
-    blockers.push(BLOCKER_LABELS.missing_send_window)
-    blockerCodes.push('missing_send_window')
-  }
+  if (!campaign.contact_window_start || !campaign.contact_window_end) block('missing_send_window')
 
-  const targets = targetRowsRes.data || []
   const persistedTargetCount = targets.length
   const readyTargets = targets.filter((row) => clean(row.target_status) === 'ready')
   const readyTotal = readyTargets.length
   const routingReadyTargets = targets.filter(isTargetRoutingReady)
   const routingReadyTotal = routingReadyTargets.length
   const templateReadyTotal = targets.filter((row) => clean(row.template_status) === 'ready').length
-  const launchReadyTargets = targets.filter(isTargetLaunchReady)
-  const launchReadyTotal = launchReadyTargets.length
   const suppressedTotal = targets.filter((row) => clean(row.suppression_status) === 'blocked').length
-  const awaitingTemplateTotal = routingReadyTargets.filter((row) => clean(row.template_status) !== 'ready').length
-  const senderCoveredTotal = routingReadyTargets.filter(isSenderCoveredTarget).length
-  const outsideSenderCapacityTotal = Math.max(0, routingReadyTotal - senderCoveredTotal)
+  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code || campaign.stage_code, 'S1')
+  const templateUseCase = clean(campaign.metadata?.template_use_case || campaign.template_use_case || campaign.objective || 'ownership_check') || 'ownership_check'
 
-  const langBuckets = new Map()
-  let unsupportedLanguageTotal = 0
-  for (const row of targets) {
-    const lang = canonicalLanguageLabel(row.language)
-    const resolved = resolveLanguage(row.language)
-    if (!langBuckets.has(lang)) {
-      langBuckets.set(lang, { total: 0, unassigned: 0, unsupported: 0 })
-    }
-    const bucket = langBuckets.get(lang)
-    bucket.total += 1
-    if (resolved.unsupported) {
-      bucket.unsupported += 1
-      unsupportedLanguageTotal += 1
-    } else if (clean(row.template_status) !== 'ready') {
-      bucket.unassigned += 1
-    }
-  }
+  if (!readyTotal) block('no_ready_recipients')
+  if (readyTotal > 0 && routingReadyTotal === 0) block('routing_zero')
 
-  const routableTotal = routingReadyTotal
-  const templateCoveragePct = routingReadyTotal > 0
-    ? (launchReadyTotal / routingReadyTotal) * 100
-    : 100
-
-  if (!readyTotal) {
-    blockers.push(BLOCKER_LABELS.no_ready_recipients)
-    blockerCodes.push('no_ready_recipients')
-  }
-
-  if (readyTotal > 0 && routingReadyTotal === 0) {
-    blockers.push(BLOCKER_LABELS.routing_zero)
-    blockerCodes.push('routing_zero')
-  }
-
-  if (routingReadyTotal > 0 && launchReadyTotal === 0) {
-    blockers.push(BLOCKER_LABELS.no_launch_ready_recipients)
-    blockerCodes.push('no_launch_ready_recipients')
-  }
-
-  const activeSenders = (senderRowsRes.data || []).filter((row) => clean(row.status).toLowerCase() === 'active')
-  const campaignMarket = clean(campaign.market).toLowerCase()
-  const marketAliases = new Set([
-    campaignMarket,
-    'los angeles',
-    'los angeles, ca',
-    'la',
-    'riverside',
-    'inland empire',
-    'san bernardino',
-  ].filter(Boolean))
-  const marketSenders = activeSenders.filter((row) => marketAliases.has(clean(row.market).toLowerCase()))
-  if (routingReadyTotal > 0 && marketSenders.length === 0) {
-    blockers.push(BLOCKER_LABELS.zero_valid_senders)
-    blockerCodes.push('zero_valid_senders')
-  } else if (outsideSenderCapacityTotal > 0 && launchReadyTotal > 0) {
-    warnings.push(
-      `${outsideSenderCapacityTotal} routing-ready targets are outside current sender capacity — initial batch will cover ${senderCoveredTotal}`
-    )
-  }
-
-  for (const [lang, bucket] of langBuckets) {
-    if (bucket.unsupported > 0) {
-      warnings.push(`${bucket.unsupported} ${lang} targets excluded — no approved S1 template`)
-    }
-    if (bucket.unassigned > 0 && !bucket.unsupported) {
-      const message = `${bucket.unassigned} ${lang} targets awaiting template assignment`
-      if (launchReadyTotal > 0) {
-        warnings.push(message)
-      } else if (context.controlled_hydration && templateCoveragePct >= 95) {
-        warnings.push(message)
-      } else {
-        blockers.push(message)
-        blockerCodes.push('language_template_gap')
-      }
-    }
-  }
-
-  if (unsupportedLanguageTotal > 0 && launchReadyTotal > 0) {
-    warnings.push(`${unsupportedLanguageTotal} targets excluded for unsupported language — campaign can still launch`)
-  }
-
-  let templateResolved = 0
-  let templateMissing = 0
-  const sampleTargets = launchReadyTargets.length
-    ? launchReadyTargets.slice(0, 5)
-    : routingReadyTargets.slice(0, 5)
-  const sampleSize = Math.min(5, sampleTargets.length)
-  const stageCode = normalizeCampaignStageCode(campaign.metadata?.stage_code, 'S1')
-
-  for (let i = 0; i < sampleSize; i += 1) {
-    const target = sampleTargets[i]
-    const candidate = launchCandidateFromTarget(target, campaign)
-    candidate.stage_code = stageCode
-    const rendered = await renderOutboundTemplate(candidate, {
-      template_use_case: campaign.metadata?.template_use_case || campaign.objective || 'ownership_check',
-      stage_code: stageCode,
-      first_touch: true,
-      campaign_template_assignment: true,
-      allow_identity_unknown: true,
-    }, deps)
-    if (rendered.ok && (rendered.selected_template_id || rendered.template?.template_id)) {
-      templateResolved += 1
+  // ── senders: the plan's own router, per market ─────────────────────────────
+  const senderCoverage = routingReadyTotal
+    ? await evaluateSenderCoverage(routingReadyTargets, deps, dispatchBlocked.sender_numbers)
+    : []
+  const unsendableMarkets = senderCoverage.filter((entry) => entry.sendable === false)
+  const sendableMarketNames = new Set(senderCoverage.filter((entry) => entry.sendable !== false).map((entry) => entry.market))
+  const senderCoveredTotal = senderCoverage.filter((entry) => entry.sendable === true).reduce((sum, entry) => sum + entry.sellers, 0)
+  const outsideSenderTotal = unsendableMarkets.reduce((sum, entry) => sum + entry.sellers, 0)
+  if (routingReadyTotal > 0 && unsendableMarkets.length) {
+    const detail = unsendableMarkets.slice(0, 4).map(describeUnsendableMarket).join(' · ')
+    if (outsideSenderTotal >= routingReadyTotal) {
+      block('zero_valid_senders', `${BLOCKER_LABELS.zero_valid_senders} — ${detail}`)
     } else {
-      templateMissing += 1
+      warnings.push(`${nf(outsideSenderTotal)} ready ${outsideSenderTotal === 1 ? 'seller has' : 'sellers have'} no sendable number and won’t be scheduled — ${detail}`)
     }
   }
 
-  if (routingReadyTotal && templateMissing === sampleSize && launchReadyTotal === 0) {
-    if (context.controlled_hydration && routableTotal > 0) {
-      warnings.push(BLOCKER_LABELS.template_required)
+  // ── templates: the plan's own renderer, per language ───────────────────────
+  const languageCoverage = routingReadyTotal
+    ? await evaluateLanguageCoverage(routingReadyTargets, campaign, deps, {
+        supabase,
+        stageCode,
+        templateUseCase,
+        blockedTemplates: dispatchBlocked.template_ids,
+      })
+    : { languages: [], rendered: 0, failed: 0 }
+  const languageGaps = languageCoverage.languages.filter((entry) => entry.renders === false)
+  const renderableLanguages = new Set(languageCoverage.languages.filter((entry) => entry.renders !== false).map((entry) => entry.language))
+  const languageGapTotal = languageGaps.reduce((sum, entry) => sum + entry.sellers, 0)
+  if (routingReadyTotal > 0 && languageGaps.length) {
+    const detail = languageGaps.slice(0, 3).map(describeLanguageGap)
+    if (languageGapTotal >= routingReadyTotal) {
+      // No ready seller has a language with an approved message: the plan
+      // would place nothing, so say so before activating rather than after.
+      block('template_required', `${BLOCKER_LABELS.template_required} — ${detail.join(' · ')}`)
     } else {
-      blockers.push(BLOCKER_LABELS.template_required)
-      blockerCodes.push('template_required')
+      for (const line of detail) warnings.push(line)
     }
-  } else if (templateMissing > 0) {
-    warnings.push(`${templateMissing}/${sampleSize} sampled recipients missing template resolution`)
   }
 
-  if (['archived', 'completed', 'failed'].includes(status)) {
-    blockers.push(BLOCKER_LABELS.campaign_not_queueable)
-    blockerCodes.push('campaign_not_queueable')
+  const sellerLevelMisses = languageCoverage.languages.filter((entry) => entry.seller_level_failure)
+  if (sellerLevelMisses.length) {
+    const why = sellerLevelMisses.some((entry) => entry.seller_level_failure === 'TEMPLATE_RENDER_LINT_FAILURE')
+      ? 'no first name on file, so the greeting would read “Hi ,” and is refused'
+      : 'their message could not be personalized'
+    warnings.push(`Some sampled sellers (${sellerLevelMisses.map((entry) => entry.language).join(', ')}) will be skipped: ${why}. The launch check counts exactly how many.`)
   }
+
+  // Launch-ready = routing-ready, in a market a sender can reach, in a language
+  // an approved message renders for.
+  const launchReadyTotal = routingReadyTargets.filter((row) => {
+    const market = clean(row.market) || 'Unknown market'
+    const language = canonicalLanguageLabel(resolveTargetMessageLanguage(row, campaign)) || 'English'
+    return sendableMarketNames.has(market) && renderableLanguages.has(language)
+  }).length
+  if (routingReadyTotal > 0 && launchReadyTotal === 0 && !blockerCodes.includes('zero_valid_senders') && !blockerCodes.includes('template_required')) {
+    block('no_launch_ready_recipients')
+  }
+
+  // ── the last real plan ─────────────────────────────────────────────────────
+  const lastPlan = await describeLastPlan(campaign)
+  if (lastPlan && lastPlan.inserted === 0 && lastPlan.summary && ['active', 'scheduled', 'queued', 'paused'].includes(status)) {
+    warnings.push(`The last refill placed nothing — ${lastPlan.summary}`)
+  }
+
+  if (['archived', 'completed', 'failed'].includes(status)) block('campaign_not_queueable')
 
   const uniqueBlockers = [...new Set(blockers)]
   const uniqueCodes = [...new Set(blockerCodes)]
-  const level = uniqueBlockers.length ? 'blocked' : warnings.length ? 'warnings' : 'ready'
+  const uniqueWarnings = [...new Set(warnings)]
+  const level = uniqueBlockers.length ? 'blocked' : uniqueWarnings.length ? 'warnings' : 'ready'
+  const templateSample = {
+    resolved: languageCoverage.rendered,
+    missing: languageCoverage.failed,
+    sampled: languageCoverage.languages.reduce((sum, entry) => sum + Number(entry.samples || 0), 0),
+  }
 
   return {
     ok: true,
@@ -349,9 +588,16 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
     blocker_count: uniqueBlockers.length,
     blocker_codes: uniqueCodes,
     blockers: uniqueBlockers,
-    warnings,
-    template_readiness: templateMissing === 0 && launchReadyTotal ? 'resolved' : templateMissing === sampleSize ? 'missing' : 'partial',
-    template_sample: { resolved: templateResolved, missing: templateMissing, sampled: sampleSize },
+    warnings: uniqueWarnings,
+    template_readiness: !routingReadyTotal
+      ? 'missing'
+      : languageGapTotal === 0
+        ? 'resolved'
+        : languageGapTotal >= routingReadyTotal ? 'missing' : 'partial',
+    template_sample: templateSample,
+    language_coverage: languageCoverage.languages,
+    sender_coverage: senderCoverage,
+    last_plan: lastPlan,
     counts: {
       candidates_discovered:
         Number(campaign.metadata?.candidate_count || campaign.metadata?.preview_ready_to_queue || 0) || null,
@@ -363,26 +609,24 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
       sender_covered: senderCoveredTotal,
       contactable: Math.max(0, routingReadyTotal - suppressedTotal),
       launch_ready: launchReadyTotal,
-      awaiting_template: awaitingTemplateTotal,
-      unsupported_language: unsupportedLanguageTotal,
-      outside_sender_capacity: outsideSenderCapacityTotal,
+      // Ready sellers whose language has no approved message — not "unassigned".
+      awaiting_template: languageGapTotal,
+      unsupported_language: languageGaps.filter((entry) => entry.reason === 'unsupported_language').reduce((sum, entry) => sum + entry.sellers, 0),
+      outside_sender_capacity: outsideSenderTotal,
       suppressed: suppressedTotal,
-      previously_contacted: targets.filter((row) => {
-        const meta = metadataObject(row.metadata)
-        return meta.never_contacted === false || Number(meta.touch_count || 0) > 0
-      }).length,
-      blocked: suppressedTotal + (routingReadyTotal === 0 && readyTotal > 0 ? readyTotal - routingReadyTotal : 0),
-      warnings_count: warnings.length,
+      blocked: targets.filter((row) => clean(row.target_status) === 'blocked').length,
+      warnings_count: uniqueWarnings.length,
       hard_blockers_count: uniqueBlockers.length,
-      excluded: unsupportedLanguageTotal + suppressedTotal,
+      excluded: languageGapTotal + suppressedTotal,
     },
     ready_recipient_count: readyTotal,
-    routable_recipient_count: routableTotal,
+    routable_recipient_count: routingReadyTotal,
     launch_ready_recipient_count: launchReadyTotal,
     remediation: uniqueBlockers,
     readiness_context: context,
     send_brake_state: brakeState,
     stage_code: stageCode,
+    default_language: 'English',
     false_routing_blocker_removed: true,
   }
 }

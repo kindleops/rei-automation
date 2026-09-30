@@ -145,6 +145,30 @@ describe('the other live shapes', () => {
     expect(a[2].detail).toMatch(/no sender for their market \(22\), the sender is blocked by an operator \(14\)/)
     expect(execState(eg, null, NOW).key).toBe('degraded')
   })
+  it('an unplaceable pass names the market’s numbers and why each can’t send', () => {
+    const miami = row({
+      id: 'm75', campaign_name: '75+ ACQ SCORE', status: 'active', total_targets: 146, ready_targets: 84,
+      feeder_last: {
+        at: '2026-09-30T12:25:00Z', inserted: 0, active_live_rows: 0, ready_remaining: 84, bound: 'buffer', reason: 'no_row_placed', stalled: true,
+        ...({
+          skipped_counts_by_reason: { sender_blocked_by_operator: 84 },
+          routing_blocks_by_market: {
+            'Miami, FL': {
+              targets: 84,
+              reason: 'sender_blocked_by_operator',
+              senders: [
+                { phone_number: '+13058975670', state: 'blocked_by_operator' },
+                { phone_number: '+17866052999', state: 'health_cooling' },
+                { phone_number: '+13057604780', state: 'status_paused' },
+              ],
+            },
+          },
+        }),
+      },
+    })
+    const item = attentionFor(miami, null, NOW).find((x) => x.key === 'not_placed')
+    expect(item?.detail).toMatch(/Miami, FL \(84\) — \+13058975670 blocked by an operator; \+17866052999 cooling; \+13057604780 paused/)
+  })
   it('a running campaign in its window is Running; outside it, Waiting for window', () => {
     const ok = row({ id: 'ok', status: 'active', total_targets: 100, ready_targets: 40, sent_count: 50, delivered_count: 48, live_queue: { live: 10, due: 1, overdue: 0, oldest_due_at: null, next_scheduled_at: '2026-09-30T12:30:00Z', release_reasons: {} } })
     const open = cockpit({ queue: { ...cockpit().queue!, live: 10, due: 1, overdue: 0, release_reasons: {} }, window: { ...cockpit().window, open: true, closes_at: '2026-09-31T02:00:00Z', next_open_at: null } })

@@ -350,9 +350,56 @@ export async function runDueScheduledCampaignActivations(deps = {}) {
       buildScheduledActivationRequest(campaign),
       deps,
     )
-    results.push({ campaign_id: campaign.id, name: campaign.name, ...result })
+    const recorded = result.ok === false
+      ? await recordScheduledActivationRefusal(campaign, result, deps).catch(() => false)
+      : false
+    results.push({ campaign_id: campaign.id, name: campaign.name, refusal_recorded: recorded, ...result })
   }
   return { ok: true, processed: results.length, results }
+}
+
+/**
+ * A scheduled launch that readiness refused left no trace on the campaign: the
+ * reasons went back to the scheduler tick and nowhere else, the campaign sat
+ * `scheduled`, and two hours later it was marked missed. The operator saw a
+ * schedule that silently never started. Record the refusal — once per distinct
+ * (schedule, reasons) — on the campaign and in its activity.
+ */
+export async function recordScheduledActivationRefusal(campaign = {}, result = {}, deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  const metadata = campaign.metadata && typeof campaign.metadata === 'object' && !Array.isArray(campaign.metadata) ? campaign.metadata : {}
+  const blockers = (Array.isArray(result.blockers) ? result.blockers : []).map((value) => clean(value)).filter(Boolean).slice(0, 6)
+  const codes = (Array.isArray(result.blocker_codes) ? result.blocker_codes : []).map((value) => clean(value)).filter(Boolean).slice(0, 10)
+  const error = clean(result.error) || 'activation_failed'
+  const signature = [clean(campaign.scheduled_for), error, ...codes, ...blockers].join('|')
+  if (metadata.activation_blocked?.signature === signature) return false
+  const at = new Date(deps.now || Date.now()).toISOString()
+  const scheduledMs = Date.parse(campaign.scheduled_for || '')
+  const retryUntil = Number.isFinite(scheduledMs) ? new Date(scheduledMs + SCHEDULE_MISSED_GRACE_MS).toISOString() : null
+  const activationBlocked = {
+    at,
+    scheduled_for: campaign.scheduled_for || null,
+    error,
+    blocker_codes: codes,
+    blockers,
+    retry_until: retryUntil,
+    signature,
+  }
+  const { error: updateError } = await supabase
+    .from('campaigns')
+    .update({ metadata: { ...metadata, activation_blocked: activationBlocked }, updated_at: at })
+    .eq('id', campaign.id)
+  if (updateError) throw updateError
+  await supabase.from('campaign_events').insert({
+    campaign_id: campaign.id,
+    event_type: 'campaign.activation_blocked',
+    severity: 'warning',
+    title: 'Scheduled launch held',
+    description: `The scheduled launch could not start: ${blockers.join(' · ') || error}.`
+      + (retryUntil ? ' It retries every few minutes for two hours after the scheduled time, then is marked missed.' : ''),
+    metadata: { ...activationBlocked, source: 'scheduled_activation' },
+  })
+  return true
 }
 
 export { ACTIVATION_STEPS }

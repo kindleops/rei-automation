@@ -29,19 +29,21 @@ import {
 import {
   buildActivateNowPayload,
   buildCampaignPersistPayload,
+  builderStageChoice,
   extractMarketFromFilterDraft,
   hydrateLaunchSettings,
   isInsideContactWindow,
   perSenderOverride,
   resolveCampaignTimezone,
 } from './campaign-builder-launch'
-import { getCampaignBackend, getQueueControlSettings, queueCampaignPlan, type CampaignLaunchPreflight } from '../../lib/api/backendClient'
+import { getCampaignBackend, getQueueControlSettings, queueCampaignPlan, type CampaignBuildSummary, type CampaignLaunchPreflight } from '../../lib/api/backendClient'
 import {
   CAMPAIGN_FIELD_KEY_ALIASES,
   createEmptyFilterGroups,
   defaultOperatorForField,
   defaultValueForField,
   getFieldCatalog,
+  isFieldCampaignInapplicable,
   previewTargets,
   searchFieldOptions,
   serializeFilterGroups,
@@ -809,6 +811,10 @@ export const CreateCampaignModal = ({
   // snapshot only while this still equals the live key.
   const [launchPreflightSnapshotKey, setLaunchPreflightSnapshotKey] = useState<string | null>(null)
   const [launchPreflightLoading, setLaunchPreflightLoading] = useState(false)
+  // Why the preflight has no answer, when it failed (build refused / request failed).
+  const [launchPreflightError, setLaunchPreflightError] = useState<string | null>(null)
+  // What the preflight build wrote: ready vs held, by reason.
+  const [launchPreflightBuild, setLaunchPreflightBuild] = useState<CampaignBuildSummary | null>(null)
   const preflightKeyRef = useRef<string | null>(null)
   const [pendingLivePayload, setPendingLivePayload] = useState<CampaignLaunchPayload | null>(null)
   const [pendingLaunchIntent, setPendingLaunchIntent] = useState<'schedule' | 'activate'>('schedule')
@@ -838,12 +844,13 @@ export const CreateCampaignModal = ({
   }, [activeFilterDraft])
 
   /*
-   * Queue posture, read once here rather than inside the LAUNCH screen, because
-   * the builder footer now needs the same per-run limit to label its button:
-   * "Launch · 50 sellers" and the plan card must agree on the 50.
+   * Queue posture, read once here rather than inside the LAUNCH screen. The
+   * per-run limit (queue_run_limit) is the worker's batch size, not the size
+   * of a launch, so it is deliberately not read: it capped the plan at "50
+   * sellers" when the feeder keeps refilling until the audience is done.
    */
-  const [queuePosture, setQueuePosture] = useState<{ queueMode: string | null; autoMode: string | null; runLimit: number | null }>(
-    { queueMode: null, autoMode: null, runLimit: null },
+  const [queuePosture, setQueuePosture] = useState<{ queueMode: string | null; autoMode: string | null }>(
+    { queueMode: null, autoMode: null },
   )
   useEffect(() => {
     if (!isMobile) return
@@ -851,11 +858,9 @@ export const CreateCampaignModal = ({
     void getQueueControlSettings().then((res) => {
       if (dead || !res.ok) return
       const d = (res.data?.diagnostics ?? {}) as Record<string, unknown>
-      const lim = Number(d.queue_run_limit)
       setQueuePosture({
         queueMode: d.queue_execution_mode ? String(d.queue_execution_mode) : null,
         autoMode: d.auto_reply_mode ? String(d.auto_reply_mode) : null,
-        runLimit: Number.isFinite(lim) && lim > 0 ? lim : null,
       })
     })
     return () => { dead = true }
@@ -938,7 +943,7 @@ export const CreateCampaignModal = ({
           name: String(c.name ?? prev.name),
           description: String(c.description ?? prev.description),
           template_use_case: String(c.objective ?? prev.template_use_case),
-          stage_code: String(c.stage_code ?? prev.stage_code),
+          stage_code: builderStageChoice(c.stage_code ?? meta.stage_code, prev.stage_code),
           target_filters: groups,
         }))
         setFilterStatuses((prev) => ({ ...prev, ...statuses }))
@@ -963,6 +968,10 @@ export const CreateCampaignModal = ({
     return () => { cancelled = true }
   }, [campaignId])
 
+  // Read at call time so a send-limit edit reaches the next Reach count.
+  const previewBuildLimitRef = useRef<number>(DEFAULT_MAX_TARGETS)
+  previewBuildLimitRef.current = parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS)
+
   const runPreview = useCallback((reason: 'auto' | 'manual' = 'auto') => {
     const sequence = previewSequenceRef.current + 1
     previewSequenceRef.current = sequence
@@ -972,7 +981,7 @@ export const CreateCampaignModal = ({
     const previous = previewResultRef.current
     const t0 = Date.now()
     setIsPreviewLoading(true)
-    previewTargets(activeFilterDraft, { requestId })
+    previewTargets(activeFilterDraft, { requestId, buildLimit: previewBuildLimitRef.current })
       .then((result) => {
         if (latestPreviewRequestRef.current !== requestId) return
         const previousTotal = previous?.total_matched ?? null
@@ -1648,7 +1657,14 @@ export const CreateCampaignModal = ({
           {optionCount > 0 && (
             <span className="cmp-active-filter-badge cmp-active-filter-badge--count">{formatNumber(optionCount)} options</span>
           )}
-          {!field.supported_in_preview && (
+          {isFieldCampaignInapplicable(field) ? (
+            <span
+              className="cmp-active-filter-badge cmp-active-filter-badge--unsupported"
+              title={field.campaign_inapplicable_message ?? undefined}
+            >
+              Not applied — remove to schedule
+            </span>
+          ) : !field.supported_in_preview && (
             <span className="cmp-active-filter-badge cmp-active-filter-badge--unsupported">Not counted in preview</span>
           )}
 
@@ -1784,7 +1800,7 @@ export const CreateCampaignModal = ({
   const buildAppliedFilters = useMemo(() => {
     const rows: Array<{
       id: string; domain: string; fieldLabel: string; operatorLabel: string
-      valueLabel: string; unsupported: boolean; pending: boolean
+      valueLabel: string; unsupported: boolean; unsupportedReason: string | null; pending: boolean
     }> = []
     for (const domain of ALL_DOMAIN_KEYS) {
       for (const filter of draft.target_filters[domain] ?? []) {
@@ -1796,7 +1812,8 @@ export const CreateCampaignModal = ({
           fieldLabel: field.label,
           operatorLabel: FRIENDLY_OPERATORS[filter.operator] ?? filter.operator,
           valueLabel: getValueLabel(filter, field),
-          unsupported: !field.supported_in_preview,
+          unsupported: !field.supported_in_preview || isFieldCampaignInapplicable(field),
+          unsupportedReason: isFieldCampaignInapplicable(field) ? (field.campaign_inapplicable_message ?? null) : null,
           pending: filterStatuses[filter.id] !== 'active',
         })
       }
@@ -1827,7 +1844,7 @@ export const CreateCampaignModal = ({
 
   useEffect(() => {
     if (!isMobile || mobilePhase !== 'launch') return
-    if (!savedCampaignId) { setLaunchPreflight(null); return }
+    if (!savedCampaignId) { setLaunchPreflight(null); setLaunchPreflightError(null); setLaunchPreflightBuild(null); return }
     if (preflightKeyRef.current === launchPreflightKey) return
     preflightKeyRef.current = launchPreflightKey
     let dead = false
@@ -1853,23 +1870,47 @@ export const CreateCampaignModal = ({
     // take the campaign execution lock: that lock is acquired only for live or
     // proof-hydration writes, and a dry run is neither. Verified concurrently:
     // preview 3.7s / build-targets 8.4s, no contention.
+    //
+    // full_cohort: the plan routes and renders EVERY built target (not one
+    // worker batch) and returns the rolling plan — sends per day, days to
+    // finish, first send — for the pacing below, so the screen can say "all N,
+    // over D days" instead of "sending to 50".
+    const firstScheduledIso = (() => {
+      const at = new Date(launchSettings.first_scheduled_at || '')
+      return Number.isNaN(at.getTime()) ? undefined : at.toISOString()
+    })()
+    setLaunchPreflightError(null)
     void buildCampaignTargetSnapshots(savedCampaignId, { limit })
-      .then(() => queueCampaignPlan(savedCampaignId, {
-        dry_run: true,
-        create_send_queue_rows: false,
-        limit,
-      }))
+      .then((build) => {
+        if (!dead) setLaunchPreflightBuild(build.build_summary ?? null)
+        return queueCampaignPlan(savedCampaignId, {
+          dry_run: true,
+          create_send_queue_rows: false,
+          full_cohort: true,
+          limit,
+          daily_cap: parsePositiveInt(launchSettings.daily_cap, 750),
+          spread_interval_seconds: parsePositiveInt(launchSettings.spread_interval_seconds, 45),
+          contact_window_start: launchSettings.contact_window_start || undefined,
+          contact_window_end: launchSettings.contact_window_end || undefined,
+          ...(firstScheduledIso ? { first_scheduled_at: firstScheduledIso } : {}),
+        })
+      })
       .then((res) => {
         if (dead) return
-        // Only trust the plan when it actually had targets to plan against;
-        // planned_target_count is 0 for a campaign with no snapshots yet, which
-        // would falsely claim "0 schedulable" for a 3,260-row audience.
+        // The preflight always builds first, so total_ready_targets 0 is a real
+        // answer (every seller held at build), not "not built yet" — it's kept
+        // and explained rather than turned into "couldn't verify".
         const data = res.ok && res.data ? res.data : null
-        const usable = data && Number(data.total_ready_targets ?? 0) > 0 ? data : null
-        setLaunchPreflight(usable)
-        setLaunchPreflightSnapshotKey(usable ? launchPreflightKey : null)
+        setLaunchPreflight(data)
+        setLaunchPreflightSnapshotKey(data ? launchPreflightKey : null)
+        setLaunchPreflightError(data ? null : (res.ok ? 'The check returned no answer.' : (res.message || res.error || 'The check failed.')))
       })
-      .catch(() => { if (!dead) { setLaunchPreflight(null); setLaunchPreflightSnapshotKey(null) } })
+      .catch((error: unknown) => {
+        if (dead) return
+        setLaunchPreflight(null)
+        setLaunchPreflightSnapshotKey(null)
+        setLaunchPreflightError(error instanceof Error ? error.message : String(error))
+      })
       .finally(() => { if (!dead) setLaunchPreflightLoading(false) })
     return () => { dead = true }
   }, [isMobile, mobilePhase, savedCampaignId, launchPreflightKey])
@@ -1901,8 +1942,11 @@ export const CreateCampaignModal = ({
   const backendDegradedMessage = preview?.degradedReason ?? catalog.degradedReason ?? degradedOptionState?.message ?? 'Backend degraded / using local preview fallback'
   // The one READY figure. REACH derives it from the exclusive partition, so
   // LAUNCH must read the same value rather than a parallel ready_to_queue.
+  // Reach leads with what Build will actually produce (build_simulation), so
+  // READY here is the number Schedule builds — not the graph's queue-eligible
+  // count before the send limit, the one-per-phone collapse and review holds.
   const canonicalReady = preview
-    ? Number(preview.exclusive_block_reasons?.ready ?? preview.ready_to_queue ?? 0)
+    ? Number(preview.build_simulation?.ok ? preview.build_simulation.ready : (preview.exclusive_block_reasons?.ready ?? preview.ready_to_queue ?? 0))
     : null
 
   // Same canonical routing tiers REACH reports, scoped to the targeted audience.
@@ -1938,7 +1982,10 @@ export const CreateCampaignModal = ({
     const first = launchPreflight?.first_scheduled_at
     const last = launchPreflight?.last_scheduled_at
     let durationLabel: string | null = null
-    if (first && last) {
+    const rollingDays = Number(launchPreflight?.rolling_plan?.days_to_complete ?? 0)
+    if (rollingDays > 1) {
+      durationLabel = `~${rollingDays} days`
+    } else if (first && last) {
       const mins = Math.max(0, (new Date(last).getTime() - new Date(first).getTime()) / 60000)
       durationLabel = mins < 1 ? 'under a minute'
         : mins < 90 ? `~${Math.round(mins)} min`
@@ -2049,8 +2096,10 @@ export const CreateCampaignModal = ({
     effectiveSends: launchEstimates.effectiveSends,
     dailyVolume: launchEstimates.dailyVolume,
     spacingSeconds: launchEstimates.spacingSeconds,
-    runLimit: queuePosture.runLimit,
     scheduledAt: launchSettings.first_scheduled_at,
+    rolling: launchPreflight?.rolling_plan ?? null,
+    eligibleInAudience: preview?.build_simulation?.ok ? Number(preview.build_simulation.eligible_in_audience ?? 0) : null,
+    maxTargets: parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS),
   })
   const mobileLaunchIssues = groupLaunchBlockers(mobileActivationBlockers, { hasName: Boolean(draft.name.trim()) })
   const mobileLaunchAction = deriveLaunchAction({
@@ -2058,6 +2107,9 @@ export const CreateCampaignModal = ({
     plan: mobileLaunchPlan,
     schedulable: launchPreflight?.planned_target_count != null ? Number(launchPreflight.planned_target_count) : null,
     schedulableLoading: launchPreflightLoading,
+    preflightError: launchPreflightError,
+    skippedCounts: launchPreflight?.skipped_counts_by_reason ?? null,
+    readyAfterBuild: launchPreflightBuild?.ready ?? (launchPreflight ? Number(launchPreflight.total_ready_targets ?? 0) : null),
     savedCampaignId,
     isLaunching,
     isPersisting: isPersistingLaunch,
@@ -2219,7 +2271,7 @@ export const CreateCampaignModal = ({
                                 <div className="cmp-suggested-chips">
                                   {suggestedKeys
                                     .map((key) => fieldsByKey.get(key))
-                                    .filter((f): f is CampaignFieldDefinition => !!f)
+                                    .filter((f): f is CampaignFieldDefinition => !!f && !isFieldCampaignInapplicable(f))
                                     .map((field) => (
                                       <button
                                         key={field.key}
@@ -2624,12 +2676,16 @@ export const CreateCampaignModal = ({
               }
               schedulableLoading={launchPreflightLoading}
               schedulableBlockers={launchPreflight?.skipped_counts_by_reason ?? null}
+              routingBlocks={launchPreflight?.routing_blocks_by_market ?? null}
+              preflightError={launchPreflightError}
+              buildHeld={launchPreflightBuild?.held_by_reason ?? null}
+              eligibleInAudience={preview?.build_simulation?.ok ? Number(preview.build_simulation.eligible_in_audience ?? 0) : null}
               plan={mobileLaunchPlan}
               display={{
                 dailyVolume: launchEstimates.dailyVolume,
+                dailyCap: parsePositiveInt(launchSettings.daily_cap, 750),
                 spacingSeconds: launchEstimates.spacingSeconds,
                 maxTargets: parsePositiveInt(launchSettings.max_targets, DEFAULT_MAX_TARGETS),
-                runLimit: queuePosture.runLimit,
               }}
               scheduledAt={launchSettings.first_scheduled_at}
               routing={previewCanonicalRouting}
@@ -3134,9 +3190,12 @@ const FieldPickerInline = ({
     return hay.includes(search.toLowerCase())
   })
 
-  const suggested = filtered.filter((f) => suggestedKeys.includes(f.key))
-  const rest = filtered.filter((f) => !suggestedKeys.includes(f.key))
-  const sorted = search.trim() ? filtered : [...suggested, ...rest]
+  // Fields the campaign audience can't filter on sink to the end, disabled.
+  const usable = (f: CampaignFieldDefinition) => !isFieldCampaignInapplicable(f)
+  const suggested = filtered.filter((f) => suggestedKeys.includes(f.key) && usable(f))
+  const rest = filtered.filter((f) => !suggestedKeys.includes(f.key) && usable(f))
+  const unusable = filtered.filter((f) => !usable(f))
+  const sorted = search.trim() ? [...filtered.filter(usable), ...unusable] : [...suggested, ...rest, ...unusable]
 
   return (
     <div className="cmp-field-picker">
@@ -3163,19 +3222,31 @@ const FieldPickerInline = ({
           <div className="cmp-field-picker-group-label">Suggested for this category</div>
         )}
         {sorted.map((field, idx) => {
-          const isSuggested = !search.trim() && suggestedKeys.includes(field.key)
-          const isFirstRest = !search.trim() && !isSuggested && idx === suggested.length
+          const disabled = !usable(field)
+          const isSuggested = !disabled && !search.trim() && suggestedKeys.includes(field.key)
+          const isFirstRest = !search.trim() && !isSuggested && !disabled && idx === suggested.length
+          const isFirstUnusable = disabled && idx === sorted.length - unusable.length
           return (
             <Fragment key={field.key}>
               {isFirstRest && rest.length > 0 && (
                 <div key={`divider-${field.key}`} className="cmp-field-picker-group-label">All Fields</div>
               )}
+              {isFirstUnusable && (
+                <div key={`divider-unusable-${field.key}`} className="cmp-field-picker-group-label">Can’t narrow a campaign yet</div>
+              )}
               <button
-                className={`cmp-field-picker-item ${isSuggested ? 'is-suggested' : ''}`}
-                onClick={() => onPick(field)}
-                title={field.description}
+                className={`cmp-field-picker-item ${isSuggested ? 'is-suggested' : ''}${disabled ? ' is-disabled' : ''}`}
+                onClick={() => { if (!disabled) onPick(field) }}
+                disabled={disabled}
+                aria-disabled={disabled}
+                title={disabled ? (field.campaign_inapplicable_message ?? 'This field can’t narrow a campaign.') : field.description}
               >
-                <span className="cmp-field-picker-label">{field.label}</span>
+                <span className="cmp-field-picker-label">
+                  {field.label}
+                  {disabled && field.campaign_inapplicable_message && (
+                    <small className="cmp-field-picker-reason">{field.campaign_inapplicable_message}</small>
+                  )}
+                </span>
                 <span className="cmp-field-picker-badges">
                   {isSuggested && <span className="cmp-fpbadge cmp-fpbadge--suggested">suggested</span>}
                   <span className="cmp-fpbadge cmp-fpbadge--type">{field.type}</span>
@@ -3224,18 +3295,18 @@ const TargetReachPanel = ({
   const activeFilterCount = Object.values(filterGroups).reduce((sum, f) => sum + f.length, 0)
   const showZeroMatchWarn = preview !== null && !loading && preview.total_matched === 0 && activeFilterCount > 0
   const unsupportedFilters = [
-    ...(preview?.unsupported_in_preview ?? []).map((item) => ({ fieldKey: item.fieldKey, label: item.label, message: 'Filter applied but no graph column mapping found.' })),
+    ...(preview?.unsupported_in_preview ?? []).map((item) => ({ fieldKey: item.fieldKey, label: item.label, message: 'Not applied: this field isn’t part of the campaign audience data.' })),
     ...((preview?.unsupportedFilters ?? preview?.unsupported_filters ?? []) as Array<Record<string, unknown>>).map((item) => ({
       fieldKey: String(item.field_key ?? item.fieldKey ?? ''),
       label: String(item.label ?? item.field_key ?? item.fieldKey ?? 'Unsupported filter'),
-      message: String(item.message ?? 'Filter applied but no graph column mapping found.'),
+      message: String(item.message ?? 'Not applied: this field isn’t part of the campaign audience data.'),
     })),
   ].filter((item, index, all) => {
     const key = item.fieldKey || item.label
     return Boolean(key) && all.findIndex((other) => (other.fieldKey || other.label) === key) === index
   })
   const unsupportedCount = unsupportedFilters.length
-  const missingMappingCount = unsupportedFilters.filter((item) => item.message.includes('no graph column mapping')).length
+  const missingMappingCount = unsupportedFilters.filter((item) => /not applied/i.test(item.message)).length
   const previewWarningMessages = Array.from(new Set((preview?.warnings ?? [])
     .map((warning) => formatPreviewWarning(String(warning ?? '').trim()))
     .filter(Boolean)))
@@ -3477,7 +3548,7 @@ const TargetReachPanel = ({
         {developerMode && !showZeroMatchWarn && unsupportedCount > 0 && (
           <div className="cmp-diag-alert cmp-diag-alert--info">
             <Icon name="alert-circle" size={12} />
-            {missingMappingCount > 0 ? 'Filter applied but no graph column mapping found.' : 'Some filters are approved but not available in the active preview source.'}
+            {missingMappingCount > 0 ? 'Not applied: this field isn’t part of the campaign audience data.' : 'Some filters are approved but not available in the active preview source.'}
           </div>
         )}
 
@@ -3618,13 +3689,13 @@ const BackendStatusStrip = ({
       fieldKey: item.fieldKey,
       label: item.label,
       reason: item.reason,
-      message: 'Filter applied but no graph column mapping found.',
+      message: 'Not applied: this field isn’t part of the campaign audience data.',
     })),
     ...asDiagnosticRecords(preview?.unsupportedFilters ?? preview?.unsupported_filters).map((item) => ({
       fieldKey: diagnosticFieldKey(item),
       label: diagnosticLabel(item, 'Unsupported filter'),
       reason: diagnosticReason(item, 'unsupported_in_preview'),
-      message: String(item.message ?? 'Filter applied but no graph column mapping found.'),
+      message: String(item.message ?? 'Not applied: this field isn’t part of the campaign audience data.'),
     })),
   ].filter((item, index, all) => {
     const key = item.fieldKey || item.label
@@ -3878,8 +3949,8 @@ const BackendStatusStrip = ({
 
           {unsupportedCount > 0 && (
             <div className="cmp-diag-note">
-              {unsupportedFilters.some((item) => item.message.includes('no graph column mapping'))
-                ? 'Filter applied but no graph column mapping found.'
+              {unsupportedFilters.some((item) => /not applied/i.test(item.message))
+                ? 'Not applied: this field isn’t part of the campaign audience data.'
                 : 'Some filters are approved but not available in the active preview source.'}
             </div>
           )}

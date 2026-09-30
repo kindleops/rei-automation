@@ -6,6 +6,7 @@
  * cockpit read. Nothing is estimated: a value neither carries is left out or
  * said to be unavailable — never approximated, never zero.
  */
+import { describeNotSchedulable } from '../campaign-launch-plan'
 import type { CampaignSummary } from '../campaigns.types'
 import { describeBlocker } from '../campaign-operator-language'
 import { displayName } from '../mobile/campaign-index-model'
@@ -100,6 +101,8 @@ const FEEDER_SKIP_WORDS: Record<string, string> = {
   ROUTING_BLOCKED: 'no sender for their market',
   routing_blocked: 'no sender for their market',
   sender_blocked_by_operator: 'the sender is blocked by an operator',
+  local_senders_unavailable: 'their market’s numbers are paused or cooling',
+  no_local_sender_number: 'no sender number in their market',
   TEMPLATE_RENDER_LINT_FAILURE: 'the message failed the template check',
   per_sender_cap_reached: 'sender daily limit reached',
   per_market_cap_reached: 'market cap reached',
@@ -334,11 +337,17 @@ export function attentionFor(c: CampaignSummary, k?: CockpitRead | null, now = D
   const ready = k?.targets?.ready ?? c.ready_targets
   const skipped = sortedEntries((fl as { skipped_counts_by_reason?: Record<string, number> } | null)?.skipped_counts_by_reason)
   if (fl && Number(fl.inserted ?? 0) === 0 && ready > 0 && skipped.length && fl.bound !== 'buffer_full') {
+    // Name the numbers behind a sender reason: "Miami, FL (84) — +1305… blocked by an operator; +1786… cooling".
+    const senderDetail = describeNotSchedulable(
+      Object.fromEntries(skipped),
+      (fl as { routing_blocks_by_market?: Parameters<typeof describeNotSchedulable>[1] }).routing_blocks_by_market ?? null,
+    ).flatMap((line) => line.details).slice(0, 2)
     out.push({
       key: 'not_placed',
       severity: 'needs_you',
       title: `${plural(ready, 'ready seller')} couldn’t be queued`,
-      detail: `The last feeder pass${fl.at ? ` (${ago(fl.at, now)})` : ''} placed none: ${skipped.map(([code, n]) => `${feederSkipWords(code)} (${nf(n)})`).join(', ')}.`,
+      detail: `The last feeder pass${fl.at ? ` (${ago(fl.at, now)})` : ''} placed none: ${skipped.map(([code, n]) => `${feederSkipWords(code)} (${nf(n)})`).join(', ')}.`
+        + (senderDetail.length ? ` ${senderDetail.join(' · ')}.` : ''),
       stopped: 'These sellers wait; everything else continues.',
       todo: 'Check the numbers for these sellers’ markets.',
       actions: [{ id: 'inspector:channels', label: 'Review senders' }],

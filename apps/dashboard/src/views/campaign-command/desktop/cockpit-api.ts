@@ -178,6 +178,10 @@ export type CockpitRead = {
       active_live_rows: number
       last_refill_at: string | null
       skipped_counts_by_reason: Record<string, number>
+      /** "84 sender blocked by operator (Miami, FL: +1305… blocked by operator; …)" */
+      skip_summary?: string | null
+      /** Per market: why no sender could carry these sellers, number by number. */
+      routing_blocks_by_market?: Record<string, { targets: number; reason: string; senders: Array<{ phone_number: string | null; state: string }> }>
     }
   }
   senders: CockpitSender[]

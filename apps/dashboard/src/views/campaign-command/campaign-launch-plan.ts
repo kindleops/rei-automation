@@ -7,11 +7,16 @@
  * Build / Reach / Launch, so the footer needs the same answer — and a derivation
  * that two surfaces read has to live in exactly one place, or they drift.
  *
- * The quantitative rules are unchanged from the component they came out of:
- * the binding cap is the smallest of the campaign cap, the system per-run cap
- * and what can actually render; duration is computed from what will actually be
- * queued, not from the discarded campaign cap; READY is never presented as the
- * schedulable answer.
+ * THE ROLLING PLAN (2026-09-30). A campaign is not "one launch of 50". The
+ * worker places rows in batches (queue_run_limit, batch_max) and the feeder
+ * keeps refilling until every schedulable seller is messaged, at the pace the
+ * campaign allows. This screen used to cap the answer at the worker's batch
+ * size — "Sending to 50", "A system limit of 50 per run applies" — which is
+ * not what happens. The plan now says: all N sellers, at X a day (the smallest
+ * of the daily cap, what fits in the contact window, and what the available
+ * sender numbers may carry), finishing in about D days, first send at T. The
+ * pacing figures come from the server's full-cohort preflight when it has
+ * answered (rolling_plan); until then from the launch settings.
  *
  * What IS new is how refusals are worded. The canonical gate still decides —
  * `canActivate` / `canSchedule` come from the modal untouched — but the reasons
@@ -20,25 +25,51 @@
 
 export type BuilderStep = 'build' | 'reach' | 'launch'
 
+/** The server's rolling plan (queue-plan dry run, full cohort). */
+export interface RollingPlanLike {
+  schedulable: number
+  sends_per_day: number
+  binding?: string | null
+  days_to_complete: number
+  first_send_at: string | null
+  daily_cap?: number | null
+  spread_interval_seconds?: number
+  sendable_senders?: number | null
+}
+
 export interface LaunchPlanInput {
   ready: number | null
   schedulable: number | null
   schedulableLoading: boolean
   firstScheduledAt: string | null
   lastScheduledAt: string | null
+  /** The campaign's own limit applied to what's deliverable (max_targets). */
   effectiveSends: number
+  /** min(daily cap, spaced messages that fit in the contact window). */
   dailyVolume: number
   spacingSeconds: number
-  runLimit: number | null
   scheduledAt: string
+  /** Server rolling plan, when the full-cohort preflight has answered. */
+  rolling?: RollingPlanLike | null
+  /** Queue-eligible sellers in the whole audience (Reach), before the limit. */
+  eligibleInAudience?: number | null
+  /** The campaign's send limit (max_targets). */
+  maxTargets?: number | null
 }
+
+export type PaceBinding = 'daily_cap' | 'contact_window' | 'sender_capacity'
 
 export interface LaunchPlan {
   now: boolean
   schedulableKnown: boolean
+  /** Every seller this campaign will message — the whole cohort, not one batch. */
   willQueue: number
+  /** The campaign's own send limit leaves eligible sellers out of the audience. */
   capBinds: boolean
-  systemBound: boolean
+  sendsPerDay: number
+  paceBinding: PaceBinding | null
+  days: number | null
+  firstSendAt: string | null
   durationLabel: string
   durationKnown: boolean
 }
@@ -51,30 +82,27 @@ export function startsNow(value: string): boolean {
   return d.getTime() <= Date.now() + 120_000
 }
 
+function paceBinding(value: unknown): PaceBinding | null {
+  return value === 'daily_cap' || value === 'contact_window' || value === 'sender_capacity' ? value : null
+}
+
 export function deriveLaunchPlan(input: LaunchPlanInput): LaunchPlan {
   const schedulableKnown = input.schedulable != null
-  const systemBound = input.runLimit != null && input.runLimit < input.effectiveSends
-  const capBound = systemBound ? (input.runLimit as number) : input.effectiveSends
-  const willQueue = schedulableKnown ? Math.min(capBound, input.schedulable as number) : capBound
-  const capBinds = input.ready != null && input.ready > 0 && willQueue < input.ready
+  const willQueue = schedulableKnown
+    ? Math.max(0, input.schedulable as number)
+    : Math.max(0, input.ready != null ? Math.min(input.ready, input.effectiveSends) : input.effectiveSends)
+  const capBinds = input.maxTargets != null && input.eligibleInAudience != null
+    && input.eligibleInAudience > input.maxTargets
 
-  const windowMinutes = input.firstScheduledAt && input.lastScheduledAt
-    ? Math.max(0, (new Date(input.lastScheduledAt).getTime() - new Date(input.firstScheduledAt).getTime()) / 60000)
-    : null
+  const rolling = input.rolling && Number(input.rolling.sends_per_day) > 0 ? input.rolling : null
+  const sendsPerDay = Math.max(1, rolling ? Number(rolling.sends_per_day) : input.dailyVolume)
+  const spacing = Math.max(1, rolling?.spread_interval_seconds ?? input.spacingSeconds)
+  const days = willQueue > 0 ? Math.max(1, Math.ceil(willQueue / sendsPerDay)) : null
 
   const durationLabel = (() => {
-    if (willQueue <= 0) return '—'
-    if (windowMinutes != null && Number.isFinite(windowMinutes)) {
-      if (windowMinutes < 1) return 'under a minute'
-      if (windowMinutes < 90) return `about ${Math.round(windowMinutes)} min`
-      const hours = windowMinutes / 60
-      if (hours < 24) return `about ${hours.toFixed(hours < 10 ? 1 : 0)} hr`
-      return `about ${Math.ceil(hours / 24)} days`
-    }
-    const perDay = Math.max(1, input.dailyVolume)
-    const days = Math.ceil(willQueue / perDay)
+    if (willQueue <= 0 || days == null) return '—'
     if (days > 1) return `about ${days} days`
-    const seconds = Math.max(0, willQueue - 1) * Math.max(1, input.spacingSeconds)
+    const seconds = Math.max(0, willQueue - 1) * spacing
     if (seconds < 60) return 'under a minute'
     const mins = Math.round(seconds / 60)
     return mins < 90 ? `about ${mins} min` : `about ${(mins / 60).toFixed(1)} hr`
@@ -85,10 +113,127 @@ export function deriveLaunchPlan(input: LaunchPlanInput): LaunchPlan {
     schedulableKnown,
     willQueue,
     capBinds,
-    systemBound,
+    sendsPerDay,
+    paceBinding: rolling ? paceBinding(rolling.binding) : (input.dailyVolume > 0 ? 'daily_cap' : null),
+    days,
+    firstSendAt: rolling?.first_send_at ?? input.firstScheduledAt ?? null,
     durationLabel,
     durationKnown: willQueue > 0 && durationLabel !== '—',
   }
+}
+
+/** "750 a day — the daily cap" · "1,040 a day — what fits in 8 AM–9 PM" · … */
+export function describePace(plan: Pick<LaunchPlan, 'sendsPerDay' | 'paceBinding'>): string {
+  const perDay = `${plan.sendsPerDay.toLocaleString()} a day`
+  if (plan.paceBinding === 'sender_capacity') return `${perDay}, limited by available sender numbers`
+  if (plan.paceBinding === 'contact_window') return `${perDay}, what fits in texting hours`
+  if (plan.paceBinding === 'daily_cap') return `${perDay}, the daily cap`
+  return perDay
+}
+
+// ── why sellers can't be scheduled ─────────────────────────────────────────
+
+const SKIP_REASON_COPY: Record<string, string> = {
+  sender_blocked_by_operator: 'Sender number blocked by an operator',
+  local_senders_unavailable: 'Local sender numbers paused or cooling',
+  no_local_sender_number: 'No sender number in their market',
+  ROUTING_BLOCKED: 'No sender route for their market',
+  NO_VALID_TEXTGRID_NUMBER: 'No active sender numbers',
+  missing_selected_sender_number: 'No sender number',
+  TEMPLATE_RENDER_LINT_FAILURE: 'No first name on file — the greeting can’t be personalized',
+  NO_TEMPLATE: 'No approved message for their language',
+  MISSING_FIRST_NAME: 'Seller first name missing',
+  template_blocked_by_operator: 'Message blocked by an operator',
+  OUTREACH_HISTORY_UNAVAILABLE: 'Message history couldn’t be read',
+  active_queue_row_exists: 'Already queued',
+  prior_contacted_suppression: 'Already contacted',
+  graph_suppression_or_queue_block: 'Suppressed',
+  duplicate_phone_in_launch_batch: 'Same phone as another seller',
+  missing_prospect_id: 'No resolved seller',
+  missing_to_phone_number: 'No phone number',
+  schedule_window_full: 'No room left in today’s window',
+  per_sender_cap_reached: 'Sender daily cap reached',
+  per_market_cap_reached: 'Market cap reached',
+}
+
+export function describeSkipReason(reason: string): string {
+  return SKIP_REASON_COPY[reason]
+    ?? reason.toLowerCase().replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
+}
+
+const SENDER_STATE_COPY: Record<string, string> = {
+  blocked_by_operator: 'blocked by an operator',
+  status_paused: 'paused',
+  health_cooling: 'cooling',
+  cooling_until: 'cooling',
+  daily_limit_reached: 'at today’s limit',
+}
+
+const SENDER_REASONS = new Set([
+  'sender_blocked_by_operator', 'local_senders_unavailable', 'no_local_sender_number',
+  'ROUTING_BLOCKED', 'NO_VALID_TEXTGRID_NUMBER', 'missing_selected_sender_number',
+])
+
+export interface NotSchedulableLine {
+  reason: string
+  label: string
+  count: number
+  /** "Miami, FL — +13058975670 blocked by an operator; +17866052999 cooling" */
+  details: string[]
+}
+
+type RoutingBlocks = Record<string, { targets: number; reason: string; senders: Array<{ phone_number: string | null; state: string }> }>
+
+/** Skipped sellers by reason, with the markets and numbers behind sender reasons. */
+export function describeNotSchedulable(
+  skipped: Record<string, number> | null | undefined,
+  routingBlocks?: RoutingBlocks | null,
+): NotSchedulableLine[] {
+  return Object.entries(skipped ?? {})
+    .filter(([, n]) => Number(n) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([reason, n]) => ({
+      reason,
+      label: describeSkipReason(reason),
+      count: Number(n),
+      details: SENDER_REASONS.has(reason)
+        ? Object.entries(routingBlocks ?? {})
+            .filter(([, block]) => block.reason === reason)
+            .sort((a, b) => b[1].targets - a[1].targets)
+            .slice(0, 4)
+            .map(([market, block]) => {
+              const senders = (block.senders ?? [])
+                .map((sender) => `${sender.phone_number ?? 'number'} ${SENDER_STATE_COPY[sender.state] ?? sender.state.replace(/_/g, ' ')}`)
+                .join('; ')
+              return `${market} (${block.targets.toLocaleString()}) — ${senders || 'no sender number in this market'}`
+            })
+        : [],
+    }))
+}
+
+const HELD_REASON_COPY: Record<string, string> = {
+  entity_contact_requires_review: 'Entity owner — contact needs review',
+  missing_identity_linkage: 'No resolved person and phone',
+  ambiguous_phone_ownership: 'Phone shared by several owners',
+  missing_timezone: 'No timezone',
+  graph_not_queue_eligible: 'Not eligible in the audience data',
+  RENTER_NOT_OWNER: 'Likely a renter, not the owner',
+  IDENTITY_MISMATCH: 'Owner identity doesn’t match',
+  OWNERSHIP_NOT_CONFIRMED: 'Ownership not confirmed',
+}
+
+/** Why the build held a seller back (target block_reason), in words. */
+export function describeHeldReason(reason: string): string {
+  return HELD_REASON_COPY[reason] ?? describeSkipReason(reason)
+}
+
+/** What the plan's 0 means, in one line. */
+export function zeroSchedulableTitle(skipped: Record<string, number> | null | undefined): string {
+  const top = Object.entries(skipped ?? {}).filter(([, n]) => Number(n) > 0).sort((a, b) => Number(b[1]) - Number(a[1]))[0]
+  if (!top) return 'No seller can be messaged yet'
+  if (SENDER_REASONS.has(top[0])) return 'No sender number can reach these sellers'
+  if (top[0] === 'TEMPLATE_RENDER_LINT_FAILURE' || top[0] === 'NO_TEMPLATE' || top[0] === 'MISSING_FIRST_NAME') return 'Fix message personalization'
+  return describeSkipReason(top[0])
 }
 
 // ── blockers ────────────────────────────────────────────────────────────────
@@ -179,6 +324,12 @@ export interface LaunchActionInput {
   plan: LaunchPlan
   schedulable: number | null
   schedulableLoading: boolean
+  /** Why the preflight has no answer (the build or plan call failed), when it failed. */
+  preflightError?: string | null
+  /** The preflight plan's skips by reason — what "0 schedulable" is made of. */
+  skippedCounts?: Record<string, number> | null
+  /** Ready targets the preflight build produced (0 = everyone held at build). */
+  readyAfterBuild?: number | null
   savedCampaignId: string | null
   isLaunching: boolean
   isPersisting: boolean
@@ -221,11 +372,31 @@ export function deriveLaunchAction(input: LaunchActionInput): LaunchAction {
     return { kind: 'busy', label, intent: 'none' }
   }
 
+  /*
+   * "Couldn't verify messages — retry" was the answer to three different
+   * things: the check timing out (a dry-run plan made ~2,000 round trips and
+   * outlived the two-minute request), the build refusing the audience (a
+   * filter it can't apply), and a build that held every seller. Only the
+   * first is a retry.
+   */
   if (!input.plan.schedulableKnown && input.savedCampaignId) {
-    return { kind: 'blocked', label: 'Couldn’t verify messages — retry', intent: 'resolve', step: 'reach' }
+    const error = String(input.preflightError ?? '')
+    if (/refusing to build targets/i.test(error)) {
+      return { kind: 'blocked', label: 'Remove filters that can’t narrow a campaign', intent: 'resolve', step: 'build' }
+    }
+    if (input.readyAfterBuild === 0) {
+      return { kind: 'blocked', label: 'No seller is ready to message', intent: 'resolve', step: 'reach' }
+    }
+    return { kind: 'blocked', label: 'Couldn’t check messages — retry', intent: 'resolve', step: 'reach' }
   }
   if (input.plan.schedulableKnown && input.schedulable === 0) {
-    return { kind: 'blocked', label: 'Fix message personalization', intent: 'resolve', step: 'build' }
+    if (input.readyAfterBuild === 0) {
+      return { kind: 'blocked', label: 'No seller is ready to message', intent: 'resolve', step: 'reach' }
+    }
+    const title = zeroSchedulableTitle(input.skippedCounts)
+    return title === 'Fix message personalization'
+      ? { kind: 'blocked', label: title, intent: 'resolve', step: 'build' }
+      : { kind: 'blocked', label: title, intent: 'none' }
   }
 
   if (input.plan.now) {

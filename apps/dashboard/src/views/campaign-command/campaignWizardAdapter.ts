@@ -44,6 +44,20 @@ export interface CampaignFieldDefinition {
   supported_in_preview: boolean
   description: string
   derived_from?: string
+  /**
+   * Can this field narrow a campaign? From the backend catalog: false when the
+   * campaign audience has no column for it or no seller carries a value. Such a
+   * field is shown disabled with the reason — never accepted and then ignored.
+   * Undefined (local fallback catalog) means unknown, treated as usable.
+   */
+  campaign_applicable?: boolean
+  campaign_inapplicable_reason?: string | null
+  campaign_inapplicable_message?: string | null
+}
+
+/** A field the campaign audience can't filter on, per the backend catalog. */
+export function isFieldCampaignInapplicable(field: Pick<CampaignFieldDefinition, 'campaign_applicable'> | null | undefined): boolean {
+  return field?.campaign_applicable === false
 }
 
 export interface CampaignFieldCatalog {
@@ -206,6 +220,35 @@ export interface CampaignPreviewResult {
     matched?: number | null
     reconciles?: boolean
   } | null
+  /**
+   * What Build will produce with these filters and this send limit — the
+   * figure Reach leads with (same rows, limit, one-per-phone collapse and
+   * review/identity holds as the real build), plus whether a sender can
+   * reach each ready seller today.
+   */
+  build_simulation?: {
+    ok?: boolean
+    error?: string
+    eligible_in_audience?: number
+    requested_limit?: number
+    simulated_limit?: number
+    capped_by_preview?: boolean
+    queue_eligible_rows_read?: number
+    recipients?: number
+    duplicate_phones_collapsed?: number
+    built?: number
+    ready: number
+    held?: number
+    held_by_reason?: Record<string, number>
+    limited?: boolean
+    sendable_now?: number | null
+    no_sendable_number?: number | null
+    sender_markets?: Array<{ market: string; sellers: number; sendable: boolean | null; summary?: string | null }>
+  } | null
+  /** A selection that stood for more values than it named (property-type families). */
+  filter_notes?: Array<{ field_key: string; message: string }>
+  /** Filters that can't narrow a campaign, with the reason. Build refuses them. */
+  inapplicable_filters?: Array<{ field_key: string; label: string; reason: string; message: string }>
   /** Properties that exist but are absent from the target graph (freshness loss). */
   universe_gap?: {
     addressable?: number | null
@@ -1208,6 +1251,11 @@ function normalizeBackendField(
     supported_in_preview: asBooleanValue(raw.supported_in_preview, false),
     description: asText(raw.description, descriptionForField(domain, fallbackCategory, label)),
     ...(derivedFrom ? { derived_from: derivedFrom } : {}),
+    ...(typeof raw.campaign_applicable === 'boolean' ? {
+      campaign_applicable: raw.campaign_applicable,
+      campaign_inapplicable_reason: asText(raw.campaign_inapplicable_reason) || null,
+      campaign_inapplicable_message: asText(raw.campaign_inapplicable_message) || null,
+    } : {}),
   }
 }
 
@@ -1430,7 +1478,7 @@ function assertPreviewPayloadDomainCounts(
   throw error
 }
 
-function buildPreviewPayload(draft: CampaignWizardDraft, requestId?: string | null): Record<string, unknown> {
+function buildPreviewPayload(draft: CampaignWizardDraft, requestId?: string | null, buildLimit?: number | null): Record<string, unknown> {
   const filters = serializeFilterGroups(draft.target_filters)
   const { expected: frontendPayloadDomainCounts, dropped } = assertPreviewPayloadDomainCounts(draft.target_filters, filters)
   const market = firstSerializedFilterValue(filters.properties, 'properties.market')
@@ -1446,6 +1494,8 @@ function buildPreviewPayload(draft: CampaignWizardDraft, requestId?: string | nu
     limitPreview: DEFAULT_LIMIT_PREVIEW,
     scan_limit: DEFAULT_SCAN_PREVIEW,
     ...(requestId ? { request_id: requestId } : {}),
+    // Reach simulates the build Schedule will run, with the same send limit.
+    ...(buildLimit && buildLimit > 0 ? { build_limit: buildLimit } : {}),
     ...(market ? { market } : {}),
     ...(state ? { state } : {}),
     template_use_case: draft.template_use_case,
@@ -1465,8 +1515,8 @@ function firstSerializedFilterValue(filters: Array<Record<string, unknown>>, fie
   return text || null
 }
 
-export async function previewTargets(draft: CampaignWizardDraft, options: { requestId?: string | null } = {}): Promise<CampaignPreviewResult> {
-  const payload = buildPreviewPayload(draft, options.requestId)
+export async function previewTargets(draft: CampaignWizardDraft, options: { requestId?: string | null; buildLimit?: number | null } = {}): Promise<CampaignPreviewResult> {
+  const payload = buildPreviewPayload(draft, options.requestId, options.buildLimit)
   const result = await callBackend<Record<string, unknown>>(PREVIEW_TARGETS_ENDPOINT, {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -1995,6 +2045,19 @@ function normalizePreviewResponse(payload: unknown): CampaignPreviewResult {
     universe_gap: (isRecord(responsePayload.universe_gap)
       ? responsePayload.universe_gap
       : null) as CampaignPreviewResult['universe_gap'],
+    build_simulation: (isRecord(responsePayload.build_simulation)
+      ? responsePayload.build_simulation
+      : null) as CampaignPreviewResult['build_simulation'],
+    filter_notes: recordArray(responsePayload.filter_notes)
+      .map((note) => ({ field_key: asText(note.field_key), message: asText(note.message) }))
+      .filter((note) => note.message),
+    inapplicable_filters: recordArray(responsePayload.inapplicable_filters)
+      .map((item) => ({
+        field_key: asText(item.field_key),
+        label: asText(item.label, asText(item.field_key)),
+        reason: asText(item.reason),
+        message: asText(item.message),
+      })),
     request_id: asText(responsePayload.request_id ?? responsePayload.requestId ?? payload.request_id ?? payload.requestId) || null,
     result_hash: asText(responsePayload.result_hash ?? responsePayload.resultHash ?? payload.result_hash ?? payload.resultHash) || null,
     total_matched_properties: totalMatchedProperties,

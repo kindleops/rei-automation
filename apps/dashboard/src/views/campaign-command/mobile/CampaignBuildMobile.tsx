@@ -38,6 +38,8 @@ export interface BuildAppliedFilter {
   operatorLabel: string
   valueLabel: string
   unsupported: boolean
+  /** Why the filter can't narrow a campaign (field has no audience data). */
+  unsupportedReason?: string | null
   pending: boolean
 }
 
@@ -290,7 +292,11 @@ function FilterChip({
         <span className="cbb-chip__op">{filter.operatorLabel.toLowerCase()}</span>
         <span className="cbb-chip__value">{filter.valueLabel}</span>
         {filter.pending && <span className="cbb-chip__flag">Not applied</span>}
-        {filter.unsupported && !filter.pending && <span className="cbb-chip__flag">Not in count</span>}
+        {filter.unsupported && !filter.pending && (
+          <span className="cbb-chip__flag" title={filter.unsupportedReason ?? undefined}>
+            {filter.unsupportedReason ? 'Can’t narrow — remove' : 'Not in count'}
+          </span>
+        )}
       </button>
       <button
         type="button"

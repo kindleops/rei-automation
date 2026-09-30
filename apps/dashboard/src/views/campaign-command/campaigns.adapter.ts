@@ -39,6 +39,7 @@ import {
   getCampaignCommandSummary,
   getCampaignFailuresBackend,
   type CampaignApiSummary,
+  type CampaignBuildSummary,
 } from '../../lib/api/backendClient'
 
 export type CampaignLifecycleAction =
@@ -76,7 +77,7 @@ export const createCampaign = async (payload: CreateCampaignPayload): Promise<st
 export const buildCampaignTargetSnapshots = async (
   campaignId: string,
   options: { limit: number },
-): Promise<{ built_count: number; no_send_queue_rows_created?: boolean; preview?: Record<string, unknown> }> => {
+): Promise<{ built_count: number; no_send_queue_rows_created?: boolean; preview?: Record<string, unknown>; build_summary?: CampaignBuildSummary }> => {
   const res = await buildCampaignTargets(campaignId, {
     limit: options.limit,
     target_limit: options.limit,
@@ -87,6 +88,7 @@ export const buildCampaignTargetSnapshots = async (
     built_count: res.data.built_count ?? 0,
     no_send_queue_rows_created: res.data.no_send_queue_rows_created,
     preview: res.data.preview,
+    build_summary: res.data.build_summary,
   }
 }
 

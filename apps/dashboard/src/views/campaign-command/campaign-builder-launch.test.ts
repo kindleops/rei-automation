@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildActivateNowPayload,
   buildCampaignPersistPayload,
+  builderStageChoice,
   CAMPAIGN_HYDRATION_CHUNK,
   hydrateLaunchSettings,
   toLocalDateTimeInputValue,
@@ -141,5 +142,20 @@ describe('per-number daily limit', () => {
     expect(persisted.per_sender_cap).toBeNull()
     const override = buildActivateNowPayload(launch({ per_sender_cap: '300' }), 'c1', 'America/Chicago') as Record<string, any>
     expect(override.per_sender_cap).toBe(300)
+  })
+})
+
+describe('the touch a saved campaign reopens with', () => {
+  it('canonical codes the API saves map back to the builder’s choices', () => {
+    // The API now saves S1/S2 (what templates carry) instead of 'first_touch'.
+    expect(builderStageChoice('S1')).toBe('first_touch')
+    expect(builderStageChoice('S2')).toBe('second_touch')
+    expect(builderStageChoice('first_touch')).toBe('first_touch')
+    expect(builderStageChoice('REENGAGEMENT')).toBe('reengagement')
+  })
+
+  it('an unknown or missing code keeps the current choice', () => {
+    expect(builderStageChoice(undefined, 'second_touch')).toBe('second_touch')
+    expect(builderStageChoice('S6B', 'first_touch')).toBe('first_touch')
   })
 })

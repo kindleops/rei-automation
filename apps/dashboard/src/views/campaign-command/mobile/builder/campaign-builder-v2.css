@@ -1137,6 +1137,24 @@ html[data-nexus-theme='light'] .cmp-studio--mobile {
   color: var(--cb-ink-2);
 }
 
+/* Reach: what Schedule will build, and the notes that explain it. */
+.crx__note {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--cb-ink-2, rgba(255, 255, 255, 0.72));
+}
+
+.crx__note.is-warn {
+  color: var(--cb-warn, #f5b54a);
+}
+
+.crx__build .cdb__row.is-total .cdb__row-label,
+.crx__build .cdb__row.is-total .cdb__row-value {
+  font-weight: 650;
+  color: var(--cb-ink, #fff);
+}
+
 .cmp-studio--mobile .crx__route-label {
   font-size: 11.5px;
   font-weight: 560;

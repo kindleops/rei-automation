@@ -1,3 +1,4 @@
+import { collapsePropertyTypeOptions } from '@/lib/domain/campaigns/campaign-property-type-families.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   loadCanonicalMarketDirectory,
@@ -1348,7 +1349,9 @@ async function queryGraphFacetOptions({
     ok: true,
     ...base,
     ...(marketWarning ? { warnings: uniqueClean([...(base.warnings || []), marketWarning]) } : {}),
-    options,
+    // One option per property-type family ("Multi-Family (incl. Apartment)"),
+    // exactly the set the audience filter applies for it.
+    options: facetKey === 'properties.property_type' ? collapsePropertyTypeOptions(options) : options,
     sourceColumn: graphSourceColumnForField(field),
     queryMs: Date.now() - startedAt,
   }

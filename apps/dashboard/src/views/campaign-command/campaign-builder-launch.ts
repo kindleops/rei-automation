@@ -8,6 +8,22 @@ import type { CreateCampaignPayload } from './campaigns.types'
  */
 export const CAMPAIGN_HYDRATION_CHUNK = 100
 
+/**
+ * The builder's touch choice for a saved stage code. Campaigns are saved with
+ * canonical codes (S1, S2 — what templates carry); the builder offers
+ * first_touch / second_touch / reengagement. Reopening a campaign read a
+ * top-level `stage_code` the campaign row doesn't have, so every saved
+ * campaign reopened as "First touch".
+ */
+export function builderStageChoice(value: unknown, fallback = 'first_touch'): string {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return fallback
+  if (['s1', 'first_touch', 'first-touch', 'touch_1', 'touch1', 'ownership_check'].includes(raw)) return 'first_touch'
+  if (['s2', 'second_touch', 'follow_up', 'touch_2', 'touch2'].includes(raw)) return 'second_touch'
+  if (raw === 'reengagement' || raw === 're-engagement') return 'reengagement'
+  return fallback
+}
+
 export const MARKET_TIMEZONES: Record<string, string> = {
   'los angeles, ca': 'America/Los_Angeles',
   'miami, fl': 'America/New_York',

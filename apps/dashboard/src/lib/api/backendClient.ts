@@ -2047,6 +2047,20 @@ export function createWorkflowSenderPoolMemberBackend(senderPoolId: string, payl
   })
 }
 
+/** Ready / held-by-reason for a build, exactly as written (or as Reach simulates it). */
+export interface CampaignBuildSummary {
+  queue_eligible_rows_read?: number
+  recipients?: number
+  duplicate_phones_collapsed?: number
+  built?: number
+  ready?: number
+  held?: number
+  held_by_reason?: Record<string, number>
+  limit?: number
+  limited?: boolean
+  entity_review_held?: number
+}
+
 export interface BuildTargetsResponse {
   ok?: boolean
   success: boolean
@@ -2054,6 +2068,9 @@ export interface BuildTargetsResponse {
   built_count: number
   no_send_queue_rows_created?: boolean
   preview?: Record<string, unknown>
+  build_summary?: CampaignBuildSummary
+  dropped_filters?: Array<Record<string, unknown>>
+  error?: string
   message?: string
 }
 
@@ -2209,10 +2226,43 @@ export function fetchMapAccounting(params: {
  * Commercial reads 5 READY and plans 0, every one blocked on the blank-greeting
  * lint. That gap must be visible before Schedule, not discovered after it.
  */
+/** How a campaign actually goes out: every schedulable seller, paced over days. */
+export interface CampaignRollingPlan {
+  ready: number
+  schedulable: number
+  not_schedulable: number
+  daily_cap: number | null
+  spread_interval_seconds: number
+  contact_window?: { start: string | null; end: string | null; minutes: number }
+  window_capacity_per_day: number
+  per_sender_cap: number | null
+  sendable_senders: number | null
+  sendable_senders_by_market?: Record<string, number> | null
+  sender_capacity_per_day: number | null
+  sends_per_day: number
+  binding: 'daily_cap' | 'contact_window' | 'sender_capacity' | string
+  days_to_complete: number
+  first_send_at: string | null
+  first_day_scheduled?: number
+  after_first_day?: number
+  full_cohort?: boolean
+}
+
+export interface CampaignRoutingBlock {
+  targets: number
+  reason: string
+  senders: Array<{ phone_number: string | null; state: string }>
+}
+
 export interface CampaignLaunchPreflight extends QueueBatchResponse {
   total_ready_targets?: number
   planned_target_count?: number
+  schedulable_target_count?: number
   skipped_counts_by_reason?: Record<string, number>
+  skip_summary?: string
+  routing_blocks_by_market?: Record<string, CampaignRoutingBlock>
+  rolling_plan?: CampaignRollingPlan
+  full_cohort?: boolean
   first_scheduled_at?: string | null
   last_scheduled_at?: string | null
   spread_interval_seconds?: number

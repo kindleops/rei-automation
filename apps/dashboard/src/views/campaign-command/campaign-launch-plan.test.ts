@@ -3,9 +3,13 @@ import {
   deriveLaunchAction,
   deriveLaunchPlan,
   describeAutoReplyMode,
+  describeHeldReason,
+  describeNotSchedulable,
+  describePace,
   describeQueueHold,
   friendlyTimezone,
   groupLaunchBlockers,
+  zeroSchedulableTitle,
   type LaunchActionInput,
 } from './campaign-launch-plan'
 
@@ -21,7 +25,7 @@ const REAL_FIVE = [
 const plan = (over: Partial<Parameters<typeof deriveLaunchPlan>[0]> = {}) => deriveLaunchPlan({
   ready: 1000, schedulable: 1000, schedulableLoading: false,
   firstScheduledAt: null, lastScheduledAt: null,
-  effectiveSends: 1000, dailyVolume: 750, spacingSeconds: 45, runLimit: null,
+  effectiveSends: 1000, dailyVolume: 750, spacingSeconds: 45,
   scheduledAt: '', ...over,
 })
 
@@ -91,24 +95,113 @@ describe('deriveLaunchAction', () => {
     expect(deriveLaunchAction(actionInput({ schedulableLoading: true }))).toMatchObject({ kind: 'busy', intent: 'none' })
   })
 
-  it('zero schedulable is a message problem, and says so', () => {
-    const a = deriveLaunchAction(actionInput({ schedulable: 0, plan: plan({ schedulable: 0 }) }))
-    expect(a).toMatchObject({ kind: 'blocked', label: 'Fix message personalization' })
+  it('zero schedulable names its real cause: a message problem only when it is one', () => {
+    const lint = deriveLaunchAction(actionInput({
+      schedulable: 0, plan: plan({ schedulable: 0 }), skippedCounts: { TEMPLATE_RENDER_LINT_FAILURE: 12 },
+    }))
+    expect(lint).toMatchObject({ kind: 'blocked', label: 'Fix message personalization', intent: 'resolve', step: 'build' })
+
+    // 75+ ACQ SCORE, 2026-09-30: 84 ready, 84 skipped sender_blocked_by_operator.
+    const senders = deriveLaunchAction(actionInput({
+      schedulable: 0, plan: plan({ schedulable: 0 }), skippedCounts: { sender_blocked_by_operator: 84 },
+    }))
+    expect(senders).toMatchObject({ kind: 'blocked', label: 'No sender number can reach these sellers', intent: 'none' })
+    expect(senders.label).not.toMatch(/personaliz/i)
+  })
+
+  it('a build that held every seller says so instead of "couldn’t verify"', () => {
+    const a = deriveLaunchAction(actionInput({
+      schedulable: 0, plan: plan({ schedulable: 0 }), readyAfterBuild: 0, skippedCounts: {},
+    }))
+    expect(a).toMatchObject({ kind: 'blocked', label: 'No seller is ready to message', step: 'reach' })
+  })
+
+  it('a refused build names the filter problem; only a failed check is a retry', () => {
+    const unknown = plan({ schedulable: null })
+    const refused = deriveLaunchAction(actionInput({
+      plan: unknown, schedulable: null,
+      preflightError: 'Refusing to build targets: Units Count (No seller in the campaign audience has a value for this field yet).',
+    }))
+    expect(refused).toMatchObject({ kind: 'blocked', label: 'Remove filters that can’t narrow a campaign', step: 'build' })
+
+    const failed = deriveLaunchAction(actionInput({ plan: unknown, schedulable: null, preflightError: 'Request timed out' }))
+    expect(failed).toMatchObject({ kind: 'blocked', label: 'Couldn’t check messages — retry', step: 'reach' })
+  })
+})
+
+describe('describeNotSchedulable', () => {
+  it('names the markets and numbers behind a sender reason', () => {
+    const lines = describeNotSchedulable(
+      { sender_blocked_by_operator: 84, TEMPLATE_RENDER_LINT_FAILURE: 3 },
+      {
+        'Miami, FL': {
+          targets: 84,
+          reason: 'sender_blocked_by_operator',
+          senders: [
+            { phone_number: '+13058975670', state: 'blocked_by_operator' },
+            { phone_number: '+17866052999', state: 'health_cooling' },
+            { phone_number: '+13057604780', state: 'status_paused' },
+          ],
+        },
+      },
+    )
+    expect(lines[0]).toMatchObject({ reason: 'sender_blocked_by_operator', count: 84, label: 'Sender number blocked by an operator' })
+    expect(lines[0].details[0]).toBe('Miami, FL (84) — +13058975670 blocked by an operator; +17866052999 cooling; +13057604780 paused')
+    expect(lines[1]).toMatchObject({ reason: 'TEMPLATE_RENDER_LINT_FAILURE', details: [] })
+  })
+
+  it('a market with no number at all says so', () => {
+    const [line] = describeNotSchedulable({ no_local_sender_number: 229 }, {
+      'Chicago, IL': { targets: 229, reason: 'no_local_sender_number', senders: [] },
+    })
+    expect(line.label).toBe('No sender number in their market')
+    expect(line.details).toEqual(['Chicago, IL (229) — no sender number in this market'])
+  })
+
+  it('zeroSchedulableTitle reads the dominant reason', () => {
+    expect(zeroSchedulableTitle({ no_local_sender_number: 5, TEMPLATE_RENDER_LINT_FAILURE: 1 })).toBe('No sender number can reach these sellers')
+    expect(zeroSchedulableTitle({})).toBe('No seller can be messaged yet')
+  })
+
+  it('held-at-build reasons are words, not codes', () => {
+    expect(describeHeldReason('entity_contact_requires_review')).toBe('Entity owner — contact needs review')
+    expect(describeHeldReason('some_new_reason')).toBe('Some new reason')
   })
 })
 
 describe('deriveLaunchPlan', () => {
-  it('the smallest cap binds, and the plan says which', () => {
-    const p = plan({ ready: 14_147, effectiveSends: 1000, runLimit: 50, schedulable: 900 })
-    expect(p.willQueue).toBe(50)
-    expect(p.systemBound).toBe(true)
-    expect(p.capBinds).toBe(true)
+  it('the whole cohort is the launch — a worker batch size never caps it', () => {
+    // "Yes": 539 ready. The old screen said "Sending to 50" because
+    // queue_run_limit is 50; the feeder refills until everyone is messaged.
+    const p = plan({ ready: 539, schedulable: 539, effectiveSends: 1000 })
+    expect(p.willQueue).toBe(539)
+    expect(p).not.toHaveProperty('systemBound')
   })
 
-  it('duration comes from what will actually queue, not the discarded cap', () => {
-    // 50 messages 45s apart is ~37 minutes, not "~2 days" from a 1,000 cap.
-    const p = plan({ effectiveSends: 1000, runLimit: 50, schedulable: 900, dailyVolume: 750, spacingSeconds: 45 })
+  it('pace, days and first send come from the server rolling plan when it has answered', () => {
+    const p = plan({
+      ready: 1000, schedulable: 1000,
+      rolling: { schedulable: 1000, sends_per_day: 300, binding: 'sender_capacity', days_to_complete: 4, first_send_at: '2026-10-01T13:00:00.000Z', spread_interval_seconds: 45 },
+    })
+    expect(p.sendsPerDay).toBe(300)
+    expect(p.paceBinding).toBe('sender_capacity')
+    expect(p.days).toBe(4)
+    expect(p.durationLabel).toBe('about 4 days')
+    expect(p.firstSendAt).toBe('2026-10-01T13:00:00.000Z')
+    expect(describePace(p)).toBe('300 a day, limited by available sender numbers')
+  })
+
+  it('a one-day plan is timed by its spacing', () => {
+    // 50 messages 45s apart is ~37 minutes.
+    const p = plan({ ready: 50, schedulable: 50, dailyVolume: 750, spacingSeconds: 45 })
+    expect(p.days).toBe(1)
     expect(p.durationLabel).toBe('about 37 min')
+  })
+
+  it('the campaign’s own send limit binds only when the audience is larger than it', () => {
+    expect(plan({ eligibleInAudience: 27_257, maxTargets: 1000 }).capBinds).toBe(true)
+    expect(plan({ eligibleInAudience: 800, maxTargets: 1000 }).capBinds).toBe(false)
+    expect(plan({}).capBinds).toBe(false)
   })
 
   it('READY is never substituted for an unknown schedulable count', () => {
