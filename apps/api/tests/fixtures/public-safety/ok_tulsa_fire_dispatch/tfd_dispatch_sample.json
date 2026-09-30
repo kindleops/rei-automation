@@ -1,0 +1,464 @@
+{
+  "Incidents": {
+    "Incident": [
+      {
+        "IncidentNumber": "TFD2026000065388",
+        "Problem": "Motor Vehicle Accident",
+        "Address": "12500 E 46TH ST N",
+        "ResponseDate": "9/30/2026 6:48:48 AM",
+        "Latitude": "36.220555",
+        "Longitude": "-95.837514",
+        "Vehicles": {
+          "Vehicle": {
+            "Division": "District 2",
+            "Station": "Station 31",
+            "VehicleID": ""
+          }
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065387",
+        "Problem": "Motor Vehicle Accident",
+        "Address": "12500 E 46th St N",
+        "ResponseDate": "9/30/2026 6:46:22 AM",
+        "Latitude": "36.220554",
+        "Longitude": "-95.837504",
+        "Vehicles": {
+          "Vehicle": {
+            "Division": "District 2",
+            "Station": "Station 31",
+            "VehicleID": "ENG31"
+          }
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065385",
+        "Problem": "Open Burn",
+        "Address": "1200 S Main St",
+        "ResponseDate": "9/30/2026 6:31:43 AM",
+        "Latitude": "36.144821",
+        "Longitude": "-95.987324",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 1",
+              "Station": "Station 4",
+              "VehicleID": "C764"
+            },
+            {
+              "Division": "District 1",
+              "Station": "Station 4",
+              "VehicleID": "C769"
+            },
+            {
+              "Division": "District 1",
+              "Station": "Station 4",
+              "VehicleID": "L4"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065379",
+        "Problem": "Inv- Unknown Odor",
+        "Address": "0 E 5th St S",
+        "ResponseDate": "9/30/2026 6:02:43 AM",
+        "Latitude": "36.151577",
+        "Longitude": "-95.989786",
+        "Vehicles": {
+          "Vehicle": {
+            "Division": "District 1",
+            "Station": "Station 4",
+            "VehicleID": "L4"
+          }
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065377",
+        "Problem": "House Fire",
+        "Address": "2500 E Admiral Pl",
+        "ResponseDate": "9/30/2026 5:36:11 AM",
+        "Latitude": "36.160810",
+        "Longitude": "-95.954956",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C644"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C764"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C769"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG10"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG15"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG17"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG3"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG7"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "L2"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "L7"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065376",
+        "Problem": "Residential Alarm",
+        "Address": "7300 E 88th St S",
+        "ResponseDate": "9/30/2026 5:35:06 AM",
+        "Latitude": "36.036624",
+        "Longitude": "-95.894784",
+        "Vehicles": {
+          "Vehicle": {
+            "Division": "District 5",
+            "Station": "Station 32",
+            "VehicleID": "L32"
+          }
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065373",
+        "Problem": "Building Fire",
+        "Address": "800 N LEWIS PL",
+        "ResponseDate": "9/30/2026 4:38:47 AM",
+        "Latitude": "36.166715",
+        "Longitude": "-95.956942",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C641"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C644"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C764"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C769"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG10"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG17"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG2"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG24"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG3"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG4"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "L2"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "L24"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "L7"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "RES4"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065368",
+        "Problem": "Investigate Unk Fire",
+        "Address": "900 N WHEELING AVE",
+        "ResponseDate": "9/30/2026 4:09:34 AM",
+        "Latitude": "36.166817",
+        "Longitude": "-95.964723",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C764"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C769"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG10"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG15"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG19"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG3"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "GR19"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065367",
+        "Problem": "Car Fire",
+        "Address": "1400 N Wheeling Ave",
+        "ResponseDate": "9/30/2026 3:47:05 AM",
+        "Latitude": "36.175217",
+        "Longitude": "-95.964961",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C764"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "C769"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 3",
+              "VehicleID": "ENG3"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065352",
+        "Problem": "Apartment Fire",
+        "Address": "2100 E 61st St S",
+        "ResponseDate": "9/30/2026 12:27:29 AM",
+        "Latitude": "36.075267",
+        "Longitude": "-95.962521",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "C643"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "C645"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "ENG14"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "ENG18"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "ENG23"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "ENG29"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "ENG6"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "L23"
+            },
+            {
+              "Division": "District 3",
+              "Station": "Station 29",
+              "VehicleID": "L29"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065346",
+        "Problem": "Carbon Monoxide - No sympt",
+        "Address": "2200 N Pittsburg Ave",
+        "ResponseDate": "9/29/2026 11:14:11 PM",
+        "Latitude": "36.185288",
+        "Longitude": "-95.931413",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 4",
+              "Station": "Station 16",
+              "VehicleID": "ENG16"
+            },
+            {
+              "Division": "District 4",
+              "Station": "Station 16",
+              "VehicleID": "L24"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065327",
+        "Problem": "Business Alarm",
+        "Address": "4600 E Admiral Pl",
+        "ResponseDate": "9/29/2026 8:45:44 PM",
+        "Latitude": "36.160714",
+        "Longitude": "-95.925060",
+        "Vehicles": {
+          "Vehicle": {
+            "Division": "District 4",
+            "Station": "Station 15",
+            "VehicleID": "ENG15"
+          }
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065325",
+        "Problem": "Inv- Smoke Detector/Alarm",
+        "Address": "400 S Detroit Ave",
+        "ResponseDate": "9/29/2026 8:45:08 PM",
+        "Latitude": "36.153458",
+        "Longitude": "-95.986927",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 1",
+              "Station": "Station 4",
+              "VehicleID": "C718"
+            },
+            {
+              "Division": "District 1",
+              "Station": "Station 4",
+              "VehicleID": "L4"
+            }
+          ]
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065312",
+        "Problem": "Fluid Spill",
+        "Address": "8200 S Harvard Ave",
+        "ResponseDate": "9/29/2026 7:03:29 PM",
+        "Latitude": "36.044787",
+        "Longitude": "-95.939974",
+        "Vehicles": {
+          "Vehicle": {
+            "Division": "District 3",
+            "Station": "Station 29",
+            "VehicleID": "ENG29"
+          }
+        }
+      },
+      {
+        "IncidentNumber": "TFD2026000065285",
+        "Problem": "Inv- Smoke in area",
+        "Address": "6500 Eb E Hwy 64-51 Expy",
+        "ResponseDate": "9/29/2026 4:43:32 PM",
+        "Latitude": "36.115486",
+        "Longitude": "-95.904585",
+        "Vehicles": {
+          "Vehicle": [
+            {
+              "Division": "District 2",
+              "Station": "Station 21",
+              "VehicleID": "ENG21"
+            },
+            {
+              "Division": "District 2",
+              "Station": "Station 21",
+              "VehicleID": "ENG25"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

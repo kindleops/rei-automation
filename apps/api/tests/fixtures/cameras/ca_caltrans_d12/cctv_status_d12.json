@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2025-09-23",
+          "recordTime": "09:36:35",
+          "recordEpoch": "1758645395"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-5 : (1) North of Magnolia Avenue (South Of SR-91)",
+          "nearbyPlace": "Anaheim",
+          "longitude": "-117.97886",
+          "latitude": "33.85629",
+          "elevation": "108",
+          "direction": "South",
+          "county": "Orange",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "42.11",
+          "alignment": "L",
+          "milepost": "114.08"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/SB5MagnoliaAveSO91.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/i51northofmagnoliaavenuesouthofsr91.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i51northofmagnoliaavenuesouthofsr91/previous/i51northofmagnoliaavenuesouthofsr91-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2025-01-28",
+          "recordTime": "10:26:12",
+          "recordEpoch": "1738088772"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-91 : (2) Beach Boulevard",
+          "nearbyPlace": "Buena Park",
+          "longitude": "-117.99698",
+          "latitude": "33.85631",
+          "elevation": "85",
+          "direction": "South",
+          "county": "Orange",
+          "route": "SR-91",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "2.67",
+          "alignment": "",
+          "milepost": "17.41"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/WB91BEACH.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/sr912beachboulevard.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr912beachboulevard/previous/sr912beachboulevard-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2025-08-14",
+          "recordTime": "13:50:01",
+          "recordEpoch": "1755204601"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-57 : (12) SR-22",
+          "nearbyPlace": "Orange",
+          "longitude": "-117.879614",
+          "latitude": "33.783174",
+          "elevation": "160",
+          "direction": "West",
+          "county": "Orange",
+          "route": "SR-57",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "10.940",
+          "alignment": "R",
+          "milepost": "0.206"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/NB57NO_RTE22.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/sr5712sr22.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5712sr22/previous/sr5712sr22-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2026-06-30",
+          "recordTime": "16:31:16",
+          "recordEpoch": "1782862276"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-91 : (4) Scale House",
+          "nearbyPlace": "Anaheim",
+          "longitude": "-117.755142",
+          "latitude": "33.868618",
+          "elevation": "367",
+          "direction": "North",
+          "county": "Orange",
+          "route": "SR-91",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "13.81",
+          "alignment": "R",
+          "milepost": "32.18"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/EB91SCALEHOUSE.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/sr914scalehouse.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr914scalehouse/previous/sr914scalehouse-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2026-06-25",
+          "recordTime": "15:39:45",
+          "recordEpoch": "1782427185"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-91 : (5) RTE 55 (HM Pole)",
+          "nearbyPlace": "Anaheim",
+          "longitude": "-117.829380",
+          "latitude": "33.845023",
+          "elevation": "288",
+          "direction": "East",
+          "county": "Orange",
+          "route": "SR-91",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "9.043",
+          "alignment": "R",
+          "milepost": "27.416"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/EB91RTE55HMPOLE.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/sr915rte55hmpole.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr915rte55hmpole/previous/sr915rte55hmpole-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2024-09-09",
+          "recordTime": "17:38:36",
+          "recordEpoch": "1725928716"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-57 : (6) Ball Road",
+          "nearbyPlace": "Anaheim",
+          "longitude": "-117.87591",
+          "latitude": "33.8177",
+          "elevation": "196",
+          "direction": "North",
+          "county": "Orange",
+          "route": "SR-57",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "13.39",
+          "alignment": "",
+          "milepost": "2.66"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/NB57Ball.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/sr576ballroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr576ballroad/previous/sr576ballroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2025-08-14",
+          "recordTime": "13:49:24",
+          "recordEpoch": "1755204564"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-5 : (7) Harbor Boulevard",
+          "nearbyPlace": "Anaheim",
+          "longitude": "-117.91463",
+          "latitude": "33.81526",
+          "elevation": "144",
+          "direction": "North",
+          "county": "Orange",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "37.35",
+          "alignment": "",
+          "milepost": "109.39"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/i57harborboulevard.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i57harborboulevard/previous/i57harborboulevard-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2024-09-09",
+          "recordTime": "15:12:21",
+          "recordEpoch": "1725919941"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-22 : (8) Fairview",
+          "nearbyPlace": "Garden Grove",
+          "longitude": "-117.905425",
+          "latitude": "33.773825",
+          "elevation": "118",
+          "direction": "East",
+          "county": "Orange",
+          "route": "SR-22",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "8.77",
+          "alignment": "",
+          "milepost": "10.23"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/EB22GARDENGROVEBLVD.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/sr228fairview.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr228fairview/previous/sr228fairview-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2026-09-10",
+          "recordTime": "15:55:20",
+          "recordEpoch": "1789080920"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-405 : (10) South of SR-22",
+          "nearbyPlace": "Westminster",
+          "longitude": "-118.040104",
+          "latitude": "33.774063",
+          "elevation": "32",
+          "direction": "North",
+          "county": "Orange",
+          "route": "I-405",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "20.62",
+          "alignment": "",
+          "milepost": "20.39"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/i40510southofsr22.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40510southofsr22/previous/i40510southofsr22-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2025-06-17",
+          "recordTime": "14:17:14",
+          "recordEpoch": "1750195034"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "SR-55 : (11) Del Mar Avenue",
+          "nearbyPlace": "Costa Mesa",
+          "longitude": "-117.89661",
+          "latitude": "33.66381",
+          "elevation": "68",
+          "direction": "South",
+          "county": "Orange",
+          "route": "SR-55",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "3.84",
+          "alignment": "",
+          "milepost": "3.67"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/SB55DELMAR.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/sr5511delmaravenue.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5511delmaravenue/previous/sr5511delmaravenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "13",
+        "recordTimestamp": {
+          "recordDate": "2024-08-20",
+          "recordTime": "11:48:24",
+          "recordEpoch": "1724179704"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-5 : (13) SR-22",
+          "nearbyPlace": "Santa Ana",
+          "longitude": "-117.87515",
+          "latitude": "33.778342",
+          "elevation": "137",
+          "direction": "North",
+          "county": "Orange",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "33.95",
+          "alignment": "",
+          "milepost": "105.99"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/NB5RTE22.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/i513sr22.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i513sr22/previous/i513sr22-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "14",
+        "recordTimestamp": {
+          "recordDate": "2026-09-10",
+          "recordTime": "15:53:44",
+          "recordEpoch": "1789080824"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-405 : (14) SR-73",
+          "nearbyPlace": "Costa Mesa",
+          "longitude": "-117.89902",
+          "latitude": "33.6879",
+          "elevation": "45",
+          "direction": "North",
+          "county": "Orange",
+          "route": "I-405",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "10.31",
+          "alignment": "",
+          "milepost": "10.08"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/NB405RTE73.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/i40514sr73.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i40514sr73/previous/i40514sr73-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "15",
+        "recordTimestamp": {
+          "recordDate": "2024-08-20",
+          "recordTime": "11:47:53",
+          "recordEpoch": "1724179673"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-5 : (15) Broadway",
+          "nearbyPlace": "Santa Ana",
+          "longitude": "-117.869323",
+          "latitude": "33.769632",
+          "elevation": "157",
+          "direction": "South",
+          "county": "Orange",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "33.30",
+          "alignment": "",
+          "milepost": "105.34"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/SB5Broadway.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/i515broadway.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i515broadway/previous/i515broadway-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "206",
+        "recordTimestamp": {
+          "recordDate": "2026-09-01",
+          "recordTime": "17:50:51",
+          "recordEpoch": "1788310251"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-5 : (206) Christianitos Road",
+          "nearbyPlace": "San Clemente",
+          "longitude": "-117.59341",
+          "latitude": "33.39651",
+          "elevation": "111",
+          "direction": "North",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "72.362",
+          "alignment": "R",
+          "milepost": "72.038"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D12/NB5CHRISTIANITOS.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/i5206christianitosroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5206christianitosroad/previous/i5206christianitosroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "426",
+        "recordTimestamp": {
+          "recordDate": "2026-09-29",
+          "recordTime": "10:18:12",
+          "recordEpoch": "1790702292"
+        },
+        "location": {
+          "district": "12",
+          "locationName": "I-405: (911)  NB JSO I-605",
+          "nearbyPlace": "Seal Beach",
+          "longitude": "-118.063414",
+          "latitude": "33.774498",
+          "elevation": "19",
+          "direction": "",
+          "county": "Orange",
+          "route": "I-405",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "21.979",
+          "alignment": "R",
+          "milepost": "21.749"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/i405911nbjsoi605.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405911nbjsoi605/previous/i405911nbjsoi605-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

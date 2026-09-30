@@ -1,0 +1,272 @@
+[
+  {
+    "traffic_report_id": "97B0FD2F9B2C4E92174719458B283189C944E15B_1790766659_traffic_incident",
+    "published_date": "2026-09-30T11:10:59.000Z",
+    "issue_reported": "Crash Urgent",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.668745,
+        30.405744
+      ]
+    },
+    "latitude": "30.405744",
+    "longitude": "-97.668745",
+    "address": "CENTER LAKE DR / W PARMER LN",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T11:15:17.000Z",
+    "agency": "AUSTIN PD           "
+  },
+  {
+    "traffic_report_id": "ECFECE8663D32713C352CAAB824C71F53F9974D2_1790766602_traffic_incident",
+    "published_date": "2026-09-30T11:10:02.000Z",
+    "issue_reported": "COLLISION",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.690746,
+        30.061083
+      ]
+    },
+    "latitude": "30.061083",
+    "longitude": "-97.690746",
+    "address": "12301-12621 S Us 183 Hwy Nb",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T11:15:17.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "387DF23DAF76202669C65F238D31F504C8064583_1790766135_traffic_incident",
+    "published_date": "2026-09-30T11:02:15.000Z",
+    "issue_reported": "COLLISN/ LVNG SCN",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.492356,
+        30.350999
+      ]
+    },
+    "latitude": "30.350999",
+    "longitude": "-97.492356",
+    "address": "14100-14518 E Us 290 Hwy Wb",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T11:05:17.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "4EC9F4EB1CF064513747B5E058DD05F3F6D6B737_1790765631_traffic_incident",
+    "published_date": "2026-09-30T10:53:51.000Z",
+    "issue_reported": "COLLISN/ LVNG SCN",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.576557,
+        30.252174
+      ]
+    },
+    "latitude": "30.252174",
+    "longitude": "-97.576557",
+    "address": "15300-15309 Chamberlain Ct",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T10:55:14.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "275CA1C1B6F73ABB5E67F61C11EF17C5620ACD07_1790750964_traffic_incident",
+    "published_date": "2026-09-30T06:49:24.000Z",
+    "issue_reported": "Stalled Vehicle",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.750278,
+        30.180887
+      ]
+    },
+    "latitude": "30.180887",
+    "longitude": "-97.750278",
+    "address": "Meadow Lake Blvd / E William Cannon Dr",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T07:15:20.000Z",
+    "agency": "AUSTIN PD           "
+  },
+  {
+    "traffic_report_id": "69CA7DFC8CEDA460F74502B95B23694A29725292_1790748832_traffic_incident",
+    "published_date": "2026-09-30T06:13:52.000Z",
+    "issue_reported": "Traffic Hazard",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.772791,
+        30.208863
+      ]
+    },
+    "latitude": "30.208863",
+    "longitude": "-97.772791",
+    "address": "S Congress Ave / Ramble Ln",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T06:50:24.000Z",
+    "agency": "AUSTIN PD           "
+  },
+  {
+    "traffic_report_id": "BFAC6A4B8FAC8CC5337C3E58459324C560CFEA67_1790744987_traffic_incident",
+    "published_date": "2026-09-30T05:09:47.000Z",
+    "issue_reported": "Crash Service",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.776855,
+        30.181776
+      ]
+    },
+    "latitude": "30.181776",
+    "longitude": "-97.776855",
+    "address": "7500 S Ih 35 Svrd Sb",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T05:40:17.000Z",
+    "agency": "AUSTIN PD           "
+  },
+  {
+    "traffic_report_id": "095719A3FF80CB6C8AC4E0E7B8E7DA0881234A18_1790727428_traffic_incident",
+    "published_date": "2026-09-30T00:17:08.000Z",
+    "issue_reported": "TRFC HAZD/ DEBRIS",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.540509,
+        30.349126
+      ]
+    },
+    "latitude": "30.349126",
+    "longitude": "-97.540509",
+    "address": "11925-12033 E US 290 HWY EB",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T00:25:14.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "B5AA3C061DD7CC6FFEBB32E8AF615EE74BCAB62F_1790724295_traffic_incident",
+    "published_date": "2026-09-29T23:24:55.000Z",
+    "issue_reported": "COLLISION WITH INJURY",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.545439,
+        30.400974
+      ]
+    },
+    "latitude": "30.400974",
+    "longitude": "-97.545439",
+    "address": "16650-16729 CAMERON RD",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T00:30:23.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "259D7030971F60371D67B764FFEECCD0FD050080_1790717508_traffic_incident",
+    "published_date": "2026-09-29T21:31:48.000Z",
+    "issue_reported": "COLLISION/PRIVATE PROPERTY",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.542412,
+        30.349316
+      ]
+    },
+    "latitude": "30.349316",
+    "longitude": "-97.542412",
+    "address": "11910 E US 290 HWY WB",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-29T22:00:34.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "FFD63112BA288B8043425D9FA47646CC9CA53E25_1790695177_traffic_incident",
+    "published_date": "2026-09-29T15:19:37.000Z",
+    "issue_reported": "BLOCKED DRIV/ HWY",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.6802,
+        30.43184
+      ]
+    },
+    "latitude": "30.43184",
+    "longitude": "-97.6802",
+    "address": "1902 BENCH MARK DR",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-29T18:40:12.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "EFFE2D14189C8C7BE0838FCCACF77DD0811B9F0A_1790670719_traffic_incident",
+    "published_date": "2026-09-29T08:31:59.000Z",
+    "issue_reported": "VEHICLE FIRE",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.671348,
+        30.431055
+      ]
+    },
+    "latitude": "30.431055",
+    "longitude": "-97.671348",
+    "address": "14106 N Ih 35 Svrd Sb",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-29T08:40:17.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "8000134409F9739525D1B91D308AB8444766F41F_1790631021_traffic_incident",
+    "published_date": "2026-09-28T21:30:21.000Z",
+    "issue_reported": "LOOSE LIVESTOCK",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.504315,
+        30.273414
+      ]
+    },
+    "latitude": "30.273414",
+    "longitude": "-97.504315",
+    "address": "19966-21051 BLAKE MANOR RD",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-28T22:45:18.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "780E202B137A715C8D1B159E4E1540323203CDD8_1790477137_traffic_incident",
+    "published_date": "2026-09-27T02:45:37.000Z",
+    "issue_reported": "TRAFFIC FATALITY",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.667596,
+        30.446974
+      ]
+    },
+    "latitude": "30.446974",
+    "longitude": "-97.667596",
+    "address": "15300-15500 N IH 35 SVRD SB",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-27T06:45:16.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  },
+  {
+    "traffic_report_id": "E1E2113D3105A4AB5E0052F7803AFC0D1079B55C_1790760656_traffic_incident",
+    "published_date": "2026-09-30T09:30:56.000Z",
+    "issue_reported": "COLLISION",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.556956,
+        30.351692
+      ]
+    },
+    "latitude": "30.351692",
+    "longitude": "-97.556956",
+    "address": "LEXINGTON ST / HILL LN",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T10:15:13.000Z",
+    "agency": "TRAVIS COUNTY SHERIF"
+  }
+]

@@ -1,0 +1,218 @@
+[
+  {
+    "master_incident_number": "20260901-0521151",
+    "response_date": "2026-08-31T23:59:08.000",
+    "agency_type": "Law Enforcement",
+    "problem": "DOC - Disorderly Conduct",
+    "jurisdiction": "St. Paul Police Department",
+    "division": "St. Paul Police Department Central District",
+    "battalion": "St. Paul Police Department Central District",
+    "street_name": "Albemarle St",
+    "city": "St Paul",
+    "postal_code": "55117",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260901-0521157",
+    "response_date": "2026-08-31T23:58:29.000",
+    "agency_type": "Law Enforcement",
+    "problem": "SUS - Suspicious Activity",
+    "jurisdiction": "St. Paul Police Department",
+    "division": "St. Paul Police Department East District",
+    "battalion": "St. Paul Police Department East District",
+    "street_name": "Wilson Ave",
+    "city": "St Paul",
+    "postal_code": "55106",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521143",
+    "response_date": "2026-08-31T23:58:13.000",
+    "agency_type": "Law Enforcement",
+    "problem": "TRF - Traffic Stop",
+    "jurisdiction": "St. Paul Police Department",
+    "division": "St. Paul Police Department Central District",
+    "battalion": "St. Paul Police Department Central District",
+    "street_name": "12th St W To WB I94",
+    "city": "St Paul",
+    "postal_code": "55101",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521141",
+    "response_date": "2026-08-31T23:57:07.000",
+    "agency_type": "Law Enforcement",
+    "problem": "INV - Investigate",
+    "jurisdiction": "St. Paul Police Department",
+    "division": "St. Paul Police Department Central District",
+    "battalion": "St. Paul Police Department Central District",
+    "street_name": "Randolph Ave",
+    "city": "St Paul",
+    "postal_code": "55102",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521138",
+    "response_date": "2026-08-31T23:53:29.000",
+    "agency_type": "Law Enforcement",
+    "problem": "SUS - Suspicious Activity",
+    "jurisdiction": "St. Paul Police Department",
+    "division": "St. Paul Police Department West District",
+    "battalion": "St. Paul Police Department West District",
+    "street_name": "Lincoln Ave",
+    "city": "St Paul",
+    "postal_code": "55105",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260901-0521153",
+    "response_date": "2026-08-31T23:59:41.000",
+    "agency_type": "Law Enforcement",
+    "problem": "DOC - Disorderly Conduct",
+    "jurisdiction": "New Brighton Public Safety (Police)",
+    "division": "New Brighton Public Safety (Police)",
+    "battalion": "New Brighton Public Safety (Police)",
+    "street_name": "Palmer Dr",
+    "city": "New Brighton",
+    "postal_code": "55112",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "45.06324",
+      "longitude": "-93.19312",
+      "human_address": "{\"address\": \"\", \"city\": \"New Brighton\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521147",
+    "response_date": "2026-08-31T23:59:39.000",
+    "agency_type": "Law Enforcement",
+    "problem": "TRF - Traffic Stop",
+    "jurisdiction": "Mounds View Police Department",
+    "division": "Mounds View Police Department",
+    "battalion": "NULL",
+    "street_name": "Osborne Rd NE",
+    "city": "Spring Lake Park",
+    "postal_code": "55432",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "45.115",
+      "longitude": "-93.23618",
+      "human_address": "{\"address\": \"\", \"city\": \"Spring Lake Park\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521146",
+    "response_date": "2026-08-31T23:58:07.000",
+    "agency_type": "Medical/Fire",
+    "problem": "MEDICAL",
+    "jurisdiction": "St. Paul Fire Department",
+    "division": "St. Paul Fire Department Division 2",
+    "battalion": "St. Paul Fire Department Division 2 Station 22",
+    "street_name": "Albemarle St",
+    "city": "St Paul",
+    "postal_code": "55117",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521132",
+    "response_date": "2026-08-31T23:48:14.000",
+    "agency_type": "Medical/Fire",
+    "problem": "MEDICAL",
+    "jurisdiction": "St. Paul Fire Department",
+    "division": "St. Paul Fire Department Division 1",
+    "battalion": "St. Paul Fire Department Division 1 Station 14",
+    "street_name": "Interstate 94",
+    "city": "St Paul",
+    "postal_code": "55104",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521116",
+    "response_date": "2026-08-31T23:38:26.000",
+    "agency_type": "Medical/Fire",
+    "problem": "IBURN - Illegal Burn",
+    "jurisdiction": "St. Paul Fire Department",
+    "division": "St. Paul Fire Department Division 2",
+    "battalion": "St. Paul Fire Department Division 2 Station 6",
+    "street_name": "Oakdale Ave",
+    "city": "St Paul",
+    "postal_code": "55107",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521091",
+    "response_date": "2026-08-31T23:19:29.000",
+    "agency_type": "Medical/Fire",
+    "problem": "SER - Public Service",
+    "jurisdiction": "St. Paul Fire Department",
+    "division": "St. Paul Fire Department Division 1",
+    "battalion": "St. Paul Fire Department Division 1 Station 19",
+    "street_name": "Otis Ave",
+    "city": "St Paul",
+    "postal_code": "55104",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.94339",
+      "longitude": "-93.09648",
+      "human_address": "{\"address\": \"\", \"city\": \"St Paul\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  },
+  {
+    "master_incident_number": "20260831-0521071",
+    "response_date": "2026-08-31T23:08:58.000",
+    "agency_type": "Medical/Fire",
+    "problem": "SER - Public Service",
+    "jurisdiction": "St. Paul Fire Department",
+    "division": "St. Paul Fire Department Division 1",
+    "battalion": "St. Paul Fire Department Division 1 Station 23",
+    "street_name": "Dan Patch Ave",
+    "city": "Falcon Heights",
+    "postal_code": "55108",
+    "state": "MN",
+    "geocoded_column_1": {
+      "latitude": "44.99178",
+      "longitude": "-93.18352",
+      "human_address": "{\"address\": \"\", \"city\": \"Falcon Heights\", \"state\": \"MN\", \"zip\": \"\"}"
+    }
+  }
+]

@@ -1,0 +1,306 @@
+{
+  "displayFieldName": "DESCRIPTION",
+  "fieldAliases": {
+    "CAM_ID": "CAM_ID",
+    "DESCRIPTION": "DESCRIPTION",
+    "X": "X",
+    "Y": "Y",
+    "URL1": "URL1",
+    "URL2": "URL2",
+    "REFR_RATE_MS": "REFR_RATE_MS",
+    "STREAM_ERROR": "STREAM_ERROR"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "CAM_ID",
+      "type": "esriFieldTypeOID",
+      "alias": "CAM_ID"
+    },
+    {
+      "name": "DESCRIPTION",
+      "type": "esriFieldTypeString",
+      "alias": "DESCRIPTION",
+      "length": 128
+    },
+    {
+      "name": "X",
+      "type": "esriFieldTypeDouble",
+      "alias": "X"
+    },
+    {
+      "name": "Y",
+      "type": "esriFieldTypeDouble",
+      "alias": "Y"
+    },
+    {
+      "name": "URL1",
+      "type": "esriFieldTypeString",
+      "alias": "URL1",
+      "length": 128
+    },
+    {
+      "name": "URL2",
+      "type": "esriFieldTypeString",
+      "alias": "URL2",
+      "length": 128
+    },
+    {
+      "name": "REFR_RATE_MS",
+      "type": "esriFieldTypeInteger",
+      "alias": "REFR_RATE_MS"
+    },
+    {
+      "name": "STREAM_ERROR",
+      "type": "esriFieldTypeString",
+      "alias": "STREAM_ERROR",
+      "length": 1
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "CAM_ID": 1000,
+        "DESCRIPTION": "MO 13 and Norton",
+        "X": -93.310842,
+        "Y": 37.255655,
+        "URL1": null,
+        "URL2": "https://s2.ozarkstrafficoneview.com/rtplive/CAM01/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -93.31084199999998,
+        "y": 37.255655000000047
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1001,
+        "DESCRIPTION": "Chestnut and Pythian",
+        "X": -93.257365,
+        "Y": 37.214458,
+        "URL1": null,
+        "URL2": "https://s2.ozarkstrafficoneview.com/rtplive/CAM02/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -93.257364999999936,
+        "y": 37.214458000000036
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1002,
+        "DESCRIPTION": "Chestnut and Barnes",
+        "X": -93.252453,
+        "Y": 37.210428,
+        "URL1": null,
+        "URL2": "https://s2.ozarkstrafficoneview.com/rtplive/CAM03/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -93.252452999999946,
+        "y": 37.210428000000036
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1025,
+        "DESCRIPTION": "US 65 and Kearney",
+        "X": -93.22544,
+        "Y": 37.238744,
+        "URL1": null,
+        "URL2": "https://s2.ozarkstrafficoneview.com/rtplive/CAM26/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "Y"
+      },
+      "geometry": {
+        "x": -93.225439999999935,
+        "y": 37.238744000000054
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1094,
+        "DESCRIPTION": "44 AT PACIFIC, MM 256.8",
+        "X": -90.754896,
+        "Y": 38.4846,
+        "URL1": null,
+        "URL2": "https://sfs01-traveler.modot.mo.gov/rtplive/MODOT_CAM_001/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -90.754895999999974,
+        "y": 38.484600000000057
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1095,
+        "DESCRIPTION": "44 E/O SIX FLAGS, MM 263.3",
+        "X": -90.652496,
+        "Y": 38.5038,
+        "URL1": null,
+        "URL2": "https://sfs02-traveler.modot.mo.gov/rtplive/MODOT_CAM_002/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -90.652495999999985,
+        "y": 38.503800000000069
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1096,
+        "DESCRIPTION": "44 AT 109, MM 264.7",
+        "X": -90.623904,
+        "Y": 38.5064,
+        "URL1": null,
+        "URL2": "https://sfs03-traveler.modot.mo.gov/rtplive/MODOT_CAM_003/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -90.623903999999982,
+        "y": 38.506400000000042
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1097,
+        "DESCRIPTION": "44 W/O LEWIS, MM 266",
+        "X": -90.5988,
+        "Y": 38.5024,
+        "URL1": null,
+        "URL2": "https://sfs01-traveler.modot.mo.gov/rtplive/MODOT_CAM_004/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -90.598799999999983,
+        "y": 38.50240000000008
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1150,
+        "DESCRIPTION": "64 AT N, MM 4.1",
+        "X": -90.776704,
+        "Y": 38.7698,
+        "URL1": null,
+        "URL2": "https://sfs03-traveler.modot.mo.gov/rtplive/MODOT_CAM_057/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "Y"
+      },
+      "geometry": {
+        "x": -90.776703999999938,
+        "y": 38.769800000000032
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1222,
+        "DESCRIPTION": "70 AT 370, MM 223.7",
+        "X": -90.5928,
+        "Y": 38.8014,
+        "URL1": null,
+        "URL2": "https://sfs03-traveler.modot.mo.gov/rtplive/MODOT_CAM_129/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "Y"
+      },
+      "geometry": {
+        "x": -90.592799999999954,
+        "y": 38.801400000000058
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 1227,
+        "DESCRIPTION": "70 AT 270, MM 232.7",
+        "X": -90.4384,
+        "Y": 38.7482,
+        "URL1": null,
+        "URL2": "https://sfs02-traveler.modot.mo.gov/rtplive/MODOT_CAM_134/playlist.m3u8",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "Y"
+      },
+      "geometry": {
+        "x": -90.438399999999945,
+        "y": 38.748200000000054
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 3964,
+        "DESCRIPTION": "I-435 EB At Antioch Rd",
+        "X": -94.690608,
+        "Y": 38.93422,
+        "URL1": null,
+        "URL2": "https://traveler.modot.org/tisvc/api/Tms/CameraStream/K435EBC-06-LQ",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -94.690607999999941,
+        "y": 38.934220000000039
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 3965,
+        "DESCRIPTION": "K-10 EB Before Ridgeview",
+        "X": -94.80168,
+        "Y": 38.9413,
+        "URL1": null,
+        "URL2": "https://traveler.modot.org/tisvc/api/Tms/CameraStream/K010EBIPC-01-LQ",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -94.801679999999976,
+        "y": 38.941300000000069
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 3966,
+        "DESCRIPTION": "I-35 NB At 127th St",
+        "X": -94.784192,
+        "Y": 38.899392,
+        "URL1": null,
+        "URL2": "https://traveler.modot.org/tisvc/api/Tms/CameraStream/K035NBIPC-01-LQ",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -94.784191999999962,
+        "y": 38.899392000000034
+      }
+    },
+    {
+      "attributes": {
+        "CAM_ID": 3967,
+        "DESCRIPTION": "I-35 SB At 87th St",
+        "X": -94.717248,
+        "Y": 38.97314,
+        "URL1": null,
+        "URL2": "https://traveler.modot.org/tisvc/api/Tms/CameraStream/K035SBC-04-LQ",
+        "REFR_RATE_MS": -1,
+        "STREAM_ERROR": "N"
+      },
+      "geometry": {
+        "x": -94.717247999999984,
+        "y": 38.973140000000058
+      }
+    }
+  ]
+}

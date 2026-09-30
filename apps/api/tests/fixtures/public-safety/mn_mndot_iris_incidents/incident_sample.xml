@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE active_incidents [
+<!ELEMENT active_incidents (incident)*>
+<!ATTLIST active_incidents time_stamp CDATA #REQUIRED>
+<!ELEMENT incident EMPTY>
+<!ATTLIST incident name CDATA #REQUIRED>
+<!ATTLIST incident replaces CDATA #IMPLIED>
+<!ATTLIST incident event_type CDATA #REQUIRED>
+<!ATTLIST incident event_date CDATA #REQUIRED>
+<!ATTLIST incident detail CDATA #IMPLIED>
+<!ATTLIST incident lane_code CDATA #REQUIRED>
+<!ATTLIST incident road CDATA #REQUIRED>
+<!ATTLIST incident dir CDATA #REQUIRED>
+<!ATTLIST incident location CDATA #IMPLIED>
+<!ATTLIST incident lon CDATA #REQUIRED>
+<!ATTLIST incident lat CDATA #REQUIRED>
+<!ATTLIST incident camera CDATA #REQUIRED>
+<!ATTLIST incident impact CDATA #REQUIRED>
+<!ATTLIST incident cleared CDATA #REQUIRED>
+]>
+<active_incidents time_stamp='Wed Sep 30 06:55:07 CDT 2026'>
+<incident name='2026093006500425' replaces='L004_15765059' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:50:04 CDT 2026' lane_code='Mainline' road='T.H.77' dir='NB' location='Cliff Rd' lon='-93.22116' lat='44.79021' camera='C506' impact='....' cleared='false' confirmed='false'/>
+<incident name='2026093006455317' replaces='L004_15765056' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:45:53 CDT 2026' lane_code='Mainline' road='T.H.77' dir='NB' location='T.H.13 EB' lon='-93.22101' lat='44.81515' camera='C508' impact='......' cleared='false' confirmed='false'/>
+<incident name='2026093006534319' replaces='L004_15765060' event_type='INCIDENT_STALL' event_date='Wed Sep 30 06:53:43 CDT 2026' lane_code='Mainline' road='I-35E' dir='NB' location='T.H.36 EB' lon='-93.0893' lat='45.00978' camera='C006' impact='......' cleared='false' confirmed='false'/>
+<incident name='L004_15765012' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:11:13 CDT 2026' lane_code='Mainline' road='I-94' dir='EB' location='I-94 CD EB' lon='-93.67291' lat='45.24428' camera='C795' impact='.....' cleared='false' confirmed='false'/>
+<incident name='2026093006392310' replaces='L004_15765047' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:39:23 CDT 2026' lane_code='Mainline' road='I-494' dir='NB' location='Co Rd 6' lon='-93.45802' lat='44.99667' camera='C437' impact='.....' cleared='false' confirmed='false'/>
+<incident name='2026093003583318' replaces='L004_15764971' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 03:58:33 CDT 2026' detail='Rollover' lane_code='Mainline' road='I-94' dir='EB' location='I-35E NB' lon='-93.09932' lat='44.95073' camera='C850' impact='.....' cleared='false' confirmed='false'/>
+<incident name='L004_15765020' event_type='INCIDENT_STALL' event_date='Wed Sep 30 06:20:03 CDT 2026' lane_code='Mainline' road='I-94' dir='EB' location='T.H.241' lon='-93.59272' lat='45.21606' camera='C799' impact='!....' cleared='false' confirmed='true'/>
+<incident name='L004_15764987' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 04:52:23 CDT 2026' lane_code='Mainline' road='T.H.52' dir='NB' lon='-92.53379' lat='44.15455' camera='D6-C6024' impact='....' cleared='false' confirmed='false'/>
+<incident name='L004_15765054' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:42:13 CDT 2026' lane_code='Mainline' road='I-35E' dir='SB' location='W. 7th St' lon='-93.14453' lat='44.91562' camera='C028' impact='....' cleared='true' confirmed='false'/>
+<incident name='L004_15765050' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:41:13 CDT 2026' lane_code='Mainline' road='T.H.77' dir='NB' location='S of Old Shakopee Rd' lon='-93.23924' lat='44.83494' camera='C30604' impact='.....' cleared='true' confirmed='false'/>
+<incident name='2026093006524319' replaces='L004_15765063' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:52:43 CDT 2026' lane_code='Mainline' road='I-35E' dir='SB' location='Roselawn Ave' lon='-93.08964' lat='44.99904' camera='C30720' impact='......' cleared='false' confirmed='false'/>
+<incident name='2026093006382314' replaces='L004_15765042' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:38:23 CDT 2026' lane_code='Mainline' road='I-35W' dir='SB' location='T.H.10' lon='-93.18855' lat='45.11554' camera='C641' impact='....!' cleared='false' confirmed='true'/>
+<incident name='2026093006532319' replaces='L004_15765066' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:53:23 CDT 2026' lane_code='Mainline' road='I-94' dir='WB' location='T.H.52' lon='-93.08277' lat='44.953' camera='C854' impact='......' cleared='false' confirmed='false'/>
+<incident name='2026093006382966' replaces='L004_15765046' event_type='INCIDENT_CRASH' event_date='Wed Sep 30 06:38:29 CDT 2026' lane_code='Mainline' road='T.H.77' dir='NB' location='Diffley Rd' lon='-93.21953' lat='44.80794' camera='C508' impact='.....' cleared='false' confirmed='true'/>
+</active_incidents>

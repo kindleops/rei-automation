@@ -1,0 +1,694 @@
+{
+  "displayFieldName": "Case_No_Offense",
+  "fieldAliases": {
+    "Case_No_Offense": "Case_No_Offense",
+    "Case_No": "Case_No",
+    "Reported_Date": "Reported_Date",
+    "Nature_Of_Call": "Nature_Of_Call",
+    "From_Date": "From_Date",
+    "Offense": "Offense",
+    "Offense_Desc": "Offense_Desc",
+    "BLOCK_ADDRESS": "BLOCK_ADDRESS",
+    "City": "City",
+    "State": "State",
+    "Address": "Address",
+    "Beat": "Beat",
+    "Division": "Division",
+    "CouncilDistrict": "CouncilDistrict",
+    "Attempt_Complete": "Attempt_Complete",
+    "Location_Type": "Location_Type",
+    "LocationTypeDescription": "LocationTypeDescription",
+    "intTotal": "intTotal",
+    "Location_1": "Location_1",
+    "GeoCodeScore": "GeoCodeScore",
+    "X_Coordinate": "X_Coordinate",
+    "Y_Coordinate": "Y_Coordinate",
+    "Latitude": "Latitude",
+    "Longitude": "Longitude",
+    "LastUpdated": "LastUpdated",
+    "OBJECTID": "OBJECTID"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "Case_No_Offense",
+      "type": "esriFieldTypeString",
+      "alias": "Case_No_Offense",
+      "length": 13
+    },
+    {
+      "name": "Case_No",
+      "type": "esriFieldTypeString",
+      "alias": "Case_No",
+      "length": 9
+    },
+    {
+      "name": "Reported_Date",
+      "type": "esriFieldTypeDate",
+      "alias": "Reported_Date",
+      "length": 8
+    },
+    {
+      "name": "Nature_Of_Call",
+      "type": "esriFieldTypeString",
+      "alias": "Nature_Of_Call",
+      "length": 25
+    },
+    {
+      "name": "From_Date",
+      "type": "esriFieldTypeDate",
+      "alias": "From_Date",
+      "length": 8
+    },
+    {
+      "name": "Offense",
+      "type": "esriFieldTypeString",
+      "alias": "Offense",
+      "length": 3
+    },
+    {
+      "name": "Offense_Desc",
+      "type": "esriFieldTypeString",
+      "alias": "Offense_Desc",
+      "length": 50
+    },
+    {
+      "name": "BLOCK_ADDRESS",
+      "type": "esriFieldTypeString",
+      "alias": "BLOCK_ADDRESS",
+      "length": 102
+    },
+    {
+      "name": "City",
+      "type": "esriFieldTypeString",
+      "alias": "City",
+      "length": 50
+    },
+    {
+      "name": "State",
+      "type": "esriFieldTypeString",
+      "alias": "State",
+      "length": 50
+    },
+    {
+      "name": "Address",
+      "type": "esriFieldTypeString",
+      "alias": "Address",
+      "length": 200
+    },
+    {
+      "name": "Beat",
+      "type": "esriFieldTypeString",
+      "alias": "Beat",
+      "length": 50
+    },
+    {
+      "name": "Division",
+      "type": "esriFieldTypeString",
+      "alias": "Division",
+      "length": 16
+    },
+    {
+      "name": "CouncilDistrict",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "CouncilDistrict"
+    },
+    {
+      "name": "Attempt_Complete",
+      "type": "esriFieldTypeString",
+      "alias": "Attempt_Complete",
+      "length": 1
+    },
+    {
+      "name": "Location_Type",
+      "type": "esriFieldTypeInteger",
+      "alias": "Location_Type"
+    },
+    {
+      "name": "LocationTypeDescription",
+      "type": "esriFieldTypeString",
+      "alias": "LocationTypeDescription",
+      "length": 50
+    },
+    {
+      "name": "intTotal",
+      "type": "esriFieldTypeInteger",
+      "alias": "intTotal"
+    },
+    {
+      "name": "Location_1",
+      "type": "esriFieldTypeString",
+      "alias": "Location_1",
+      "length": 112
+    },
+    {
+      "name": "GeoCodeScore",
+      "type": "esriFieldTypeInteger",
+      "alias": "GeoCodeScore"
+    },
+    {
+      "name": "X_Coordinate",
+      "type": "esriFieldTypeDouble",
+      "alias": "X_Coordinate"
+    },
+    {
+      "name": "Y_Coordinate",
+      "type": "esriFieldTypeDouble",
+      "alias": "Y_Coordinate"
+    },
+    {
+      "name": "Latitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Latitude"
+    },
+    {
+      "name": "Longitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Longitude"
+    },
+    {
+      "name": "LastUpdated",
+      "type": "esriFieldTypeDate",
+      "alias": "LastUpdated",
+      "length": 8
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID"
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "Case_No_Offense": "260073583-13C",
+        "Case_No": "260073583",
+        "Reported_Date": 1790513340000,
+        "Nature_Of_Call": "ASSAULT BY THREAT",
+        "From_Date": 1790505360000,
+        "Offense": "13C",
+        "Offense_Desc": "PC 22.07(C) Terroristic Threat Cause Fear Immen SB",
+        "BLOCK_ADDRESS": "8600 COTTAGE CREEK DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "8612 COTTAGE CREEK DR",
+        "Beat": "J19",
+        "Division": "",
+        "CouncilDistrict": 6,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.614949975341034, -97.374633760970411)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2314992.43867528,
+        "Y_Coordinate": 6908519.97455049,
+        "Latitude": 32.614949975341034,
+        "Longitude": -97.37463376097041,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221105
+      },
+      "geometry": {
+        "x": -97.37464142144937,
+        "y": 32.614955657771816
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073595-23H",
+        "Case_No": "260073595",
+        "Reported_Date": 1790512800000,
+        "Nature_Of_Call": "THEFT",
+        "From_Date": 1790434800000,
+        "Offense": "23H",
+        "Offense_Desc": "GC  085-07 Theft under $100",
+        "BLOCK_ADDRESS": "2200 HEMPHILL ST",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "2250 HEMPHILL ST",
+        "Beat": "B14",
+        "Division": "",
+        "CouncilDistrict": 9,
+        "Attempt_Complete": "C",
+        "Location_Type": 7,
+        "LocationTypeDescription": "07 CONVENIENCE STORE",
+        "intTotal": 0,
+        "Location_1": "(32.719339778826402, -97.331667097079531)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2327798.6943977,
+        "Y_Coordinate": 6946639.21330914,
+        "Latitude": 32.7193397788264,
+        "Longitude": -97.33166709707953,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221108
+      },
+      "geometry": {
+        "x": -97.3316747524993,
+        "y": 32.71934548263216
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073592-23F",
+        "Case_No": "260073592",
+        "Reported_Date": 1790511840000,
+        "Nature_Of_Call": "BURGLARY VEHICLE",
+        "From_Date": 1790460000000,
+        "Offense": "23F",
+        "Offense_Desc": "PC 30.04(d) Burglary of Vehicles",
+        "BLOCK_ADDRESS": "3800 BRADFORD CREEK DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "3801 BRADFORD CREEK DR",
+        "Beat": "K16",
+        "Division": "",
+        "CouncilDistrict": 3,
+        "Attempt_Complete": "C",
+        "Location_Type": 18,
+        "LocationTypeDescription": "18 PARKING LOT/GARAGE",
+        "intTotal": 0,
+        "Location_1": "(32.723337981771955, -97.414001885868259)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2302464.08671941,
+        "Y_Coordinate": 6947822.01728095,
+        "Latitude": 32.723337981771955,
+        "Longitude": -97.41400188586826,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221107
+      },
+      "geometry": {
+        "x": -97.41400956261351,
+        "y": 32.723343683036205
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073589-13B",
+        "Case_No": "260073589",
+        "Reported_Date": 1790509860000,
+        "Nature_Of_Call": "ASSAULT",
+        "From_Date": 1790507520000,
+        "Offense": "13B",
+        "Offense_Desc": "PC 22.01(a)(1) Assault Causes Bodily injury  Famil",
+        "BLOCK_ADDRESS": "600 E BERRY ST",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "620 E BERRY ST",
+        "Beat": "B17",
+        "Division": "",
+        "CouncilDistrict": 11,
+        "Attempt_Complete": "C",
+        "Location_Type": 23,
+        "LocationTypeDescription": "23 SERVICE/GAS STATION",
+        "intTotal": 0,
+        "Location_1": "(32.705875488852186, -97.321889538528197)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2330860.40267192,
+        "Y_Coordinate": 6941774.76234822,
+        "Latitude": 32.705875488852186,
+        "Longitude": -97.3218895385282,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221106
+      },
+      "geometry": {
+        "x": -97.32189719118993,
+        "y": 32.70588119071773
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073560-220",
+        "Case_No": "260073560",
+        "Reported_Date": 1790508060000,
+        "Nature_Of_Call": "BURGLARY RESIDENTIAL",
+        "From_Date": 1790491500000,
+        "Offense": "220",
+        "Offense_Desc": "PC 30.02(C)(2) Burglary Habitation",
+        "BLOCK_ADDRESS": "5300 TRINITY RIVER TRL",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "5332 TRINITY RIVER TRL",
+        "Beat": "D13",
+        "Division": "",
+        "CouncilDistrict": 7,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.76142767728934, -97.402299233970751)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2305917.94406984,
+        "Y_Coordinate": 6961715.80779327,
+        "Latitude": 32.76142767728934,
+        "Longitude": -97.40229923397075,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221099
+      },
+      "geometry": {
+        "x": -97.402306910357,
+        "y": 32.761433386048054
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073573-240",
+        "Case_No": "260073573",
+        "Reported_Date": 1790505900000,
+        "Nature_Of_Call": "COMMERCIAL AUTO THEFT",
+        "From_Date": 1790438400000,
+        "Offense": "240",
+        "Offense_Desc": "PC 31.03(e)(7) Auto Theft Property >= $300K",
+        "BLOCK_ADDRESS": "3200 KELLER HICKS RD",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "3255 KELLER HICKS RD",
+        "Beat": "F12",
+        "Division": "",
+        "CouncilDistrict": 10,
+        "Attempt_Complete": "C",
+        "Location_Type": 5,
+        "LocationTypeDescription": "05 COMMERCIAL/OFFICE BUILDING",
+        "intTotal": 0,
+        "Location_1": "(32.93900235557679, -97.289295402969316)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2339907.7779824,
+        "Y_Coordinate": 7026695.94538716,
+        "Latitude": 32.93900235557679,
+        "Longitude": -97.28929540296932,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221103
+      },
+      "geometry": {
+        "x": -97.28930306172565,
+        "y": 32.939008102070176
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073565-240",
+        "Case_No": "260073565",
+        "Reported_Date": 1790499578000,
+        "Nature_Of_Call": "AUTO THEFT",
+        "From_Date": 1790467200000,
+        "Offense": "240",
+        "Offense_Desc": "PC 31.03(E)(4)(A)AUTO2015 Theft Prop>=$2500<$30k A",
+        "BLOCK_ADDRESS": "6700 WESTCREEK DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "6776 WESTCREEK DR",
+        "Beat": "J12",
+        "Division": null,
+        "CouncilDistrict": null,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.645083426256065, -97.366079285211825)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2317507.8757784,
+        "Y_Coordinate": 6919510.23604066,
+        "Latitude": 32.645083426256065,
+        "Longitude": -97.36607928521182,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221101
+      },
+      "geometry": {
+        "x": -97.3660869449442,
+        "y": 32.64508911470354
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073562-90Z",
+        "Case_No": "260073562",
+        "Reported_Date": 1790498220000,
+        "Nature_Of_Call": "PENAL CODE",
+        "From_Date": 1790498220000,
+        "Offense": "90Z",
+        "Offense_Desc": "PC 48.05 Prohibition of Camping Public Places",
+        "BLOCK_ADDRESS": "100 W 7TH ST",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Address": "100 W 7TH ST",
+        "Beat": "A16",
+        "Division": "",
+        "CouncilDistrict": 9,
+        "Attempt_Complete": "C",
+        "Location_Type": 13,
+        "LocationTypeDescription": "13 HIGHWAY/ROAD/ALLEY",
+        "intTotal": 0,
+        "Location_1": "(32.752705437707924, -97.329971785748924)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2328184.84486272,
+        "Y_Coordinate": 6958782.7833062,
+        "Latitude": 32.752705437707924,
+        "Longitude": -97.32997178574892,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221100
+      },
+      "geometry": {
+        "x": -97.3299794427317,
+        "y": 32.75271114751414
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073521-90D",
+        "Case_No": "260073521",
+        "Reported_Date": 1790476200000,
+        "Nature_Of_Call": "DWI",
+        "From_Date": 1790476200000,
+        "Offense": "90D",
+        "Offense_Desc": "PC 49.04(D) DWI BAC >= 0.15",
+        "BLOCK_ADDRESS": "2900 BOMAR AVE",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "2936 BOMAR AVE",
+        "Beat": "G11",
+        "Division": "",
+        "CouncilDistrict": 11,
+        "Attempt_Complete": "C",
+        "Location_Type": 13,
+        "LocationTypeDescription": "13 HIGHWAY/ROAD/ALLEY",
+        "intTotal": 0,
+        "Location_1": "(32.745668509602197, -97.28365622762955)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2342451.98303964,
+        "Y_Coordinate": 6956384.61283466,
+        "Latitude": 32.7456685096022,
+        "Longitude": -97.28365622762955,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221086
+      },
+      "geometry": {
+        "x": -97.28366387267002,
+        "y": 32.74567422028272
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073503-90Z",
+        "Case_No": "260073503",
+        "Reported_Date": 1790475900000,
+        "Nature_Of_Call": "NARCOTIC VIOLATIONS",
+        "From_Date": 1790472360000,
+        "Offense": "90Z",
+        "Offense_Desc": "PC 38.04(b) Evading Arrest Detention",
+        "BLOCK_ADDRESS": "800 GRIGGS AVE",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Address": "824 GRIGGS AVE",
+        "Beat": "G12",
+        "Division": "",
+        "CouncilDistrict": 11,
+        "Attempt_Complete": "C",
+        "Location_Type": 13,
+        "LocationTypeDescription": "13 HIGHWAY/ROAD/ALLEY",
+        "intTotal": 0,
+        "Location_1": "(32.735535003225316, -97.258383569050721)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2350265.00596465,
+        "Y_Coordinate": 6952789.16683674,
+        "Latitude": 32.735535003225316,
+        "Longitude": -97.25838356905072,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221068
+      },
+      "geometry": {
+        "x": -97.25839120764776,
+        "y": 32.73554071338408
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073513-13A",
+        "Case_No": "260073513",
+        "Reported_Date": 1790475180000,
+        "Nature_Of_Call": "AG ASSAULT",
+        "From_Date": 1790475180000,
+        "Offense": "13A",
+        "Offense_Desc": "PC 22.02(a)(1) Aggravated Assault causes serious b",
+        "BLOCK_ADDRESS": "2900 BLEDSOE ST",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Address": "2901 BLEDSOE ST",
+        "Beat": "A14",
+        "Division": "",
+        "CouncilDistrict": 9,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.748249915716173, -97.358474743065557)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2319440.55513739,
+        "Y_Coordinate": 6957065.54584595,
+        "Latitude": 32.74824991571617,
+        "Longitude": -97.35847474306556,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221076
+      },
+      "geometry": {
+        "x": -97.3584824076005,
+        "y": 32.74825562368318
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073497-90Z",
+        "Case_No": "260073497",
+        "Reported_Date": 1790468760000,
+        "Nature_Of_Call": "PUBLIC INTOXICATION",
+        "From_Date": 1790468520000,
+        "Offense": "90Z",
+        "Offense_Desc": "GC 080 Public Intoxication",
+        "BLOCK_ADDRESS": "6100 LONGHORN LN",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Address": "6113 LONGHORN LN",
+        "Beat": "D16",
+        "Division": "",
+        "CouncilDistrict": 7,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.855535922171079, -97.415735026419867)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2301434.76040932,
+        "Y_Coordinate": 6995908.1284989,
+        "Latitude": 32.85553592217108,
+        "Longitude": -97.41573502641987,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221065
+      },
+      "geometry": {
+        "x": -97.41574271177642,
+        "y": 32.85554164802646
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073550-13B",
+        "Case_No": "260073550",
+        "Reported_Date": 1790467200000,
+        "Nature_Of_Call": "ASSAULT C",
+        "From_Date": 1790467200000,
+        "Offense": "13B",
+        "Offense_Desc": "GC 088-03 Assault by Offensive Contact Family or D",
+        "BLOCK_ADDRESS": "5800 ARBORLAWN DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Address": "5828 ARBORLAWN DR",
+        "Beat": "L13",
+        "Division": "",
+        "CouncilDistrict": 3,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.698422589489233, -97.414176032012691)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2302504.22113697,
+        "Y_Coordinate": 6938757.67200872,
+        "Latitude": 32.69842258948923,
+        "Longitude": -97.41417603201269,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221096
+      },
+      "geometry": {
+        "x": -97.41418370724817,
+        "y": 32.69842828574869
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073511-90Z",
+        "Case_No": "260073511",
+        "Reported_Date": 1790467200000,
+        "Nature_Of_Call": "TRAFFIC CODE",
+        "From_Date": 1790467200000,
+        "Offense": "90Z",
+        "Offense_Desc": "PC 25.07 G Violation of Bond/Protective Order",
+        "BLOCK_ADDRESS": "MILLER AVE & REED ST",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Address": "MILLER AVE & REED ST",
+        "Beat": "G16",
+        "Division": "",
+        "CouncilDistrict": 11,
+        "Attempt_Complete": "C",
+        "Location_Type": 13,
+        "LocationTypeDescription": "13 HIGHWAY/ROAD/ALLEY",
+        "intTotal": 0,
+        "Location_1": "",
+        "GeoCodeScore": 1,
+        "X_Coordinate": null,
+        "Y_Coordinate": null,
+        "Latitude": null,
+        "Longitude": null,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221075
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073472-90Z",
+        "Case_No": "260073472",
+        "Reported_Date": 1790463720000,
+        "Nature_Of_Call": "HARASS",
+        "From_Date": 1790450340000,
+        "Offense": "90Z",
+        "Offense_Desc": "PC 42.07 Harassment",
+        "BLOCK_ADDRESS": "3200 HUNTER PARK CIR",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Address": "3209 HUNTER PARK CIR",
+        "Beat": "L16",
+        "Division": "",
+        "CouncilDistrict": 3,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.727031844316187, -97.468597969204353)",
+        "GeoCodeScore": 100,
+        "X_Coordinate": 2285662.16275645,
+        "Y_Coordinate": 6948996.59180417,
+        "Latitude": 32.72703184431619,
+        "Longitude": -97.46859796920435,
+        "LastUpdated": 1790519584000,
+        "OBJECTID": 2221057
+      },
+      "geometry": {
+        "x": -97.46860566025346,
+        "y": 32.72703754364184
+      }
+    }
+  ],
+  "exceededTransferLimit": true
+}

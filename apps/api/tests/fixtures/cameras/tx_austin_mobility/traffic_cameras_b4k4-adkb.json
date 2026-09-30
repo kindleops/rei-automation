@@ -1,0 +1,409 @@
+[
+  {
+    "camera_id": "1",
+    "location_name": "830 BLK W RUNDBERG LN (Little Walnut Creek Library, HEB)",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2016-11-18T06:00:00.000Z",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-005090",
+    "landmark": "Little Walnut Creek Library, HEB",
+    "signal_eng_area": "NORTHEAST",
+    "council_district": "4",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "BUILDING",
+    "primary_st_block": "830",
+    "primary_st": " RUNDBERG LN",
+    "modified_date": "2023-07-18T20:45:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1.jpg",
+    "funding": "None Identified",
+    "id": "58598262bcb3437b51194040",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.698158,
+        30.363686
+      ]
+    }
+  },
+  {
+    "camera_id": "10",
+    "location_name": " 35TH ST / JACKSON AVE",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2016-11-16T06:00:00.000Z",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-000530",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "10",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "1914",
+    "primary_st": " 35TH ST",
+    "cross_st_block": "3500",
+    "cross_st": " JACKSON AVE",
+    "coa_intersection_id": "5154965",
+    "modified_date": "2023-11-16T16:03:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/10.jpg",
+    "funding": "None Identified",
+    "id": "582c83276703af1e2d14d77f",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.75589,
+        30.308735
+      ]
+    }
+  },
+  {
+    "camera_id": "100",
+    "location_name": " LAMAR BLVD / BARTON SPRINGS RD",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2017-06-27T05:00:00.000Z",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-000600",
+    "signal_eng_area": "CENTRAL",
+    "council_district": "9",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "419",
+    "primary_st": " LAMAR BLVD",
+    "cross_st_block": "1301",
+    "cross_st": " BARTON SPRINGS RD",
+    "coa_intersection_id": "5154798",
+    "modified_date": "2025-08-13T15:47:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/100.jpg",
+    "funding": "None Identified",
+    "id": "582a41a05e304c982be5c526",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.758522,
+        30.260862
+      ]
+    }
+  },
+  {
+    "camera_id": "1000",
+    "location_name": " SPRINGDALE RD / ED BLUESTEIN BLVD SVRD",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2021-08-04T05:00:00.000Z",
+    "camera_mfg": "Advidia",
+    "atd_location_id": "LOC16-003090",
+    "signal_eng_area": "NORTHEAST",
+    "council_district": "1",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "7312",
+    "primary_st": " SPRINGDALE RD",
+    "cross_st_block": "7300",
+    "cross_st": " ED BLUESTEIN BLVD SVRD",
+    "coa_intersection_id": "5165590",
+    "modified_date": "2025-04-02T20:52:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1000.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b24e4035067602f58b",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.662689,
+        30.316633
+      ]
+    }
+  },
+  {
+    "camera_id": "101",
+    "location_name": " BARTON SPRINGS RD / AZIE MORTON RD",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2017-09-27T05:00:00.000Z",
+    "camera_mfg": "Advidia",
+    "atd_location_id": "LOC16-000645",
+    "signal_eng_area": "CENTRAL",
+    "council_district": "5, 9",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "1901",
+    "primary_st": " BARTON SPRINGS RD",
+    "cross_st_block": "401",
+    "cross_st": " AZIE MORTON RD",
+    "coa_intersection_id": "5153923",
+    "modified_date": "2022-10-10T17:11:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/101.jpg",
+    "funding": "None Identified",
+    "id": "582a41a05e304c982be5c524",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.764984,
+        30.264769
+      ]
+    }
+  },
+  {
+    "camera_id": "1011",
+    "location_name": " BURNET RD / RESEARCH BLVD SVRD",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2021-03-12T06:00:00.000Z",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-003295",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "4, 7",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "8927",
+    "primary_st": " BURNET RD",
+    "cross_st_block": "9051",
+    "cross_st": " RESEARCH BLVD SVRD",
+    "coa_intersection_id": "5158979",
+    "modified_date": "2026-07-15T16:17:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1011.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b44e4035067602f5bd",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.726288,
+        30.373507
+      ]
+    }
+  },
+  {
+    "camera_id": "1013",
+    "location_name": " LAKELINE BLVD / 183 HWY SVRD",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-003320",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "6",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "11301",
+    "primary_st": " LAKELINE BLVD",
+    "cross_st_block": "14077",
+    "cross_st": "US 183 HWY SVRD",
+    "coa_intersection_id": "5149638",
+    "modified_date": "2023-12-15T21:10:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1013.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b44e4035067602f5c4",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.801956,
+        30.480049
+      ]
+    }
+  },
+  {
+    "camera_id": "1016",
+    "location_name": " CAPITAL OF TEXAS HWY SVRD / LAMAR BLVD SVRD",
+    "camera_status": "VOID",
+    "atd_location_id": "LOC16-003380",
+    "signal_eng_area": "SOUTH",
+    "council_district": "5",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "4200",
+    "primary_st": " CAPITAL OF TEXAS HWY SVRD",
+    "cross_st_block": "4400",
+    "cross_st": " LAMAR BLVD SVRD",
+    "coa_intersection_id": "5150660",
+    "modified_date": "2023-10-31T15:49:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1016.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b44e4035067602f5d3",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.797066,
+        30.234022
+      ]
+    }
+  },
+  {
+    "camera_id": "1018",
+    "location_name": " LAKELINE MALL DR / 183 HWY SVRD",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-003405",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "6",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "10904",
+    "primary_st": " LAKELINE MALL DR",
+    "cross_st_block": "14020",
+    "cross_st": "US 183 HWY SVRD",
+    "coa_intersection_id": "5149969",
+    "modified_date": "2023-09-26T19:23:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1018.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b54e4035067602f5da",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.798264,
+        30.473202
+      ]
+    }
+  },
+  {
+    "camera_id": "1019",
+    "location_name": " HOWARD LN / 35 SVRD",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Advidia",
+    "atd_location_id": "LOC16-003415",
+    "signal_eng_area": "NORTHEAST",
+    "council_district": "7",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "1300",
+    "primary_st": " HOWARD LN",
+    "cross_st_block": "13608",
+    "cross_st": "IH 35 SVRD",
+    "coa_intersection_id": "5164744",
+    "modified_date": "2026-01-07T22:00:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1019.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b54e4035067602f5dd",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.67189,
+        30.424465
+      ]
+    }
+  },
+  {
+    "camera_id": "102",
+    "location_name": " CONGRESS AVE / BARTON SPRINGS RD",
+    "camera_status": "TURNED_ON",
+    "turn_on_date": "2019-09-12T05:00:00.000Z",
+    "camera_mfg": "Advidia",
+    "atd_location_id": "LOC16-000655",
+    "signal_eng_area": "CENTRAL",
+    "council_district": "9",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "300",
+    "primary_st": " CONGRESS AVE",
+    "cross_st_block": "101",
+    "cross_st": " BARTON SPRINGS RD",
+    "coa_intersection_id": "5156502",
+    "modified_date": "2022-10-10T17:11:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/102.jpg",
+    "funding": "None Identified",
+    "id": "582a41a05e304c982be5c522",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.74614,
+        30.259111
+      ]
+    }
+  },
+  {
+    "camera_id": "1020",
+    "location_name": " RESEARCH BLVD SVRD / ANDERSON SQ",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Advidia",
+    "atd_location_id": "LOC16-003425",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "4",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "8121",
+    "primary_st": " RESEARCH BLVD SVRD",
+    "cross_st_block": "8076",
+    "cross_st": " ANDERSON SQ",
+    "coa_intersection_id": "5160371",
+    "modified_date": "2022-10-10T17:11:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1020.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b54e4035067602f5e0",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.714195,
+        30.353102
+      ]
+    }
+  },
+  {
+    "camera_id": "1023",
+    "location_name": "US 183 HWY SVRD / PECAN PARK BLVD",
+    "camera_status": "DESIRED",
+    "atd_location_id": "LOC16-003485",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "6",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "13822",
+    "primary_st": "US 183 HWY SVRD",
+    "cross_st_block": "10451",
+    "cross_st": " PECAN PARK BLVD",
+    "coa_intersection_id": "5150177",
+    "modified_date": "2023-11-30T21:51:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1023.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b54e4035067602f5ef",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.796272,
+        30.465315
+      ]
+    }
+  },
+  {
+    "camera_id": "103",
+    "location_name": " CONGRESS AVE / LIVE OAK ST",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Wisenet",
+    "atd_location_id": "LOC16-000705",
+    "signal_eng_area": "SOUTH",
+    "council_district": "3, 9",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "2109",
+    "primary_st": " CONGRESS AVE",
+    "cross_st_block": "100",
+    "cross_st": " LIVE OAK ST",
+    "coa_intersection_id": "5155594",
+    "modified_date": "2023-04-13T22:44:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/103.jpg",
+    "funding": "None Identified",
+    "id": "582a41a05e304c982be5c520",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.752525,
+        30.241852
+      ]
+    }
+  },
+  {
+    "camera_id": "1031",
+    "location_name": "US 183 HWY SVRD / POND SPRINGS RD",
+    "camera_status": "DESIRED",
+    "atd_location_id": "LOC16-003565",
+    "signal_eng_area": "NORTHWEST",
+    "council_district": "6",
+    "jurisdiction_label": "AUSTIN FULL PURPOSE",
+    "location_type": "ROADWAY",
+    "primary_st_block": "12807",
+    "primary_st": "US 183 HWY SVRD",
+    "cross_st_block": "12820",
+    "cross_st": " POND SPRINGS RD",
+    "coa_intersection_id": "5152734",
+    "modified_date": "2023-11-30T21:51:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1031.jpg",
+    "funding": "None Identified",
+    "id": "5f8da8b64e4035067602f607",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.770386,
+        30.435135
+      ]
+    }
+  }
+]

@@ -1,0 +1,366 @@
+{
+  "objectIdFieldName": "ObjectId",
+  "uniqueIdField": {
+    "name": "ObjectId",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "fields": [
+    {
+      "name": "CASE_NUMBER",
+      "type": "esriFieldTypeInteger",
+      "alias": "CASE NUMBER",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "DATE",
+      "type": "esriFieldTypeDate",
+      "alias": "DATE",
+      "sqlType": "sqlTypeTimestamp2",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "TIME",
+      "type": "esriFieldTypeDate",
+      "alias": "TIME",
+      "sqlType": "sqlTypeTimestamp2",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CODE",
+      "type": "esriFieldTypeInteger",
+      "alias": "CODE",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "INCIDENT_TYPE",
+      "type": "esriFieldTypeString",
+      "alias": "INCIDENT TYPE",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "INCIDENT",
+      "type": "esriFieldTypeString",
+      "alias": "INCIDENT",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "POLICE_GRID_NUMBER",
+      "type": "esriFieldTypeInteger",
+      "alias": "POLICE GRID NUMBER",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "NEIGHBORHOOD_NUMBER",
+      "type": "esriFieldTypeInteger",
+      "alias": "NEIGHBORHOOD NUMBER",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "NEIGHBORHOOD_NAME",
+      "type": "esriFieldTypeString",
+      "alias": "NEIGHBORHOOD NAME",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "BLOCK",
+      "type": "esriFieldTypeString",
+      "alias": "BLOCK",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CALL_DISPOSITION_CODE",
+      "type": "esriFieldTypeString",
+      "alias": "CALL DISPOSITION CODE",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CALL_DISPOSITION",
+      "type": "esriFieldTypeString",
+      "alias": "CALL DISPOSITION",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Count_",
+      "type": "esriFieldTypeInteger",
+      "alias": "Count",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ObjectId",
+      "type": "esriFieldTypeOID",
+      "alias": "ObjectId",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177318,
+        "DATE": 1790744460000,
+        "TIME": null,
+        "CODE": 9954,
+        "INCIDENT_TYPE": "POLICE VISIT-PROACTIVE POLICE VISIT",
+        "INCIDENT": "Proactive Police Visit",
+        "POLICE_GRID_NUMBER": 12,
+        "NEIGHBORHOOD_NUMBER": 6,
+        "NEIGHBORHOOD_NAME": "6 - North End",
+        "BLOCK": "15XX LORIENT ST",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581449
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177283,
+        "DATE": 1790740080000,
+        "TIME": null,
+        "CODE": 9954,
+        "INCIDENT_TYPE": "POLICE VISIT-PROACTIVE POLICE VISIT",
+        "INCIDENT": "Proactive Police Visit",
+        "POLICE_GRID_NUMBER": 92,
+        "NEIGHBORHOOD_NUMBER": 7,
+        "NEIGHBORHOOD_NAME": "7 - Thomas/Dale(Frogtown)",
+        "BLOCK": "1XX MTAIRY ST",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581448
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177171,
+        "DATE": 1790726940000,
+        "TIME": null,
+        "CODE": 630,
+        "INCIDENT_TYPE": "THEFT-SHOPLIFTING",
+        "INCIDENT": "Theft",
+        "POLICE_GRID_NUMBER": 106,
+        "NEIGHBORHOOD_NUMBER": 13,
+        "NEIGHBORHOOD_NAME": "13 - Union Park",
+        "BLOCK": "13XX UNIVERSITY AVE W",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581429
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177153,
+        "DATE": 1790724900000,
+        "TIME": null,
+        "CODE": 640,
+        "INCIDENT_TYPE": "THEFT-FROM AUTO",
+        "INCIDENT": "Theft",
+        "POLICE_GRID_NUMBER": 183,
+        "NEIGHBORHOOD_NUMBER": 15,
+        "NEIGHBORHOOD_NAME": "15 - Highland",
+        "BLOCK": "6XX CLEVELAND AVE S",
+        "CALL_DISPOSITION_CODE": "R",
+        "CALL_DISPOSITION": "Report Written",
+        "Count_": null,
+        "ObjectId": 581426
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26176982,
+        "DATE": 1790714880000,
+        "TIME": null,
+        "CODE": 500,
+        "INCIDENT_TYPE": "BURGLARY",
+        "INCIDENT": "Burglary",
+        "POLICE_GRID_NUMBER": 69,
+        "NEIGHBORHOOD_NUMBER": 6,
+        "NEIGHBORHOOD_NAME": "6 - North End",
+        "BLOCK": "4XX TOPPING ST",
+        "CALL_DISPOSITION_CODE": "G",
+        "CALL_DISPOSITION": "Gone on Arrival",
+        "Count_": null,
+        "ObjectId": 581401
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177273,
+        "DATE": 1790733420000,
+        "TIME": null,
+        "CODE": 700,
+        "INCIDENT_TYPE": "AUTO THEFT",
+        "INCIDENT": "Auto Theft",
+        "POLICE_GRID_NUMBER": 118,
+        "NEIGHBORHOOD_NUMBER": 1,
+        "NEIGHBORHOOD_NAME": "1 - Conway/Battlecreek/Highwood",
+        "BLOCK": "17XX OLDHUDSON RD",
+        "CALL_DISPOSITION_CODE": "R",
+        "CALL_DISPOSITION": "Report Written",
+        "Count_": null,
+        "ObjectId": 581447
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177251,
+        "DATE": 1790736720000,
+        "TIME": null,
+        "CODE": 2619,
+        "INCIDENT_TYPE": "WEAPONS-DISCHARGING A FIREARM IN THE CITY LIMITS",
+        "INCIDENT": "Discharge",
+        "POLICE_GRID_NUMBER": 124,
+        "NEIGHBORHOOD_NUMBER": 13,
+        "NEIGHBORHOOD_NAME": "13 - Union Park",
+        "BLOCK": "17XX LAUREL AVE",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581441
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26176808,
+        "DATE": 1790698260000,
+        "TIME": null,
+        "CODE": 420,
+        "INCIDENT_TYPE": "AGG ASSAULT-W/KNIFE,CUTTING INSTRUMENT,ETC",
+        "INCIDENT": "Agg. Assault",
+        "POLICE_GRID_NUMBER": 117,
+        "NEIGHBORHOOD_NUMBER": 4,
+        "NEIGHBORHOOD_NAME": "4 - Dayton's Bluff",
+        "BLOCK": "12XX WILSON AVE",
+        "CALL_DISPOSITION_CODE": "RR",
+        "CALL_DISPOSITION": "Report Written",
+        "Count_": null,
+        "ObjectId": 581378
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26176137,
+        "DATE": 1790630280000,
+        "TIME": null,
+        "CODE": 861,
+        "INCIDENT_TYPE": "DOMESTIC-OTHER ASSAULTS,ALL DOMESTIC OPPOSITE SEX",
+        "INCIDENT": "Simple Assault Dom.",
+        "POLICE_GRID_NUMBER": 78,
+        "NEIGHBORHOOD_NUMBER": 2,
+        "NEIGHBORHOOD_NAME": "2 - Greater East Side",
+        "BLOCK": "REANEY AVE AND GERMAIN",
+        "CALL_DISPOSITION_CODE": "RR",
+        "CALL_DISPOSITION": "Report Written",
+        "Count_": null,
+        "ObjectId": 581303
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177135,
+        "DATE": 1790723580000,
+        "TIME": null,
+        "CODE": 1800,
+        "INCIDENT_TYPE": "DRUGS-NARCOTICS",
+        "INCIDENT": "Narcotics",
+        "POLICE_GRID_NUMBER": 109,
+        "NEIGHBORHOOD_NUMBER": 8,
+        "NEIGHBORHOOD_NAME": "8 - Summit/University",
+        "BLOCK": "4XX UNIVERSITY AVE W",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581420
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26177216,
+        "DATE": 1790728200000,
+        "TIME": null,
+        "CODE": 1400,
+        "INCIDENT_TYPE": "CRIMINAL DAMAGE TO PROPERTY",
+        "INCIDENT": "Criminal Damage",
+        "POLICE_GRID_NUMBER": 119,
+        "NEIGHBORHOOD_NUMBER": 1,
+        "NEIGHBORHOOD_NAME": "1 - Conway/Battlecreek/Highwood",
+        "BLOCK": "3XX RUTH ST",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581436
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26176970,
+        "DATE": 1790713980000,
+        "TIME": null,
+        "CODE": 300,
+        "INCIDENT_TYPE": "ROBBERY",
+        "INCIDENT": "Robbery",
+        "POLICE_GRID_NUMBER": 110,
+        "NEIGHBORHOOD_NUMBER": 8,
+        "NEIGHBORHOOD_NAME": "8 - Summit/University",
+        "BLOCK": "2XX RAVOUX ST",
+        "CALL_DISPOSITION_CODE": "RR",
+        "CALL_DISPOSITION": "Report Written",
+        "Count_": null,
+        "ObjectId": 581400
+      }
+    },
+    {
+      "attributes": {
+        "CASE_NUMBER": 26175973,
+        "DATE": 1790616840000,
+        "TIME": null,
+        "CODE": 9959,
+        "INCIDENT_TYPE": "COMMUNITY ORIENTED/OUTREACH EVENT ",
+        "INCIDENT": "Community Event",
+        "POLICE_GRID_NUMBER": 153,
+        "NEIGHBORHOOD_NUMBER": 17,
+        "NEIGHBORHOOD_NAME": "17 - Capitol River",
+        "BLOCK": "3XX CEDAR ST",
+        "CALL_DISPOSITION_CODE": "A",
+        "CALL_DISPOSITION": "Advised",
+        "Count_": null,
+        "ObjectId": 581266
+      }
+    }
+  ]
+}

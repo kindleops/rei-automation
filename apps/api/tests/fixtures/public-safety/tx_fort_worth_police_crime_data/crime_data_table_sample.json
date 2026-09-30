@@ -1,0 +1,526 @@
+{
+  "objectIdFieldName": "ObjectId",
+  "uniqueIdField": {
+    "name": "ObjectId",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "fields": [
+    {
+      "name": "Case_No_Offense",
+      "type": "esriFieldTypeString",
+      "alias": "Case_No_Offense",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Case_No",
+      "type": "esriFieldTypeString",
+      "alias": "Case_No",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 256,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Reported_Date",
+      "type": "esriFieldTypeString",
+      "alias": "Reported_Date",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 256,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Nature_Of_Call",
+      "type": "esriFieldTypeString",
+      "alias": "Nature_Of_Call",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "From_Date",
+      "type": "esriFieldTypeString",
+      "alias": "From_Date",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 256,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Offense",
+      "type": "esriFieldTypeString",
+      "alias": "Offense",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Offense_Desc",
+      "type": "esriFieldTypeString",
+      "alias": "Offense_Desc",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "BLOCK_ADDRESS",
+      "type": "esriFieldTypeString",
+      "alias": "BLOCK_ADDRESS",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "City",
+      "type": "esriFieldTypeString",
+      "alias": "City",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "State",
+      "type": "esriFieldTypeString",
+      "alias": "State",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Beat",
+      "type": "esriFieldTypeString",
+      "alias": "Beat",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Division",
+      "type": "esriFieldTypeString",
+      "alias": "Division",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CouncilDistrict",
+      "type": "esriFieldTypeString",
+      "alias": "CouncilDistrict",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Attempt_Complete",
+      "type": "esriFieldTypeString",
+      "alias": "Attempt_Complete",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Location_Type",
+      "type": "esriFieldTypeInteger",
+      "alias": "Location_Type",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "LocationTypeDescription",
+      "type": "esriFieldTypeString",
+      "alias": "LocationTypeDescription",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "intTotal",
+      "type": "esriFieldTypeInteger",
+      "alias": "intTotal",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Location_1",
+      "type": "esriFieldTypeString",
+      "alias": "Location_1",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ObjectId",
+      "type": "esriFieldTypeOID",
+      "alias": "ObjectId",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "exceededTransferLimit": true,
+  "features": [
+    {
+      "attributes": {
+        "Case_No_Offense": "260073583-13C",
+        "Case_No": "260073583",
+        "Reported_Date": "2026-09-27T12:49:00",
+        "Nature_Of_Call": "ASSAULT BY THREAT",
+        "From_Date": "2026-09-27T10:36:00",
+        "Offense": "13C",
+        "Offense_Desc": "PC 22.07(C) Terroristic Threat Cause Fear Immen SB",
+        "BLOCK_ADDRESS": "8600 COTTAGE CREEK DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "J19",
+        "Division": null,
+        "CouncilDistrict": "6",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.614949975341034, -97.374633760970411)",
+        "ObjectId": 1453414
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073595-23H",
+        "Case_No": "260073595",
+        "Reported_Date": "2026-09-27T12:40:00",
+        "Nature_Of_Call": "THEFT",
+        "From_Date": "2026-09-26T15:00:00",
+        "Offense": "23H",
+        "Offense_Desc": "GC  085-07 Theft under $100",
+        "BLOCK_ADDRESS": "2200 HEMPHILL ST",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "B14",
+        "Division": null,
+        "CouncilDistrict": "9",
+        "Attempt_Complete": "C",
+        "Location_Type": 7,
+        "LocationTypeDescription": "07 CONVENIENCE STORE",
+        "intTotal": 0,
+        "Location_1": "(32.719339778826402, -97.331667097079531)",
+        "ObjectId": 1453417
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073592-23F",
+        "Case_No": "260073592",
+        "Reported_Date": "2026-09-27T12:24:00",
+        "Nature_Of_Call": "BURGLARY VEHICLE",
+        "From_Date": "2026-09-26T22:00:00",
+        "Offense": "23F",
+        "Offense_Desc": "PC 30.04(d) Burglary of Vehicles",
+        "BLOCK_ADDRESS": "3800 BRADFORD CREEK DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "K16",
+        "Division": null,
+        "CouncilDistrict": "3",
+        "Attempt_Complete": "C",
+        "Location_Type": 18,
+        "LocationTypeDescription": "18 PARKING LOT/GARAGE",
+        "intTotal": 0,
+        "Location_1": "(32.723337981771955, -97.414001885868259)",
+        "ObjectId": 1453416
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073589-13B",
+        "Case_No": "260073589",
+        "Reported_Date": "2026-09-27T11:51:00",
+        "Nature_Of_Call": "ASSAULT",
+        "From_Date": "2026-09-27T11:12:00",
+        "Offense": "13B",
+        "Offense_Desc": "PC 22.01(a)(1) Assault Causes Bodily injury  Famil",
+        "BLOCK_ADDRESS": "600 E BERRY ST",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "B17",
+        "Division": null,
+        "CouncilDistrict": "11",
+        "Attempt_Complete": "C",
+        "Location_Type": 23,
+        "LocationTypeDescription": "23 SERVICE/GAS STATION",
+        "intTotal": 0,
+        "Location_1": "(32.705875488852186, -97.321889538528197)",
+        "ObjectId": 1453415
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073560-220",
+        "Case_No": "260073560",
+        "Reported_Date": "2026-09-27T11:21:00",
+        "Nature_Of_Call": "BURGLARY RESIDENTIAL",
+        "From_Date": "2026-09-27T06:45:00",
+        "Offense": "220",
+        "Offense_Desc": "PC 30.02(C)(2) Burglary Habitation",
+        "BLOCK_ADDRESS": "5300 TRINITY RIVER TRL",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "D13",
+        "Division": null,
+        "CouncilDistrict": "7",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.76142767728934, -97.402299233970751)",
+        "ObjectId": 1453408
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073573-240",
+        "Case_No": "260073573",
+        "Reported_Date": "2026-09-27T10:45:00",
+        "Nature_Of_Call": "COMMERCIAL AUTO THEFT",
+        "From_Date": "2026-09-26T16:00:00",
+        "Offense": "240",
+        "Offense_Desc": "PC 31.03(e)(7) Auto Theft Property >= $300K",
+        "BLOCK_ADDRESS": "3200 KELLER HICKS RD",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "F12",
+        "Division": null,
+        "CouncilDistrict": "10",
+        "Attempt_Complete": "C",
+        "Location_Type": 5,
+        "LocationTypeDescription": "05 COMMERCIAL/OFFICE BUILDING",
+        "intTotal": 0,
+        "Location_1": "(32.93900235557679, -97.289295402969316)",
+        "ObjectId": 1453412
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073575-23F",
+        "Case_No": "260073575",
+        "Reported_Date": "2026-09-27T10:42:00",
+        "Nature_Of_Call": "BURGLARY VEHICLE",
+        "From_Date": "2026-09-27T03:50:00",
+        "Offense": "23F",
+        "Offense_Desc": "PC 30.04(d) Burglary of Vehicles",
+        "BLOCK_ADDRESS": "2200 MARIGOLD AVE",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "A12",
+        "Division": null,
+        "CouncilDistrict": "11",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.783074794125923, -97.313935946270192)",
+        "ObjectId": 1453413
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073570-23H",
+        "Case_No": "260073570",
+        "Reported_Date": "2026-09-27T10:16:00",
+        "Nature_Of_Call": "THEFT",
+        "From_Date": "2026-09-27T10:13:00",
+        "Offense": "23H",
+        "Offense_Desc": "PC 31.03(e)(2)(A)  Theft Property >=$100<$750",
+        "BLOCK_ADDRESS": "2100 EAST LOOP 820 FWY",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Beat": "H13",
+        "Division": null,
+        "CouncilDistrict": "5",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.749058322629672, -97.22048981755492)",
+        "ObjectId": 1453411
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073565-240",
+        "Case_No": "260073565",
+        "Reported_Date": "2026-09-27T08:59:38",
+        "Nature_Of_Call": "AUTO THEFT",
+        "From_Date": "2026-09-27T00:00:00",
+        "Offense": "240",
+        "Offense_Desc": "PC 31.03(E)(4)(A)AUTO2015 Theft Prop>=$2500<$30k A",
+        "BLOCK_ADDRESS": "6700 WESTCREEK DR",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "J12",
+        "Division": null,
+        "CouncilDistrict": null,
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.645083426256065, -97.366079285211825)",
+        "ObjectId": 1453410
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073562-90Z",
+        "Case_No": "260073562",
+        "Reported_Date": "2026-09-27T08:37:00",
+        "Nature_Of_Call": "PENAL CODE",
+        "From_Date": "2026-09-27T08:37:00",
+        "Offense": "90Z",
+        "Offense_Desc": "PC 48.05 Prohibition of Camping Public Places",
+        "BLOCK_ADDRESS": "100 W 7TH ST",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Beat": "A16",
+        "Division": null,
+        "CouncilDistrict": "9",
+        "Attempt_Complete": "C",
+        "Location_Type": 13,
+        "LocationTypeDescription": "13 HIGHWAY/ROAD/ALLEY",
+        "intTotal": 0,
+        "Location_1": "(32.752705437707924, -97.329971785748924)",
+        "ObjectId": 1453409
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073555-23H",
+        "Case_No": "260073555",
+        "Reported_Date": "2026-09-27T08:05:00",
+        "Nature_Of_Call": "THEFT",
+        "From_Date": "2026-09-26T18:30:00",
+        "Offense": "23H",
+        "Offense_Desc": "PC 31.03(E)(4)(A) Theft Property >= $2500<$30K  (t",
+        "BLOCK_ADDRESS": "3300 CAMP BOWIE BLVD",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Beat": "K11",
+        "Division": null,
+        "CouncilDistrict": "7",
+        "Attempt_Complete": "C",
+        "Location_Type": 14,
+        "LocationTypeDescription": "14 HOTEL/MOTEL/ETC.",
+        "intTotal": 0,
+        "Location_1": "(32.750125382510319, -97.364561929342656)",
+        "ObjectId": 1453407
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073554-13B",
+        "Case_No": "260073554",
+        "Reported_Date": "2026-09-27T08:00:00",
+        "Nature_Of_Call": "ASSAULT",
+        "From_Date": "2026-09-26T13:00:00",
+        "Offense": "13B",
+        "Offense_Desc": "PC 22.01(a)(1) Assault Causes Bodily injury  Famil",
+        "BLOCK_ADDRESS": "4300 SURFSIDE DR N",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Beat": "D14",
+        "Division": null,
+        "CouncilDistrict": "7",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.819307930186447, -97.456497343566113)",
+        "ObjectId": 1453406
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073547-240",
+        "Case_No": "260073547",
+        "Reported_Date": "2026-09-27T07:21:00",
+        "Nature_Of_Call": "AUTO THEFT",
+        "From_Date": "2026-09-27T00:01:00",
+        "Offense": "240",
+        "Offense_Desc": "PC 31.03(E)(4)(A)AUTO2015 Theft Prop>=$2500<$30k A",
+        "BLOCK_ADDRESS": "800 W ANTHONY ST",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "I11",
+        "Division": null,
+        "CouncilDistrict": "11",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.685780031093621, -97.333566033971877)",
+        "ObjectId": 1453403
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073543-23G",
+        "Case_No": "260073543",
+        "Reported_Date": "2026-09-27T07:02:00",
+        "Nature_Of_Call": "THEFT",
+        "From_Date": "2026-09-26T23:00:00",
+        "Offense": "23G",
+        "Offense_Desc": "PC 31.03(e)(2)(A) Theft Property >=$100<$750 (moto",
+        "BLOCK_ADDRESS": "8700 CALMONT AVE",
+        "City": "FORT WORTH",
+        "State": "TX",
+        "Beat": "L16",
+        "Division": null,
+        "CouncilDistrict": "3",
+        "Attempt_Complete": "C",
+        "Location_Type": 18,
+        "LocationTypeDescription": "18 PARKING LOT/GARAGE",
+        "intTotal": 0,
+        "Location_1": "(32.735372601612532, -97.469074933761519)",
+        "ObjectId": 1453402
+      }
+    },
+    {
+      "attributes": {
+        "Case_No_Offense": "260073507-13B",
+        "Case_No": "260073507",
+        "Reported_Date": "2026-09-27T06:05:00",
+        "Nature_Of_Call": "ASSAULT",
+        "From_Date": "2026-09-27T02:58:00",
+        "Offense": "13B",
+        "Offense_Desc": "PC 22.01(a)(1) Assault Causes Bodily injury  Famil",
+        "BLOCK_ADDRESS": "7200 MARTHA LN",
+        "City": "FORT WORTH",
+        "State": "Te",
+        "Beat": "H14",
+        "Division": null,
+        "CouncilDistrict": "5",
+        "Attempt_Complete": "C",
+        "Location_Type": 20,
+        "LocationTypeDescription": "20 RESIDENCE/HOME",
+        "intTotal": 0,
+        "Location_1": "(32.747771286585099, -97.204171260098519)",
+        "ObjectId": 1453380
+      }
+    }
+  ]
+}

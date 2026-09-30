@@ -1,0 +1,459 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "publicaddress",
+      "type": "esriFieldTypeString",
+      "alias": "publicaddress",
+      "sqlType": "sqlTypeOther",
+      "length": 555,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "caseNumber",
+      "type": "esriFieldTypeString",
+      "alias": "caseNumber",
+      "sqlType": "sqlTypeOther",
+      "length": 28,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "precinct",
+      "type": "esriFieldTypeString",
+      "alias": "precinct",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportedDate",
+      "type": "esriFieldTypeDate",
+      "alias": "reportedDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportedTime",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "reportedTime",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "beginDate",
+      "type": "esriFieldTypeDate",
+      "alias": "beginDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportedDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "reportedDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "beginTime",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "beginTime",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "offense",
+      "type": "esriFieldTypeString",
+      "alias": "offense",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "description",
+      "type": "esriFieldTypeString",
+      "alias": "description",
+      "sqlType": "sqlTypeOther",
+      "length": 65,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "UCRCode",
+      "type": "esriFieldTypeString",
+      "alias": "UCRCode",
+      "sqlType": "sqlTypeOther",
+      "length": 3,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "enteredDate",
+      "type": "esriFieldTypeDate",
+      "alias": "enteredDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "centergbsid",
+      "type": "esriFieldTypeDouble",
+      "alias": "centergbsid",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "centerLong",
+      "type": "esriFieldTypeDouble",
+      "alias": "centerLong",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "centerLat",
+      "type": "esriFieldTypeDouble",
+      "alias": "centerLat",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "centerX",
+      "type": "esriFieldTypeDouble",
+      "alias": "centerX",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "centerY",
+      "type": "esriFieldTypeDouble",
+      "alias": "centerY",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "neighborhood",
+      "type": "esriFieldTypeString",
+      "alias": "neighborhood",
+      "sqlType": "sqlTypeOther",
+      "length": 32,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "lastchanged",
+      "type": "esriFieldTypeDate",
+      "alias": "lastchanged",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "LastUpdateDateETL",
+      "type": "esriFieldTypeDate",
+      "alias": "LastUpdateDateETL",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "publicaddress": "0038XX 37TH AVE S",
+        "caseNumber": "MP2026279168",
+        "precinct": "3",
+        "reportedDate": 1790380800000,
+        "reportedTime": 1049,
+        "beginDate": 1790294400000,
+        "reportedDateTime": 1790419740000,
+        "beginTime": 1800,
+        "offense": "AUTOTH",
+        "description": "AUTOMOBILE THEFT",
+        "UCRCode": "08 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.21914,
+        "centerLat": 44.9333,
+        "centerX": -10377107.55395629,
+        "centerY": 5611027.02712187,
+        "neighborhood": "Howe",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6954
+      },
+      "geometry": {
+        "x": -10377107.554,
+        "y": 5611027.027099997
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "0006XX EAST MINNEHAHA PKWY",
+        "caseNumber": "MP2026279102",
+        "precinct": "3",
+        "reportedDate": 1790380800000,
+        "reportedTime": 818,
+        "beginDate": 1790380800000,
+        "reportedDateTime": 1790410680000,
+        "beginTime": 630,
+        "offense": "BURGD",
+        "description": "BURGLARY OF DWELLING",
+        "UCRCode": "06 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.26712,
+        "centerLat": 44.91218,
+        "centerX": -10382447.80604856,
+        "centerY": 5607706.34882358,
+        "neighborhood": "Page",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6953
+      },
+      "geometry": {
+        "x": -10382447.806,
+        "y": 5607706.3488000035
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "4TH ST N / 1ST AVE N",
+        "caseNumber": "MP2026278962",
+        "precinct": "1",
+        "reportedDate": 1790380800000,
+        "reportedTime": 453,
+        "beginDate": 1790380800000,
+        "reportedDateTime": 1790398380000,
+        "beginTime": 159,
+        "offense": "ASLT3",
+        "description": "ASLT-SGNFCNT BDLY HM",
+        "UCRCode": "05 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.27254,
+        "centerLat": 44.98124,
+        "centerX": -10383051.67,
+        "centerY": 5618568.839,
+        "neighborhood": "Downtown West",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6952
+      },
+      "geometry": {
+        "x": -10383051.67,
+        "y": 5618568.839000002
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "PLYMOUTH AVE N / PENN AVE N",
+        "caseNumber": "MP2026278892",
+        "precinct": "4",
+        "reportedDate": 1790380800000,
+        "reportedTime": 145,
+        "beginDate": 1790294400000,
+        "reportedDateTime": 1790387100000,
+        "beginTime": 2345,
+        "offense": "ASLT2",
+        "description": "ASSLT W/DNGRS WEAPON",
+        "UCRCode": "05 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.30822,
+        "centerLat": 44.9915,
+        "centerX": -10387023.84,
+        "centerY": 5620184.05,
+        "neighborhood": "Willard - Hay",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6951
+      },
+      "geometry": {
+        "x": -10387023.84,
+        "y": 5620184.049999997
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "0014XX 6TH ST NE",
+        "caseNumber": "MP2026278576",
+        "precinct": "2",
+        "reportedDate": 1790294400000,
+        "reportedTime": 2149,
+        "beginDate": 1790294400000,
+        "reportedDateTime": 1790372940000,
+        "beginTime": 2002,
+        "offense": "DASTR",
+        "description": "DOMESTIC ASSAULT/STRANGULATION",
+        "UCRCode": "05",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.25889,
+        "centerLat": 45.00198,
+        "centerX": -10381532.69768687,
+        "centerY": 5621833.76337872,
+        "neighborhood": "St. Anthony East",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6950
+      },
+      "geometry": {
+        "x": -10381532.6977,
+        "y": 5621833.763400003
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "0023XX WEST BROADWAY",
+        "caseNumber": "MP2026278243",
+        "precinct": "4",
+        "reportedDate": 1790294400000,
+        "reportedTime": 2139,
+        "beginDate": 1789516800000,
+        "reportedDateTime": 1790372340000,
+        "beginTime": 2139,
+        "offense": "AUTOTH",
+        "description": "AUTOMOBILE THEFT",
+        "UCRCode": "08 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.31053,
+        "centerLat": 45.00536,
+        "centerX": -10387281.23620833,
+        "centerY": 5622364.82936849,
+        "neighborhood": "Jordan",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6944
+      },
+      "geometry": {
+        "x": -10387281.2362,
+        "y": 5622364.829400003
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "0014XX NEW BRIGHTON BLVD",
+        "caseNumber": "MP2026278283",
+        "precinct": "2",
+        "reportedDate": 1790294400000,
+        "reportedTime": 1854,
+        "beginDate": 1790294400000,
+        "reportedDateTime": 1790362440000,
+        "beginTime": 1603,
+        "offense": "SHOPLF",
+        "description": "SHOPLIFTING",
+        "UCRCode": "07 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.22883,
+        "centerLat": 45.00364,
+        "centerX": -10378186.34125064,
+        "centerY": 5622094.40259906,
+        "neighborhood": "Northeast Park",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6945
+      },
+      "geometry": {
+        "x": -10378186.3413,
+        "y": 5622094.402599998
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "0004XX MALCOLM AVE SE",
+        "caseNumber": "MP2026278440",
+        "precinct": "2",
+        "reportedDate": 1790294400000,
+        "reportedTime": 1830,
+        "beginDate": 1790121600000,
+        "reportedDateTime": 1790361000000,
+        "beginTime": 1200,
+        "offense": "AUTOTH",
+        "description": "AUTOMOBILE THEFT",
+        "UCRCode": "08 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.21115,
+        "centerLat": 44.97216,
+        "centerX": -10376217.99516267,
+        "centerY": 5617139.41662851,
+        "neighborhood": "Prospect Park - East River Road",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6948
+      },
+      "geometry": {
+        "x": -10376217.9952,
+        "y": 5617139.416599996
+      }
+    },
+    {
+      "attributes": {
+        "publicaddress": "0032XX LAKE ST W",
+        "caseNumber": "MP2026276257",
+        "precinct": "5",
+        "reportedDate": 1790121600000,
+        "reportedTime": 2011,
+        "beginDate": 1790121600000,
+        "reportedDateTime": 1790194260000,
+        "beginTime": 1952,
+        "offense": "BURGB",
+        "description": "BURGLARY OF BUSINESS",
+        "UCRCode": "06 ",
+        "enteredDate": 1790380800000,
+        "centergbsid": null,
+        "centerLong": -93.32281,
+        "centerLat": 44.94842,
+        "centerX": -10388647.29195719,
+        "centerY": 5613404.25359804,
+        "neighborhood": "Cedar - Isles - Dean",
+        "lastchanged": 1790380800000,
+        "LastUpdateDateETL": 1790492457000,
+        "OBJECTID": 6926
+      },
+      "geometry": {
+        "x": -10388647.292,
+        "y": 5613404.253600001
+      }
+    }
+  ]
+}

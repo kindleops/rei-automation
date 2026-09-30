@@ -1,0 +1,666 @@
+{
+  "displayFieldName": "StreetName",
+  "fieldAliases": {
+    "OBJECTID": "OBJECTID",
+    "PRA": "PRA",
+    "Beat": "Beat",
+    "DispatchArea": "Dispatch Area",
+    "District": "District",
+    "CallType": "Call Type",
+    "CallTypeDescription": "Call Type Description",
+    "Priority": "Priority",
+    "TimeEntered": "Time Entered",
+    "CallDate": "Call Date",
+    "CallTime": "Call Time",
+    "CallNumber": "Call Number",
+    "StreetNumber": "Street Number",
+    "StreetDirection": "Street Direction",
+    "StreetName": "Street Name",
+    "StreetType": "Street Type",
+    "StreetSuffix": "Street Suffix",
+    "Apartment1": "Apartment1",
+    "Apartment2": "Apartment2",
+    "Location": "Location",
+    "CrossStreet1": "Cross Street1",
+    "CrossStreet2": "Cross Street2",
+    "Status": "Status",
+    "XCOORD": "XCOORD",
+    "YCOORD": "YCOORD",
+    "UpdatedDate": "Updated Date"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID"
+    },
+    {
+      "name": "PRA",
+      "type": "esriFieldTypeString",
+      "alias": "PRA",
+      "length": 6
+    },
+    {
+      "name": "Beat",
+      "type": "esriFieldTypeString",
+      "alias": "Beat",
+      "length": 7
+    },
+    {
+      "name": "DispatchArea",
+      "type": "esriFieldTypeString",
+      "alias": "Dispatch Area",
+      "length": 5
+    },
+    {
+      "name": "District",
+      "type": "esriFieldTypeString",
+      "alias": "District",
+      "length": 1
+    },
+    {
+      "name": "CallType",
+      "type": "esriFieldTypeString",
+      "alias": "Call Type",
+      "length": 16
+    },
+    {
+      "name": "CallTypeDescription",
+      "type": "esriFieldTypeString",
+      "alias": "Call Type Description",
+      "length": 80
+    },
+    {
+      "name": "Priority",
+      "type": "esriFieldTypeInteger",
+      "alias": "Priority"
+    },
+    {
+      "name": "TimeEntered",
+      "type": "esriFieldTypeString",
+      "alias": "Time Entered",
+      "length": 16
+    },
+    {
+      "name": "CallDate",
+      "type": "esriFieldTypeDate",
+      "alias": "Call Date",
+      "length": 8
+    },
+    {
+      "name": "CallTime",
+      "type": "esriFieldTypeString",
+      "alias": "Call Time",
+      "length": 8
+    },
+    {
+      "name": "CallNumber",
+      "type": "esriFieldTypeString",
+      "alias": "Call Number",
+      "length": 12
+    },
+    {
+      "name": "StreetNumber",
+      "type": "esriFieldTypeString",
+      "alias": "Street Number",
+      "length": 15
+    },
+    {
+      "name": "StreetDirection",
+      "type": "esriFieldTypeString",
+      "alias": "Street Direction",
+      "length": 2
+    },
+    {
+      "name": "StreetName",
+      "type": "esriFieldTypeString",
+      "alias": "Street Name",
+      "length": 30
+    },
+    {
+      "name": "StreetType",
+      "type": "esriFieldTypeString",
+      "alias": "Street Type",
+      "length": 4
+    },
+    {
+      "name": "StreetSuffix",
+      "type": "esriFieldTypeString",
+      "alias": "Street Suffix",
+      "length": 2
+    },
+    {
+      "name": "Apartment1",
+      "type": "esriFieldTypeInteger",
+      "alias": "Apartment1"
+    },
+    {
+      "name": "Apartment2",
+      "type": "esriFieldTypeInteger",
+      "alias": "Apartment2"
+    },
+    {
+      "name": "Location",
+      "type": "esriFieldTypeString",
+      "alias": "Location",
+      "length": 48
+    },
+    {
+      "name": "CrossStreet1",
+      "type": "esriFieldTypeString",
+      "alias": "Cross Street1",
+      "length": 34
+    },
+    {
+      "name": "CrossStreet2",
+      "type": "esriFieldTypeString",
+      "alias": "Cross Street2",
+      "length": 34
+    },
+    {
+      "name": "Status",
+      "type": "esriFieldTypeString",
+      "alias": "Status",
+      "length": 255
+    },
+    {
+      "name": "XCOORD",
+      "type": "esriFieldTypeDouble",
+      "alias": "XCOORD"
+    },
+    {
+      "name": "YCOORD",
+      "type": "esriFieldTypeDouble",
+      "alias": "YCOORD"
+    },
+    {
+      "name": "UpdatedDate",
+      "type": "esriFieldTypeDate",
+      "alias": "Updated Date",
+      "length": 8
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 6198057,
+        "PRA": "0263",
+        "Beat": "450",
+        "DispatchArea": "P6",
+        "District": "E",
+        "CallType": "T",
+        "CallTypeDescription": "TRAFFIC STOP",
+        "Priority": 3,
+        "TimeEntered": "20260930050359CD",
+        "CallDate": 1790762639000,
+        "CallTime": "05:03:59",
+        "CallNumber": "L26273P0057",
+        "StreetNumber": "",
+        "StreetDirection": null,
+        "StreetName": null,
+        "StreetType": null,
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "",
+        "CrossStreet1": "S SH 360 FWY SB",
+        "CrossStreet2": "E PARK ROW DR",
+        "Status": "Assigned",
+        "XCOORD": 2410510.47,
+        "YCOORD": 6948204.27,
+        "UpdatedDate": 1790766602000
+      },
+      "geometry": {
+        "x": -97.06268129405184,
+        "y": 32.72082764355363
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197662,
+        "PRA": "189A",
+        "Beat": "280",
+        "DispatchArea": "P1",
+        "District": "N",
+        "CallType": "T",
+        "CallTypeDescription": "TRAFFIC STOP",
+        "Priority": 3,
+        "TimeEntered": "20260930045208CD",
+        "CallDate": 1790761928000,
+        "CallTime": "04:52:08",
+        "CallNumber": "L26273P0056",
+        "StreetNumber": "",
+        "StreetDirection": null,
+        "StreetName": null,
+        "StreetType": null,
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "",
+        "CrossStreet1": "N SH 360 FWY SB",
+        "CrossStreet2": "E DIVISION ST",
+        "Status": "Assigned",
+        "XCOORD": 2410549.69,
+        "YCOORD": 6956166.66,
+        "UpdatedDate": 1790765702000
+      },
+      "geometry": {
+        "x": -97.06219942916118,
+        "y": 32.74271068372681
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197661,
+        "PRA": "0257",
+        "Beat": "450",
+        "DispatchArea": "P3",
+        "District": "E",
+        "CallType": "T",
+        "CallTypeDescription": "TRAFFIC STOP",
+        "Priority": 3,
+        "TimeEntered": "20260930044241CD",
+        "CallDate": 1790761361000,
+        "CallTime": "04:42:41",
+        "CallNumber": "L26273P0053",
+        "StreetNumber": "",
+        "StreetDirection": null,
+        "StreetName": null,
+        "StreetType": null,
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "",
+        "CrossStreet1": "E PARK ROW DR",
+        "CrossStreet2": "HILLCREST DR",
+        "Status": "Assigned",
+        "XCOORD": 2405963.45,
+        "YCOORD": 6948178.44,
+        "UpdatedDate": 1790765702000
+      },
+      "geometry": {
+        "x": -97.07746658381174,
+        "y": 32.720926768030424
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6198056,
+        "PRA": "0318",
+        "Beat": "370",
+        "DispatchArea": "P2",
+        "District": "W",
+        "CallType": "CALARM",
+        "CallTypeDescription": "COMMERCIAL ALARM",
+        "Priority": 2,
+        "TimeEntered": "20260930044224CD",
+        "CallDate": 1790761344000,
+        "CallTime": "04:42:24",
+        "CallNumber": "L26273P0052",
+        "StreetNumber": "3000",
+        "StreetDirection": "S",
+        "StreetName": "COOPER",
+        "StreetType": "ST",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "3000 S COOPER ST  ",
+        "CrossStreet1": "FLORIDA DR",
+        "CrossStreet2": "MEDLIN DR",
+        "Status": "Assigned",
+        "XCOORD": 2390981.69,
+        "YCOORD": 6938632.69,
+        "UpdatedDate": 1790766602000
+      },
+      "geometry": {
+        "x": -97.12658433016404,
+        "y": 32.69523822946467
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197659,
+        "PRA": "0377",
+        "Beat": "480",
+        "DispatchArea": "P3",
+        "District": "E",
+        "CallType": "E911",
+        "CallTypeDescription": "911 HANG UP",
+        "Priority": 2,
+        "TimeEntered": "20260930044146CD",
+        "CallDate": 1790761306000,
+        "CallTime": "04:41:46",
+        "CallNumber": "L26273P0050",
+        "StreetNumber": "2200",
+        "StreetDirection": null,
+        "StreetName": "WILDBRIAR",
+        "StreetType": "DR",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "2200  WILDBRIAR DR  ",
+        "CrossStreet1": "KRISTINWOOD DR",
+        "CrossStreet2": "DEAD END",
+        "Status": "Assigned",
+        "XCOORD": 2407843.69,
+        "YCOORD": 6940173.26,
+        "UpdatedDate": 1790765702000
+      },
+      "geometry": {
+        "x": -97.07170707538899,
+        "y": 32.698854458170885
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197658,
+        "PRA": "0342",
+        "Beat": "310",
+        "DispatchArea": "P2",
+        "District": "W",
+        "CallType": "RTHEFT",
+        "CallTypeDescription": "THEFT REPORT",
+        "Priority": 3,
+        "TimeEntered": "20260930043713CD",
+        "CallDate": 1790761033000,
+        "CallTime": "04:37:13",
+        "CallNumber": "L26273P0049",
+        "StreetNumber": "5900",
+        "StreetDirection": "W",
+        "StreetName": "PLEASANT RIDGE",
+        "StreetType": "RD",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "5900 W PLEASANT RIDGE RD  ",
+        "CrossStreet1": null,
+        "CrossStreet2": null,
+        "Status": "Assigned",
+        "XCOORD": 2369360.32,
+        "YCOORD": 6933230.47,
+        "UpdatedDate": 1790765702000
+      },
+      "geometry": {
+        "x": -97.1970825040274,
+        "y": 32.681147099292936
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197657,
+        "PRA": "423B",
+        "Beat": "520",
+        "DispatchArea": "P4",
+        "District": "S",
+        "CallType": "DOM",
+        "CallTypeDescription": "DISTURBANCE - DOMESTIC",
+        "Priority": 1,
+        "TimeEntered": "20260930043401CD",
+        "CallDate": 1790760841000,
+        "CallTime": "04:34:01",
+        "CallNumber": "L26273P0048",
+        "StreetNumber": "6000",
+        "StreetDirection": "S",
+        "StreetName": "COOPER",
+        "StreetType": "ST",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "6000 S COOPER ST  ",
+        "CrossStreet1": "W SUBLETT RD",
+        "CrossStreet2": "FANNIN DR",
+        "Status": "Assigned",
+        "XCOORD": 2388785.43,
+        "YCOORD": 6921115.48,
+        "UpdatedDate": 1790765702000
+      },
+      "geometry": {
+        "x": -97.13446339535217,
+        "y": 32.647170550077696
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197656,
+        "PRA": "0048",
+        "Beat": "210",
+        "DispatchArea": "P1",
+        "District": "N",
+        "CallType": "SUSPER",
+        "CallTypeDescription": "SUSPICIOUS PERSON / VEHICLE",
+        "Priority": 2,
+        "TimeEntered": "20260930043157CD",
+        "CallDate": 1790760717000,
+        "CallTime": "04:31:57",
+        "CallNumber": "L26273P0047",
+        "StreetNumber": "700",
+        "StreetDirection": "W",
+        "StreetName": "LAMAR",
+        "StreetType": "BLVD",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "700 W LAMAR BLVD  ",
+        "CrossStreet1": "N COOPER ST",
+        "CrossStreet2": "IH 30 WB EXIT LAMAR/COOPER",
+        "Status": "Assigned",
+        "XCOORD": 2394254.61,
+        "YCOORD": 6962383.59,
+        "UpdatedDate": 1790765702000
+      },
+      "geometry": {
+        "x": -97.11492787439937,
+        "y": 32.76039962885225
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6197256,
+        "PRA": "0229",
+        "Beat": "430",
+        "DispatchArea": "P3",
+        "District": "E",
+        "CallType": "DOM",
+        "CallTypeDescription": "DISTURBANCE - DOMESTIC",
+        "Priority": 1,
+        "TimeEntered": "20260930042714CD",
+        "CallDate": 1790760434000,
+        "CallTime": "04:27:14",
+        "CallNumber": "L26273P0046",
+        "StreetNumber": "1000",
+        "StreetDirection": "S",
+        "StreetName": "CENTER",
+        "StreetType": "ST",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "1000 S CENTER ST  ",
+        "CrossStreet1": "SIXTH ST",
+        "CrossStreet2": "HOSACK ST",
+        "Status": "Assigned",
+        "XCOORD": 2397066.58,
+        "YCOORD": 6950283.63,
+        "UpdatedDate": 1790764802000
+      },
+      "geometry": {
+        "x": -97.10630313729321,
+        "y": 32.72704065997843
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6196857,
+        "PRA": "0030",
+        "Beat": "240",
+        "DispatchArea": "P1",
+        "District": "N",
+        "CallType": "DISLOU",
+        "CallTypeDescription": "DISTURBANCE - LOUD MUSIC",
+        "Priority": 3,
+        "TimeEntered": "20260930041307CD",
+        "CallDate": 1790759587000,
+        "CallTime": "04:13:07",
+        "CallNumber": "L26273P0044",
+        "StreetNumber": "800",
+        "StreetDirection": null,
+        "StreetName": "BROWN",
+        "StreetType": "BVLD",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "800  BROWN BVLD  ",
+        "CrossStreet1": null,
+        "CrossStreet2": null,
+        "Status": "Assigned",
+        "XCOORD": 2398244.04,
+        "YCOORD": 6967776.85,
+        "UpdatedDate": 1790763902000
+      },
+      "geometry": {
+        "x": -97.10171732446885,
+        "y": 32.77507771347131
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6194856,
+        "PRA": "0411",
+        "Beat": "510",
+        "DispatchArea": "P4",
+        "District": "S",
+        "CallType": "DOM",
+        "CallTypeDescription": "DISTURBANCE - DOMESTIC",
+        "Priority": 1,
+        "TimeEntered": "20260930024107CD",
+        "CallDate": 1790754067000,
+        "CallTime": "02:41:07",
+        "CallNumber": "L26273P0036",
+        "StreetNumber": "5700",
+        "StreetDirection": null,
+        "StreetName": "AUTUMN WHEAT",
+        "StreetType": "TRL",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "5700  AUTUMN WHEAT TRL  ",
+        "CrossStreet1": "STERLING GREEN TRL",
+        "CrossStreet2": "STERLING GREEN TRL",
+        "Status": "Assigned",
+        "XCOORD": 2383043.93,
+        "YCOORD": 6923721.25,
+        "UpdatedDate": 1790758502000
+      },
+      "geometry": {
+        "x": -97.15300742887621,
+        "y": 32.65453631796345
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6196856,
+        "PRA": "0095",
+        "Beat": "240",
+        "DispatchArea": "P1",
+        "District": "N",
+        "CallType": "T",
+        "CallTypeDescription": "TRAFFIC STOP",
+        "Priority": 3,
+        "TimeEntered": "20260930000550CD",
+        "CallDate": 1790744750000,
+        "CallTime": "00:05:50",
+        "CallNumber": "L26273P0003",
+        "StreetNumber": "",
+        "StreetDirection": null,
+        "StreetName": null,
+        "StreetType": null,
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "",
+        "CrossStreet1": "N COLLINS ST",
+        "CrossStreet2": "E LAMAR BVLD",
+        "Status": "Assigned",
+        "XCOORD": 2399703.74,
+        "YCOORD": 6964356.09,
+        "UpdatedDate": 1790763902000
+      },
+      "geometry": {
+        "x": -97.09711697748916,
+        "y": 32.765622292738094
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6191658,
+        "PRA": null,
+        "Beat": "410",
+        "DispatchArea": "P3",
+        "District": "E",
+        "CallType": "DWI",
+        "CallTypeDescription": "DRIVING WHILE INTOXICATED",
+        "Priority": 1,
+        "TimeEntered": "20260930000135CD",
+        "CallDate": 1790744495000,
+        "CallTime": "00:01:35",
+        "CallNumber": "L26273P0002",
+        "StreetNumber": "2400-BLK",
+        "StreetDirection": "E",
+        "StreetName": "ABRAM",
+        "StreetType": "ST",
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "",
+        "CrossStreet1": "SHERRY ST",
+        "CrossStreet2": "S WATSON RD",
+        "Status": "Assigned",
+        "XCOORD": 2408632.0,
+        "YCOORD": 6953389.0,
+        "UpdatedDate": 1790748602000
+      },
+      "geometry": {
+        "x": -97.06855922021036,
+        "y": 32.73514830797221
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6190856,
+        "PRA": "0086",
+        "Beat": "220",
+        "DispatchArea": "P1",
+        "District": "N",
+        "CallType": "DASSLT",
+        "CallTypeDescription": "DOMESTIC ASSAULT",
+        "Priority": 2,
+        "TimeEntered": "20260929233022CD",
+        "CallDate": 1790742622000,
+        "CallTime": "23:30:22",
+        "CallNumber": "L26272P0844",
+        "StreetNumber": "",
+        "StreetDirection": null,
+        "StreetName": null,
+        "StreetType": null,
+        "StreetSuffix": null,
+        "Apartment1": null,
+        "Apartment2": null,
+        "Location": "",
+        "CrossStreet1": "BALLPARK WAY",
+        "CrossStreet2": "LOS ROBLES ST",
+        "Status": "Assigned",
+        "XCOORD": 2406888.25,
+        "YCOORD": 6966883.18,
+        "UpdatedDate": 1790746802000
+      },
+      "geometry": {
+        "x": -97.07363390631177,
+        "y": 32.772302049268674
+      }
+    }
+  ]
+}

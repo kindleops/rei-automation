@@ -1,0 +1,391 @@
+{
+  "displayFieldName": "address",
+  "fieldAliases": {
+    "rin": "rin",
+    "occ_date": "occ_date",
+    "dispatch_time": "dispatch_time",
+    "address": "address",
+    "grid": "grid",
+    "case_description": "case_description",
+    "report_number": "report_number",
+    "x_coordinate": "x_coordinate",
+    "y_coordinate": "y_coordinate",
+    "OBJECTID": "OBJECTID",
+    "id": "id",
+    "ESRI_OID": "ESRI_OID"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "rin",
+      "type": "esriFieldTypeInteger",
+      "alias": "rin"
+    },
+    {
+      "name": "occ_date",
+      "type": "esriFieldTypeDate",
+      "alias": "occ_date",
+      "length": 8
+    },
+    {
+      "name": "dispatch_time",
+      "type": "esriFieldTypeDate",
+      "alias": "dispatch_time",
+      "length": 8
+    },
+    {
+      "name": "address",
+      "type": "esriFieldTypeString",
+      "alias": "address",
+      "length": 125
+    },
+    {
+      "name": "grid",
+      "type": "esriFieldTypeString",
+      "alias": "grid",
+      "length": 25
+    },
+    {
+      "name": "case_description",
+      "type": "esriFieldTypeString",
+      "alias": "case_description",
+      "length": 125
+    },
+    {
+      "name": "report_number",
+      "type": "esriFieldTypeInteger",
+      "alias": "report_number"
+    },
+    {
+      "name": "x_coordinate",
+      "type": "esriFieldTypeInteger",
+      "alias": "x_coordinate"
+    },
+    {
+      "name": "y_coordinate",
+      "type": "esriFieldTypeInteger",
+      "alias": "y_coordinate"
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeDouble",
+      "alias": "OBJECTID"
+    },
+    {
+      "name": "id",
+      "type": "esriFieldTypeInteger",
+      "alias": "id"
+    },
+    {
+      "name": "ESRI_OID",
+      "type": "esriFieldTypeOID",
+      "alias": "ESRI_OID"
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "rin": 30434633,
+        "occ_date": 1790665208000,
+        "dispatch_time": 1790672312000,
+        "address": "3600 BLOCK W NORTH A ST                                                                                                      ",
+        "grid": "152                      ",
+        "case_description": "BUILDING CHECK                                                                                                               ",
+        "report_number": 575276,
+        "x_coordinate": 494218,
+        "y_coordinate": 1313271,
+        "OBJECTID": 338,
+        "id": 2356,
+        "ESRI_OID": 1152
+      },
+      "geometry": {
+        "x": -82.50161913348558,
+        "y": 27.945639027419045
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434306,
+        "occ_date": 1790663190000,
+        "dispatch_time": 1790665772000,
+        "address": "8300 BLOCK N FLORIDA AVE                                                                                                     ",
+        "grid": "36                       ",
+        "case_description": "MISDEMEANOR                                                                                                                  ",
+        "report_number": 575243,
+        "x_coordinate": 507896,
+        "y_coordinate": 1341694,
+        "OBJECTID": 262,
+        "id": 2285,
+        "ESRI_OID": 1142
+      },
+      "geometry": {
+        "x": -82.45958575087481,
+        "y": 28.023964469667046
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434374,
+        "occ_date": 1790665199000,
+        "dispatch_time": 1790665468000,
+        "address": "E PALM AVE / N FLORIDA AVE                                                                                                   ",
+        "grid": "115                      ",
+        "case_description": "TRAFFIC CRASH                                                                                                                ",
+        "report_number": 575279,
+        "x_coordinate": 507850,
+        "y_coordinate": 1319264,
+        "OBJECTID": 277,
+        "id": 2299,
+        "ESRI_OID": 1147
+      },
+      "geometry": {
+        "x": -82.4594666447572,
+        "y": 27.962270242454796
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434262,
+        "occ_date": 1790665239000,
+        "dispatch_time": 1790665239000,
+        "address": "E HILLSBOROUGH AVE / N 11TH ST                                                                                               ",
+        "grid": "71                       ",
+        "case_description": "VEHICLE STOP/TRAFFIC                                                                                                         ",
+        "report_number": 575278,
+        "x_coordinate": 511628,
+        "y_coordinate": 1331540,
+        "OBJECTID": 247,
+        "id": 2275,
+        "ESRI_OID": 1146
+      },
+      "geometry": {
+        "x": -82.44790272081974,
+        "y": 27.996074099701236
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434438,
+        "occ_date": 1790665045000,
+        "dispatch_time": 1790665046000,
+        "address": "1700 BLOCK E HILLSBOROUGH AVE                                                                                                ",
+        "grid": "60                       ",
+        "case_description": "FOLLOW UP INVESTIGATION                                                                                                      ",
+        "report_number": 575271,
+        "x_coordinate": 513916,
+        "y_coordinate": 1331549,
+        "OBJECTID": 290,
+        "id": 2310,
+        "ESRI_OID": 1150
+      },
+      "geometry": {
+        "x": -82.44081289179493,
+        "y": 27.996121765064817
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434370,
+        "occ_date": 1790663999000,
+        "dispatch_time": 1790664854000,
+        "address": "8400 BLOCK N 13TH ST                                                                                                         ",
+        "grid": "29                       ",
+        "case_description": "SUSPICIOUS VEHICLE                                                                                                           ",
+        "report_number": 575255,
+        "x_coordinate": 512134,
+        "y_coordinate": 1342193,
+        "OBJECTID": 274,
+        "id": 2297,
+        "ESRI_OID": 1144
+      },
+      "geometry": {
+        "x": -82.44645556127448,
+        "y": 28.025380269724128
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434315,
+        "occ_date": 1790664414000,
+        "dispatch_time": 1790664790000,
+        "address": "S 50TH ST / SELMON E 50TH RAMP                                                                                               ",
+        "grid": "135                      ",
+        "case_description": "STREET OBSTRUCTION                                                                                                           ",
+        "report_number": 575266,
+        "x_coordinate": 526451,
+        "y_coordinate": 1314533,
+        "OBJECTID": 264,
+        "id": 2287,
+        "ESRI_OID": 1143
+      },
+      "geometry": {
+        "x": -82.40179652148419,
+        "y": 27.949437768406575
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434257,
+        "occ_date": 1790664094000,
+        "dispatch_time": 1790664692000,
+        "address": "4800 BLOCK N CLARK AVE                                                                                                       ",
+        "grid": "68                       ",
+        "case_description": "RESID/COMMERIAL ALARM                                                                                                        ",
+        "report_number": 575258,
+        "x_coordinate": 490715,
+        "y_coordinate": 1329064,
+        "OBJECTID": 244,
+        "id": 2274,
+        "ESRI_OID": 1138
+      },
+      "geometry": {
+        "x": -82.51267415718452,
+        "y": 27.989037559758497
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434619,
+        "occ_date": 1790662571000,
+        "dispatch_time": 1790663745000,
+        "address": "4900 BLOCK N MACDILL AVE                                                                                                     ",
+        "grid": "66                       ",
+        "case_description": "MISSING PERS/RUNAWAY                                                                                                         ",
+        "report_number": 575227,
+        "x_coordinate": 497104,
+        "y_coordinate": 1329255,
+        "OBJECTID": 335,
+        "id": 2354,
+        "ESRI_OID": 1145
+      },
+      "geometry": {
+        "x": -82.49288011013064,
+        "y": 27.989635273208357
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434254,
+        "occ_date": 1790662255000,
+        "dispatch_time": 1790663166000,
+        "address": "4200 BLOCK W KENNEDY BLVD                                                                                                    ",
+        "grid": "150                      ",
+        "case_description": "TELEPHONE VIOLATION                                                                                                          ",
+        "report_number": 575222,
+        "x_coordinate": 490199,
+        "y_coordinate": 1312975,
+        "OBJECTID": 243,
+        "id": 2273,
+        "ESRI_OID": 1116
+      },
+      "geometry": {
+        "x": -82.51406322829713,
+        "y": 27.94477896187425
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434174,
+        "occ_date": 1790661837000,
+        "dispatch_time": 1790662445000,
+        "address": "4200 BLOCK W HILLSBOROUGH AVE                                                                                                ",
+        "grid": "64                       ",
+        "case_description": "DISTURBANCE                                                                                                                  ",
+        "report_number": 575211,
+        "x_coordinate": 490441,
+        "y_coordinate": 1331603,
+        "OBJECTID": 196,
+        "id": 2243,
+        "ESRI_OID": 1108
+      },
+      "geometry": {
+        "x": -82.51355624653475,
+        "y": 27.996017859943013
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434175,
+        "occ_date": 1790660188000,
+        "dispatch_time": 1790662367000,
+        "address": "2700 BLOCK W HILLSBOROUGH AVE                                                                                                ",
+        "grid": "66                       ",
+        "case_description": "INFORMATION                                                                                                                  ",
+        "report_number": 575178,
+        "x_coordinate": 498932,
+        "y_coordinate": 1331578,
+        "OBJECTID": 197,
+        "id": 2244,
+        "ESRI_OID": 1090
+      },
+      "geometry": {
+        "x": -82.48724470805004,
+        "y": 27.996044845371305
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434239,
+        "occ_date": 1790661295000,
+        "dispatch_time": 1790662093000,
+        "address": "9000 BLOCK EL PORTAL DR                                                                                                      ",
+        "grid": "26                       ",
+        "case_description": "PROWLER                                                                                                                      ",
+        "report_number": 575197,
+        "x_coordinate": 504621,
+        "y_coordinate": 1344255,
+        "OBJECTID": 235,
+        "id": 2268,
+        "ESRI_OID": 1114
+      },
+      "geometry": {
+        "x": -82.46976730815365,
+        "y": 28.03097413448802
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434245,
+        "occ_date": 1790658979000,
+        "dispatch_time": 1790658979000,
+        "address": "600 BLOCK N WILLOW AVE                                                                                                       ",
+        "grid": "155                      ",
+        "case_description": "FELONY                                                                                                                       ",
+        "report_number": 575167,
+        "x_coordinate": 503563,
+        "y_coordinate": 1314495,
+        "OBJECTID": 241,
+        "id": 2271,
+        "ESRI_OID": 1091
+      },
+      "geometry": {
+        "x": -82.47268964410242,
+        "y": 27.9491080746341
+      }
+    },
+    {
+      "attributes": {
+        "rin": 30434070,
+        "occ_date": 1790658086000,
+        "dispatch_time": 1790658148000,
+        "address": "200 BLOCK E PALM AVE                                                                                                         ",
+        "grid": "116                      ",
+        "case_description": "BURG OF A STRUCTURE                                                                                                          ",
+        "report_number": 575154,
+        "x_coordinate": 507871,
+        "y_coordinate": 1319284,
+        "OBJECTID": 164,
+        "id": 2211,
+        "ESRI_OID": 565
+      },
+      "geometry": {
+        "x": -82.45940182459258,
+        "y": 27.96232546980089
+      }
+    }
+  ]
+}

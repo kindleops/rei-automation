@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2025-10-16",
+          "recordTime": "11:45:27",
+          "recordEpoch": "1760640327"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "137 - SB I-5 N/O Lathrop Rd",
+          "nearbyPlace": "Lathrop",
+          "longitude": "-121.28509",
+          "latitude": "37.84451",
+          "elevation": "19",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "18.817",
+          "alignment": "L",
+          "milepost": "464.094"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB5_NO_LathropRd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/137sbi5nolathroprd.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/137sbi5nolathroprd/previous/137sbi5nolathroprd-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2026-07-08",
+          "recordTime": "10:04:05",
+          "recordEpoch": "1783530245"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "3 - SB I-5 Junction SR 120",
+          "nearbyPlace": "Lathrop",
+          "longitude": "-121.30189",
+          "latitude": "37.78955",
+          "elevation": "26",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "14.9",
+          "alignment": "",
+          "milepost": "460.18"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB5_JctSr120.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/3sbi5junctionsr120.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/3sbi5junctionsr120/previous/3sbi5junctionsr120-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2026-03-19",
+          "recordTime": "12:27:54",
+          "recordEpoch": "1773948474"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "4 - NB I-5 Church Street",
+          "nearbyPlace": "Stockton",
+          "longitude": "-121.2986",
+          "latitude": "37.94567",
+          "elevation": "49",
+          "direction": "North",
+          "county": "San Joaquin",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "25.97",
+          "alignment": "",
+          "milepost": "471.25"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_NB5_Church.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/4nbi5churchstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/4nbi5churchstreet/previous/4nbi5churchstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2026-05-12",
+          "recordTime": "10:50:37",
+          "recordEpoch": "1778608237"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "5 - SB I-5 North Of SR 4",
+          "nearbyPlace": "Stockton",
+          "longitude": "-121.30528",
+          "latitude": "37.95067",
+          "elevation": "19",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "26.49",
+          "alignment": "",
+          "milepost": "471.77"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB5_NO_SR4.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/5sbi5northofsr4.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/5sbi5northofsr4/previous/5sbi5northofsr4-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2026-08-12",
+          "recordTime": "13:00:49",
+          "recordEpoch": "1786564849"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "6 - SB I-5 S/O March Lane",
+          "nearbyPlace": "Stockton",
+          "longitude": "-121.34134",
+          "latitude": "37.97839",
+          "elevation": "0",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "29.562",
+          "alignment": "L",
+          "milepost": "474.877"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB5_SO_March.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/6sbi5somarchlane.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/6sbi5somarchlane/previous/6sbi5somarchlane-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2026-05-12",
+          "recordTime": "10:37:31",
+          "recordEpoch": "1778607451"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "7 - SB SR 99 North Of SR 120",
+          "nearbyPlace": "Manteca",
+          "longitude": "-121.19062",
+          "latitude": "37.79376",
+          "elevation": "52",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "SR-99",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "6.4",
+          "alignment": "",
+          "milepost": "242.25"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB99_NO_Rte120.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/7sbsr99northofsr120.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/7sbsr99northofsr120/previous/7sbsr99northofsr120-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2026-06-24",
+          "recordTime": "11:26:13",
+          "recordEpoch": "1782325573"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "8 - SB SR 99 Junction SR 4",
+          "nearbyPlace": "Stockton",
+          "longitude": "-121.2441",
+          "latitude": "37.96588",
+          "elevation": "16",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "SR-99",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "18.99",
+          "alignment": "",
+          "milepost": "254.84"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB99_JctRte4.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/8sbsr99junctionsr4.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/8sbsr99junctionsr4/previous/8sbsr99junctionsr4-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2026-03-20",
+          "recordTime": "12:11:14",
+          "recordEpoch": "1774033874"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "9 - SB SR 99 South Of Waterloo",
+          "nearbyPlace": "Stockton",
+          "longitude": "-121.25003",
+          "latitude": "37.97975",
+          "elevation": "32",
+          "direction": "South",
+          "county": "San Joaquin",
+          "route": "SR-99",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "20",
+          "alignment": "",
+          "milepost": "255.85"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_SB99_SO_Waterloo.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/9sbsr99southofwaterloo.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/9sbsr99southofwaterloo/previous/9sbsr99southofwaterloo-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2026-03-04",
+          "recordTime": "12:06:54",
+          "recordEpoch": "1772654814"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "10 - NB I-5 North of Tracy 11th St",
+          "nearbyPlace": "Banta",
+          "longitude": "-121.33849",
+          "latitude": "37.76197",
+          "elevation": "22",
+          "direction": "North",
+          "county": "San Joaquin",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "12.11",
+          "alignment": "",
+          "milepost": "457.39"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_NB5_NO_Tracy11stExit.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/10nbi5northoftracy11thst.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/10nbi5northoftracy11thst/previous/10nbi5northoftracy11thst-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2026-07-07",
+          "recordTime": "12:31:37",
+          "recordEpoch": "1783452697"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "11 - NB I-5 Westley Rest Stop",
+          "nearbyPlace": "Westley",
+          "longitude": "-121.32081",
+          "latitude": "37.58163",
+          "elevation": "308",
+          "direction": "North",
+          "county": "Stanislaus",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "27.092",
+          "alignment": "R",
+          "milepost": "444.379"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/STA_NB5_WestleyRestStop.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/11nbi5westleyreststop.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/11nbi5westleyreststop/previous/11nbi5westleyreststop-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2026-09-22",
+          "recordTime": "12:36:42",
+          "recordEpoch": "1790105802"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "12 - EB I-580 W/O Flynn Road",
+          "nearbyPlace": "Livermore",
+          "longitude": "-121.67083",
+          "latitude": "37.71856",
+          "elevation": "961",
+          "direction": "North",
+          "county": "Alameda",
+          "route": "I-580",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "6.56",
+          "alignment": "",
+          "milepost": "22.71"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/ALA_EB580_WO_FlynnRd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/12ebi580woflynnroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/12ebi580woflynnroad/previous/12ebi580woflynnroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "13",
+        "recordTimestamp": {
+          "recordDate": "2026-04-28",
+          "recordTime": "12:45:04",
+          "recordEpoch": "1777405504"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "13 - WB SR-120 E/O I-5",
+          "nearbyPlace": "Lathrop",
+          "longitude": "-121.300393",
+          "latitude": "37.789277",
+          "elevation": "19",
+          "direction": "West",
+          "county": "San Joaquin",
+          "route": "SR-120",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "0.6",
+          "alignment": "",
+          "milepost": "0.11"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_WB120_EO_I5.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/13wbsr120eoi5.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/13wbsr120eoi5/previous/13wbsr120eoi5-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "41",
+        "recordTimestamp": {
+          "recordDate": "2026-05-28",
+          "recordTime": "13:34:26",
+          "recordEpoch": "1780000466"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "41 - EB I-205 East Banta RWIS",
+          "nearbyPlace": "Banta",
+          "longitude": "-121.34643",
+          "latitude": "37.76541",
+          "elevation": "3",
+          "direction": "North",
+          "county": "San Joaquin",
+          "route": "I-205",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "11.93",
+          "alignment": "",
+          "milepost": "12.86"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/SJ_EB205_EastBantaRwis.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/41ebi205eastbantarwis.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/41ebi205eastbantarwis/previous/41ebi205eastbantarwis-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "47",
+        "recordTimestamp": {
+          "recordDate": "2025-10-16",
+          "recordTime": "12:24:11",
+          "recordEpoch": "1760642651"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "47 - EB SR-12 Tower Park RWIS",
+          "nearbyPlace": "Lodi",
+          "longitude": "-121.48523",
+          "latitude": "38.11525",
+          "elevation": "-16",
+          "direction": "East",
+          "county": "San Joaquin",
+          "route": "SR-12",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "5.39",
+          "alignment": "",
+          "milepost": "75.17"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/47ebsr12towerparkrwis.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/47ebsr12towerparkrwis/previous/47ebsr12towerparkrwis-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "83",
+        "recordTimestamp": {
+          "recordDate": "2025-10-16",
+          "recordTime": "12:29:04",
+          "recordEpoch": "1760642944"
+        },
+        "location": {
+          "district": "10",
+          "locationName": "83 - NB SR-99 Chowchilla Weigh Station",
+          "nearbyPlace": "Le Grand",
+          "longitude": "-120.29838",
+          "latitude": "37.15954",
+          "elevation": "239",
+          "direction": "",
+          "county": "Merced",
+          "route": "SR-99",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "0.62",
+          "alignment": "",
+          "milepost": "173.97"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D10/MER_NB99_ChowchillaWeighStation.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/83nbsr99chowchillaweighstation.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d10/cctv/image/83nbsr99chowchillaweighstation/previous/83nbsr99chowchillaweighstation-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

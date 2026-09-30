@@ -1,0 +1,578 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4269,
+    "latestWkid": 4269
+  },
+  "fields": [
+    {
+      "name": "Master_Incident_Number",
+      "type": "esriFieldTypeString",
+      "alias": "Master_Incident_Number",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Agency_Type",
+      "type": "esriFieldTypeString",
+      "alias": "Agency_Type",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "is_911_Call",
+      "type": "esriFieldTypeString",
+      "alias": "is_911_Call",
+      "sqlType": "sqlTypeOther",
+      "length": 3,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Is_City_Call",
+      "type": "esriFieldTypeString",
+      "alias": "Is_City_Call",
+      "sqlType": "sqlTypeOther",
+      "length": 1,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Initial_Problem",
+      "type": "esriFieldTypeString",
+      "alias": "Initial_Problem",
+      "sqlType": "sqlTypeOther",
+      "length": 400,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Problem__Final_",
+      "type": "esriFieldTypeString",
+      "alias": "Problem__Final_",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Initial_Priority",
+      "type": "esriFieldTypeInteger",
+      "alias": "Initial_Priority",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Final_Priority",
+      "type": "esriFieldTypeInteger",
+      "alias": "Final_Priority",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Division",
+      "type": "esriFieldTypeString",
+      "alias": "Division",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Jurisdiction",
+      "type": "esriFieldTypeString",
+      "alias": "Jurisdiction",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Response_Date",
+      "type": "esriFieldTypeDate",
+      "alias": "Response_Date",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Call_Disposition",
+      "type": "esriFieldTypeString",
+      "alias": "Call_Disposition",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Latitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "latitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Longitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "longitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "MPD_Response",
+      "type": "esriFieldTypeString",
+      "alias": "MPD_Response",
+      "sqlType": "sqlTypeOther",
+      "length": 1,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Park_Police_Response",
+      "type": "esriFieldTypeString",
+      "alias": "Park_Police_Response",
+      "sqlType": "sqlTypeOther",
+      "length": 1,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "U_of_M_Response",
+      "type": "esriFieldTypeString",
+      "alias": "U_of_M_Response",
+      "sqlType": "sqlTypeOther",
+      "length": 1,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Other_Agency_Response",
+      "type": "esriFieldTypeString",
+      "alias": "Other_Agency_Response",
+      "sqlType": "sqlTypeOther",
+      "length": 1,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Ward__GIS_",
+      "type": "esriFieldTypeString",
+      "alias": "Ward__GIS_",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Neighborhood__GIS_",
+      "type": "esriFieldTypeString",
+      "alias": "Neighborhood__GIS_",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280179",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Unknown Trouble (P)",
+        "Problem__Final_": "Unknown Trouble (P)",
+        "Initial_Priority": 1,
+        "Final_Priority": 1,
+        "Division": "Precinct 4 North PSA",
+        "Jurisdiction": "MPD/MFD/North",
+        "Response_Date": 1790486882000,
+        "Call_Disposition": null,
+        "Latitude": 45.03545,
+        "Longitude": -93.31011,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "4",
+        "Neighborhood__GIS_": "Victory",
+        "OBJECTID": 1217398
+      },
+      "geometry": {
+        "x": -93.31010999999995,
+        "y": 45.035450000000026
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280178",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Property Damage Accident (P)",
+        "Problem__Final_": "Property Damage Accident (P)",
+        "Initial_Priority": 2,
+        "Final_Priority": 2,
+        "Division": "Precinct 4 North PSA",
+        "Jurisdiction": "MPD/MFD/North",
+        "Response_Date": 1790486798000,
+        "Call_Disposition": null,
+        "Latitude": 45.002,
+        "Longitude": -93.31333,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "5",
+        "Neighborhood__GIS_": "Willard - Hay",
+        "OBJECTID": 1331384
+      },
+      "geometry": {
+        "x": -93.31332999999995,
+        "y": 45.002000000000066
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280177",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Unwanted Person (P)",
+        "Problem__Final_": "Unwanted Person (P)",
+        "Initial_Priority": 2,
+        "Final_Priority": 2,
+        "Division": "Precinct 3",
+        "Jurisdiction": "MPD/MFD/HCMC",
+        "Response_Date": 1790486700000,
+        "Call_Disposition": null,
+        "Latitude": 44.95722,
+        "Longitude": -93.24485,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "9",
+        "Neighborhood__GIS_": "East Phillips",
+        "OBJECTID": 1217397
+      },
+      "geometry": {
+        "x": -93.24484999999999,
+        "y": 44.95722000000006
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280176",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Silent Alarm (P)",
+        "Problem__Final_": "Unwanted Person (P)",
+        "Initial_Priority": 2,
+        "Final_Priority": 2,
+        "Division": "Precinct 5",
+        "Jurisdiction": "MPD/MFD/HCMC",
+        "Response_Date": 1790486604000,
+        "Call_Disposition": null,
+        "Latitude": 44.94837,
+        "Longitude": -93.29639,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "10",
+        "Neighborhood__GIS_": "Lowry Hill East",
+        "OBJECTID": 1331383
+      },
+      "geometry": {
+        "x": -93.29638999999997,
+        "y": 44.94837000000007
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280175",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Crim Sex Conduct/Report (P)",
+        "Problem__Final_": "Crim Sex Conduct/Report (P)",
+        "Initial_Priority": 2,
+        "Final_Priority": 2,
+        "Division": "Precinct 1",
+        "Jurisdiction": "MPD/MFD/HCMC",
+        "Response_Date": 1790486430000,
+        "Call_Disposition": null,
+        "Latitude": 44.98484,
+        "Longitude": -93.27875,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "5",
+        "Neighborhood__GIS_": "North Loop",
+        "OBJECTID": 1217396
+      },
+      "geometry": {
+        "x": -93.27874999999995,
+        "y": 44.98484000000008
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-0047944",
+        "Agency_Type": "FIRE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Shortness of Breath (FE)",
+        "Problem__Final_": "Shortness of Breath (FE)",
+        "Initial_Priority": 1,
+        "Final_Priority": 1,
+        "Division": "Minneapolis Fire (MPD-HCMC)",
+        "Jurisdiction": "Minneapolis Fire (MPD-HCMC)",
+        "Response_Date": 1790486907000,
+        "Call_Disposition": null,
+        "Latitude": 44.9951,
+        "Longitude": -93.24288,
+        "MPD_Response": null,
+        "Park_Police_Response": null,
+        "U_of_M_Response": null,
+        "Other_Agency_Response": null,
+        "Ward__GIS_": "3",
+        "Neighborhood__GIS_": "Beltrami",
+        "OBJECTID": 946136
+      },
+      "geometry": {
+        "x": -93.24287999999996,
+        "y": 44.995100000000036
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-0047943",
+        "Agency_Type": "FIRE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Personal Injury Accident (FE)",
+        "Problem__Final_": "Personal Injury Accident (FE)",
+        "Initial_Priority": 1,
+        "Final_Priority": 1,
+        "Division": "Minneapolis Fire (MPD-HCMC)",
+        "Jurisdiction": "Minneapolis Fire (MPD-HCMC)",
+        "Response_Date": 1790486433000,
+        "Call_Disposition": null,
+        "Latitude": 44.95008,
+        "Longitude": -93.26837,
+        "MPD_Response": null,
+        "Park_Police_Response": null,
+        "U_of_M_Response": null,
+        "Other_Agency_Response": null,
+        "Ward__GIS_": "6",
+        "Neighborhood__GIS_": "Phillips West",
+        "OBJECTID": 976834
+      },
+      "geometry": {
+        "x": -93.26836999999995,
+        "y": 44.95008000000007
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-0047942",
+        "Agency_Type": "FIRE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Unconscious (FE)",
+        "Problem__Final_": "Unconscious (FE)",
+        "Initial_Priority": 1,
+        "Final_Priority": 1,
+        "Division": "Minneapolis Fire (MPD-HCMC)",
+        "Jurisdiction": "Minneapolis Fire (MPD-HCMC)",
+        "Response_Date": 1790486309000,
+        "Call_Disposition": null,
+        "Latitude": 44.95015,
+        "Longitude": -93.27537,
+        "MPD_Response": null,
+        "Park_Police_Response": null,
+        "U_of_M_Response": null,
+        "Other_Agency_Response": null,
+        "Ward__GIS_": "10",
+        "Neighborhood__GIS_": "Whittier",
+        "OBJECTID": 946135
+      },
+      "geometry": {
+        "x": -93.27536999999995,
+        "y": 44.950150000000065
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-0047941",
+        "Agency_Type": "FIRE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Heart (FE)",
+        "Problem__Final_": "Heart (FE)",
+        "Initial_Priority": 1,
+        "Final_Priority": 1,
+        "Division": "Minneapolis Fire (MPD-HCMC)",
+        "Jurisdiction": "Minneapolis Fire (MPD-HCMC)",
+        "Response_Date": 1790486170000,
+        "Call_Disposition": null,
+        "Latitude": 44.93055,
+        "Longitude": -93.26439,
+        "MPD_Response": null,
+        "Park_Police_Response": null,
+        "U_of_M_Response": null,
+        "Other_Agency_Response": null,
+        "Ward__GIS_": "8",
+        "Neighborhood__GIS_": "Bryant",
+        "OBJECTID": 976832
+      },
+      "geometry": {
+        "x": -93.26438999999999,
+        "y": 44.93055000000004
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280111",
+        "Agency_Type": "BCR",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "N",
+        "Initial_Problem": "Behavioral Crisis Welfare Ck",
+        "Problem__Final_": "Behavioral Crisis Welfare Ck",
+        "Initial_Priority": 2,
+        "Final_Priority": 2,
+        "Division": "Precinct 5",
+        "Jurisdiction": "MPD/MFD/HCMC",
+        "Response_Date": 1790479090000,
+        "Call_Disposition": "TRN-Transport",
+        "Latitude": 44.95642,
+        "Longitude": -93.27658,
+        "MPD_Response": "N",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "10",
+        "Neighborhood__GIS_": "Whittier",
+        "OBJECTID": 1217368
+      },
+      "geometry": {
+        "x": -93.27657999999997,
+        "y": 44.95642000000004
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-279807",
+        "Agency_Type": "BCR",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "N",
+        "Initial_Problem": "Behavioral Crisis Welfare Ck",
+        "Problem__Final_": "Behavioral Crisis Welfare Ck",
+        "Initial_Priority": 2,
+        "Final_Priority": 2,
+        "Division": "Precinct 3",
+        "Jurisdiction": "MPD/MFD/HCMC",
+        "Response_Date": 1790459785000,
+        "Call_Disposition": "RFD-Refused",
+        "Latitude": 44.92058,
+        "Longitude": -93.21947,
+        "MPD_Response": "N",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "12",
+        "Neighborhood__GIS_": "Ericsson",
+        "OBJECTID": 1331262
+      },
+      "geometry": {
+        "x": -93.21946999999994,
+        "y": 44.92058000000003
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-276694",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Miscellaneous (P)",
+        "Problem__Final_": "Miscellaneous (P)",
+        "Initial_Priority": 3,
+        "Final_Priority": 3,
+        "Division": "Precinct 3",
+        "Jurisdiction": "MPD/MFD/HCMC",
+        "Response_Date": 1790240097000,
+        "Call_Disposition": "TRN-Transport",
+        "Latitude": 0,
+        "Longitude": 0,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "Y",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": null,
+        "Neighborhood__GIS_": null,
+        "OBJECTID": 1323620
+      },
+      "geometry": {
+        "x": 5.684341886080802e-14,
+        "y": 5.684341886080802e-14
+      }
+    },
+    {
+      "attributes": {
+        "Master_Incident_Number": "26-280118",
+        "Agency_Type": "POLICE",
+        "is_911_Call": "Yes",
+        "Is_City_Call": "Y",
+        "Initial_Problem": "Auto Theft in Progress (P)",
+        "Problem__Final_": "Auto Theft in Progress (P)",
+        "Initial_Priority": 1,
+        "Final_Priority": 1,
+        "Division": "Precinct 4 North PSA",
+        "Jurisdiction": "MPD/MFD/North",
+        "Response_Date": 1790479451000,
+        "Call_Disposition": "RPT-Report",
+        "Latitude": 45.02137,
+        "Longitude": -93.30956,
+        "MPD_Response": "Y",
+        "Park_Police_Response": "N",
+        "U_of_M_Response": "N",
+        "Other_Agency_Response": "N",
+        "Ward__GIS_": "4",
+        "Neighborhood__GIS_": "Cleveland",
+        "OBJECTID": 1331357
+      },
+      "geometry": {
+        "x": -93.30955999999998,
+        "y": 45.02137000000005
+      }
+    }
+  ]
+}

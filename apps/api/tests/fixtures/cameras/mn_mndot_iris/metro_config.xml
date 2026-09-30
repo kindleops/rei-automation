@@ -1,0 +1,79 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE tms_config [
+<!ELEMENT tms_config (corridor | camera | commlink | controller | dms)*>
+<!ATTLIST tms_config time_stamp CDATA #REQUIRED>
+<!ELEMENT corridor (r_node)*>
+<!ATTLIST corridor route CDATA #REQUIRED>
+<!ATTLIST corridor dir CDATA #REQUIRED>
+<!ELEMENT r_node (detector | meter)*>
+<!ATTLIST r_node name CDATA #REQUIRED>
+<!ATTLIST r_node n_type CDATA 'Station'>
+<!ATTLIST r_node pickable CDATA 'f'>
+<!ATTLIST r_node above CDATA 'f'>
+<!ATTLIST r_node transition CDATA 'None'>
+<!ATTLIST r_node station_id CDATA #IMPLIED>
+<!ATTLIST r_node label CDATA ''>
+<!ATTLIST r_node lon CDATA #REQUIRED>
+<!ATTLIST r_node lat CDATA #REQUIRED>
+<!ATTLIST r_node lanes CDATA '0'>
+<!ATTLIST r_node attach_side CDATA 'right'>
+<!ATTLIST r_node shift CDATA '0'>
+<!ATTLIST r_node active CDATA 't'>
+<!ATTLIST r_node abandoned CDATA 'f'>
+<!ATTLIST r_node s_limit CDATA '55'>
+<!ATTLIST r_node forks CDATA #IMPLIED>
+<!ELEMENT detector EMPTY>
+<!ATTLIST detector name CDATA #REQUIRED>
+<!ATTLIST detector label CDATA 'FUTURE'>
+<!ATTLIST detector abandoned CDATA 'f'>
+<!ATTLIST detector category CDATA ''>
+<!ATTLIST detector lane CDATA '0'>
+<!ATTLIST detector field CDATA '22.0'>
+<!ATTLIST detector controller CDATA #IMPLIED>
+<!ELEMENT meter EMPTY>
+<!ATTLIST meter name CDATA #REQUIRED>
+<!ATTLIST meter lon CDATA #IMPLIED>
+<!ATTLIST meter lat CDATA #IMPLIED>
+<!ATTLIST meter storage CDATA #REQUIRED>
+<!ATTLIST meter max_wait CDATA '240'>
+<!ELEMENT camera EMPTY>
+<!ATTLIST camera name CDATA #REQUIRED>
+<!ATTLIST camera description CDATA #REQUIRED>
+<!ATTLIST camera lon CDATA #IMPLIED>
+<!ATTLIST camera lat CDATA #IMPLIED>
+<!ELEMENT commlink EMPTY>
+<!ATTLIST commlink name CDATA #REQUIRED>
+<!ATTLIST commlink description CDATA #REQUIRED>
+<!ATTLIST commlink protocol CDATA #REQUIRED>
+<!ELEMENT controller EMPTY>
+<!ATTLIST controller name CDATA #REQUIRED>
+<!ATTLIST controller condition CDATA #REQUIRED>
+<!ATTLIST controller drop CDATA #REQUIRED>
+<!ATTLIST controller commlink CDATA #IMPLIED>
+<!ATTLIST controller lon CDATA #IMPLIED>
+<!ATTLIST controller lat CDATA #IMPLIED>
+<!ATTLIST controller location CDATA #REQUIRED>
+<!ATTLIST controller notes CDATA #IMPLIED>
+<!ELEMENT dms EMPTY>
+<!ATTLIST dms name CDATA #REQUIRED>
+<!ATTLIST dms description CDATA #REQUIRED>
+<!ATTLIST dms lon CDATA #IMPLIED>
+<!ATTLIST dms lat CDATA #IMPLIED>
+<!ATTLIST dms width_pixels CDATA #IMPLIED>
+<!ATTLIST dms height_pixels CDATA #IMPLIED>
+]>
+<tms_config time_stamp='Tue Sep 29 20:00:04 CDT 2026'>
+<camera name='CTEST-Rise4' description='Unknown location'/>
+<camera name='C909' description='I-394 EB @ Hampshire Ave' lon='-93.3652' lat='44.97115'/>
+<camera name='C20000' description='T.H.36 (wowza test C001)'/>
+<camera name='C30337' description='U.S.63 (Le Roy - MP 0.5)' lon='-92.3697' lat='43.50839'/>
+<camera name='C30198' description='I-35 (Little Chicago - MP 70.0)' lon='-93.29439' lat='44.4787'/>
+<camera name='D6-C002' description='T.H.52 NB @ 75th St NW (MP 61.7)' lon='-92.51411' lat='44.10795'/>
+<camera name='C4952' description='T.H.149 NB @ Vikings Pkwy' lon='-93.12814' lat='44.85768'/>
+<camera name='C1504' description='T.H.15 NB @ 2nd St' lon='-94.20556' lat='45.54993'/>
+<camera name='C1911' description='Unknown location'/>
+<camera name='C870' description='I-94 EB @ Heggen St' lon='-92.74352' lat='44.9624'/>
+<camera name='C001' description='T.H.36 WB @ Cleveland Ave' lon='-93.186' lat='45.01038'/>
+<camera name='C30803' description='T.H.61 EB @ Tyler Rd' lon='-92.58411' lat='44.56699'/>
+<camera name='C047' description='I-35E NS N of Co Rd J (MP 121)' lon='-93.0442' lat='45.13186'/>
+</tms_config>

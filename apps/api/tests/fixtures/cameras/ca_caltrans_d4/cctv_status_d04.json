@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2026-01-23",
+          "recordTime": "14:19:48",
+          "recordEpoch": "1769206788"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV102 -- I-580 : West of SR-24",
+          "nearbyPlace": "Oakland",
+          "longitude": "-122.27291",
+          "latitude": "37.82539",
+          "elevation": "49",
+          "direction": "West",
+          "county": "Alameda",
+          "route": "I-580",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "45.44",
+          "alignment": "",
+          "milepost": "61.52"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W580_JWO_24_IC.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/tv102i580westofsr24.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2021-03-22",
+          "recordTime": "12:02:07",
+          "recordEpoch": "1616439727"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV224 -- SR-4 : Lone Tree Way",
+          "nearbyPlace": "Antioch",
+          "longitude": "-121.74233",
+          "latitude": "37.96199",
+          "elevation": "118",
+          "direction": "West",
+          "county": "Contra Costa",
+          "route": "SR-4",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "32.93",
+          "alignment": "",
+          "milepost": "32.71"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W4_at_Lone_Tree_Way.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/tv224sr4lonetreeway.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2019-08-13",
+          "recordTime": "17:03:13",
+          "recordEpoch": "1565740993"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV127 -- US-101 : Wilfred Avenue",
+          "nearbyPlace": "Rohnert Park",
+          "longitude": "-122.7129",
+          "latitude": "38.36362",
+          "elevation": "98",
+          "direction": "South",
+          "county": "Sonoma",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "14.94",
+          "alignment": "",
+          "milepost": "483.4"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/S101_at_Wilfred_Av.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/tv127us101wilfredavenue.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv127us101wilfredavenue/previous/tv127us101wilfredavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2022-06-23",
+          "recordTime": "16:30:34",
+          "recordEpoch": "1656027034"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV216 -- I-680 : North Main Street",
+          "nearbyPlace": "Walnut Creek",
+          "longitude": "-122.06656",
+          "latitude": "37.91497",
+          "elevation": "121",
+          "direction": "South",
+          "county": "Contra Costa",
+          "route": "I-680",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "15.52",
+          "alignment": "",
+          "milepost": "47.02"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/S680_at_N_Main_St.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/tv216i680northmainstreet.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv216i680northmainstreet/previous/tv216i680northmainstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2026-01-16",
+          "recordTime": "10:21:42",
+          "recordEpoch": "1768587702"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV709 -- SR-238 : South of Ashland Avenue",
+          "nearbyPlace": "San Lorenzo",
+          "longitude": "-122.12463",
+          "latitude": "37.69022",
+          "elevation": "39",
+          "direction": "North",
+          "county": "Alameda",
+          "route": "SR-238",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "15.98",
+          "alignment": "",
+          "milepost": "11.15"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/tv709sr238southofashlandavenue.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv709sr238southofashlandavenue/previous/tv709sr238southofashlandavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2026-01-16",
+          "recordTime": "09:54:44",
+          "recordEpoch": "1768586084"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV327 -- I-280 : John Daly Blvd",
+          "nearbyPlace": "San Francisco",
+          "longitude": "-122.4654",
+          "latitude": "37.71046",
+          "elevation": "282",
+          "direction": "South",
+          "county": "San Francisco",
+          "route": "I-280",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "0.24",
+          "alignment": "",
+          "milepost": "50.2"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/S280_at_John_Daly_Bl.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/tv327i280johndalyblvd.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv327i280johndalyblvd/previous/tv327i280johndalyblvd-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2023-02-17",
+          "recordTime": "00:08:41",
+          "recordEpoch": "1676621321"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV516 -- I-80 : West of Ashby Avenue",
+          "nearbyPlace": "Emeryville",
+          "longitude": "-122.29806",
+          "latitude": "37.84672",
+          "elevation": "16",
+          "direction": "East",
+          "county": "Alameda",
+          "route": "I-80",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "4.39",
+          "alignment": "",
+          "milepost": "9.72"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/E80_JWO_ASHBY_Av.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/tv516i80westofashbyavenue.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv516i80westofashbyavenue/previous/tv516i80westofashbyavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2026-03-17",
+          "recordTime": "13:39:14",
+          "recordEpoch": "1773779954"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TVB21 -- I-880 : 66th Avenue",
+          "nearbyPlace": "Oakland",
+          "longitude": "-122.20864",
+          "latitude": "37.75385",
+          "elevation": "16",
+          "direction": "South",
+          "county": "Alameda",
+          "route": "I-880",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "26.62",
+          "alignment": "",
+          "milepost": "36.85"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/S880_at_66th_Av.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/tvb21i88066thavenue.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb21i88066thavenue/previous/tvb21i88066thavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2026-06-19",
+          "recordTime": "11:00:00",
+          "recordEpoch": "1781892000"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TVC60 -- I-880 : US-101",
+          "nearbyPlace": "San Jose",
+          "longitude": "-121.90245",
+          "latitude": "37.36369",
+          "elevation": "65",
+          "direction": "South",
+          "county": "Santa Clara",
+          "route": "I-880",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "4.03",
+          "alignment": "",
+          "milepost": "4.03"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/N880_at_JCT_101.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/tvc60i880us101.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvc60i880us101/previous/tvc60i880us101-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2026-09-17",
+          "recordTime": "15:33:01",
+          "recordEpoch": "1789684381"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TVA49 -- I-580 : AT Tassajara",
+          "nearbyPlace": "Dublin",
+          "longitude": "-121.87167",
+          "latitude": "37.70189",
+          "elevation": "341",
+          "direction": "West",
+          "county": "Alameda",
+          "route": "I-580",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "17.93",
+          "alignment": "",
+          "milepost": "34.11"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W580_at_Tassajara_Rd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/tva49i580attassajara.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva49i580attassajara/previous/tva49i580attassajara-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2021-03-22",
+          "recordTime": "11:12:26",
+          "recordEpoch": "1616436746"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV398 -- I-380 : West of US-101",
+          "nearbyPlace": "San Bruno",
+          "longitude": "-122.40778",
+          "latitude": "37.63377",
+          "elevation": "16",
+          "direction": "East",
+          "county": "San Mateo",
+          "route": "I-380",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "6.11",
+          "alignment": "",
+          "milepost": "1.41"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/E380_JWO_JCT_101.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/tv398i380westofus101.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv398i380westofus101/previous/tv398i380westofus101-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "143",
+        "recordTimestamp": {
+          "recordDate": "2026-01-15",
+          "recordTime": "17:18:28",
+          "recordEpoch": "1768526308"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV965 -- I-80 : SR-29",
+          "nearbyPlace": "Vallejo",
+          "longitude": "-122.232165",
+          "latitude": "38.076304",
+          "elevation": "91",
+          "direction": "West",
+          "county": "Solano",
+          "route": "I-80",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "1.14",
+          "alignment": "",
+          "milepost": "28.63"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W80_at_JCT_29.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/tv965i80sr29.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "256",
+        "recordTimestamp": {
+          "recordDate": "2022-10-18",
+          "recordTime": "11:33:14",
+          "recordEpoch": "1666117994"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV826 -- SR-242 : AT CONCORD AV",
+          "nearbyPlace": "Concord",
+          "longitude": "-122.04342",
+          "latitude": "37.978452",
+          "elevation": "49",
+          "direction": "North",
+          "county": "Contra Costa",
+          "route": "SR-242",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "1.45",
+          "alignment": "",
+          "milepost": "1.71"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov:443/D4/N242_at_Concord_Av.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/tv826sr242atconcordav.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv826sr242atconcordav/previous/tv826sr242atconcordav-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "423",
+        "recordTimestamp": {
+          "recordDate": "2019-11-20",
+          "recordTime": "10:50:37",
+          "recordEpoch": "1574275837"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV975 -- I-80 : E80 Manuel Campos Pkwy ",
+          "nearbyPlace": "Fairfield",
+          "longitude": "-122.03355",
+          "latitude": "38.2949",
+          "elevation": "180",
+          "direction": "East",
+          "county": "Solano",
+          "route": "I-80",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "20.91",
+          "alignment": "",
+          "milepost": "48.41"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/E80_at_Manuel_Campos_Pkwy_OR.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "Not Reported",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/tv975i80e80manuelcampospkwy.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv975i80e80manuelcampospkwy/previous/tv975i80e80manuelcampospkwy-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "605",
+        "recordTimestamp": {
+          "recordDate": "2022-09-02",
+          "recordTime": "11:39:22",
+          "recordEpoch": "1662143962"
+        },
+        "location": {
+          "district": "4",
+          "locationName": "TV957 -- SR-84: W84 at Midspan Sub 23",
+          "nearbyPlace": "Fremont",
+          "longitude": "-122.11188",
+          "latitude": "37.51066",
+          "elevation": "-9",
+          "direction": "",
+          "county": "Alameda",
+          "route": "SR-84",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "0.000",
+          "alignment": "",
+          "milepost": "0.000"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/tv957sr84w84atmidspansub23.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv957sr84w84atmidspansub23/previous/tv957sr84w84atmidspansub23-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

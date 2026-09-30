@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2023-11-30",
+          "recordTime": "13:59:20",
+          "recordEpoch": "1701381560"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-AT TRUCK ESCAPE RAMP (SHOULDER)",
+          "nearbyPlace": "Lebec",
+          "longitude": "-118.92301",
+          "latitude": "34.912901",
+          "elevation": "2181",
+          "direction": "North",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "8.22",
+          "alignment": "R",
+          "milepost": "213.34"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at Truck Escape Ramp (Right Shoulder)",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Truck_Esc_Ramp_Shoulder.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/ker5attruckescaperampshoulder.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampshoulder/previous/ker5attruckescaperampshoulder-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2026-02-26",
+          "recordTime": "11:13:29",
+          "recordEpoch": "1772133209"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-AT TRUCK ESCAPE RAMP(MEDIAN)",
+          "nearbyPlace": "Lebec",
+          "longitude": "-118.92381",
+          "latitude": "34.921729",
+          "elevation": "1968",
+          "direction": "North",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "8.81",
+          "alignment": "R",
+          "milepost": "213.92"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at Truck Escape Ramp (Median)",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Truck_Esc_Ramp_Median.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/ker5attruckescaperampmedian.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5attruckescaperampmedian/previous/ker5attruckescaperampmedian-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2025-02-26",
+          "recordTime": "14:36:28",
+          "recordEpoch": "1740609388"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-AT GRAPEVINE UC",
+          "nearbyPlace": "Lebec",
+          "longitude": "-118.930646",
+          "latitude": "34.939257",
+          "elevation": "1541",
+          "direction": "South",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "10.17",
+          "alignment": "L",
+          "milepost": "215.29"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at Grapevine Road UC",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Grapevine_UC.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/ker5atgrapevineuc.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atgrapevineuc/previous/ker5atgrapevineuc-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2026-02-27",
+          "recordTime": "16:16:26",
+          "recordEpoch": "1772237786"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-AT RTE 99",
+          "nearbyPlace": "Bakersfield",
+          "longitude": "-118.955002",
+          "latitude": "35.018232",
+          "elevation": "830",
+          "direction": "North",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "15.815",
+          "alignment": "R",
+          "milepost": "220.717"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at SR-99 Interchange",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Rte_99.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/ker5atrte99.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5atrte99/previous/ker5atrte99-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2019-10-08",
+          "recordTime": "10:42:26",
+          "recordEpoch": "1570556546"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-N/O RTE 119",
+          "nearbyPlace": "Bakersfield",
+          "longitude": "-119.228696",
+          "latitude": "35.271401",
+          "elevation": "318",
+          "direction": "North",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "39.17",
+          "alignment": "",
+          "milepost": "244.29"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "North of SR-119",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_NO_RTE_119.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/ker5norte119.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte119/previous/ker5norte119-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2025-04-02",
+          "recordTime": "09:13:42",
+          "recordEpoch": "1743610422"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-N/O RTE 43",
+          "nearbyPlace": "Tupman",
+          "longitude": "-119.2876",
+          "latitude": "35.320279",
+          "elevation": "328",
+          "direction": "South",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "43.91",
+          "alignment": "",
+          "milepost": "248.81"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "North of SR-43",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Rte_43.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/ker5norte43.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte43/previous/ker5norte43-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2023-04-26",
+          "recordTime": "09:46:21",
+          "recordEpoch": "1682527581"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-N/O RTE 58",
+          "nearbyPlace": "Buttonwillow",
+          "longitude": "-119.419989",
+          "latitude": "35.415128",
+          "elevation": "308",
+          "direction": "South",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "53.83",
+          "alignment": "",
+          "milepost": "258.95"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "North of SR-58",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_NO_Rte_58.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/ker5norte58.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/previous/ker5norte58-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2022-08-29",
+          "recordTime": "14:43:20",
+          "recordEpoch": "1661809400"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "KER-5-S/O RTE 46",
+          "nearbyPlace": "Lost Hills",
+          "longitude": "-119.626532",
+          "latitude": "35.58653",
+          "elevation": "246",
+          "direction": "North",
+          "county": "Kern",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "70.46",
+          "alignment": "",
+          "milepost": "275.57"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "South of SR-46",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Rte_46.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/ker5sorte46.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5sorte46/previous/ker5sorte46-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2022-08-09",
+          "recordTime": "11:45:27",
+          "recordEpoch": "1660070727"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-5-N/O PANOCHE ROAD",
+          "nearbyPlace": "Firebaugh",
+          "longitude": "-120.630048",
+          "latitude": "36.648405",
+          "elevation": "469",
+          "direction": "South",
+          "county": "Fresno",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "49.72",
+          "alignment": "",
+          "milepost": "368.59"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": " Just North of Panoche Rd ",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Panoche.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/fre5nopanocheroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5nopanocheroad/previous/fre5nopanocheroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2023-03-08",
+          "recordTime": "11:31:29",
+          "recordEpoch": "1678303889"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-5-AT RTE 33 ",
+          "nearbyPlace": "Cantua Creek",
+          "longitude": "-120.39393",
+          "latitude": "36.43614",
+          "elevation": "472",
+          "direction": "North",
+          "county": "Fresno",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "29.96",
+          "alignment": "",
+          "milepost": "348.61"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at SR-33 (Derrick Blvd) Overcrossing",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/5_Rte_33.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/fre5atrte33.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33/previous/fre5atrte33-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "13",
+        "recordTimestamp": {
+          "recordDate": "2024-07-24",
+          "recordTime": "09:19:52",
+          "recordEpoch": "1721837992"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-41-AT RTE 99 IC",
+          "nearbyPlace": "Fresno",
+          "longitude": "-119.785139",
+          "latitude": "36.719132",
+          "elevation": "295",
+          "direction": "South",
+          "county": "Fresno",
+          "route": "SR-41",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "21.96",
+          "alignment": "",
+          "milepost": "123.71"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at SR-99",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/41_RTE_99.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/fre41atrte99ic.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/previous/fre41atrte99ic-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "14",
+        "recordTimestamp": {
+          "recordDate": "2026-03-10",
+          "recordTime": "15:21:29",
+          "recordEpoch": "1773181289"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-41-AT TULARE AVE",
+          "nearbyPlace": "Fresno",
+          "longitude": "-119.776917",
+          "latitude": "36.74348",
+          "elevation": "308",
+          "direction": "North",
+          "county": "Fresno",
+          "route": "SR-41",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "23.77",
+          "alignment": "",
+          "milepost": "125.53"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "at Tulare Ave",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/41_Tulare.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/fre41attulareave.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41attulareave/previous/fre41attulareave-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "15",
+        "recordTimestamp": {
+          "recordDate": "2026-07-23",
+          "recordTime": "09:19:26",
+          "recordEpoch": "1784823566"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-41-JNO RTE 180",
+          "nearbyPlace": "Fresno",
+          "longitude": "-119.775288",
+          "latitude": "36.757485",
+          "elevation": "324",
+          "direction": "North",
+          "county": "Fresno",
+          "route": "SR-41",
+          "routeSuffix": "S",
+          "postmilePrefix": "R",
+          "postmile": "24.73",
+          "alignment": "",
+          "milepost": "126.48"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "Just North of Route 180",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/fre41jnorte180.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41jnorte180/previous/fre41jnorte180-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "19",
+        "recordTimestamp": {
+          "recordDate": "2026-03-25",
+          "recordTime": "16:18:20",
+          "recordEpoch": "1774480700"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-41-AT SHAW AVE",
+          "nearbyPlace": "Fresno",
+          "longitude": "-119.785747",
+          "latitude": "36.808356",
+          "elevation": "324",
+          "direction": "South",
+          "county": "Fresno",
+          "route": "SR-41",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "28.46",
+          "alignment": "",
+          "milepost": "130.21"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "at Shaw Ave",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/41_Shaw.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/fre41atshawave.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshawave/previous/fre41atshawave-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "105",
+        "recordTimestamp": {
+          "recordDate": "2023-08-09",
+          "recordTime": "10:57:37",
+          "recordEpoch": "1691603857"
+        },
+        "location": {
+          "district": "6",
+          "locationName": "FRE-180-AT ACADEMY AVE",
+          "nearbyPlace": "Sanger",
+          "longitude": "-119.55661",
+          "latitude": "36.7363",
+          "elevation": "390",
+          "direction": "",
+          "county": "Fresno",
+          "route": "SR-180",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "71.59",
+          "alignment": "",
+          "milepost": "48.08"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "At Academy Ave",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D6/180_Academy.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "1",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/fre180atacademyave.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/previous/fre180atacademyave-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

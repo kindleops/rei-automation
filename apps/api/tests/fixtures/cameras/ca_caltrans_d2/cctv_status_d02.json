@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2026-08-17",
+          "recordTime": "11:22:56",
+          "recordEpoch": "1786990976"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Abrams Lake NB",
+          "nearbyPlace": "Mount Shasta",
+          "longitude": "-122.34276",
+          "latitude": "41.34496",
+          "elevation": "3861",
+          "direction": "",
+          "county": "Siskiyou",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "13.17",
+          "alignment": "",
+          "milepost": "740.821"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/abramslakenb.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/previous/abramslakenb-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2018-07-25",
+          "recordTime": "14:57:28",
+          "recordEpoch": "1532555848"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Anderson Grade",
+          "nearbyPlace": "Yreka",
+          "longitude": "-122.58937",
+          "latitude": "41.79255",
+          "elevation": "2963",
+          "direction": "",
+          "county": "Siskiyou",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "53.08",
+          "alignment": "",
+          "milepost": "780.283"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/andersongrade.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/andersongrade/previous/andersongrade-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2026-07-17",
+          "recordTime": "14:34:41",
+          "recordEpoch": "1784324081"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Antlers Bridge",
+          "nearbyPlace": "Lakehead",
+          "longitude": "-122.38379",
+          "latitude": "40.88504",
+          "elevation": "1020",
+          "direction": "",
+          "county": "Shasta",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "40.6",
+          "alignment": "",
+          "milepost": "701.725"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/antlersbridge.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/antlersbridge/previous/antlersbridge-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2026-07-17",
+          "recordTime": "14:34:49",
+          "recordEpoch": "1784324089"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "BassMtn",
+          "nearbyPlace": "Redding",
+          "longitude": "-122.36731",
+          "latitude": "40.73272",
+          "elevation": "2775",
+          "direction": "",
+          "county": "Shasta",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "24.54",
+          "alignment": "",
+          "milepost": "687.173"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/bassmtn.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bassmtn/previous/bassmtn-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2026-08-17",
+          "recordTime": "11:23:15",
+          "recordEpoch": "1786990995"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Black Butte",
+          "nearbyPlace": "Mount Shasta",
+          "longitude": "-122.3559",
+          "latitude": "41.35411",
+          "elevation": "3912",
+          "direction": "",
+          "county": "Siskiyou",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "14.08",
+          "alignment": "",
+          "milepost": "741.746"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/blackbutte.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/blackbutte/previous/blackbutte-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2025-01-16",
+          "recordTime": "09:33:14",
+          "recordEpoch": "1737048794"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Bogard",
+          "nearbyPlace": "Susanville",
+          "longitude": "-121.0887",
+          "latitude": "40.58548",
+          "elevation": "5629",
+          "direction": "",
+          "county": "Lassen",
+          "route": "SR-44",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "14.72",
+          "alignment": "",
+          "milepost": "84.312"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/bogard.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/bogard/previous/bogard-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2024-02-15",
+          "recordTime": "16:20:09",
+          "recordEpoch": "1708042809"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Buckhorn",
+          "nearbyPlace": "Lewiston",
+          "longitude": "-122.7608",
+          "latitude": "40.65457",
+          "elevation": "2646",
+          "direction": "",
+          "county": "Trinity",
+          "route": "SR-299",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "69.7",
+          "alignment": "",
+          "milepost": "111.662"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/buckhorn.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/buckhorn/previous/buckhorn-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2026-08-07",
+          "recordTime": "07:27:16",
+          "recordEpoch": "1786112836"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Cedar Pass",
+          "nearbyPlace": "Alturas",
+          "longitude": "-120.28769",
+          "latitude": "41.5604",
+          "elevation": "6097",
+          "direction": "",
+          "county": "Modoc",
+          "route": "SR-299",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "50.3",
+          "alignment": "",
+          "milepost": "289.452"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/cedarpass.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/cedarpass/previous/cedarpass-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2025-04-21",
+          "recordTime": "07:16:24",
+          "recordEpoch": "1745244984"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Central Yreka",
+          "nearbyPlace": "Yreka",
+          "longitude": "-122.63091",
+          "latitude": "41.73425",
+          "elevation": "2674",
+          "direction": "",
+          "county": "Siskiyou",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "47.82",
+          "alignment": "",
+          "milepost": "775.053"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "60",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/centralyreka.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/centralyreka/previous/centralyreka-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2022-05-12",
+          "recordTime": "13:33:41",
+          "recordEpoch": "1652387621"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Deschutes",
+          "nearbyPlace": "Anderson",
+          "longitude": "-122.28756",
+          "latitude": "40.43842",
+          "elevation": "439",
+          "direction": "",
+          "county": "Shasta",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "4.29",
+          "alignment": "",
+          "milepost": "666.935"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/deschutes.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/deschutes/previous/deschutes-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2026-01-20",
+          "recordTime": "15:22:31",
+          "recordEpoch": "1768951351"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Dorris",
+          "nearbyPlace": "Dorris",
+          "longitude": "-121.9091",
+          "latitude": "41.97273",
+          "elevation": "4354",
+          "direction": "",
+          "county": "Siskiyou",
+          "route": "US-97",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "51.64",
+          "alignment": "",
+          "milepost": "51.971"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/dorris.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dorris/previous/dorris-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "13",
+        "recordTimestamp": {
+          "recordDate": "2022-08-01",
+          "recordTime": "14:32:21",
+          "recordEpoch": "1659389541"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Doyle",
+          "nearbyPlace": "Doyle",
+          "longitude": "-120.0853",
+          "latitude": "40.00069",
+          "elevation": "4300",
+          "direction": "",
+          "county": "Lassen",
+          "route": "US-395",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "21.88",
+          "alignment": "",
+          "milepost": "379.026"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/doyle.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/doyle/previous/doyle-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "14",
+        "recordTimestamp": {
+          "recordDate": "2026-03-06",
+          "recordTime": "14:30:40",
+          "recordEpoch": "1772836240"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Dunsmuir",
+          "nearbyPlace": "Dunsmuir",
+          "longitude": "-122.27521",
+          "latitude": "41.21896",
+          "elevation": "2420",
+          "direction": "",
+          "county": "Siskiyou",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "2.16",
+          "alignment": "",
+          "milepost": "730.226"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/dunsmuir.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/dunsmuir/previous/dunsmuir-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "15",
+        "recordTimestamp": {
+          "recordDate": "2025-09-09",
+          "recordTime": "12:25:53",
+          "recordEpoch": "1757445953"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "East Riverside",
+          "nearbyPlace": "Susanville",
+          "longitude": "-120.63309",
+          "latitude": "40.40596",
+          "elevation": "4205",
+          "direction": "",
+          "county": "Lassen",
+          "route": "SR-36",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "26.49",
+          "alignment": "",
+          "milepost": "245.848"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "60",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/eastriverside.jpg",
+            "referenceImageUpdateFrequency": "58",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/eastriverside/previous/eastriverside-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "30",
+        "recordTimestamp": {
+          "recordDate": "2025-04-25",
+          "recordTime": "09:49:17",
+          "recordEpoch": "1745599757"
+        },
+        "location": {
+          "district": "2",
+          "locationName": "Lake Blvd",
+          "nearbyPlace": "Redding",
+          "longitude": "-122.37628",
+          "latitude": "40.60909",
+          "elevation": "746",
+          "direction": "",
+          "county": "Shasta",
+          "route": "SR-299",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "18.62",
+          "alignment": "",
+          "milepost": "136.91"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/lakeblvd.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d2/cctv/image/lakeblvd/previous/lakeblvd-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

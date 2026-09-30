@@ -1,0 +1,375 @@
+{
+  "objectIdFieldName": "ObjectId",
+  "uniqueIdField": {
+    "name": "ObjectId",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "Id",
+      "type": "esriFieldTypeString",
+      "alias": "Id",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Latitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Latitude",
+      "sqlType": "sqlTypeFloat",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Longitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Longitude",
+      "sqlType": "sqlTypeFloat",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Url",
+      "type": "esriFieldTypeString",
+      "alias": "Url",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "VideoUrl",
+      "type": "esriFieldTypeString",
+      "alias": "VideoUrl",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Status",
+      "type": "esriFieldTypeString",
+      "alias": "Status",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Description",
+      "type": "esriFieldTypeString",
+      "alias": "Description",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ObjectId",
+      "type": "esriFieldTypeOID",
+      "alias": "ObjectId",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Roadway",
+      "type": "esriFieldTypeString",
+      "alias": "Roadway",
+      "sqlType": "sqlTypeOther",
+      "length": 256,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Direction",
+      "type": "esriFieldTypeString",
+      "alias": "Direction",
+      "sqlType": "sqlTypeOther",
+      "length": 55,
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "exceededTransferLimit": true,
+  "features": [
+    {
+      "attributes": {
+        "Id": "10651",
+        "Latitude": 0,
+        "Longitude": 0,
+        "Url": "https://511ga.org/map/Cctv/10651",
+        "VideoUrl": "https://sfs-lr-40.dot.ga.gov:443/rtplive/GWIN-CCTV-SatelliteBlvd_BoggsRd-111_249-N/playlist.m3u8",
+        "Status": "Disabled",
+        "Description": "N/A",
+        "ObjectId": 1,
+        "Roadway": "I-20",
+        "Direction": "Unknown"
+      },
+      "geometry": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18549",
+        "Latitude": 33.995518,
+        "Longitude": -83.733475,
+        "Url": "https://511ga.org/map/Cctv/18549",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/BARR-CCTV-0003/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "BARR-0003: SR 211 at Horton St (Barrow)",
+        "ObjectId": 2,
+        "Roadway": "SR 211",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9321167.7993513029,
+        "y": 4028200.2189155552
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18550",
+        "Latitude": 34.176594,
+        "Longitude": -84.786095,
+        "Url": "https://511ga.org/map/Cctv/18550",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/BART-CCTV-0004/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "BART-0004: SR 3 at MLK (Bartow)",
+        "ObjectId": 3,
+        "Roadway": "SR 3",
+        "Direction": "South"
+      },
+      "geometry": {
+        "x": -9438344.921750119,
+        "y": 4052539.005726235
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18551",
+        "Latitude": 34.37697,
+        "Longitude": -84.91445,
+        "Url": "https://511ga.org/map/Cctv/18551",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/BART-CCTV-0209/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "BART-0209: SR 140 at Princeton Blvd (Bartow)",
+        "ObjectId": 4,
+        "Roadway": "SR 140",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9452633.3349908888,
+        "y": 4079532.9045428955
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18552",
+        "Latitude": 33.568897,
+        "Longitude": -85.04876,
+        "Url": "https://511ga.org/map/Cctv/18552",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/CARR-CCTV-0401/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "CARR-0401: SR 166 at SR 16 (Carroll)",
+        "ObjectId": 5,
+        "Roadway": "SR 166",
+        "Direction": "North"
+      },
+      "geometry": {
+        "x": -9467584.655799333,
+        "y": 3971061.278728127
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18553",
+        "Latitude": 34.113056182861,
+        "Longitude": -84.561744689941,
+        "Url": "https://511ga.org/map/Cctv/18553",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/CHER-CCTV-0806/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "CHER-0806: Eagle Dr at Putnam Ford Dr (Cherokee)",
+        "ObjectId": 6,
+        "Roadway": "Eagle Dr",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9413370.3594750371,
+        "y": 4043992.8304272708
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18554",
+        "Latitude": 31.487771987915,
+        "Longitude": -82.851196289062,
+        "Url": "https://511ga.org/map/Cctv/18554",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/COFF-CCTV-0012/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "COFF-0012: SR 31 at SR 135 (Coffee)",
+        "ObjectId": 7,
+        "Roadway": "SR 31",
+        "Direction": "South"
+      },
+      "geometry": {
+        "x": -9222952.9825119376,
+        "y": 3696258.9627942829
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18555",
+        "Latitude": 31.4975,
+        "Longitude": -82.873,
+        "Url": "https://511ga.org/map/Cctv/18555",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/COFF-CCTV-0015/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "COFF-0015: SR 158 at SR 206 (Coffee)",
+        "ObjectId": 8,
+        "Roadway": "SR 158",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9225380.160510961,
+        "y": 3697528.9382462557
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18556",
+        "Latitude": 31.502285003662,
+        "Longitude": -82.874977111816,
+        "Url": "https://511ga.org/map/Cctv/18556",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/COFF-CCTV-0018/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "COFF-0018: SR 206 at Thompson Dr (Coffee)",
+        "ObjectId": 9,
+        "Roadway": "SR 206",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9225600.2515915576,
+        "y": 3698153.6608211673
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18557",
+        "Latitude": 34.143715,
+        "Longitude": -84.251366,
+        "Url": "https://511ga.org/map/Cctv/18557",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/FORS-CCTV-0012/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "FORS-0012: SR 9 / Atlanta Hwy at Francis Rd / Grassland Pkwy (Forsyth)",
+        "ObjectId": 10,
+        "Roadway": "SR 9/Atlanta Hwy",
+        "Direction": "North"
+      },
+      "geometry": {
+        "x": -9378819.1617577225,
+        "y": 4048115.8024306614
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18558",
+        "Latitude": 33.8258,
+        "Longitude": -84.35284,
+        "Url": "https://511ga.org/map/Cctv/18558",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/ATL-CCTV-0602/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "ATL-0602: SR 13 at Lenox Rd / Cheshire Bridge Rd (Atlanta)",
+        "ObjectId": 11,
+        "Roadway": "SR 13",
+        "Direction": "North"
+      },
+      "geometry": {
+        "x": -9390115.1957664788,
+        "y": 4005435.1378950491
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18559",
+        "Latitude": 34.158222,
+        "Longitude": -84.78711,
+        "Url": "https://511ga.org/map/Cctv/18559",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/BART-CCTV-0001/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "BART-0001: SR 3 at S Bridge Dr (Bartow)",
+        "ObjectId": 12,
+        "Roadway": "SR 3",
+        "Direction": "North"
+      },
+      "geometry": {
+        "x": -9438457.9110332746,
+        "y": 4050067.21303836
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18560",
+        "Latitude": 34.16763,
+        "Longitude": -84.79358,
+        "Url": "https://511ga.org/map/Cctv/18560",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/BART-CCTV-0206/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "BART-0206: SR 61 at Church St (Bartow)",
+        "ObjectId": 13,
+        "Roadway": "SR 61",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9439178.1481387056,
+        "y": 4051332.9103413392
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18561",
+        "Latitude": 33.73094,
+        "Longitude": -84.91887,
+        "Url": "https://511ga.org/map/Cctv/18561",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/CARR-CCTV-0102/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "CARR-0102: SR 8 at Carroll (Carroll)",
+        "ObjectId": 14,
+        "Roadway": "SR 8",
+        "Direction": "East"
+      },
+      "geometry": {
+        "x": -9453125.3671401944,
+        "y": 3992730.80671824
+      }
+    },
+    {
+      "attributes": {
+        "Id": "18562",
+        "Latitude": 34.07864,
+        "Longitude": -84.57326,
+        "Url": "https://511ga.org/map/Cctv/18562",
+        "VideoUrl": "https://sfs-msc-pub-lq-01.navigator.dot.ga.gov:443/rtplive/CHER-CCTV-0801/playlist.m3u8",
+        "Status": "Enabled",
+        "Description": "CHER-0801: Bells Ferry Rd at Lake Forest Dr (Cherokee)",
+        "ObjectId": 15,
+        "Roadway": "Bells Ferry Rd",
+        "Direction": "North"
+      },
+      "geometry": {
+        "x": -9414652.2379271332,
+        "y": 4039366.3509859233
+      }
+    }
+  ]
+}

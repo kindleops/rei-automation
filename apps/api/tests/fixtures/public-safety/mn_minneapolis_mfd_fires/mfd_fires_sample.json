@@ -1,0 +1,614 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4269,
+    "latestWkid": 4269
+  },
+  "fields": [
+    {
+      "name": "incident_number",
+      "type": "esriFieldTypeString",
+      "alias": "incident_number",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "incident_type_code",
+      "type": "esriFieldTypeString",
+      "alias": "incident_type_code",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "incident_type",
+      "type": "esriFieldTypeString",
+      "alias": "incident_type",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "alarm_date",
+      "type": "esriFieldTypeDate",
+      "alias": "alarm_date",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "alarm_time",
+      "type": "esriFieldTypeString",
+      "alias": "alarm_time",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "cleared_date",
+      "type": "esriFieldTypeDate",
+      "alias": "cleared_date",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "cleared_time",
+      "type": "esriFieldTypeString",
+      "alias": "cleared_time",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "street_number",
+      "type": "esriFieldTypeString",
+      "alias": "street_number",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "street_prefix",
+      "type": "esriFieldTypeString",
+      "alias": "street_prefix",
+      "sqlType": "sqlTypeOther",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "street_name",
+      "type": "esriFieldTypeString",
+      "alias": "street_name",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "street_type",
+      "type": "esriFieldTypeString",
+      "alias": "street_type",
+      "sqlType": "sqlTypeOther",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "street_suffix",
+      "type": "esriFieldTypeString",
+      "alias": "street_suffix",
+      "sqlType": "sqlTypeOther",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "apartment_number",
+      "type": "esriFieldTypeString",
+      "alias": "apartment_number",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "city",
+      "type": "esriFieldTypeString",
+      "alias": "city",
+      "sqlType": "sqlTypeOther",
+      "length": 120,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "zip_code",
+      "type": "esriFieldTypeString",
+      "alias": "zip_code",
+      "sqlType": "sqlTypeOther",
+      "length": 15,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "cross_street",
+      "type": "esriFieldTypeString",
+      "alias": "cross_street",
+      "sqlType": "sqlTypeOther",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "latitude",
+      "type": "esriFieldTypeString",
+      "alias": "latitude",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "longitude",
+      "type": "esriFieldTypeString",
+      "alias": "longitude",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "alarms",
+      "type": "esriFieldTypeString",
+      "alias": "alarms",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "property_use",
+      "type": "esriFieldTypeString",
+      "alias": "property_use",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "fire_spread",
+      "type": "esriFieldTypeString",
+      "alias": "fire_spread",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "property_losses",
+      "type": "esriFieldTypeInteger",
+      "alias": "property_losses",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "content_losses",
+      "type": "esriFieldTypeInteger",
+      "alias": "content_losses",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "incident_number": "26-0024723",
+        "incident_type_code": "111",
+        "incident_type": "Building fire",
+        "alarm_date": 1779667200000,
+        "alarm_time": "22:10:17",
+        "cleared_date": 1779667200000,
+        "cleared_time": "23:18:09",
+        "street_number": "3643",
+        "street_prefix": null,
+        "street_name": "Penn",
+        "street_type": "Avenue",
+        "street_suffix": "North",
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55412",
+        "cross_street": null,
+        "latitude": "45.021238",
+        "longitude": "-93.308283",
+        "alarms": "1",
+        "property_use": "Multifamily dwelling",
+        "fire_spread": "Confined to object of origin",
+        "property_losses": 5000,
+        "content_losses": 10000,
+        "OBJECTID": 1283
+      },
+      "geometry": {
+        "x": -93.30828299999996,
+        "y": 45.02123800000004
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0025933",
+        "incident_type_code": "111",
+        "incident_type": "Building fire",
+        "alarm_date": 1780272000000,
+        "alarm_time": "12:00:14",
+        "cleared_date": 1780272000000,
+        "cleared_time": "13:13:59",
+        "street_number": "4515",
+        "street_prefix": null,
+        "street_name": "Washburn",
+        "street_type": "Avenue",
+        "street_suffix": "North",
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55412",
+        "cross_street": null,
+        "latitude": "45.037757",
+        "longitude": "-93.317994",
+        "alarms": "1",
+        "property_use": "1 or 2 family dwelling",
+        "fire_spread": "Confined to room of origin",
+        "property_losses": 30000,
+        "content_losses": 5000,
+        "OBJECTID": 1330
+      },
+      "geometry": {
+        "x": -93.31799399999994,
+        "y": 45.037757000000056
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0023008",
+        "incident_type_code": "111",
+        "incident_type": "Building fire",
+        "alarm_date": 1778889600000,
+        "alarm_time": "12:47:39",
+        "cleared_date": 1778889600000,
+        "cleared_time": "15:36:15",
+        "street_number": "2611",
+        "street_prefix": null,
+        "street_name": "Central",
+        "street_type": "Avenue",
+        "street_suffix": "Northeast",
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55418",
+        "cross_street": null,
+        "latitude": "45.015148",
+        "longitude": "-93.24734",
+        "alarms": "2",
+        "property_use": "Residential board and care",
+        "fire_spread": "Confined to floor of origin",
+        "property_losses": 40000,
+        "content_losses": 10000,
+        "OBJECTID": 149
+      },
+      "geometry": {
+        "x": -93.24733999999995,
+        "y": 45.01514800000007
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0025643",
+        "incident_type_code": "112",
+        "incident_type": "Fires in structure other than in a building",
+        "alarm_date": 1780099200000,
+        "alarm_time": "18:08:51",
+        "cleared_date": 1780099200000,
+        "cleared_time": "20:27:56",
+        "street_number": "5158",
+        "street_prefix": null,
+        "street_name": "Queen",
+        "street_type": "Avenue",
+        "street_suffix": "North",
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55430",
+        "cross_street": null,
+        "latitude": "45.048648",
+        "longitude": "-93.310603",
+        "alarms": null,
+        "property_use": "Parking garage, (detached residential garage)",
+        "fire_spread": "Beyond building of origin",
+        "property_losses": 120000,
+        "content_losses": 30000,
+        "OBJECTID": 1315
+      },
+      "geometry": {
+        "x": -93.31060299999996,
+        "y": 45.04864800000007
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026188",
+        "incident_type_code": "113",
+        "incident_type": "Cooking fire, confined to container",
+        "alarm_date": 1780358400000,
+        "alarm_time": "17:47:14",
+        "cleared_date": 1780358400000,
+        "cleared_time": "18:00:05",
+        "street_number": "4953",
+        "street_prefix": null,
+        "street_name": "Aldrich",
+        "street_type": "Avenue",
+        "street_suffix": "South",
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55409",
+        "cross_street": null,
+        "latitude": "44.913144",
+        "longitude": "-93.28955",
+        "alarms": null,
+        "property_use": "24-hour care Nursing homes, 4 or more persons",
+        "fire_spread": null,
+        "property_losses": null,
+        "content_losses": null,
+        "OBJECTID": 1341
+      },
+      "geometry": {
+        "x": -93.28954999999996,
+        "y": 44.913144000000045
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026467",
+        "incident_type_code": "131",
+        "incident_type": "Passenger vehicle fire",
+        "alarm_date": 1780531200000,
+        "alarm_time": "00:13:03",
+        "cleared_date": 1780531200000,
+        "cleared_time": "00:40:30",
+        "street_number": "300-301",
+        "street_prefix": null,
+        "street_name": "INTERSTATE 35W SB",
+        "street_type": null,
+        "street_suffix": null,
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55408",
+        "cross_street": null,
+        "latitude": "44.950008",
+        "longitude": "-93.274831",
+        "alarms": null,
+        "property_use": "Highway or divided highway",
+        "fire_spread": null,
+        "property_losses": 3000,
+        "content_losses": 500,
+        "OBJECTID": 1352
+      },
+      "geometry": {
+        "x": -93.27483099999995,
+        "y": 44.950008000000025
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026416",
+        "incident_type_code": "131",
+        "incident_type": "Passenger vehicle fire",
+        "alarm_date": 1780444800000,
+        "alarm_time": "17:43:42",
+        "cleared_date": 1780444800000,
+        "cleared_time": "18:39:36",
+        "street_number": null,
+        "street_prefix": null,
+        "street_name": "Lasalle",
+        "street_type": "Avenue",
+        "street_suffix": null,
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55403",
+        "cross_street": "Oak Grove St",
+        "latitude": "44.966375",
+        "longitude": "-93.279331",
+        "alarms": null,
+        "property_use": "Street or road in commercial area",
+        "fire_spread": null,
+        "property_losses": 3000,
+        "content_losses": 500,
+        "OBJECTID": 1346
+      },
+      "geometry": {
+        "x": -93.27933099999996,
+        "y": 44.96637500000003
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026861",
+        "incident_type_code": "151",
+        "incident_type": "Outside rubbish, trash or waste fire",
+        "alarm_date": 1780704000000,
+        "alarm_time": "03:35:06",
+        "cleared_date": 1780704000000,
+        "cleared_time": "03:49:22",
+        "street_number": "3734",
+        "street_prefix": null,
+        "street_name": "STEVENS",
+        "street_type": "Avenue",
+        "street_suffix": "South",
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55409",
+        "cross_street": null,
+        "latitude": "44.935328",
+        "longitude": "-93.275327",
+        "alarms": null,
+        "property_use": "1 or 2 family dwelling",
+        "fire_spread": null,
+        "property_losses": null,
+        "content_losses": null,
+        "OBJECTID": 172
+      },
+      "geometry": {
+        "x": -93.27532699999995,
+        "y": 44.93532800000003
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026700",
+        "incident_type_code": "151",
+        "incident_type": "Outside rubbish, trash or waste fire",
+        "alarm_date": 1780617600000,
+        "alarm_time": "11:12:59",
+        "cleared_date": 1780617600000,
+        "cleared_time": "11:55:21",
+        "street_number": null,
+        "street_prefix": null,
+        "street_name": "Glenwood",
+        "street_type": "Avenue",
+        "street_suffix": null,
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55403",
+        "cross_street": "12 St N",
+        "latitude": "44.978928",
+        "longitude": "-93.281528",
+        "alarms": null,
+        "property_use": "Street, other",
+        "fire_spread": null,
+        "property_losses": 0,
+        "content_losses": 0,
+        "OBJECTID": 173
+      },
+      "geometry": {
+        "x": -93.28152799999998,
+        "y": 44.97892800000005
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026426",
+        "incident_type_code": "154",
+        "incident_type": "Dumpster or other outside trash receptacle fire",
+        "alarm_date": 1780444800000,
+        "alarm_time": "18:58:58",
+        "cleared_date": 1780444800000,
+        "cleared_time": "19:18:45",
+        "street_number": "4155",
+        "street_prefix": null,
+        "street_name": "Hiawatha",
+        "street_type": "Avenue",
+        "street_suffix": null,
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55406",
+        "cross_street": null,
+        "latitude": "44.927708",
+        "longitude": "-93.224148",
+        "alarms": null,
+        "property_use": "Vacant lot",
+        "fire_spread": null,
+        "property_losses": 0,
+        "content_losses": 0,
+        "OBJECTID": 1347
+      },
+      "geometry": {
+        "x": -93.22414799999996,
+        "y": 44.92770800000005
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0026415",
+        "incident_type_code": "143",
+        "incident_type": "Grass fire",
+        "alarm_date": 1780444800000,
+        "alarm_time": "17:37:14",
+        "cleared_date": 1780444800000,
+        "cleared_time": "17:58:58",
+        "street_number": null,
+        "street_prefix": null,
+        "street_name": "Douglas",
+        "street_type": "Avenue",
+        "street_suffix": null,
+        "apartment_number": null,
+        "city": "MINNEAPOLIS",
+        "zip_code": "55405",
+        "cross_street": "Kenwood Pkwy",
+        "latitude": "44.966453",
+        "longitude": "-93.307875",
+        "alarms": null,
+        "property_use": "Residential street, road or residential driveway",
+        "fire_spread": null,
+        "property_losses": 0,
+        "content_losses": 0,
+        "OBJECTID": 1345
+      },
+      "geometry": {
+        "x": -93.30787499999997,
+        "y": 44.96645300000006
+      }
+    },
+    {
+      "attributes": {
+        "incident_number": "26-0025709",
+        "incident_type_code": "113",
+        "incident_type": "Cooking fire, confined to container",
+        "alarm_date": 1780099200000,
+        "alarm_time": "23:59:17",
+        "cleared_date": 1780185600000,
+        "cleared_time": "00:17:31",
+        "street_number": "4410",
+        "street_prefix": "West",
+        "street_name": "Lake Harriet",
+        "street_type": "Parkway",
+        "street_suffix": null,
+        "apartment_number": "[redacted]",
+        "city": "MINNEAPOLIS",
+        "zip_code": "55410",
+        "cross_street": null,
+        "latitude": "44.92265",
+        "longitude": "-93.311767",
+        "alarms": null,
+        "property_use": "Multifamily dwelling",
+        "fire_spread": null,
+        "property_losses": null,
+        "content_losses": null,
+        "OBJECTID": 1318
+      },
+      "geometry": {
+        "x": -93.31176699999997,
+        "y": 44.92265000000003
+      }
+    }
+  ]
+}

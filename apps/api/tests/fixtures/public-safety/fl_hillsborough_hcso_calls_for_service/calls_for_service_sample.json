@@ -1,0 +1,412 @@
+{
+  "displayFieldName": "FullReportNumber",
+  "fieldAliases": {
+    "OBJECTID": "OBJECTID",
+    "FullReportNumber": "Report Number",
+    "IncidentStartDate": "Incident Date Original",
+    "IncidentStartDateString": "Incident Date Original String",
+    "UTCIncidentStartDate": "Incident Date",
+    "IncidentStartTime": "Incident Start Time",
+    "TimeReceived": "Time Received",
+    "Address": "Address",
+    "Grid": "Grid",
+    "TimeCleared": "Time Cleared",
+    "IncidentTypeDesc": "Incident Type",
+    "Category": "Category",
+    "X": "X",
+    "Y": "Y"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID"
+    },
+    {
+      "name": "FullReportNumber",
+      "type": "esriFieldTypeString",
+      "alias": "Report Number",
+      "length": 60
+    },
+    {
+      "name": "IncidentStartDate",
+      "type": "esriFieldTypeDate",
+      "alias": "Incident Date Original",
+      "length": 8
+    },
+    {
+      "name": "IncidentStartDateString",
+      "type": "esriFieldTypeString",
+      "alias": "Incident Date Original String",
+      "length": 10
+    },
+    {
+      "name": "UTCIncidentStartDate",
+      "type": "esriFieldTypeDate",
+      "alias": "Incident Date",
+      "length": 8
+    },
+    {
+      "name": "IncidentStartTime",
+      "type": "esriFieldTypeString",
+      "alias": "Incident Start Time",
+      "length": 10
+    },
+    {
+      "name": "TimeReceived",
+      "type": "esriFieldTypeString",
+      "alias": "Time Received",
+      "length": 10
+    },
+    {
+      "name": "Address",
+      "type": "esriFieldTypeString",
+      "alias": "Address",
+      "length": 50
+    },
+    {
+      "name": "Grid",
+      "type": "esriFieldTypeString",
+      "alias": "Grid",
+      "length": 6
+    },
+    {
+      "name": "TimeCleared",
+      "type": "esriFieldTypeString",
+      "alias": "Time Cleared",
+      "length": 10
+    },
+    {
+      "name": "IncidentTypeDesc",
+      "type": "esriFieldTypeString",
+      "alias": "Incident Type",
+      "length": 70
+    },
+    {
+      "name": "Category",
+      "type": "esriFieldTypeString",
+      "alias": "Category",
+      "length": 50
+    },
+    {
+      "name": "X",
+      "type": "esriFieldTypeInteger",
+      "alias": "X"
+    },
+    {
+      "name": "Y",
+      "type": "esriFieldTypeInteger",
+      "alias": "Y"
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 26981098,
+        "FullReportNumber": "26981098",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767772000,
+        "IncidentStartTime": "07:29:32",
+        "TimeReceived": "07:29:32",
+        "Address": "E FOWLER AVE / GILLETTE AVE",
+        "Grid": "HS3908",
+        "TimeCleared": "00:00:00",
+        "IncidentTypeDesc": "VEHICLE STOP                                                       ",
+        "Category": "traffic",
+        "X": 534548,
+        "Y": 1352658
+      },
+      "geometry": {
+        "x": -82.37708148011008,
+        "y": 28.054372532844777
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981097,
+        "FullReportNumber": "26981097",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767667000,
+        "IncidentStartTime": "07:27:47",
+        "TimeReceived": "07:27:47",
+        "Address": "W SLIGH AVE / N ROME AVE",
+        "Grid": "TA0042",
+        "TimeCleared": "00:00:00",
+        "IncidentTypeDesc": "VEHICLE STOP                                                       ",
+        "Category": "traffic",
+        "X": 502541,
+        "Y": 1336913
+      },
+      "geometry": {
+        "x": -82.4761259006836,
+        "y": 28.010757886713463
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981092,
+        "FullReportNumber": "26981092",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767517000,
+        "IncidentStartTime": "07:25:17",
+        "TimeReceived": "07:25:17",
+        "Address": null,
+        "Grid": "HS3248",
+        "TimeCleared": "07:25:30",
+        "IncidentTypeDesc": "REFER - COMMUNITY CENTER                                           ",
+        "Category": "referred",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981089,
+        "FullReportNumber": "26981089",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767414000,
+        "IncidentStartTime": "07:23:34",
+        "TimeReceived": "07:23:34",
+        "Address": null,
+        "Grid": "HS3222",
+        "TimeCleared": "07:24:17",
+        "IncidentTypeDesc": "REFER - FIRE RESCUE                                                ",
+        "Category": "referred",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981085,
+        "FullReportNumber": "26981085",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767401000,
+        "IncidentStartTime": "07:23:21",
+        "TimeReceived": "07:23:21",
+        "Address": "W HILLSBOROUGH AVE / COUNTRYWAY BLVD",
+        "Grid": "HS3043",
+        "TimeCleared": "07:28:25",
+        "IncidentTypeDesc": "VEHICLE STOP                                                       ",
+        "Category": "traffic",
+        "X": 455184,
+        "Y": 1340427
+      },
+      "geometry": {
+        "x": -82.62294592144269,
+        "y": 28.019836161539235
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981087,
+        "FullReportNumber": "26981087",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767345000,
+        "IncidentStartTime": "07:22:25",
+        "TimeReceived": "07:22:25",
+        "Address": null,
+        "Grid": "HS3799",
+        "TimeCleared": "07:23:54",
+        "IncidentTypeDesc": "REFER - COMMUNITY CENTER                                           ",
+        "Category": "referred",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981077,
+        "FullReportNumber": "26981077",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767217000,
+        "IncidentStartTime": "07:20:17",
+        "TimeReceived": "07:20:17",
+        "Address": "OLD BIG BEND RD / SIMMONS RD",
+        "Grid": "HS4021",
+        "TimeCleared": "07:23:09",
+        "IncidentTypeDesc": "VEHICLE STOP                                                       ",
+        "Category": "traffic",
+        "X": 543879,
+        "Y": 1257233
+      },
+      "geometry": {
+        "x": -82.34731135579696,
+        "y": 27.791976024410637
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981078,
+        "FullReportNumber": "26981078",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767201000,
+        "IncidentStartTime": "07:20:01",
+        "TimeReceived": "07:20:01",
+        "Address": null,
+        "Grid": "HS3750",
+        "TimeCleared": "07:20:28",
+        "IncidentTypeDesc": "REFER - COMMUNITY CENTER                                           ",
+        "Category": "referred",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981084,
+        "FullReportNumber": "26981084",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767093000,
+        "IncidentStartTime": "07:18:13",
+        "TimeReceived": "07:18:13",
+        "Address": null,
+        "Grid": "HS3105",
+        "TimeCleared": "07:25:59",
+        "IncidentTypeDesc": "CONTACT MESSAGE - NO CONTACT MADE                                  ",
+        "Category": "other",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981068,
+        "FullReportNumber": "26981068",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767070000,
+        "IncidentStartTime": "07:17:50",
+        "TimeReceived": "07:17:50",
+        "Address": "5200 BLOCK N 15TH ST",
+        "Grid": "TA0072",
+        "TimeCleared": "07:24:40",
+        "IncidentTypeDesc": "CIVIL - CIVIL PROCESS SERVICE                                      ",
+        "Category": "other",
+        "X": 513238,
+        "Y": 1330920
+      },
+      "geometry": {
+        "x": -82.44290676988963,
+        "y": 27.994384944945917
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981069,
+        "FullReportNumber": "26981069",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767035000,
+        "IncidentStartTime": "07:17:15",
+        "TimeReceived": "07:17:15",
+        "Address": null,
+        "Grid": "HS3112",
+        "TimeCleared": "07:18:22",
+        "IncidentTypeDesc": "REFER - COMMUNITY CENTER                                           ",
+        "Category": "referred",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981070,
+        "FullReportNumber": "26981070",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790767032000,
+        "IncidentStartTime": "07:17:12",
+        "TimeReceived": "07:17:12",
+        "Address": null,
+        "Grid": "HS3653",
+        "TimeCleared": "07:26:08",
+        "IncidentTypeDesc": "ASSAULT OR BATTERY - JUST OCCURRED                                 ",
+        "Category": "violent",
+        "X": null,
+        "Y": null
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981066,
+        "FullReportNumber": "26981066",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790766952000,
+        "IncidentStartTime": "07:15:52",
+        "TimeReceived": "07:15:52",
+        "Address": "2000 BLOCK E 8TH AVE",
+        "Grid": "TA0128",
+        "TimeCleared": "07:16:13",
+        "IncidentTypeDesc": "REFER - COMMUNITY CENTER                                           ",
+        "Category": "referred",
+        "X": 515228,
+        "Y": 1318786
+      },
+      "geometry": {
+        "x": -82.43660594302901,
+        "y": 27.961029901714337
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981064,
+        "FullReportNumber": "26981064",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790766909000,
+        "IncidentStartTime": "07:15:09",
+        "TimeReceived": "07:15:09",
+        "Address": "N MANHATTAN AVE / W WATERS AVE",
+        "Grid": "HS3108",
+        "TimeCleared": "07:20:41",
+        "IncidentTypeDesc": "VEHICLE STOP                                                       ",
+        "Category": "traffic",
+        "X": 489307,
+        "Y": 1342307
+      },
+      "geometry": {
+        "x": -82.51721080469044,
+        "y": 28.025445732423243
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 26981063,
+        "FullReportNumber": "26981063",
+        "IncidentStartDate": 1790726400000,
+        "IncidentStartDateString": "09/30/2026",
+        "UTCIncidentStartDate": 1790766908000,
+        "IncidentStartTime": "07:15:08",
+        "TimeReceived": "07:15:08",
+        "Address": "8900 BLOCK PLUM GROVE CT",
+        "Grid": "HS3095",
+        "TimeCleared": "07:32:10",
+        "IncidentTypeDesc": "CIVIL - CIVIL PROCESS SERVICE                                      ",
+        "Category": "other",
+        "X": 476251,
+        "Y": 1345502
+      },
+      "geometry": {
+        "x": -82.5577237037416,
+        "y": 28.034075129604
+      }
+    }
+  ],
+  "exceededTransferLimit": true
+}

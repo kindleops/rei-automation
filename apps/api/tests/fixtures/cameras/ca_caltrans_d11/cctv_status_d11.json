@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2024-04-11",
+          "recordTime": "11:39:15",
+          "recordEpoch": "1712860755"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C 348) SR-163 : Friars N/E_B",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.160577",
+          "latitude": "32.772126",
+          "elevation": "45",
+          "direction": "South",
+          "county": "San Diego",
+          "route": "SR-163",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "4.409",
+          "alignment": "",
+          "milepost": "3.86"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C348_NB_163_at_North_Side_of_Friars_Rd_T.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/c348sr163friarsneb.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c348sr163friarsneb/previous/c348sr163friarsneb-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:42:45",
+          "recordEpoch": "1697816565"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C002) SR-163 : Just South Of I-8",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.16382",
+          "latitude": "32.76076",
+          "elevation": "49",
+          "direction": "South",
+          "county": "San Diego",
+          "route": "SR-163",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "3.64",
+          "alignment": "",
+          "milepost": "3.09"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C002_SB_163_JSO_Rte_8.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/c002sr163justsouthofi8.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c002sr163justsouthofi8/previous/c002sr163justsouthofi8-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2026-07-07",
+          "recordTime": "13:56:26",
+          "recordEpoch": "1783457786"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C003) SR-163 : I-8",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.162786",
+          "latitude": "32.763681",
+          "elevation": "49",
+          "direction": "",
+          "county": "San Diego",
+          "route": "SR-163",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "3.818",
+          "alignment": "R",
+          "milepost": "3.267"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C003_NB_163_at_Rte_8.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/c003sr163i8.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c003sr163i8/previous/c003sr163i8-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2023-10-30",
+          "recordTime": "14:32:45",
+          "recordEpoch": "1698701565"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C 350) SR-163 : Friars S/E",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.160533",
+          "latitude": "32.771578",
+          "elevation": "216",
+          "direction": "South",
+          "county": "San Diego",
+          "route": "SR-163",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "4.96",
+          "alignment": "",
+          "milepost": "4.376"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C350_NB_163_at_SSO_Friars_Rd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/c350sr163friarsse.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c350sr163friarsse/previous/c350sr163friarsse-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:44:36",
+          "recordEpoch": "1697816676"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C005) I-8 : Hotel Circle",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.17079",
+          "latitude": "32.76005",
+          "elevation": "32",
+          "direction": "East",
+          "county": "San Diego",
+          "route": "I-8",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "1.99",
+          "alignment": "",
+          "milepost": "3.95"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C005_EB_8_at_Hotel_Circle.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/c005i8hotelcircle.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c005i8hotelcircle/previous/c005i8hotelcircle-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:45:30",
+          "recordEpoch": "1697816730"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C006) I-8 : Just East Of Taylor",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.18028",
+          "latitude": "32.75919",
+          "elevation": "55",
+          "direction": "East",
+          "county": "San Diego",
+          "route": "I-8",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "1.42",
+          "alignment": "",
+          "milepost": "3.38"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C006_EB_8_JEO_Taylor.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/c006i8justeastoftaylor.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c006i8justeastoftaylor/previous/c006i8justeastoftaylor-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:46:15",
+          "recordEpoch": "1697816775"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C007) I-8 : Morena Boulevard",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.1968",
+          "latitude": "32.76002",
+          "elevation": "26",
+          "direction": "East",
+          "county": "San Diego",
+          "route": "I-8",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "0.44",
+          "alignment": "",
+          "milepost": "2.40"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C007_EB_8_at_Morena_Blvd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/c007i8morenaboulevard.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c007i8morenaboulevard/previous/c007i8morenaboulevard-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:46:45",
+          "recordEpoch": "1697816805"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C008) I-5 : Just South Of I-8",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.20229",
+          "latitude": "32.75589",
+          "elevation": "16",
+          "direction": "North",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "19.82",
+          "alignment": "",
+          "milepost": "19.50"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C008_NB_5_JSO_Rte_8.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/c008i5justsouthofi8.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c008i5justsouthofi8/previous/c008i5justsouthofi8-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:48:31",
+          "recordEpoch": "1697816911"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C 009) I-5 : Just North Of Old Town",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.19542",
+          "latitude": "32.74958",
+          "elevation": "26",
+          "direction": "North",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "19.210",
+          "alignment": "R",
+          "milepost": "18.886"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C009_NB_5_JNO_Old_Town.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/c009i5justnorthofoldtown.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c009i5justnorthofoldtown/previous/c009i5justnorthofoldtown-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2023-10-20",
+          "recordTime": "08:49:00",
+          "recordEpoch": "1697816940"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C 010) I-5 : Old Town Avenue",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.19329",
+          "latitude": "32.74706",
+          "elevation": "22",
+          "direction": "South",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "19.008",
+          "alignment": "L",
+          "milepost": "18.684"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C010_SB_5_at_Old_Town_Ave.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/c010i5oldtownavenue.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c010i5oldtownavenue/previous/c010i5oldtownavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2024-08-29",
+          "recordTime": "12:53:51",
+          "recordEpoch": "1724961231"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C 011) I-5 : Just North Of Washington Street",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.18376",
+          "latitude": "32.74339",
+          "elevation": "65",
+          "direction": "North",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "18.401",
+          "alignment": "R",
+          "milepost": "18.077"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C011_NB_5_JNO_Washington.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/c011i5justnorthofwashingtonstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c011i5justnorthofwashingtonstreet/previous/c011i5justnorthofwashingtonstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2025-03-18",
+          "recordTime": "09:31:57",
+          "recordEpoch": "1742315517"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C 012) NB 5 : Just North Of Pacific Highway",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.17461",
+          "latitude": "32.73556",
+          "elevation": "91",
+          "direction": "North",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "17.637",
+          "alignment": "R",
+          "milepost": "17.313"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C012_NB_5_JNO_Pacific_Hwy.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/c012nb5justnorthofpacifichighway.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c012nb5justnorthofpacifichighway/previous/c012nb5justnorthofpacifichighway-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "13",
+        "recordTimestamp": {
+          "recordDate": "2025-03-18",
+          "recordTime": "09:31:46",
+          "recordEpoch": "1742315506"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C013) NB 5 at Sassafras St",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.17124",
+          "latitude": "32.73166",
+          "elevation": "118",
+          "direction": "North",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "17.291",
+          "alignment": "R",
+          "milepost": "16.967"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C013_NB_5_JNO_Laurel.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/c013nb5atsassafrasst.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c013nb5atsassafrasst/previous/c013nb5atsassafrasst-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "14",
+        "recordTimestamp": {
+          "recordDate": "2025-03-18",
+          "recordTime": "09:31:37",
+          "recordEpoch": "1742315497"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C014) I-5 : First Avenue",
+          "nearbyPlace": "San Diego",
+          "longitude": "-117.16356",
+          "latitude": "32.72285",
+          "elevation": "98",
+          "direction": "South",
+          "county": "San Diego",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "16.56",
+          "alignment": "",
+          "milepost": "16.24"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D11/C014_SB_5_at_First_St.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/c014i5firstavenue.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c014i5firstavenue/previous/c014i5firstavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "563",
+        "recordTimestamp": {
+          "recordDate": "2023-11-03",
+          "recordTime": "11:38:40",
+          "recordEpoch": "1699036720"
+        },
+        "location": {
+          "district": "11",
+          "locationName": "(C431) NB 111: JNO 7th St.",
+          "nearbyPlace": "Calexico",
+          "longitude": "-115.498646",
+          "latitude": "32.671964",
+          "elevation": "-3",
+          "direction": "",
+          "county": "Imperial",
+          "route": "SR-111",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "0.696",
+          "alignment": "R",
+          "milepost": "0.561"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/c431nb111jno7thst.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d11/cctv/image/c431nb111jno7thst/previous/c431nb111jno7thst-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

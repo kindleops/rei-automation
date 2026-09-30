@@ -1,0 +1,293 @@
+{
+  "data": [
+    {
+      "cameraCategories": [
+        "Wash. DC"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-270 & Old Hundred Rd (MD 109)(CAM 165)",
+      "id": "7a00a1dc01250075004d823633235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.2773,
+      "lon": -77.3236,
+      "milePost": 22.29,
+      "name": "I-270 & Old Hundred Rd (MD 109)",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/7a00a1dc01250075004d823633235daa",
+      "routeNumber": 270,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Western MD"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-70 East of I-270",
+      "id": "9201ff5801f700d700437a45351f0214",
+      "lastCachedDataUpdateTime": 1790113449478,
+      "lat": 39.39761,
+      "lon": -77.42188,
+      "milePost": 53.13,
+      "name": "710002",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/9201ff5801f700d700437a45351f0214",
+      "routeNumber": 70,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Annapolis"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "US 50 AT MD 424",
+      "id": "000109f6004b00a6004af03676235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 38.96042,
+      "lon": -76.65623,
+      "milePost": 25.66,
+      "name": "502004",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/000109f6004b00a6004af03676235daa",
+      "routeNumber": 50,
+      "routePrefix": "US",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Baltimore"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-97 AT NEW CUT ROAD",
+      "id": "00012848007300bc004c823633235daa",
+      "lastCachedDataUpdateTime": 1790084267769,
+      "lat": 39.128563,
+      "lon": -76.64165,
+      "milePost": 12.2,
+      "name": "502021",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/00012848007300bc004c823633235daa",
+      "routeNumber": 97,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Baltimore"
+      ],
+      "cctvIp": "strmr3.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-695 Median at MM32.3 (C027)",
+      "id": "3801d561005e00d00057fa36c4235c0a",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.358448,
+      "lon": -76.50345,
+      "milePost": 33.5,
+      "name": "I-695 MEDIAN PRIOR TO I-95 NORTH SIDE (C-027)",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/3801d561005e00d00057fa36c4235c0a",
+      "routeNumber": 695,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Baltimore"
+      ],
+      "cctvIp": "strmr3.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-70 E at EX 87 US 29",
+      "id": "d6015dff0075004f0060d336c4235c0a",
+      "lastCachedDataUpdateTime": 1790353185119,
+      "lat": 39.29633,
+      "lon": -76.83091,
+      "milePost": 86.71,
+      "name": "713023",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/d6015dff0075004f0060d336c4235c0a",
+      "routeNumber": 70,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Southern MD"
+      ],
+      "cctvIp": "strmr3.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "US 301 HWN BRIDGE G8",
+      "id": "15026b78004600330063d336c4235c0a",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 38.363857,
+      "lon": -76.984184,
+      "milePost": 1.7,
+      "name": "US 301 HWN BRIDGE G8 C-308",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/15026b78004600330063d336c4235c0a",
+      "routeNumber": 301,
+      "routePrefix": "US",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Wash. DC"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "ICC MD 200 WB, DECKOVER APPROACH, MM 4.7 (C208)",
+      "id": "7f014af00502004e004d06363d235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.137234,
+      "lon": -77.13176,
+      "milePost": 7.24,
+      "name": "ICC MD 200 WB, DECKOVER APPROACH, MM 4.7 (C-208)",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/7f014af00502004e004d06363d235daa",
+      "routeNumber": 200,
+      "routePrefix": "MD",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Southern MD"
+      ],
+      "cctvIp": "strmr3.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "US 301 HWN BRIDGE M.M. 141.5",
+      "id": "1201953f005200330063d336c4235c0a",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 38.357517,
+      "lon": -77.02986,
+      "milePost": 0.0,
+      "name": "US 301 HWN BRIDGE MM. 141.5 C-323",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/1201953f005200330063d336c4235c0a",
+      "routeNumber": 0,
+      "routePrefix": "",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Eastern Shore"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "MD 90 AT MD 589",
+      "id": "c1000a2d004700e700498436cf235d0a",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 38.380375,
+      "lon": -75.170685,
+      "milePost": 6.0,
+      "name": "123003",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/c1000a2d004700e700498436cf235d0a",
+      "routeNumber": 90,
+      "routePrefix": "MD",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Wash. DC"
+      ],
+      "cctvIp": "strmr3.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "Columbia Pk (US 29) at Fairland Rd",
+      "id": "0701fd2100120075004d823633235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.073334,
+      "lon": -76.95575,
+      "milePost": 7.68,
+      "name": "MC130",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/0701fd2100120075004d823633235daa",
+      "routeNumber": 29,
+      "routePrefix": "US",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Wash. DC"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-95/495 AT MD 4",
+      "id": "6a01d75801f700d700437a45351f0214",
+      "lastCachedDataUpdateTime": 1789845962730,
+      "lat": 38.84008,
+      "lon": -76.86648,
+      "milePost": 10.82,
+      "name": "316012",
+      "opStatus": "COMM_MARGINAL",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/6a01d75801f700d700437a45351f0214",
+      "routeNumber": 95,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Wash. DC"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "ICC MD 200 EB, DECKOVER INTERIOR, MM 4.5 (C206)",
+      "id": "a70150c00554004e004d06363d235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.13806,
+      "lon": -77.13517,
+      "milePost": 7.04,
+      "name": "ICC MD 200 EB, DECKOVER INTERIOR, MM 4.5 (C-206)",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/a70150c00554004e004d06363d235daa",
+      "routeNumber": 200,
+      "routePrefix": "MD",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Baltimore"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-95 S of Md 272 (C004) MP 99.4",
+      "id": "d501656c00e20039004606363d235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.629566,
+      "lon": -75.96052,
+      "milePost": 99.21,
+      "name": "C004",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/d501656c00e20039004606363d235daa",
+      "routeNumber": 95,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    },
+    {
+      "cameraCategories": [
+        "Wash. DC"
+      ],
+      "cctvIp": "strmr5.sha.maryland.gov",
+      "commMode": "ONLINE",
+      "description": "I-270 & Old Georgetown Rd (MD 187)(CAM 4)",
+      "id": "a900598700f30074004d823633235daa",
+      "lastCachedDataUpdateTime": 1789655296746,
+      "lat": 39.03092,
+      "lon": -77.12762,
+      "milePost": 1.64,
+      "name": "I-270 & Old Georgetown Rd (MD 187)",
+      "opStatus": "OK",
+      "publicVideoURL": "https://chart.maryland.gov/Video/GetVideo/a900598700f30074004d823633235daa",
+      "routeNumber": 270,
+      "routePrefix": "IS",
+      "routeSuffix": ""
+    }
+  ],
+  "error": null,
+  "success": true,
+  "totalCount": 552,
+  "warnings": []
+}

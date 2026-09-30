@@ -1,0 +1,373 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "GlobalID",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Equipment_Name",
+      "type": "esriFieldTypeString",
+      "alias": "Equipment_Name",
+      "sqlType": "sqlTypeOther",
+      "length": 8000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Latitude",
+      "type": "esriFieldTypeInteger",
+      "alias": "Latitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Longitude",
+      "type": "esriFieldTypeInteger",
+      "alias": "Longitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Lat_Y",
+      "type": "esriFieldTypeDouble",
+      "alias": "Lat_Y",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Lon_X",
+      "type": "esriFieldTypeDouble",
+      "alias": "Lon_X",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "District",
+      "type": "esriFieldTypeString",
+      "alias": "District",
+      "sqlType": "sqlTypeOther",
+      "length": 8000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Type",
+      "type": "esriFieldTypeString",
+      "alias": "Type",
+      "sqlType": "sqlTypeOther",
+      "length": 8000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Field8",
+      "type": "esriFieldTypeString",
+      "alias": "Field8",
+      "sqlType": "sqlTypeOther",
+      "length": 8000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Field9",
+      "type": "esriFieldTypeString",
+      "alias": "Field9",
+      "sqlType": "sqlTypeOther",
+      "length": 8000,
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "exceededTransferLimit": true,
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "Equipment_Name": "287 - 4 Mi. S of Dumas",
+        "Latitude": 35804527,
+        "Longitude": -101960032,
+        "Lat_Y": 35.804527,
+        "Lon_X": -101.960032,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": "Fiberlight",
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11350138.843505874,
+        "y": 4273757.8163187373
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "Equipment_Name": "287 -20 Mi. S of Dumas",
+        "Latitude": 35589377,
+        "Longitude": -101957045,
+        "Lat_Y": 35.589377,
+        "Lon_X": -101.957045,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11349806.332186872,
+        "y": 4244266.3899050662
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 3,
+        "Equipment_Name": "I27 & Hillside",
+        "Latitude": 35146954,
+        "Longitude": -101886406,
+        "Lat_Y": 35.146954,
+        "Lon_X": -101.886406,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11341942.83467673,
+        "y": 4183869.5817312594
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4,
+        "Equipment_Name": "IH27 & Hollywood",
+        "Latitude": 35117162,
+        "Longitude": -101908848,
+        "Lat_Y": 35.117162,
+        "Lon_X": -101.908848,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11344441.066689113,
+        "y": 4179814.4125558008
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 5,
+        "Equipment_Name": "IH27 @ Georgia",
+        "Latitude": 35168415,
+        "Longitude": -101868222,
+        "Lat_Y": 35.168415,
+        "Lon_X": -101.868222,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11339918.601056144,
+        "y": 4186791.6880475753
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6,
+        "Equipment_Name": "IH27 @ IH40 North",
+        "Latitude": 35192468,
+        "Longitude": -101836695,
+        "Lat_Y": 35.192468,
+        "Lon_X": -101.836695,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11336409.031469904,
+        "y": 4190067.63494651
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 7,
+        "Equipment_Name": "IH27 @ IH40 South",
+        "Latitude": 35191977,
+        "Longitude": -101836652,
+        "Lat_Y": 35.191977,
+        "Lon_X": -101.836652,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11336404.244731799,
+        "y": 4190000.75251566
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 8,
+        "Equipment_Name": "IH40 & Bell",
+        "Latitude": 35190529,
+        "Longitude": -101903980,
+        "Lat_Y": 35.190529,
+        "Lon_X": -101.90398,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11343899.163407933,
+        "y": 4189803.512995807
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 9,
+        "Equipment_Name": "IH40 & Georgia",
+        "Latitude": 35195564,
+        "Longitude": -101868339,
+        "Lat_Y": 35.195564,
+        "Lon_X": -101.868339,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11339931.62543657,
+        "y": 4190489.3713563094
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 10,
+        "Equipment_Name": "IH40 & Grand",
+        "Latitude": 35192810,
+        "Longitude": -101791337,
+        "Lat_Y": 35.19281,
+        "Lon_X": -101.791337,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11331359.802006502,
+        "y": 4190114.2213184307
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 11,
+        "Equipment_Name": "IH40 & Lakeside",
+        "Latitude": 35192511,
+        "Longitude": -101745969,
+        "Lat_Y": 35.192511,
+        "Lon_X": -101.745969,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11326309.459348192,
+        "y": 4190073.49228658
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 12,
+        "Equipment_Name": "IH40 & Soncy",
+        "Latitude": 35186862,
+        "Longitude": -101938053,
+        "Lat_Y": 35.186862,
+        "Lon_X": -101.938053,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11347692.152417729,
+        "y": 4189304.027806663
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 13,
+        "Equipment_Name": "IH40 @ Caprock",
+        "Latitude": 35251352,
+        "Longitude": -102779873,
+        "Lat_Y": 35.251352,
+        "Lon_X": -102.779873,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11441403.126157321,
+        "y": 4198091.5566119878
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 14,
+        "Equipment_Name": "IH40 @ IH27 East",
+        "Latitude": 35192345,
+        "Longitude": -101836352,
+        "Lat_Y": 35.192345,
+        "Lon_X": -101.836352,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11336370.848884564,
+        "y": 4190050.8802466579
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 15,
+        "Equipment_Name": "IH40 @ IH27 West",
+        "Latitude": 35192310,
+        "Longitude": -101837060,
+        "Lat_Y": 35.19231,
+        "Lon_X": -101.83706,
+        "District": "AMA",
+        "Type": "CCTV",
+        "Field8": null,
+        "Field9": null
+      },
+      "geometry": {
+        "x": -11336449.663084043,
+        "y": 4190046.1126537807
+      }
+    }
+  ]
+}

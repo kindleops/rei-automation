@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2025-02-27",
+          "recordTime": "12:31:35",
+          "recordEpoch": "1740688295"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : North Main Street",
+          "nearbyPlace": "Salinas",
+          "longitude": "-121.653231",
+          "latitude": "36.687188",
+          "elevation": "52",
+          "direction": "South",
+          "county": "Monterey",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "88.28",
+          "alignment": "",
+          "milepost": "328.5"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atMainSt-Route183.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/us101northmainstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101northmainstreet/previous/us101northmainstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2020-07-30",
+          "recordTime": "13:22:37",
+          "recordEpoch": "1596140557"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Broad Street",
+          "nearbyPlace": "San Luis Obispo",
+          "longitude": "-120.667849",
+          "latitude": "35.28353",
+          "elevation": "203",
+          "direction": "South",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "28.72",
+          "alignment": "",
+          "milepost": "202.26"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atBroadSt.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/us101broadstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101broadstreet/previous/us101broadstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2020-01-07",
+          "recordTime": "08:48:59",
+          "recordEpoch": "1578415739"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Los Osos Valley Road",
+          "nearbyPlace": "San Luis Obispo",
+          "longitude": "-120.682343",
+          "latitude": "35.244772",
+          "elevation": "124",
+          "direction": "South",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "25.91",
+          "alignment": "",
+          "milepost": "199.45"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atLosOsosValleyRd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/us101losososvalleyroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101losososvalleyroad/previous/us101losososvalleyroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2020-01-07",
+          "recordTime": "08:49:26",
+          "recordEpoch": "1578415766"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Marsh Street",
+          "nearbyPlace": "San Luis Obispo",
+          "longitude": "-120.67201",
+          "latitude": "35.27337",
+          "elevation": "180",
+          "direction": "South",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "28.01",
+          "alignment": "",
+          "milepost": "201.55"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atMarshSt.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/us101marshstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101marshstreet/previous/us101marshstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2020-01-07",
+          "recordTime": "08:49:16",
+          "recordEpoch": "1578415756"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Madonna Road",
+          "nearbyPlace": "San Luis Obispo",
+          "longitude": "-120.673748",
+          "latitude": "35.265722",
+          "elevation": "173",
+          "direction": "South",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "27.48",
+          "alignment": "",
+          "milepost": "201.02"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atMadonnaRd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/us101madonnaroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101madonnaroad/previous/us101madonnaroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2021-02-18",
+          "recordTime": "13:07:41",
+          "recordEpoch": "1613682461"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Monterey Street",
+          "nearbyPlace": "San Luis Obispo",
+          "longitude": "-120.64855",
+          "latitude": "35.29161",
+          "elevation": "314",
+          "direction": "North",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "30.05",
+          "alignment": "",
+          "milepost": "203.59"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atMontereySt.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/us101montereystreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101montereystreet/previous/us101montereystreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2025-07-01",
+          "recordTime": "15:34:36",
+          "recordEpoch": "1751409276"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : SR-46 East",
+          "nearbyPlace": "Paso Robles",
+          "longitude": "-120.684988",
+          "latitude": "35.64227",
+          "elevation": "708",
+          "direction": "South",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "57.89",
+          "alignment": "",
+          "milepost": "231.38"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atRoute46East.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/us101sr46east.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr46east/previous/us101sr46east-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2025-01-08",
+          "recordTime": "16:06:11",
+          "recordEpoch": "1736381171"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Avila Beach Drive",
+          "nearbyPlace": "Pismo Beach",
+          "longitude": "-120.697739",
+          "latitude": "35.177695",
+          "elevation": "164",
+          "direction": "North",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "20.94",
+          "alignment": "",
+          "milepost": "194.49"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atAvilaBeachDr.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/us101avilabeachdrive.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101avilabeachdrive/previous/us101avilabeachdrive-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2023-08-22",
+          "recordTime": "12:30:22",
+          "recordEpoch": "1692732622"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : SR-1 and Bello St",
+          "nearbyPlace": "Pismo Beach",
+          "longitude": "-120.645348",
+          "latitude": "35.147674",
+          "elevation": "157",
+          "direction": "North",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "17.07",
+          "alignment": "",
+          "milepost": "190.73"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atBelloSt.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/us101sr1andbellost.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr1andbellost/previous/us101sr1andbellost-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2024-04-12",
+          "recordTime": "07:12:09",
+          "recordEpoch": "1712931129"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Mattie Road",
+          "nearbyPlace": "Pismo Beach",
+          "longitude": "-120.662324",
+          "latitude": "35.154338",
+          "elevation": "101",
+          "direction": "North",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "18.16",
+          "alignment": "",
+          "milepost": "191.81"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atMattieRd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/us101mattieroad.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101mattieroad/previous/us101mattieroad-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2023-08-22",
+          "recordTime": "11:45:07",
+          "recordEpoch": "1692729907"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : 4th Street",
+          "nearbyPlace": "Pismo Beach",
+          "longitude": "-120.621828",
+          "latitude": "35.136549",
+          "elevation": "95",
+          "direction": "North",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "15.49",
+          "alignment": "",
+          "milepost": "189.14"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101at4thSt.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/us1014thstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us1014thstreet/previous/us1014thstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2021-03-01",
+          "recordTime": "15:36:40",
+          "recordEpoch": "1614641800"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Spyglass Dr",
+          "nearbyPlace": "Pismo Beach",
+          "longitude": "-120.687051",
+          "latitude": "35.163886",
+          "elevation": "121",
+          "direction": "South",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "19.8",
+          "alignment": "",
+          "milepost": "193.35"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atSpyglassDr.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/us101spyglassdr.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101spyglassdr/previous/us101spyglassdr-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "13",
+        "recordTimestamp": {
+          "recordDate": "2021-02-18",
+          "recordTime": "13:07:13",
+          "recordEpoch": "1613682433"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : SR-58",
+          "nearbyPlace": "Santa Margarita",
+          "longitude": "-120.62971",
+          "latitude": "35.38348",
+          "elevation": "1072",
+          "direction": "North",
+          "county": "San Luis Obispo",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "37.9",
+          "alignment": "",
+          "milepost": "211.4"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atRoute58.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/us101sr58.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr58/previous/us101sr58-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "37",
+        "recordTimestamp": {
+          "recordDate": "2026-04-28",
+          "recordTime": "13:30:13",
+          "recordEpoch": "1777408213"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Cabrillo Blvd",
+          "nearbyPlace": "Santa Barbara",
+          "longitude": "-119.659076",
+          "latitude": "34.423288",
+          "elevation": "32",
+          "direction": "North",
+          "county": "Santa Barbara",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "11.69",
+          "alignment": "",
+          "milepost": "94.6"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atWestofCabrilloBlvd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/us101cabrilloblvd.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101cabrilloblvd/previous/us101cabrilloblvd-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "93",
+        "recordTimestamp": {
+          "recordDate": "2023-07-11",
+          "recordTime": "16:07:48",
+          "recordEpoch": "1689116868"
+        },
+        "location": {
+          "district": "5",
+          "locationName": "US-101 : Stowell Rd",
+          "nearbyPlace": "Santa Maria",
+          "longitude": "-120.41801",
+          "latitude": "34.93904",
+          "elevation": "255",
+          "direction": "",
+          "county": "Santa Barbara",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "87.65",
+          "alignment": "",
+          "milepost": "170.31"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D5/101atStowellRd.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/us101stowellrd.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101stowellrd/previous/us101stowellrd-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

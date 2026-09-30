@@ -1,0 +1,322 @@
+[
+  {
+    "state": "idaho",
+    "issuingorganization": "Idaho DOT",
+    "feedname": "iddot",
+    "url": {
+      "url": "https://511.idaho.gov/api/wzdx"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "1m",
+    "version": "4.1",
+    "sdate": "2025-09-19T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -116.19341,
+        43.60764
+      ]
+    }
+  },
+  {
+    "state": "indiana",
+    "issuingorganization": "Indiana DOT",
+    "feedname": "indot",
+    "url": {
+      "url": "https://in.carsprogram.org/carsapi_v1/api/wzdx"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "1m",
+    "version": "4.1",
+    "sdate": "2025-10-02T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -86.15013,
+        39.76691
+      ]
+    }
+  },
+  {
+    "state": "iowa",
+    "issuingorganization": "Iowa DOT",
+    "feedname": "idot",
+    "url": {
+      "url": "https://iowa-atms.cloud-q-free.com/api/rest/dataprism/wzdx/wzdxfeed"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "1m",
+    "version": "4",
+    "sdate": "2022-08-25T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -93.61539,
+        41.58981
+      ]
+    }
+  },
+  {
+    "state": "kansas",
+    "issuingorganization": "Kansas DOT",
+    "feedname": "kansas",
+    "url": {
+      "url": "https://ks.carsprogram.org/carsapi_v1/api/wzdx"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "60s",
+    "version": "4",
+    "sdate": "2024-07-23T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -95.6712,
+        39.04926
+      ]
+    }
+  },
+  {
+    "state": "kentucky",
+    "issuingorganization": "Kentucky Transportation Cabinet",
+    "feedname": "kytc",
+    "url": {
+      "url": "https://storage.googleapis.com/kytc-its-2020-openrecords/public/feeds/WZDx/kytc_wzdx_v4.1.geojson"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "30m",
+    "version": "4.1",
+    "sdate": "2024-03-11T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -84.8787,
+        38.19507
+      ]
+    }
+  },
+  {
+    "state": "maryland",
+    "issuingorganization": "Maryland DOT",
+    "feedname": "mdot",
+    "url": {
+      "url": "https://filter.ritis.org/wzdx_v4.1/mdot.geojson"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "1m",
+    "version": "4.1",
+    "sdate": "2022-12-13T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -76.49015,
+        38.97678
+      ]
+    }
+  },
+  {
+    "state": "minnesota",
+    "issuingorganization": "Minnesota DOT",
+    "feedname": "mndot",
+    "url": {
+      "url": "https://mn.carsprogram.org/carsapi_v1/api/wzdx"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "1m",
+    "version": "4",
+    "sdate": "2022-10-19T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -93.09649,
+        44.94339
+      ]
+    }
+  },
+  {
+    "state": "new york",
+    "issuingorganization": "New York DOT",
+    "feedname": "nysdot",
+    "url": {
+      "url": "https://511ny.org/api/wzdx"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "15m",
+    "version": "4.1",
+    "sdate": "2023-08-03T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -73.75522,
+        42.65155
+      ]
+    }
+  },
+  {
+    "state": "north carolina",
+    "issuingorganization": "North Carolina DOT",
+    "feedname": "ncdot",
+    "url": {
+      "url": "https://drivenc.gov/api/wzdx"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "4m",
+    "version": "4.2",
+    "sdate": "2026-05-27T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -78.64271,
+        35.78543
+      ]
+    }
+  },
+  {
+    "state": "nps",
+    "issuingorganization": "National Park Service",
+    "feedname": "nps",
+    "url": {
+      "url": "https://developer.nps.gov/api/v1/roadevents?type=workzone&api_key="
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "60m",
+    "version": "4",
+    "sdate": "2022-09-02T00:00:00.000",
+    "needapikey": true,
+    "apikeyurl": {
+      "url": "https://www.nps.gov/subjects/developer/get-started.htm",
+      "description": ""
+    }
+  },
+  {
+    "state": "ohio",
+    "issuingorganization": "Ohio DOT",
+    "feedname": "ohio",
+    "url": {
+      "url": "https://publicapi.ohgo.com/api/work-zones/wzdx/4.2?api-key=INSERT-API-KEY-HERE"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "60m",
+    "version": "4.2",
+    "sdate": "2025-02-18T00:00:00.000",
+    "needapikey": true,
+    "apikeyurl": {
+      "url": "https://publicapi.ohgo.com/accounts/registration",
+      "description": ""
+    },
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -83.00276,
+        39.96199
+      ]
+    }
+  },
+  {
+    "state": "texas",
+    "issuingorganization": "City of Austin",
+    "feedname": "austin",
+    "url": {
+      "url": "https://data.austintexas.gov/download/d9mm-cjw9"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "60m",
+    "version": "4.2",
+    "sdate": "2024-11-07T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -97.743,
+        30.26759
+      ]
+    }
+  },
+  {
+    "state": "texas",
+    "issuingorganization": "Texas DOT",
+    "feedname": "txdot_v4_2",
+    "url": {
+      "url": "https://api.drivetexas.org/api/conditions.wzdx.geojson?key="
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "5m",
+    "version": "4.2",
+    "sdate": "2024-01-17T00:00:00.000",
+    "needapikey": true,
+    "apikeyurl": {
+      "url": "https://api.drivetexas.org/",
+      "description": ""
+    },
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -97.743,
+        30.26759
+      ]
+    }
+  },
+  {
+    "state": "utah",
+    "issuingorganization": "Utah DOT",
+    "feedname": "udot",
+    "url": {
+      "url": "https://udottraffic.utah.gov/wzdx/udot/v40/data"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "15m",
+    "version": "4",
+    "sdate": "2022-07-15T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -111.88822,
+        40.76031
+      ]
+    }
+  },
+  {
+    "state": "washington",
+    "issuingorganization": "Washington State DOT",
+    "feedname": "wsdot",
+    "url": {
+      "url": "https://wzdx.wsdot.wa.gov/api/v4/WorkZoneFeed"
+    },
+    "format": "geojson",
+    "active": true,
+    "datafeed_frequency_update": "1m",
+    "version": "4.2",
+    "sdate": "2024-02-05T00:00:00.000",
+    "needapikey": false,
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        -122.89165,
+        47.03954
+      ]
+    }
+  }
+]

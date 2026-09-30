@@ -1,0 +1,40 @@
+[
+  {
+    "Id": 2056,
+    "Source": "AZDOT",
+    "SourceId": "2bf8fc21-3cb8-4dda-bb70-d1c8786a9dc3",
+    "Roadway": "SR-95",
+    "Direction": "Unknown",
+    "Latitude": 35.172449,
+    "Longitude": -114.566108,
+    "Location": "SR-95 @SR68 Laughlin Rd",
+    "SortOrder": 0,
+    "Views": [
+      {
+        "Id": 960,
+        "Url": "https://az511.com/map/Cctv/960",
+        "Status": "Enabled",
+        "Description": "SR-95 NB 249.80 @SR68 Laughlin Rd"
+      }
+    ]
+  },
+  {
+    "Id": 2057,
+    "Source": "AZDOT",
+    "SourceId": "d2e59446-cc9f-4de1-b7d9-46ee3c5793bc",
+    "Roadway": "SR-389",
+    "Direction": "Unknown",
+    "Latitude": 36.9590711000001,
+    "Longitude": -112.9661646,
+    "Location": "SR-389 @MP3.3",
+    "SortOrder": 0,
+    "Views": [
+      {
+        "Id": 961,
+        "Url": "https://az511.com/map/Cctv/961",
+        "Status": "Enabled",
+        "Description": "SR-389 SB 3.30 @MP3.3"
+      }
+    ]
+  }
+]

@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2026-05-14",
+          "recordTime": "16:56:28",
+          "recordEpoch": "1778802988"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : At SR-1 - Looking East (C020)",
+          "nearbyPlace": "Fort Bragg",
+          "longitude": "-123.807828",
+          "latitude": "39.420010",
+          "elevation": "95",
+          "direction": "East",
+          "county": "Mendocino",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "0.007",
+          "alignment": "",
+          "milepost": "0.007"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/sr20atsr1lookingeast.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/previous/sr20atsr1lookingeast-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2026-05-14",
+          "recordTime": "16:27:03",
+          "recordEpoch": "1778801223"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : West Of US-101 - Looking East (C007)",
+          "nearbyPlace": "Willits",
+          "longitude": "-123.369057",
+          "latitude": "39.405805",
+          "elevation": "1437",
+          "direction": "East",
+          "county": "Mendocino",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "32.214",
+          "alignment": "",
+          "milepost": "32.131"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "10",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/sr20westofus101lookingeast.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/previous/sr20westofus101lookingeast-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2026-05-14",
+          "recordTime": "16:26:55",
+          "recordEpoch": "1778801215"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : West Of US-101 - Looking West (C007)",
+          "nearbyPlace": "Willits",
+          "longitude": "-123.369057",
+          "latitude": "39.405805",
+          "elevation": "1437",
+          "direction": "East",
+          "county": "Mendocino",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "32.214",
+          "alignment": "",
+          "milepost": "32.131"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "10",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/sr20westofus101lookingwest.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/previous/sr20westofus101lookingwest-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "14",
+        "recordTimestamp": {
+          "recordDate": "2026-03-06",
+          "recordTime": "13:45:11",
+          "recordEpoch": "1772833511"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : East Of US-101 - Looking East (C006)",
+          "nearbyPlace": "Ukiah",
+          "longitude": "-123.167075",
+          "latitude": "39.237775",
+          "elevation": "839",
+          "direction": "West",
+          "county": "Mendocino",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "35.605",
+          "alignment": "",
+          "milepost": "38.261"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/sr20eastofus101lookingeast.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/previous/sr20eastofus101lookingeast-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "16",
+        "recordTimestamp": {
+          "recordDate": "2026-03-12",
+          "recordTime": "09:20:24",
+          "recordEpoch": "1773332424"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : East Of US-101 - Looking West (C006)",
+          "nearbyPlace": "Ukiah",
+          "longitude": "-123.167075",
+          "latitude": "39.237775",
+          "elevation": "839",
+          "direction": "West",
+          "county": "Mendocino",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "35.605",
+          "alignment": "",
+          "milepost": "38.261"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/sr20eastofus101lookingwest.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/previous/sr20eastofus101lookingwest-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "18",
+        "recordTimestamp": {
+          "recordDate": "2026-03-06",
+          "recordTime": "13:49:08",
+          "recordEpoch": "1772833748"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : West Of SR-29 - Looking East (C009)",
+          "nearbyPlace": "Upper Lake",
+          "longitude": "-122.929786",
+          "latitude": "39.167210",
+          "elevation": "1361",
+          "direction": "East",
+          "county": "Lake",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "7.794",
+          "alignment": "",
+          "milepost": "54.510"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/sr20westofsr29lookingeast.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/previous/sr20westofsr29lookingeast-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "20",
+        "recordTimestamp": {
+          "recordDate": "2026-03-12",
+          "recordTime": "09:20:53",
+          "recordEpoch": "1773332453"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : West Of SR-29 - Looking West (C009)",
+          "nearbyPlace": "Upper Lake",
+          "longitude": "-122.929786",
+          "latitude": "39.167210",
+          "elevation": "1361",
+          "direction": "East",
+          "county": "Lake",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "7.794",
+          "alignment": "",
+          "milepost": "54.510"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/sr20westofsr29lookingwest.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/previous/sr20westofsr29lookingwest-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "22",
+        "recordTimestamp": {
+          "recordDate": "2026-03-12",
+          "recordTime": "09:44:29",
+          "recordEpoch": "1773333869"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101 : North Of SR-20 - Looking North (C001)",
+          "nearbyPlace": "Redwood Valley",
+          "longitude": "-123.211273",
+          "latitude": "39.250328",
+          "elevation": "774",
+          "direction": "North",
+          "county": "Mendocino",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "31.6",
+          "alignment": "",
+          "milepost": "553.467"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/us101northofsr20lookingnorth.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/previous/us101northofsr20lookingnorth-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "24",
+        "recordTimestamp": {
+          "recordDate": "2026-03-12",
+          "recordTime": "09:44:25",
+          "recordEpoch": "1773333865"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101 : North Of SR-20 - Looking South (C001)",
+          "nearbyPlace": "Redwood Valley",
+          "longitude": "-123.211273",
+          "latitude": "39.250328",
+          "elevation": "774",
+          "direction": "South",
+          "county": "Mendocino",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "31.6",
+          "alignment": "",
+          "milepost": "553.467"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/us101northofsr20lookingsouth.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/previous/us101northofsr20lookingsouth-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "32",
+        "recordTimestamp": {
+          "recordDate": "2026-03-12",
+          "recordTime": "10:13:07",
+          "recordEpoch": "1773335587"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101 : S of SR 271 - Looking South (C030)",
+          "nearbyPlace": "Piercy",
+          "longitude": "-123.776828",
+          "latitude": "39.939334",
+          "elevation": "849",
+          "direction": "South",
+          "county": "Mendocino",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "101.535",
+          "alignment": "",
+          "milepost": "621.738"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "10",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/us101sofsr271lookingsouth.jpg",
+            "referenceImageUpdateFrequency": "10",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/previous/us101sofsr271lookingsouth-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "34",
+        "recordTimestamp": {
+          "recordDate": "2026-07-16",
+          "recordTime": "16:14:10",
+          "recordEpoch": "1784243650"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101 : South Of SR-36 - Looking North (C013)",
+          "nearbyPlace": "Fortuna",
+          "longitude": "-124.149945",
+          "latitude": "40.525027",
+          "elevation": "78",
+          "direction": "North",
+          "county": "Humboldt",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "55.959",
+          "alignment": "",
+          "milepost": "680.453"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "5",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/us101southofsr36lookingnorth.jpg",
+            "referenceImageUpdateFrequency": "5",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/previous/us101southofsr36lookingnorth-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "36",
+        "recordTimestamp": {
+          "recordDate": "2026-07-16",
+          "recordTime": "16:15:05",
+          "recordEpoch": "1784243705"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101 : South Of SR-36 - Looking South (C013)",
+          "nearbyPlace": "Fortuna",
+          "longitude": "-124.149945",
+          "latitude": "40.525027",
+          "elevation": "78",
+          "direction": "North",
+          "county": "Humboldt",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "55.959",
+          "alignment": "",
+          "milepost": "680.453"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/us101southofsr36lookingsouth.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/previous/us101southofsr36lookingsouth-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "38",
+        "recordTimestamp": {
+          "recordDate": "2026-07-16",
+          "recordTime": "13:56:49",
+          "recordEpoch": "1784235409"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101 : North Of SR-36 - Looking North (C003)",
+          "nearbyPlace": "Fortuna",
+          "longitude": "-124.148136",
+          "latitude": "40.562896",
+          "elevation": "49",
+          "direction": "South",
+          "county": "Humboldt",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "58.686",
+          "alignment": "",
+          "milepost": "683.180"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/us101northofsr36lookingnorth.jpg",
+            "referenceImageUpdateFrequency": "60",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/previous/us101northofsr36lookingnorth-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "143",
+        "recordTimestamp": {
+          "recordDate": "2026-03-06",
+          "recordTime": "14:02:14",
+          "recordEpoch": "1772834534"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "SR-20 : Just East Of SR-53 - Looking East (CXXX)",
+          "nearbyPlace": "Clearlake",
+          "longitude": "-122.605983",
+          "latitude": "39.009950",
+          "elevation": "1778",
+          "direction": "",
+          "county": "Lake",
+          "route": "SR-20",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "32.064",
+          "alignment": "",
+          "milepost": "78.780"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "15",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/sr20justeastofsr53lookingeast.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20justeastofsr53lookingeast/previous/sr20justeastofsr53lookingeast-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "160",
+        "recordTimestamp": {
+          "recordDate": "2026-08-12",
+          "recordTime": "07:36:33",
+          "recordEpoch": "1786545393"
+        },
+        "location": {
+          "district": "1",
+          "locationName": "US-101: Eureka / 4th & H - Looking North (CXXX)",
+          "nearbyPlace": "Eureka",
+          "longitude": "-124.164200",
+          "latitude": "40.803139",
+          "elevation": "15",
+          "direction": "North",
+          "county": "Humboldt",
+          "route": "US-101",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "78.608",
+          "alignment": "L",
+          "milepost": "703.179"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D1/eureka_4th_h_320x240.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "10",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/us101eureka4thhlookingnorth.jpg",
+            "referenceImageUpdateFrequency": "10",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thhlookingnorth/previous/us101eureka4thhlookingnorth-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

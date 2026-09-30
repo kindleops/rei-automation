@@ -1,0 +1,272 @@
+[
+  {
+    "traffic_report_id": "B1EC8F67B0A0C6F3F7AD0EB395F53941447DB242_1790766850_fire_incident",
+    "published_date": "2026-09-30T11:14:10.000Z",
+    "issue_reported": "HMTF - Hazmat Taskforce",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.689478,
+        30.207918
+      ]
+    },
+    "latitude": "30.207918",
+    "longitude": "-97.689478",
+    "address": "7700-8299 Metropolis Dr",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T11:15:17.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "A7577DC35CDD2E893DEE3D8178CF3347048FACD2_1790766644_fire_incident",
+    "published_date": "2026-09-30T11:10:44.000Z",
+    "issue_reported": "ODOR - Odor Investigation",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.532555,
+        30.321205
+      ]
+    },
+    "latitude": "30.321205",
+    "longitude": "-97.532555",
+    "address": "17720 Powder Creek Dr",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T11:15:17.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "58F4E08AE0D4BAD7D6E1BAD54BEF8F0D672EA674_1790766575_fire_incident",
+    "published_date": "2026-09-30T11:09:35.000Z",
+    "issue_reported": "ALARM - Fire Alarm",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.771219,
+        30.20257
+      ]
+    },
+    "latitude": "30.20257",
+    "longitude": "-97.771219",
+    "address": "500 E Stassney Ln",
+    "traffic_report_status": "ACTIVE",
+    "traffic_report_status_date_time": "2026-09-30T11:15:17.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "362C717B4ED7B3E0D3B6D1592ABAAA54F700BE4E_1790758162_fire_incident",
+    "published_date": "2026-09-30T08:49:22.000Z",
+    "issue_reported": "ALARMM - Fire Alarm MIDRISE",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.753221,
+        30.316729
+      ]
+    },
+    "latitude": "30.316729",
+    "longitude": "-97.753221",
+    "address": "4424 Jackson Ave",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T09:25:18.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "16046E465072BB02916EE2189604156A43625942_1790755647_fire_incident",
+    "published_date": "2026-09-30T08:07:27.000Z",
+    "issue_reported": "CO - Carbon Monoxide Alarm",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.699881,
+        30.292747
+      ]
+    },
+    "latitude": "30.292747",
+    "longitude": "-97.699881",
+    "address": "4040 Berkman Dr",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T09:35:18.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "19FDED88E79786F8384D252183E24B0271862003_1790750925_fire_incident",
+    "published_date": "2026-09-30T06:48:45.000Z",
+    "issue_reported": "BOX -Structure Fire",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.669824,
+        29886914
+      ]
+    },
+    "latitude": "29886914",
+    "longitude": "-97.669824",
+    "address": "200-220 N Brazos St",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T09:35:18.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "E0806955019B7677C0516006D4BAFD6F4CD927DA_1790743974_fire_incident",
+    "published_date": "2026-09-30T04:52:54.000Z",
+    "issue_reported": "DUMP - Dumpster Fire",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.725764,
+        30.262805
+      ]
+    },
+    "latitude": "30.262805",
+    "longitude": "-97.725764",
+    "address": "1618 E 6th St",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T05:20:18.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "B24057B2BAA092760EB40B8CB0CE35CA547391C2_1790742398_fire_incident",
+    "published_date": "2026-09-30T04:26:38.000Z",
+    "issue_reported": "TRASH - Trash Fire",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.710572,
+        30.281543
+      ]
+    },
+    "latitude": "30.281543",
+    "longitude": "-97.710572",
+    "address": "2823 E Martin Luther King Jr Blvd",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T04:50:21.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "94FE381C56C29BD742876CB5C21A392A77589B5D_1790742052_fire_incident",
+    "published_date": "2026-09-30T04:20:52.000Z",
+    "issue_reported": "AUTO - Auto Fire",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.719121,
+        30.295559
+      ]
+    },
+    "latitude": "30.295559",
+    "longitude": "-97.719121",
+    "address": "3400-3900 N Ih 35 Nb",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T05:00:25.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "6C0D1CE3B3ACB152B51431044EE25DCD663ABC9E_1790734898_fire_incident",
+    "published_date": "2026-09-30T02:21:38.000Z",
+    "issue_reported": "Traffic Injury Pri 2 Rollover",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.896336,
+        30.470334
+      ]
+    },
+    "latitude": "30.470334",
+    "longitude": "-97.896336",
+    "address": "9246-10033 Lime Creek Rd",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T03:00:16.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "58D13C823009B4C9EBF01929F178BD434DDA078E_1790730485_fire_incident",
+    "published_date": "2026-09-30T01:08:05.000Z",
+    "issue_reported": "GRASS - Small Grass Fire",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.934215,
+        30.517931
+      ]
+    },
+    "latitude": "30.517931",
+    "longitude": "-97.934215",
+    "address": "19700-21028 Lindeman Ln",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T01:25:12.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "D220643AD034B7D13483600124E962D31F63B751_1790725927_fire_incident",
+    "published_date": "2026-09-29T23:52:07.000Z",
+    "issue_reported": "SMOKE - Smoke Investigation",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.788446,
+        30.471608
+      ]
+    },
+    "latitude": "30.471608",
+    "longitude": "-97.788446",
+    "address": "13320-13448 N Fm 620 Rd Sb",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-30T00:10:23.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "7ED2BD4045FEEB481F54D325DE26F0D54BBCCBF1_1790717180_fire_incident",
+    "published_date": "2026-09-29T21:26:20.000Z",
+    "issue_reported": "BWP - Broken Water Pipe",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.65248,
+        30.313869
+      ]
+    },
+    "latitude": "30.313869",
+    "longitude": "-97.65248",
+    "address": "5515 Burgundy Dr",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-29T21:40:20.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "1469BDB67574F64DABEE960C87FBD65D371AE7B8_1790715236_fire_incident",
+    "published_date": "2026-09-29T20:53:56.000Z",
+    "issue_reported": "ELEC - Electrical Fire",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.691662,
+        30.250952
+      ]
+    },
+    "latitude": "30.250952",
+    "longitude": "-97.691662",
+    "address": "7201 Levander Loop",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-29T21:30:19.000Z",
+    "agency": "FIRE"
+  },
+  {
+    "traffic_report_id": "B9AA454BF336A9F2DF1A7632EF2013266C7CE3D4_1790714630_fire_incident",
+    "published_date": "2026-09-29T20:43:50.000Z",
+    "issue_reported": "Traffic Injury Pri 2",
+    "location": {
+      "type": "Point",
+      "coordinates": [
+        -97.571847,
+        30.464595
+      ]
+    },
+    "latitude": "30.464595",
+    "longitude": "-97.571847",
+    "address": "19500-19513 Moorlynch Ave",
+    "traffic_report_status": "ARCHIVED",
+    "traffic_report_status_date_time": "2026-09-29T21:10:17.000Z",
+    "agency": "FIRE"
+  }
+]

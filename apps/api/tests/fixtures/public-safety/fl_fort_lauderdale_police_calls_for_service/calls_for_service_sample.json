@@ -1,0 +1,471 @@
+[
+  {
+    "case_id": "342308164953",
+    "actdate": "2023-08-17T12:48:12.000",
+    "acttime": "1248",
+    "zone": "3411",
+    "reportareadesc": "132",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "emunit": "OPB",
+    "emdivision": "OPSB",
+    "emsection": "TRNG",
+    "emshift": "FL01",
+    "timedisp": "1248",
+    "timearrive": "1248",
+    "timeclear": "1248",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:21.000",
+    "ncodedesc": "68-POLICE SERVICE CA",
+    "dispdesc": "P-PARK CHECK",
+    "streetdir": "N",
+    "street": "N OCEAN BLVD",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164948",
+    "actdate": "2023-08-17T12:43:12.000",
+    "acttime": "1243",
+    "zone": "3494",
+    "reportareadesc": "328",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:22.000",
+    "ncodedesc": "04-ACCIDENT-MINOR",
+    "dispdesc": "I-NO POLICE RESPONSE TO NON-EMERGENCY CALL",
+    "streetdir": "W",
+    "street": "W BROWARD BLVD",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164947",
+    "actdate": "2023-08-17T12:39:32.000",
+    "acttime": "1239",
+    "zone": "3440",
+    "reportareadesc": "220",
+    "neighborhddesc": "NULL",
+    "locdesc": "LAT: <26.128674>  LONG: <",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:22.000",
+    "ncodedesc": "30-LARCENY",
+    "dispdesc": "I-NO POLICE RESPONSE TO NON-EMERGENCY CALL",
+    "streetdir": "NW",
+    "street": "NW 14TH AV",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164946",
+    "actdate": "2023-08-17T12:38:23.000",
+    "acttime": "1238",
+    "zone": "3425",
+    "reportareadesc": "130",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "emunit": "OPB",
+    "emdivision": "PATR",
+    "emsection": "PATR",
+    "emshift": "FL02",
+    "timedisp": "1240",
+    "timearrive": "1241",
+    "timeclear": "1244",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:21.000",
+    "ncodedesc": "49SH-SILENT HOLD-UP",
+    "dispdesc": "C-ALARM CONTACT MADE/ACCIDENTAL",
+    "streetdir": "N",
+    "street": "N FEDERAL HWY",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164942",
+    "actdate": "2023-08-17T12:27:43.000",
+    "acttime": "1227",
+    "zone": "3441",
+    "reportareadesc": "217",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:21.000",
+    "ncodedesc": "13I-SUSPICIOUS INCID",
+    "dispdesc": "I-NO POLICE RESPONSE TO NON-EMERGENCY CALL",
+    "streetdir": "NW",
+    "street": "NW 6TH CT",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164941",
+    "actdate": "2023-08-17T12:22:47.000",
+    "acttime": "1222",
+    "zone": "3423",
+    "reportareadesc": "133",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:21.000",
+    "ncodedesc": "67UM-MEDICAL-UNKNOWN",
+    "dispdesc": "R-REFER TO OTHER AGENCY",
+    "streetdir": "N",
+    "street": "N FEDERAL HWY",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164939",
+    "actdate": "2023-08-17T12:17:43.000",
+    "acttime": "1217",
+    "zone": "3481",
+    "reportareadesc": "228",
+    "neighborhddesc": "NULL",
+    "locdesc": "*1045*",
+    "officer": "[redacted]",
+    "emunit": "OPS",
+    "emdivision": "PATR",
+    "emsection": "PATR",
+    "emshift": "FL03",
+    "timedisp": "1223",
+    "timearrive": "1223",
+    "timeclear": "1234",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:21.000",
+    "ncodedesc": "68-POLICE SERVICE CA",
+    "dispdesc": "B-ASSISTANCE RENDERED",
+    "streetdir": "N",
+    "street": "N NEW RIVER  DR",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164937",
+    "actdate": "2023-08-17T12:11:58.000",
+    "acttime": "1211",
+    "zone": "3480",
+    "reportareadesc": "227",
+    "neighborhddesc": "NULL",
+    "locdesc": "LAT: <26.120156>  LONG: <",
+    "officer": "[redacted]",
+    "timedisp": "1214",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:20.000",
+    "ncodedesc": "911 HANG UP/DROP OFF",
+    "streetdir": "SW",
+    "street": "SW 3RD AV",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164934",
+    "actdate": "2023-08-17T12:09:05.000",
+    "acttime": "1209",
+    "zone": "3480",
+    "reportareadesc": "227",
+    "neighborhddesc": "NULL",
+    "locdesc": "LAT: <26.117066>  LONG: <",
+    "officer": "[redacted]",
+    "emunit": "OPS",
+    "emdivision": "PATR",
+    "emsection": "PATR",
+    "emshift": "FL01",
+    "timedisp": "1212",
+    "timeclear": "1214",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:20.000",
+    "ncodedesc": "911 HANG UP/DROP OFF",
+    "streetdir": "SW",
+    "street": "SW 4TH CT",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164930",
+    "actdate": "2023-08-17T12:05:02.000",
+    "acttime": "1205",
+    "zone": "3475",
+    "reportareadesc": "305",
+    "neighborhddesc": "NULL",
+    "locdesc": "LAT: <26.117001>  LONG: <",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:18.000",
+    "ncodedesc": "911 HANG UP/DROP OFF",
+    "dispdesc": "I-NO POLICE RESPONSE TO NON-EMERGENCY CALL",
+    "streetdir": "SW",
+    "street": "SW 4TH AV",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164931",
+    "actdate": "2023-08-17T12:05:02.000",
+    "acttime": "1205",
+    "zone": "3471",
+    "reportareadesc": "313",
+    "neighborhddesc": "NULL",
+    "locdesc": "YEL BLDG",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:20.000",
+    "ncodedesc": "67TB-MEDICAL-TROUBLE",
+    "dispdesc": "R-REFER TO OTHER AGENCY",
+    "streetdir": "S",
+    "street": "S MIAMI RD",
+    "city": "FORT LAUDERDALE",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164927",
+    "actdate": "2023-08-17T12:03:06.000",
+    "acttime": "1203",
+    "zone": "3475",
+    "reportareadesc": "312",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "emunit": "OPS",
+    "emdivision": "PATR",
+    "emsection": "PATR",
+    "emshift": "FL01",
+    "timedisp": "1203",
+    "timearrive": "1203",
+    "timeclear": "1203",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:18.000",
+    "ncodedesc": "22-DISTURBANCE/NUISA",
+    "dispdesc": "B-ASSISTANCE RENDERED",
+    "streetdir": "S",
+    "street": "S ANDREWS AV",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164926",
+    "actdate": "2023-08-17T11:59:03.000",
+    "acttime": "1159",
+    "zone": "3471",
+    "reportareadesc": "320",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "emunit": "CHF",
+    "emdivision": "CHF",
+    "emsection": "IA",
+    "emshift": "FL01",
+    "timedisp": "1200",
+    "timearrive": "1207",
+    "timeclear": "1216",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:19.000",
+    "ncodedesc": "49A-AUDIBLE/INTRUSIO",
+    "street": "CORDOVA RD",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164924",
+    "actdate": "2023-08-17T11:55:34.000",
+    "acttime": "1155",
+    "zone": "3425",
+    "reportareadesc": "137",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:18.000",
+    "ncodedesc": "13I-SUSPICIOUS INCID",
+    "dispdesc": "I-NO POLICE RESPONSE TO NON-EMERGENCY CALL",
+    "street": "MIDDLE RIVER DR",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "case_id": "342308164921",
+    "actdate": "2023-08-17T11:52:30.000",
+    "acttime": "1152",
+    "zone": "3425",
+    "reportareadesc": "130",
+    "neighborhddesc": "NULL",
+    "officer": "[redacted]",
+    "emunit": "INV",
+    "emdivision": "INVB",
+    "emsection": "PROP",
+    "emshift": "FL01",
+    "timedisp": "1154",
+    "timearrive": "1154",
+    "timeclear": "1200",
+    "geox": "0",
+    "geoy": "0",
+    "addtime": "2023-08-17T12:51:16.000",
+    "ncodedesc": "14-INFORMATION",
+    "dispdesc": "B-ASSISTANCE RENDERED",
+    "streetdir": "NE",
+    "street": "NE 27TH TER",
+    "city": "FORT LAUDERDALE",
+    "state": "FL",
+    "reccount": "1",
+    "month": "8",
+    "year": "2023",
+    "geocoded_column": {
+      "type": "Point",
+      "coordinates": [
+        0,
+        0
+      ]
+    }
+  }
+]

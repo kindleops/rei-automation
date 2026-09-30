@@ -1,0 +1,679 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Priority",
+      "type": "esriFieldTypeDouble",
+      "alias": "Priority",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "StartTime",
+      "type": "esriFieldTypeString",
+      "alias": "Start Time",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "UpdateDate",
+      "type": "esriFieldTypeString",
+      "alias": "Update Date",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "UpdateTime",
+      "type": "esriFieldTypeString",
+      "alias": "Update Time",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ORGID",
+      "type": "esriFieldTypeString",
+      "alias": "ORGID",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Instruct",
+      "type": "esriFieldTypeString",
+      "alias": "Instructions",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "STYLE",
+      "type": "esriFieldTypeString",
+      "alias": "Map Style",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "headline",
+      "type": "esriFieldTypeString",
+      "alias": "Headline",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "phrase",
+      "type": "esriFieldTypeString",
+      "alias": "Phrase",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "cause",
+      "type": "esriFieldTypeString",
+      "alias": "Cause",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Restrict_",
+      "type": "esriFieldTypeString",
+      "alias": "Restriction",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "linktxt",
+      "type": "esriFieldTypeString",
+      "alias": "Link Text",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Route",
+      "type": "esriFieldTypeString",
+      "alias": "Route",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "IssueTime",
+      "type": "esriFieldTypeString",
+      "alias": "Issue Time",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "IssueDate",
+      "type": "esriFieldTypeString",
+      "alias": "Issue Date",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ExpireTime",
+      "type": "esriFieldTypeString",
+      "alias": "Expire Time",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ExpireDate",
+      "type": "esriFieldTypeString",
+      "alias": "Expire Date",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "EndTime",
+      "type": "esriFieldTypeString",
+      "alias": "End Time",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ID",
+      "type": "esriFieldTypeString",
+      "alias": "ID",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "AltRoute",
+      "type": "esriFieldTypeString",
+      "alias": "Alternate Route",
+      "sqlType": "sqlTypeOther",
+      "length": 254,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "EditDate",
+      "type": "esriFieldTypeDate",
+      "alias": "Lasted Updated",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "message",
+      "type": "esriFieldTypeString",
+      "alias": "Message",
+      "sqlType": "sqlTypeOther",
+      "length": 2147483647,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "description",
+      "type": "esriFieldTypeString",
+      "alias": "Description",
+      "sqlType": "sqlTypeOther",
+      "length": 2147483647,
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 110,
+        "Priority": 4,
+        "StartTime": "09:00 PM",
+        "UpdateDate": "09/16/2026",
+        "UpdateTime": "02:50 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "closure",
+        "headline": "US 169 SB: Closed",
+        "phrase": "Closed",
+        "cause": "due to closed. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-140843",
+        "Route": "US 169 SB",
+        "IssueTime": "180453",
+        "IssueDate": "20260916",
+        "ExpireTime": "040000",
+        "ExpireDate": "20261001",
+        "EndTime": "04:00 AM",
+        "ID": "CARSx-140843",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10397476.548731724,
+        "y": 5635008.32421832
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 116,
+        "Priority": 4,
+        "StartTime": "02:38 AM",
+        "UpdateDate": "09/30/2026",
+        "UpdateTime": "02:40 AM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "closure",
+        "headline": "I-35E: Closed",
+        "phrase": "Closed",
+        "cause": "due to closed. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-145923",
+        "Route": "I-35E",
+        "IssueTime": "024953",
+        "IssueDate": "20260930",
+        "ExpireTime": "120000",
+        "ExpireDate": "20260930",
+        "EndTime": "12:00 PM",
+        "ID": "CARSx-145923",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10363809.86117264,
+        "y": 5613716.830126606
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 12,
+        "Priority": 5,
+        "StartTime": "10:00 PM",
+        "UpdateDate": "09/29/2026",
+        "UpdateTime": "05:18 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "warning",
+        "headline": "I-35E: Entrance Ramp Closed",
+        "phrase": "Entrance Ramp Closed",
+        "cause": "due to entrance ramp closed. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-130167",
+        "Route": "I-35E",
+        "IssueTime": "171814",
+        "IssueDate": "20260929",
+        "ExpireTime": "220000",
+        "ExpireDate": "20261023",
+        "EndTime": "10:00 PM",
+        "ID": "CARSx-130167",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10368805.768599954,
+        "y": 5607895.3895125035
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 21,
+        "Priority": 5,
+        "StartTime": "01:00 AM",
+        "UpdateDate": "09/18/2026",
+        "UpdateTime": "01:45 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "warning",
+        "headline": "I-90: Exit Ramp Closed",
+        "phrase": "Exit Ramp Closed",
+        "cause": "due to exit ramp closed. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-133614",
+        "Route": "I-90",
+        "IssueTime": "134557",
+        "IssueDate": "20260918",
+        "ExpireTime": "210000",
+        "ExpireDate": "20261016",
+        "EndTime": "09:00 PM",
+        "ID": "CARSx-133614",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": "Web Text: For additional information on this project,"
+      },
+      "geometry": {
+        "x": -10281075.211864248,
+        "y": 5457886.879776556
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 180,
+        "Priority": 2,
+        "StartTime": "12:01 AM",
+        "UpdateDate": "08/12/2026",
+        "UpdateTime": "05:05 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "roadwork",
+        "headline": "I-494: Bridge Construction",
+        "phrase": "Bridge Construction",
+        "cause": "due to bridge construction. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-129893",
+        "Route": "I-494",
+        "IssueTime": "080454",
+        "IssueDate": "20260908",
+        "ExpireTime": "000000",
+        "ExpireDate": "20261017",
+        "EndTime": "12:00 AM",
+        "ID": "CARSx-129893",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10380297.279634543,
+        "y": 5599001.281800965
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 183,
+        "Priority": 2,
+        "StartTime": "07:00 AM",
+        "UpdateDate": "09/09/2026",
+        "UpdateTime": "04:05 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "roadwork",
+        "headline": "I-35E: Construction Work",
+        "phrase": "Construction Work",
+        "cause": "due to construction work. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-132697",
+        "Route": "I-35E",
+        "IssueTime": "161953",
+        "IssueDate": "20260909",
+        "ExpireTime": "220000",
+        "ExpireDate": "20261023",
+        "EndTime": "10:00 PM",
+        "ID": "CARSx-132697",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10367853.87563418,
+        "y": 5605997.808920047
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 80,
+        "Priority": 4,
+        "StartTime": "09:00 PM",
+        "UpdateDate": "09/29/2026",
+        "UpdateTime": "06:05 AM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "future_event",
+        "headline": "Starts Thursday October 01. I-694: Road Maintenance Operations",
+        "phrase": "Road Maintenance Operations",
+        "cause": "due to road maintenance operations. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-145456",
+        "Route": "I-694",
+        "IssueTime": "061953",
+        "IssueDate": "20260929",
+        "ExpireTime": "040000",
+        "ExpireDate": "20261002",
+        "EndTime": "04:00 AM",
+        "ID": "CARSx-145456",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10348216.894819265,
+        "y": 5621099.742331042
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 83,
+        "Priority": 4,
+        "StartTime": "10:00 PM",
+        "UpdateDate": "09/23/2026",
+        "UpdateTime": "02:05 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "future_event",
+        "headline": "Starts Thursday October 01. I-94: Bridge Construction",
+        "phrase": "Bridge Construction",
+        "cause": "due to bridge construction. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-143034",
+        "Route": "I-94",
+        "IssueTime": "180453",
+        "IssueDate": "20260923",
+        "ExpireTime": "050000",
+        "ExpireDate": "20261002",
+        "EndTime": "05:00 AM",
+        "ID": "CARSx-143034",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10360265.893863747,
+        "y": 5613947.582544064
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 14,
+        "Priority": 5,
+        "StartTime": "02:00 PM",
+        "UpdateDate": "02/25/2026",
+        "UpdateTime": "02:16 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "restriction",
+        "headline": "South Riverfront Drive: Height Limit",
+        "phrase": "Height Limit",
+        "cause": "due to height limit. ",
+        "Restrict_": "There is a height limit in effect. Height limit of 15.75 ft. ",
+        "linktxt": "https://511mn.org/event/CARSx-62998",
+        "Route": "South Riverfront Drive",
+        "IssueTime": "141621",
+        "IssueDate": "20260225",
+        "ExpireTime": "000000",
+        "ExpireDate": "20261101",
+        "EndTime": "12:00 AM",
+        "ID": "CARSx-62998",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": "Web Text: Height limit 15'9\" on Riverfront Drive in Mankato under the Veteran's Memorial Bridge due to the Veteran's Memorial Bridge project. For additional information on this project,"
+      },
+      "geometry": {
+        "x": -10464239.18882059,
+        "y": 5491578.3607053775
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 16,
+        "Priority": 5,
+        "StartTime": "04:02 PM",
+        "UpdateDate": "07/03/2025",
+        "UpdateTime": "04:03 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "restriction",
+        "headline": "US 61: Gross Weight Limit",
+        "phrase": "Gross Weight Limit",
+        "cause": "due to gross weight limit. ",
+        "Restrict_": "There is a weight limit in effect. No vehicles over 79998 lbs. ",
+        "linktxt": "https://511mn.org/event/CARSx-11361",
+        "Route": "US 61",
+        "IssueTime": "160314",
+        "IssueDate": "20250703",
+        "ExpireTime": "120000",
+        "ExpireDate": "20271130",
+        "EndTime": "12:00 PM",
+        "ID": "CARSx-11361",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10353191.094945872,
+        "y": 5603572.541467002
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 92,
+        "Priority": 5,
+        "StartTime": "06:00 AM",
+        "UpdateDate": "03/19/2026",
+        "UpdateTime": "04:24 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "lane_closure",
+        "headline": "US 169: Reduced To One Lane",
+        "phrase": "Reduced To One Lane",
+        "cause": "due to reduced to one lane. ",
+        "Restrict_": "There is a weight limit in effect. Width limit 366 ft. ",
+        "linktxt": "https://511mn.org/event/CARSx-68004",
+        "Route": "US 169",
+        "IssueTime": "162408",
+        "IssueDate": "20260319",
+        "ExpireTime": "180000",
+        "ExpireDate": "20261031",
+        "EndTime": "06:00 PM",
+        "ID": "CARSx-68004",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": "Expect major delays. Web Text: Expect major delays. For additional information on this project,"
+      },
+      "geometry": {
+        "x": -10415665.708249383,
+        "y": 5687101.956701047
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 98,
+        "Priority": 5,
+        "StartTime": "06:00 AM",
+        "UpdateDate": "03/18/2026",
+        "UpdateTime": "12:45 PM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "lane_closure",
+        "headline": "I-90: Reduced To One Lane",
+        "phrase": "Reduced To One Lane",
+        "cause": "due to reduced to one lane. ",
+        "Restrict_": "There is a weight limit in effect. Width limit 381 ft. ",
+        "linktxt": "https://511mn.org/event/CARSx-67741",
+        "Route": "I-90",
+        "IssueTime": "124516",
+        "IssueDate": "20260318",
+        "ExpireTime": "210000",
+        "ExpireDate": "20261113",
+        "EndTime": "09:00 PM",
+        "ID": "CARSx-67741",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": "Web Text: Width restriction is in effect for WB traffic. For additional information on this project,"
+      },
+      "geometry": {
+        "x": -10282631.680984518,
+        "y": 5456294.534123601
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 120,
+        "Priority": 4,
+        "StartTime": "04:14 AM",
+        "UpdateDate": "09/30/2026",
+        "UpdateTime": "04:26 AM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "priority_warning",
+        "headline": "I-35E: Crash",
+        "phrase": "Crash",
+        "cause": "due to crash. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-145929",
+        "Route": "I-35E",
+        "IssueTime": "043453",
+        "IssueDate": "20260930",
+        "ExpireTime": "014620",
+        "ExpireDate": "20300720",
+        "EndTime": null,
+        "ID": "CARSx-145929",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10364096.731500417,
+        "y": 5613467.366186135
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 125,
+        "Priority": 4,
+        "StartTime": "04:30 AM",
+        "UpdateDate": "09/30/2026",
+        "UpdateTime": "04:31 AM",
+        "ORGID": "Minnesota",
+        "Instruct": null,
+        "STYLE": "priority_warning",
+        "headline": "I-35E: Crash",
+        "phrase": "Crash",
+        "cause": "due to crash. ",
+        "Restrict_": null,
+        "linktxt": "https://511mn.org/event/CARSx-145930",
+        "Route": "I-35E",
+        "IssueTime": "043453",
+        "IssueDate": "20260930",
+        "ExpireTime": "015120",
+        "ExpireDate": "20300720",
+        "EndTime": null,
+        "ID": "CARSx-145930",
+        "AltRoute": null,
+        "EditDate": 1790769666461,
+        "message": null,
+        "description": null
+      },
+      "geometry": {
+        "x": -10363809.86117264,
+        "y": 5613716.830126606
+      }
+    }
+  ]
+}

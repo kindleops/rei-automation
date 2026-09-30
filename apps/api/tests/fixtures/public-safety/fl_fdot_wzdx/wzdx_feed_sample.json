@@ -1,0 +1,2924 @@
+{
+  "features": [
+    {
+      "id": "4406783015/269728176",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "35071",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4406783015"
+            }
+          ],
+          "road_names": [
+            "East University Avenue",
+            "East University Avenue, Gainesville, Florida"
+          ],
+          "direction": "eastbound",
+          "name": "East University Avenue, Gainesville",
+          "description": "Road closure",
+          "creation_date": "2026-09-30T01:53:05.401+00:00",
+          "update_date": "2026-09-30T01:53:05.401+00:00",
+          "relationship": {
+            "parents": [
+              "4406783015"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-30T01:52:21.000+00:00",
+        "end_date": "2026-09-30T10:30:59.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "all-lanes-closed",
+        "location_method": "unknown",
+        "worker_presence": {
+          "are_workers_present": true,
+          "method": "check-in-app",
+          "confidence": "high"
+        },
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.31266,
+            29.65186
+          ],
+          [
+            -82.31266,
+            29.65188
+          ],
+          [
+            -82.31239,
+            29.65188
+          ],
+          [
+            -82.31212,
+            29.65187
+          ],
+          [
+            -82.31153,
+            29.65187
+          ]
+        ]
+      },
+      "bbox": [
+        -82.31266,
+        29.65186,
+        -82.31153,
+        29.65188
+      ]
+    },
+    {
+      "id": "4400700819/268844568",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "25114",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4400700819"
+            }
+          ],
+          "road_names": [
+            "East Hanna Avenue",
+            "East Hanna Avenue, Tampa, Florida"
+          ],
+          "direction": "westbound",
+          "name": "East Hanna Avenue, Tampa",
+          "description": "Road closure",
+          "creation_date": "2026-09-28T19:33:32.829+00:00",
+          "update_date": "2026-09-29T11:27:53.556+00:00",
+          "relationship": {
+            "parents": [
+              "4400700819"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-29T11:27:00.000+00:00",
+        "end_date": "2026-10-02T18:00:00.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "all-lanes-closed",
+        "location_method": "unknown",
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.45558,
+            28.00338
+          ],
+          [
+            -82.4559,
+            28.00338
+          ],
+          [
+            -82.45727,
+            28.00338
+          ]
+        ]
+      },
+      "bbox": [
+        -82.45727,
+        28.00338,
+        -82.45558,
+        28.00338
+      ]
+    },
+    {
+      "id": "4400700819/268844568-R",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "25114",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4400700819"
+            }
+          ],
+          "road_names": [
+            "East Hanna Avenue",
+            "East Hanna Avenue, Tampa, Florida"
+          ],
+          "direction": "eastbound",
+          "name": "East Hanna Avenue, Tampa",
+          "description": "Road closure",
+          "creation_date": "2026-09-28T19:33:32.829+00:00",
+          "update_date": "2026-09-29T11:27:53.556+00:00",
+          "relationship": {
+            "parents": [
+              "4400700819"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-29T11:27:00.000+00:00",
+        "end_date": "2026-10-02T18:00:00.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "all-lanes-closed",
+        "location_method": "unknown",
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.45727,
+            28.00338
+          ],
+          [
+            -82.4559,
+            28.00338
+          ],
+          [
+            -82.45558,
+            28.00338
+          ]
+        ]
+      },
+      "bbox": [
+        -82.45727,
+        28.00338,
+        -82.45558,
+        28.00338
+      ]
+    },
+    {
+      "id": "4407072863/269775201",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "32896",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4407072863"
+            }
+          ],
+          "road_names": [
+            "SR 436",
+            "SR 436, Casselberry, Florida"
+          ],
+          "direction": "southbound",
+          "name": "SR 436, Casselberry",
+          "description": "Lane closure",
+          "creation_date": "2026-09-30T03:12:11.456+00:00",
+          "update_date": "2026-09-30T03:12:11.456+00:00",
+          "relationship": {
+            "parents": [
+              "4407072863"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-30T03:11:31.000+00:00",
+        "end_date": "2026-09-30T10:30:00.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "some-lanes-closed",
+        "location_method": "unknown",
+        "worker_presence": {
+          "are_workers_present": true,
+          "method": "check-in-app",
+          "confidence": "high"
+        },
+        "lanes": [
+          {
+            "order": 1,
+            "status": "open",
+            "type": "shoulder"
+          },
+          {
+            "order": 2,
+            "status": "open",
+            "type": "general"
+          },
+          {
+            "order": 3,
+            "status": "closed",
+            "type": "general"
+          },
+          {
+            "order": 4,
+            "status": "closed",
+            "type": "general"
+          },
+          {
+            "order": 5,
+            "status": "open",
+            "type": "general"
+          },
+          {
+            "order": 6,
+            "status": "open",
+            "type": "general"
+          },
+          {
+            "order": 7,
+            "status": "open",
+            "type": "shoulder"
+          }
+        ],
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -81.32254,
+            28.6404
+          ],
+          [
+            -81.32253,
+            28.6401
+          ],
+          [
+            -81.32247,
+            28.63966
+          ],
+          [
+            -81.3224,
+            28.63928
+          ],
+          [
+            -81.32236,
+            28.63916
+          ],
+          [
+            -81.32226,
+            28.63881
+          ],
+          [
+            -81.32226,
+            28.6388
+          ],
+          [
+            -81.32209,
+            28.63835
+          ],
+          [
+            -81.32197,
+            28.6381
+          ],
+          [
+            -81.32181,
+            28.63776
+          ],
+          [
+            -81.32168,
+            28.6375
+          ],
+          [
+            -81.32164,
+            28.63742
+          ],
+          [
+            -81.32162,
+            28.63737
+          ],
+          [
+            -81.3213,
+            28.63669
+          ],
+          [
+            -81.321,
+            28.63608
+          ],
+          [
+            -81.32092,
+            28.63592
+          ],
+          [
+            -81.32087,
+            28.63582
+          ],
+          [
+            -81.32063,
+            28.63536
+          ],
+          [
+            -81.32041,
+            28.6349
+          ],
+          [
+            -81.32029,
+            28.63464
+          ],
+          [
+            -81.32016,
+            28.6343
+          ],
+          [
+            -81.32003,
+            28.63405
+          ],
+          [
+            -81.31971,
+            28.63336
+          ],
+          [
+            -81.31965,
+            28.63323
+          ],
+          [
+            -81.31938,
+            28.63264
+          ],
+          [
+            -81.31931,
+            28.63249
+          ],
+          [
+            -81.31925,
+            28.63237
+          ],
+          [
+            -81.31912,
+            28.63207
+          ],
+          [
+            -81.31897,
+            28.63174
+          ],
+          [
+            -81.31889,
+            28.63156
+          ],
+          [
+            -81.31872,
+            28.6312
+          ],
+          [
+            -81.31866,
+            28.63108
+          ],
+          [
+            -81.31855,
+            28.63083
+          ],
+          [
+            -81.31837,
+            28.63045
+          ],
+          [
+            -81.31835,
+            28.63041
+          ],
+          [
+            -81.31821,
+            28.63011
+          ],
+          [
+            -81.31818,
+            28.63006
+          ],
+          [
+            -81.31812,
+            28.62992
+          ],
+          [
+            -81.31771,
+            28.62905
+          ]
+        ]
+      },
+      "bbox": [
+        -81.32254,
+        28.62905,
+        -81.31771,
+        28.6404
+      ]
+    },
+    {
+      "id": "4406841093/269736058",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "32896",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4406841093"
+            }
+          ],
+          "road_names": [
+            "Panama City Beach Parkway",
+            "Chip Seal Parkway, Panama City Beach, Florida"
+          ],
+          "direction": "westbound",
+          "name": "Panama City Beach Parkway",
+          "description": "Lane closure",
+          "creation_date": "2026-09-30T02:06:28.478+00:00",
+          "update_date": "2026-09-30T02:06:28.478+00:00",
+          "relationship": {
+            "parents": [
+              "4406841093"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-30T02:05:44.000+00:00",
+        "end_date": "2026-09-30T11:00:44.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "some-lanes-closed",
+        "location_method": "unknown",
+        "worker_presence": {
+          "are_workers_present": true,
+          "method": "check-in-app",
+          "confidence": "high"
+        },
+        "reduced_speed_limit_kph": 48.0,
+        "lanes": [
+          {
+            "order": 1,
+            "status": "open",
+            "type": "shoulder"
+          },
+          {
+            "order": 2,
+            "status": "closed",
+            "type": "general"
+          },
+          {
+            "order": 3,
+            "status": "open",
+            "type": "general"
+          },
+          {
+            "order": 4,
+            "status": "open",
+            "type": "shoulder"
+          }
+        ],
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -85.76685,
+            30.1885
+          ],
+          [
+            -85.76739,
+            30.18853
+          ],
+          [
+            -85.76758,
+            30.18854
+          ],
+          [
+            -85.76802,
+            30.18855
+          ],
+          [
+            -85.7684,
+            30.18856
+          ],
+          [
+            -85.76905,
+            30.18857
+          ],
+          [
+            -85.76908,
+            30.18857
+          ],
+          [
+            -85.76981,
+            30.18858
+          ],
+          [
+            -85.77014,
+            30.18853
+          ],
+          [
+            -85.7703,
+            30.18854
+          ],
+          [
+            -85.77053,
+            30.18854
+          ],
+          [
+            -85.77067,
+            30.18855
+          ],
+          [
+            -85.77108,
+            30.18857
+          ],
+          [
+            -85.77142,
+            30.18859
+          ],
+          [
+            -85.77174,
+            30.18861
+          ],
+          [
+            -85.77211,
+            30.18863
+          ],
+          [
+            -85.77258,
+            30.18866
+          ],
+          [
+            -85.77289,
+            30.18867
+          ],
+          [
+            -85.77335,
+            30.1887
+          ],
+          [
+            -85.77403,
+            30.18873
+          ],
+          [
+            -85.77415,
+            30.1888
+          ],
+          [
+            -85.77575,
+            30.18892
+          ],
+          [
+            -85.77579,
+            30.18892
+          ],
+          [
+            -85.77601,
+            30.18894
+          ],
+          [
+            -85.77621,
+            30.18895
+          ],
+          [
+            -85.77655,
+            30.18898
+          ],
+          [
+            -85.77712,
+            30.18902
+          ],
+          [
+            -85.77778,
+            30.18907
+          ],
+          [
+            -85.77824,
+            30.18911
+          ],
+          [
+            -85.77838,
+            30.18912
+          ],
+          [
+            -85.77878,
+            30.18915
+          ],
+          [
+            -85.77896,
+            30.18916
+          ],
+          [
+            -85.77923,
+            30.18918
+          ],
+          [
+            -85.77989,
+            30.18921
+          ],
+          [
+            -85.77995,
+            30.18922
+          ],
+          [
+            -85.78011,
+            30.18922
+          ],
+          [
+            -85.78028,
+            30.18923
+          ],
+          [
+            -85.78065,
+            30.18925
+          ],
+          [
+            -85.7814,
+            30.18929
+          ],
+          [
+            -85.7822,
+            30.18933
+          ],
+          [
+            -85.78345,
+            30.1894
+          ],
+          [
+            -85.78498,
+            30.18948
+          ],
+          [
+            -85.7852,
+            30.18949
+          ],
+          [
+            -85.78545,
+            30.18951
+          ],
+          [
+            -85.7862,
+            30.18954
+          ],
+          [
+            -85.78646,
+            30.18956
+          ],
+          [
+            -85.78676,
+            30.18957
+          ],
+          [
+            -85.78696,
+            30.18958
+          ],
+          [
+            -85.78722,
+            30.1896
+          ],
+          [
+            -85.78747,
+            30.18962
+          ],
+          [
+            -85.78759,
+            30.18962
+          ],
+          [
+            -85.78773,
+            30.18963
+          ],
+          [
+            -85.78785,
+            30.18965
+          ],
+          [
+            -85.78797,
+            30.18966
+          ],
+          [
+            -85.7881,
+            30.18967
+          ],
+          [
+            -85.78822,
+            30.18969
+          ],
+          [
+            -85.78835,
+            30.1897
+          ],
+          [
+            -85.7886,
+            30.18974
+          ],
+          [
+            -85.78872,
+            30.18976
+          ],
+          [
+            -85.78885,
+            30.18978
+          ],
+          [
+            -85.78897,
+            30.1898
+          ],
+          [
+            -85.78909,
+            30.18982
+          ],
+          [
+            -85.78922,
+            30.18985
+          ],
+          [
+            -85.78934,
+            30.18987
+          ],
+          [
+            -85.78959,
+            30.18993
+          ],
+          [
+            -85.78969,
+            30.18995
+          ],
+          [
+            -85.78994,
+            30.19002
+          ],
+          [
+            -85.79007,
+            30.19005
+          ],
+          [
+            -85.79031,
+            30.19011
+          ],
+          [
+            -85.79067,
+            30.19021
+          ],
+          [
+            -85.79111,
+            30.19033
+          ],
+          [
+            -85.79163,
+            30.19048
+          ],
+          [
+            -85.79244,
+            30.1907
+          ],
+          [
+            -85.79268,
+            30.19077
+          ],
+          [
+            -85.79311,
+            30.19088
+          ],
+          [
+            -85.79372,
+            30.19105
+          ],
+          [
+            -85.79418,
+            30.19117
+          ],
+          [
+            -85.79567,
+            30.19158
+          ]
+        ]
+      },
+      "bbox": [
+        -85.79567,
+        30.1885,
+        -85.76685,
+        30.19158
+      ]
+    },
+    {
+      "id": "4408336594",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "37837",
+          "event_type": "work-zone",
+          "road_names": [
+            "Normandy Road,Burnice Drive"
+          ],
+          "direction": "eastbound",
+          "name": "Burnice Dr",
+          "description": "[redacted]",
+          "creation_date": "2026-09-30T09:45:48.981+00:00",
+          "update_date": "2026-09-30T09:45:48.981+00:00"
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-30T04:00:00.000+00:00",
+        "end_date": "2026-10-08T03:59:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "vehicle_impact": "unknown",
+        "location_method": "unknown",
+        "types_of_work": [
+          {
+            "type_name": "maintenance"
+          }
+        ],
+        "event_status": "active",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            -82.751494,
+            27.952796
+          ],
+          [
+            -82.751331,
+            27.952795
+          ]
+        ]
+      },
+      "bbox": [
+        -82.751494,
+        27.952795,
+        -82.751331,
+        27.952796
+      ]
+    },
+    {
+      "id": "4407072863",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "32896",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4407072863/269775201"
+            }
+          ],
+          "road_names": [
+            "State Road 436"
+          ],
+          "direction": "unknown",
+          "name": "Lane Closure SR 436,State Road 436,Carmel Circle,Lake Howell",
+          "description": "Roadworks / License - Roadworks scheduled 09/29/2026 - 09/30/2026 due to Roadworks / License - Roadworks works (Florida DOT)",
+          "creation_date": "2026-09-30T03:12:11.456+00:00",
+          "update_date": "2026-09-30T03:12:11.456+00:00",
+          "relationship": {
+            "children": [
+              "4407072863/269775201"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-30T03:11:31.000+00:00",
+        "end_date": "2026-09-30T10:30:00.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "unknown",
+        "location_method": "unknown",
+        "types_of_work": [
+          {
+            "type_name": "maintenance"
+          }
+        ],
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            -81.320306,
+            28.634675
+          ]
+        ]
+      },
+      "bbox": [
+        -81.320306,
+        28.634675,
+        -81.320306,
+        28.634675
+      ]
+    },
+    {
+      "id": "4406924986",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "32896",
+          "event_type": "work-zone",
+          "road_names": [
+            "Mason Avenue"
+          ],
+          "direction": "unknown",
+          "name": "Road Closure Mason Avenue",
+          "description": "Roadworks / License - Roadworks scheduled 09/29/2026 - 09/30/2026 due to Roadworks / License - Roadworks works (Florida DOT)",
+          "creation_date": "2026-09-30T02:32:16.268+00:00",
+          "update_date": "2026-09-30T09:48:35.664+00:00"
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-09-30T02:31:56.000+00:00",
+        "end_date": "2026-09-30T11:31:56.000+00:00",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "vehicle_impact": "unknown",
+        "location_method": "unknown",
+        "types_of_work": [
+          {
+            "type_name": "maintenance"
+          }
+        ],
+        "event_status": "active",
+        "start_date_accuracy": "verified",
+        "end_date_accuracy": "verified",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            -81.048629,
+            29.219207
+          ]
+        ]
+      },
+      "bbox": [
+        -81.048629,
+        29.219207,
+        -81.048629,
+        29.219207
+      ]
+    },
+    {
+      "id": "4404267257",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "37728",
+          "event_type": "work-zone",
+          "direction": "westbound",
+          "name": "E7R30 - SB I275",
+          "description": "Outside double lane closure on SB I275 for light pole removal.",
+          "creation_date": "2026-09-29T13:09:10.200+00:00",
+          "update_date": "2026-09-29T18:06:30.077+00:00"
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-10-05T02:00:00.000+00:00",
+        "end_date": "2026-10-07T10:00:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "vehicle_impact": "unknown",
+        "location_method": "unknown",
+        "types_of_work": [
+          {
+            "type_name": "maintenance"
+          }
+        ],
+        "event_status": "pending",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.543725,
+            27.943492
+          ],
+          [
+            -82.550766,
+            27.940939
+          ],
+          [
+            -82.556892,
+            27.938855
+          ],
+          [
+            -82.560326,
+            27.937904
+          ],
+          [
+            -82.562746,
+            27.937125
+          ],
+          [
+            -82.564421,
+            27.936666
+          ]
+        ]
+      },
+      "bbox": [
+        -82.564421,
+        27.936666,
+        -82.543725,
+        27.943492
+      ]
+    },
+    {
+      "id": "4400985047",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "37635",
+          "event_type": "work-zone",
+          "related_road_events": [
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/0"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/1"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/2"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/3"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/4"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/5"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/6"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/7"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/8"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/9"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/10"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/11"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/12"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/13"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/14"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/15"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/16"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/17"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/18"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/19"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/20"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/21"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/22"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/23"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/24"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/25"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/26"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/27"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/28"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/29"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111/13004807/30"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/0"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/1"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/2"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/3"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/4"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/5"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/6"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/7"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/8"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/9"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/10"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/11"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/12"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/13"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/14"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/15"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/16"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/17"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/18"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/19"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/20"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/21"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/22"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/23"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/24"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/25"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/26"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/27"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/28"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/29"
+            },
+            {
+              "type": "related-detour",
+              "id": "4400985047/268887111-R/13004807/30"
+            }
+          ],
+          "road_names": [
+            "Storey Creek Boulevard"
+          ],
+          "direction": "unknown",
+          "name": "Storey Creek Blvd. WB Road Closure",
+          "description": "Westbound Storey Creek Boulevard will be closed October 5\u2013November 16, weekdays from 7:30 a.m. to 4:30 p.m.",
+          "creation_date": "2026-09-28T20:57:40.848+00:00",
+          "update_date": "2026-09-29T19:52:54.512+00:00",
+          "relationship": {
+            "children": [
+              "4400985047/268887111/13004807/0",
+              "4400985047/268887111/13004807/1",
+              "4400985047/268887111/13004807/2",
+              "4400985047/268887111/13004807/3",
+              "4400985047/268887111/13004807/4",
+              "4400985047/268887111/13004807/5",
+              "4400985047/268887111/13004807/6",
+              "4400985047/268887111/13004807/7",
+              "4400985047/268887111/13004807/8",
+              "4400985047/268887111/13004807/9",
+              "4400985047/268887111/13004807/10",
+              "4400985047/268887111/13004807/11",
+              "4400985047/268887111/13004807/12",
+              "4400985047/268887111/13004807/13",
+              "4400985047/268887111/13004807/14",
+              "4400985047/268887111/13004807/15",
+              "4400985047/268887111/13004807/16",
+              "4400985047/268887111/13004807/17",
+              "4400985047/268887111/13004807/18",
+              "4400985047/268887111/13004807/19",
+              "4400985047/268887111/13004807/20",
+              "4400985047/268887111/13004807/21",
+              "4400985047/268887111/13004807/22",
+              "4400985047/268887111/13004807/23",
+              "4400985047/268887111/13004807/24",
+              "4400985047/268887111/13004807/25",
+              "4400985047/268887111/13004807/26",
+              "4400985047/268887111/13004807/27",
+              "4400985047/268887111/13004807/28",
+              "4400985047/268887111/13004807/29",
+              "4400985047/268887111/13004807/30",
+              "4400985047/268887111-R/13004807/0",
+              "4400985047/268887111-R/13004807/1",
+              "4400985047/268887111-R/13004807/2",
+              "4400985047/268887111-R/13004807/3",
+              "4400985047/268887111-R/13004807/4",
+              "4400985047/268887111-R/13004807/5",
+              "4400985047/268887111-R/13004807/6",
+              "4400985047/268887111-R/13004807/7",
+              "4400985047/268887111-R/13004807/8",
+              "4400985047/268887111-R/13004807/9",
+              "4400985047/268887111-R/13004807/10",
+              "4400985047/268887111-R/13004807/11",
+              "4400985047/268887111-R/13004807/12",
+              "4400985047/268887111-R/13004807/13",
+              "4400985047/268887111-R/13004807/14",
+              "4400985047/268887111-R/13004807/15",
+              "4400985047/268887111-R/13004807/16",
+              "4400985047/268887111-R/13004807/17",
+              "4400985047/268887111-R/13004807/18",
+              "4400985047/268887111-R/13004807/19",
+              "4400985047/268887111-R/13004807/20",
+              "4400985047/268887111-R/13004807/21",
+              "4400985047/268887111-R/13004807/22",
+              "4400985047/268887111-R/13004807/23",
+              "4400985047/268887111-R/13004807/24",
+              "4400985047/268887111-R/13004807/25",
+              "4400985047/268887111-R/13004807/26",
+              "4400985047/268887111-R/13004807/27",
+              "4400985047/268887111-R/13004807/28",
+              "4400985047/268887111-R/13004807/29",
+              "4400985047/268887111-R/13004807/30"
+            ]
+          }
+        },
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "start_date": "2026-10-05T11:30:00.000+00:00",
+        "end_date": "2026-11-16T21:30:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "vehicle_impact": "unknown",
+        "location_method": "unknown",
+        "types_of_work": [
+          {
+            "type_name": "maintenance"
+          }
+        ],
+        "event_status": "pending",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated",
+        "beginning_accuracy": "estimated",
+        "ending_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            -81.445687,
+            28.243054
+          ]
+        ]
+      },
+      "bbox": [
+        -81.445687,
+        28.243054,
+        -81.445687,
+        28.243054
+      ]
+    },
+    {
+      "id": "4400955600/268882918",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "37635",
+          "event_type": "detour",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4400955600"
+            }
+          ],
+          "road_names": [
+            "Presley Place,Storey Creek Boulevard"
+          ],
+          "direction": "westbound",
+          "name": "Storey Creek Boulevard - Detour",
+          "description": "Diversion route",
+          "creation_date": "2026-09-28T20:48:58.960+00:00",
+          "update_date": "2026-09-28T20:54:36.288+00:00",
+          "relationship": {
+            "parents": [
+              "4400955600"
+            ]
+          }
+        },
+        "start_date": "2026-09-29T11:30:00.000+00:00",
+        "end_date": "2026-11-16T09:30:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "event_status": "active",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -81.44403,
+            28.24267
+          ],
+          [
+            -81.44403,
+            28.24314
+          ],
+          [
+            -81.44424,
+            28.24317
+          ],
+          [
+            -81.44445,
+            28.24323
+          ],
+          [
+            -81.445,
+            28.24338
+          ],
+          [
+            -81.44541,
+            28.24349
+          ],
+          [
+            -81.44589,
+            28.24363
+          ],
+          [
+            -81.44597,
+            28.24365
+          ],
+          [
+            -81.4471,
+            28.24396
+          ],
+          [
+            -81.44725,
+            28.24354
+          ],
+          [
+            -81.44726,
+            28.24351
+          ]
+        ]
+      },
+      "bbox": [
+        -81.44726,
+        28.24267,
+        -81.44403,
+        28.24396
+      ]
+    },
+    {
+      "id": "4400955600/268882918-R",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "37635",
+          "event_type": "detour",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4400955600"
+            }
+          ],
+          "road_names": [
+            "Presley Place,Storey Creek Boulevard"
+          ],
+          "direction": "eastbound",
+          "name": "Storey Creek Boulevard - Detour",
+          "description": "Diversion route",
+          "creation_date": "2026-09-28T20:48:58.960+00:00",
+          "update_date": "2026-09-28T20:54:36.288+00:00",
+          "relationship": {
+            "parents": [
+              "4400955600"
+            ]
+          }
+        },
+        "start_date": "2026-09-29T11:30:00.000+00:00",
+        "end_date": "2026-11-16T09:30:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "event_status": "active",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -81.44726,
+            28.24351
+          ],
+          [
+            -81.44725,
+            28.24354
+          ],
+          [
+            -81.4471,
+            28.24396
+          ],
+          [
+            -81.44597,
+            28.24365
+          ],
+          [
+            -81.44589,
+            28.24363
+          ],
+          [
+            -81.44541,
+            28.24349
+          ],
+          [
+            -81.445,
+            28.24338
+          ],
+          [
+            -81.44445,
+            28.24323
+          ],
+          [
+            -81.44424,
+            28.24317
+          ],
+          [
+            -81.44403,
+            28.24314
+          ],
+          [
+            -81.44403,
+            28.24267
+          ]
+        ]
+      },
+      "bbox": [
+        -81.44726,
+        28.24267,
+        -81.44403,
+        28.24396
+      ]
+    },
+    {
+      "id": "4384367202/266488871",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "28357",
+          "event_type": "detour",
+          "related_road_events": [
+            {
+              "type": "related-work-zone",
+              "id": "4384367202"
+            }
+          ],
+          "road_names": [
+            "Nundy Avenue,Nundy Avenue"
+          ],
+          "direction": "westbound",
+          "name": "Detour",
+          "description": "Diversion route",
+          "creation_date": "2026-09-25T13:59:09.666+00:00",
+          "update_date": "2026-09-28T12:03:52.239+00:00",
+          "relationship": {
+            "parents": [
+              "4384367202"
+            ]
+          }
+        },
+        "start_date": "2026-09-28T12:00:00.000+00:00",
+        "end_date": "2026-12-18T23:00:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "event_status": "active",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.35143,
+            27.84646
+          ],
+          [
+            -82.35135,
+            27.84646
+          ],
+          [
+            -82.35131,
+            27.84645
+          ],
+          [
+            -82.35129,
+            27.84644
+          ],
+          [
+            -82.35125,
+            27.8464
+          ],
+          [
+            -82.35122,
+            27.84637
+          ],
+          [
+            -82.3512,
+            27.84632
+          ],
+          [
+            -82.35117,
+            27.84625
+          ],
+          [
+            -82.35116,
+            27.84621
+          ],
+          [
+            -82.35116,
+            27.84596
+          ],
+          [
+            -82.35119,
+            27.84577
+          ],
+          [
+            -82.35123,
+            27.84543
+          ],
+          [
+            -82.35125,
+            27.84525
+          ],
+          [
+            -82.35127,
+            27.84511
+          ],
+          [
+            -82.35128,
+            27.84501
+          ],
+          [
+            -82.35135,
+            27.84447
+          ],
+          [
+            -82.35149,
+            27.84334
+          ],
+          [
+            -82.3515,
+            27.84327
+          ],
+          [
+            -82.35154,
+            27.84293
+          ],
+          [
+            -82.35155,
+            27.84288
+          ],
+          [
+            -82.35162,
+            27.84231
+          ],
+          [
+            -82.35164,
+            27.84215
+          ],
+          [
+            -82.35169,
+            27.84176
+          ],
+          [
+            -82.3517,
+            27.84167
+          ],
+          [
+            -82.35174,
+            27.84133
+          ],
+          [
+            -82.35181,
+            27.84073
+          ],
+          [
+            -82.35182,
+            27.84066
+          ],
+          [
+            -82.35186,
+            27.84038
+          ],
+          [
+            -82.3519,
+            27.84018
+          ],
+          [
+            -82.35194,
+            27.83987
+          ],
+          [
+            -82.35197,
+            27.83959
+          ],
+          [
+            -82.352,
+            27.83935
+          ],
+          [
+            -82.35203,
+            27.83911
+          ],
+          [
+            -82.35204,
+            27.839
+          ],
+          [
+            -82.35205,
+            27.83882
+          ],
+          [
+            -82.35211,
+            27.83832
+          ],
+          [
+            -82.35215,
+            27.83803
+          ],
+          [
+            -82.35222,
+            27.83743
+          ],
+          [
+            -82.35225,
+            27.83727
+          ],
+          [
+            -82.35228,
+            27.83712
+          ],
+          [
+            -82.35232,
+            27.83694
+          ],
+          [
+            -82.35239,
+            27.83671
+          ],
+          [
+            -82.3525,
+            27.83642
+          ],
+          [
+            -82.35262,
+            27.83613
+          ],
+          [
+            -82.35267,
+            27.83602
+          ],
+          [
+            -82.3527,
+            27.83591
+          ],
+          [
+            -82.35273,
+            27.83582
+          ],
+          [
+            -82.35276,
+            27.83572
+          ],
+          [
+            -82.35278,
+            27.83563
+          ],
+          [
+            -82.35279,
+            27.83553
+          ],
+          [
+            -82.3528,
+            27.83545
+          ],
+          [
+            -82.35281,
+            27.83536
+          ],
+          [
+            -82.35281,
+            27.8352
+          ],
+          [
+            -82.35282,
+            27.83516
+          ],
+          [
+            -82.35282,
+            27.8351
+          ],
+          [
+            -82.35954,
+            27.8351
+          ],
+          [
+            -82.361,
+            27.83511
+          ],
+          [
+            -82.36173,
+            27.83511
+          ],
+          [
+            -82.36273,
+            27.83512
+          ],
+          [
+            -82.36328,
+            27.83514
+          ],
+          [
+            -82.36382,
+            27.83516
+          ],
+          [
+            -82.36501,
+            27.83517
+          ],
+          [
+            -82.36579,
+            27.83517
+          ],
+          [
+            -82.36625,
+            27.83516
+          ],
+          [
+            -82.36687,
+            27.83514
+          ],
+          [
+            -82.36747,
+            27.83514
+          ],
+          [
+            -82.36845,
+            27.83515
+          ],
+          [
+            -82.36926,
+            27.83515
+          ],
+          [
+            -82.36969,
+            27.83516
+          ],
+          [
+            -82.37001,
+            27.83518
+          ],
+          [
+            -82.37031,
+            27.83519
+          ],
+          [
+            -82.37157,
+            27.83519
+          ],
+          [
+            -82.37199,
+            27.83517
+          ],
+          [
+            -82.37222,
+            27.83515
+          ],
+          [
+            -82.37239,
+            27.83514
+          ],
+          [
+            -82.37324,
+            27.83513
+          ],
+          [
+            -82.37337,
+            27.83513
+          ],
+          [
+            -82.3737,
+            27.83514
+          ],
+          [
+            -82.37408,
+            27.83514
+          ],
+          [
+            -82.37492,
+            27.83513
+          ],
+          [
+            -82.37555,
+            27.83513
+          ],
+          [
+            -82.3759,
+            27.83512
+          ],
+          [
+            -82.37626,
+            27.83511
+          ],
+          [
+            -82.3767,
+            27.83511
+          ],
+          [
+            -82.3787,
+            27.8351
+          ],
+          [
+            -82.37974,
+            27.8351
+          ],
+          [
+            -82.38017,
+            27.83509
+          ],
+          [
+            -82.38164,
+            27.83509
+          ],
+          [
+            -82.38164,
+            27.83637
+          ],
+          [
+            -82.38165,
+            27.83739
+          ],
+          [
+            -82.38165,
+            27.83914
+          ],
+          [
+            -82.38164,
+            27.83936
+          ],
+          [
+            -82.38164,
+            27.83956
+          ],
+          [
+            -82.38162,
+            27.83997
+          ],
+          [
+            -82.38162,
+            27.84015
+          ],
+          [
+            -82.38161,
+            27.84062
+          ],
+          [
+            -82.38161,
+            27.84078
+          ],
+          [
+            -82.38159,
+            27.84116
+          ],
+          [
+            -82.38159,
+            27.8413
+          ],
+          [
+            -82.38158,
+            27.8421
+          ],
+          [
+            -82.38158,
+            27.84269
+          ],
+          [
+            -82.38157,
+            27.84312
+          ],
+          [
+            -82.38157,
+            27.84386
+          ],
+          [
+            -82.38156,
+            27.84403
+          ],
+          [
+            -82.38156,
+            27.84516
+          ],
+          [
+            -82.38155,
+            27.84548
+          ],
+          [
+            -82.38155,
+            27.84595
+          ],
+          [
+            -82.38147,
+            27.84595
+          ]
+        ]
+      },
+      "bbox": [
+        -82.38165,
+        27.83509,
+        -82.35116,
+        27.84646
+      ]
+    },
+    {
+      "id": "4363874049/266494070/12953754/0",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "35276",
+          "event_type": "detour",
+          "related_road_events": [
+            {
+              "type": "next-occurrence",
+              "id": "4363874049/266494070/12953754/1"
+            },
+            {
+              "type": "related-work-zone",
+              "id": "4363874049"
+            }
+          ],
+          "road_names": [
+            "East 21st Avenue"
+          ],
+          "direction": "westbound",
+          "name": "CWS-26-0001080 \u2013 E 21st Ave Detour",
+          "description": "Diversion route",
+          "creation_date": "2026-09-21T15:08:27.765+00:00",
+          "update_date": "2026-09-25T16:19:52.662+00:00",
+          "relationship": {
+            "parents": [
+              "4363874049"
+            ]
+          }
+        },
+        "start_date": "2026-09-29T13:00:00.000+00:00",
+        "end_date": "2026-09-29T20:00:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "event_status": "completed",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.44305,
+            27.97049
+          ],
+          [
+            -82.44297,
+            27.97049
+          ],
+          [
+            -82.44297,
+            27.9706
+          ],
+          [
+            -82.44298,
+            27.97123
+          ],
+          [
+            -82.44297,
+            27.97197
+          ],
+          [
+            -82.44298,
+            27.97235
+          ],
+          [
+            -82.44298,
+            27.97385
+          ],
+          [
+            -82.44297,
+            27.97403
+          ],
+          [
+            -82.44297,
+            27.97415
+          ],
+          [
+            -82.44295,
+            27.97506
+          ],
+          [
+            -82.44295,
+            27.97599
+          ],
+          [
+            -82.44292,
+            27.97688
+          ],
+          [
+            -82.44292,
+            27.97734
+          ],
+          [
+            -82.44293,
+            27.9774
+          ],
+          [
+            -82.44293,
+            27.97747
+          ],
+          [
+            -82.44294,
+            27.97766
+          ],
+          [
+            -82.44294,
+            27.97782
+          ],
+          [
+            -82.44325,
+            27.97782
+          ],
+          [
+            -82.44344,
+            27.97783
+          ],
+          [
+            -82.44427,
+            27.97783
+          ],
+          [
+            -82.44427,
+            27.97774
+          ],
+          [
+            -82.44428,
+            27.97689
+          ],
+          [
+            -82.44429,
+            27.97599
+          ],
+          [
+            -82.4443,
+            27.97508
+          ],
+          [
+            -82.44431,
+            27.97468
+          ],
+          [
+            -82.44427,
+            27.97453
+          ],
+          [
+            -82.44422,
+            27.97441
+          ],
+          [
+            -82.44421,
+            27.97433
+          ],
+          [
+            -82.4442,
+            27.97416
+          ],
+          [
+            -82.44421,
+            27.97343
+          ],
+          [
+            -82.44421,
+            27.97197
+          ],
+          [
+            -82.44422,
+            27.97124
+          ],
+          [
+            -82.44422,
+            27.97087
+          ],
+          [
+            -82.44421,
+            27.9706
+          ],
+          [
+            -82.44421,
+            27.97052
+          ],
+          [
+            -82.44418,
+            27.97052
+          ]
+        ]
+      },
+      "bbox": [
+        -82.44431,
+        27.97049,
+        -82.44292,
+        27.97783
+      ]
+    },
+    {
+      "id": "4363874049/266494070-R/12953754/0",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "data_source_id": "35276",
+          "event_type": "detour",
+          "related_road_events": [
+            {
+              "type": "next-occurrence",
+              "id": "4363874049/266494070-R/12953754/1"
+            },
+            {
+              "type": "related-work-zone",
+              "id": "4363874049"
+            }
+          ],
+          "road_names": [
+            "East 21st Avenue"
+          ],
+          "direction": "eastbound",
+          "name": "CWS-26-0001080 \u2013 E 21st Ave Detour",
+          "description": "Diversion route",
+          "creation_date": "2026-09-21T15:08:27.765+00:00",
+          "update_date": "2026-09-25T16:19:52.662+00:00",
+          "relationship": {
+            "parents": [
+              "4363874049"
+            ]
+          }
+        },
+        "start_date": "2026-09-29T13:00:00.000+00:00",
+        "end_date": "2026-09-29T20:00:00.000+00:00",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "event_status": "completed",
+        "start_date_accuracy": "estimated",
+        "end_date_accuracy": "estimated"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -82.44418,
+            27.97052
+          ],
+          [
+            -82.44421,
+            27.97052
+          ],
+          [
+            -82.44421,
+            27.9706
+          ],
+          [
+            -82.44422,
+            27.97087
+          ],
+          [
+            -82.44422,
+            27.97124
+          ],
+          [
+            -82.44421,
+            27.97197
+          ],
+          [
+            -82.44421,
+            27.97343
+          ],
+          [
+            -82.4442,
+            27.97416
+          ],
+          [
+            -82.44421,
+            27.97433
+          ],
+          [
+            -82.44422,
+            27.97441
+          ],
+          [
+            -82.44427,
+            27.97453
+          ],
+          [
+            -82.44431,
+            27.97468
+          ],
+          [
+            -82.4443,
+            27.97508
+          ],
+          [
+            -82.44429,
+            27.97599
+          ],
+          [
+            -82.44428,
+            27.97689
+          ],
+          [
+            -82.44427,
+            27.97774
+          ],
+          [
+            -82.44427,
+            27.97783
+          ],
+          [
+            -82.44344,
+            27.97783
+          ],
+          [
+            -82.44325,
+            27.97782
+          ],
+          [
+            -82.44294,
+            27.97782
+          ],
+          [
+            -82.44294,
+            27.97766
+          ],
+          [
+            -82.44293,
+            27.97747
+          ],
+          [
+            -82.44293,
+            27.9774
+          ],
+          [
+            -82.44292,
+            27.97734
+          ],
+          [
+            -82.44292,
+            27.97688
+          ],
+          [
+            -82.44295,
+            27.97599
+          ],
+          [
+            -82.44295,
+            27.97506
+          ],
+          [
+            -82.44297,
+            27.97415
+          ],
+          [
+            -82.44297,
+            27.97403
+          ],
+          [
+            -82.44298,
+            27.97385
+          ],
+          [
+            -82.44298,
+            27.97235
+          ],
+          [
+            -82.44297,
+            27.97197
+          ],
+          [
+            -82.44298,
+            27.97123
+          ],
+          [
+            -82.44297,
+            27.9706
+          ],
+          [
+            -82.44297,
+            27.97049
+          ],
+          [
+            -82.44305,
+            27.97049
+          ]
+        ]
+      },
+      "bbox": [
+        -82.44431,
+        27.97049,
+        -82.44292,
+        27.97783
+      ]
+    }
+  ],
+  "feed_info": {
+    "publisher": "one.network",
+    "contact_name": "Support",
+    "contact_email": "support@one.network",
+    "update_date": "2026-09-30T10:13:00.483+00:00",
+    "version": "4.2",
+    "data_sources": [
+      {
+        "data_source_id": "37673",
+        "organization_name": "AECOM"
+      },
+      {
+        "data_source_id": "37278",
+        "organization_name": "Consor Engineering Firm"
+      },
+      {
+        "data_source_id": "35056",
+        "organization_name": "OHLA USA"
+      },
+      {
+        "data_source_id": "35199",
+        "organization_name": "Archer Western Construction, LLC"
+      },
+      {
+        "data_source_id": "35276",
+        "organization_name": "RTD Construction Inc"
+      },
+      {
+        "data_source_id": "35176",
+        "organization_name": "Jr. Davis Construction Co., Inc."
+      },
+      {
+        "data_source_id": "35054",
+        "organization_name": "Masci General Contractors, Inc"
+      },
+      {
+        "data_source_id": "ELGIN",
+        "organization_name": "ELGIN"
+      },
+      {
+        "data_source_id": "35073",
+        "organization_name": "Horsepower Electric, Inc."
+      },
+      {
+        "data_source_id": "35071",
+        "organization_name": "Preferred Materials Inc."
+      },
+      {
+        "data_source_id": "37837",
+        "organization_name": "Pinellas County, FL"
+      },
+      {
+        "data_source_id": "35115",
+        "organization_name": "Lane Construction Corporation (the)"
+      },
+      {
+        "data_source_id": "28357",
+        "organization_name": "Hillsborough County, Florida"
+      },
+      {
+        "data_source_id": "35211",
+        "organization_name": "Asphalt Group, Inc."
+      },
+      {
+        "data_source_id": "37411",
+        "organization_name": "AUM Construction"
+      },
+      {
+        "data_source_id": "37754",
+        "organization_name": "Plant City, FL"
+      },
+      {
+        "data_source_id": "37711",
+        "organization_name": "J Mori Painting"
+      },
+      {
+        "data_source_id": "37657",
+        "organization_name": "HNTB"
+      },
+      {
+        "data_source_id": "37635",
+        "organization_name": "Osceola County, Florida"
+      },
+      {
+        "data_source_id": "37636",
+        "organization_name": "Seminole County, Florida"
+      },
+      {
+        "data_source_id": "35080",
+        "organization_name": "Weekley Asphalt Paving, Inc."
+      },
+      {
+        "data_source_id": "37264",
+        "organization_name": "CWR Contracting"
+      },
+      {
+        "data_source_id": "florida_hillsborough_county_permits",
+        "organization_name": "Hillsborough County, Florida"
+      },
+      {
+        "data_source_id": "35166",
+        "organization_name": "Glf Construction Corporation"
+      },
+      {
+        "data_source_id": "25114",
+        "organization_name": "City of Tampa, Florida"
+      },
+      {
+        "data_source_id": "35044",
+        "organization_name": "Halley Engineering Contractors, Inc."
+      },
+      {
+        "data_source_id": "35087",
+        "organization_name": "General Asphalt Company, LLC"
+      },
+      {
+        "data_source_id": "35086",
+        "organization_name": "Roadway Construction, LLC"
+      },
+      {
+        "data_source_id": "35141",
+        "organization_name": "TransCore"
+      },
+      {
+        "data_source_id": "35042",
+        "organization_name": "Ranger Construction Industries, Inc."
+      },
+      {
+        "data_source_id": "35061",
+        "organization_name": "Structural Technologies, LLC"
+      },
+      {
+        "data_source_id": "28605",
+        "organization_name": "Hubbard Construction"
+      },
+      {
+        "data_source_id": "28704",
+        "organization_name": "Dallas 1"
+      },
+      {
+        "data_source_id": "35207",
+        "organization_name": "Bacallao Construction & Engineering Development"
+      },
+      {
+        "data_source_id": "32896",
+        "organization_name": "Florida DOT"
+      },
+      {
+        "data_source_id": "35943",
+        "organization_name": "Prince Contracting LLC"
+      },
+      {
+        "data_source_id": "37728",
+        "organization_name": "SLJV"
+      },
+      {
+        "data_source_id": "37707",
+        "organization_name": "GAI Consultants"
+      },
+      {
+        "data_source_id": "35205",
+        "organization_name": "Florida Engineering & Development Corp"
+      },
+      {
+        "data_source_id": "37808",
+        "organization_name": "AGC Electric Inc."
+      },
+      {
+        "data_source_id": "35125",
+        "organization_name": "Sema Construction, Inc."
+      },
+      {
+        "data_source_id": "35200",
+        "organization_name": "The Stout Group LLC"
+      },
+      {
+        "data_source_id": "37368",
+        "organization_name": "American Utility Management & Energy Services"
+      },
+      {
+        "data_source_id": "37348",
+        "organization_name": "Southland Construction, Inc."
+      },
+      {
+        "data_source_id": "37349",
+        "organization_name": "City of Altamonte Springs"
+      },
+      {
+        "data_source_id": "37668",
+        "organization_name": "CPC Eng."
+      },
+      {
+        "data_source_id": "florida_dot_construction_projects",
+        "organization_name": "Florida DOT"
+      },
+      {
+        "data_source_id": "37803",
+        "organization_name": "Advanced Roofing"
+      }
+    ]
+  },
+  "type": "FeatureCollection",
+  "bbox": [
+    -87.492141,
+    24.55477,
+    -80.053759,
+    30.996942
+  ],
+  "road_event_feed_info": {
+    "publisher": "one.network",
+    "contact_name": "Support",
+    "contact_email": "support@one.network",
+    "update_date": "2026-09-30T10:13:00.483+00:00",
+    "version": "4.2",
+    "data_sources": [
+      {
+        "data_source_id": "37673",
+        "organization_name": "AECOM"
+      },
+      {
+        "data_source_id": "37278",
+        "organization_name": "Consor Engineering Firm"
+      },
+      {
+        "data_source_id": "35056",
+        "organization_name": "OHLA USA"
+      },
+      {
+        "data_source_id": "35199",
+        "organization_name": "Archer Western Construction, LLC"
+      },
+      {
+        "data_source_id": "35276",
+        "organization_name": "RTD Construction Inc"
+      },
+      {
+        "data_source_id": "35176",
+        "organization_name": "Jr. Davis Construction Co., Inc."
+      },
+      {
+        "data_source_id": "35054",
+        "organization_name": "Masci General Contractors, Inc"
+      },
+      {
+        "data_source_id": "ELGIN",
+        "organization_name": "ELGIN"
+      },
+      {
+        "data_source_id": "35073",
+        "organization_name": "Horsepower Electric, Inc."
+      },
+      {
+        "data_source_id": "35071",
+        "organization_name": "Preferred Materials Inc."
+      },
+      {
+        "data_source_id": "37837",
+        "organization_name": "Pinellas County, FL"
+      },
+      {
+        "data_source_id": "35115",
+        "organization_name": "Lane Construction Corporation (the)"
+      },
+      {
+        "data_source_id": "28357",
+        "organization_name": "Hillsborough County, Florida"
+      },
+      {
+        "data_source_id": "35211",
+        "organization_name": "Asphalt Group, Inc."
+      },
+      {
+        "data_source_id": "37411",
+        "organization_name": "AUM Construction"
+      },
+      {
+        "data_source_id": "37754",
+        "organization_name": "Plant City, FL"
+      },
+      {
+        "data_source_id": "37711",
+        "organization_name": "J Mori Painting"
+      },
+      {
+        "data_source_id": "37657",
+        "organization_name": "HNTB"
+      },
+      {
+        "data_source_id": "37635",
+        "organization_name": "Osceola County, Florida"
+      },
+      {
+        "data_source_id": "37636",
+        "organization_name": "Seminole County, Florida"
+      },
+      {
+        "data_source_id": "35080",
+        "organization_name": "Weekley Asphalt Paving, Inc."
+      },
+      {
+        "data_source_id": "37264",
+        "organization_name": "CWR Contracting"
+      },
+      {
+        "data_source_id": "florida_hillsborough_county_permits",
+        "organization_name": "Hillsborough County, Florida"
+      },
+      {
+        "data_source_id": "35166",
+        "organization_name": "Glf Construction Corporation"
+      },
+      {
+        "data_source_id": "25114",
+        "organization_name": "City of Tampa, Florida"
+      },
+      {
+        "data_source_id": "35044",
+        "organization_name": "Halley Engineering Contractors, Inc."
+      },
+      {
+        "data_source_id": "35087",
+        "organization_name": "General Asphalt Company, LLC"
+      },
+      {
+        "data_source_id": "35086",
+        "organization_name": "Roadway Construction, LLC"
+      },
+      {
+        "data_source_id": "35141",
+        "organization_name": "TransCore"
+      },
+      {
+        "data_source_id": "35042",
+        "organization_name": "Ranger Construction Industries, Inc."
+      },
+      {
+        "data_source_id": "35061",
+        "organization_name": "Structural Technologies, LLC"
+      },
+      {
+        "data_source_id": "28605",
+        "organization_name": "Hubbard Construction"
+      },
+      {
+        "data_source_id": "28704",
+        "organization_name": "Dallas 1"
+      },
+      {
+        "data_source_id": "35207",
+        "organization_name": "Bacallao Construction & Engineering Development"
+      },
+      {
+        "data_source_id": "32896",
+        "organization_name": "Florida DOT"
+      },
+      {
+        "data_source_id": "35943",
+        "organization_name": "Prince Contracting LLC"
+      },
+      {
+        "data_source_id": "37728",
+        "organization_name": "SLJV"
+      },
+      {
+        "data_source_id": "37707",
+        "organization_name": "GAI Consultants"
+      },
+      {
+        "data_source_id": "35205",
+        "organization_name": "Florida Engineering & Development Corp"
+      },
+      {
+        "data_source_id": "37808",
+        "organization_name": "AGC Electric Inc."
+      },
+      {
+        "data_source_id": "35125",
+        "organization_name": "Sema Construction, Inc."
+      },
+      {
+        "data_source_id": "35200",
+        "organization_name": "The Stout Group LLC"
+      },
+      {
+        "data_source_id": "37368",
+        "organization_name": "American Utility Management & Energy Services"
+      },
+      {
+        "data_source_id": "37348",
+        "organization_name": "Southland Construction, Inc."
+      },
+      {
+        "data_source_id": "37349",
+        "organization_name": "City of Altamonte Springs"
+      },
+      {
+        "data_source_id": "37668",
+        "organization_name": "CPC Eng."
+      },
+      {
+        "data_source_id": "florida_dot_construction_projects",
+        "organization_name": "Florida DOT"
+      },
+      {
+        "data_source_id": "37803",
+        "organization_name": "Advanced Roofing"
+      }
+    ]
+  }
+}

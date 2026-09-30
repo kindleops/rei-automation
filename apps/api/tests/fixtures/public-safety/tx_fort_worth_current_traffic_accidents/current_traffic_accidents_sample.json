@@ -1,0 +1,229 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ID",
+      "type": "esriFieldTypeInteger",
+      "alias": "ID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Event_Number",
+      "type": "esriFieldTypeInteger",
+      "alias": "Event_Number",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Type_",
+      "type": "esriFieldTypeString",
+      "alias": "Type_",
+      "sqlType": "sqlTypeOther",
+      "length": 16,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CreationTime",
+      "type": "esriFieldTypeDate",
+      "alias": "CreationTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Description",
+      "type": "esriFieldTypeString",
+      "alias": "Description",
+      "sqlType": "sqlTypeOther",
+      "length": 32,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Severity",
+      "type": "esriFieldTypeString",
+      "alias": "Severity",
+      "sqlType": "sqlTypeOther",
+      "length": 16,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Address",
+      "type": "esriFieldTypeString",
+      "alias": "Address",
+      "sqlType": "sqlTypeOther",
+      "length": 128,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Street",
+      "type": "esriFieldTypeString",
+      "alias": "Street",
+      "sqlType": "sqlTypeOther",
+      "length": 128,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Cross_Street",
+      "type": "esriFieldTypeString",
+      "alias": "Cross_Street",
+      "sqlType": "sqlTypeOther",
+      "length": 128,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "UpdateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "UpdateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Location_Description",
+      "type": "esriFieldTypeString",
+      "alias": "Location_Description",
+      "sqlType": "sqlTypeOther",
+      "length": 128,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "City",
+      "type": "esriFieldTypeString",
+      "alias": "City",
+      "sqlType": "sqlTypeOther",
+      "length": 16,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "State",
+      "type": "esriFieldTypeString",
+      "alias": "State",
+      "sqlType": "sqlTypeOther",
+      "length": 3,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Zip",
+      "type": "esriFieldTypeInteger",
+      "alias": "Zip",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "SubType_",
+      "type": "esriFieldTypeString",
+      "alias": "SubType_",
+      "sqlType": "sqlTypeOther",
+      "length": 16,
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 3,
+        "ID": 27110701,
+        "Event_Number": 261051944,
+        "Type_": "ACCIDENT",
+        "CreationTime": 1790764604000,
+        "Description": "Minor Accident",
+        "Severity": "MINOR",
+        "Address": "Highway 114 / Wolff Xing",
+        "Street": "Highway 114 / Wolff Xing",
+        "Cross_Street": null,
+        "UpdateTime": 1790766605210,
+        "Location_Description": null,
+        "City": null,
+        "State": null,
+        "Zip": null,
+        "SubType_": null
+      },
+      "geometry": {
+        "x": -97.329888,
+        "y": 33.03511999999999
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "ID": 27110530,
+        "Event_Number": 261051920,
+        "Type_": "ACCIDENT",
+        "CreationTime": 1790763902000,
+        "Description": "Minor Accident",
+        "Severity": "MINOR",
+        "Address": "340 Iron Ore Trl",
+        "Street": "IRON ORE",
+        "Cross_Street": "TALUS DR/FOSSIL SPRINGS DR",
+        "UpdateTime": 1790766605210,
+        "Location_Description": null,
+        "City": null,
+        "State": null,
+        "Zip": null,
+        "SubType_": null
+      },
+      "geometry": {
+        "x": -97.36571700000002,
+        "y": 32.91987799999999
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "ID": 27110520,
+        "Event_Number": 261051909,
+        "Type_": "ACCIDENT",
+        "CreationTime": 1790763572000,
+        "Description": "Major Accident",
+        "Severity": "MAJOR",
+        "Address": "Village Creek Rd / S Us Hwy 287 Nb",
+        "Street": "Village Creek Rd / S Us Hwy 287 Nb",
+        "Cross_Street": null,
+        "UpdateTime": 1790766605210,
+        "Location_Description": null,
+        "City": null,
+        "State": null,
+        "Zip": null,
+        "SubType_": null
+      },
+      "geometry": {
+        "x": -97.250335,
+        "y": 32.69468400000001
+      }
+    }
+  ]
+}

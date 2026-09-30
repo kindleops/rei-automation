@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2024-05-07",
+          "recordTime": "16:27:07",
+          "recordEpoch": "1715124427"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-110 : (196) Avenue 26 Off Ramp",
+          "nearbyPlace": "Cypress Park",
+          "longitude": "-118.2215",
+          "latitude": "34.0837",
+          "elevation": "95",
+          "direction": "South",
+          "county": "Alameda",
+          "route": "I-110",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "26.01",
+          "alignment": "",
+          "milepost": "25.892"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-196.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/i110196avenue26offramp.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110196avenue26offramp/previous/i110196avenue26offramp-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2025-10-17",
+          "recordTime": "13:13:05",
+          "recordEpoch": "1760731985"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (2) Slauson Ave",
+          "nearbyPlace": "Los Angeles",
+          "longitude": "-118.12791",
+          "latitude": "33.97857",
+          "elevation": "167",
+          "direction": "South",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "10.057",
+          "alignment": "L",
+          "milepost": "126.417"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-2.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/i52slausonave.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i52slausonave/previous/i52slausonave-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2026-09-04",
+          "recordTime": "09:35:59",
+          "recordEpoch": "1788539759"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (7) Triggs St",
+          "nearbyPlace": "Los Angeles",
+          "longitude": "-118.16267",
+          "latitude": "34.01224",
+          "elevation": "157",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "13.132",
+          "alignment": "R",
+          "milepost": "129.555"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-007.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/i57triggsst.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i57triggsst/previous/i57triggsst-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "17",
+        "recordTimestamp": {
+          "recordDate": "2024-05-08",
+          "recordTime": "15:36:57",
+          "recordEpoch": "1715207817"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (17) South of I-10",
+          "nearbyPlace": "Los Angeles",
+          "longitude": "-118.21391",
+          "latitude": "34.05367",
+          "elevation": "341",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "18.341",
+          "alignment": "R",
+          "milepost": "134.764"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-17.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/i517southofi10.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i517southofi10/previous/i517southofi10-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "25",
+        "recordTimestamp": {
+          "recordDate": "2024-05-08",
+          "recordTime": "15:37:23",
+          "recordEpoch": "1715207843"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (25) Meadowdale",
+          "nearbyPlace": "Elysian Park",
+          "longitude": "-118.2369",
+          "latitude": "34.08842",
+          "elevation": "400",
+          "direction": "South",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "21.34",
+          "alignment": "L",
+          "milepost": "21.34"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-25.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/i525meadowdale.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i525meadowdale/previous/i525meadowdale-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "27",
+        "recordTimestamp": {
+          "recordDate": "2025-10-16",
+          "recordTime": "12:13:27",
+          "recordEpoch": "1760642007"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (27) North of SR-2",
+          "nearbyPlace": "Los Angeles",
+          "longitude": "-118.25247",
+          "latitude": "34.10472",
+          "elevation": "390",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "22.752",
+          "alignment": "R",
+          "milepost": "139.175"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-27.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/i527northofsr2.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i527northofsr2/previous/i527northofsr2-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "31",
+        "recordTimestamp": {
+          "recordDate": "2024-05-08",
+          "recordTime": "15:37:48",
+          "recordEpoch": "1715207868"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (31) Zoo Drive",
+          "nearbyPlace": "Los Angeles",
+          "longitude": "-118.28078",
+          "latitude": "34.15109",
+          "elevation": "446",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "26.509",
+          "alignment": "R",
+          "milepost": "142.932"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-31.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/i531zoodrive.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i531zoodrive/previous/i531zoodrive-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "37",
+        "recordTimestamp": {
+          "recordDate": "2024-05-08",
+          "recordTime": "15:38:40",
+          "recordEpoch": "1715207920"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (37) Olive",
+          "nearbyPlace": "Burbank",
+          "longitude": "-118.30795",
+          "latitude": "34.17717",
+          "elevation": "580",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "28.957",
+          "alignment": "R",
+          "milepost": "145.380"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-37.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/i537olive.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i537olive/previous/i537olive-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "40",
+        "recordTimestamp": {
+          "recordDate": "2026-03-12",
+          "recordTime": "13:13:10",
+          "recordEpoch": "1773346390"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (40) North of Burbank Blvd",
+          "nearbyPlace": "Burbank",
+          "longitude": "-118.32019",
+          "latitude": "34.18587",
+          "elevation": "600",
+          "direction": "South",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "29.907",
+          "alignment": "L",
+          "milepost": "146.267"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-40.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/i540northofburbankblvd.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i540northofburbankblvd/previous/i540northofburbankblvd-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "41",
+        "recordTimestamp": {
+          "recordDate": "2026-05-14",
+          "recordTime": "14:31:18",
+          "recordEpoch": "1778794278"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (41) San Fernando On-Ramp",
+          "nearbyPlace": "Burbank",
+          "longitude": "-118.33019",
+          "latitude": "34.1942",
+          "elevation": "649",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "30.708",
+          "alignment": "R",
+          "milepost": "147.131"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-41.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/i541sanfernandoonramp.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i541sanfernandoonramp/previous/i541sanfernandoonramp-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "42",
+        "recordTimestamp": {
+          "recordDate": "2026-08-06",
+          "recordTime": "09:33:41",
+          "recordEpoch": "1786034021"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (42) Buena Vista",
+          "nearbyPlace": "Burbank",
+          "longitude": "-118.33959",
+          "latitude": "34.20061",
+          "elevation": "702",
+          "direction": "South",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "31.413",
+          "alignment": "L",
+          "milepost": "147.773"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-42.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/i542buenavista.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i542buenavista/previous/i542buenavista-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "67",
+        "recordTimestamp": {
+          "recordDate": "2023-06-14",
+          "recordTime": "11:11:44",
+          "recordEpoch": "1686766304"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-5 : (67) Penrose Street",
+          "nearbyPlace": "Sun Valley",
+          "longitude": "-118.37508",
+          "latitude": "34.22615",
+          "elevation": "866",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "I-5",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "34.260",
+          "alignment": "R",
+          "milepost": "150.683"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/i567penrosestreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i567penrosestreet/previous/i567penrosestreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "68",
+        "recordTimestamp": {
+          "recordDate": "2026-08-24",
+          "recordTime": "10:35:58",
+          "recordEpoch": "1787592958"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "SR-118 : (68) East of SR-118 Connector",
+          "nearbyPlace": "Pacoima",
+          "longitude": "-118.44027",
+          "latitude": "34.26606",
+          "elevation": "990",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "SR-118",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "11.622",
+          "alignment": "R",
+          "milepost": "43.511"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-68.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/sr11868eastofsr118connector.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr11868eastofsr118connector/previous/sr11868eastofsr118connector-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "97",
+        "recordTimestamp": {
+          "recordDate": "2026-08-07",
+          "recordTime": "14:16:39",
+          "recordEpoch": "1786137399"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "SR-170 : (97) Oxnard St",
+          "nearbyPlace": "North Hollywood",
+          "longitude": "-118.39437",
+          "latitude": "34.17845",
+          "elevation": "685",
+          "direction": "North",
+          "county": "Los Angeles",
+          "route": "SR-170",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "16.568",
+          "alignment": "R",
+          "milepost": "2.068"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-97.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/sr17097oxnardst.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr17097oxnardst/previous/sr17097oxnardst-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "1041",
+        "recordTimestamp": {
+          "recordDate": "2024-09-20",
+          "recordTime": "15:30:04",
+          "recordEpoch": "1726871404"
+        },
+        "location": {
+          "district": "7",
+          "locationName": "I-110 : (812) Florence Ave SB Off Ramp",
+          "nearbyPlace": "Florence",
+          "longitude": "-118.281331",
+          "latitude": "33.975807",
+          "elevation": "95",
+          "direction": "",
+          "county": "Los Angeles",
+          "route": "I-110",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "17.00",
+          "alignment": "",
+          "milepost": "17.00"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D7/CCTV-812.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "2",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/i110812florenceavesbofframp.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110812florenceavesbofframp/previous/i110812florenceavesbofframp-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}

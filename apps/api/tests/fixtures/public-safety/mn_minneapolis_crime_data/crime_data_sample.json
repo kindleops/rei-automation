@@ -1,0 +1,557 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "Type",
+      "type": "esriFieldTypeString",
+      "alias": "Type",
+      "sqlType": "sqlTypeOther",
+      "length": 24,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "DID",
+      "type": "esriFieldTypeString",
+      "alias": "DID",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Case_Number",
+      "type": "esriFieldTypeString",
+      "alias": "Case_Number",
+      "sqlType": "sqlTypeOther",
+      "length": 55,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Case_NumberAlt",
+      "type": "esriFieldTypeString",
+      "alias": "Case_NumberAlt",
+      "sqlType": "sqlTypeOther",
+      "length": 55,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Reported_Date",
+      "type": "esriFieldTypeDate",
+      "alias": "Reported_Date",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Occurred_Date",
+      "type": "esriFieldTypeDate",
+      "alias": "Occurred_Date",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "NIBRS_Crime_Against",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS_Crime_Against",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "NIBRS_Group",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS_Group",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "NIBRS_Code",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS_Code",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Offense_Category",
+      "type": "esriFieldTypeString",
+      "alias": "Offense_Category",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Offense",
+      "type": "esriFieldTypeString",
+      "alias": "Offense",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Problem_Initial",
+      "type": "esriFieldTypeString",
+      "alias": "Problem_Initial",
+      "sqlType": "sqlTypeOther",
+      "length": 400,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Problem_Final",
+      "type": "esriFieldTypeString",
+      "alias": "Problem_Final",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Address",
+      "type": "esriFieldTypeString",
+      "alias": "Address",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Precinct",
+      "type": "esriFieldTypeInteger",
+      "alias": "Precinct",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Neighborhood",
+      "type": "esriFieldTypeString",
+      "alias": "Neighborhood",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Ward",
+      "type": "esriFieldTypeInteger",
+      "alias": "Ward",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Latitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Latitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Longitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Longitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "wgsXAnon",
+      "type": "esriFieldTypeDouble",
+      "alias": "wgsXAnon",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "wgsYAnon",
+      "type": "esriFieldTypeDouble",
+      "alias": "wgsYAnon",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Crime_Count",
+      "type": "esriFieldTypeInteger",
+      "alias": "Crime_Count",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "Type": "Crime Offenses (NIBRS)",
+        "DID": "No",
+        "Case_Number": "26-279336",
+        "Case_NumberAlt": "MP2026279336",
+        "Reported_Date": 1790432040000,
+        "Occurred_Date": 1790428200000,
+        "NIBRS_Crime_Against": "Property ",
+        "NIBRS_Group": "Group A",
+        "NIBRS_Code": "290",
+        "Offense_Category": "Destruction/Damage/Vandalism of Property ",
+        "Offense": "Destruction/Damage/Vandalism of Property ",
+        "Problem_Initial": "Damage Property-In Progress(P)",
+        "Problem_Final": "Damage Property-In Progress(P)",
+        "Address": "0047XX EMERSON AVE N",
+        "Precinct": 4,
+        "Neighborhood": "Lind - Bohanon",
+        "Ward": 4,
+        "Latitude": 45.04118,
+        "Longitude": -93.29529,
+        "wgsXAnon": -10385583.95336684,
+        "wgsYAnon": 5628006.40760686,
+        "Crime_Count": 1,
+        "OBJECTID": 331456
+      },
+      "geometry": {
+        "x": -10385583.9534,
+        "y": 5628006.4076000005
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Crime Offenses (NIBRS)",
+        "DID": "No",
+        "Case_Number": "26-279338",
+        "Case_NumberAlt": "MP2026279338",
+        "Reported_Date": 1790428740000,
+        "Occurred_Date": 1790428740000,
+        "NIBRS_Crime_Against": "Property ",
+        "NIBRS_Group": "Group A",
+        "NIBRS_Code": "290",
+        "Offense_Category": "Destruction/Damage/Vandalism of Property ",
+        "Offense": "Destruction/Damage/Vandalism of Property ",
+        "Problem_Initial": "Damage Property-In Progress(P)",
+        "Problem_Final": "Damage Property-In Progress(P)",
+        "Address": "MALCOLM AVE SE / 4TH ST SE",
+        "Precinct": 2,
+        "Neighborhood": "Prospect Park - East River Road",
+        "Ward": 2,
+        "Latitude": 44.971,
+        "Longitude": -93.21202,
+        "wgsXAnon": -10376314.69,
+        "wgsYAnon": 5616956.84,
+        "Crime_Count": 1,
+        "OBJECTID": 331502
+      },
+      "geometry": {
+        "x": -10376314.69,
+        "y": 5616956.840000004
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Crime Offenses (NIBRS)",
+        "DID": "No",
+        "Case_Number": "26-279168",
+        "Case_NumberAlt": "MP2026279168",
+        "Reported_Date": 1790419740000,
+        "Occurred_Date": 1790359200000,
+        "NIBRS_Crime_Against": "Property ",
+        "NIBRS_Group": "Group A",
+        "NIBRS_Code": "240",
+        "Offense_Category": "Motor Vehicle Theft ",
+        "Offense": "Motor Vehicle Theft ",
+        "Problem_Initial": "Auto Theft (P)",
+        "Problem_Final": "Auto Theft (P)",
+        "Address": "0038XX 37TH AVE S",
+        "Precinct": 3,
+        "Neighborhood": "Howe",
+        "Ward": 12,
+        "Latitude": 44.9333,
+        "Longitude": -93.21914,
+        "wgsXAnon": -10377107.55395629,
+        "wgsYAnon": 5611027.02712187,
+        "Crime_Count": 1,
+        "OBJECTID": 331561
+      },
+      "geometry": {
+        "x": -10377107.554,
+        "y": 5611027.027099997
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Crime Offenses (NIBRS)",
+        "DID": "No",
+        "Case_Number": "26-279089",
+        "Case_NumberAlt": "MP2026279089",
+        "Reported_Date": 1790408640000,
+        "Occurred_Date": 1790408640000,
+        "NIBRS_Crime_Against": "Person ",
+        "NIBRS_Group": "Group A",
+        "NIBRS_Code": "13B ",
+        "Offense_Category": "Assault Offenses ",
+        "Offense": "Simple Assault ",
+        "Problem_Initial": "Domestic Abuse-In Progress (P)",
+        "Problem_Final": "Domestic Abuse-In Progress (P)",
+        "Address": "0016XX DUPONT AVE N",
+        "Precinct": 4,
+        "Neighborhood": "Near - North",
+        "Ward": 5,
+        "Latitude": 44.99578,
+        "Longitude": -93.29258,
+        "wgsXAnon": -10385282.75206339,
+        "wgsYAnon": 5620856.60187697,
+        "Crime_Count": 1,
+        "OBJECTID": 336719
+      },
+      "geometry": {
+        "x": -10385282.7521,
+        "y": 5620856.601899996
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Crime Offenses (NIBRS)",
+        "DID": "Yes",
+        "Case_Number": "26-278962",
+        "Case_NumberAlt": "MP2026278962",
+        "Reported_Date": 1790398380000,
+        "Occurred_Date": 1790387940000,
+        "NIBRS_Crime_Against": "Person ",
+        "NIBRS_Group": "Group A",
+        "NIBRS_Code": "13A ",
+        "Offense_Category": "Assault Offenses ",
+        "Offense": "Aggravated Assault ",
+        "Problem_Initial": "Personal Injury Accident (PFE)",
+        "Problem_Final": "Personal Injury Accident (PFE)",
+        "Address": "4TH ST N / 1ST AVE N",
+        "Precinct": 1,
+        "Neighborhood": "Downtown West",
+        "Ward": 7,
+        "Latitude": 44.98124,
+        "Longitude": -93.27254,
+        "wgsXAnon": -10383051.67,
+        "wgsYAnon": 5618568.839,
+        "Crime_Count": 1,
+        "OBJECTID": 331430
+      },
+      "geometry": {
+        "x": -10383051.67,
+        "y": 5618568.839000002
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Crime Offenses (NIBRS)",
+        "DID": "Yes",
+        "Case_Number": "26-278962",
+        "Case_NumberAlt": "MP2026278962",
+        "Reported_Date": 1790398380000,
+        "Occurred_Date": 1790387940000,
+        "NIBRS_Crime_Against": "Society ",
+        "NIBRS_Group": "Group A",
+        "NIBRS_Code": "35A ",
+        "Offense_Category": "Drug/Narcotic Offenses ",
+        "Offense": "Drug/Narcotic Violations ",
+        "Problem_Initial": "Personal Injury Accident (PFE)",
+        "Problem_Final": "Personal Injury Accident (PFE)",
+        "Address": "4TH ST N / 1ST AVE N",
+        "Precinct": 1,
+        "Neighborhood": "Downtown West",
+        "Ward": 7,
+        "Latitude": 44.98124,
+        "Longitude": -93.27254,
+        "wgsXAnon": -10383051.67,
+        "wgsYAnon": 5618568.839,
+        "Crime_Count": 1,
+        "OBJECTID": 331402
+      },
+      "geometry": {
+        "x": -10383051.67,
+        "y": 5618568.839000002
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Shots Fired Calls",
+        "DID": "No",
+        "Case_Number": "26-279923",
+        "Case_NumberAlt": null,
+        "Reported_Date": 1790466527000,
+        "Occurred_Date": 1790466527000,
+        "NIBRS_Crime_Against": "Non NIBRS Data",
+        "NIBRS_Group": "Non NIBRS Data",
+        "NIBRS_Code": "Non NIBRS Data",
+        "Offense_Category": "Shots Fired Calls",
+        "Offense": "ShotSpotter Activation (P)",
+        "Problem_Initial": "ShotSpotter Activation (P)",
+        "Problem_Final": "ShotSpotter Activation (P)",
+        "Address": "0016XX HILLSIDE AVE N",
+        "Precinct": 4,
+        "Neighborhood": "Jordan",
+        "Ward": 5,
+        "Latitude": 45.00119,
+        "Longitude": -93.3009,
+        "wgsXAnon": -10386208.25273225,
+        "wgsYAnon": 5621709.08581571,
+        "Crime_Count": 1,
+        "OBJECTID": 385682
+      },
+      "geometry": {
+        "x": -10386208.2527,
+        "y": 5621709.0858
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Shots Fired Calls",
+        "DID": "No",
+        "Case_Number": "26-279616",
+        "Case_NumberAlt": null,
+        "Reported_Date": 1790446902000,
+        "Occurred_Date": 1790446902000,
+        "NIBRS_Crime_Against": "Non NIBRS Data",
+        "NIBRS_Group": "Non NIBRS Data",
+        "NIBRS_Code": "Non NIBRS Data",
+        "Offense_Category": "Shots Fired Calls",
+        "Offense": "Sound of Shots Fired (P)",
+        "Problem_Initial": "Sound of Shots Fired (P)",
+        "Problem_Final": "Sound of Shots Fired (P)",
+        "Address": "0010XX 3RD ST N",
+        "Precinct": 1,
+        "Neighborhood": "North Loop",
+        "Ward": 5,
+        "Latitude": 44.98968,
+        "Longitude": -93.28208,
+        "wgsXAnon": -10384113.75716626,
+        "wgsYAnon": 5619896.36618545,
+        "Crime_Count": 1,
+        "OBJECTID": 392959
+      },
+      "geometry": {
+        "x": -10384113.7572,
+        "y": 5619896.3662
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Shots Fired Calls",
+        "DID": "No",
+        "Case_Number": "26-279511",
+        "Case_NumberAlt": null,
+        "Reported_Date": 1790441469000,
+        "Occurred_Date": 1790441469000,
+        "NIBRS_Crime_Against": "Non NIBRS Data",
+        "NIBRS_Group": "Non NIBRS Data",
+        "NIBRS_Code": "Non NIBRS Data",
+        "Offense_Category": "Shots Fired Calls",
+        "Offense": "Sound of Shots Fired (P)",
+        "Problem_Initial": "Sound of Shots Fired (P)",
+        "Problem_Final": "Sound of Shots Fired (P)",
+        "Address": "0016XX GIRARD AVE N",
+        "Precinct": 4,
+        "Neighborhood": "Near - North",
+        "Ward": 5,
+        "Latitude": 44.99578,
+        "Longitude": -93.29717,
+        "wgsXAnon": -10385793.6572088,
+        "wgsYAnon": 5620857.21200356,
+        "Crime_Count": 1,
+        "OBJECTID": 384518
+      },
+      "geometry": {
+        "x": -10385793.6572,
+        "y": 5620857.2119999975
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Additional Crime Metrics",
+        "DID": "No",
+        "Case_Number": "26-278576",
+        "Case_NumberAlt": "MP2026278576",
+        "Reported_Date": 1790372940000,
+        "Occurred_Date": 1790366520000,
+        "NIBRS_Crime_Against": "Non NIBRS Data",
+        "NIBRS_Group": "Non NIBRS Data",
+        "NIBRS_Code": "Non NIBRS Data",
+        "Offense_Category": "Subset of NIBRS Assault Offenses",
+        "Offense": "Domestic Aggravated Assault - Subset of Assault",
+        "Problem_Initial": "Domestic Abuse-In Progress (P)",
+        "Problem_Final": "Domestic Abuse-In Progress (P)",
+        "Address": "0014XX 6TH ST NE",
+        "Precinct": 2,
+        "Neighborhood": "St. Anthony East",
+        "Ward": 3,
+        "Latitude": 45.00198,
+        "Longitude": -93.25889,
+        "wgsXAnon": -10381532.69768687,
+        "wgsYAnon": 5621833.76337872,
+        "Crime_Count": 1,
+        "OBJECTID": 56681
+      },
+      "geometry": {
+        "x": -10381532.6977,
+        "y": 5621833.763400003
+      }
+    },
+    {
+      "attributes": {
+        "Type": "Gunshot Wound Victims",
+        "DID": "No",
+        "Case_Number": "26-276003",
+        "Case_NumberAlt": "MP2026276003",
+        "Reported_Date": 1790185020000,
+        "Occurred_Date": 1790181240000,
+        "NIBRS_Crime_Against": "Non NIBRS Data",
+        "NIBRS_Group": "Non NIBRS Data",
+        "NIBRS_Code": "Non NIBRS Data",
+        "Offense_Category": "Gunshot Wound Victims",
+        "Offense": "Gunshot Wound Victims",
+        "Problem_Initial": "Shooting (PFE)",
+        "Problem_Final": "Shooting (PFE)",
+        "Address": "0012XX BROOK AVE SE",
+        "Precinct": 2,
+        "Neighborhood": "Como",
+        "Ward": 2,
+        "Latitude": 44.98695,
+        "Longitude": -93.23393,
+        "wgsXAnon": -10378753.90922552,
+        "wgsYAnon": 5619467.21556861,
+        "Crime_Count": 1,
+        "OBJECTID": 351530
+      },
+      "geometry": {
+        "x": -10378753.9092,
+        "y": 5619467.215599999
+      }
+    }
+  ]
+}

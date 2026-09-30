@@ -1,0 +1,111 @@
+{
+  "displayFieldName": "address",
+  "fieldAliases": {
+    "rin": "rin",
+    "occ_date": "occ_date",
+    "dispatch_time": "dispatch_time",
+    "clear_time": "clear_time",
+    "address": "address",
+    "case_description": "case_description",
+    "report_number": "report_number",
+    "x_coordinate": "x_coordinate",
+    "y_coordinate": "y_coordinate",
+    "OBJECTID": "OBJECTID",
+    "id": "id",
+    "ESRI_OID": "ESRI_OID"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "rin",
+      "type": "esriFieldTypeInteger",
+      "alias": "rin"
+    },
+    {
+      "name": "occ_date",
+      "type": "esriFieldTypeDate",
+      "alias": "occ_date",
+      "length": 8
+    },
+    {
+      "name": "dispatch_time",
+      "type": "esriFieldTypeDate",
+      "alias": "dispatch_time",
+      "length": 8
+    },
+    {
+      "name": "clear_time",
+      "type": "esriFieldTypeDate",
+      "alias": "clear_time",
+      "length": 8
+    },
+    {
+      "name": "address",
+      "type": "esriFieldTypeString",
+      "alias": "address",
+      "length": 125
+    },
+    {
+      "name": "case_description",
+      "type": "esriFieldTypeString",
+      "alias": "case_description",
+      "length": 125
+    },
+    {
+      "name": "report_number",
+      "type": "esriFieldTypeInteger",
+      "alias": "report_number"
+    },
+    {
+      "name": "x_coordinate",
+      "type": "esriFieldTypeInteger",
+      "alias": "x_coordinate"
+    },
+    {
+      "name": "y_coordinate",
+      "type": "esriFieldTypeInteger",
+      "alias": "y_coordinate"
+    },
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeDouble",
+      "alias": "OBJECTID"
+    },
+    {
+      "name": "id",
+      "type": "esriFieldTypeInteger",
+      "alias": "id"
+    },
+    {
+      "name": "ESRI_OID",
+      "type": "esriFieldTypeOID",
+      "alias": "ESRI_OID"
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "rin": 30438159,
+        "occ_date": 1790748707000,
+        "dispatch_time": 1790748905000,
+        "clear_time": 1790751909000,
+        "address": "11510 N 30TH ST                                                                                                              ",
+        "case_description": "TRAFFIC CRASH                                                                                                                ",
+        "report_number": 577337,
+        "x_coordinate": 518458,
+        "y_coordinate": 1352297,
+        "OBJECTID": 1,
+        "id": 184,
+        "ESRI_OID": 1
+      },
+      "geometry": {
+        "x": -82.42696347506468,
+        "y": 28.053233560331023
+      }
+    }
+  ]
+}

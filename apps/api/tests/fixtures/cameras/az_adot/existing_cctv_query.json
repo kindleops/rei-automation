@@ -1,0 +1,350 @@
+{
+  "objectIdFieldName": "ObjectId",
+  "uniqueIdField": {
+    "name": "ObjectId",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "District",
+      "type": "esriFieldTypeString",
+      "alias": "District",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Route",
+      "type": "esriFieldTypeString",
+      "alias": "Route",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Cross_Street_Attached_to",
+      "type": "esriFieldTypeString",
+      "alias": "Cross Street/Attached to",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Cam__",
+      "type": "esriFieldTypeString",
+      "alias": "Cam #",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Area",
+      "type": "esriFieldTypeString",
+      "alias": "Area",
+      "sqlType": "sqlTypeNVarchar",
+      "length": 4000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "MP",
+      "type": "esriFieldTypeDouble",
+      "alias": "MP",
+      "sqlType": "sqlTypeFloat",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Latitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Latitude",
+      "sqlType": "sqlTypeFloat",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Longitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "Longitude",
+      "sqlType": "sqlTypeFloat",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ObjectId",
+      "type": "esriFieldTypeOID",
+      "alias": "ObjectId",
+      "sqlType": "sqlTypeInteger",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "exceededTransferLimit": true,
+  "features": [
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "L-303 SB",
+        "Cross_Street_Attached_to": "W of I-17",
+        "Cam__": "1378W",
+        "Area": "State Trust Land",
+        "MP": 137.88,
+        "Latitude": 33.76859957,
+        "Longitude": -112.1488882,
+        "ObjectId": 1
+      },
+      "geometry": {
+        "x": -12484357.127455767,
+        "y": 3997772.7625295576
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "N of McDowell",
+        "Cam__": "0010N",
+        "Area": "Phoenix",
+        "MP": 1,
+        "Latitude": 33.47222885,
+        "Longitude": -112.0385209,
+        "ObjectId": 2
+      },
+      "geometry": {
+        "x": -12472071.095819538,
+        "y": 3958153.5054144785
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "N of Thomas",
+        "Cam__": "0021N",
+        "Area": "Phoenix",
+        "MP": 2.18,
+        "Latitude": 33.48769771,
+        "Longitude": -112.0420657,
+        "ObjectId": 3
+      },
+      "geometry": {
+        "x": -12472465.701150501,
+        "y": 3960218.0413488266
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "S of Highland",
+        "Cam__": "0030N",
+        "Area": "Phoenix",
+        "MP": 3.09,
+        "Latitude": 33.50176448,
+        "Longitude": -112.0435781,
+        "ObjectId": 4
+      },
+      "geometry": {
+        "x": -12472634.060748378,
+        "y": 3962095.7688987646
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "S Colter",
+        "Cam__": "0038S",
+        "Area": "Phoenix",
+        "MP": 3.83,
+        "Latitude": 33.51244263,
+        "Longitude": -112.0442382,
+        "ObjectId": 5
+      },
+      "geometry": {
+        "x": -12472707.542744251,
+        "y": 3963521.3642909997
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "S Bethany Hm",
+        "Cam__": "0044S",
+        "Area": "Phoenix",
+        "MP": 4.48,
+        "Latitude": 33.52188644,
+        "Longitude": -112.0438451,
+        "ObjectId": 6
+      },
+      "geometry": {
+        "x": -12472663.78305242,
+        "y": 3964782.3146963753
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "S of Glendale",
+        "Cam__": "0051S",
+        "Area": "Phoenix",
+        "MP": 5.14,
+        "Latitude": 33.53088555,
+        "Longitude": -112.0432324,
+        "ObjectId": 7
+      },
+      "geometry": {
+        "x": -12472595.57760041,
+        "y": 3965984.0162629862
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "N of Glendale",
+        "Cam__": "0058S",
+        "Area": "Phoenix",
+        "MP": 5.82,
+        "Latitude": 33.54041382,
+        "Longitude": -112.0410871,
+        "ObjectId": 8
+      },
+      "geometry": {
+        "x": -12472356.763896812,
+        "y": 3967256.515858131
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "S of Northern",
+        "Cam__": "0067N",
+        "Area": "Phoenix",
+        "MP": 6.71,
+        "Latitude": 33.55416189,
+        "Longitude": -112.0377349,
+        "ObjectId": 9
+      },
+      "geometry": {
+        "x": -12471983.598699775,
+        "y": 3969092.8166186344
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "N of Northern",
+        "Cam__": "0074S",
+        "Area": "Phoenix",
+        "MP": 7.41,
+        "Latitude": 33.56360892,
+        "Longitude": -112.0356819,
+        "ObjectId": 10
+      },
+      "geometry": {
+        "x": -12471755.059785176,
+        "y": 3970354.8059253595
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "S of 32 St",
+        "Cam__": "0083S",
+        "Area": "Phoenix",
+        "MP": 8.33,
+        "Latitude": 33.57134504,
+        "Longitude": -112.0241445,
+        "ObjectId": 11
+      },
+      "geometry": {
+        "x": -12470470.7222921,
+        "y": 3971388.3447257942
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "S of Shea",
+        "Cam__": "0091N",
+        "Area": "Phoenix",
+        "MP": 9.13,
+        "Latitude": 33.57709611,
+        "Longitude": -112.0122671,
+        "ObjectId": 12
+      },
+      "geometry": {
+        "x": -12469148.536172152,
+        "y": 3972156.7426174614
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "S of Cactus",
+        "Cam__": "0100N",
+        "Area": "Phoenix",
+        "MP": 10.09,
+        "Latitude": 33.59062429,
+        "Longitude": -112.0093379,
+        "ObjectId": 13
+      },
+      "geometry": {
+        "x": -12468822.459119719,
+        "y": 3973964.4385995003
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 NB",
+        "Cross_Street_Attached_to": "S of Thunderbird",
+        "Cam__": "0110N",
+        "Area": "Phoenix",
+        "MP": 11.06,
+        "Latitude": 33.60469872,
+        "Longitude": -112.0094011,
+        "ObjectId": 14
+      },
+      "geometry": {
+        "x": -12468829.494511537,
+        "y": 3975845.42785544
+      }
+    },
+    {
+      "attributes": {
+        "District": "Central",
+        "Route": "SR-51 SB",
+        "Cross_Street_Attached_to": "S of Greenway",
+        "Cam__": "0120S",
+        "Area": "Phoenix",
+        "MP": 12.06,
+        "Latitude": 33.61917031,
+        "Longitude": -112.0092988,
+        "ObjectId": 15
+      },
+      "geometry": {
+        "x": -12468818.106527628,
+        "y": 3977779.8160906439
+      }
+    }
+  ]
+}

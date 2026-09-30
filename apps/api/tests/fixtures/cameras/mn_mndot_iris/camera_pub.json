@@ -1,0 +1,17 @@
+[
+{"name":"C001","cam_num":1,"publish":true,"streamable":true,"hashtags":"#LiveStream #Preset #Recorded","roadway":"T.H.36","road_dir":"WB","cross_street":"Cleveland Ave","location":"T.H.36 WB @ Cleveland Ave","lat":45.0103771789102,"lon":-93.1860000160346,"views":[]},
+{"name":"C027","cam_num":27,"publish":false,"streamable":true,"hashtags":"#LiveStream #Recorded","roadway":"I-35E","road_dir":"SB","cross_street":"Shepard Rd","location":"I-35E SB @ Shepard Rd","lat":44.91096568515607,"lon":-93.14415244999506,"views":[]},
+{"name":"C047","cam_num":47,"publish":true,"streamable":true,"hashtags":"#LiveStream #Recorded","roadway":"I-35E","road_dir":"N-S","cross_street":"Co Rd J","location":"I-35E N-S N of Co Rd J (MP 121)","lat":45.13186454469384,"lon":-93.04420462574308,"views":[]},
+{"name":"C1504","cam_num":7744,"publish":true,"streamable":true,"hashtags":"#d3 #LiveStream #Recorded","roadway":"T.H.15","road_dir":"NB","cross_street":"2nd St","location":"T.H.15 NB @ 2nd St","lat":45.549926515003676,"lon":-94.20555814048633,"views":[]},
+{"name":"C1911","cam_num":1911,"publish":false,"streamable":false,"road_dir":"","views":[]},
+{"name":"C20000","cam_num":9998,"publish":true,"streamable":true,"hashtags":"#LiveStream","roadway":"T.H.36","road_dir":"","location":"T.H.36 (wowza test C001)","views":[]},
+{"name":"C30198","publish":true,"streamable":false,"roadway":"I-35","road_dir":"","location":"I-35 (Little Chicago - MP 70.0)","lat":44.47870355465176,"lon":-93.29439010178744,"views":[1,2,3,4,5]},
+{"name":"C30337","publish":true,"streamable":false,"roadway":"U.S.63","road_dir":"","location":"U.S.63 (Le Roy - MP 0.5)","lat":43.5083936853739,"lon":-92.3696964607502,"views":[1,2,3,4]},
+{"name":"C30803","publish":true,"streamable":false,"roadway":"T.H.61","road_dir":"EB","cross_street":"Tyler Rd","location":"T.H.61 EB @ Tyler Rd","lat":44.56698948323887,"lon":-92.58411017293983,"views":[]},
+{"name":"C4952","cam_num":4952,"publish":true,"streamable":true,"hashtags":"#LiveStream #Recorded","roadway":"T.H.149","road_dir":"NB","cross_street":"Vikings Pkwy","location":"T.H.149 NB @ Vikings Pkwy","lat":44.8576776251831,"lon":-93.12813889215545,"views":[]},
+{"name":"C791","cam_num":791,"publish":false,"streamable":true,"hashtags":"#LiveStream #MnRoad #Recorded","roadway":"I-94","road_dir":"WB","cross_street":"Co Rd 18","location":"I-94 WB E of Co Rd 18 (MP 197)","lat":45.27481980668418,"lon":-93.73355847788781,"views":[]},
+{"name":"C870","cam_num":870,"publish":true,"streamable":true,"hashtags":"#LiveStream #Recorded #WisDOT","roadway":"I-94","road_dir":"EB","cross_street":"Heggen St","location":"I-94 EB @ Heggen St","lat":44.962395281983376,"lon":-92.74351703053253,"views":[]},
+{"name":"C909","cam_num":909,"publish":true,"streamable":true,"hashtags":"#LiveStream #Recorded","roadway":"I-394","road_dir":"EB","cross_street":"Hampshire Ave","location":"I-394 EB @ Hampshire Ave","lat":44.97114635872987,"lon":-93.3652026702861,"views":[]},
+{"name":"CTEST-Rise4","publish":true,"streamable":false,"road_dir":"","views":[]},
+{"name":"D6-C002","cam_num":6463,"publish":true,"streamable":true,"hashtags":"#LiveStream #Recorded","roadway":"T.H.52","road_dir":"NB","cross_street":"75th St NW","location":"T.H.52 NB @ 75th St NW (MP 61.7)","lat":44.10795374030664,"lon":-92.51411344600123,"views":[]}
+]

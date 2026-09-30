@@ -1,0 +1,1625 @@
+{
+	"data":
+	[
+		{
+			"lcs":
+			{
+				"index": "C5EB-0009-2026-08-06-21:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "North",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Route 5",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "San Clemente",
+						"beginLongitude":           "-117.522435",
+						"beginLatitude":            "33.350913",
+						"beginElevation":           "193",
+						"beginDirection":           "North",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-5",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "R",
+						"beginPostmile":            "67.079",
+						"beginAlignment":           "",
+						"beginMilepost":            "66.755"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "NB Truck Scales",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "San Clemente",
+						"endLongitude":           "-117.523494",
+						"endLatitude":            "33.351727",
+						"endElevation":           "196",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-5",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "R",
+						"endPostmile":            "67.079",
+						"endAlignment":           "",
+						"endMilepost":            "66.755"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C5EB",
+					"logNumber": "9",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-07-28",
+						"closureRequestTime":     "07:26:40",
+						"closureRequestEpoch":    "1785248800",
+						"closureStartDate":       "2026-08-06",
+						"closureStartTime":       "21:01:00",
+						"closureStartEpoch":      "1786075260",
+						"closureEndDate":         "2026-12-04",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1796389260",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Off Ramp",
+					"typeOfClosure":      "Full",
+					"typeOfWork":         "Highway Construction",
+					"durationOfClosure":  "Long Term",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "All",
+					"totalExistingLanes": "4",
+					"isCHINReportable":   "false",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-08-06",
+							"code1097Time":  "21:20:00",
+							"code1097Epoch": "1786076400"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "2026-08-07",
+							"code1098Time":  "04:00:00",
+							"code1098Epoch": "1786100400"
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C8VA-0017-2026-10-01-21:30:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "West",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Route 8",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "San Diego",
+						"beginLongitude":           "-117.104791",
+						"beginLatitude":            "32.778987",
+						"beginElevation":           "88",
+						"beginDirection":           "West",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-8",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "5.640",
+						"beginAlignment":           "",
+						"beginMilepost":            "7.597"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Route 15",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "San Diego",
+						"endLongitude":           "-117.112967",
+						"endLatitude":            "32.781111",
+						"endElevation":           "52",
+						"endDirection":           "North",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-8",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "5.640",
+						"endAlignment":           "",
+						"endMilepost":            "2.317"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C8VA",
+					"logNumber": "17",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-25",
+						"closureRequestTime":     "10:47:46",
+						"closureRequestEpoch":    "1790358466",
+						"closureStartDate":       "2026-10-01",
+						"closureStartTime":       "21:30:00",
+						"closureStartEpoch":      "1790915400",
+						"closureEndDate":         "2026-10-02",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1790942460",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Connector",
+					"typeOfClosure":      "Full",
+					"typeOfWork":         "Bridge Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "All",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C15FB-0002-2026-10-04-21:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "South",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Route 15",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "San Diego",
+						"beginLongitude":           "-117.094576",
+						"beginLatitude":            "32.966857",
+						"beginElevation":           "567",
+						"beginDirection":           "South",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-15",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "M",
+						"beginPostmile":            "19.470",
+						"beginAlignment":           "",
+						"beginMilepost":            "19.717"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Route 56 \/ Ted Williams Pkwy",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "San Diego",
+						"endLongitude":           "-117.096593",
+						"endLatitude":            "32.964638",
+						"endElevation":           "567",
+						"endDirection":           "West",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-15",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "M",
+						"endPostmile":            "19.470",
+						"endAlignment":           "",
+						"endMilepost":            "19.717"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C15FB",
+					"logNumber": "2",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-25",
+						"closureRequestTime":     "10:06:59",
+						"closureRequestEpoch":    "1790356019",
+						"closureStartDate":       "2026-10-04",
+						"closureStartTime":       "21:01:00",
+						"closureStartEpoch":      "1791172860",
+						"closureEndDate":         "2026-10-05",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1791201660",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Connector",
+					"typeOfClosure":      "Lane",
+					"typeOfWork":         "AC Paving",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "false",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C76EA-0007-2026-09-30-07:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "East \/ West",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "East Loop Rd - East",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Santa Ysabel",
+						"beginLongitude":           "-116.730291",
+						"beginLatitude":            "33.208122",
+						"beginElevation":           "2749",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "SR-76",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "50.970",
+						"beginAlignment":           "",
+						"beginMilepost":            "50.861"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "W Carrizo Creek Bridge",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Santa Ysabel",
+						"endLongitude":           "-116.710709",
+						"endLatitude":            "33.199920",
+						"endElevation":           "2795",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "SR-76",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "52.290",
+						"endAlignment":           "",
+						"endMilepost":            "52.181"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C76EA",
+					"logNumber": "7",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-22",
+						"closureRequestTime":     "15:02:15",
+						"closureRequestEpoch":    "1790114535",
+						"closureStartDate":       "2026-09-30",
+						"closureStartTime":       "07:01:00",
+						"closureStartEpoch":      "1790776860",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "17:01:00",
+						"closureEndEpoch":        "1790812860",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Conventional Hwy",
+					"typeOfClosure":      "One-Way Traffic",
+					"typeOfWork":         "Drainage Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C76GA-0002-2026-09-29-20:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "East",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Jeffries Ranch Rd",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Oceanside",
+						"beginLongitude":           "-117.260095",
+						"beginLatitude":            "33.253570",
+						"beginElevation":           "170",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "SR-76",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "R",
+						"beginPostmile":            "8.070",
+						"beginAlignment":           "",
+						"beginMilepost":            "8.070"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "N River Rd",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Bonsall",
+						"endLongitude":           "-117.236732",
+						"endLatitude":            "33.267629",
+						"endElevation":           "164",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "SR-76",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "R",
+						"endPostmile":            "10.200",
+						"endAlignment":           "",
+						"endMilepost":            "10.200"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C76GA",
+					"logNumber": "2",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-24",
+						"closureRequestTime":     "15:52:32",
+						"closureRequestEpoch":    "1790290352",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "20:01:00",
+						"closureStartEpoch":      "1790737260",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1790769660",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Conventional Hwy",
+					"typeOfClosure":      "Lane",
+					"typeOfWork":         "Shoulder Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "2",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-09-29",
+							"code1097Time":  "20:11:24",
+							"code1097Epoch": "1790737884"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C78CA-0061-2026-09-29-19:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "East",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Route 78",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Vista",
+						"beginLongitude":           "-117.242902",
+						"beginLatitude":            "33.191081",
+						"beginElevation":           "416",
+						"beginDirection":           "East",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "SR-78",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "6.701",
+						"beginAlignment":           "",
+						"beginMilepost":            "6.697"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Sunset Dr",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Vista",
+						"endLongitude":           "-117.242902",
+						"endLatitude":            "33.191081",
+						"endElevation":           "416",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "SR-78",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "6.701",
+						"endAlignment":           "",
+						"endMilepost":            "6.345"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C78CA",
+					"logNumber": "61",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-08-31",
+						"closureRequestTime":     "09:55:32",
+						"closureRequestEpoch":    "1788195332",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "19:01:00",
+						"closureStartEpoch":      "1790733660",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1790769660",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Off Ramp",
+					"typeOfClosure":      "Full",
+					"typeOfWork":         "Highway Construction",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "All",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "false",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-09-29",
+							"code1097Time":  "19:49:22",
+							"code1097Epoch": "1790736562"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "true",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "2026-09-30",
+							"code1098Time":  "02:29:50",
+							"code1098Epoch": "1790760590"
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C86BA-0001-2026-10-01-18:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "North",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "B St",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Westmorland",
+						"beginLongitude":           "-115.617328",
+						"beginLatitude":            "33.037400",
+						"beginElevation":           "-160",
+						"beginDirection":           "",
+						"beginCounty":              "Imperial",
+						"beginRoute":               "SR-86",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "27.260",
+						"beginAlignment":           "",
+						"beginMilepost":            "24.809"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Martin Rd",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Westmorland",
+						"endLongitude":           "-115.630232",
+						"endLatitude":            "33.037408",
+						"endElevation":           "-167",
+						"endDirection":           "",
+						"endCounty":              "Imperial",
+						"endRoute":               "SR-86",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "R",
+						"endPostmile":            "28.010",
+						"endAlignment":           "",
+						"endMilepost":            "25.559"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C86BA",
+					"logNumber": "1",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-15",
+						"closureRequestTime":     "08:03:18",
+						"closureRequestEpoch":    "1789484598",
+						"closureStartDate":       "2026-10-01",
+						"closureStartTime":       "18:01:00",
+						"closureStartEpoch":      "1790902860",
+						"closureEndDate":         "2026-10-02",
+						"closureEndTime":         "01:01:00",
+						"closureEndEpoch":        "1790928060",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Conventional Hwy",
+					"typeOfClosure":      "Lane",
+					"typeOfWork":         "Emergency Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C94NA-0066-2026-09-29-22:30:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "West",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Route 94",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "San Diego",
+						"beginLongitude":           "-117.143362",
+						"beginLatitude":            "32.713260",
+						"beginElevation":           "141",
+						"beginDirection":           "West",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "SR-94",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "1.670",
+						"beginAlignment":           "",
+						"beginMilepost":            "0.254"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Route 5",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "San Diego",
+						"endLongitude":           "-117.143362",
+						"endLatitude":            "32.713260",
+						"endElevation":           "141",
+						"endDirection":           "North",
+						"endCounty":              "San Diego",
+						"endRoute":               "SR-94",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "1.670",
+						"endAlignment":           "",
+						"endMilepost":            "1.254"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C94NA",
+					"logNumber": "66",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-23",
+						"closureRequestTime":     "15:07:25",
+						"closureRequestEpoch":    "1790201245",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "22:30:00",
+						"closureStartEpoch":      "1790746200",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "04:01:00",
+						"closureEndEpoch":        "1790766060",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Connector",
+					"typeOfClosure":      "Full",
+					"typeOfWork":         "Concrete Barrier Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "All",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-09-29",
+							"code1097Time":  "23:09:21",
+							"code1097Epoch": "1790748561"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C188AA-0003-2026-09-29-22:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "North \/ South",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Thing Rd",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Tecate",
+						"beginLongitude":           "-116.627749",
+						"beginLatitude":            "32.577661",
+						"beginElevation":           "1781",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "SR-188",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "0.100",
+						"beginAlignment":           "",
+						"beginMilepost":            "0.100"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Route 94",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Tecate",
+						"endLongitude":           "-116.643235",
+						"endLatitude":            "32.598000",
+						"endElevation":           "1840",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "SR-188",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "1.850",
+						"endAlignment":           "",
+						"endMilepost":            "1.850"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C188AA",
+					"logNumber": "3",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-24",
+						"closureRequestTime":     "15:59:22",
+						"closureRequestEpoch":    "1790290762",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "22:01:00",
+						"closureStartEpoch":      "1790744460",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "06:01:00",
+						"closureEndEpoch":        "1790773260",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Conventional Hwy",
+					"typeOfClosure":      "One-Way Traffic",
+					"typeOfWork":         "Pavement Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-09-29",
+							"code1097Time":  "22:10:00",
+							"code1097Epoch": "1790745000"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C805CB-0085-2026-09-29-22:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "South",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Route 52",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "San Diego",
+						"beginLongitude":           "-117.178328",
+						"beginLatitude":            "32.847580",
+						"beginElevation":           "239",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-805",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "23.650",
+						"beginAlignment":           "",
+						"beginMilepost":            "23.501"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Clairemont Mesa Blvd",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "San Diego",
+						"endLongitude":           "-117.169730",
+						"endLatitude":            "32.833529",
+						"endElevation":           "390",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-805",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "22.560",
+						"endAlignment":           "",
+						"endMilepost":            "22.411"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C805CB",
+					"logNumber": "85",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-24",
+						"closureRequestTime":     "12:24:55",
+						"closureRequestEpoch":    "1790277895",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "22:01:00",
+						"closureStartEpoch":      "1790744460",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1790769660",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Mainline",
+					"typeOfClosure":      "Lane",
+					"typeOfWork":         "Electrical Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "3",
+					"totalExistingLanes": "4",
+					"isCHINReportable":   "false",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "true",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "2026-09-30",
+							"code1022Time":  "02:56:10",
+							"code1022Epoch": "1790762170"
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "C805HA-0066-2026-09-29-19:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "North",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Palomar St OC",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Chula Vista",
+						"beginLongitude":           "-117.037889",
+						"beginLatitude":            "32.614903",
+						"beginElevation":           "305",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-805",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "5.060",
+						"beginAlignment":           "",
+						"beginMilepost":            "4.911"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Route 805",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Chula Vista",
+						"endLongitude":           "-117.037889",
+						"endLatitude":            "32.614903",
+						"endElevation":           "305",
+						"endDirection":           "North",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-805",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "5.060",
+						"endAlignment":           "",
+						"endMilepost":            "4.911"
+					}
+				},
+				"closure":
+				{
+					"closureID": "C805HA",
+					"logNumber": "66",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-25",
+						"closureRequestTime":     "14:57:00",
+						"closureRequestEpoch":    "1790373420",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "19:01:00",
+						"closureStartEpoch":      "1790733660",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "05:01:00",
+						"closureEndEpoch":        "1790769660",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "HOV On Ramp",
+					"typeOfClosure":      "Full",
+					"typeOfWork":         "Grinding Operation",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "All",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "false",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "true",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "2026-09-29",
+							"code1022Time":  "22:22:40",
+							"code1022Epoch": "1790745760"
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "M8IA-0002-2026-09-29-08:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "East",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Crestwood Rd",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Pine Valley",
+						"beginLongitude":           "-116.363290",
+						"beginLatitude":            "32.705705",
+						"beginElevation":           "4120",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-8",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "R",
+						"beginPostmile":            "61.015",
+						"beginAlignment":           "R",
+						"beginMilepost":            "60.630"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "McCain Valley Rd UC",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Boulevard",
+						"endLongitude":           "-116.260185",
+						"endLatitude":            "32.667834",
+						"endElevation":           "3307",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-8",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "R",
+						"endPostmile":            "67.830",
+						"endAlignment":           "",
+						"endMilepost":            "67.383"
+					}
+				},
+				"closure":
+				{
+					"closureID": "M8IA",
+					"logNumber": "2",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-28",
+						"closureRequestTime":     "05:09:09",
+						"closureRequestEpoch":    "1790597349",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "08:01:00",
+						"closureStartEpoch":      "1790694060",
+						"closureEndDate":         "2026-09-29",
+						"closureEndTime":         "14:01:00",
+						"closureEndEpoch":        "1790715660",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Mainline",
+					"typeOfClosure":      "Moving",
+					"typeOfWork":         "Pavement Marker Replacement",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-09-29",
+							"code1097Time":  "08:36:00",
+							"code1097Epoch": "1790696160"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "true",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "2026-09-29",
+							"code1098Time":  "14:00:00",
+							"code1098Epoch": "1790715600"
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "M8IA-0003-2026-09-30-08:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "East",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Crestwood Rd",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Pine Valley",
+						"beginLongitude":           "-116.363290",
+						"beginLatitude":            "32.705705",
+						"beginElevation":           "4120",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-8",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "R",
+						"beginPostmile":            "61.015",
+						"beginAlignment":           "R",
+						"beginMilepost":            "60.630"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "McCain Valley Rd UC",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Boulevard",
+						"endLongitude":           "-116.260185",
+						"endLatitude":            "32.667834",
+						"endElevation":           "3307",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-8",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "R",
+						"endPostmile":            "67.830",
+						"endAlignment":           "",
+						"endMilepost":            "67.383"
+					}
+				},
+				"closure":
+				{
+					"closureID": "M8IA",
+					"logNumber": "3",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-28",
+						"closureRequestTime":     "05:09:09",
+						"closureRequestEpoch":    "1790597349",
+						"closureStartDate":       "2026-09-30",
+						"closureStartTime":       "08:01:00",
+						"closureStartEpoch":      "1790780460",
+						"closureEndDate":         "2026-09-30",
+						"closureEndTime":         "14:01:00",
+						"closureEndEpoch":        "1790802060",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Mainline",
+					"typeOfClosure":      "Moving",
+					"typeOfWork":         "Pavement Marker Replacement",
+					"durationOfClosure":  "Intermittent",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "M8IA-0004-2026-10-01-08:01:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "East",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Crestwood Rd",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Pine Valley",
+						"beginLongitude":           "-116.363290",
+						"beginLatitude":            "32.705705",
+						"beginElevation":           "4120",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "I-8",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "R",
+						"beginPostmile":            "61.015",
+						"beginAlignment":           "R",
+						"beginMilepost":            "60.630"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "McCain Valley Rd UC",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Boulevard",
+						"endLongitude":           "-116.260185",
+						"endLatitude":            "32.667834",
+						"endElevation":           "3307",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "I-8",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "R",
+						"endPostmile":            "67.830",
+						"endAlignment":           "",
+						"endMilepost":            "67.383"
+					}
+				},
+				"closure":
+				{
+					"closureID": "M8IA",
+					"logNumber": "4",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-28",
+						"closureRequestTime":     "05:09:09",
+						"closureRequestEpoch":    "1790597349",
+						"closureStartDate":       "2026-10-01",
+						"closureStartTime":       "08:01:00",
+						"closureStartEpoch":      "1790866860",
+						"closureEndDate":         "2026-10-01",
+						"closureEndTime":         "14:01:00",
+						"closureEndEpoch":        "1790888460",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Mainline",
+					"typeOfClosure":      "Moving",
+					"typeOfWork":         "Pavement Marker Replacement",
+					"durationOfClosure":  "Intermittent",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "false",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "",
+							"code1097Time":  "",
+							"code1097Epoch": ""
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "false",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "",
+							"code1098Time":  "",
+							"code1098Epoch": ""
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		},
+		{
+			"lcs":
+			{
+				"index": "P75FA-0002-2026-09-29-08:30:00",
+				"recordTimestamp":
+				{
+					"recordDate":  "2026-09-30",
+					"recordTime":  "03:33:03",
+					"recordEpoch": "1790764383"
+				},
+				"location":
+				{
+					"travelFlowDirection": "North",
+					"begin":
+					{
+						"beginDistrict":            "11",
+						"beginLocationName":        "Avenida Lunar",
+						"beginFreeFormDescription": "",
+						"beginNearbyPlace":         "Coronado",
+						"beginLongitude":           "-117.170494",
+						"beginLatitude":            "32.675716",
+						"beginElevation":           "29",
+						"beginDirection":           "",
+						"beginCounty":              "San Diego",
+						"beginRoute":               "SR-75",
+						"beginRouteSuffix":         "",
+						"beginPostmilePrefix":      "",
+						"beginPostmile":            "18.010",
+						"beginAlignment":           "",
+						"beginMilepost":            "6.813"
+					},
+					"end":
+					{
+						"endDistrict":            "11",
+						"endLocationName":        "Glorietta Blvd",
+						"endFreeFormDescription": "",
+						"endNearbyPlace":         "Coronado",
+						"endLongitude":           "-117.176520",
+						"endLatitude":            "32.681015",
+						"endElevation":           "26",
+						"endDirection":           "",
+						"endCounty":              "San Diego",
+						"endRoute":               "SR-75",
+						"endRouteSuffix":         "",
+						"endPostmilePrefix":      "",
+						"endPostmile":            "18.530",
+						"endAlignment":           "",
+						"endMilepost":            "7.333"
+					}
+				},
+				"closure":
+				{
+					"closureID": "P75FA",
+					"logNumber": "2",
+					"closureTimestamp":
+					{
+						"closureRequestDate":     "2026-09-21",
+						"closureRequestTime":     "07:28:42",
+						"closureRequestEpoch":    "1790000922",
+						"closureStartDate":       "2026-09-29",
+						"closureStartTime":       "08:30:00",
+						"closureStartEpoch":      "1790695800",
+						"closureEndDate":         "2026-09-29",
+						"closureEndTime":         "16:30:00",
+						"closureEndEpoch":        "1790724600",
+						"isClosureEndIndefinite": "false"
+					},
+					"facility":           "Conventional Hwy",
+					"typeOfClosure":      "Lane",
+					"typeOfWork":         "Landscape Work",
+					"durationOfClosure":  "Standard",
+					"estimatedDelay":     "Not Reported",
+					"lanesClosed":        "1",
+					"totalExistingLanes": "2",
+					"isCHINReportable":   "true",
+					"code1097":
+					{
+						"isCode1097": "true",
+						"code1097Timestamp":
+						{
+							"code1097Date":  "2026-09-29",
+							"code1097Time":  "08:30:20",
+							"code1097Epoch": "1790695820"
+						}
+					},
+					"code1098":
+					{
+						"isCode1098": "true",
+						"code1098Timestamp":
+						{
+							"code1098Date":  "2026-09-29",
+							"code1098Time":  "15:56:56",
+							"code1098Epoch": "1790722616"
+						}
+					},
+					"code1022":
+					{
+						"isCode1022": "false",
+						"code1022Timestamp":
+						{
+							"code1022Date":  "",
+							"code1022Time":  "",
+							"code1022Epoch": ""
+						}
+					}
+				}
+			}
+		}
+	]
+}

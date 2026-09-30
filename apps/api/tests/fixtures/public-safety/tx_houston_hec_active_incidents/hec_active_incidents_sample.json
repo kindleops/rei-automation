@@ -1,0 +1,415 @@
+{
+  "displayFieldName": "Agency",
+  "fieldAliases": {
+    "UID": "UID",
+    "Agency": "Agency",
+    "Address": "Address",
+    "CrossStreet": "CrossStreet",
+    "CALL_TIME": "CALL_TIME",
+    "IncidentType": "IncidentType",
+    "ALARM_LEVEL": "ALARM_LEVEL",
+    "NO_UNITS": "NO_UNITS",
+    "Units": "Units",
+    "LONGITUDE": "LONGITUDE",
+    "LATITUDE": "LATITUDE",
+    "KeyMap": "KeyMap",
+    "CombinedResponse": "CombinedResponse"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "UID",
+      "type": "esriFieldTypeOID",
+      "alias": "UID"
+    },
+    {
+      "name": "Agency",
+      "type": "esriFieldTypeString",
+      "alias": "Agency",
+      "length": 50
+    },
+    {
+      "name": "Address",
+      "type": "esriFieldTypeString",
+      "alias": "Address",
+      "length": 300
+    },
+    {
+      "name": "CrossStreet",
+      "type": "esriFieldTypeString",
+      "alias": "CrossStreet",
+      "length": 300
+    },
+    {
+      "name": "CALL_TIME",
+      "type": "esriFieldTypeDate",
+      "alias": "CALL_TIME",
+      "length": 8
+    },
+    {
+      "name": "IncidentType",
+      "type": "esriFieldTypeString",
+      "alias": "IncidentType",
+      "length": 300
+    },
+    {
+      "name": "ALARM_LEVEL",
+      "type": "esriFieldTypeInteger",
+      "alias": "ALARM_LEVEL"
+    },
+    {
+      "name": "NO_UNITS",
+      "type": "esriFieldTypeInteger",
+      "alias": "NO_UNITS"
+    },
+    {
+      "name": "Units",
+      "type": "esriFieldTypeString",
+      "alias": "Units",
+      "length": 500
+    },
+    {
+      "name": "LONGITUDE",
+      "type": "esriFieldTypeDouble",
+      "alias": "LONGITUDE"
+    },
+    {
+      "name": "LATITUDE",
+      "type": "esriFieldTypeDouble",
+      "alias": "LATITUDE"
+    },
+    {
+      "name": "KeyMap",
+      "type": "esriFieldTypeString",
+      "alias": "KeyMap",
+      "length": 50
+    },
+    {
+      "name": "CombinedResponse",
+      "type": "esriFieldTypeString",
+      "alias": "CombinedResponse",
+      "length": 50
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "UID": 29726086,
+        "Agency": "P",
+        "Address": "200 BROADWAY ST",
+        "CrossStreet": "BLK SYCAMORE ST",
+        "CALL_TIME": 1790770620000,
+        "IncidentType": "TRAFFIC HAZARD/URGENT",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "11H12D",
+        "LONGITUDE": -95.278644,
+        "LATITUDE": 29.726086,
+        "KeyMap": "535B",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10606365.235495994,
+        "y": 3468390.915538046
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29790084,
+        "Agency": "F",
+        "Address": "CONRAD SAUER DR",
+        "CrossStreet": "BLK WESTVIEW DR",
+        "CALL_TIME": 1790770620000,
+        "IncidentType": "EMS EVENT",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "A069",
+        "LONGITUDE": -95.549095,
+        "LATITUDE": 29.790084,
+        "KeyMap": "449Z",
+        "CombinedResponse": "F"
+      },
+      "geometry": {
+        "x": -10636477.15775557,
+        "y": 3476597.5885737003
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29681769,
+        "Agency": "F",
+        "Address": "GULF FWY OB",
+        "CrossStreet": null,
+        "CALL_TIME": 1790770440000,
+        "IncidentType": "GRASS FIRE",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "E026",
+        "LONGITUDE": -95.274348,
+        "LATITUDE": 29.681769,
+        "KeyMap": "535T",
+        "CombinedResponse": "F"
+      },
+      "geometry": {
+        "x": -10605886.561685583,
+        "y": 3462713.424563215
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29714664,
+        "Agency": "P",
+        "Address": "6001 FONDREN RD",
+        "CrossStreet": null,
+        "CALL_TIME": 1790769840000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 2,
+        "Units": "18F54D,18F52D",
+        "LONGITUDE": -95.520124,
+        "LATITUDE": 29.714664,
+        "KeyMap": "530C",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10633248.892522566,
+        "y": 3466929.651429429
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29769263,
+        "Agency": "P",
+        "Address": "1204 FEDERAL RD",
+        "CrossStreet": "BLK KEYPORT LN",
+        "CALL_TIME": 1790769780000,
+        "IncidentType": "CRASH/MINOR",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "9C32A",
+        "LONGITUDE": -95.213368,
+        "LATITUDE": 29.769263,
+        "KeyMap": "496L",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10599107.204696272,
+        "y": 3473929.844850113
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29746131,
+        "Agency": "F",
+        "Address": "HAMILTON ST",
+        "CrossStreet": "BLK ST JOSEPH PKWY",
+        "CALL_TIME": 1790766900000,
+        "IncidentType": "UNKNOWN EVENT A LEVEL RESPONSE",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "A008",
+        "LONGITUDE": -95.362052,
+        "LATITUDE": 29.746131,
+        "KeyMap": "493U",
+        "CombinedResponse": "F"
+      },
+      "geometry": {
+        "x": -10615660.412977226,
+        "y": 3470954.937971008
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29615117,
+        "Agency": "P",
+        "Address": "10519 SOUTHWAY BEND LN",
+        "CrossStreet": "BLK KURLAND DR",
+        "CALL_TIME": 1790763420000,
+        "IncidentType": "CRASH/MINOR/FSGI",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "12D30D",
+        "LONGITUDE": -95.201268,
+        "LATITUDE": 29.615117,
+        "KeyMap": "576V",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10597760.238857668,
+        "y": 3454169.864812024
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29745755,
+        "Agency": "P",
+        "Address": "2000 JEFFERSON ST",
+        "CrossStreet": "BLK SAINT EMANUEL ST",
+        "CALL_TIME": 1790769600000,
+        "IncidentType": "TRAFFIC HAZARD/URGENT",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "10H35D",
+        "LONGITUDE": -95.360988,
+        "LATITUDE": 29.745755,
+        "KeyMap": "493U",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10615537.96153736,
+        "y": 3470916.4738570047
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29675372,
+        "Agency": "P",
+        "Address": "7703 CULLEN BLVD",
+        "CrossStreet": "BLK TETON ST",
+        "CALL_TIME": 1790769240000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "14D52D",
+        "LONGITUDE": -95.355806,
+        "LATITUDE": 29.675372,
+        "KeyMap": "533V",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10614959.100185234,
+        "y": 3461893.407062135
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29898227,
+        "Agency": "P",
+        "Address": "NIH45OB-W MOUNT HOUSTON 9420 N IH 45 FWY",
+        "CrossStreet": "WEST EXIT RAMP",
+        "CALL_TIME": 1790768340000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "3B51D",
+        "LONGITUDE": -95.412102,
+        "LATITUDE": 29.898227,
+        "KeyMap": "412H",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10621226.387516892,
+        "y": 3490471.102781108
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29672971,
+        "Agency": "P",
+        "Address": "2700 W BELLFORT AVE",
+        "CrossStreet": "BLK BUFFALO SPEEDWAY",
+        "CALL_TIME": 1790768280000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 2,
+        "Units": "15E44D,15E48A",
+        "LONGITUDE": -95.420918,
+        "LATITUDE": 29.672971,
+        "KeyMap": "532U",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10622205.999035874,
+        "y": 3461585.9139559306
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29803940,
+        "Agency": "P",
+        "Address": "700 W CAVALCADE ST",
+        "CrossStreet": "BLK AIRLINE DR",
+        "CALL_TIME": 1790766180000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "2A33D",
+        "LONGITUDE": -95.380229,
+        "LATITUDE": 29.80394,
+        "KeyMap": "453T",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10617675.295760585,
+        "y": 3478367.839867586
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29832357,
+        "Agency": "P",
+        "Address": "9901 CLAY RD",
+        "CrossStreet": null,
+        "CALL_TIME": 1790765820000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "5F38D",
+        "LONGITUDE": -95.536842,
+        "LATITUDE": 29.832357,
+        "KeyMap": "450E",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10635107.928018816,
+        "y": 3482024.5668868525
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29734473,
+        "Agency": "P",
+        "Address": "4301 MONTROSE BLVD",
+        "CrossStreet": null,
+        "CALL_TIME": 1790764980000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 2,
+        "Units": "1A50N,1A53N",
+        "LONGITUDE": -95.391127,
+        "LATITUDE": 29.734473,
+        "KeyMap": "493W",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10618888.678210232,
+        "y": 3469467.742690843
+      }
+    },
+    {
+      "attributes": {
+        "UID": 29638643,
+        "Agency": "P",
+        "Address": "5415 CANTERWAY DR",
+        "CrossStreet": "BLK MARTIN LUTHER KING BLVD",
+        "CALL_TIME": 1790764140000,
+        "IncidentType": "CRASH/MAJOR/NON FATAL",
+        "ALARM_LEVEL": 0,
+        "NO_UNITS": 1,
+        "Units": "14D40N",
+        "LONGITUDE": -95.340439,
+        "LATITUDE": 29.638643,
+        "KeyMap": "574E",
+        "CombinedResponse": "P"
+      },
+      "geometry": {
+        "x": -10613244.780027019,
+        "y": 3457179.3187664016
+      }
+    }
+  ]
+}

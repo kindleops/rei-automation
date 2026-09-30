@@ -1,0 +1,898 @@
+{
+  "feed_info": {
+    "publisher": "City of Austin",
+    "version": "4.2",
+    "license": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "update_date": "2026-09-30T12:02:09Z",
+    "update_frequency": 3600,
+    "data_sources": [
+      {
+        "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+        "organization_name": "City of Austin: AMANDA Right of Way Permits",
+        "update_date": "2026-09-30T12:02:09Z",
+        "update_frequency": 3600,
+        "contact_name": "Transportation and Public Works Department",
+        "contact_email": "transportation.data@austintexas.gov"
+      },
+      {
+        "data_source_id": "94f42b9d-2c02-506a-a0eb-d9d3c1e50edb",
+        "organization_name": "City of Austin: AMANDA Excavation Permits",
+        "update_date": "2026-09-30T12:02:09Z",
+        "update_frequency": 3600,
+        "contact_name": "Transportation and Public Works Department",
+        "contact_email": "transportation.data@austintexas.gov"
+      }
+    ],
+    "contact_name": "Transportation and Public Works Department",
+    "contact_email": "transportation.data@austintexas.gov"
+  },
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "22bd58e3-36c3-5b91-a538-cfd7c14f5f17",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "JE Dunn Construction - Colorado St Lane Closures- CapComp Phase 2 ",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "COLORADO ST"
+          ],
+          "direction": "northbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-07-05T05:00:00Z",
+        "end_date": "2026-12-25T06:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "all-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.7404908314511,
+            30.27825628448241
+          ],
+          [
+            -97.74083813638187,
+            30.277301818498874
+          ]
+        ]
+      }
+    },
+    {
+      "id": "eac7c88e-a7ff-5352-8d2c-b299145e2a58",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "JE Dunn Construction - Colorado St Lane Closures- CapComp Phase 2 ",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "COLORADO ST"
+          ],
+          "direction": "southbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-07-05T05:00:00Z",
+        "end_date": "2026-12-25T06:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "all-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.74085021998636,
+            30.277305130708825
+          ],
+          [
+            -97.74050291516312,
+            30.278259596725338
+          ]
+        ]
+      }
+    },
+    {
+      "id": "1639bf3b-fc6b-5b67-a34d-ef18ff9fd718",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "CIP - ACC/JED - E Cesar Chavez St 400-500 blks - Austin Convention Center Redevelopment",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "TRINITY ST"
+          ],
+          "direction": "northbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-10-01T05:00:00Z",
+        "end_date": "2027-03-31T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "all-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.74000386940162,
+            30.265242775714377
+          ],
+          [
+            -97.74036171744973,
+            30.26427639592835
+          ]
+        ]
+      }
+    },
+    {
+      "id": "0fc7f8d1-c9ab-546c-be50-61d757f0b435",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "CIP - ACC/JED - E Cesar Chavez St 400-500 blks - Austin Convention Center Redevelopment",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "TRINITY ST"
+          ],
+          "direction": "northbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-10-01T05:00:00Z",
+        "end_date": "2027-03-31T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "all-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.74036173425863,
+            30.264276351192777
+          ],
+          [
+            -97.74071962966072,
+            30.26333747584768
+          ]
+        ]
+      }
+    },
+    {
+      "id": "d460d8d9-c92c-5e62-9234-a89e8f91c9d6",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "CIP - ACC/JED - E Cesar Chavez St 400-500 blks - Austin Convention Center Redevelopment",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "E 4TH ST"
+          ],
+          "direction": "westbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-10-01T05:00:00Z",
+        "end_date": "2027-03-31T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "all-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.73895049104623,
+            30.264953238567852
+          ],
+          [
+            -97.73784688462709,
+            30.264636600392613
+          ]
+        ]
+      }
+    },
+    {
+      "id": "3b3fb173-f60f-5675-b8bf-039a9ea1bd45",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "AE/Mastec/Primoris - W OLTORF ST 1400 BLK - Replace Wiring ",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "W OLTORF ST"
+          ],
+          "direction": "eastbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-03-04T06:00:00Z",
+        "end_date": "2027-03-03T06:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.76927432158102,
+            30.246558780416898
+          ],
+          [
+            -97.76996101457708,
+            30.248416476170338
+          ]
+        ]
+      }
+    },
+    {
+      "id": "c8357324-8323-5389-8455-7816a2b0e518",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "JE Dunn Construction - Colorado St Lane Closures- CapComp Phase 2 ",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "W 15TH ST"
+          ],
+          "direction": "eastbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-07-05T05:00:00Z",
+        "end_date": "2026-12-25T06:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.7408428182044,
+            30.277298103583398
+          ],
+          [
+            -97.7409916922755,
+            30.277269706643047
+          ],
+          [
+            -97.74099235752965,
+            30.277269611625286
+          ],
+          [
+            -97.74099303065015,
+            30.277269578498817
+          ],
+          [
+            -97.7409937040154,
+            30.27726960763877
+          ],
+          [
+            -97.7409943700009,
+            30.277269698715152
+          ],
+          [
+            -97.74099502106584,
+            30.27726985069676
+          ],
+          [
+            -97.7418171550151,
+            30.27750312394998
+          ],
+          [
+            -97.74181770173652,
+            30.27750330370509
+          ],
+          [
+            -97.7418182270406,
+            30.27750352643331
+          ],
+          [
+            -97.74181872645478,
+            30.277503790238306
+          ],
+          [
+            -97.74181919572693,
+            30.277504092873937
+          ],
+          [
+            -97.74181963086157,
+            30.277504431763564
+          ],
+          [
+            -97.74193833881543,
+            30.277605844586432
+          ]
+        ]
+      }
+    },
+    {
+      "id": "8db01582-986c-5d6b-b4bf-4281ffcf8cd0",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "Austin Commercial - Whitis Ave 2000 BLK - USB Long Term Closure",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "UNIVERSITY AVE"
+          ],
+          "direction": "unknown",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-05-01T05:00:00Z",
+        "end_date": "2026-10-27T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.73975853994901,
+            30.282484583271014
+          ],
+          [
+            -97.739663599853,
+            30.282537559436005
+          ],
+          [
+            -97.739565731404,
+            30.283521494760002
+          ],
+          [
+            -97.73963559799,
+            30.283658693389004
+          ]
+        ]
+      }
+    },
+    {
+      "id": "09c83319-aaec-5754-ac41-dcdb9843751c",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "Austin Commercial - Whitis Ave 2000 BLK - USB Long Term Closure",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "WHITIS AVE"
+          ],
+          "direction": "unknown",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-05-01T05:00:00Z",
+        "end_date": "2026-10-27T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.740922923727,
+            30.282570851576
+          ],
+          [
+            -97.740783711205,
+            30.283742432565003
+          ]
+        ]
+      }
+    },
+    {
+      "id": "beb1861d-22ca-5bba-b624-cc89a03450c0",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "Austin Commercial - Whitis Ave 2000 BLK - USB Long Term Closure",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "W 20TH ST"
+          ],
+          "direction": "unknown",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-05-01T05:00:00Z",
+        "end_date": "2026-10-27T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.73975853994901,
+            30.282484583271014
+          ],
+          [
+            -97.740264180584,
+            30.282527297276985
+          ],
+          [
+            -97.740922923727,
+            30.282570851576
+          ]
+        ]
+      }
+    },
+    {
+      "id": "1bdab9f6-92da-5f85-9850-f24e945b45be",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "WorkZone Event",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "VERTEX BLVD"
+          ],
+          "direction": "unknown",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-10-15T05:00:00Z",
+        "end_date": "2026-12-13T06:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "planned-moving-area",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.752419647434,
+            30.157939556345003
+          ],
+          [
+            -97.752530588012,
+            30.157711619616002
+          ],
+          [
+            -97.752658967348,
+            30.157450426213018
+          ],
+          [
+            -97.752739807683,
+            30.15729363847301
+          ],
+          [
+            -97.752876320375,
+            30.156872402723987
+          ],
+          [
+            -97.752984644112,
+            30.156272956667006
+          ],
+          [
+            -97.752955868008,
+            30.15567877634
+          ],
+          [
+            -97.75239476055,
+            30.154294905116
+          ],
+          [
+            -97.75237788713,
+            30.154084415604995
+          ],
+          [
+            -97.752791282047,
+            30.15311298838798
+          ],
+          [
+            -97.753267253543,
+            30.152010369474
+          ],
+          [
+            -97.753600515216,
+            30.151296732011993
+          ],
+          [
+            -97.754134248789,
+            30.150887053400023
+          ],
+          [
+            -97.754569578095,
+            30.150520662457986
+          ],
+          [
+            -97.754642178361,
+            30.15039118462
+          ],
+          [
+            -97.754699684392,
+            30.150239548179982
+          ],
+          [
+            -97.754707455758,
+            30.149948241354007
+          ],
+          [
+            -97.754665817389,
+            30.149301127496997
+          ],
+          [
+            -97.754636006579,
+            30.148828708441002
+          ],
+          [
+            -97.754614067535,
+            30.14848104171701
+          ],
+          [
+            -97.754625210482,
+            30.14828997773797
+          ],
+          [
+            -97.7546528423,
+            30.148227832523006
+          ],
+          [
+            -97.754736516434,
+            30.14803963765598
+          ],
+          [
+            -97.75486854471,
+            30.147884012083015
+          ],
+          [
+            -97.7549986334,
+            30.147698326798015
+          ],
+          [
+            -97.755384517134,
+            30.14759807022799
+          ],
+          [
+            -97.755840681827,
+            30.147643667542017
+          ],
+          [
+            -97.756665384805,
+            30.147827393641
+          ],
+          [
+            -97.757181548941,
+            30.147837785186013
+          ],
+          [
+            -97.757739205208,
+            30.14773441300901
+          ],
+          [
+            -97.758300826338,
+            30.147515444132015
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ad66d72d-cc75-5600-b4b9-af78d0eae3db",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "WorkZone Event",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "CORRAL LN"
+          ],
+          "direction": "eastbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-09-01T05:00:00Z",
+        "end_date": "2026-10-30T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "planned-moving-area",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.77493735331623,
+            30.18463896792101
+          ],
+          [
+            -97.77931910818594,
+            30.186657858298588
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ab28ad5e-381c-5f0b-8faf-829a4e99db14",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "WorkZone Event",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "CORRAL LN"
+          ],
+          "direction": "westbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-09-01T05:00:00Z",
+        "end_date": "2026-10-30T05:00:00Z",
+        "is_start_date_verified": false,
+        "is_end_date_verified": false,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "planned-moving-area",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": false,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.77931317669179,
+            30.186667574775328
+          ],
+          [
+            -97.77493142150544,
+            30.184648684192897
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ecd44683-8943-5f0e-a530-40fbec496c1b",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "D2 Excavating - 200-400 E 56th St - ROW Closure",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "E 56TH ST"
+          ],
+          "direction": "westbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-09-23T05:00:00Z",
+        "end_date": "2026-10-07T04:59:00Z",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": true,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.71811020231928,
+            30.320642003140534
+          ],
+          [
+            -97.71721937015538,
+            30.320203021587677
+          ]
+        ]
+      }
+    },
+    {
+      "id": "28bfb045-7e6a-57b3-9bb7-a5cfdc8bf533",
+      "type": "Feature",
+      "properties": {
+        "core_details": {
+          "name": "D2 Excavating - 200-400 E 56th St - ROW Closure",
+          "event_type": "work-zone",
+          "data_source_id": "7424752a-50db-5bbf-87fa-72172ff3b7c9",
+          "road_names": [
+            "E 56TH ST"
+          ],
+          "direction": "westbound",
+          "description": "[redacted]"
+        },
+        "start_date": "2026-09-23T05:00:00Z",
+        "end_date": "2026-10-07T04:59:00Z",
+        "is_start_date_verified": true,
+        "is_end_date_verified": true,
+        "is_start_position_verified": false,
+        "is_end_position_verified": false,
+        "location_method": "other",
+        "work_zone_type": "static",
+        "vehicle_impact": "some-lanes-closed",
+        "worker_presence": {
+          "are_workers_present": true,
+          "definition": [
+            "workers-in-work-zone-working"
+          ],
+          "method": "check-in-app",
+          "confidence": "medium"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -97.71721934909625,
+            30.320203011163848
+          ],
+          [
+            -97.71633097491475,
+            30.319761323081885
+          ]
+        ]
+      }
+    }
+  ]
+}

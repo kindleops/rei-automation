@@ -1,0 +1,1507 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "GlobalID",
+  "geometryProperties": {
+    "shapeAreaFieldName": "Shape__Area",
+    "shapeLengthFieldName": "Shape__Length",
+    "units": "esriDecimalDegrees"
+  },
+  "geometryType": "esriGeometryPolygon",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_SourceOID",
+      "type": "esriFieldTypeInteger",
+      "alias": "poly_SourceOID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_IncidentName",
+      "type": "esriFieldTypeString",
+      "alias": "poly_IncidentName",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_FeatureCategory",
+      "type": "esriFieldTypeString",
+      "alias": "poly_FeatureCategory",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_MapMethod",
+      "type": "esriFieldTypeString",
+      "alias": "poly_MapMethod",
+      "sqlType": "sqlTypeOther",
+      "length": 25,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_GISAcres",
+      "type": "esriFieldTypeDouble",
+      "alias": "poly_GISAcres",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_DeleteThis",
+      "type": "esriFieldTypeString",
+      "alias": "poly_DeleteThis",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_FeatureAccess",
+      "type": "esriFieldTypeString",
+      "alias": "poly_FeatureAccess",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_FeatureStatus",
+      "type": "esriFieldTypeString",
+      "alias": "poly_FeatureStatus",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_IsVisible",
+      "type": "esriFieldTypeString",
+      "alias": "poly_IsVisible",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_CreateDate",
+      "type": "esriFieldTypeDate",
+      "alias": "poly_CreateDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_DateCurrent",
+      "type": "esriFieldTypeDate",
+      "alias": "poly_DateCurrent",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_PolygonDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "poly_PolygonDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_IRWINID",
+      "type": "esriFieldTypeString",
+      "alias": "poly_IRWINID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_FORID",
+      "type": "esriFieldTypeString",
+      "alias": "poly_FORID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_Acres_AutoCalc",
+      "type": "esriFieldTypeDouble",
+      "alias": "poly_Acres_AutoCalc",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_SourceGlobalID",
+      "type": "esriFieldTypeString",
+      "alias": "poly_SourceGlobalID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "poly_Source",
+      "type": "esriFieldTypeString",
+      "alias": "poly_Source",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_SourceOID",
+      "type": "esriFieldTypeInteger",
+      "alias": "attr_SourceOID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ABCDMisc",
+      "type": "esriFieldTypeString",
+      "alias": "attr_ABCDMisc",
+      "sqlType": "sqlTypeOther",
+      "length": 4,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ADSPermissionState",
+      "type": "esriFieldTypeString",
+      "alias": "attr_ADSPermissionState",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_CalculatedAcres",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_CalculatedAcres",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ContainmentDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_ContainmentDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ControlDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_ControlDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_CreatedBySystem",
+      "type": "esriFieldTypeString",
+      "alias": "attr_CreatedBySystem",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentSize",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_IncidentSize",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_DiscoveryAcres",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_DiscoveryAcres",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_DispatchCenterID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_DispatchCenterID",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_EstimatedCostToDate",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_EstimatedCostToDate",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FinalAcres",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_FinalAcres",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FFReportApprovedByTitle",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FFReportApprovedByTitle",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FFReportApprovedByUnit",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FFReportApprovedByUnit",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FFReportApprovedDate",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_FFReportApprovedDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireBehaviorGeneral",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireBehaviorGeneral",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireBehaviorGeneral1",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireBehaviorGeneral1",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireBehaviorGeneral2",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireBehaviorGeneral2",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireBehaviorGeneral3",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireBehaviorGeneral3",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireCause",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireCause",
+      "sqlType": "sqlTypeOther",
+      "length": 15,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireCauseGeneral",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireCauseGeneral",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireCauseSpecific",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireCauseSpecific",
+      "sqlType": "sqlTypeOther",
+      "length": 200,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireCode",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireCode",
+      "sqlType": "sqlTypeOther",
+      "length": 4,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireDepartmentID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireDepartmentID",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireDiscoveryDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_FireDiscoveryDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireMgmtComplexity",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FireMgmtComplexity",
+      "sqlType": "sqlTypeOther",
+      "length": 25,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireOutDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_FireOutDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireStrategyConfinePercent",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_FireStrategyConfinePercent",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireStrategyFullSuppPrcnt",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_FireStrategyFullSuppPrcnt",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireStrategyMonitorPercent",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_FireStrategyMonitorPercent",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FireStrategyPointZonePrcnt",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_FireStrategyPointZonePrcnt",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FSJobCode",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FSJobCode",
+      "sqlType": "sqlTypeOther",
+      "length": 2,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FSOverrideCode",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FSOverrideCode",
+      "sqlType": "sqlTypeOther",
+      "length": 4,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_GACC",
+      "type": "esriFieldTypeString",
+      "alias": "attr_GACC",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ICS209ReportDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_ICS209ReportDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ICS209RptForTimePeriodFrom",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_ICS209RptForTimePeriodFrom",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ICS209RptForTimePeriodTo",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_ICS209RptForTimePeriodTo",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ICS209ReportStatus",
+      "type": "esriFieldTypeString",
+      "alias": "attr_ICS209ReportStatus",
+      "sqlType": "sqlTypeOther",
+      "length": 1,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentManagementOrg",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IncidentManagementOrg",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentName",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IncidentName",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentShortDescription",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IncidentShortDescription",
+      "sqlType": "sqlTypeOther",
+      "length": 80,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentTypeCategory",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IncidentTypeCategory",
+      "sqlType": "sqlTypeOther",
+      "length": 2,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentTypeKind",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IncidentTypeKind",
+      "sqlType": "sqlTypeOther",
+      "length": 2,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_InitialLatitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_InitialLatitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_InitialLongitude",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_InitialLongitude",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_InitialResponseAcres",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_InitialResponseAcres",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_InitialResponseDateTime",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_InitialResponseDateTime",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IrwinID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IrwinID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsFireCauseInvestigated",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsFireCauseInvestigated",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsFireCodeRequested",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsFireCodeRequested",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsFSAssisted",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsFSAssisted",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsMultiJurisdictional",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsMultiJurisdictional",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsReimbursable",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsReimbursable",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsTrespass",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsTrespass",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsUnifiedCommand",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsUnifiedCommand",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_LocalIncidentIdentifier",
+      "type": "esriFieldTypeString",
+      "alias": "attr_LocalIncidentIdentifier",
+      "sqlType": "sqlTypeOther",
+      "length": 10,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ModifiedBySystem",
+      "type": "esriFieldTypeString",
+      "alias": "attr_ModifiedBySystem",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_PercentContained",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_PercentContained",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_PercentPerimToBeContained",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_PercentPerimToBeContained",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOCity",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOCity",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOCounty",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOCounty",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POODispatchCenterID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POODispatchCenterID",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOFips",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOFips",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOJurisdictionalAgency",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOJurisdictionalAgency",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOJurisdictionalUnit",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOJurisdictionalUnit",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOJurisdictUnitParentUnit",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOJurisdictUnitParentUnit",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLandownerCategory",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLandownerCategory",
+      "sqlType": "sqlTypeOther",
+      "length": 7,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLandownerKind",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLandownerKind",
+      "sqlType": "sqlTypeOther",
+      "length": 7,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLegalDescPrincipalMerid",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLegalDescPrincipalMerid",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLegalDescQtr",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLegalDescQtr",
+      "sqlType": "sqlTypeOther",
+      "length": 2,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLegalDescQtrQtr",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLegalDescQtrQtr",
+      "sqlType": "sqlTypeOther",
+      "length": 2,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLegalDescRange",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLegalDescRange",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLegalDescSection",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_POOLegalDescSection",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOLegalDescTownship",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOLegalDescTownship",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOPredictiveServiceAreaID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOPredictiveServiceAreaID",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOProtectingAgency",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOProtectingAgency",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOProtectingUnit",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOProtectingUnit",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_POOState",
+      "type": "esriFieldTypeString",
+      "alias": "attr_POOState",
+      "sqlType": "sqlTypeOther",
+      "length": 6,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_PredominantFuelGroup",
+      "type": "esriFieldTypeString",
+      "alias": "attr_PredominantFuelGroup",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_PredominantFuelModel",
+      "type": "esriFieldTypeString",
+      "alias": "attr_PredominantFuelModel",
+      "sqlType": "sqlTypeOther",
+      "length": 100,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_PrimaryFuelModel",
+      "type": "esriFieldTypeString",
+      "alias": "attr_PrimaryFuelModel",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_SecondaryFuelModel",
+      "type": "esriFieldTypeString",
+      "alias": "attr_SecondaryFuelModel",
+      "sqlType": "sqlTypeOther",
+      "length": 30,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_TotalIncidentPersonnel",
+      "type": "esriFieldTypeInteger",
+      "alias": "attr_TotalIncidentPersonnel",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_UniqueFireIdentifier",
+      "type": "esriFieldTypeString",
+      "alias": "attr_UniqueFireIdentifier",
+      "sqlType": "sqlTypeOther",
+      "length": 22,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_FORID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_FORID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_WFDSSDecisionStatus",
+      "type": "esriFieldTypeString",
+      "alias": "attr_WFDSSDecisionStatus",
+      "sqlType": "sqlTypeOther",
+      "length": 20,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_EstimatedFinalCost",
+      "type": "esriFieldTypeDouble",
+      "alias": "attr_EstimatedFinalCost",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_OrganizationalAssessment",
+      "type": "esriFieldTypeString",
+      "alias": "attr_OrganizationalAssessment",
+      "sqlType": "sqlTypeOther",
+      "length": 25,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_StratDecisionPublishDate",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_StratDecisionPublishDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_CreatedOnDateTime_dt",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_CreatedOnDateTime_dt",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ModifiedOnDateTime_dt",
+      "type": "esriFieldTypeDate",
+      "alias": "attr_ModifiedOnDateTime_dt",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_Source",
+      "type": "esriFieldTypeString",
+      "alias": "attr_Source",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_ActiveFireCandidate",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_ActiveFireCandidate",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IsCpxChild",
+      "type": "esriFieldTypeSmallInteger",
+      "alias": "attr_IsCpxChild",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_CpxName",
+      "type": "esriFieldTypeString",
+      "alias": "attr_CpxName",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_CpxID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_CpxID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_SourceGlobalID",
+      "type": "esriFieldTypeString",
+      "alias": "attr_SourceGlobalID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "GlobalID",
+      "type": "esriFieldTypeGlobalID",
+      "alias": "GlobalID",
+      "sqlType": "sqlTypeOther",
+      "length": 38,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Shape__Area",
+      "type": "esriFieldTypeDouble",
+      "alias": "Shape__Area",
+      "sqlType": "sqlTypeDouble",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Shape__Length",
+      "type": "esriFieldTypeDouble",
+      "alias": "Shape__Length",
+      "sqlType": "sqlTypeDouble",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "attr_IncidentComplexityLevel",
+      "type": "esriFieldTypeString",
+      "alias": "attr_IncidentComplexityLevel",
+      "sqlType": "sqlTypeOther",
+      "length": 25,
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 61564,
+        "poly_SourceOID": 50460,
+        "poly_IncidentName": "AA - Power Storm",
+        "poly_FeatureCategory": "Wildfire Daily Fire Perimeter",
+        "poly_MapMethod": "Auto-generated for InFORM",
+        "poly_GISAcres": 15.937912101642931,
+        "poly_DeleteThis": "No",
+        "poly_FeatureAccess": "Public",
+        "poly_FeatureStatus": "Approved",
+        "poly_IsVisible": "Yes",
+        "poly_CreateDate": 1789309724335,
+        "poly_DateCurrent": 1790188471000,
+        "poly_PolygonDateTime": 1789310059000,
+        "poly_IRWINID": "{CFE76052-2BDC-4486-9037-2BED0D888079}",
+        "poly_FORID": null,
+        "poly_Acres_AutoCalc": 15.937911919447238,
+        "poly_SourceGlobalID": "{FAE88C80-0351-4025-8FD9-34EB28C79FDB}",
+        "poly_Source": "2026 NIFS",
+        "attr_SourceOID": 43320965,
+        "attr_ABCDMisc": null,
+        "attr_ADSPermissionState": "DEFAULT",
+        "attr_CalculatedAcres": null,
+        "attr_ContainmentDateTime": null,
+        "attr_ControlDateTime": null,
+        "attr_CreatedBySystem": "wildcade",
+        "attr_IncidentSize": 16,
+        "attr_DiscoveryAcres": 16,
+        "attr_DispatchCenterID": "FLFIC",
+        "attr_EstimatedCostToDate": null,
+        "attr_FinalAcres": null,
+        "attr_FFReportApprovedByTitle": null,
+        "attr_FFReportApprovedByUnit": null,
+        "attr_FFReportApprovedDate": null,
+        "attr_FireBehaviorGeneral": null,
+        "attr_FireBehaviorGeneral1": null,
+        "attr_FireBehaviorGeneral2": null,
+        "attr_FireBehaviorGeneral3": null,
+        "attr_FireCause": "Undetermined",
+        "attr_FireCauseGeneral": null,
+        "attr_FireCauseSpecific": null,
+        "attr_FireCode": "SZDV",
+        "attr_FireDepartmentID": null,
+        "attr_FireDiscoveryDateTime": 1789309200000,
+        "attr_FireMgmtComplexity": null,
+        "attr_FireOutDateTime": null,
+        "attr_FireStrategyConfinePercent": null,
+        "attr_FireStrategyFullSuppPrcnt": null,
+        "attr_FireStrategyMonitorPercent": null,
+        "attr_FireStrategyPointZonePrcnt": null,
+        "attr_FSJobCode": "PR",
+        "attr_FSOverrideCode": "1542",
+        "attr_GACC": "SACC",
+        "attr_ICS209ReportDateTime": null,
+        "attr_ICS209RptForTimePeriodFrom": null,
+        "attr_ICS209RptForTimePeriodTo": null,
+        "attr_ICS209ReportStatus": null,
+        "attr_IncidentManagementOrg": null,
+        "attr_IncidentName": "Power Storm",
+        "attr_IncidentShortDescription": null,
+        "attr_IncidentTypeCategory": "WF",
+        "attr_IncidentTypeKind": "FI",
+        "attr_InitialLatitude": 18.026528,
+        "attr_InitialLongitude": -66.979278,
+        "attr_InitialResponseAcres": null,
+        "attr_InitialResponseDateTime": null,
+        "attr_IrwinID": "{CFE76052-2BDC-4486-9037-2BED0D888079}",
+        "attr_IsFireCauseInvestigated": null,
+        "attr_IsFireCodeRequested": 0,
+        "attr_IsFSAssisted": 1,
+        "attr_IsMultiJurisdictional": 0,
+        "attr_IsReimbursable": 0,
+        "attr_IsTrespass": 0,
+        "attr_IsUnifiedCommand": null,
+        "attr_LocalIncidentIdentifier": "002726",
+        "attr_ModifiedBySystem": "INFORM_Inspector",
+        "attr_PercentContained": null,
+        "attr_PercentPerimToBeContained": null,
+        "attr_POOCity": null,
+        "attr_POOCounty": "Lajas",
+        "attr_POODispatchCenterID": "PRCIC",
+        "attr_POOFips": "72079",
+        "attr_POOJurisdictionalAgency": null,
+        "attr_POOJurisdictionalUnit": null,
+        "attr_POOJurisdictUnitParentUnit": null,
+        "attr_POOLandownerCategory": "Private",
+        "attr_POOLandownerKind": "Private",
+        "attr_POOLegalDescPrincipalMerid": null,
+        "attr_POOLegalDescQtr": null,
+        "attr_POOLegalDescQtrQtr": null,
+        "attr_POOLegalDescRange": null,
+        "attr_POOLegalDescSection": null,
+        "attr_POOLegalDescTownship": null,
+        "attr_POOPredictiveServiceAreaID": "SA52A",
+        "attr_POOProtectingAgency": "USFWS",
+        "attr_POOProtectingUnit": "PRLCR",
+        "attr_POOState": "US-PR",
+        "attr_PredominantFuelGroup": null,
+        "attr_PredominantFuelModel": null,
+        "attr_PrimaryFuelModel": null,
+        "attr_SecondaryFuelModel": null,
+        "attr_TotalIncidentPersonnel": null,
+        "attr_UniqueFireIdentifier": "2026-PRLCR-002726",
+        "attr_FORID": null,
+        "attr_WFDSSDecisionStatus": "No Decision",
+        "attr_EstimatedFinalCost": null,
+        "attr_OrganizationalAssessment": null,
+        "attr_StratDecisionPublishDate": null,
+        "attr_CreatedOnDateTime_dt": 1789309714700,
+        "attr_ModifiedOnDateTime_dt": 1790278018333,
+        "attr_Source": "IRWIN",
+        "attr_ActiveFireCandidate": 1,
+        "attr_IsCpxChild": 0,
+        "attr_CpxName": null,
+        "attr_CpxID": null,
+        "attr_SourceGlobalID": "{AE5BA80A-294D-4E98-96A9-D86761640E68}",
+        "GlobalID": "7583fe0a-5f06-4331-8f9e-078d63aac3a7",
+        "Shape__Area": 5.503332772605063e-06,
+        "Shape__Length": 0.00948428032069651,
+        "attr_IncidentComplexityLevel": null
+      },
+      "geometry": {
+        "rings": [
+          [
+            [
+              -66.9785721932227,
+              18.0266772141143
+            ],
+            [
+              -66.9787062472289,
+              18.0246612516346
+            ],
+            [
+              -66.9814365893178,
+              18.0247904289937
+            ],
+            [
+              -66.9812594779262,
+              18.0268220101087
+            ],
+            [
+              -66.9785721932227,
+              18.0266772141143
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 61565,
+        "poly_SourceOID": 44388,
+        "poly_IncidentName": "AA - Valle",
+        "poly_FeatureCategory": "Wildfire Daily Fire Perimeter",
+        "poly_MapMethod": "Auto-generated for InFORM",
+        "poly_GISAcres": 60.78093531291055,
+        "poly_DeleteThis": "No",
+        "poly_FeatureAccess": "Public",
+        "poly_FeatureStatus": "Approved",
+        "poly_IsVisible": "Yes",
+        "poly_CreateDate": 1787753891114,
+        "poly_DateCurrent": 1790188297000,
+        "poly_PolygonDateTime": 1787753887000,
+        "poly_IRWINID": "{3CE71653-12A4-4FE3-A1E2-AC33D54997F7}",
+        "poly_FORID": null,
+        "poly_Acres_AutoCalc": 60.78093810162619,
+        "poly_SourceGlobalID": "{87672060-FE60-4E73-86F6-976F780824D8}",
+        "poly_Source": "2026 NIFS",
+        "attr_SourceOID": 43315432,
+        "attr_ABCDMisc": null,
+        "attr_ADSPermissionState": "DEFAULT",
+        "attr_CalculatedAcres": null,
+        "attr_ContainmentDateTime": null,
+        "attr_ControlDateTime": null,
+        "attr_CreatedBySystem": "wildcade",
+        "attr_IncidentSize": 60,
+        "attr_DiscoveryAcres": 60,
+        "attr_DispatchCenterID": "FLFIC",
+        "attr_EstimatedCostToDate": null,
+        "attr_FinalAcres": null,
+        "attr_FFReportApprovedByTitle": null,
+        "attr_FFReportApprovedByUnit": null,
+        "attr_FFReportApprovedDate": null,
+        "attr_FireBehaviorGeneral": null,
+        "attr_FireBehaviorGeneral1": null,
+        "attr_FireBehaviorGeneral2": null,
+        "attr_FireBehaviorGeneral3": null,
+        "attr_FireCause": "Undetermined",
+        "attr_FireCauseGeneral": null,
+        "attr_FireCauseSpecific": null,
+        "attr_FireCode": "SY3S",
+        "attr_FireDepartmentID": null,
+        "attr_FireDiscoveryDateTime": 1787753577000,
+        "attr_FireMgmtComplexity": null,
+        "attr_FireOutDateTime": null,
+        "attr_FireStrategyConfinePercent": null,
+        "attr_FireStrategyFullSuppPrcnt": null,
+        "attr_FireStrategyMonitorPercent": null,
+        "attr_FireStrategyPointZonePrcnt": null,
+        "attr_FSJobCode": "PR",
+        "attr_FSOverrideCode": "1542",
+        "attr_GACC": "SACC",
+        "attr_ICS209ReportDateTime": null,
+        "attr_ICS209RptForTimePeriodFrom": null,
+        "attr_ICS209RptForTimePeriodTo": null,
+        "attr_ICS209ReportStatus": null,
+        "attr_IncidentManagementOrg": null,
+        "attr_IncidentName": "Valle",
+        "attr_IncidentShortDescription": null,
+        "attr_IncidentTypeCategory": "WF",
+        "attr_IncidentTypeKind": "FI",
+        "attr_InitialLatitude": 18.017008,
+        "attr_InitialLongitude": -67.003342,
+        "attr_InitialResponseAcres": null,
+        "attr_InitialResponseDateTime": null,
+        "attr_IrwinID": "{3CE71653-12A4-4FE3-A1E2-AC33D54997F7}",
+        "attr_IsFireCauseInvestigated": null,
+        "attr_IsFireCodeRequested": 0,
+        "attr_IsFSAssisted": 1,
+        "attr_IsMultiJurisdictional": 0,
+        "attr_IsReimbursable": 0,
+        "attr_IsTrespass": 0,
+        "attr_IsUnifiedCommand": null,
+        "attr_LocalIncidentIdentifier": "002614",
+        "attr_ModifiedBySystem": "INFORM_Inspector",
+        "attr_PercentContained": null,
+        "attr_PercentPerimToBeContained": null,
+        "attr_POOCity": null,
+        "attr_POOCounty": "Lajas",
+        "attr_POODispatchCenterID": "PRCIC",
+        "attr_POOFips": "72079",
+        "attr_POOJurisdictionalAgency": null,
+        "attr_POOJurisdictionalUnit": null,
+        "attr_POOJurisdictUnitParentUnit": null,
+        "attr_POOLandownerCategory": "Private",
+        "attr_POOLandownerKind": "Private",
+        "attr_POOLegalDescPrincipalMerid": null,
+        "attr_POOLegalDescQtr": null,
+        "attr_POOLegalDescQtrQtr": null,
+        "attr_POOLegalDescRange": null,
+        "attr_POOLegalDescSection": null,
+        "attr_POOLegalDescTownship": null,
+        "attr_POOPredictiveServiceAreaID": "SA52A",
+        "attr_POOProtectingAgency": "USFWS",
+        "attr_POOProtectingUnit": "PRLCR",
+        "attr_POOState": "US-PR",
+        "attr_PredominantFuelGroup": null,
+        "attr_PredominantFuelModel": null,
+        "attr_PrimaryFuelModel": null,
+        "attr_SecondaryFuelModel": null,
+        "attr_TotalIncidentPersonnel": null,
+        "attr_UniqueFireIdentifier": "2026-PRLCR-002614",
+        "attr_FORID": null,
+        "attr_WFDSSDecisionStatus": "No Decision",
+        "attr_EstimatedFinalCost": null,
+        "attr_OrganizationalAssessment": null,
+        "attr_StratDecisionPublishDate": null,
+        "attr_CreatedOnDateTime_dt": 1787753852607,
+        "attr_ModifiedOnDateTime_dt": 1790277812767,
+        "attr_Source": "IRWIN",
+        "attr_ActiveFireCandidate": 1,
+        "attr_IsCpxChild": 0,
+        "attr_CpxName": null,
+        "attr_CpxID": null,
+        "attr_SourceGlobalID": "{75871FB9-4056-4F86-BEA4-39F104159E3A}",
+        "GlobalID": "8d3ef885-703e-403c-8ad3-d361fba933c8",
+        "Shape__Area": 2.0986641288800456e-05,
+        "Shape__Length": 0.01864046755428229,
+        "attr_IncidentComplexityLevel": null
+      },
+      "geometry": {
+        "rings": [
+          [
+            [
+              -67.0050494760548,
+              18.02070893397
+            ],
+            [
+              -67.0012526963317,
+              18.0206504814875
+            ],
+            [
+              -67.0014068790364,
+              18.0151758946321
+            ],
+            [
+              -67.0052289512315,
+              18.0151674407939
+            ],
+            [
+              -67.0050494760548,
+              18.02070893397
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 61682,
+        "poly_SourceOID": 55613,
+        "poly_IncidentName": "Ranger Academy RX 3",
+        "poly_FeatureCategory": "Wildfire Daily Fire Perimeter",
+        "poly_MapMethod": "Auto-generated for InFORM",
+        "poly_GISAcres": 20,
+        "poly_DeleteThis": "No",
+        "poly_FeatureAccess": "Public",
+        "poly_FeatureStatus": "Approved",
+        "poly_IsVisible": "Yes",
+        "poly_CreateDate": 1790473095281,
+        "poly_DateCurrent": 1790473396248,
+        "poly_PolygonDateTime": 1790473118633,
+        "poly_IRWINID": "{BC2D3DD7-0354-4869-B0ED-61EE442BA81E}",
+        "poly_FORID": null,
+        "poly_Acres_AutoCalc": 15.860604540526785,
+        "poly_SourceGlobalID": "{0661E517-2F26-466F-A785-36163039F8AB}",
+        "poly_Source": "2026 NIFS",
+        "attr_SourceOID": 43325703,
+        "attr_ABCDMisc": null,
+        "attr_ADSPermissionState": "DEFAULT",
+        "attr_CalculatedAcres": 15.86,
+        "attr_ContainmentDateTime": null,
+        "attr_ControlDateTime": null,
+        "attr_CreatedBySystem": "INFORM_Inspector",
+        "attr_IncidentSize": 16,
+        "attr_DiscoveryAcres": 20,
+        "attr_DispatchCenterID": "NHNEC",
+        "attr_EstimatedCostToDate": null,
+        "attr_FinalAcres": null,
+        "attr_FFReportApprovedByTitle": null,
+        "attr_FFReportApprovedByUnit": null,
+        "attr_FFReportApprovedDate": null,
+        "attr_FireBehaviorGeneral": null,
+        "attr_FireBehaviorGeneral1": null,
+        "attr_FireBehaviorGeneral2": null,
+        "attr_FireBehaviorGeneral3": null,
+        "attr_FireCause": null,
+        "attr_FireCauseGeneral": null,
+        "attr_FireCauseSpecific": null,
+        "attr_FireCode": null,
+        "attr_FireDepartmentID": null,
+        "attr_FireDiscoveryDateTime": 1790179249000,
+        "attr_FireMgmtComplexity": null,
+        "attr_FireOutDateTime": null,
+        "attr_FireStrategyConfinePercent": null,
+        "attr_FireStrategyFullSuppPrcnt": null,
+        "attr_FireStrategyMonitorPercent": null,
+        "attr_FireStrategyPointZonePrcnt": null,
+        "attr_FSJobCode": null,
+        "attr_FSOverrideCode": null,
+        "attr_GACC": "EACC",
+        "attr_ICS209ReportDateTime": null,
+        "attr_ICS209RptForTimePeriodFrom": null,
+        "attr_ICS209RptForTimePeriodTo": null,
+        "attr_ICS209ReportStatus": null,
+        "attr_IncidentManagementOrg": null,
+        "attr_IncidentName": "Ranger Academy RX 3",
+        "attr_IncidentShortDescription": null,
+        "attr_IncidentTypeCategory": "RX",
+        "attr_IncidentTypeKind": "FI",
+        "attr_InitialLatitude": null,
+        "attr_InitialLongitude": null,
+        "attr_InitialResponseAcres": null,
+        "attr_InitialResponseDateTime": null,
+        "attr_IrwinID": "{BC2D3DD7-0354-4869-B0ED-61EE442BA81E}",
+        "attr_IsFireCauseInvestigated": null,
+        "attr_IsFireCodeRequested": 0,
+        "attr_IsFSAssisted": 0,
+        "attr_IsMultiJurisdictional": null,
+        "attr_IsReimbursable": null,
+        "attr_IsTrespass": null,
+        "attr_IsUnifiedCommand": null,
+        "attr_LocalIncidentIdentifier": "26003216",
+        "attr_ModifiedBySystem": "INFORM_Inspector",
+        "attr_PercentContained": null,
+        "attr_PercentPerimToBeContained": null,
+        "attr_POOCity": null,
+        "attr_POOCounty": "Washington",
+        "attr_POODispatchCenterID": "NHNEC",
+        "attr_POOFips": "23029",
+        "attr_POOJurisdictionalAgency": "SFS",
+        "attr_POOJurisdictionalUnit": "MEMES",
+        "attr_POOJurisdictUnitParentUnit": null,
+        "attr_POOLandownerCategory": "State",
+        "attr_POOLandownerKind": "State",
+        "attr_POOLegalDescPrincipalMerid": null,
+        "attr_POOLegalDescQtr": null,
+        "attr_POOLegalDescQtrQtr": null,
+        "attr_POOLegalDescRange": null,
+        "attr_POOLegalDescSection": null,
+        "attr_POOLegalDescTownship": null,
+        "attr_POOPredictiveServiceAreaID": "EA22",
+        "attr_POOProtectingAgency": "SFS",
+        "attr_POOProtectingUnit": "MEMES",
+        "attr_POOState": "US-ME",
+        "attr_PredominantFuelGroup": null,
+        "attr_PredominantFuelModel": null,
+        "attr_PrimaryFuelModel": null,
+        "attr_SecondaryFuelModel": null,
+        "attr_TotalIncidentPersonnel": null,
+        "attr_UniqueFireIdentifier": "2026-MEMES-26003216",
+        "attr_FORID": null,
+        "attr_WFDSSDecisionStatus": "No Decision",
+        "attr_EstimatedFinalCost": null,
+        "attr_OrganizationalAssessment": null,
+        "attr_StratDecisionPublishDate": null,
+        "attr_CreatedOnDateTime_dt": 1790473088550,
+        "attr_ModifiedOnDateTime_dt": 1790473738210,
+        "attr_Source": "IRWIN",
+        "attr_ActiveFireCandidate": 1,
+        "attr_IsCpxChild": 0,
+        "attr_CpxName": null,
+        "attr_CpxID": null,
+        "attr_SourceGlobalID": "{B719BE13-D5D7-4631-B8EF-F79BA3AABFF4}",
+        "GlobalID": "e3b97d19-fb63-4768-a15b-ce9c3733ddce",
+        "Shape__Area": 7.316986739169806e-06,
+        "Shape__Length": 0.0114827933000091,
+        "attr_IncidentComplexityLevel": null
+      },
+      "geometry": {
+        "rings": [
+          [
+            [
+              -67.8625856926572,
+              44.9364735512087
+            ],
+            [
+              -67.8615827601638,
+              44.9346078004155
+            ],
+            [
+              -67.8655595507686,
+              44.9336738784611
+            ],
+            [
+              -67.8658846018955,
+              44.9354787985254
+            ],
+            [
+              -67.8625856926572,
+              44.9364735512087
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

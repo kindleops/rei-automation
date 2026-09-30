@@ -1,0 +1,629 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "alias": "OBJECTID",
+      "type": "esriFieldTypeOID"
+    },
+    {
+      "name": "index_",
+      "alias": "index",
+      "type": "esriFieldTypeInteger"
+    },
+    {
+      "name": "recordDate",
+      "alias": "recordDate",
+      "type": "esriFieldTypeDate",
+      "length": 8
+    },
+    {
+      "name": "recordTime",
+      "alias": "recordTime",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "recordEpoch",
+      "alias": "recordEpoch",
+      "type": "esriFieldTypeInteger"
+    },
+    {
+      "name": "district",
+      "alias": "district",
+      "type": "esriFieldTypeInteger"
+    },
+    {
+      "name": "locationName",
+      "alias": "locationName",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "nearbyPlace",
+      "alias": "nearbyPlace",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "longitude",
+      "alias": "longitude",
+      "type": "esriFieldTypeDouble"
+    },
+    {
+      "name": "latitude",
+      "alias": "latitude",
+      "type": "esriFieldTypeDouble"
+    },
+    {
+      "name": "elevation",
+      "alias": "elevation",
+      "type": "esriFieldTypeDouble"
+    },
+    {
+      "name": "direction",
+      "alias": "direction",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "county",
+      "alias": "county",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "route",
+      "alias": "route",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "routeSuffix",
+      "alias": "routeSuffix",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "postmilePrefix",
+      "alias": "postmilePrefix",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "postmile",
+      "alias": "postmile",
+      "type": "esriFieldTypeDouble"
+    },
+    {
+      "name": "Postmile_Suffix",
+      "alias": "Postmile_Suffix",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "Odometer",
+      "alias": "Odometer",
+      "type": "esriFieldTypeDouble"
+    },
+    {
+      "name": "inService",
+      "alias": "inService",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "imageDescription",
+      "alias": "imageDescription",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "streamingVideoURL",
+      "alias": "streamingVideoURL",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "currentImageUpdateFrequency",
+      "alias": "currentImageUpdateFrequency",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    },
+    {
+      "name": "currentImageURL",
+      "alias": "currentImageURL",
+      "type": "esriFieldTypeString",
+      "length": 1073741822
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "index_": 1,
+        "recordDate": 1626912000000,
+        "recordTime": "06:50:03",
+        "recordEpoch": 1626961803,
+        "district": 1,
+        "locationName": "SR-20 : At SR-1 - Looking East (C020)",
+        "nearbyPlace": "Fort Bragg",
+        "longitude": -123.80779,
+        "latitude": 39.42002,
+        "elevation": 95.0,
+        "direction": "East",
+        "county": "Mendocino",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": "R",
+        "postmile": 0.01,
+        "Postmile_Suffix": null,
+        "Odometer": 0.01,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20atsr1lookingeast/sr20atsr1lookingeast.jpg"
+      },
+      "geometry": {
+        "x": -123.80778999963576,
+        "y": 39.420020000070473
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "index_": 9,
+        "recordDate": 1715040000000,
+        "recordTime": "09:43:18",
+        "recordEpoch": 1715100198,
+        "district": 1,
+        "locationName": "SR-20 : West Of US-101 - Looking East (C007)",
+        "nearbyPlace": "Willits",
+        "longitude": -123.36904,
+        "latitude": 39.40581,
+        "elevation": 1437.0,
+        "direction": "East",
+        "county": "Mendocino",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 32.21,
+        "Postmile_Suffix": null,
+        "Odometer": 32.16,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "10",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingeast/sr20westofus101lookingeast.jpg"
+      },
+      "geometry": {
+        "x": -123.36904000040427,
+        "y": 39.40581000021308
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 3,
+        "index_": 11,
+        "recordDate": 1715040000000,
+        "recordTime": "09:43:32",
+        "recordEpoch": 1715100212,
+        "district": 1,
+        "locationName": "SR-20 : West Of US-101 - Looking West (C007)",
+        "nearbyPlace": "Willits",
+        "longitude": -123.36904,
+        "latitude": 39.40581,
+        "elevation": 1437.0,
+        "direction": "East",
+        "county": "Mendocino",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 32.21,
+        "Postmile_Suffix": null,
+        "Odometer": 32.16,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "10",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofus101lookingwest/sr20westofus101lookingwest.jpg"
+      },
+      "geometry": {
+        "x": -123.36904000040427,
+        "y": 39.40581000021308
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4,
+        "index_": 14,
+        "recordDate": 1728864000000,
+        "recordTime": "11:45:55",
+        "recordEpoch": 1728931555,
+        "district": 1,
+        "locationName": "SR-20 : East Of US-101 - Looking East (C006)",
+        "nearbyPlace": "Ukiah",
+        "longitude": -123.16703,
+        "latitude": 39.2378,
+        "elevation": 839.0,
+        "direction": "West",
+        "county": "Mendocino",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 35.68,
+        "Postmile_Suffix": null,
+        "Odometer": 35.57,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/sr20eastofus101lookingeast.jpg"
+      },
+      "geometry": {
+        "x": -123.16702999982169,
+        "y": 39.237800000137263
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 5,
+        "index_": 16,
+        "recordDate": 1728864000000,
+        "recordTime": "11:46:11",
+        "recordEpoch": 1728931571,
+        "district": 1,
+        "locationName": "SR-20 : East Of US-101 - Looking West (C006)",
+        "nearbyPlace": "Ukiah",
+        "longitude": -123.16703,
+        "latitude": 39.2378,
+        "elevation": 839.0,
+        "direction": "West",
+        "county": "Mendocino",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 35.68,
+        "Postmile_Suffix": null,
+        "Odometer": 35.57,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingwest/sr20eastofus101lookingwest.jpg"
+      },
+      "geometry": {
+        "x": -123.16702999982169,
+        "y": 39.237800000137263
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 6,
+        "index_": 18,
+        "recordDate": 1728864000000,
+        "recordTime": "11:48:55",
+        "recordEpoch": 1728931735,
+        "district": 1,
+        "locationName": "SR-20 : West Of SR-29 - Looking East (C009)",
+        "nearbyPlace": "Upper Lake",
+        "longitude": -122.929788,
+        "latitude": 39.167204,
+        "elevation": 1361.0,
+        "direction": "East",
+        "county": "Lake",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 7.78,
+        "Postmile_Suffix": null,
+        "Odometer": 51.73,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingeast/sr20westofsr29lookingeast.jpg"
+      },
+      "geometry": {
+        "x": -122.92978800013411,
+        "y": 39.167204000318215
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 7,
+        "index_": 20,
+        "recordDate": 1728864000000,
+        "recordTime": "11:49:08",
+        "recordEpoch": 1728931748,
+        "district": 1,
+        "locationName": "SR-20 : West Of SR-29 - Looking West (C009)",
+        "nearbyPlace": "Upper Lake",
+        "longitude": -122.929788,
+        "latitude": 39.167204,
+        "elevation": 1361.0,
+        "direction": "East",
+        "county": "Lake",
+        "route": "SR-20",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 7.78,
+        "Postmile_Suffix": null,
+        "Odometer": 51.73,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20westofsr29lookingwest/sr20westofsr29lookingwest.jpg"
+      },
+      "geometry": {
+        "x": -122.92978800013411,
+        "y": 39.167204000318215
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 8,
+        "index_": 22,
+        "recordDate": 1728518400000,
+        "recordTime": "16:01:49",
+        "recordEpoch": 1728601309,
+        "district": 1,
+        "locationName": "US-101 : North Of SR-20 - Looking North (C001)",
+        "nearbyPlace": "Redwood Valley",
+        "longitude": -123.211287,
+        "latitude": 39.250296,
+        "elevation": 774.0,
+        "direction": "South",
+        "county": "Mendocino",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": "R",
+        "postmile": 31.6,
+        "Postmile_Suffix": null,
+        "Odometer": 555.36,
+        "inService": "False",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingnorth/us101northofsr20lookingnorth.jpg"
+      },
+      "geometry": {
+        "x": -123.2112869997854,
+        "y": 39.250296000032229
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 9,
+        "index_": 24,
+        "recordDate": 1728518400000,
+        "recordTime": "16:02:28",
+        "recordEpoch": 1728601348,
+        "district": 1,
+        "locationName": "US-101 : North Of SR-20 - Looking South (C001)",
+        "nearbyPlace": "Redwood Valley",
+        "longitude": -123.211287,
+        "latitude": 39.250296,
+        "elevation": 774.0,
+        "direction": "South",
+        "county": "Mendocino",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": "R",
+        "postmile": 31.6,
+        "Postmile_Suffix": null,
+        "Odometer": 555.36,
+        "inService": "False",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr20lookingsouth/us101northofsr20lookingsouth.jpg"
+      },
+      "geometry": {
+        "x": -123.2112869997854,
+        "y": 39.250296000032229
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 10,
+        "index_": 32,
+        "recordDate": 1711670400000,
+        "recordTime": "17:09:41",
+        "recordEpoch": 1711757381,
+        "district": 1,
+        "locationName": "US-101 : S of SR 271 - Looking South (C030)",
+        "nearbyPlace": "Piercy",
+        "longitude": -123.776812,
+        "latitude": 39.939376,
+        "elevation": 849.0,
+        "direction": "South",
+        "county": "Mendocino",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": "R",
+        "postmile": 101.54,
+        "Postmile_Suffix": null,
+        "Odometer": 623.95,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "10",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101sofsr271lookingsouth/us101sofsr271lookingsouth.jpg"
+      },
+      "geometry": {
+        "x": -123.77681200040645,
+        "y": 39.939375999997431
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 11,
+        "index_": 34,
+        "recordDate": 1728518400000,
+        "recordTime": "16:28:47",
+        "recordEpoch": 1728602927,
+        "district": 1,
+        "locationName": "US-101 : South Of SR-36 - Looking North (C013)",
+        "nearbyPlace": "Fortuna",
+        "longitude": -124.149926,
+        "latitude": 40.525005,
+        "elevation": 78.0,
+        "direction": "North",
+        "county": "Humboldt",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 55.96,
+        "Postmile_Suffix": null,
+        "Odometer": 682.66,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "5",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingnorth/us101southofsr36lookingnorth.jpg"
+      },
+      "geometry": {
+        "x": -124.14992599961737,
+        "y": 40.525004999675232
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 12,
+        "index_": 36,
+        "recordDate": 1728518400000,
+        "recordTime": "16:29:04",
+        "recordEpoch": 1728602944,
+        "district": 1,
+        "locationName": "US-101 : South Of SR-36 - Looking South (C013)",
+        "nearbyPlace": "Fortuna",
+        "longitude": -124.149926,
+        "latitude": 40.525005,
+        "elevation": 78.0,
+        "direction": "North",
+        "county": "Humboldt",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 55.96,
+        "Postmile_Suffix": null,
+        "Odometer": 682.66,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofsr36lookingsouth/us101southofsr36lookingsouth.jpg"
+      },
+      "geometry": {
+        "x": -124.14992599961737,
+        "y": 40.525004999675232
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 13,
+        "index_": 38,
+        "recordDate": 1728518400000,
+        "recordTime": "15:21:01",
+        "recordEpoch": 1728598861,
+        "district": 1,
+        "locationName": "US-101 : North Of SR-36 - Looking North (C003)",
+        "nearbyPlace": "Fortuna",
+        "longitude": -124.14815,
+        "latitude": 40.56289,
+        "elevation": 49.0,
+        "direction": "South",
+        "county": "Humboldt",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 58.69,
+        "Postmile_Suffix": null,
+        "Odometer": 685.5,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingnorth/us101northofsr36lookingnorth.jpg"
+      },
+      "geometry": {
+        "x": -124.14814999975795,
+        "y": 40.562889999980882
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 14,
+        "index_": 40,
+        "recordDate": 1728518400000,
+        "recordTime": "15:21:16",
+        "recordEpoch": 1728598876,
+        "district": 1,
+        "locationName": "US-101 : North Of SR-36 - Looking South (C003)",
+        "nearbyPlace": "Fortuna",
+        "longitude": -124.14815,
+        "latitude": 40.56289,
+        "elevation": 49.0,
+        "direction": "South",
+        "county": "Humboldt",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 58.69,
+        "Postmile_Suffix": null,
+        "Odometer": 685.5,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "15",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101northofsr36lookingsouth/us101northofsr36lookingsouth.jpg"
+      },
+      "geometry": {
+        "x": -124.14814999975795,
+        "y": 40.562889999980882
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 15,
+        "index_": 42,
+        "recordDate": 1688083200000,
+        "recordTime": "08:34:37",
+        "recordEpoch": 1688139277,
+        "district": 1,
+        "locationName": "US-101 : Eureka / Spruce Point - Looking North (C023)",
+        "nearbyPlace": "Eureka",
+        "longitude": -124.19933,
+        "latitude": 40.74447,
+        "elevation": 22.0,
+        "direction": "North",
+        "county": "Humboldt",
+        "route": "US-101",
+        "routeSuffix": null,
+        "postmilePrefix": null,
+        "postmile": 73.72,
+        "Postmile_Suffix": null,
+        "Odometer": 700.53,
+        "inService": "True",
+        "imageDescription": null,
+        "streamingVideoURL": null,
+        "currentImageUpdateFrequency": "10",
+        "currentImageURL": "https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eurekasprucepointlookingnorth/us101eurekasprucepointlookingnorth.jpg"
+      },
+      "geometry": {
+        "x": -124.19933000030771,
+        "y": 40.744469999693685
+      }
+    }
+  ],
+  "exceededTransferLimit": true
+}

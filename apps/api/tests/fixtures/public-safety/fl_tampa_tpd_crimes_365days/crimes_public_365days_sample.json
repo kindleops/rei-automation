@@ -1,0 +1,2004 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "offenseid",
+      "type": "esriFieldTypeString",
+      "alias": "Offense ID",
+      "sqlType": "sqlTypeOther",
+      "length": 200,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "sequence",
+      "type": "esriFieldTypeInteger",
+      "alias": "Offense Sequence Number",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "statute",
+      "type": "esriFieldTypeString",
+      "alias": "Offense Statute",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "nibrscode",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS Code",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": {
+        "type": "codedValue",
+        "name": "Crimes_nibrscode_82f4dbdd-5f83-48bc-89c0-3b4994947b65",
+        "codedValues": [
+          {
+            "name": "0",
+            "code": "0"
+          },
+          {
+            "name": "90Z",
+            "code": "90Z"
+          },
+          {
+            "name": "13B",
+            "code": "13B"
+          },
+          {
+            "name": "35A",
+            "code": "35A"
+          },
+          {
+            "name": "90J",
+            "code": "90J"
+          },
+          {
+            "name": "23H",
+            "code": "23H"
+          },
+          {
+            "name": "90D",
+            "code": "90D"
+          },
+          {
+            "name": "290",
+            "code": "290"
+          },
+          {
+            "name": "23F",
+            "code": "23F"
+          },
+          {
+            "name": "13A",
+            "code": "13A"
+          },
+          {
+            "name": "26A",
+            "code": "26A"
+          },
+          {
+            "name": "23C",
+            "code": "23C"
+          },
+          {
+            "name": "220",
+            "code": "220"
+          },
+          {
+            "name": "240",
+            "code": "240"
+          },
+          {
+            "name": "520",
+            "code": "520"
+          },
+          {
+            "name": "35B",
+            "code": "35B"
+          },
+          {
+            "name": "90C",
+            "code": "90C"
+          },
+          {
+            "name": "23D",
+            "code": "23D"
+          },
+          {
+            "name": "26B",
+            "code": "26B"
+          },
+          {
+            "name": "13C",
+            "code": "13C"
+          },
+          {
+            "name": "120",
+            "code": "120"
+          },
+          {
+            "name": "23G",
+            "code": "23G"
+          },
+          {
+            "name": "9500",
+            "code": "9500"
+          },
+          {
+            "name": "250",
+            "code": "250"
+          },
+          {
+            "name": "26F",
+            "code": "26F"
+          },
+          {
+            "name": "23A",
+            "code": "23A"
+          },
+          {
+            "name": "11A",
+            "code": "11A"
+          },
+          {
+            "name": "270",
+            "code": "270"
+          },
+          {
+            "name": "90E",
+            "code": "90E"
+          },
+          {
+            "name": "280",
+            "code": "280"
+          },
+          {
+            "name": "90F",
+            "code": "90F"
+          },
+          {
+            "name": "100",
+            "code": "100"
+          },
+          {
+            "name": "90B",
+            "code": "90B"
+          },
+          {
+            "name": "40A",
+            "code": "40A"
+          },
+          {
+            "name": "90G",
+            "code": "90G"
+          },
+          {
+            "name": "64A",
+            "code": "64A"
+          },
+          {
+            "name": "11D",
+            "code": "11D"
+          },
+          {
+            "name": "23B",
+            "code": "23B"
+          },
+          {
+            "name": "09A",
+            "code": "09A"
+          },
+          {
+            "name": "11B",
+            "code": "11B"
+          },
+          {
+            "name": "200",
+            "code": "200"
+          },
+          {
+            "name": "370",
+            "code": "370"
+          },
+          {
+            "name": "11C",
+            "code": "11C"
+          },
+          {
+            "name": "720",
+            "code": "720"
+          },
+          {
+            "name": "210",
+            "code": "210"
+          },
+          {
+            "name": "26G",
+            "code": "26G"
+          },
+          {
+            "name": "90H",
+            "code": "90H"
+          },
+          {
+            "name": "09B",
+            "code": "09B"
+          },
+          {
+            "name": "64B",
+            "code": "64B"
+          },
+          {
+            "name": "09C",
+            "code": "09C"
+          },
+          {
+            "name": "40B",
+            "code": "40B"
+          },
+          {
+            "name": "26E",
+            "code": "26E"
+          },
+          {
+            "name": "90A",
+            "code": "90A"
+          },
+          {
+            "name": "23E",
+            "code": "23E"
+          },
+          {
+            "name": "39A",
+            "code": "39A"
+          },
+          {
+            "name": "510",
+            "code": "510"
+          },
+          {
+            "name": "26C",
+            "code": "26C"
+          },
+          {
+            "name": "39B",
+            "code": "39B"
+          },
+          {
+            "name": "26D",
+            "code": "26D"
+          }
+        ]
+      },
+      "defaultValue": null
+    },
+    {
+      "name": "nibrsoffense",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS Offense Category",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": {
+        "type": "codedValue",
+        "name": "Crimes_nibrsoffense_5571d4ac-0fc8-4553-8c32-79ad989efa36",
+        "codedValues": [
+          {
+            "name": "TRESPASS",
+            "code": "TRESPASS"
+          },
+          {
+            "name": "All Other Offenses",
+            "code": "All Other Offenses"
+          },
+          {
+            "name": "Assault Offenses",
+            "code": "Assault Offenses"
+          },
+          {
+            "name": "Larceny/Theft Offenses",
+            "code": "Larceny/Theft Offenses"
+          },
+          {
+            "name": "Drug/Narcotic Offenses",
+            "code": "Drug/Narcotic Offenses"
+          },
+          {
+            "name": "Trespass of Real Property",
+            "code": "Trespass of Real Property"
+          },
+          {
+            "name": "Driving Under the Influence",
+            "code": "Driving Under the Influence"
+          },
+          {
+            "name": "Destruction/Damage/Vandalism of Property",
+            "code": "Destruction/Damage/Vandalism of Property"
+          },
+          {
+            "name": "Fraud Offenses",
+            "code": "Fraud Offenses"
+          },
+          {
+            "name": "OTHER",
+            "code": "OTHER"
+          },
+          {
+            "name": "Burglary/Breaking & Entering",
+            "code": "Burglary/Breaking & Entering"
+          },
+          {
+            "name": "Motor Vehicle Theft",
+            "code": "Motor Vehicle Theft"
+          },
+          {
+            "name": "Weapon Law Violations",
+            "code": "Weapon Law Violations"
+          },
+          {
+            "name": "Disorderly Conduct",
+            "code": "Disorderly Conduct"
+          },
+          {
+            "name": "Robbery",
+            "code": "Robbery"
+          },
+          {
+            "name": "Sex Offenses",
+            "code": "Sex Offenses"
+          },
+          {
+            "name": "Counterfeiting/Forgery",
+            "code": "Counterfeiting/Forgery"
+          },
+          {
+            "name": "Embezzlement",
+            "code": "Embezzlement"
+          },
+          {
+            "name": "Stolen Property Offenses",
+            "code": "Stolen Property Offenses"
+          },
+          {
+            "name": "DRUNKENN",
+            "code": "DRUNKENN"
+          },
+          {
+            "name": "Nonviolent Family Offenses",
+            "code": "Nonviolent Family Offenses"
+          },
+          {
+            "name": "Kidnapping/Abduction",
+            "code": "Kidnapping/Abduction"
+          },
+          {
+            "name": "Curfew/Loitering/Vagrancy Violations",
+            "code": "Curfew/Loitering/Vagrancy Violations"
+          },
+          {
+            "name": "Prostitution Offenses",
+            "code": "Prostitution Offenses"
+          },
+          {
+            "name": "Liquor Law Violations",
+            "code": "Liquor Law Violations"
+          },
+          {
+            "name": "Human Trafficking",
+            "code": "Human Trafficking"
+          },
+          {
+            "name": "Homicide Offenses",
+            "code": "Homicide Offenses"
+          },
+          {
+            "name": "Arson",
+            "code": "Arson"
+          },
+          {
+            "name": "Pornography/Obscene Material",
+            "code": "Pornography/Obscene Material"
+          },
+          {
+            "name": "Animal Cruelty",
+            "code": "Animal Cruelty"
+          },
+          {
+            "name": "Extortion/Blackmail",
+            "code": "Extortion/Blackmail"
+          },
+          {
+            "name": "PEEPINGT",
+            "code": "PEEPINGT"
+          },
+          {
+            "name": "HOMICIDE",
+            "code": "HOMICIDE"
+          },
+          {
+            "name": "BADCHECK",
+            "code": "BADCHECK"
+          },
+          {
+            "name": "Gambling Offenses",
+            "code": "Gambling Offenses"
+          },
+          {
+            "name": "Bribery",
+            "code": "Bribery"
+          }
+        ]
+      },
+      "defaultValue": null
+    },
+    {
+      "name": "nibrsdesc",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS Description",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": {
+        "type": "codedValue",
+        "name": "Crimes_nibrsdesc_3ef35182-4f65-4c63-85d8-3488ece6512c",
+        "codedValues": [
+          {
+            "name": "Simple Assault",
+            "code": "Simple Assault"
+          },
+          {
+            "name": "Drug/Narcotic Violations",
+            "code": "Drug/Narcotic Violations"
+          },
+          {
+            "name": "All Other Larceny",
+            "code": "All Other Larceny"
+          },
+          {
+            "name": "Destruction/Damage/Vandalism of Property",
+            "code": "Destruction/Damage/Vandalism of Property"
+          },
+          {
+            "name": "Aggravated Assault",
+            "code": "Aggravated Assault"
+          },
+          {
+            "name": "Theft From Motor Vehicle",
+            "code": "Theft From Motor Vehicle"
+          },
+          {
+            "name": "False Pretenses/Swindle/Confidence Game",
+            "code": "False Pretenses/Swindle/Confidence Game"
+          },
+          {
+            "name": "Shoplifting",
+            "code": "Shoplifting"
+          },
+          {
+            "name": "Burglary/Breaking & Entering",
+            "code": "Burglary/Breaking & Entering"
+          },
+          {
+            "name": "Drug Equipment Violations",
+            "code": "Drug Equipment Violations"
+          },
+          {
+            "name": "Motor Vehicle Theft",
+            "code": "Motor Vehicle Theft"
+          },
+          {
+            "name": "Weapon Law Violations",
+            "code": "Weapon Law Violations"
+          },
+          {
+            "name": "Theft From Building",
+            "code": "Theft From Building"
+          },
+          {
+            "name": "Intimidation",
+            "code": "Intimidation"
+          },
+          {
+            "name": "Credit Card/Automated Teller Machine Fraud",
+            "code": "Credit Card/Automated Teller Machine Fraud"
+          },
+          {
+            "name": "Theft of Motor Vehicle Parts or Accessories",
+            "code": "Theft of Motor Vehicle Parts or Accessories"
+          },
+          {
+            "name": "Robbery",
+            "code": "Robbery"
+          },
+          {
+            "name": "Counterfeiting/Forgery",
+            "code": "Counterfeiting/Forgery"
+          },
+          {
+            "name": "Identity Theft",
+            "code": "Identity Theft"
+          },
+          {
+            "name": "Rape",
+            "code": "Rape"
+          },
+          {
+            "name": "Pocket-Picking",
+            "code": "Pocket-Picking"
+          },
+          {
+            "name": "Embezzlement",
+            "code": "Embezzlement"
+          },
+          {
+            "name": "Stolen Property Offenses",
+            "code": "Stolen Property Offenses"
+          },
+          {
+            "name": "Kidnapping/Abduction",
+            "code": "Kidnapping/Abduction"
+          },
+          {
+            "name": "Prostitution",
+            "code": "Prostitution"
+          },
+          {
+            "name": "Fondling",
+            "code": "Fondling"
+          },
+          {
+            "name": "Purse-Snatching",
+            "code": "Purse-Snatching"
+          },
+          {
+            "name": "Pornography/Obscene Material",
+            "code": "Pornography/Obscene Material"
+          },
+          {
+            "name": "Murder & Nonnegligent Manslaughter",
+            "code": "Murder & Nonnegligent Manslaughter"
+          },
+          {
+            "name": "Human Trafficking, Commercial Sex Acts",
+            "code": "Human Trafficking, Commercial Sex Acts"
+          },
+          {
+            "name": "Sodomy",
+            "code": "Sodomy"
+          },
+          {
+            "name": "Arson",
+            "code": "Arson"
+          },
+          {
+            "name": "Sexual Assault With An Object",
+            "code": "Sexual Assault With An Object"
+          },
+          {
+            "name": "Animal Cruelty",
+            "code": "Animal Cruelty"
+          },
+          {
+            "name": "Extortion/Blackmail",
+            "code": "Extortion/Blackmail"
+          },
+          {
+            "name": "Hacking/Computer Invasion",
+            "code": "Hacking/Computer Invasion"
+          },
+          {
+            "name": "Negligent Manslaughter",
+            "code": "Negligent Manslaughter"
+          },
+          {
+            "name": "Assisting or Promoting Prostitution",
+            "code": "Assisting or Promoting Prostitution"
+          },
+          {
+            "name": "Wire Fraud",
+            "code": "Wire Fraud"
+          },
+          {
+            "name": "Theft From Coin-Operated Machine or Device",
+            "code": "Theft From Coin-Operated Machine or Device"
+          },
+          {
+            "name": "Betting/Wagering",
+            "code": "Betting/Wagering"
+          },
+          {
+            "name": "Human Trafficking, Involuntary Servitude",
+            "code": "Human Trafficking, Involuntary Servitude"
+          },
+          {
+            "name": "Welfare Fraud",
+            "code": "Welfare Fraud"
+          },
+          {
+            "name": "Impersonation",
+            "code": "Impersonation"
+          },
+          {
+            "name": "Bribery",
+            "code": "Bribery"
+          },
+          {
+            "name": "Operating/Promoting/Assisting Gambling",
+            "code": "Operating/Promoting/Assisting Gambling"
+          }
+        ]
+      },
+      "defaultValue": null
+    },
+    {
+      "name": "nibrscrimeag",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS Crime Against Category",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "nibrsgroup",
+      "type": "esriFieldTypeString",
+      "alias": "NIBRS Group",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": {
+        "type": "codedValue",
+        "name": "Crimes_nibrsgroup_4ada5143-f330-436a-82d9-d8b62bd01274",
+        "codedValues": [
+          {
+            "name": "Group A",
+            "code": "Group A"
+          },
+          {
+            "name": "Group B",
+            "code": "Group B"
+          },
+          {
+            "name": "0",
+            "code": "0"
+          },
+          {
+            "name": "B",
+            "code": "B"
+          },
+          {
+            "name": "A",
+            "code": "A"
+          }
+        ]
+      },
+      "defaultValue": null
+    },
+    {
+      "name": "attemptcompleted",
+      "type": "esriFieldTypeString",
+      "alias": "Offense Attempted Indicator",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "narrative",
+      "type": "esriFieldTypeString",
+      "alias": "Offense Narrative",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "fulladdr",
+      "type": "esriFieldTypeString",
+      "alias": "Full Address",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "city",
+      "type": "esriFieldTypeString",
+      "alias": "City",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "state",
+      "type": "esriFieldTypeString",
+      "alias": "State",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "zip5",
+      "type": "esriFieldTypeString",
+      "alias": "Zip",
+      "sqlType": "sqlTypeOther",
+      "length": 5,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "beat",
+      "type": "esriFieldTypeString",
+      "alias": "Beat",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "district",
+      "type": "esriFieldTypeString",
+      "alias": "TPD Sector",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "agency",
+      "type": "esriFieldTypeString",
+      "alias": "Agency",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "neighborhood",
+      "type": "esriFieldTypeString",
+      "alias": "Neighborhood",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "locatecd",
+      "type": "esriFieldTypeString",
+      "alias": "Location Code",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "locatedesc",
+      "type": "esriFieldTypeString",
+      "alias": "Location Description",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "locatecat",
+      "type": "esriFieldTypeString",
+      "alias": "Location Category",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "weaponcd",
+      "type": "esriFieldTypeString",
+      "alias": "Weapon Code",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "weapondesc",
+      "type": "esriFieldTypeString",
+      "alias": "Weapon Description",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "weaponcat",
+      "type": "esriFieldTypeString",
+      "alias": "Weapon Category",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "entrycd",
+      "type": "esriFieldTypeString",
+      "alias": "Method of Entry Code",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "probtype",
+      "type": "esriFieldTypeString",
+      "alias": "Problem Type",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "analystnotes",
+      "type": "esriFieldTypeString",
+      "alias": "Analyst Notes",
+      "sqlType": "sqlTypeOther",
+      "length": 5000,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "biasmotivation",
+      "type": "esriFieldTypeString",
+      "alias": "Bias Motivation",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "offensefactor",
+      "type": "esriFieldTypeString",
+      "alias": "Offense Factor",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "criminalactivity",
+      "type": "esriFieldTypeString",
+      "alias": "Criminal Activity/Gang Information",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "aggassaulthomicidefactor",
+      "type": "esriFieldTypeString",
+      "alias": "Aggravated Assault/Homicide Circumstance",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "casestatus",
+      "type": "esriFieldTypeString",
+      "alias": "Case Status",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "exceptionalclear",
+      "type": "esriFieldTypeString",
+      "alias": "Exceptional Clearance Code",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "officer",
+      "type": "esriFieldTypeString",
+      "alias": "Reporting Officer",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportdate",
+      "type": "esriFieldTypeDate",
+      "alias": "Reported Date",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportyear",
+      "type": "esriFieldTypeInteger",
+      "alias": "Reported Year",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportmonth",
+      "type": "esriFieldTypeInteger",
+      "alias": "Reported Month",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportdow",
+      "type": "esriFieldTypeString",
+      "alias": "Reported Day of Week",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reportdownum",
+      "type": "esriFieldTypeInteger",
+      "alias": "Reported Day of Week Num",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "reporthour",
+      "type": "esriFieldTypeInteger",
+      "alias": "Reported Hour",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "occurfrdate",
+      "type": "esriFieldTypeDate",
+      "alias": "Offense Date From",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "occurtodate",
+      "type": "esriFieldTypeDate",
+      "alias": "Offense Date To",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "x",
+      "type": "esriFieldTypeDouble",
+      "alias": "x",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "y",
+      "type": "esriFieldTypeDouble",
+      "alias": "y",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CreationDate",
+      "type": "esriFieldTypeDate",
+      "alias": "CreationDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Creator",
+      "type": "esriFieldTypeString",
+      "alias": "Creator",
+      "sqlType": "sqlTypeOther",
+      "length": 128,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "EditDate",
+      "type": "esriFieldTypeDate",
+      "alias": "EditDate",
+      "sqlType": "sqlTypeOther",
+      "length": 8,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "Editor",
+      "type": "esriFieldTypeString",
+      "alias": "Editor",
+      "sqlType": "sqlTypeOther",
+      "length": 128,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "callid",
+      "type": "esriFieldTypeString",
+      "alias": "Call ID",
+      "sqlType": "sqlTypeOther",
+      "length": 200,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "crimegroup",
+      "type": "esriFieldTypeString",
+      "alias": "Crime Group",
+      "sqlType": "sqlTypeOther",
+      "length": 255,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "division",
+      "type": "esriFieldTypeInteger",
+      "alias": "TPD District",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "nibrscrimecount",
+      "type": "esriFieldTypeInteger",
+      "alias": "Incident Crime Count",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "exceededTransferLimit": true,
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 4943,
+        "offenseid": "2026574709",
+        "sequence": 1,
+        "statute": "784.021",
+        "nibrscode": "13A",
+        "nibrsoffense": "Assault Offenses",
+        "nibrsdesc": "Aggravated Assault",
+        "nibrscrimeag": "Crimes Against Persons",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "N Lois Ave & W Woodlawn Ave",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "A2",
+        "district": "A",
+        "agency": null,
+        "neighborhood": "Drew Park",
+        "locatecd": "20",
+        "locatedesc": "Residence/Home",
+        "locatecat": "Residential",
+        "weaponcd": "20",
+        "weapondesc": "Knife/Cutting Instrument",
+        "weaponcat": "Knife",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "ARREST -PATROL",
+        "exceptionalclear": "N",
+        "officer": "[redacted]",
+        "reportdate": 1790654400000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Tuesday",
+        "reportdownum": 3,
+        "reporthour": 1,
+        "occurfrdate": 1790568000000,
+        "occurtodate": null,
+        "x": -82.51370208,
+        "y": 27.97584682,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026574709",
+        "crimegroup": "Crimes Against Persons",
+        "division": 1,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.51370207987893,
+        "y": 27.97584682014946
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4947,
+        "offenseid": "2026575105",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "240",
+        "nibrsoffense": "Motor Vehicle Theft",
+        "nibrsdesc": "Motor Vehicle Theft",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "S Castle Ct & N Court Way",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "C4",
+        "district": "C",
+        "agency": null,
+        "neighborhood": "North Tampa Community",
+        "locatecd": "OT",
+        "locatedesc": "",
+        "locatecat": "",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790654400000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Tuesday",
+        "reportdownum": 3,
+        "reporthour": 3,
+        "occurfrdate": 1790568000000,
+        "occurtodate": 1790654400000,
+        "x": -82.4502071,
+        "y": 28.03710981,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026575105",
+        "crimegroup": "Crimes Against Property",
+        "division": 2,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.45020710025199,
+        "y": 28.037109809913662
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4948,
+        "offenseid": "2026575548",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "23H",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "All Other Larceny",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "Columbia Dr & Davis Blvd",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "B4",
+        "district": "B",
+        "agency": null,
+        "neighborhood": "Davis Islands",
+        "locatecd": "09",
+        "locatedesc": "Drug Store/Doctor\u2019s Office/Hospital",
+        "locatecat": "Commercial",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790654400000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Tuesday",
+        "reportdownum": 3,
+        "reporthour": 9,
+        "occurfrdate": 1790308800000,
+        "occurtodate": null,
+        "x": -82.4596391,
+        "y": 27.93692183,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026575548",
+        "crimegroup": "Crimes Against Property",
+        "division": 1,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.45963909991815,
+        "y": 27.936921830100413
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4949,
+        "offenseid": "2026576056",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "240",
+        "nibrsoffense": "Motor Vehicle Theft",
+        "nibrsdesc": "Motor Vehicle Theft",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "N 9th St & E Louisiana Ave",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "E2",
+        "district": "E",
+        "agency": null,
+        "neighborhood": "Southeast Seminole Heights",
+        "locatecd": "20",
+        "locatedesc": "Residence/Home",
+        "locatecat": "Residential",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790654400000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Tuesday",
+        "reportdownum": 3,
+        "reporthour": 14,
+        "occurfrdate": 1787976000000,
+        "occurtodate": 1788062400000,
+        "x": -82.4500316,
+        "y": 27.98940082,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026576056",
+        "crimegroup": "Crimes Against Property",
+        "division": 3,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.4500315999882,
+        "y": 27.989400820341572
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4319,
+        "offenseid": "2026800752",
+        "sequence": 1,
+        "statute": "230C-2",
+        "nibrscode": "23C",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "Shoplifting",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "W San Miguel St & S West Shore Blvd",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "B2",
+        "district": "B",
+        "agency": null,
+        "neighborhood": "Sunset Park",
+        "locatecd": "08",
+        "locatedesc": "Department/Discount Store",
+        "locatecat": "Commercial",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 12,
+        "occurfrdate": 1790308800000,
+        "occurtodate": null,
+        "x": -82.52439858,
+        "y": 27.92485284,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "",
+        "crimegroup": "Crimes Against Property",
+        "division": 1,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.52439857958004,
+        "y": 27.924852840314678
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4321,
+        "offenseid": "2026800755",
+        "sequence": 1,
+        "statute": "230C-2",
+        "nibrscode": "23C",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "Shoplifting",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "Dona Michelle Dr & North Palms Village Pl",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "C2",
+        "district": "C",
+        "agency": null,
+        "neighborhood": "Richmond Place",
+        "locatecd": "09",
+        "locatedesc": "Drug Store/Doctor\u2019s Office/Hospital",
+        "locatecat": "Commercial",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 14,
+        "occurfrdate": 1790568000000,
+        "occurtodate": null,
+        "x": -82.36861312,
+        "y": 28.12587678,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "",
+        "crimegroup": "Crimes Against Property",
+        "division": 2,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.36861312030047,
+        "y": 28.12587678019193
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4927,
+        "offenseid": "2026572889",
+        "sequence": 1,
+        "statute": "784.045",
+        "nibrscode": "13A",
+        "nibrsoffense": "Assault Offenses",
+        "nibrsdesc": "Aggravated Assault",
+        "nibrscrimeag": "Crimes Against Persons",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "E 28th Ave & Sarah St",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "E3",
+        "district": "E",
+        "agency": null,
+        "neighborhood": "College Hill-Belmont Heights",
+        "locatecd": "13",
+        "locatedesc": "Highway/Road/Alley/Street/Sidewalk",
+        "locatecat": "Outside",
+        "weaponcd": "13S",
+        "weapondesc": "Rifle",
+        "weaponcat": "Firearm",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 4,
+        "occurfrdate": 1790568000000,
+        "occurtodate": null,
+        "x": -82.4381651,
+        "y": 27.97599082,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026572889",
+        "crimegroup": "Crimes Against Persons",
+        "division": 3,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.43816510032505,
+        "y": 27.975990819746734
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4928,
+        "offenseid": "2026572938",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "23H",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "All Other Larceny",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "S Manhattan Ave & W Paxton Ave",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "B5",
+        "district": "B",
+        "agency": null,
+        "neighborhood": "Gandy / Sun Bay South",
+        "locatecd": "18",
+        "locatedesc": "Parking/Drop Lot/Garage",
+        "locatecat": "Outside",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 1,
+        "occurfrdate": 1790481600000,
+        "occurtodate": 1790568000000,
+        "x": -82.51841358,
+        "y": 27.88863684,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026572938",
+        "crimegroup": "Crimes Against Property",
+        "division": 1,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.51841358005075,
+        "y": 27.888636840364246
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4930,
+        "offenseid": "2026573258",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "23H",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "All Other Larceny",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "N 50th St & E Acline Dr",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "F6",
+        "district": "F",
+        "agency": null,
+        "neighborhood": "East Side Commercial",
+        "locatecd": "OT",
+        "locatedesc": "",
+        "locatecat": "",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "CAPIAS/WARRANT ISSUED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 7,
+        "occurfrdate": 1790568000000,
+        "occurtodate": null,
+        "x": -82.40178711,
+        "y": 27.95442683,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026573258",
+        "crimegroup": "Crimes Against Property",
+        "division": 3,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.40178710963228,
+        "y": 27.954426829840543
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4931,
+        "offenseid": "2026573628",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "23H",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "All Other Larceny",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "N 15th St & E 33rd Ave",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "E3",
+        "district": "E",
+        "agency": null,
+        "neighborhood": "College Hill-Belmont Heights",
+        "locatecd": "20",
+        "locatedesc": "Residence/Home",
+        "locatecat": "Residential",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 11,
+        "occurfrdate": 1790568000000,
+        "occurtodate": null,
+        "x": -82.4429396,
+        "y": 27.98068882,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026573628",
+        "crimegroup": "Crimes Against Property",
+        "division": 3,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.44293960024606,
+        "y": 27.980688820355432
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4932,
+        "offenseid": "2026573829",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "240",
+        "nibrsoffense": "Motor Vehicle Theft",
+        "nibrsdesc": "Motor Vehicle Theft",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "E 23rd Ave & N 50th St",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "E6",
+        "district": "E",
+        "agency": null,
+        "neighborhood": "Highland Pines",
+        "locatecd": "13",
+        "locatedesc": "Highway/Road/Alley/Street/Sidewalk",
+        "locatecat": "Outside",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 13,
+        "occurfrdate": 1790568000000,
+        "occurtodate": null,
+        "x": -82.40167911,
+        "y": 27.97237282,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026573829",
+        "crimegroup": "Crimes Against Property",
+        "division": 3,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.40167910967725,
+        "y": 27.97237281980319
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4933,
+        "offenseid": "2026573892",
+        "sequence": 1,
+        "statute": "810.02",
+        "nibrscode": "23F",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "Theft From Motor Vehicle",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "E 20th Ave & N 9th St",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "E4",
+        "district": "E",
+        "agency": null,
+        "neighborhood": "VM Ybor",
+        "locatecd": "UN",
+        "locatedesc": "",
+        "locatecat": "",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 13,
+        "occurfrdate": 1789444800000,
+        "occurtodate": 1790222400000,
+        "x": -82.4494826,
+        "y": 27.96958282,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026573892",
+        "crimegroup": "Crimes Against Property",
+        "division": 3,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.44948259999218,
+        "y": 27.969582819815937
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4934,
+        "offenseid": "2026574044",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "23H",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "All Other Larceny",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "W Columbus Dr & N Grady Ave",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "A4",
+        "district": "A",
+        "agency": null,
+        "neighborhood": "Carver City Lincoln Gardens",
+        "locatecd": "18",
+        "locatedesc": "Parking/Drop Lot/Garage",
+        "locatecat": "Outside",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "REFERRED",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 15,
+        "occurfrdate": 1790222400000,
+        "occurtodate": 1790568000000,
+        "x": -82.50978708,
+        "y": 27.96684682,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026574044",
+        "crimegroup": "Crimes Against Property",
+        "division": 1,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.50978707993693,
+        "y": 27.966846820120516
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4935,
+        "offenseid": "2026574088",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "240",
+        "nibrsoffense": "Motor Vehicle Theft",
+        "nibrsdesc": "Motor Vehicle Theft",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "Mistflower Ln & Paddock View Dr",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "C2",
+        "district": "C",
+        "agency": null,
+        "neighborhood": "K Bar Ranch",
+        "locatecd": "57",
+        "locatedesc": "Community Center",
+        "locatecat": "Public Access",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "INACTIVE",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 15,
+        "occurfrdate": 1790568000000,
+        "occurtodate": 1790568000000,
+        "x": -82.29946614,
+        "y": 28.16333477,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026574088",
+        "crimegroup": "Crimes Against Property",
+        "division": 2,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.29946614033184,
+        "y": 28.163334770386378
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 4936,
+        "offenseid": "2026574098",
+        "sequence": 1,
+        "statute": "812.014",
+        "nibrscode": "23H",
+        "nibrsoffense": "Larceny/Theft Offenses",
+        "nibrsdesc": "All Other Larceny",
+        "nibrscrimeag": "Crimes Against Property",
+        "nibrsgroup": "Group A",
+        "attemptcompleted": "C",
+        "narrative": null,
+        "fulladdr": "W Busch Blvd & N Florida Ave",
+        "city": "T",
+        "state": "FL",
+        "zip5": null,
+        "beat": "D2",
+        "district": "D",
+        "agency": null,
+        "neighborhood": "Sulphur Springs",
+        "locatecd": "13",
+        "locatedesc": "Highway/Road/Alley/Street/Sidewalk",
+        "locatecat": "Outside",
+        "weaponcd": "",
+        "weapondesc": "",
+        "weaponcat": "",
+        "entrycd": null,
+        "probtype": null,
+        "analystnotes": null,
+        "biasmotivation": "88",
+        "offensefactor": null,
+        "criminalactivity": "",
+        "aggassaulthomicidefactor": null,
+        "casestatus": "INACTIVE",
+        "exceptionalclear": "",
+        "officer": "[redacted]",
+        "reportdate": 1790568000000,
+        "reportyear": 2026,
+        "reportmonth": 9,
+        "reportdow": "Monday",
+        "reportdownum": 2,
+        "reporthour": 15,
+        "occurfrdate": 1790568000000,
+        "occurtodate": 1790568000000,
+        "x": -82.4594771,
+        "y": 28.03295181,
+        "CreationDate": null,
+        "Creator": null,
+        "EditDate": null,
+        "Editor": null,
+        "callid": "2026574098",
+        "crimegroup": "Crimes Against Property",
+        "division": 2,
+        "nibrscrimecount": 1
+      },
+      "geometry": {
+        "x": -82.45947710043477,
+        "y": 28.03295181027015
+      }
+    }
+  ]
+}

@@ -1,0 +1,301 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": 1790770040000,
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
+    "title": "USGS All Earthquakes, Past Hour",
+    "status": 200,
+    "api": "2.7.0",
+    "count": 7
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 1.79,
+        "place": "78 km NE of Tonopah, Nevada",
+        "time": 1790769348886,
+        "updated": 1790769545995,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925079",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/nn00925079.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 49,
+        "net": "nn",
+        "code": "00925079",
+        "ids": ",nn00925079,",
+        "sources": ",nn,",
+        "types": ",origin,phase-data,",
+        "nst": 9,
+        "dmin": 1.059,
+        "rms": 0.2074,
+        "gap": 197,
+        "magType": "ml",
+        "type": "earthquake",
+        "title": "M 1.8 - 78 km NE of Tonopah, Nevada"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -116.4919,
+          38.4673,
+          0
+        ]
+      },
+      "id": "nn00925079"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 1.29,
+        "place": "2 km N of The Geysers, CA",
+        "time": 1790769240040,
+        "updated": 1790769336800,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nc75441866",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/nc75441866.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 26,
+        "net": "nc",
+        "code": "75441866",
+        "ids": ",nc75441866,",
+        "sources": ",nc,",
+        "types": ",nearby-cities,origin,phase-data,",
+        "nst": 18,
+        "dmin": 0.006652,
+        "rms": 0.02,
+        "gap": 123,
+        "magType": "md",
+        "type": "earthquake",
+        "title": "M 1.3 - 2 km N of The Geysers, CA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -122.758834838867,
+          38.7939987182617,
+          0.730000019073486
+        ]
+      },
+      "id": "nc75441866"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 1.15,
+        "place": "4 km WSW of Anza, CA",
+        "time": 1790768031400,
+        "updated": 1790768239223,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41340967",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/ci41340967.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 20,
+        "net": "ci",
+        "code": "41340967",
+        "ids": ",ci41340967,",
+        "sources": ",ci,",
+        "types": ",nearby-cities,origin,phase-data,",
+        "nst": 21,
+        "dmin": 0.03636,
+        "rms": 0.11,
+        "gap": 48,
+        "magType": "ml",
+        "type": "earthquake",
+        "title": "M 1.2 - 4 km WSW of Anza, CA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -116.706666666667,
+          33.5395,
+          5.8
+        ]
+      },
+      "id": "ci41340967"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 1.9,
+        "place": "20 km WSW of Tyonek, Alaska",
+        "time": 1790767928129,
+        "updated": 1790768058484,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026tjhahd",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/aka2026tjhahd.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 56,
+        "net": "ak",
+        "code": "a2026tjhahd",
+        "ids": ",aka2026tjhahd,",
+        "sources": ",ak,",
+        "types": ",origin,phase-data,",
+        "nst": 47,
+        "dmin": 0.3,
+        "rms": 0.6,
+        "gap": 58,
+        "magType": "ml",
+        "type": "earthquake",
+        "title": "M 1.9 - 20 km WSW of Tyonek, Alaska"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -151.481,
+          60.981,
+          72.4
+        ]
+      },
+      "id": "aka2026tjhahd"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 4.4,
+        "place": "47 km S of Trà My, Vietnam",
+        "time": 1790767481639,
+        "updated": 1790769593040,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000tyjl",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us6000tyjl.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "reviewed",
+        "tsunami": 0,
+        "sig": 298,
+        "net": "us",
+        "code": "6000tyjl",
+        "ids": ",us6000tyjl,",
+        "sources": ",us,",
+        "types": ",origin,phase-data,",
+        "nst": 28,
+        "dmin": 4.178,
+        "rms": 0.76,
+        "gap": 102,
+        "magType": "mb",
+        "type": "earthquake",
+        "title": "M 4.4 - 47 km S of Trà My, Vietnam"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          108.2955,
+          14.9174,
+          10
+        ]
+      },
+      "id": "us6000tyjl"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 1.57,
+        "place": "8 km SW of Anza, CA",
+        "time": 1790767007790,
+        "updated": 1790767684770,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41340959",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/ci41340959.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 38,
+        "net": "ci",
+        "code": "41340959",
+        "ids": ",ci41340959,",
+        "sources": ",ci,",
+        "types": ",focal-mechanism,nearby-cities,origin,phase-data,scitech-link,",
+        "nst": 83,
+        "dmin": 0.05277,
+        "rms": 0.21,
+        "gap": 21,
+        "magType": "ml",
+        "type": "earthquake",
+        "title": "M 1.6 - 8 km SW of Anza, CA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -116.7455,
+          33.5081666666667,
+          3.4
+        ]
+      },
+      "id": "ci41340959"
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "mag": 1.76,
+        "place": "29 km W of Empire, Nevada",
+        "time": 1790766492719,
+        "updated": 1790766646228,
+        "tz": null,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/nn00925077",
+        "detail": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/nn00925077.geojson",
+        "felt": null,
+        "cdi": null,
+        "mmi": null,
+        "alert": null,
+        "status": "automatic",
+        "tsunami": 0,
+        "sig": 48,
+        "net": "nn",
+        "code": "00925077",
+        "ids": ",nn00925077,",
+        "sources": ",nn,",
+        "types": ",origin,phase-data,",
+        "nst": 11,
+        "dmin": 0.373,
+        "rms": 0.2279,
+        "gap": 190,
+        "magType": "ml",
+        "type": "earthquake",
+        "title": "M 1.8 - 29 km W of Empire, Nevada"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.686,
+          40.5416,
+          3.5138
+        ]
+      },
+      "id": "nn00925077"
+    }
+  ],
+  "bbox": [
+    -151.481,
+    14.9174,
+    0,
+    108.2955,
+    60.981,
+    72.4
+  ]
+}

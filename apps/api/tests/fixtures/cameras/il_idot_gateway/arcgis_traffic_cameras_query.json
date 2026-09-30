@@ -1,0 +1,374 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "uniqueIdField": {
+    "name": "OBJECTID",
+    "isSystemMaintained": true
+  },
+  "globalIdFieldName": "",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 4269,
+    "latestWkid": 4269
+  },
+  "fields": [
+    {
+      "name": "OBJECTID",
+      "type": "esriFieldTypeOID",
+      "alias": "OBJECTID",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "ImgPath",
+      "type": "esriFieldTypeString",
+      "alias": "ImgPath",
+      "sqlType": "sqlTypeOther",
+      "length": 300,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CameraLocation",
+      "type": "esriFieldTypeString",
+      "alias": "CameraLocation",
+      "sqlType": "sqlTypeOther",
+      "length": 150,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "CameraDirection",
+      "type": "esriFieldTypeString",
+      "alias": "CameraDirection",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "y",
+      "type": "esriFieldTypeDouble",
+      "alias": "y",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "x",
+      "type": "esriFieldTypeDouble",
+      "alias": "x",
+      "sqlType": "sqlTypeOther",
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "SnapShot",
+      "type": "esriFieldTypeString",
+      "alias": "SnapShot",
+      "sqlType": "sqlTypeOther",
+      "length": 300,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "WarningAge",
+      "type": "esriFieldTypeString",
+      "alias": "WarningAge",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "TooOld",
+      "type": "esriFieldTypeString",
+      "alias": "TooOld",
+      "sqlType": "sqlTypeOther",
+      "length": 50,
+      "domain": null,
+      "defaultValue": null
+    },
+    {
+      "name": "AgeInMinutes",
+      "type": "esriFieldTypeString",
+      "alias": "AgeInMinutes",
+      "sqlType": "sqlTypeOther",
+      "length": 10,
+      "domain": null,
+      "defaultValue": null
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-IDOTD1-IK14B&direction=NONE",
+        "CameraLocation": "Hillside Tower Camera 9",
+        "CameraDirection": "NONE",
+        "y": 41.88597,
+        "x": -87.91483,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-IDOTD1_1_Cook_WB_Albin_4188597_-8791483_2_NONE.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "3"
+      },
+      "geometry": {
+        "x": -87.91483,
+        "y": 41.88597
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-IDOTD1-IK23&direction=NONE",
+        "CameraLocation": "Nordic",
+        "CameraDirection": "NONE",
+        "y": 41.95833,
+        "x": -88.02554,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-IDOTD1_1_DuPage_WB_I-290_4195833_-8802554_1_NONE.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "2"
+      },
+      "geometry": {
+        "x": -88.02554,
+        "y": 41.95833
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 3,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-IDOTD1-KE13&direction=NONE",
+        "CameraLocation": "Cumberland HD",
+        "CameraDirection": "NONE",
+        "y": 41.98388,
+        "x": -87.83975,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-IDOTD1_1_Cook_EB_I-90_4198388_-8783975_1_NONE.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "5"
+      },
+      "geometry": {
+        "x": -87.83975,
+        "y": 41.98388
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 71,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-IDOTD4-4002&direction=E",
+        "CameraLocation": "I-74 at Fondulac Bridge",
+        "CameraDirection": "E",
+        "y": 40.668776,
+        "x": -89.572542,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-IDOTD4_4_Tazewell_NWB_I-74_4066878_-8957254_1_E.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "3"
+      },
+      "geometry": {
+        "x": -89.572542,
+        "y": 40.668776
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 72,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-IDOTD4-4002&direction=N",
+        "CameraLocation": "I-74 at Fondulac Bridge",
+        "CameraDirection": "N",
+        "y": 40.668776,
+        "x": -89.572542,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-IDOTD4_4_Tazewell_NWB_I-74_4066878_-8957254_1_N.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "3"
+      },
+      "geometry": {
+        "x": -89.572542,
+        "y": 40.668776
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 73,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-IDOTD4-4002&direction=W",
+        "CameraLocation": "I-74 at Fondulac Bridge",
+        "CameraDirection": "W",
+        "y": 40.668776,
+        "x": -89.572542,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-IDOTD4_4_Tazewell_NWB_I-74_4066878_-8957254_1_W.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "3"
+      },
+      "geometry": {
+        "x": -89.572542,
+        "y": 40.668776
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1030,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-KANECOUNTY-1",
+        "CameraLocation": "Orchard Rd at Rochester Dr",
+        "CameraDirection": "NONE",
+        "y": 41.740227,
+        "x": -88.375262,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-KANECOUNTY_1_Kane_NB_Orchard_4174023_-8837526_1_NONE.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "1"
+      },
+      "geometry": {
+        "x": -88.375262,
+        "y": 41.740227
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1123,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-LAKECOUNTY-31475&direction=E",
+        "CameraLocation": "Darrell at Roberts (Cell)",
+        "CameraDirection": "E",
+        "y": 42.248908996582031,
+        "x": -88.1961898803711,
+        "SnapShot": "https://www.lakecountypassage.com/snapshots/Darrell_@_Roberts_(Cell)_cctv_East_Leg.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "5"
+      },
+      "geometry": {
+        "x": -88.1961898803711,
+        "y": 42.248908996582031
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1124,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-LAKECOUNTY-31475&direction=N",
+        "CameraLocation": "Darrell at Roberts (Cell)",
+        "CameraDirection": "N",
+        "y": 42.248908996582031,
+        "x": -88.1961898803711,
+        "SnapShot": "https://www.lakecountypassage.com/snapshots/Darrell_@_Roberts_(Cell)_cctv_North_Leg.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "5"
+      },
+      "geometry": {
+        "x": -88.1961898803711,
+        "y": 42.248908996582031
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1125,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-LAKECOUNTY-31475&direction=S",
+        "CameraLocation": "Darrell at Roberts (Cell)",
+        "CameraDirection": "S",
+        "y": 42.248908996582031,
+        "x": -88.1961898803711,
+        "SnapShot": "https://www.lakecountypassage.com/snapshots/Darrell_@_Roberts_(Cell)_cctv_South_Leg.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "5"
+      },
+      "geometry": {
+        "x": -88.1961898803711,
+        "y": 42.248908996582031
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1126,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-LAKECOUNTY-31475&direction=W",
+        "CameraLocation": "Darrell at Roberts (Cell)",
+        "CameraDirection": "W",
+        "y": 42.248908996582031,
+        "x": -88.1961898803711,
+        "SnapShot": "https://www.lakecountypassage.com/snapshots/Darrell_@_Roberts_(Cell)_cctv_West_Leg.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "5"
+      },
+      "geometry": {
+        "x": -88.1961898803711,
+        "y": 42.248908996582031
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1505,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-DUPAGECOUNTY-88&direction=E",
+        "CameraLocation": "83rd / Woodward",
+        "CameraDirection": "E",
+        "y": 41.73619,
+        "x": -88.0306,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-DUPAGECOUNTY_1_DuPage_SB_Woodward_4173619_-8803060_1_E.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "0"
+      },
+      "geometry": {
+        "x": -88.0306,
+        "y": 41.73619
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 1506,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-DUPAGECOUNTY-88&direction=N",
+        "CameraLocation": "83rd / Woodward",
+        "CameraDirection": "N",
+        "y": 41.73619,
+        "x": -88.0306,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-DUPAGECOUNTY_1_DuPage_SB_Woodward_4173619_-8803060_1_N.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "0"
+      },
+      "geometry": {
+        "x": -88.0306,
+        "y": 41.73619
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 3730,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-ISTHA-bkWelUZ79reGAKdLMh+MlC6jVSo=&direction=N",
+        "CameraLocation": "I-355 at Spring Creek Plaza",
+        "CameraDirection": "N",
+        "y": 41.57659912109375,
+        "x": -88.000503540039063,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-ISTHA_1_Will_SEB_I-355-CASH_4157660_-8800050_1_N.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "2"
+      },
+      "geometry": {
+        "x": -88.000503540039063,
+        "y": 41.57659912109375
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 3731,
+        "ImgPath": "https://travelmidwest.com/showCamera?id=IL-ISTHA-bkWelUZ79reGAKdLMh+MlC6jVSo=&direction=S",
+        "CameraLocation": "I-355 at Spring Creek Plaza",
+        "CameraDirection": "S",
+        "y": 41.57659912109375,
+        "x": -88.000503540039063,
+        "SnapShot": "https://cctv.travelmidwest.com/snapshots/IL-ISTHA_1_Will_SEB_I-355-CASH_4157660_-8800050_1_S.jpg",
+        "WarningAge": "false",
+        "TooOld": "false",
+        "AgeInMinutes": "2"
+      },
+      "geometry": {
+        "x": -88.000503540039063,
+        "y": 41.57659912109375
+      }
+    }
+  ]
+}

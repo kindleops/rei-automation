@@ -1,0 +1,437 @@
+{
+  "@context": [
+    "https://geojson.org/geojson-ld/geojson-context.jsonld",
+    {
+      "@version": "1.1",
+      "wx": "https://api.weather.gov/ontology#",
+      "@vocab": "https://api.weather.gov/ontology#"
+    }
+  ],
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.53860e0d2e6693a5282cbda4576b11b2c3f7713f.002.1",
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.53860e0d2e6693a5282cbda4576b11b2c3f7713f.002.1",
+        "@type": "wx:Alert",
+        "id": "urn:oid:2.49.0.1.840.0.53860e0d2e6693a5282cbda4576b11b2c3f7713f.002.1",
+        "areaDesc": "Lyon; Osceola; Sioux; O'Brien; Plymouth; Cherokee; Woodbury; Lincoln; Lyon; Murray; Cottonwood; Nobles; Jackson; Pipestone; Rock; Dixon; Dakota; Beadle; Kingsbury; Brookings; Gregory; Jerauld; Sanborn; Miner; Lake; Moody; Brule; Aurora; Davison; Hanson; McCook; Minnehaha; Charles Mix; Douglas; Hutchinson; Turner; Lincoln; Bon Homme; Yankton; Clay; Union",
+        "geocode": {
+          "SAME": [
+            "019119",
+            "019143",
+            "019167",
+            "019141",
+            "019149",
+            "019035",
+            "019193",
+            "027081",
+            "027083",
+            "027101",
+            "027033",
+            "027105",
+            "027063",
+            "027117",
+            "027133",
+            "031051",
+            "031043",
+            "046005",
+            "046077",
+            "046011",
+            "046053",
+            "046073",
+            "046111",
+            "046097",
+            "046079",
+            "046101",
+            "046015",
+            "046003",
+            "046035",
+            "046061",
+            "046087",
+            "046099",
+            "046023",
+            "046043",
+            "046067",
+            "046125",
+            "046083",
+            "046009",
+            "046135",
+            "046027",
+            "046127"
+          ],
+          "UGC": [
+            "IAZ001",
+            "IAZ002",
+            "IAZ012",
+            "IAZ013",
+            "IAZ020",
+            "IAZ021",
+            "IAZ031",
+            "MNZ071",
+            "MNZ072",
+            "MNZ080",
+            "MNZ081",
+            "MNZ089",
+            "MNZ090",
+            "MNZ097",
+            "MNZ098",
+            "NEZ013",
+            "NEZ014",
+            "SDZ038",
+            "SDZ039",
+            "SDZ040",
+            "SDZ050",
+            "SDZ052",
+            "SDZ053",
+            "SDZ054",
+            "SDZ055",
+            "SDZ056",
+            "SDZ057",
+            "SDZ058",
+            "SDZ059",
+            "SDZ060",
+            "SDZ061",
+            "SDZ062",
+            "SDZ063",
+            "SDZ064",
+            "SDZ065",
+            "SDZ066",
+            "SDZ067",
+            "SDZ068",
+            "SDZ069",
+            "SDZ070",
+            "SDZ071"
+          ]
+        },
+        "affectedZones": [
+          "https://api.weather.gov/zones/forecast/IAZ001",
+          "https://api.weather.gov/zones/forecast/IAZ002",
+          "https://api.weather.gov/zones/forecast/IAZ012",
+          "https://api.weather.gov/zones/forecast/IAZ013",
+          "https://api.weather.gov/zones/forecast/IAZ020",
+          "https://api.weather.gov/zones/forecast/IAZ021",
+          "https://api.weather.gov/zones/forecast/IAZ031",
+          "https://api.weather.gov/zones/forecast/MNZ071",
+          "https://api.weather.gov/zones/forecast/MNZ072",
+          "https://api.weather.gov/zones/forecast/MNZ080",
+          "https://api.weather.gov/zones/forecast/MNZ081",
+          "https://api.weather.gov/zones/forecast/MNZ089",
+          "https://api.weather.gov/zones/forecast/MNZ090",
+          "https://api.weather.gov/zones/forecast/MNZ097",
+          "https://api.weather.gov/zones/forecast/MNZ098",
+          "https://api.weather.gov/zones/forecast/NEZ013",
+          "https://api.weather.gov/zones/forecast/NEZ014",
+          "https://api.weather.gov/zones/forecast/SDZ038",
+          "https://api.weather.gov/zones/forecast/SDZ039",
+          "https://api.weather.gov/zones/forecast/SDZ040",
+          "https://api.weather.gov/zones/forecast/SDZ050",
+          "https://api.weather.gov/zones/forecast/SDZ052",
+          "https://api.weather.gov/zones/forecast/SDZ053",
+          "https://api.weather.gov/zones/forecast/SDZ054",
+          "https://api.weather.gov/zones/forecast/SDZ055",
+          "https://api.weather.gov/zones/forecast/SDZ056",
+          "https://api.weather.gov/zones/forecast/SDZ057",
+          "https://api.weather.gov/zones/forecast/SDZ058",
+          "https://api.weather.gov/zones/forecast/SDZ059",
+          "https://api.weather.gov/zones/forecast/SDZ060",
+          "https://api.weather.gov/zones/forecast/SDZ061",
+          "https://api.weather.gov/zones/forecast/SDZ062",
+          "https://api.weather.gov/zones/forecast/SDZ063",
+          "https://api.weather.gov/zones/forecast/SDZ064",
+          "https://api.weather.gov/zones/forecast/SDZ065",
+          "https://api.weather.gov/zones/forecast/SDZ066",
+          "https://api.weather.gov/zones/forecast/SDZ067",
+          "https://api.weather.gov/zones/forecast/SDZ068",
+          "https://api.weather.gov/zones/forecast/SDZ069",
+          "https://api.weather.gov/zones/forecast/SDZ070",
+          "https://api.weather.gov/zones/forecast/SDZ071"
+        ],
+        "references": [
+          {
+            "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.03e3caa6cd4612134da034fa8e5ef7c5e75dd447.001.1",
+            "identifier": "urn:oid:2.49.0.1.840.0.03e3caa6cd4612134da034fa8e5ef7c5e75dd447.001.1",
+            "sender": "w-nws.webmaster@noaa.gov",
+            "sent": "2026-09-30T01:43:00-05:00"
+          },
+          {
+            "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.66ca00108d8c34e514ea696839d9c6821cd30be0.001.1",
+            "identifier": "urn:oid:2.49.0.1.840.0.66ca00108d8c34e514ea696839d9c6821cd30be0.001.1",
+            "sender": "w-nws.webmaster@noaa.gov",
+            "sent": "2026-09-30T03:21:00-05:00"
+          },
+          {
+            "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.66ca00108d8c34e514ea696839d9c6821cd30be0.002.1",
+            "identifier": "urn:oid:2.49.0.1.840.0.66ca00108d8c34e514ea696839d9c6821cd30be0.002.1",
+            "sender": "w-nws.webmaster@noaa.gov",
+            "sent": "2026-09-30T03:21:00-05:00"
+          }
+        ],
+        "sent": "2026-09-30T06:32:00-05:00",
+        "effective": "2026-09-30T06:32:00-05:00",
+        "onset": "2026-09-30T06:32:00-05:00",
+        "expires": "2026-09-30T10:00:00-05:00",
+        "ends": "2026-09-30T10:00:00-05:00",
+        "status": "Actual",
+        "messageType": "Update",
+        "category": "Met",
+        "severity": "Moderate",
+        "certainty": "Likely",
+        "urgency": "Expected",
+        "event": "Dense Fog Advisory",
+        "sender": "w-nws.webmaster@noaa.gov",
+        "senderName": "NWS Sioux Falls SD",
+        "headline": "Dense Fog Advisory issued September 30 at 6:32AM CDT until September 30 at 10:00AM CDT by NWS Sioux Falls SD",
+        "description": "* WHAT...Visibility one quarter mile or less at times in dense fog.\n\n* WHERE...Portions of northwest and west central Iowa, southwest\nMinnesota, northeast Nebraska, and central, east central, south\ncentral, and southeast South Dakota.\n\n* WHEN...Until 10 AM CDT this morning.\n\n* IMPACTS...Low visibility or rapidly changing visibility could make\ndriving conditions hazardous.",
+        "instruction": "If driving, slow down, use your headlights, and leave plenty of\ndistance ahead of you.",
+        "response": "Execute",
+        "note": null,
+        "parameters": {
+          "AWIPSidentifier": [
+            "NPWFSD"
+          ],
+          "WMOidentifier": [
+            "WWUS73 KFSD 301132"
+          ],
+          "NWSheadline": [
+            "DENSE FOG ADVISORY REMAINS IN EFFECT UNTIL 10 AM CDT THIS MORNING"
+          ],
+          "BLOCKCHANNEL": [
+            "EAS",
+            "NWEM",
+            "CMAS"
+          ],
+          "VTEC": [
+            "/O.CON.KFSD.FG.Y.0020.000000T0000Z-260930T1500Z/"
+          ],
+          "eventEndingTime": [
+            "2026-09-30T10:00:00-05:00"
+          ]
+        },
+        "scope": "Public",
+        "code": "IPAWSv1.0",
+        "language": "en-US",
+        "web": "http://www.weather.gov",
+        "eventCode": {
+          "SAME": [
+            "NWS"
+          ],
+          "NationalWeatherService": [
+            "FGY"
+          ]
+        }
+      }
+    },
+    {
+      "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.496e7ff25caefe159ffd36aa2b4d86c500817cd2.001.1",
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.496e7ff25caefe159ffd36aa2b4d86c500817cd2.001.1",
+        "@type": "wx:Alert",
+        "id": "urn:oid:2.49.0.1.840.0.496e7ff25caefe159ffd36aa2b4d86c500817cd2.001.1",
+        "areaDesc": "Todd; Stearns; Meeker; Wright; McLeod; Sibley; Nicollet",
+        "geocode": {
+          "SAME": [
+            "027153",
+            "027145",
+            "027093",
+            "027171",
+            "027085",
+            "027143",
+            "027103"
+          ],
+          "UGC": [
+            "MNZ042",
+            "MNZ049",
+            "MNZ058",
+            "MNZ059",
+            "MNZ066",
+            "MNZ067",
+            "MNZ075"
+          ]
+        },
+        "affectedZones": [
+          "https://api.weather.gov/zones/forecast/MNZ042",
+          "https://api.weather.gov/zones/forecast/MNZ049",
+          "https://api.weather.gov/zones/forecast/MNZ058",
+          "https://api.weather.gov/zones/forecast/MNZ059",
+          "https://api.weather.gov/zones/forecast/MNZ066",
+          "https://api.weather.gov/zones/forecast/MNZ067",
+          "https://api.weather.gov/zones/forecast/MNZ075"
+        ],
+        "references": [],
+        "sent": "2026-09-30T04:53:00-05:00",
+        "effective": "2026-09-30T04:53:00-05:00",
+        "onset": "2026-09-30T04:53:00-05:00",
+        "expires": "2026-09-30T10:00:00-05:00",
+        "ends": "2026-09-30T10:00:00-05:00",
+        "status": "Actual",
+        "messageType": "Alert",
+        "category": "Met",
+        "severity": "Moderate",
+        "certainty": "Likely",
+        "urgency": "Expected",
+        "event": "Dense Fog Advisory",
+        "sender": "w-nws.webmaster@noaa.gov",
+        "senderName": "NWS Twin Cities/Chanhassen MN",
+        "headline": "Dense Fog Advisory issued September 30 at 4:53AM CDT until September 30 at 10:00AM CDT by NWS Twin Cities/Chanhassen MN",
+        "description": "* WHAT...Visibility one quarter mile or less in dense fog.\n\n* WHERE...McLeod, Meeker, Sibley, Stearns, Todd, Wright, and Nicollet\nCounties.\n\n* WHEN...Until 10 AM CDT this morning.\n\n* IMPACTS...Low visibility could make driving conditions hazardous.",
+        "instruction": "If driving, slow down, use your headlights, and leave plenty of\ndistance ahead of you.",
+        "response": "Execute",
+        "note": null,
+        "parameters": {
+          "AWIPSidentifier": [
+            "NPWMPX"
+          ],
+          "WMOidentifier": [
+            "WWUS73 KMPX 300953"
+          ],
+          "NWSheadline": [
+            "DENSE FOG ADVISORY IN EFFECT UNTIL 10 AM CDT THIS MORNING"
+          ],
+          "BLOCKCHANNEL": [
+            "EAS",
+            "NWEM",
+            "CMAS"
+          ],
+          "VTEC": [
+            "/O.EXA.KMPX.FG.Y.0013.000000T0000Z-260930T1500Z/"
+          ],
+          "eventEndingTime": [
+            "2026-09-30T10:00:00-05:00"
+          ]
+        },
+        "scope": "Public",
+        "code": "IPAWSv1.0",
+        "language": "en-US",
+        "web": "http://www.weather.gov",
+        "eventCode": {
+          "SAME": [
+            "NWS"
+          ],
+          "NationalWeatherService": [
+            "FGY"
+          ]
+        }
+      }
+    },
+    {
+      "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.496e7ff25caefe159ffd36aa2b4d86c500817cd2.002.1",
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.496e7ff25caefe159ffd36aa2b4d86c500817cd2.002.1",
+        "@type": "wx:Alert",
+        "id": "urn:oid:2.49.0.1.840.0.496e7ff25caefe159ffd36aa2b4d86c500817cd2.002.1",
+        "areaDesc": "Douglas; Stevens; Pope; Lac Qui Parle; Swift; Chippewa; Kandiyohi; Yellow Medicine; Renville; Redwood; Brown",
+        "geocode": {
+          "SAME": [
+            "027041",
+            "027149",
+            "027121",
+            "027073",
+            "027151",
+            "027023",
+            "027067",
+            "027173",
+            "027129",
+            "027127",
+            "027015"
+          ],
+          "UGC": [
+            "MNZ041",
+            "MNZ047",
+            "MNZ048",
+            "MNZ054",
+            "MNZ055",
+            "MNZ056",
+            "MNZ057",
+            "MNZ064",
+            "MNZ065",
+            "MNZ073",
+            "MNZ074"
+          ]
+        },
+        "affectedZones": [
+          "https://api.weather.gov/zones/forecast/MNZ041",
+          "https://api.weather.gov/zones/forecast/MNZ047",
+          "https://api.weather.gov/zones/forecast/MNZ048",
+          "https://api.weather.gov/zones/forecast/MNZ054",
+          "https://api.weather.gov/zones/forecast/MNZ055",
+          "https://api.weather.gov/zones/forecast/MNZ056",
+          "https://api.weather.gov/zones/forecast/MNZ057",
+          "https://api.weather.gov/zones/forecast/MNZ064",
+          "https://api.weather.gov/zones/forecast/MNZ065",
+          "https://api.weather.gov/zones/forecast/MNZ073",
+          "https://api.weather.gov/zones/forecast/MNZ074"
+        ],
+        "references": [
+          {
+            "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.df433181714d0a28a1bba0e79e1fc8505ff16447.001.1",
+            "identifier": "urn:oid:2.49.0.1.840.0.df433181714d0a28a1bba0e79e1fc8505ff16447.001.1",
+            "sender": "w-nws.webmaster@noaa.gov",
+            "sent": "2026-09-30T03:20:00-05:00"
+          }
+        ],
+        "sent": "2026-09-30T04:53:00-05:00",
+        "effective": "2026-09-30T04:53:00-05:00",
+        "onset": "2026-09-30T04:53:00-05:00",
+        "expires": "2026-09-30T10:00:00-05:00",
+        "ends": "2026-09-30T10:00:00-05:00",
+        "status": "Actual",
+        "messageType": "Update",
+        "category": "Met",
+        "severity": "Moderate",
+        "certainty": "Likely",
+        "urgency": "Expected",
+        "event": "Dense Fog Advisory",
+        "sender": "w-nws.webmaster@noaa.gov",
+        "senderName": "NWS Twin Cities/Chanhassen MN",
+        "headline": "Dense Fog Advisory issued September 30 at 4:53AM CDT until September 30 at 10:00AM CDT by NWS Twin Cities/Chanhassen MN",
+        "description": "* WHAT...Visibility one quarter mile or less in dense fog.\n\n* WHERE...Kandiyohi, Renville, Brown, Redwood, Chippewa, Douglas, Lac\nQui Parle, Pope, Stevens, Swift, and Yellow Medicine Counties.\n\n* WHEN...Until 10 AM CDT this morning.\n\n* IMPACTS...Low visibility could make driving conditions hazardous.",
+        "instruction": "If driving, slow down, use your headlights, and leave plenty of\ndistance ahead of you.",
+        "response": "Execute",
+        "note": null,
+        "parameters": {
+          "AWIPSidentifier": [
+            "NPWMPX"
+          ],
+          "WMOidentifier": [
+            "WWUS73 KMPX 300953"
+          ],
+          "NWSheadline": [
+            "DENSE FOG ADVISORY REMAINS IN EFFECT UNTIL 10 AM CDT THIS MORNING"
+          ],
+          "BLOCKCHANNEL": [
+            "EAS",
+            "NWEM",
+            "CMAS"
+          ],
+          "VTEC": [
+            "/O.CON.KMPX.FG.Y.0013.000000T0000Z-260930T1500Z/"
+          ],
+          "eventEndingTime": [
+            "2026-09-30T10:00:00-05:00"
+          ]
+        },
+        "scope": "Public",
+        "code": "IPAWSv1.0",
+        "language": "en-US",
+        "web": "http://www.weather.gov",
+        "eventCode": {
+          "SAME": [
+            "NWS"
+          ],
+          "NationalWeatherService": [
+            "FGY"
+          ]
+        }
+      }
+    }
+  ],
+  "title": "Current watches, warnings, and advisories for Minnesota",
+  "updated": "2026-09-30T12:03:16+00:00"
+}

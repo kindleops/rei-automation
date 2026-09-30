@@ -1,0 +1,724 @@
+{
+  "data": [
+    {
+      "cctv": {
+        "index": "1",
+        "recordTimestamp": {
+          "recordDate": "2025-07-03",
+          "recordTime": "13:46:32",
+          "recordEpoch": "1751575592"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (01) LA County Line",
+          "nearbyPlace": "Montclair",
+          "longitude": "-117.704026",
+          "latitude": "34.081538",
+          "elevation": "1062",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "0.03",
+          "alignment": "",
+          "milepost": "47.13"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_1.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/i1001lacountyline.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1001lacountyline/previous/i1001lacountyline-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "2",
+        "recordTimestamp": {
+          "recordDate": "2025-07-03",
+          "recordTime": "14:15:59",
+          "recordEpoch": "1751577359"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (02) East of Monte Vista",
+          "nearbyPlace": "Montclair",
+          "longitude": "-117.69707",
+          "latitude": "34.08219",
+          "elevation": "1102",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "0.76",
+          "alignment": "",
+          "milepost": "47.52"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_2.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/i1002eastofmontevista.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1002eastofmontevista/previous/i1002eastofmontevista-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "3",
+        "recordTimestamp": {
+          "recordDate": "2025-07-03",
+          "recordTime": "14:42:27",
+          "recordEpoch": "1751578947"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (03) Central",
+          "nearbyPlace": "Montclair",
+          "longitude": "-117.69015",
+          "latitude": "34.085",
+          "elevation": "1131",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "1.21",
+          "alignment": "",
+          "milepost": "47.98"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_3.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/i1003central.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1003central/previous/i1003central-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "4",
+        "recordTimestamp": {
+          "recordDate": "2025-07-03",
+          "recordTime": "15:02:16",
+          "recordEpoch": "1751580136"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (04) Benson Avenue",
+          "nearbyPlace": "Montclair",
+          "longitude": "-117.68116",
+          "latitude": "34.0875",
+          "elevation": "1167",
+          "direction": "West",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "1.75",
+          "alignment": "",
+          "milepost": "48.52"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_4.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/i1004bensonavenue.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1004bensonavenue/previous/i1004bensonavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "5",
+        "recordTimestamp": {
+          "recordDate": "2025-09-04",
+          "recordTime": "05:59:23",
+          "recordEpoch": "1756990763"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (05) East of Mountain Avenue",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.66955",
+          "latitude": "34.08706",
+          "elevation": "1164",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "2.408",
+          "alignment": "",
+          "milepost": "49.173"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_5.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/i1005eastofmountainavenue.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1005eastofmountainavenue/previous/i1005eastofmountainavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "6",
+        "recordTimestamp": {
+          "recordDate": "2025-09-04",
+          "recordTime": "06:31:48",
+          "recordEpoch": "1756992708"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (06) West of Euclid",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.656371",
+          "latitude": "34.087607",
+          "elevation": "1158",
+          "direction": "West",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "3.166",
+          "alignment": "",
+          "milepost": "49.931"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_6.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/i1006westofeuclid.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1006westofeuclid/previous/i1006westofeuclid-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "7",
+        "recordTimestamp": {
+          "recordDate": "2025-07-03",
+          "recordTime": "13:50:27",
+          "recordEpoch": "1751575827"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (07) East of Euclid",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.6491",
+          "latitude": "34.08712",
+          "elevation": "1148",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "3.58",
+          "alignment": "",
+          "milepost": "50.34"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_7.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/i1007eastofeuclid.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/previous/i1007eastofeuclid-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "8",
+        "recordTimestamp": {
+          "recordDate": "2025-09-04",
+          "recordTime": "06:57:45",
+          "recordEpoch": "1756994265"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (08) E/O Sixth Street",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.636102",
+          "latitude": "34.084615",
+          "elevation": "1105",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "4.385",
+          "alignment": "",
+          "milepost": "51.150"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_8.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/i1008eosixthstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1008eosixthstreet/previous/i1008eosixthstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "9",
+        "recordTimestamp": {
+          "recordDate": "2025-09-04",
+          "recordTime": "07:06:45",
+          "recordEpoch": "1756994805"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (09) 4th Street",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.622827",
+          "latitude": "34.076985",
+          "elevation": "1056",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "5.31",
+          "alignment": "",
+          "milepost": "52.08"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_9.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/i10094thstreet.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10094thstreet/previous/i10094thstreet-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "10",
+        "recordTimestamp": {
+          "recordDate": "2025-07-03",
+          "recordTime": "14:11:51",
+          "recordEpoch": "1751577111"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (10) East of Vineyard",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.60859",
+          "latitude": "34.06924",
+          "elevation": "994",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "6.27",
+          "alignment": "",
+          "milepost": "53.03"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_10.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/i1010eastofvineyard.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1010eastofvineyard/previous/i1010eastofvineyard-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "11",
+        "recordTimestamp": {
+          "recordDate": "2025-10-30",
+          "recordTime": "09:11:29",
+          "recordEpoch": "1761840689"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (11) w/o Archibald Ave.",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.60135",
+          "latitude": "34.06806",
+          "elevation": "990",
+          "direction": "West",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "6.69",
+          "alignment": "",
+          "milepost": "53.45"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_11.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/i1011woarchibaldave.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1011woarchibaldave/previous/i1011woarchibaldave-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "12",
+        "recordTimestamp": {
+          "recordDate": "2025-09-04",
+          "recordTime": "07:14:44",
+          "recordEpoch": "1756995284"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (12) West of Haven",
+          "nearbyPlace": "Ontario",
+          "longitude": "-117.583743",
+          "latitude": "34.067901",
+          "elevation": "980",
+          "direction": "West",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "",
+          "postmile": "7.711",
+          "alignment": "",
+          "milepost": "54.476"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_12.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/i1012westofhaven.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1012westofhaven/previous/i1012westofhaven-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "22",
+        "recordTimestamp": {
+          "recordDate": "2024-09-27",
+          "recordTime": "10:58:14",
+          "recordEpoch": "1727459894"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (22) West of Cedar",
+          "nearbyPlace": "Bloomington",
+          "longitude": "-117.40071",
+          "latitude": "34.06788",
+          "elevation": "1099",
+          "direction": "East",
+          "county": "San Bernardino",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "18.23",
+          "alignment": "",
+          "milepost": "65"
+        },
+        "inService": "false",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_22.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/i1022westofcedar.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1022westofcedar/previous/i1022westofcedar-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "369",
+        "recordTimestamp": {
+          "recordDate": "2024-06-27",
+          "recordTime": "08:38:07",
+          "recordEpoch": "1719502687"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-210 : (369) West of Victoria Avenue",
+          "nearbyPlace": "Highland",
+          "longitude": "-117.22783",
+          "latitude": "34.13264",
+          "elevation": "1236",
+          "direction": "West",
+          "county": "San Bernardino",
+          "route": "I-210",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "27.3",
+          "alignment": "",
+          "milepost": "79.78"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/i210369westofvictoriaavenue.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210369westofvictoriaavenue/previous/i210369westofvictoriaavenue-12.jpg"
+          }
+        }
+      }
+    },
+    {
+      "cctv": {
+        "index": "1370",
+        "recordTimestamp": {
+          "recordDate": "2024-06-17",
+          "recordTime": "13:13:42",
+          "recordEpoch": "1718655222"
+        },
+        "location": {
+          "district": "8",
+          "locationName": "I-10 : (515) Indian Canyon",
+          "nearbyPlace": "Garnet",
+          "longitude": "-116.54549",
+          "latitude": "33.90506",
+          "elevation": "730.35",
+          "direction": "",
+          "county": "Riverside",
+          "route": "I-10",
+          "routeSuffix": "",
+          "postmilePrefix": "R",
+          "postmile": "33.122",
+          "alignment": "",
+          "milepost": "118.943"
+        },
+        "inService": "true",
+        "imageData": {
+          "imageDescription": "",
+          "streamingVideoURL": "https://wzmedia.dot.ca.gov/D8/LB-8_10_515.stream/playlist.m3u8",
+          "static": {
+            "currentImageUpdateFrequency": "3",
+            "currentImageURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/i10515indiancanyon.jpg",
+            "referenceImageUpdateFrequency": "15",
+            "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-1.jpg",
+            "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-2.jpg",
+            "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-3.jpg",
+            "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-4.jpg",
+            "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-5.jpg",
+            "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-6.jpg",
+            "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-7.jpg",
+            "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-8.jpg",
+            "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-9.jpg",
+            "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-10.jpg",
+            "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-11.jpg",
+            "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10515indiancanyon/previous/i10515indiancanyon-12.jpg"
+          }
+        }
+      }
+    }
+  ]
+}
