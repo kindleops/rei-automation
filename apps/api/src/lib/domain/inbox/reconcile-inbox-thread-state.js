@@ -9,7 +9,50 @@ import {
   normalizeInboxThreadStateRow,
 } from "@/lib/domain/inbox/inbox-thread-state-contract.js";
 
-export async function transitionStaleWaitingThreads(supabase, now = Date.now()) {
+/**
+ * THE 2026-09-30 STAMPEDE. This runs on the inbox-counts fallback path, i.e.
+ * on a poll, from every open Inbox. It used to PATCH each stale row with its own
+ * request. When ~445 Minneapolis threads crossed the reply window together,
+ * every concurrent poll selected the same rows and re-patched all of them
+ * (~38k PATCHes in 20 minutes, each row 60-100 times), the count views timed
+ * out, which sent more polls down this fallback, and the API pool starved:
+ * ops.leadcommand.ai stopped loading.
+ *
+ * So, per database client (one per process in production):
+ *   - one run at a time; concurrent callers share the run in flight;
+ *   - at most one run per minute unless `force` (the maintenance route);
+ *   - the patch is identical for every row, so rows move in a few bulk
+ *     compare-and-set updates (`inbox_bucket = 'waiting'` still true), which
+ *     makes a repeat from another process a cheap no-op instead of a write.
+ */
+const TRANSITION_MIN_INTERVAL_MS = 60_000;
+const TRANSITION_CHUNK_SIZE = 100;
+const transitionGates = new WeakMap();
+
+function gateFor(supabase) {
+  const key = supabase && typeof supabase === "object" ? supabase : transitionGates;
+  let gate = transitionGates.get(key);
+  if (!gate) {
+    gate = { inFlight: null, lastFinishedAt: 0 };
+    transitionGates.set(key, gate);
+  }
+  return gate;
+}
+
+export async function transitionStaleWaitingThreads(supabase, now = Date.now(), { force = false } = {}) {
+  const gate = gateFor(supabase);
+  if (gate.inFlight) return gate.inFlight;
+  if (!force && gate.lastFinishedAt && Date.now() - gate.lastFinishedAt < TRANSITION_MIN_INTERVAL_MS) {
+    return 0;
+  }
+  gate.inFlight = runStaleWaitingTransition(supabase, now).finally(() => {
+    gate.lastFinishedAt = Date.now();
+    gate.inFlight = null;
+  });
+  return gate.inFlight;
+}
+
+async function runStaleWaitingTransition(supabase, now) {
   const cutoffIso = new Date(now - WAITING_REPLY_WINDOW_MS).toISOString();
   const { data: staleRows, error } = await supabase
     .from("inbox_thread_state")
@@ -20,21 +63,30 @@ export async function transitionStaleWaitingThreads(supabase, now = Date.now()) 
 
   if (error) throw error;
 
-  let transitioned = 0;
+  let patch = null;
+  const due = [];
   for (const row of staleRows || []) {
-    const patch = buildColdTransitionPatch({
+    const rowPatch = buildColdTransitionPatch({
       inbox_bucket: row.inbox_bucket,
       lastOutboundAt: row.last_outbound_at,
       lastInboundAt: row.last_inbound_at,
       now,
     });
-    if (!patch) continue;
+    if (!rowPatch || !row.thread_key) continue;
+    patch = patch || rowPatch;
+    due.push(row.thread_key);
+  }
+  if (!due.length) return 0;
 
-    const { error: updateError } = await supabase
+  let transitioned = 0;
+  for (let i = 0; i < due.length; i += TRANSITION_CHUNK_SIZE) {
+    const { data, error: updateError } = await supabase
       .from("inbox_thread_state")
       .update(patch)
-      .eq("thread_key", row.thread_key);
-    if (!updateError) transitioned += 1;
+      .in("thread_key", due.slice(i, i + TRANSITION_CHUNK_SIZE))
+      .eq("inbox_bucket", "waiting")
+      .select("thread_key");
+    if (!updateError) transitioned += Array.isArray(data) ? data.length : 0;
   }
 
   if (transitioned > 0) {
@@ -51,7 +103,7 @@ export async function reconcileStaleInboxBuckets(
   let examined = 0;
   let updated = 0;
 
-  const waitingTransitioned = await transitionStaleWaitingThreads(supabase, now);
+  const waitingTransitioned = await transitionStaleWaitingThreads(supabase, now, { force: true });
   updated += waitingTransitioned;
 
   const { data: staleNewReplies, error: newRepliesError } = await supabase
