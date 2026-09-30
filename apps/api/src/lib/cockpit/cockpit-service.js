@@ -536,6 +536,9 @@ export async function runInboxAction({
         send_now_proof: sendResult.proof || null,
         queue_send_result: sendResult.diagnostics?.queue_send_result || null,
         warning_codes: sendResult.warning_codes || [],
+        // "deferred" = the send is durable and the message_events/thread-state
+        // projections are finishing after this response (message_event_id null).
+        post_send_projection: sendResult.diagnostics?.post_send_projection || null,
       },
     })
   }

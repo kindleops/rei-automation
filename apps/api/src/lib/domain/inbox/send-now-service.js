@@ -32,6 +32,10 @@ import {
 import { evaluateAndBlockSendAtCompliance } from "@/lib/domain/queue/block-send-at-compliance.js";
 import { promoteFirstContactOnProviderAcceptance } from "@/lib/domain/lead-state/promote-first-contact-on-send.js";
 import { loadDispatchBlockedSets, isSenderDispatchBlocked } from "@/lib/domain/delivery/sms-health-guard.js";
+import {
+  resolvePostSendBudgetMs,
+  runPostSendProjection,
+} from "@/lib/domain/inbox/post-send-projection.js";
 
 // Final safety rail before provider dispatch: never let an SMS go out addressed to
 // an entity/LLC/trust name (e.g. "Hey West 7th Apartments LLC,"). Checks only the
@@ -1997,6 +2001,8 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
   // 4. Bookkeeping (Success or Failure)
   // We use the authority of the claimed row and our manual lock token.
   let bookkeeping_result = null;
+  let post_send_projection = null;
+  let post_send_budget_ms = null;
   const bookkeeping_deps = {
     ...deps,
     supabase,
@@ -2006,55 +2012,21 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
 
   if (send_result?.ok) {
     // Success path
+    //
+    // a. Update send_queue row to terminal 'sent'. Together with the §11 attempt
+    //    ledger written inside the dispatch above, THIS is the durable record of
+    //    the send, and it is the last thing the operator's response waits for
+    //    unconditionally.
+    let finalized_row = null;
+    let finalized = false;
     try {
-      // a. Update send_queue row to terminal 'sent'
-      const finalized_row = await finalizeSendQueueSuccessImpl(
+      finalized_row = await finalizeSendQueueSuccessImpl(
         normalized_row,
         manual_lock_token,
         send_result,
         bookkeeping_deps
       );
-
-      // b. Log message_events, update thread state, outreach, etc.
-      const outbound_event = await writeOutboundSuccessMessageEventImpl(
-        finalized_row,
-        send_result,
-        bookkeeping_deps
-      );
-
-      // c. First-contact promotion. An operator texting a never-contacted seller
-      //    from the composer is a real first touch too; on an existing
-      //    conversation this is a state-conditional no-op. Non-fatal: the send is
-      //    already terminal and correct.
-      try {
-        const promote_first_contact =
-          deps.promoteFirstContactOnProviderAcceptance ?? promoteFirstContactOnProviderAcceptance;
-        const promotion = await promote_first_contact({
-          queue_row: finalized_row,
-          outbound_event,
-          supabase,
-          now,
-          deps: bookkeeping_deps,
-        });
-        if (promotion && !promotion.ok) {
-          logger.warn("inbox_send_now.first_contact_promotion_failed", {
-            queue_row_id: finalized_row?.id ?? null,
-            reason: promotion.reason || null,
-          });
-        }
-      } catch (promotion_error) {
-        logger.warn("inbox_send_now.first_contact_promotion_failed", {
-          queue_row_id: finalized_row?.id ?? null,
-          message: promotion_error?.message || null,
-        });
-      }
-
-      bookkeeping_result = {
-        sent: true,
-        final_queue_status: "sent",
-        outbound_event,
-        provider_message_id: send_result.sid,
-      };
+      finalized = true;
     } catch (bk_error) {
       logger.error("inbox_send_now.bookkeeping_success_failed", {
         queue_row_id,
@@ -2067,6 +2039,99 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
         bookkeeping_error: bk_error.message,
         provider_message_id: send_result?.sid,
       };
+    }
+
+    if (finalized) {
+      // b + c. PROJECTIONS: message_events, the classified thread-state resync,
+      // outreach state and first-contact promotion. Same calls, same order, same
+      // arguments as before -- but they no longer hold the operator's response
+      // past a short budget (see post-send-projection.js; 2026-09-30 an
+      // operator was told a delivered send had failed while these ran).
+      post_send_budget_ms = resolvePostSendBudgetMs({ budget_ms: deps.post_send_budget_ms });
+      post_send_projection = await runPostSendProjection({
+        key:
+          clean(finalized_row?.thread_key) ||
+          clean(normalized_row.thread_key) ||
+          clean(manual_input.thread_key) ||
+          to_phone ||
+          null,
+        budget_ms: post_send_budget_ms,
+        context: { queue_row_id: clean(queue_row_id) || null, operator_action_id },
+        task: async () => {
+          // b. Log message_events, update thread state, outreach, etc.
+          const outbound_event = await writeOutboundSuccessMessageEventImpl(
+            finalized_row,
+            send_result,
+            bookkeeping_deps
+          );
+
+          // c. First-contact promotion. An operator texting a never-contacted
+          //    seller from the composer is a real first touch too; on an
+          //    existing conversation this is a state-conditional no-op.
+          //    Non-fatal: the send is already terminal and correct.
+          try {
+            const promote_first_contact =
+              deps.promoteFirstContactOnProviderAcceptance ?? promoteFirstContactOnProviderAcceptance;
+            const promotion = await promote_first_contact({
+              queue_row: finalized_row,
+              outbound_event,
+              supabase,
+              now,
+              deps: bookkeeping_deps,
+            });
+            if (promotion && !promotion.ok) {
+              logger.warn("inbox_send_now.first_contact_promotion_failed", {
+                queue_row_id: finalized_row?.id ?? null,
+                reason: promotion.reason || null,
+              });
+            }
+          } catch (promotion_error) {
+            logger.warn("inbox_send_now.first_contact_promotion_failed", {
+              queue_row_id: finalized_row?.id ?? null,
+              message: promotion_error?.message || null,
+            });
+          }
+
+          return { outbound_event };
+        },
+      });
+
+      if (post_send_projection.state === "completed") {
+        bookkeeping_result = {
+          sent: true,
+          final_queue_status: "sent",
+          outbound_event: post_send_projection.value?.outbound_event ?? null,
+          provider_message_id: send_result.sid,
+        };
+      } else if (post_send_projection.state === "failed") {
+        const message =
+          post_send_projection.error?.message || String(post_send_projection.error || "unknown_error");
+        logger.error("inbox_send_now.bookkeeping_success_failed", {
+          queue_row_id,
+          message,
+        });
+        // We still return ok: true to the user because the SMS WAS sent.
+        bookkeeping_result = {
+          sent: true,
+          final_queue_status: "sent",
+          bookkeeping_error: message,
+          provider_message_id: send_result?.sid,
+        };
+      } else {
+        // Deferred: the send is durable; the projections finish after the
+        // response. message_event_id is therefore not known yet.
+        logger.warn("inbox_send_now.post_send_projection_deferred", {
+          queue_row_id,
+          budget_ms: post_send_budget_ms,
+          elapsed_ms: post_send_projection.elapsed_ms,
+        });
+        bookkeeping_result = {
+          sent: true,
+          final_queue_status: "sent",
+          provider_message_id: send_result.sid,
+          post_send_projection: "deferred",
+        };
+      }
     }
   } else {
     // Failure path
@@ -2140,6 +2205,14 @@ export async function executeManualInboxSendNow(input = {}, deps = {}) {
       diagnostics: {
         bookkeeping_result,
         bookkeeping_error: bookkeeping_result.bookkeeping_error || null,
+        // "completed" | "failed" | "deferred" (finishing after this response).
+        post_send_projection: post_send_projection
+          ? {
+              state: post_send_projection.state,
+              elapsed_ms: post_send_projection.elapsed_ms,
+              budget_ms: post_send_budget_ms === Infinity ? null : post_send_budget_ms,
+            }
+          : null,
       },
     };
   }
