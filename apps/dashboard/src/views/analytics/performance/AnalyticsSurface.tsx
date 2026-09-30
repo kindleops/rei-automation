@@ -10,8 +10,10 @@
  * market re-reads every property-attributed section for that market; sections
  * without geographic attribution say so.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import { pushRoutePath } from '../../../app/router'
 import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
 import { useBackHandler } from '../../../domain/navigation/useBackHandler'
@@ -28,7 +30,32 @@ const STAGE_SHORT: Record<string, string> = { ownership_confirmation: 'S1', offe
 
 type Cohort = { title: string; eyebrow: string; items: CohortItem[]; note?: string; points?: Array<{ lat: number | null; lng: number | null; label: string | null; id?: string }> }
 
+/**
+ * DESKTOP 2.0 — the modern desktop renders THE INTELLIGENCE LAB
+ * (views/analytics/lab). Phones keep this surface exactly as it was. If the
+ * Lab bundle fails to load or throws, the desktop falls back to this surface
+ * (styled by analytics-desktop.css) rather than to a blank pane.
+ */
+const AnalyticsLab = lazy(() => import('../lab/AnalyticsLab'))
+class LabBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(error: unknown) { console.error('analytics.lab_crashed', error) }
+  render() { return this.state.failed ? this.props.fallback : this.props.children }
+}
 export function AnalyticsSurface() {
+  const { isModernDesktop } = useBreakpoint()
+  if (!isModernDesktop) return <AnalyticsPhoneSurface />
+  return (
+    <LabBoundary fallback={<AnalyticsPhoneSurface />}>
+      <Suspense fallback={<div className="anx" aria-busy="true" />}>
+        <AnalyticsLab />
+      </Suspense>
+    </LabBoundary>
+  )
+}
+
+function AnalyticsPhoneSurface() {
   const [range, setRange] = useState<RangeKey>(() => (localStorage.getItem(RANGE_KEY) as RangeKey) || '30d')
   const [scope, setScope] = useState<string | null>(null)
   const [w, setW] = useState<AnalyticsPerformance | null>(null)
