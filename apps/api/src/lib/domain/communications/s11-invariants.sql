@@ -102,6 +102,23 @@ lineage_missing AS (
   FROM public.seller_logical_communications
   WHERE logical_key !~ '^lck_v[0-9]+:[a-z_]+:[0-9a-f]{64}$'
 ),
+-- Migration 20260930160000: a campaign touch may gain a successor action only
+-- over a carrier-failed predecessor. A successor over anything delivered is a
+-- second message to a seller who already has the first.
+campaign_touch_successor_over_delivered AS (
+  SELECT 'CAMPAIGN_TOUCH_SUCCESSOR_OVER_DELIVERED', 'fatal', s.id::text, 1
+  FROM public.seller_logical_communications s
+  JOIN public.seller_logical_communications p ON p.id = s.supersedes_communication_id
+  WHERE s.communication_type = 'campaign_touch'
+    AND (
+      p.state = 'delivered' OR p.delivery_possibility = 'delivered'
+      OR EXISTS (
+        SELECT 1 FROM public.seller_communication_attempts a
+        JOIN public.message_events m ON m.provider_message_sid = a.provider_message_id
+        WHERE a.logical_communication_id = p.id AND m.delivery_status = 'delivered'
+      )
+    )
+),
 -- ── Slice 2: callback reconciliation ──────────────────────────────────────
 -- These REQUIRE migration 20260906060000. A plain SELECT against a missing
 -- relation is a hard error, not an empty result, so this evaluator does not
@@ -176,6 +193,7 @@ UNION ALL SELECT * FROM queue_logical_parent_mismatch
 UNION ALL SELECT * FROM monetary_offer_mismatch
 UNION ALL SELECT * FROM attempt_without_parent
 UNION ALL SELECT * FROM lineage_missing
+UNION ALL SELECT * FROM campaign_touch_successor_over_delivered
 UNION ALL SELECT * FROM callback_duplicate_fingerprint
 UNION ALL SELECT * FROM callback_orphan_multi_adopt
 UNION ALL SELECT * FROM callback_applied_without_binding

@@ -13,6 +13,7 @@ import {
   dispatchStatus,
   dispatchWhen,
   localWhen,
+  processorHold,
   segmentOf,
   summarySentence,
 } from './queue-dispatch-model'
@@ -68,6 +69,44 @@ describe('reasons are human, and specific', () => {
   })
   it('live rows carry no failure reason', () => {
     expect(dispatchReason(row())).toBeNull()
+  })
+})
+
+describe('a queued row the processor keeps putting back is Held, not Ready', () => {
+  // 2026-09-29/30: 166 rows read "Ready" for ~25 hours while every pass refused them.
+  const refused = (over: Partial<QueueItem> = {}, md: Record<string, unknown> = {}) => row({
+    status: 'queued', queueStatusRaw: 'queued',
+    scheduledForUtc: '2026-09-25T07:00:00Z', scheduledForLocal: '2026-09-25T07:00:00Z',
+    metadata: { skip_reason: 'logical_communication_store_error', final_queue_status: 'queued', finalized_at: '2026-09-25T07:59:00Z', ...md },
+    ...over,
+  })
+
+  it('a refusal recorded after the row came due reads Held with the ledger reason', () => {
+    const item = refused()
+    expect(segmentOf(item)).toBe('ready')
+    expect(dispatchStatus(item)).toEqual({ label: 'Held', tone: 'amber' })
+    expect(dispatchReason(item)?.title).toBe('Duplicate-send guard')
+    expect(dispatchWhen(item, NOW).primary).toBe('Held by the processor')
+  })
+
+  it('the refusal backoff counts tries and says when it retries', () => {
+    const item = refused({ scheduledForUtc: '2026-09-25T08:04:00Z', scheduledForLocal: '2026-09-25T08:04:00Z' }, { dispatch_refusal_count: 3 })
+    expect(processorHold(item)?.tries).toBe(3)
+    expect(dispatchWhen(item, NOW)).toEqual({ primary: 'Held by the processor · 3 tries', secondary: 'Retries in 4m' })
+  })
+
+  it('a row re-planned to a later time after an old refusal is waiting, not held', () => {
+    const item = refused({ scheduledForUtc: '2026-09-25T09:00:00Z', scheduledForLocal: '2026-09-25T09:00:00Z' })
+    expect(processorHold(item)).toBeNull()
+    expect(dispatchStatus(item).label).toBe('Ready')
+    expect(dispatchWhen(item, NOW).primary).toBe('Sends in 1h')
+  })
+
+  it('a queued row with no refusal on record stays Ready', () => {
+    const item = row({ status: 'queued', queueStatusRaw: 'queued', scheduledForUtc: '2026-09-25T07:00:00Z' })
+    expect(processorHold(item)).toBeNull()
+    expect(dispatchStatus(item).label).toBe('Ready')
+    expect(dispatchReason(item)).toBeNull()
   })
 })
 
