@@ -1234,6 +1234,48 @@ export function resolveSafeFallbackClarifierDispatch({
   };
 }
 
+// ── A decline is never answered with an interest probe (2026-09-30) ─────────
+// "Yes and I'm not interested in selling it" (+14697324317) selected and
+// rendered consider_selling -- "Thanks for confirming. Would you consider a
+// proposal for the property?". Two things combined:
+//   1. the S1 not-for-sale overlay (applyOwnershipProbeOverlay) stamps
+//      route_hint/allowed_template_stages = consider_selling(+_follow_up). That
+//      is LIFECYCLE metadata -- the thread advances to S2 and a nurture
+//      follow-up is scheduled -- not a reply route, yet it was unioned into
+//      the immediate-reply candidates next to the not_interested profile;
+//   2. every catalog row ties on success_rate/usage_count/updated_at, so the
+//      winner was whichever row Postgres returned first.
+// On a pure decline turn the only use cases an immediate reply may carry are
+// the decline profile's own (soft close / future nurture). This only NARROWS
+// selection -- it can make a turn fail closed (no template), never send.
+// Deliberately NOT a pure decline, and left to their own authority:
+//   - the compound "not for sale, but what would you pay?" route
+//     (declined_but_asks_offer): the seller asked for a number;
+//   - a negotiation-strategy turn (S5+): the strategy router owns its template.
+export const DECLINE_SAFE_REPLY_USE_CASES = Object.freeze(
+  ROUTE_PROFILES.not_interested.template_use_case_candidates.map((use_case) => lower(use_case))
+);
+
+export function isPureDeclineTurn({ classification = null, decision = null } = {}) {
+  const intent = normalizeCanonicalIntent(
+    classification?.primary_intent || classification?.detected_intent || null
+  );
+  if (intent !== "not_interested") return false;
+  if (
+    clean(decision?.negotiation_strategy) ||
+    decision?.send_authority === "negotiation_strategy_directive"
+  ) {
+    return false;
+  }
+  if (
+    lower(decision?.audit_reason) === "declined_but_asks_offer" ||
+    lower(decision?.route_hint) === lower(ROUTE_PROFILES.asks_offer.route_hint)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function selectSafeAutoReplyTemplate({
   supabaseClient = null,
   classification = null,
@@ -1311,19 +1353,30 @@ export async function selectSafeAutoReplyTemplate({
   // required use case restricts matching to EXACTLY that use case so the
   // intent profile's candidates cannot leak a stage-earlier question back in.
   const required_use_case = lower(clean(decision?.required_template_use_case));
-  const allowed_matches = required_use_case
+  const route_matches = required_use_case
     ? [required_use_case]
     : uniq([
         ...asArray(decision?.allowed_template_stages).map(lower),
         lower(decision?.route_hint),
         ...templateCandidateSet(decision, classification).map(lower),
       ]);
+  // Pure decline: intersect with the decline profile (see DECLINE_SAFE_REPLY_USE_CASES).
+  // A required use case outside it is dropped too, so this fails closed.
+  const decline_turn = isPureDeclineTurn({ classification, decision });
+  const allowed_matches = decline_turn
+    ? route_matches.filter((value) => DECLINE_SAFE_REPLY_USE_CASES.includes(value))
+    : route_matches;
   const property_type_scope = derivePropertyTypeScope(context);
 
   if (!supabase || allowed_matches.length === 0) {
     return {
       ok: false,
-      reason: allowed_matches.length === 0 ? "no_template_route_candidates" : "missing_supabase",
+      reason:
+        allowed_matches.length === 0
+          ? decline_turn && route_matches.length > 0
+            ? "decline_turn_no_decline_safe_route"
+            : "no_template_route_candidates"
+          : "missing_supabase",
       template: null,
     };
   }
@@ -1344,6 +1397,9 @@ export async function selectSafeAutoReplyTemplate({
         const matches = normalizeTemplateMatchValues(row);
         return matches.some((value) => allowed_matches.includes(value));
       })
+      // Rows also match on stage_code/stage_label/template_name; on a decline
+      // turn the row's own use case must be decline-safe as well.
+      .filter((row) => !decline_turn || DECLINE_SAFE_REPLY_USE_CASES.includes(lower(row.use_case)))
       .filter((row) => {
         const reply_mode = lower(row.reply_mode);
         return !reply_mode || reply_mode === "auto" || reply_mode === "auto_reply";

@@ -130,7 +130,12 @@ const LANGUAGE_PATTERNS = [
       // Misc affirmations
       "gracias", "por favor", "sí señor", "sí señora",
       "entendido", "de acuerdo", "está bien", "claro",
-      "por supuesto", "sale", "órale", "ándale",
+      // "sale" (Mexican slang for "ok") was removed 2026-09-30: it is the
+      // ENGLISH word in "Not for sale" / "Yes it's for sale", so those replies
+      // were detected as Spanish, and keyword detections are trusted by
+      // resolveThreadLanguage -- an English seller could be answered with a
+      // Spanish template. Real Spanish carries other words on this list.
+      "por supuesto", "órale", "ándale",
     ],
   },
   {
@@ -208,9 +213,14 @@ const LANGUAGE_PATTERNS = [
       "smettila di scrivermi", "toglimi dalla lista",
       "non mandarmi messaggi", "smettila di chiamarmi",
       "basta messaggi",
-      // Affirmations
+      // Affirmations. "ok" was removed 2026-09-30: it is not Italian evidence,
+      // and because Italian is checked before any English default, every
+      // English reply containing "ok" was detected as Italian. The template
+      // layer then failed closed (language_template_missing -- there are no
+      // Italian templates), so "Ok I am ready to sell." got no reply
+      // (+16122756497, 2026-09-30).
       "grazie", "capito", "va bene", "certo",
-      "certamente", "d'accordo", "sì", "ok",
+      "certamente", "d'accordo", "sì",
     ],
   },
   {
@@ -278,8 +288,9 @@ const LANGUAGE_PATTERNS = [
       "entferne mich von deiner liste",
       "schreib mir nicht mehr", "ruf mich nicht an",
       "keine nachrichten mehr", "aufhören",
-      // Affirmations
-      "danke", "verstanden", "ok", "gut", "in ordnung",
+      // Affirmations ("ok" removed 2026-09-30 -- not German evidence; see the
+      // Italian list above).
+      "danke", "verstanden", "gut", "in ordnung",
       "natürlich", "ja",
     ],
   },
@@ -4398,6 +4409,56 @@ function matchesSpanishTargetSwitch(text = "") {
   return includesAny(lower(text), SPANISH_TARGET_SWITCH_PHRASES);
 }
 
+// PURPOSE / IDENTITY QUESTIONS (2026-09-30 autopilot audit).
+//
+// Replies to a first-touch ownership text that ask who we are or what we want
+// fell through every list to unclear@0.60, and the classifier's own
+// human_review_required verdict then (correctly) forbade even the safe
+// clarifier -- so the seller got silence. Production, verbatim:
+//   "What can I do for you?"            (+12143662400, 2026-09-30)
+//   "Which company r u with"            (+16125886543, 2026-09-28)
+//   "Alex from where"                   (+16124233864, 2026-09-28)
+//   "You have been investing in what?"  (+16122756497, 2026-09-30)
+//   "You have been doing what 3635 Emerson ave n?"
+// Each is the same question as "who is this?", which already routes to the
+// approved identity template.
+//
+// EVERY PATTERN IS ANCHORED TO THE WHOLE MESSAGE (only a greeting/"yes"/"ok"
+// lead-in is tolerated). A question riding alongside anything else -- a
+// decline, profanity, a price, an opt-out -- does not match, so this can never
+// hide a second clause behind the identity route. "What do you want for it?"
+// (an offer ask) and "What do you want from me generally" (a frozen
+// calibration negative) are deliberately NOT matched. Classifying the
+// question authorizes nothing by itself: the reply still has to clear the
+// executor's mode/scope, suppression, duplicate, approved-template, property
+// compatibility, V2 safety, runtime-brake and queue-time guards exactly like
+// any other who_is_this turn.
+const PURPOSE_OR_IDENTITY_QUESTION_PATTERNS = [
+  // "What can I do for you?" / "How can I help you?" / "Yes, what can I help u with"
+  /^(?:(?:hi|hello|hey|yes|yeah|yep|ok|okay|sure)\b[\s,.!]*)?(?:what|how)\s+(?:can|may|could)\s+i\s+(?:do\s+for|help)\s+(?:you|u|ya)(?:\s+with)?(?:\s+today)?[\s?.!]*$/,
+  // "What do you want?" / "What do you want with me?" — the whole message only.
+  /^(?:(?:ok|okay|yes|yeah|so)\b[\s,.!]*)?what\s+(?:do|did)\s+(?:you|u|ya)\s+want(?:\s+(?:with|from)\s+me)?[\s?.!]*$/,
+  // "Which company are you with?" / "What company r u with" / "What company do you work for?"
+  /^(?:(?:hi|hello|hey|yes|yeah|ok|okay|and|so)\b[\s,.!]*)?(?:which|what)\s+(?:company|business|firm|agency|group)\s+(?:are|r|do|is)?\s*(?:you|u|ya|y'?all|this)(?:\s+(?:with|from|work\s+for|working\s+for|representing|part\s+of))?[\s?.!]*$/,
+  // "Alex from where" / "From where?"
+  /^(?:[a-z]+\s+)?from\s+where[\s?.!]*$/,
+  // "Where are you from?" / "Where r u located?" / "Where you at?"
+  /^where\s+(?:are\s+|r\s+)?(?:you|u|ya)\s+(?:from|located|based|at)[\s?.!]*$/,
+  // "You have been investing in what?" / "Investing in what?" /
+  // "You have been doing what 3635 Emerson ave n?" (echoing our own intro).
+  /^(?:(?:you|u)(?:\s+have|'ve)?\s+been\s+|(?:you|u)(?:\s+are|'re|\s+r)?\s+)?(?:investing\s+in|invest\s+in|doing)\s+what(?:\s+[^.!?]{1,60}\?)?[\s?.!]*$/,
+  // "Regarding what?" / "About what?" / "In reference to what?"
+  /^(?:regarding|about|re|in\s+reference\s+to|in\s+regards?\s+to)\s+what[\s?.!]*$/,
+  // "What's it about?" / "What is it regarding?" / "What is this for?"
+  /^what(?:'s|s|\s+is)\s+(?:it|this|that)\s+(?:about|regarding|in\s+reference\s+to|for)[\s?.!]*$/,
+];
+
+export function matchesPurposeOrIdentityQuestion(text = "") {
+  const t = lower(text).replace(/[’‘`]/g, "'").trim();
+  if (!t || wordCount(t) > 12) return false;
+  return PURPOSE_OR_IDENTITY_QUESTION_PATTERNS.some((re) => re.test(t));
+}
+
 // Intent families for the compound_intent meta-marker: a message whose
 // components span ≥2 of these families is a compound message whose full
 // component set must be preserved (never flattened to the primary alone).
@@ -5630,7 +5691,10 @@ function resolveIntents(
     "who are you", "do i know you", "conozco", "quien es", "quien habla",
     "how did you get my number", "where did you get my number",
     "identification", "identify",
-  ])) {
+  ]) || matchesPurposeOrIdentityQuestion(rawMessage)) {
+    // matchesPurposeOrIdentityQuestion: whole-message purpose questions
+    // ("What can I do for you?", "Which company r u with") -- see its
+    // definition for the 2026-09-30 production cases.
     intents.push("who_is_this");
   } else if (
     // Bare interrogative ("Why?" / "Porque?") is an identity challenge — but a
