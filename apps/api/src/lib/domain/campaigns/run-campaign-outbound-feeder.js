@@ -408,6 +408,10 @@ export async function feedCampaignBatch(campaign, deps = {}) {
           reason,
           stalled,
           skipped_counts_by_reason: result?.skipped_counts_by_reason || {},
+          // Why the refill placed what it didn't, in words and per market —
+          // the cockpit and readiness read it straight off the campaign.
+          skip_summary: result?.skip_summary || null,
+          routing_blocks_by_market: result?.routing_blocks_by_market || {},
           ...(inserted > 0 ? { last_refill_at: heartbeatAt } : { last_refill_at: metadata.feeder_last?.last_refill_at || null }),
         },
       },

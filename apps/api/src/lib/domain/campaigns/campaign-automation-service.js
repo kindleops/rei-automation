@@ -22,9 +22,21 @@ import {
 import {
   chooseTextgridNumber,
   evaluateCandidateEligibility,
+  countSendableSendersByMarket,
   getSupabaseFeederCandidates,
+  loadTextgridNumberFleet,
+  prefetchRecentTemplateHistory,
+  recentTemplateIdsFromHistory,
   renderOutboundTemplate,
 } from '@/lib/domain/outbound/supabase-candidate-feeder.js'
+import {
+  applyGraphFilter,
+  describeFilterExpansions,
+  graphColumnForField,
+  INAPPLICABLE_REASONS,
+  loadGraphColumnPopulation,
+  resolveGraphFilterPlan,
+} from '@/lib/domain/campaigns/campaign-graph-filter-plan.js'
 import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
 import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
@@ -203,7 +215,7 @@ function getCampaignFilterValue(filters = {}, key, fallback = null) {
   return fallback
 }
 
-function normalizeCampaignInput(payload = {}, existing = {}) {
+export function normalizeCampaignInput(payload = {}, existing = {}) {
   const filters = getTargetFilters(payload)
   const metadata = metadataObject(payload.metadata)
   const name = clean(payload.name || payload.campaign_name || existing.name || existing.campaign_name)
@@ -216,14 +228,18 @@ function normalizeCampaignInput(payload = {}, existing = {}) {
       DEFAULT_CANDIDATE_SOURCE
   )
 
+  // A payload that carries the targeting decides the market: it is the first
+  // market filter, or none. Falling back to the stored value kept a market the
+  // operator had removed (label/timezone only — it no longer narrows a build).
+  const carriesTargeting = hasCatalogFilterGroups(filters)
   const row = {
     ...(name ? { name } : {}),
     description: payload.description ?? existing.description ?? null,
     status: clean(payload.status || existing.status || 'draft') || 'draft',
     objective: objective || null,
     candidate_source: candidateSource,
-    market: clean(payload.market || extractMarketFromCatalogFilters(filters) || firstArrayValue(filters.markets) || existing.market) || null,
-    state: clean(payload.state || firstArrayValue(filters.states) || existing.state) || null,
+    market: clean(payload.market || extractMarketFromCatalogFilters(filters) || firstArrayValue(filters.markets) || (carriesTargeting ? '' : existing.market)) || null,
+    state: clean(payload.state || firstArrayValue(filters.states) || (carriesTargeting ? '' : existing.state)) || null,
     language_policy: clean(payload.language_policy || filters.language || existing.language_policy || 'auto') || 'auto',
     agent_persona: clean(payload.agent_persona || filters.agent_persona || existing.agent_persona) || null,
     daily_cap: optionalInt(payload.daily_cap ?? filters.daily_cap ?? existing.daily_cap),
@@ -246,7 +262,17 @@ function normalizeCampaignInput(payload = {}, existing = {}) {
       target_filters: filters,
       campaign_type: clean(payload.campaign_type || metadata.campaign_type) || null,
       template_use_case: clean(payload.template_use_case || filters.template_use_case || 'ownership_check') || 'ownership_check',
-      stage_code: clean(payload.stage_code || filters.stage_code || 'S1') || 'S1',
+      /**
+       * Canonical stage codes only (S1, S2…). The builder sends its own
+       * vocabulary ('first_touch'), which was saved verbatim; every reader
+       * then had to re-normalize it, and any that didn't matched no template.
+       * An update that doesn't mention the stage keeps the existing one
+       * instead of silently resetting it to S1.
+       */
+      stage_code: normalizeCampaignStageCode(
+        payload.stage_code || metadata.stage_code || filters.stage_code || existing.metadata?.stage_code,
+        'S1'
+      ),
       launch_timezone: clean(payload.metadata?.launch_timezone || payload.launch_timezone || metadata.launch_timezone || existing.metadata?.launch_timezone) || null,
       timezone: clean(payload.metadata?.timezone || payload.timezone || metadata.timezone || existing.metadata?.timezone) || null,
     },
@@ -1142,8 +1168,26 @@ function previewOptionsFromInput(input = {}, campaign = null) {
     received_source: sourcePlan.receivedSource,
     source_normalization_reason: sourcePlan.reason,
     source_warnings: sourcePlan.warnings,
-    market: clean(input.market || campaign?.market || firstArrayValue(mergedFilters.markets)) || null,
-    state: clean(input.state || campaign?.state || firstArrayValue(mergedFilters.states)) || null,
+    /**
+     * THE FILTERS THE OPERATOR SEES ARE THE ONLY NARROWING.
+     *
+     * A single top-level market/state (the first market chip, or whatever the
+     * campaign row last held) used to be applied ON TOP of the catalog filters
+     * as `market = X`. So "Miami, Chicago, Dallas, LA, Phoenix, Houston" built
+     * 854 targets, all Miami; and "75+ ACQ SCORE" — no market filter at all —
+     * built Miami only, because the campaign row still carried Miami from an
+     * earlier edit. Catalog campaigns narrow by their catalog filters alone
+     * (a market filter is one of them); the top-level value only narrows a
+     * campaign with no applicable catalog filter. Without that, a campaign
+     * whose filter groups are all empty ("LA - TEST") would build every seller
+     * in every market; with no market either, the build refuses.
+     */
+    market: catalogFilters.has_catalog_filters && catalogFilters.supported.length
+      ? null
+      : clean(input.market || campaign?.market || firstArrayValue(mergedFilters.markets)) || null,
+    state: catalogFilters.has_catalog_filters && catalogFilters.supported.length
+      ? null
+      : clean(input.state || campaign?.state || firstArrayValue(mergedFilters.states)) || null,
     scan_limit: Math.max(1, Math.min(effectiveScanLimit, 5000)),
     target_limit: Math.max(1, Math.min(targetLimit, 5000)),
     template_use_case: clean(input.template_use_case || metadata.template_use_case || campaign?.objective || mergedFilters.template_use_case || 'ownership_check') || 'ownership_check',
@@ -3428,76 +3472,12 @@ const CAMPAIGN_TARGET_GRAPH_COMPAT_SELECT = CAMPAIGN_TARGET_GRAPH_SELECT
 const CAMPAIGN_TARGET_GRAPH_PAGE_SIZE = 1000
 const CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT = 5000
 const CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT = 100000
-const CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS = Object.freeze({
-  'properties.property_id': 'property_id',
-  'properties.market': 'market',
-  'properties.property_state': 'state',
-  'properties.property_address_state': 'state',
-  'properties.property_zip': 'property_zip',
-  'properties.property_address_zip': 'property_zip',
-  'properties.property_address_city': 'property_city',
-  'properties.property_county_name': 'property_county_name',
-  'properties.property_address_county_name': 'property_county_name',
-  'properties.property_type': 'property_type',
-  'properties.property_class': 'property_class',
-  'properties.units': 'units_count',
-  'properties.units_count': 'units_count',
-  'properties.tax_delinquent': 'tax_delinquent',
-  'properties.active_lien': 'active_lien',
-  'properties.property_flags_text': 'property_flags_text',
-  'properties.building_condition': 'building_condition',
-  'properties.rehab_level': 'rehab_level',
-  'properties.owner_type': 'owner_type',
-  'properties.owner_type_guess': 'owner_type_guess',
-  'properties.is_corporate_owner': 'is_corporate_owner',
-  'properties.out_of_state_owner': 'out_of_state_owner',
-  'properties.estimated_value': 'estimated_value',
-  'properties.equity_amount': 'equity_amount',
-  'properties.equity_percent': 'equity_percent',
-  'properties.cash_offer': 'cash_offer',
-  'properties.final_acquisition_score': 'acquisition_score',
-  'properties.structured_motivation_score': 'acquisition_score',
-  'properties.deal_strength_score': 'acquisition_score',
-  'properties.tag_distress_score': 'acquisition_score',
-  'properties.seller_tags_text': 'podio_tags',
-  'properties.podio_tags': 'podio_tags',
-  'prospects.language_preference': 'language',
-  'prospects.age_bucket': 'age_bucket',
-  'prospects.education_model': 'education_model',
-  'prospects.occupation_group': 'occupation_group',
-  'prospects.est_household_income': 'income',
-  'prospects.gender': 'gender',
-  'prospects.marital_status': 'marital_status',
-  'prospects.net_asset_value': 'net_asset_value',
-  'prospects.buying_power': 'buying_power',
-  'prospects.timezone': 'timezone',
-  'prospects.contact_window': 'contact_window',
-  'prospects.sms_eligible': 'sms_eligible',
-  'prospects.email_eligible': 'email_eligible',
-  'prospects.matching_flags': 'matching_flags_text',
-  'prospects.person_flags_text': 'matching_flags_text',
-  'prospects.seller_tags_text': 'podio_tags',
-  'master_owners.owner_type_guess': 'owner_type_guess',
-  'master_owners.priority_tier': 'priority_tier',
-  'master_owners.follow_up_cadence': 'follow_up_cadence',
-  'master_owners.priority_score': 'acquisition_score',
-  'phones.phone_owner': 'phone_owner',
-  'phones.activity_status': 'phone_activity_status',
-  'phones.usage_12_months': 'usage_12_months',
-  'phones.usage_2_months': 'usage_2_months',
-  'outreach.never_contacted': 'never_contacted',
-  'outreach.last_outbound_at': 'last_outbound_at',
-  'outreach.last_sms_at': 'last_outbound_at',
-  'outreach.last_touch_at': 'latest_contact_at',
-  'outreach.touch_count': 'touch_count',
-  'outreach.current_touch_number': 'current_touch_number',
-  'outreach.true_post_contact_suppression': 'true_post_contact_suppression',
-  'outreach.pending_prior_touch': 'pending_prior_touch',
-  'sender_coverage.routing_allowed': 'sender_covered',
-  'sender_coverage.routing_tier': 'routing_tier',
-  'sender_coverage.selected_textgrid_market': 'sender_market',
-  'sender_coverage.selected_textgrid_state': 'state',
-})
+/**
+ * Field → audience column mapping and every audience predicate live in
+ * campaign-graph-filter-plan.js — the one place Reach, Build and the builder's
+ * field list read. (This file kept its own copy, with metric substitutions and
+ * whole-string equality on ';'-joined tag lists.)
+ */
 
 async function readCampaignGraphRefreshStatus(supabase) {
   if (!supabase) {
@@ -3559,55 +3539,40 @@ async function readCampaignGraphRefreshStatus(supabase) {
   }
 }
 
-function graphFilterColumn(filter = {}) {
-  const fieldKey = clean(filter.field_key || filter.fieldKey || filter.field)
-  if (CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS[fieldKey]) return CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS[fieldKey]
-  const field = filter.fieldDefinition || getCampaignFieldDefinition(fieldKey)
-  if (!field) return null
-  const column = field.key?.split('.').pop()
-  return CAMPAIGN_TARGET_GRAPH_FILTER_COLUMNS[`${field.domain}.${column}`] || null
-}
-
 function graphApplicationColumn(filter = {}) {
-  const fieldKey = clean(filter.field_key || filter.fieldKey || filter.field)
-  if (fieldKey === 'sender_coverage.sender_coverage_status') return 'sender_covered'
-  if (fieldKey === 'outreach.duplicate_queue_status') return 'active_queue_item'
-  return graphFilterColumn(filter)
+  return graphColumnForField(filter)
 }
 
-function resolveCatalogFiltersForTargetGraph(catalogFilters = {}) {
-  const supported = []
-  const mappingUnsupported = []
-
-  for (const filter of catalogFilters.supported || []) {
-    const graphColumn = graphApplicationColumn(filter)
-    const normalized = {
-      ...filter,
-      graph_column: graphColumn || null,
-      preview_column: graphColumn || null,
-      preview_columns: graphColumn ? [graphColumn] : [],
-      preview_mapping: {
-        field_key: filter.field_key,
-        graph_column: graphColumn || null,
-        preview_column: graphColumn || null,
-        preview_columns: graphColumn ? [graphColumn] : [],
-      },
-    }
-    if (graphColumn) {
-      supported.push({
-        ...normalized,
-        applied_in_preview: true,
-      })
-    } else {
-      mappingUnsupported.push({
-        ...publicFilter(normalized),
-        supported_in_preview: false,
-        applied_in_preview: false,
-        unsupported_reason: 'missing_campaign_target_graph_column_mapping',
-        message: 'Filter applied but no graph column mapping found.',
-      })
-    }
-  }
+/**
+ * Resolve catalog filters against the audience: applicable ones carry their
+ * column; the rest are reported with the reason they can't narrow a campaign
+ * (no audience column, or no audience data). Preview reports them; Build
+ * refuses them — neither ever applies a different predicate than the other.
+ */
+function resolveCatalogFiltersForTargetGraph(catalogFilters = {}, { population = null } = {}) {
+  const plan = resolveGraphFilterPlan(catalogFilters.supported || [], { population })
+  const supported = plan.applicable.map((filter) => ({
+    ...filter,
+    preview_column: filter.graph_column,
+    preview_columns: [filter.graph_column],
+    preview_mapping: {
+      field_key: filter.field_key,
+      graph_column: filter.graph_column,
+      preview_column: filter.graph_column,
+      preview_columns: [filter.graph_column],
+    },
+    applied_in_preview: true,
+  }))
+  const inapplicable = plan.inapplicable.map((filter) => ({
+    ...publicFilter(filter),
+    label: filter.label,
+    supported_in_preview: false,
+    applied_in_preview: false,
+    campaign_applicable: false,
+    unsupported_reason: filter.reason,
+    reason: filter.reason,
+    message: `Not applied: ${filter.message}`,
+  }))
 
   const unsupported = [
     ...(catalogFilters.unsupported || []).map((filter) => ({
@@ -3615,16 +3580,16 @@ function resolveCatalogFiltersForTargetGraph(catalogFilters = {}) {
       supported_in_preview: false,
       applied_in_preview: false,
       unsupported_reason: filter.unsupported_reason || 'unsupported_in_target_graph',
-      message: filter.message || 'Filter applied but no graph column mapping found.',
+      message: filter.message || `Not applied: ${INAPPLICABLE_REASONS.not_in_audience}`,
     })),
-    ...mappingUnsupported,
+    ...inapplicable,
   ]
   const unknown = (catalogFilters.unknown || []).map((filter) => ({
     ...publicFilter(filter),
     supported_in_preview: false,
     applied_in_preview: false,
     unsupported_reason: 'unknown_campaign_field',
-    message: 'Filter applied but no graph column mapping found.',
+    message: `Not applied: ${INAPPLICABLE_REASONS.unknown_field}`,
   }))
 
   return {
@@ -3632,6 +3597,7 @@ function resolveCatalogFiltersForTargetGraph(catalogFilters = {}) {
     unknown,
     supported,
     unsupported,
+    inapplicable,
     applied: [
       ...supported.map(publicFilter),
       ...unsupported,
@@ -3642,42 +3608,15 @@ function resolveCatalogFiltersForTargetGraph(catalogFilters = {}) {
   }
 }
 
-function graphBooleanValue(value) {
-  const text = lower(value)
-  if (['true', '1', 'yes', 'covered', 'active_queue_item'].includes(text)) return true
-  if (['false', '0', 'no', 'clear', 'no route', 'no_route'].includes(text)) return false
-  return null
-}
-
-function applyGraphStatusFilter(query, filter = {}, column) {
-  const operator = normalizePreviewOperator(filter.operator || 'eq', filter.fieldDefinition || getCampaignFieldDefinition(filter.field_key))
-  const values = filterScalarValues({ ...filter, operator })
-  if (operator === 'is_empty') return query.is(column, null)
-  if (operator === 'is_not_empty') return query.not(column, 'is', null)
-  if (operator === 'is_true') return query.eq(column, true)
-  if (operator === 'is_false') return query.eq(column, false)
-  const bools = values.map(graphBooleanValue).filter((value) => value !== null)
-  if (!bools.length) return query
-  if (operator === 'is_not_any_of') return query.not(column, 'in', `(${bools.join(',')})`)
-  if (bools.length === 1) return query.eq(column, bools[0])
-  return query.in(column, [...new Set(bools)])
-}
-
-function applyCampaignGraphCatalogFilter(query, filter = {}, warnings = []) {
-  const fieldKey = clean(filter.field_key)
-  if (fieldKey === 'sender_coverage.sender_coverage_status') {
-    return applyGraphStatusFilter(query, filter, 'sender_covered')
-  }
-  if (fieldKey === 'outreach.duplicate_queue_status') {
-    return applyGraphStatusFilter(query, filter, 'active_queue_item')
-  }
-
-  const column = graphFilterColumn(filter)
-  if (!column) {
-    warnings.push(`campaign_target_graph_filter_not_materialized:${fieldKey || 'unknown'}`)
-    return query
-  }
-  return applySupabaseFilterToColumn(query, filter, column)
+/**
+ * Which audience columns carry any data (cached probe). Only against the
+ * production client: a caller that injects its own client (tests, scripts)
+ * passes `graphColumnPopulation` itself or gets mapping-only answers.
+ */
+async function resolveGraphColumnPopulation(deps = {}) {
+  if (deps.graphColumnPopulation instanceof Map) return deps.graphColumnPopulation
+  if (deps.supabase) return null
+  return loadGraphColumnPopulation(defaultSupabase).catch(() => null)
 }
 
 function applyInFilter(query, column, values, normalizer = clean) {
@@ -3748,8 +3687,10 @@ function applyCampaignGraphFilters(query, options = {}, warnings = [], { require
   if (options.market) query = query.eq('market', options.market)
   if (options.state) query = query.eq('state', normalizeState(options.state))
   query = applyCampaignGraphLegacyFilters(query, options.filters || {})
+  // Only filters the plan resolved as applicable reach here (see
+  // resolveCatalogFiltersForTargetGraph); one predicate for Reach and Build.
   for (const filter of options.catalog_filters?.supported || []) {
-    query = applyCampaignGraphCatalogFilter(query, filter, warnings)
+    query = applyGraphFilter(query, filter)
   }
   if (requireQueueEligible) query = query.eq('queue_eligible', true)
   return query
@@ -3798,6 +3739,10 @@ async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEl
       .order('queue_eligible', { ascending: false, nullsFirst: false })
       .order('acquisition_score', { ascending: false, nullsFirst: false })
       .order('best_phone_score', { ascending: false, nullsFirst: false })
+      // A total order: without the key, ~65k rows tie on a NULL score, so
+      // range pages could repeat or skip rows and two reads of the same
+      // audience (Reach, then Build) could pick different sellers.
+      .order('graph_id', { ascending: true })
       .range(offset, Math.min(offset + CAMPAIGN_TARGET_GRAPH_PAGE_SIZE - 1, cappedLimit - 1))
     query = applyCampaignGraphFilters(query, options, warnings, { requireQueueEligible })
     const { data, error } = await query
@@ -3876,7 +3821,11 @@ async function countAddressableProperties({ supabase, options }) {
       approximate = true
       continue
     }
-    query = applySupabaseFilterToColumn(query, filter, column)
+    // Same predicate as the audience (property-type families included), so
+    // the addressable universe and the matched audience count one thing.
+    query = key === 'properties.property_type'
+      ? applyGraphFilter(query, { ...filter, graph_column: column })
+      : applySupabaseFilterToColumn(query, filter, column)
   }
 
   const { count, error } = await query
@@ -4386,16 +4335,65 @@ function graphAppliedFilterSummary(options = {}) {
   ]
 }
 
+/** The send limit a build would use, as Reach must simulate it. */
+export const DEFAULT_PREVIEW_BUILD_LIMIT = 1000
+
+export function resolvePreviewBuildLimit(input = {}, campaign = null) {
+  const requested = asPositiveInteger(
+    input.build_limit ?? input.max_targets ?? input.total_cap ?? campaign?.total_cap,
+    DEFAULT_PREVIEW_BUILD_LIMIT
+  ) || DEFAULT_PREVIEW_BUILD_LIMIT
+  const simulated = Math.max(1, Math.min(requested, CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT))
+  return { requested, simulated, capped_by_preview: simulated < requested }
+}
+
+/**
+ * Reach's answer, computed the way Build computes it (planCampaignTargetRows)
+ * plus whether a sender can carry each ready seller's first text today (the
+ * planner's own router). Read-only.
+ */
+async function simulateCampaignBuild({ campaign, options, graph, buildLimit, deps }) {
+  try {
+    const planned = await planCampaignTargetRows({
+      campaign,
+      options,
+      graph,
+      targetLimit: buildLimit.simulated,
+      deps,
+      resolveLanguages: false,
+    })
+    const readyRows = planned.rows.filter((row) => row.target_status === 'ready')
+    const { evaluateAudienceSenderCoverage } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
+    const senders = await evaluateAudienceSenderCoverage(readyRows, deps).catch(() => null)
+    return {
+      ok: true,
+      source: 'build_simulation',
+      eligible_in_audience: Number(graph.readyToQueue || 0),
+      requested_limit: buildLimit.requested,
+      simulated_limit: buildLimit.simulated,
+      capped_by_preview: buildLimit.capped_by_preview,
+      ...planned.summary,
+      sendable_now: senders ? senders.sendable_now : null,
+      no_sendable_number: senders ? senders.no_sendable_number : null,
+      sender_markets: senders ? senders.markets : [],
+    }
+  } catch (error) {
+    return { ok: false, source: 'build_simulation', error: errorMessage(error) }
+  }
+}
+
 async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
   const startedAt = Date.now()
   const supabase = deps.supabase || defaultSupabase
   const campaign = input.campaign || null
   const baseOptions = previewOptionsFromInput(input, campaign)
+  const population = await resolveGraphColumnPopulation(deps)
   const options = {
     ...baseOptions,
-    catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters),
+    catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population }),
   }
   options.target_limit = Math.max(1, Math.min(options.target_limit || CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT, CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT))
+  const buildLimit = resolvePreviewBuildLimit(input, campaign)
 
   if (!supabase) {
     return {
@@ -4406,11 +4404,12 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     }
   }
 
+  // The same rows Build reads: queue-eligible, same order, same limit.
   const graph = await summarizeCampaignGraph({
     supabase,
     options,
-    rowLimit: options.target_limit,
-    requireQueueEligibleRows: false,
+    rowLimit: buildLimit.simulated,
+    requireQueueEligibleRows: true,
   })
   const warnings = uniqueClean([
     ...(options.source_warnings || []),
@@ -4518,6 +4517,7 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     }, diagnostics, options.include_diagnostics)
   }
 
+  const buildSimulation = await simulateCampaignBuild({ campaign, options, graph, buildLimit, deps })
   const queueableRows = (graph.rows || []).filter((row) => row.queue_eligible)
   const targetRows = queueableRows
     .slice(0, options.target_limit)
@@ -4666,8 +4666,22 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     addressable_properties_approximate: Boolean(graph.addressableApproximate),
     addressable_source: graph.addressableSource || 'properties_universe',
     funnel: audienceFunnel,
-    headline_metric: 'ready_to_queue',
-    headline_count: graph.readyToQueue,
+    headline_metric: buildSimulation.ok ? 'build_simulation.ready' : 'ready_to_queue',
+    headline_count: buildSimulation.ok ? buildSimulation.ready : graph.readyToQueue,
+    /**
+     * What Build will produce with these filters and this send limit — the
+     * number Reach leads with. ready_to_queue stays the graph's
+     * queue-eligible count (the audience before the limit, the one-per-phone
+     * collapse and the review/identity holds).
+     */
+    build_simulation: buildSimulation,
+    filter_notes: describeFilterExpansions(options.catalog_filters.supported || []),
+    inapplicable_filters: (options.catalog_filters.inapplicable || []).map((filter) => ({
+      field_key: filter.field_key,
+      label: filter.label,
+      reason: filter.reason,
+      message: filter.message,
+    })),
     blocked: blockedSummary,
     distributions,
     sampleTargets,
@@ -6095,6 +6109,104 @@ export async function deleteCampaign(campaignId, deps = {}) {
   }
 }
 
+/**
+ * THE ROWS A BUILD WRITES — computed without writing.
+ *
+ * Build and Reach both call this, so "ready to message" on the Reach step is
+ * the number Build will actually produce: the same queue-eligible graph rows
+ * (same filters, same order, same limit), the same entity-contact review
+ * holds, the same one-recipient-per-phone collapse and the same readiness
+ * rules. Reach used to show the graph's queue-eligible count (4,771) while the
+ * build capped at the campaign limit (1,000), collapsed to 949 recipients and
+ * held 410 for review/identity — 539 ready.
+ */
+export async function planCampaignTargetRows({ campaign = null, options = {}, graph = {}, targetLimit, deps = {}, resolveLanguages = true } = {}) {
+  const limit = Math.max(1, Number(targetLimit) || CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT)
+  const touchNumber = asPositiveInteger(options.stage_touch ?? options.touch_number ?? campaign?.metadata?.stage_touch, 1) || 1
+  const eligibleRows = (graph.rows || []).filter((row) => row.queue_eligible).map((row) => ({ ...row }))
+
+  /**
+   * Entity-contact review flags, in ONE set-based call for the whole
+   * candidate set. The graph does not project `requires_review`, and without
+   * it an entity contact the canonical source says needs review becomes
+   * campaign-ready.
+   */
+  const { fetchEntityContactReviewBlocks, fetchCanonicalLanguages } =
+    await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
+  const [entityReview, languages] = await Promise.all([
+    fetchEntityContactReviewBlocks(eligibleRows.map((row) => row.property_id), deps),
+    /**
+     * The graph has no language at all, but the seller's language IS
+     * canonical on prospects/master_owners under keys the graph carries.
+     * Resolved here, set-based, so a Spanish-speaking owner is not handed an
+     * English template by default. Unknown stays unknown — nothing is
+     * written back to the graph. (Reach skips it: language never changes
+     * whether a target is ready.)
+     */
+    resolveLanguages ? fetchCanonicalLanguages(eligibleRows, deps) : Promise.resolve(null),
+  ])
+  for (const row of eligibleRows) {
+    row.entity_contact_requires_review = entityReview.blocked.has(clean(row.property_id))
+    if (languages) {
+      const resolvedLanguage = languages.resolve(row)
+      row.resolved_language = resolvedLanguage.language
+      row.resolved_language_source = resolvedLanguage.source
+    }
+  }
+  const { collapseGraphRowsToRecipients } = await import('@/lib/domain/campaigns/campaign-recipient-dedup.js')
+  const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(eligibleRows, { touch_number: touchNumber })
+  const rows = recipients
+    .slice(0, limit)
+    .map((row, index) => {
+      const snapshot = buildTargetSnapshotFromGraphRow(campaign, row, index, options)
+      return {
+        ...snapshot,
+        campaign_id: campaign?.id || null,
+        campaign_name: campaign?.name || null,
+        source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
+        daily_cap: campaign?.daily_cap,
+        touch_number: row.touch_number || touchNumber,
+        matched_property_count: row.matched_property_count || 1,
+        portfolio_property_ids: row.portfolio_property_ids || [],
+        primary_property_id: row.primary_property_id || row.property_id || null,
+        recipient_dedup_key: row.recipient_dedup_key || null,
+        property_id: row.primary_property_id || snapshot.property_id,
+        metadata: {
+          ...metadataObject(snapshot.metadata),
+          recipient_dedup: {
+            matched_property_count: row.matched_property_count || 1,
+            portfolio_property_ids: row.portfolio_property_ids || [],
+            primary_property_id: row.primary_property_id || null,
+            ambiguous_phone_ownership: Boolean(row.ambiguous_phone_ownership),
+          },
+          dedup_stats: index === 0 ? dedupStats : undefined,
+        },
+      }
+    })
+
+  const heldByReason = {}
+  let ready = 0
+  for (const row of rows) {
+    if (row.target_status === 'ready') ready += 1
+    else increment(heldByReason, clean(row.block_reason) || 'blocked')
+  }
+  return {
+    rows,
+    summary: {
+      queue_eligible_rows_read: eligibleRows.length,
+      recipients: recipients.length,
+      duplicate_phones_collapsed: Math.max(0, eligibleRows.length - recipients.length),
+      built: rows.length,
+      ready,
+      held: rows.length - ready,
+      held_by_reason: heldByReason,
+      limit,
+      limited: recipients.length > rows.length,
+      entity_review_held: Number(heldByReason.entity_contact_requires_review || 0),
+    },
+  }
+}
+
 export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const detail = await getCampaign(campaignId, deps)
@@ -6117,6 +6229,9 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       limit: targetLimit,
     }, campaign)
     options.target_limit = targetLimit
+    options.catalog_filters = resolveCatalogFiltersForTargetGraph(options.catalog_filters, {
+      population: await resolveGraphColumnPopulation(deps),
+    })
 
     /**
      * A DROPPED FILTER MUST NOT BUILD THE WHOLE UNIVERSE.
@@ -6144,10 +6259,20 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
      * the operator one error message, and not refusing silently points a
      * campaign at the entire corpus.
      */
-    const droppedFilters = options.catalog_filters?.dropped || []
+    /**
+     * A filter row with no value narrows nothing in Reach and nothing here —
+     * refusing on it made "Schedule" fail for a blank row Reach had ignored.
+     * Every filter that WOULD narrow but can't be applied (unknown field, no
+     * audience column, no audience data) is refused, by name and reason.
+     */
+    const droppedFilters = [
+      ...(options.catalog_filters?.dropped || []).filter((filter) => filter.reason !== 'empty_filter_value'),
+      ...(options.catalog_filters?.inapplicable || [])
+        .filter((filter) => !(options.catalog_filters?.dropped || []).some((dropped) => dropped.field_key === filter.field_key)),
+    ]
     if (droppedFilters.length > 0) {
       const detailLines = droppedFilters
-        .map((filter) => `${filter.field_key || filter.fieldKey} (${filter.reason || 'unsupported'})`)
+        .map((filter) => `${filter.label || filter.field_key || filter.fieldKey} (${filter.message ? filter.message.replace(/^Not applied: /, '') : filter.reason || 'unsupported'})`)
       await finishCampaignRun(run.id, {
         status: 'failed',
         total_scanned: 0,
@@ -6166,10 +6291,45 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
         ok: false,
         status: 422,
         error: 'unresolved_target_filters',
-        message: `Refusing to build targets: ${detailLines.join(', ')}. `
-          + 'Building with an unresolved filter would target every reachable record.',
+        message: `Refusing to build targets: ${detailLines.join('; ')}. `
+          + 'Remove these filters (or choose fields the campaign audience carries) — building without them would target more sellers than you chose.',
         campaign_id: campaignId,
         dropped_filters: droppedFilters,
+        built_count: 0,
+        no_send_queue_rows_created: true,
+      }
+    }
+
+    // No applicable filter and no market or state: the build would target
+    // every seller in every market. Refused by name, like a dropped filter.
+    if (
+      !isInternalCanaryAudienceRequested(options)
+      && options.catalog_filters?.has_catalog_filters
+      && !(options.catalog_filters?.supported || []).length
+      && !clean(options.market)
+      && !clean(options.state)
+    ) {
+      await finishCampaignRun(run.id, {
+        status: 'failed',
+        total_scanned: 0,
+        targets_clean: 0,
+        ready_to_queue: 0,
+        blocked_counts: {},
+        metadata: { refused: 'campaign_has_no_targeting' },
+      }, deps)
+      await recordCampaignEvent({
+        campaign_id: campaignId,
+        run_id: run.id,
+        event_type: 'campaign.targets_build_refused',
+        payload: { reason: 'campaign_has_no_targeting' },
+      }, deps)
+      return {
+        ok: false,
+        status: 422,
+        error: 'campaign_has_no_targeting',
+        message: 'This campaign has no filters and no market, so it would target every seller in every market. '
+          + 'Add at least one filter (Market, for example) and schedule again.',
+        campaign_id: campaignId,
         built_count: 0,
         no_send_queue_rows_created: true,
       }
@@ -6241,65 +6401,9 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       }
     }
 
+    const planned = await planCampaignTargetRows({ campaign, options, graph, targetLimit, deps })
+    const rows = planned.rows.map((row) => ({ ...row, campaign_id: campaignId }))
     await supabase.from('campaign_targets').delete().eq('campaign_id', campaignId)
-    const { collapseGraphRowsToRecipients } = await import('@/lib/domain/campaigns/campaign-recipient-dedup.js')
-    const touchNumber = asPositiveInteger(options.stage_touch ?? options.touch_number ?? campaign.metadata?.stage_touch, 1) || 1
-    const eligibleRows = (graph.rows || []).filter((row) => row.queue_eligible)
-
-    /**
-     * Entity-contact review flags, in ONE set-based call for the whole
-     * candidate set. The graph does not project `requires_review`, and without
-     * it an entity contact the canonical source says needs review becomes
-     * campaign-ready.
-     */
-    const { fetchEntityContactReviewBlocks, fetchCanonicalLanguages } =
-      await import('@/lib/domain/campaigns/campaign-recipient-metrics.js')
-    const [entityReview, languages] = await Promise.all([
-      fetchEntityContactReviewBlocks(eligibleRows.map((row) => row.property_id), deps),
-      /**
-       * The graph has no language at all, but the seller's language IS
-       * canonical on prospects/master_owners under keys the graph carries.
-       * Resolved here, set-based, so a Spanish-speaking owner is not handed an
-       * English template by default. Unknown stays unknown — nothing is
-       * written back to the graph.
-       */
-      fetchCanonicalLanguages(eligibleRows, deps),
-    ])
-    for (const row of eligibleRows) {
-      row.entity_contact_requires_review = entityReview.blocked.has(clean(row.property_id))
-      const resolvedLanguage = languages.resolve(row)
-      row.resolved_language = resolvedLanguage.language
-      row.resolved_language_source = resolvedLanguage.source
-    }
-    const { recipients, stats: dedupStats } = collapseGraphRowsToRecipients(eligibleRows, { touch_number: touchNumber })
-    const rows = recipients
-      .slice(0, targetLimit)
-      .map((row, index) => {
-        const snapshot = buildTargetSnapshotFromGraphRow(campaign, row, index, options)
-        return {
-          ...snapshot,
-          campaign_id: campaignId,
-          campaign_name: campaign.name,
-          source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
-          daily_cap: campaign.daily_cap,
-          touch_number: row.touch_number || touchNumber,
-          matched_property_count: row.matched_property_count || 1,
-          portfolio_property_ids: row.portfolio_property_ids || [],
-          primary_property_id: row.primary_property_id || row.property_id || null,
-          recipient_dedup_key: row.recipient_dedup_key || null,
-          property_id: row.primary_property_id || snapshot.property_id,
-          metadata: {
-            ...metadataObject(snapshot.metadata),
-            recipient_dedup: {
-              matched_property_count: row.matched_property_count || 1,
-              portfolio_property_ids: row.portfolio_property_ids || [],
-              primary_property_id: row.primary_property_id || null,
-              ambiguous_phone_ownership: Boolean(row.ambiguous_phone_ownership),
-            },
-            dedup_stats: index === 0 ? dedupStats : undefined,
-          },
-        }
-      })
 
     let inserted = 0
     for (let i = 0; i < rows.length; i += 500) {
@@ -6350,6 +6454,8 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       campaign_id: campaignId,
       built_count: inserted,
       no_send_queue_rows_created: true,
+      // Ready / held by reason, exactly as written — the preflight shows it.
+      build_summary: planned.summary,
       preview: {
         total_scanned: graph.totalMatched,
         clean_targets: graph.cleanTargets,
@@ -7201,6 +7307,193 @@ export function resolveCampaignQueueWriteMode(input = {}, campaign = null) {
   }
 }
 
+/** How many skipped targets a launch event carries as examples. */
+const PLAN_EVENT_SKIP_SAMPLE = 10
+
+/** Skip reasons that all mean "no sender could carry this seller". */
+const SENDER_SKIP_REASONS = Object.freeze([
+  'sender_blocked_by_operator',
+  'local_senders_unavailable',
+  'no_local_sender_number',
+  'missing_selected_sender_number',
+  'routing_blocked',
+  'ROUTING_BLOCKED',
+  'NO_VALID_TEXTGRID_NUMBER',
+])
+
+const PLAN_SKIP_LABELS = Object.freeze({
+  sender_blocked_by_operator: 'sender blocked by operator',
+  local_senders_unavailable: 'no local sender available',
+  no_local_sender_number: 'no sender number in their market',
+  ROUTING_BLOCKED: 'no approved sender route',
+  NO_VALID_TEXTGRID_NUMBER: 'no active sender number',
+  TEMPLATE_RENDER_LINT_FAILURE: 'message failed the template check',
+  NO_TEMPLATE: 'no approved message',
+  template_blocked_by_operator: 'message blocked by operator',
+  active_queue_row_exists: 'already queued',
+  prior_contacted_suppression: 'already contacted',
+  graph_suppression_or_queue_block: 'suppressed',
+  duplicate_phone_in_launch_batch: 'duplicate phone',
+  per_sender_cap_reached: 'sender daily cap reached',
+  per_market_cap_reached: 'market cap reached',
+  schedule_window_full: 'contact window full today',
+  missing_prospect_id: 'no resolved person',
+  missing_to_phone_number: 'no phone',
+})
+
+const SENDER_STATE_LABELS = Object.freeze({
+  blocked_by_operator: 'blocked by operator',
+  status_paused: 'paused',
+  health_cooling: 'cooling',
+  cooling_until: 'cooling',
+  daily_limit_reached: 'at its daily limit',
+})
+
+/**
+ * Routing failures, named by what fixes them. The router reports a bare
+ * ROUTING_BLOCKED; the plan says whether the local numbers are blocked by an
+ * operator, unavailable (paused / cooling / capped), or absent.
+ */
+function routingSkipReason(routing = {}) {
+  switch (routing.routing_block_reason) {
+    case 'LOCAL_NUMBERS_BLOCKED_BY_OPERATOR': return 'sender_blocked_by_operator'
+    case 'LOCAL_NUMBERS_UNAVAILABLE': return 'local_senders_unavailable'
+    case 'NO_VALID_LOCAL_TEXTGRID_NUMBER': return 'no_local_sender_number'
+    default: return routing.reason_code || routing.routing_block_reason || 'routing_blocked'
+  }
+}
+
+function summarizeLocalSenders(inventory = []) {
+  return (Array.isArray(inventory) ? inventory : []).slice(0, 10).map((entry) => ({
+    phone_number: entry.phone_number || null,
+    state: entry.unavailable_reason || 'available',
+  }))
+}
+
+function noteRoutingBlock(byMarket, market, reason, routing = {}) {
+  const key = clean(market) || 'Unknown market'
+  if (!byMarket[key] && Object.keys(byMarket).length >= 25) return
+  const entry = byMarket[key] || (byMarket[key] = { targets: 0, reason, senders: summarizeLocalSenders(routing.local_sender_inventory) })
+  entry.targets += 1
+}
+
+/** "84 sender blocked by operator (Miami, FL: +1305… blocked by operator; +1786… cooling)" */
+export function describePlanSkips(skippedCounts = {}, routingBlocksByMarket = {}) {
+  const top = Object.entries(skippedCounts || {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((left, right) => Number(right[1]) - Number(left[1]))
+    .slice(0, 3)
+  if (!top.length) return ''
+  return top.map(([reason, count]) => {
+    const label = PLAN_SKIP_LABELS[reason] || reason.replace(/_/g, ' ').toLowerCase()
+    const markets = Object.entries(routingBlocksByMarket || {})
+      .filter(([, entry]) => entry.reason === reason)
+      .slice(0, 3)
+      .map(([market, entry]) => {
+        const senders = (entry.senders || [])
+          .map((sender) => `${sender.phone_number} ${SENDER_STATE_LABELS[sender.state] || String(sender.state || '').replace(/_/g, ' ')}`)
+          .join('; ')
+        return senders ? `${market}: ${senders}` : market
+      })
+    return `${count} ${label}${markets.length ? ` (${markets.join(' | ')})` : ''}`
+  }).join(', ')
+}
+
+/**
+ * Reads a plan would otherwise repeat for every target, done once: the sender
+ * fleet, the template pool per (use case, language) and the cohort's recent
+ * template history. A dry-run plan of 539 targets made ~2,000 round trips and
+ * outlived the dashboard's two-minute request ("Couldn't verify messages").
+ * Test doubles supplied through deps always win.
+ */
+async function buildQueuePlanReadDeps(readyTargets = [], caps = {}, deps = {}, { fullCohort = false } = {}) {
+  const planDeps = { ...deps }
+  if (!Array.isArray(deps.textgridNumberRows) && typeof deps.chooseTextgridNumber !== 'function') {
+    const fleet = await loadTextgridNumberFleet(deps).catch(() => null)
+    if (Array.isArray(fleet)) planDeps.textgridNumberRows = fleet
+  }
+  if (!(deps.templateFetchCache instanceof Map)) planDeps.templateFetchCache = new Map()
+  if (typeof deps.getRecentTemplateIds !== 'function') {
+    // The loop stops once the plan is full, so read ahead only as far as it is likely to go.
+    const reach = fullCohort
+      ? readyTargets.length
+      : Math.min(readyTargets.length, Math.max(300, Number(caps.effective_limit || 0) * 2))
+    const owners = readyTargets.slice(0, reach)
+      .map((target) => clean(target.master_owner_id || target.metadata?.candidate_snapshot?.master_owner_id))
+      .filter(Boolean)
+    const history = owners.length ? await prefetchRecentTemplateHistory(owners, deps).catch(() => null) : null
+    if (history) planDeps.getRecentTemplateIds = recentTemplateIdsFromHistory(history, deps)
+  }
+  return planDeps
+}
+
+/**
+ * THE ROLLING PLAN — how a campaign actually goes out.
+ *
+ * The worker places rows in batches (queue_run_limit, batch_max) and the
+ * feeder keeps refilling, so a campaign is not "sending to 50": every
+ * schedulable seller is messaged, at the pace the campaign allows. A day's
+ * sends are bounded by the daily cap, by how many spaced messages fit in the
+ * contact window (per timezone), and by how many texts the available sender
+ * numbers may carry (per_sender_cap each). The smallest bound is the pace.
+ */
+export function buildRollingPlan({
+  ready = 0,
+  schedulable = 0,
+  caps = {},
+  intervalSeconds = 60,
+  scheduleCampaign = {},
+  timezoneGroups = 1,
+  sendableSendersByMarket = null,
+  firstScheduledAt = null,
+  scheduledToday = 0,
+  pacedToLaterDays = 0,
+  fullCohort = false,
+} = {}) {
+  const startMin = parseTimeMinutes(scheduleCampaign.contact_window_start, 8 * 60)
+  const endMin = parseTimeMinutes(scheduleCampaign.contact_window_end, 21 * 60)
+  const windowMinutes = endMin > startMin ? endMin - startMin : (24 * 60 - startMin) + endMin
+  const spacing = Math.max(1, Number(intervalSeconds) || 60)
+  const windowCapacity = Math.max(1, Math.floor((windowMinutes * 60) / spacing)) * Math.max(1, Number(timezoneGroups) || 1)
+  const dailyCap = Number(caps.daily_cap) > 0 ? Number(caps.daily_cap) : null
+  const perSenderCap = Number(caps.per_sender_cap) > 0 ? Number(caps.per_sender_cap) : null
+  const sendableSenders = sendableSendersByMarket
+    ? Object.values(sendableSendersByMarket).reduce((sum, count) => sum + Number(count || 0), 0)
+    : null
+  const senderCapacity = perSenderCap && sendableSenders ? perSenderCap * sendableSenders : null
+  const bounds = [
+    ['daily_cap', dailyCap],
+    ['contact_window', windowCapacity],
+    ['sender_capacity', senderCapacity],
+  ].filter(([, value]) => Number.isFinite(value) && value > 0)
+  const [binding, sendsPerDay] = bounds.reduce((min, bound) => (bound[1] < min[1] ? bound : min), bounds[0] || ['contact_window', windowCapacity])
+  const count = Math.max(0, Number(schedulable) || 0)
+  return {
+    ready: Number(ready) || 0,
+    schedulable: count,
+    not_schedulable: Math.max(0, (Number(ready) || 0) - count),
+    daily_cap: dailyCap,
+    spread_interval_seconds: spacing,
+    contact_window: {
+      start: scheduleCampaign.contact_window_start || null,
+      end: scheduleCampaign.contact_window_end || null,
+      minutes: windowMinutes,
+    },
+    window_capacity_per_day: windowCapacity,
+    per_sender_cap: perSenderCap,
+    sendable_senders: sendableSenders,
+    sendable_senders_by_market: sendableSendersByMarket,
+    sender_capacity_per_day: senderCapacity,
+    sends_per_day: sendsPerDay,
+    binding,
+    days_to_complete: count > 0 ? Math.ceil(count / sendsPerDay) : 0,
+    first_send_at: firstScheduledAt,
+    first_day_scheduled: Number(scheduledToday) || 0,
+    after_first_day: Number(pacedToLaterDays) || 0,
+    full_cohort: Boolean(fullCohort),
+  }
+}
+
 export async function createCampaignQueuePlan(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const explicitOperatorAction = asBoolean(input.explicit_operator_action || input.operator_action, false)
@@ -7438,13 +7731,29 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const dispatchBlocked = await (deps.loadDispatchBlockedSets || loadDispatchBlockedSets)()
     .catch(() => ({ template_ids: new Set(), sender_numbers: new Set() }))
   launchOptions.blocked_template_ids = dispatchBlocked.template_ids
+  // The router skips operator-blocked senders itself, so a market with one
+  // blocked and one usable number routes to the usable one (see
+  // chooseTextgridNumber) instead of every target dead-ending on the block.
+  launchOptions.blocked_sender_numbers = dispatchBlocked.sender_numbers
+  /**
+   * FULL-COHORT PREFLIGHT (dry run only). The Launch screen asks "will every
+   * ready seller get a message, and how long will it take?" — not "what fits
+   * in one worker batch". It evaluated one batch (batch_max 50/100) and then
+   * presented that batch as the launch ("sending to 50", "a system limit of 50
+   * per run applies"). Here every ready target is routed and rendered; the
+   * per-day caps (sender, market, window) decide WHEN a seller is messaged,
+   * not WHETHER, so they shape the rolling plan instead of skipping anyone.
+   */
+  const fullCohort = dryRun && asBoolean(input.full_cohort ?? input.evaluate_full_cohort, false)
+  const planDeps = await buildQueuePlanReadDeps(readyTargets, caps, deps, { fullCohort })
+  const routingBlocksByMarket = {}
   // An explicit campaign persona wins; otherwise each owner's own (see loadOwnerPersonas).
   const ownerPersonas = clean(campaign.agent_persona)
     ? new Map()
     : await (deps.loadOwnerPersonas || loadOwnerPersonas)(supabase, readyTargets.map((target) => target.master_owner_id))
   let planLoopCounter = 0
   for (const target of readyTargets) {
-    if (plannedItems.length >= caps.effective_limit) break
+    if (!fullCohort && plannedItems.length >= caps.effective_limit) break
     // Keep the execution lease alive across long planning passes (per-target
     // routing + template render are async and can exceed the lease TTL).
     if (executionLock.token && (planLoopCounter++ % 250) === 0) {
@@ -7536,11 +7845,14 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       }
     }
 
-    const routing = await chooseTextgridNumber(candidate, launchOptions, deps)
+    const routing = await chooseTextgridNumber(candidate, launchOptions, planDeps)
     if (!routing.ok) {
-      recordSkip(routing.reason_code || routing.routing_block_reason || 'routing_blocked', target, {
+      const routingSkip = routingSkipReason(routing)
+      recordSkip(routingSkip, target, {
         routing_block_reason: routing.routing_block_reason || null,
+        local_senders: summarizeLocalSenders(routing.local_sender_inventory),
       })
+      noteRoutingBlock(routingBlocksByMarket, candidate.market || target.market, routingSkip, routing)
       continue
     }
     const senderNumber = routeSenderNumber(routing)
@@ -7562,12 +7874,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       recordSkip('sender_blocked_by_operator', target, { sender: senderNumber })
       continue
     }
-    if (caps.per_sender_cap && Number(senderUseCounts[senderKey] || 0) >= caps.per_sender_cap) {
+    if (!fullCohort && caps.per_sender_cap && Number(senderUseCounts[senderKey] || 0) >= caps.per_sender_cap) {
       recordSkip('per_sender_cap_reached', target, { sender: senderNumber })
       continue
     }
     const marketKey = clean(candidate.market || target.market || 'unknown')
-    if (caps.per_market_cap && Number(marketUseCounts[marketKey] || 0) >= caps.per_market_cap) {
+    if (!fullCohort && caps.per_market_cap && Number(marketUseCounts[marketKey] || 0) >= caps.per_market_cap) {
       recordSkip('per_market_cap_reached', target, { market: marketKey })
       continue
     }
@@ -7577,7 +7889,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     const renderOptions = targetExcluded.length
       ? { ...launchOptions, blocked_template_ids: new Set([...(launchOptions.blocked_template_ids || []), ...targetExcluded]) }
       : launchOptions
-    const rendered = await renderOutboundTemplate(candidate, renderOptions, deps)
+    const rendered = await renderOutboundTemplate(candidate, renderOptions, planDeps)
     const templateId = renderedTemplateId(rendered)
     const messageBody = renderedMessageBody(rendered)
     if (templateId && (isTemplateDispatchBlocked(templateId, dispatchBlocked) || targetExcluded.includes(String(templateId)))) {
@@ -7610,6 +7922,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   }
   const scheduleBase = new Date(input.first_scheduled_at || input.first_scheduled_at_utc || input.now || Date.now())
   const grouped = groupLaunchItemsByWindow(plannedItems)
+  let pacedToLaterDays = 0
   const plannedWindows = []
   const scheduledItems = []
   for (const group of grouped) {
@@ -7647,6 +7960,11 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     if (Number.isFinite(notBeforeMs)) cursor = Math.max(cursor, notBeforeMs)
     const endMs = new Date(window.window_end_utc).getTime()
     for (const item of group.items) {
+      if (cursor >= endMs && fullCohort) {
+        // Sends on a later day of the rolling plan — not a skip.
+        pacedToLaterDays += 1
+        continue
+      }
       if (cursor >= endMs) {
         recordSkip('schedule_window_full', item.target, {
           timezone: group.timezone,
@@ -7865,8 +8183,18 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           caps,
           sender_distribution: distributionFromCounts(senderCounts),
           template_distribution: distributionFromCounts(templateCounts),
+          routing_blocks_by_market: routingBlocksByMarket,
+          skip_sample: sampleSkips.slice(0, PLAN_EVENT_SKIP_SAMPLE),
         },
       }, deps)
+      /**
+       * "0 targets planned; 0 queue rows created." was the whole record of a
+       * plan that placed nothing — the reasons lived only in campaign_runs.
+       * The event (which is what the activity feed reads) now carries the
+       * counts by reason, the per-market sender picture and a small sample.
+       */
+      const skipTotal = Object.values(skippedCounts).reduce((sum, count) => sum + Number(count || 0), 0)
+      const skipSummary = describePlanSkips(skippedCounts, routingBlocksByMarket)
       await recordCampaignEvent({
         campaign_id: campaignId,
         run_id: run.id,
@@ -7877,11 +8205,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
             : noSend
               ? 'campaign.launch_no_send_planned'
               : 'campaign.launch_planned',
-        severity: blockers.length ? 'warning' : 'success',
+        severity: blockers.length ? 'warning' : scheduledItems.length === 0 && skipTotal > 0 ? 'warning' : 'success',
         title: blockers.length ? 'Campaign launch blocked' : 'Campaign launch planned',
-        description: blockers.length
+        description: (blockers.length
           ? `Blocked by ${blockers.join(', ')}`
-          : `${scheduledItems.length} targets planned; ${insertedQueueRows.length} queue rows created.`,
+          : `${scheduledItems.length} targets planned; ${insertedQueueRows.length} queue rows created.`)
+          + (skipSummary ? ` ${scheduledItems.length === 0 ? 'Nothing placed' : 'Held back'}: ${skipSummary}.` : ''),
         metadata: {
           blockers,
           dry_run: dryRun,
@@ -7892,6 +8221,12 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           global_emergency_stop_active: globalStop,
           block_on_global_emergency_stop: blockOnGlobalEmergencyStop,
           caps,
+          ready_target_count: readyTargets.length,
+          planned_target_count: scheduledItems.length,
+          skipped_count: skipTotal,
+          skipped_counts_by_reason: skippedCounts,
+          routing_blocks_by_market: routingBlocksByMarket,
+          skip_sample: sampleSkips.slice(0, PLAN_EVENT_SKIP_SAMPLE),
         },
       }, deps)
     }
@@ -7918,6 +8253,24 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     .filter(Boolean)
     .sort()
     .at(-1) || null
+  const plannedSenderMarkets = [...new Set(plannedItems
+    .map((item) => clean(item.routing?.selected_textgrid_market || item.routing?.selected?.market))
+    .filter(Boolean))]
+  const rollingPlan = buildRollingPlan({
+    ready: readyTargets.length,
+    schedulable: plannedItems.length,
+    caps,
+    intervalSeconds,
+    scheduleCampaign,
+    timezoneGroups: grouped.length,
+    sendableSendersByMarket: Array.isArray(planDeps.textgridNumberRows)
+      ? countSendableSendersByMarket(planDeps.textgridNumberRows, plannedSenderMarkets, { blocked_sender_numbers: dispatchBlocked.sender_numbers })
+      : null,
+    firstScheduledAt,
+    scheduledToday: scheduledItems.length,
+    pacedToLaterDays,
+    fullCohort,
+  })
   const status = blockers.length
     ? 'blocked'
     : shouldWriteQueueRows
@@ -7953,14 +8306,14 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     wrong_number: 0,
     opted_out: 0,
     template_missing: Number(skippedCounts.template_render_failed || 0),
-    sender_missing: Number(skippedCounts.missing_selected_sender_number || 0) + Number(skippedCounts.routing_blocked || 0),
+    sender_missing: SENDER_SKIP_REASONS.reduce((sum, key) => sum + Number(skippedCounts[key] || 0), 0),
     outside_contact_window: Number(skippedCounts.schedule_window_full || 0),
     blocked_identity: Number(skippedCounts.missing_master_owner_id || 0) + Number(skippedCounts.missing_prospect_id || 0),
     other_failed: Object.entries(skippedCounts)
       .filter(([key]) => ![
         'active_queue_row_exists', 'duplicate_phone_in_launch_batch', 'graph_suppression_or_queue_block',
-        'prior_contacted_suppression', 'template_render_failed', 'missing_selected_sender_number',
-        'routing_blocked', 'schedule_window_full', 'missing_master_owner_id', 'missing_prospect_id',
+        'prior_contacted_suppression', 'template_render_failed', ...SENDER_SKIP_REASONS,
+        'schedule_window_full', 'missing_master_owner_id', 'missing_prospect_id',
       ].includes(key))
       .reduce((sum, [, count]) => sum + Number(count || 0), 0),
   }
@@ -8015,7 +8368,13 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
      */
     target_integrity: containment,
     total_ready_targets: readyTargets.length,
-    planned_target_count: scheduledItems.length,
+    // Full-cohort preflight: every seller that can be messaged (paced over
+    // days by rolling_plan); otherwise what this pass scheduled.
+    planned_target_count: fullCohort ? plannedItems.length : scheduledItems.length,
+    schedulable_target_count: plannedItems.length,
+    scheduled_this_pass: scheduledItems.length,
+    full_cohort: fullCohort,
+    rolling_plan: rollingPlan,
     targets_created: launchSummary.targets_created,
     planned_windows: plannedWindows.map(({ items: windowItems, ...window }) => ({
       ...window,
@@ -8028,6 +8387,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     skipped_count: launchSummary.skipped_count,
     skipped_counts_by_reason: skippedCounts,
     sample_skips: sampleSkips,
+    // Per market: why no sender could carry these sellers, number by number.
+    routing_blocks_by_market: routingBlocksByMarket,
+    skip_summary: describePlanSkips(skippedCounts, routingBlocksByMarket),
     blocked_count: launchSummary.blocked_count,
     sender_distribution: launchSummary.sender_distribution,
     sender_market_distribution: launchSummary.sender_market_distribution,
@@ -8279,10 +8641,15 @@ export async function activateCampaignWithHydration(campaignId, input = {}, deps
 
   const queueRowsBeforeActivate = await countCampaignQueueRows(supabase, campaignId, { activeOnly: true })
   if (!queueRowsBeforeActivate) {
+    // Say why the plan placed nothing — a scheduled launch retried this every
+    // five minutes for two hours with only this sentence to show for it.
+    const skipSummary = clean(queueResult?.skip_summary)
     return {
       ok: false,
       error: 'activation_no_queue_rows',
-      blockers: ['Activation requires at least one send_queue row, but none were created.'],
+      blockers: [skipSummary
+        ? `No message could be queued: ${skipSummary}.`
+        : 'Activation requires at least one send_queue row, but none were created.'],
       queue_result: queueResult,
       lifecycle_result: null,
       inserted,
