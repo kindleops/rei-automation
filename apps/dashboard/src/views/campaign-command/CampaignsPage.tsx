@@ -53,6 +53,8 @@ import { CampaignStatusBadge } from './components/CampaignStatusBadge'
 import { CampaignListCard } from './components/CampaignListCard'
 import { CampaignCommandReadout } from './components/CampaignCommandReadout'
 import { CampaignCommandMobile } from './mobile/CampaignCommandMobile'
+// Desktop 2.0 — the live execution cockpit (modern product on a wide screen only).
+import { CampaignCockpit } from './desktop/CampaignCockpit'
 import { CampaignDetailBar, CampaignDetailHero } from './mobile/CampaignDetailMobile'
 import { CampaignSectionTabs } from './mobile/CampaignSectionTabs'
 import { CampaignExecutionMobile } from './mobile/CampaignExecutionMobile'
@@ -1547,7 +1549,7 @@ const clearComposeIntent = () => {
 }
 
 export const CampaignsPage = () => {
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
   const [model, setModel] = useState<CampaignModel | null>(() => lastCampaignModel)
   const [loading, setLoading] = useState(() => lastCampaignModel === null)
   const [refreshing, setRefreshing] = useState(false)
@@ -1563,6 +1565,8 @@ export const CampaignsPage = () => {
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
   const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule')
   const [activationCampaign, setActivationCampaign] = useState<CampaignSummary | null>(null)
+  // A campaign the desktop cockpit should open (e.g. one just created).
+  const [desktopFocusId, setDesktopFocusId] = useState<string | null>(null)
   const [deepLink] = useState(readCampaignDeepLink)
   const [detailTab, setDetailTab] = useState<CampaignDetailTab | undefined>(deepLink.section)
   
@@ -1655,7 +1659,9 @@ export const CampaignsPage = () => {
 
   useEffect(() => {
     const id = commandState.activeCampaignId
-    if (!id) {
+    // The desktop cockpit reads its own bounded live state; the heavy detail
+    // read here serves the phone's detail screen only.
+    if (!id || isModernDesktop) {
       setEnrichedCampaign(null)
       return
     }
@@ -1666,7 +1672,7 @@ export const CampaignsPage = () => {
       if (active) setEnrichedCampaign(null)
     })
     return () => { active = false }
-  }, [commandState.activeCampaignId])
+  }, [commandState.activeCampaignId, isModernDesktop])
 
   const selectedCampaign = useMemo(() => {
     // From every campaign, not the filtered list: a campaign opened by link (or
@@ -1787,6 +1793,75 @@ export const CampaignsPage = () => {
     : isMobile
       ? ''
       : `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled`
+
+  // DESKTOP 2.0 — the modern product on a wide screen gets the live execution
+  // cockpit: navigation, operating room, inspector. The phone never reaches
+  // this branch (isModernDesktop is false on every phone), so its index and
+  // detail below are untouched. Actions and modals are the same ones.
+  if (isModernDesktop) {
+    return (
+      <>
+        <CampaignCockpit
+          model={model}
+          loading={loading}
+          failed={loadFailed}
+          onRetry={() => void load()}
+          onRefresh={() => void load({ silent: true, quiet: true })}
+          onNew={() => handleGlobalAction('create')}
+          onAction={(action, c, payload) => handleCampaignAction(action, c, payload)}
+          focusCampaignId={desktopFocusId}
+        />
+        {isCreateModalOpen && (
+          <CreateCampaignModal
+            campaignId={editCampaignId ?? undefined}
+            mode={builderMode}
+            onClose={() => {
+              setIsCreateModalOpen(false)
+              setEditCampaignId(null)
+              setBuilderMode('create')
+            }}
+            onSuccess={(newId) => {
+              setIsCreateModalOpen(false)
+              setEditCampaignId(null)
+              setBuilderMode('create')
+              void load({ silent: true })
+              if (newId) setDesktopFocusId(newId)
+            }}
+          />
+        )}
+        {scheduleCampaign && (
+          <CampaignScheduleModal
+            campaign={scheduleCampaign}
+            mode={scheduleMode}
+            onClose={() => setScheduleCampaign(null)}
+            onSuccess={() => load({ silent: true })}
+          />
+        )}
+        {activationCampaign && (
+          <CampaignActivationModal
+            campaign={activationCampaign}
+            onClose={() => setActivationCampaign(null)}
+            onSuccess={(result) => {
+              const isProof = result.proofHydration || result.activationMode === 'test'
+              emitNotification({
+                title: result.idempotent
+                  ? (isProof ? 'Test hydration replay' : 'Already activated')
+                  : (isProof ? 'Test hydration complete' : 'Live activation complete'),
+                detail: result.idempotent
+                  ? 'Idempotent replay — no duplicate queue rows.'
+                  : isProof
+                    ? `${result.inserted} proof rows inserted · no SMS will transmit`
+                    : `${result.inserted} live rows inserted · ${result.skipped} skipped · sends wait for brakes + schedule`,
+                severity: isProof ? 'warning' : 'success',
+              })
+              setActivationCampaign(null)
+              void load({ silent: true })
+            }}
+          />
+        )}
+      </>
+    )
+  }
 
   // Campaign Command on mobile is its own composition, not the desktop tree with
   // smaller boxes. It short-circuits the shared layout entirely so none of the

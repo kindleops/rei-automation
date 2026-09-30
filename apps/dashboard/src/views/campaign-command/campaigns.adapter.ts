@@ -165,6 +165,8 @@ function mapCampaignSummaryRow(row: CampaignApiSummary & Record<string, unknown>
       eligible_targets: row.eligible_targets == null ? undefined : Number(row.eligible_targets),
       remaining_targets: row.remaining_targets == null ? undefined : Number(row.remaining_targets),
       feeder_last: (row.feeder_last as CampaignSummary['feeder_last']) ?? null,
+      lineage: (row.lineage as CampaignSummary['lineage']) ?? null,
+      live_queue: (row.live_queue as CampaignSummary['live_queue']) ?? null,
       schedule_missed_for: (row.schedule_missed_for as string | null) ?? null,
       scheduled_targets: Number(row.scheduled_queue_rows ?? row.scheduled_targets ?? 0),
       scheduled_queue_rows: Number(row.scheduled_queue_rows ?? row.scheduled_targets ?? 0),

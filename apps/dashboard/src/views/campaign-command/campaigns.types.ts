@@ -74,6 +74,14 @@ export interface CampaignSummary {
   remaining_targets?: number
   /** The campaign feeder's last pass over this campaign. */
   feeder_last?: CampaignFeederState | null
+  /**
+   * Where the audience came from — source, pinned cohort size, area summary,
+   * filters, zone — read off the campaign row by the list API. Never inferred
+   * from the name. Absent from older API responses.
+   */
+  lineage?: CampaignLineageSummary | null
+  /** Live (non-proof) queue rows: due / overdue / release reasons. List API. */
+  live_queue?: CampaignLiveQueueSummary | null
   /** Set when the scheduled start passed while activation was not running. */
   schedule_missed_for?: string | null
   scheduled_targets: number
@@ -521,4 +529,31 @@ export interface CampaignFeederState {
   reason?: string | null
   stalled?: boolean
   last_refill_at?: string | null
+}
+
+export interface CampaignLineageSummary {
+  kind: 'map_area' | 'entity_graph' | 'filters' | 'selection' | 'none'
+  declared_source: string | null
+  explicit_property_count: number | null
+  area: null | { bbox: number[] | null; vertices: number | null; truncated: boolean; property_count: number | null; label: string | null; polygon_stored: boolean }
+  handoff_mode: string | null
+  filters: Array<{ domain: string; field_key: string; category: string | null; operator: string | null; value: { kind: string; count?: number; sample?: string[]; value?: unknown } }>
+  market_values: string[]
+  timezone: string | null
+  stage_code: string | null
+  template_use_case: string | null
+  campaign_type: string | null
+  channel: 'sms'
+}
+
+export interface CampaignLiveQueueSummary {
+  live: number
+  due: number
+  overdue: number
+  oldest_due_at: string | null
+  next_scheduled_at: string | null
+  release_reasons: Record<string, number>
+  last_claimed_at?: string | null
+  last_released_at?: string | null
+  last_release_reason?: string | null
 }

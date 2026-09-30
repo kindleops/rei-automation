@@ -5661,6 +5661,11 @@ async function fetchExecutionProofByCampaign(supabase, campaigns = []) {
     'launch_mode:metadata->>launch_mode',
     'no_send:metadata->>no_send',
     'proof_no_send:metadata->>proof_no_send',
+    // Why/when the processor last picked up or released the row (read-only;
+    // for live_queue below).
+    'skip_reason:metadata->>skip_reason',
+    'processing_started_at:metadata->>processing_started_at',
+    'finalized_at:metadata->>finalized_at',
   ].join(',')
 
   const rehydrate = (row) => ({
@@ -5710,10 +5715,18 @@ async function fetchExecutionProofByCampaign(supabase, campaigns = []) {
     if (bucket.length < EXECUTION_PROOF_PROOF_ROW_LIMIT) bucket.push(row)
   }
 
+  const { compactLiveQueue } = await import('@/lib/domain/campaigns/campaign-live-queue.js')
+  const nowMs = Date.now()
   for (const campaign of campaigns) {
+    const active = activeByCampaign.get(campaign.id) || []
     proofByCampaign.set(
       campaign.id,
-      reduceCampaignExecutionProof(campaign, activeByCampaign.get(campaign.id) || [], proofsByCampaign.get(campaign.id) || []),
+      {
+        ...reduceCampaignExecutionProof(campaign, active, proofsByCampaign.get(campaign.id) || []),
+        // Is the queued work moving? Due / overdue live rows from the rows
+        // already read above — no extra query. Read by listCampaigns.
+        live_queue: compactLiveQueue(active, nowMs),
+      },
     )
   }
   return proofByCampaign
@@ -5776,9 +5789,11 @@ export async function listCampaigns(deps = {}) {
     if (!windowRes.error) windows = windowRes.data || []
   }
   const { deriveOperatorState, operatorStateLabel, operatorModeLabel } = await import('@/lib/domain/campaigns/campaign-operator-state.js')
+  const { describeCampaignLineage } = await import('@/lib/domain/campaigns/campaign-lineage.js')
   const summaries = (campaigns || []).map((campaign) => {
-    const proofBase = proofByCampaign.get(campaign.id) || null
-    const executionProof = proofBase
+    // live_queue rides along with the proof read but is reported on its own.
+    const { live_queue: liveQueue = null, ...proofBase } = proofByCampaign.get(campaign.id) || {}
+    const executionProof = proofByCampaign.has(campaign.id)
       ? { campaign_state: normalizeCampaignStatus(campaign.status), ...proofBase }
       : null
     const summary = mapCampaignSummary(
@@ -5794,6 +5809,10 @@ export async function listCampaigns(deps = {}) {
     summary.operator_state_label = operatorStateLabel(operatorState)
     summary.mode = operatorModeLabel(executionProof || {})
     summary.mode_label = summary.mode === 'live' ? 'Live' : 'Test Mode'
+    // Where the audience came from (source, area, filters, zone), read off the
+    // row already loaded here — no query, and never inferred from the name.
+    summary.lineage = describeCampaignLineage(campaign)
+    summary.live_queue = liveQueue
     if (executionProof?.proof_mode && operatorState === 'test_mode') {
       summary.status = summary.status === 'active' ? summary.status : summary.status
     }
