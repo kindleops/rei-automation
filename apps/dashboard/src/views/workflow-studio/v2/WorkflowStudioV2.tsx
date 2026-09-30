@@ -103,6 +103,7 @@ interface WorkflowStudioV2Props {
 }
 
 const StudioSurface = lazy(() => import('../mobile/StudioSurface').then((m) => ({ default: m.StudioSurface })))
+const WorkflowStudioDesktop = lazy(() => import('../desktop/WorkflowStudioDesktop').then((m) => ({ default: m.WorkflowStudioDesktop })))
 
 /**
  * Phone: Workflow Studio (mobile/StudioSurface) — overview, workflows (create
@@ -110,8 +111,16 @@ const StudioSurface = lazy(() => import('../mobile/StudioSurface').then((m) => (
  * larger screens; ?view=editor still opens it on a phone.
  */
 export const WorkflowStudioV2 = (props: Parameters<typeof WorkflowStudioWorkspace>[0]) => {
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
   const editor = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'editor'
+  // Desktop (modern product): Workflow Studio 3.0 — the observatory + canvas. The phone keeps its surface.
+  if (isModernDesktop && !editor) {
+    return (
+      <Suspense fallback={null}>
+        <WorkflowStudioDesktop />
+      </Suspense>
+    )
+  }
   if (isMobile && !editor) {
     return (
       <Suspense fallback={null}>

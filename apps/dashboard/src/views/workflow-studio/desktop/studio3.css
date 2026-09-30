@@ -1,0 +1,786 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   WORKFLOW STUDIO 3.0 · DESKTOP CHASSIS
+   Depth: 0 the liquid field (canvas) · 1 library + canvas · 2 nodes + rails ·
+   3 inspector · 4 popovers · 5 modals. Type: 22 title · 15 section · 13 body ·
+   12.5 meta · 11.5 min. Facts are dot-separated spec lines, never pill rows;
+   colour is spent on exceptions only. Everything is scoped to the modern
+   desktop, and composes on the PANE's width (container: pane).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root.is-desktop-modern .ws3 {
+  --ws-panel: color-mix(in srgb, var(--dsk-bg) 38%, transparent);
+  --ws-plate: var(--dsk-card-bg);
+  --ws-plate-shadow: var(--dsk-card-shadow);
+  --ws-rule: var(--dsk-edge);
+  --ws-row-hover: rgb(255 255 255 / 0.04);
+  --ws-row-on: rgb(255 255 255 / 0.07);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  font-family: var(--dsk-font);
+  font-size: 13px;
+  letter-spacing: -0.003em;
+  color: var(--dsk-ink);
+  container: ws3 / inline-size;
+}
+:root.is-desktop-modern[data-nexus-theme='light'] .ws3 { --ws-row-hover: rgb(15 17 22 / 0.035); --ws-row-on: rgb(15 17 22 / 0.06); }
+:root.is-desktop-modern .ws3 :is(button, input, select) { font: inherit; color: inherit; }
+:root.is-desktop-modern .ws3 button { cursor: pointer; }
+:root.is-desktop-modern .ws3 :is(button, select, input, [tabindex]):focus-visible { outline: 1px solid var(--dsk-accent); outline-offset: 1px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 16%, transparent); }
+
+/* ── header ──────────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-head {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 24px 14px;
+  min-width: 0;
+}
+:root.is-desktop-modern .ws3-head__title { display: grid; gap: 4px; min-width: 0; }
+:root.is-desktop-modern .ws3-head h1 { margin: 0; font-size: 22px; font-weight: 620; line-height: 1.15; letter-spacing: -0.022em; white-space: nowrap; }
+:root.is-desktop-modern .ws3-spec { display: flex; flex-wrap: wrap; margin: 0; font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-spec > span + span::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); opacity: 0.7; }
+:root.is-desktop-modern .ws3-spec b { font-weight: 600; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-spec .is-needs b { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-spec .is-error { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-modes {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+:root.is-desktop-modern .ws3-modes button {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--dsk-ink-3);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+:root.is-desktop-modern .ws3-modes button:hover { color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-modes button.is-on { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .ws3-modes button.is-design { margin-left: 4px; }
+:root.is-desktop-modern .ws3-modes button svg { width: 13px; height: 13px; }
+:root.is-desktop-modern .ws3-head__side { display: flex; align-items: center; gap: 10px; }
+:root.is-desktop-modern .ws3-fresh { font-size: 12px; color: var(--dsk-ink-3); white-space: nowrap; }
+
+:root.is-desktop-modern .ws3-main { position: relative; min-height: 0; overflow: hidden; }
+:root.is-desktop-modern .ws3-loading { display: flex; align-items: center; justify-content: center; gap: 10px; height: 100%; color: var(--dsk-ink-3); }
+
+/* live dot: a restrained breath (still when motion is off) */
+@keyframes ws3-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+:root.is-desktop-modern .ws3-livedot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ws-green); box-shadow: 0 0 6px color-mix(in srgb, var(--ws-green) 60%, transparent); animation: ws3-breathe 2.4s ease-in-out infinite; }
+:root.is-desktop-modern .ws3.is-still .ws3-livedot { animation: none; }
+@keyframes ws3-rot { to { transform: rotate(360deg); } }
+:root.is-desktop-modern .ws3-spin { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--dsk-edge-hi); border-top-color: var(--dsk-ink-2); animation: ws3-rot 0.9s linear infinite; display: inline-block; }
+
+/* dots carry run state: colour only for exceptions */
+:root.is-desktop-modern .ws3-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--dsk-ink-3); opacity: 0.55; }
+:root.is-desktop-modern .ws3-dot:is(.is-completed, .is-succeeded, .is-delivered) { background: var(--ws-green); opacity: 0.9; }
+:root.is-desktop-modern .ws3-dot:is(.is-waiting, .is-running, .is-current) { background: var(--ws-cobalt); opacity: 0.95; }
+:root.is-desktop-modern .ws3-dot:is(.is-held, .is-blocked) { background: var(--ws-amber); opacity: 1; }
+:root.is-desktop-modern .ws3-dot:is(.is-needs_you, .is-human, .is-needs_review) { background: var(--ws-gold); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws-gold) 16%, transparent); }
+:root.is-desktop-modern .ws3-dot.is-failed { background: var(--ws-red); opacity: 1; }
+
+/* shared controls */
+:root.is-desktop-modern .ws3-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 560;
+  white-space: nowrap;
+  color: var(--dsk-ink);
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+}
+:root.is-desktop-modern .ws3-btn:hover { background: var(--dsk-tile-hi); }
+:root.is-desktop-modern .ws3-btn svg { width: 14px; height: 14px; }
+:root.is-desktop-modern .ws3-btn.is-primary { color: var(--dsk-primary-ink); background: var(--dsk-primary-bg); box-shadow: var(--dsk-primary-shadow); }
+:root.is-desktop-modern .ws3-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+:root.is-desktop-modern .ws3-iconbtn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: var(--dsk-ink-2);
+  background: transparent;
+}
+:root.is-desktop-modern .ws3-iconbtn:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+:root.is-desktop-modern .ws3-iconbtn.is-on { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .ws3-iconbtn:disabled { opacity: 0.35; cursor: not-allowed; }
+:root.is-desktop-modern .ws3-iconbtn svg { width: 15px; height: 15px; }
+:root.is-desktop-modern .ws3-textbtn { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; font-size: 12.5px; font-weight: 560; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-textbtn:hover { color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-textbtn svg { width: 13px; height: 13px; }
+:root.is-desktop-modern .ws3-seg { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-seg button { height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: none; font-size: 12px; font-weight: 560; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-seg button.is-on { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .ws3-select { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 10px; border-radius: 9px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-select svg { width: 13px; height: 13px; }
+:root.is-desktop-modern .ws3-select select { appearance: none; border: 0; background: none; font-size: 12.5px; font-weight: 560; color: var(--dsk-ink); padding-right: 4px; cursor: pointer; }
+:root.is-desktop-modern .ws3-select select option { color: #111; }
+:root.is-desktop-modern .ws3-h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; font-weight: 620; letter-spacing: -0.005em; color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-h3 em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-h3 em.is-on { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-quiet { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-quiet svg { width: 14px; height: 14px; flex: 0 0 auto; }
+:root.is-desktop-modern .ws3-quiet.is-error { color: color-mix(in srgb, var(--ws-red) 80%, var(--dsk-ink-2)); }
+@keyframes ws3-shimmer { from { background-position: -240px 0; } to { background-position: 240px 0; } }
+:root.is-desktop-modern :is(.ws3-skel-rows > span, .ws3-skel-line, .ws3-skel-pipe, .ws3-skel-text) {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--dsk-tile) 0, var(--dsk-tile-hi) 50%, var(--dsk-tile) 100%) 0 0 / 480px 100%;
+  animation: ws3-shimmer 1.6s ease-in-out infinite;
+}
+:root.is-desktop-modern .ws3.is-still :is(.ws3-skel-rows > span, .ws3-skel-line, .ws3-skel-pipe, .ws3-skel-text) { animation: none; }
+:root.is-desktop-modern .ws3-skel-rows { display: grid; gap: 8px; }
+:root.is-desktop-modern .ws3-skel-rows > span { height: 44px; }
+:root.is-desktop-modern .ws3-skel-rows.is-lib > span { height: 38px; }
+:root.is-desktop-modern .ws3-skel-text { width: 320px; height: 12px; }
+:root.is-desktop-modern .ws3-skel-line { width: 40%; height: 16px; margin-bottom: 16px; }
+:root.is-desktop-modern .ws3-skel-pipe { height: 120px; }
+
+/* ── overview ────────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-overview {
+  display: grid;
+  grid-template-columns: minmax(250px, 290px) minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'lib mini needs' 'lib act needs';
+  gap: 16px 18px;
+  height: 100%;
+  padding: 4px 24px 20px;
+  box-sizing: border-box;
+  min-height: 0;
+}
+:root.is-desktop-modern .ws3-overview > * { min-height: 0; min-width: 0; }
+:root.is-desktop-modern .ws3-overview__lib { grid-area: lib; overflow: hidden; display: flex; flex-direction: column; }
+:root.is-desktop-modern .ws3-overview__mini { grid-area: mini; }
+:root.is-desktop-modern .ws3-overview__act { grid-area: act; display: flex; min-height: 0; }
+:root.is-desktop-modern .ws3-overview__act > .ws3-act { flex: 1; }
+:root.is-desktop-modern .ws3-overview__needs { grid-area: needs; overflow: hidden; display: flex; flex-direction: column; }
+/* laptop pane: the pipeline spans; activity and needs sit side by side under it */
+@container ws3 (max-width: 1320px) {
+  :root.is-desktop-modern .ws3-overview { grid-template-columns: minmax(230px, 250px) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'lib mini mini' 'lib act needs'; }
+}
+@container ws3 (min-width: 2200px) {
+  :root.is-desktop-modern .ws3-overview { grid-template-columns: 330px minmax(0, 1fr) 400px; gap: 20px 24px; padding-inline: 32px; }
+}
+
+/* the library: plates, spec lines, one dot of state */
+:root.is-desktop-modern .ws3-lib { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+:root.is-desktop-modern .ws3-lib__search { display: flex; align-items: center; gap: 8px; height: 34px; margin-bottom: 10px; padding: 0 10px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-lib__search svg { width: 14px; height: 14px; }
+:root.is-desktop-modern .ws3-lib__search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: 13px; color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-lib__search input::placeholder { color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-lib__scroll { flex: 1; min-height: 0; overflow-y: auto; margin-right: -8px; padding-right: 8px; scrollbar-width: thin; }
+:root.is-desktop-modern .ws3-lib__group + .ws3-lib__group { margin-top: 12px; }
+:root.is-desktop-modern .ws3-lib__ghead { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 4px; border: 0; background: none; font-size: 11.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-lib__ghead em { font-style: normal; font-weight: 600; letter-spacing: 0; color: var(--dsk-ink-3); opacity: 0.8; }
+:root.is-desktop-modern .ws3-lib__ghead svg { width: 13px; height: 13px; margin-left: auto; }
+:root.is-desktop-modern .ws3-lib__group.is-live_system .ws3-lib__ghead { color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-lib__family h5 { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; padding: 0 4px; font-size: 11.5px; font-weight: 560; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-lib__family h5 svg { width: 12px; height: 12px; opacity: 0.8; }
+:root.is-desktop-modern .ws3-lib__family ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-lib__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  transition: background 0.14s ease;
+}
+:root.is-desktop-modern .ws3-lib__row:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-lib__row.is-on { background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); }
+:root.is-desktop-modern .ws3-lib__row .ws3-state { margin-top: 5px; }
+:root.is-desktop-modern .ws3-lib__text { display: grid; gap: 3px; min-width: 0; flex: 1; }
+:root.is-desktop-modern .ws3-lib__text strong { overflow: hidden; font-size: 13px; font-weight: 580; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-lib__text small { display: flex; flex-wrap: wrap; font-size: 11.5px; line-height: 1.45; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-lib__text small > span + span::before { content: '·'; margin: 0 5px; opacity: 0.7; }
+:root.is-desktop-modern .ws3-lib__text small .is-state { font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; }
+:root.is-desktop-modern .ws3-lib__text small .is-state.is-live,
+:root.is-desktop-modern .ws3-lib__text small .is-state.is-armed { color: var(--ws-green); }
+:root.is-desktop-modern .ws3-lib__text small .is-state.is-off,
+:root.is-desktop-modern .ws3-lib__text small .is-state.is-paused { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-lib__text small .is-needs { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-lib__needs { flex: 0 0 auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; font-size: 11.5px; font-weight: 650; line-height: 20px; text-align: center; color: var(--ws-gold); background: color-mix(in srgb, var(--ws-gold) 13%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ws-gold) 28%, transparent); }
+:root.is-desktop-modern .ws3-lib.is-compact .ws3-lib__text small { display: none; }
+:root.is-desktop-modern .ws3-lib.is-compact .ws3-lib__row { padding: 7px 10px; }
+:root.is-desktop-modern .ws3-state { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--dsk-ink-3); opacity: 0.5; }
+:root.is-desktop-modern .ws3-state:is(.is-live, .is-armed) { background: var(--ws-green); opacity: 1; box-shadow: 0 0 6px color-mix(in srgb, var(--ws-green) 55%, transparent); }
+:root.is-desktop-modern .ws3-state:is(.is-off, .is-paused) { background: var(--ws-amber); opacity: 0.9; }
+:root.is-desktop-modern .ws3-state.is-not_running { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dsk-ink-3); }
+
+/* the mini live pipeline */
+:root.is-desktop-modern .ws3-mini {
+  position: relative;
+  padding: 18px 20px 14px;
+  border-radius: 16px;
+  background:
+    radial-gradient(80% 120% at 0% 0%, color-mix(in srgb, var(--ws-cobalt) 9%, transparent), transparent 60%),
+    radial-gradient(60% 90% at 100% 100%, color-mix(in srgb, var(--ws-violet) 7%, transparent), transparent 60%),
+    color-mix(in srgb, var(--ws-field) 88%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 0 0 1px var(--dsk-edge), 0 24px 50px -30px rgb(0 0 0 / 0.9);
+  overflow: hidden;
+}
+:root.is-desktop-modern[data-nexus-theme='light'] .ws3-mini { box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px var(--dsk-edge), 0 24px 50px -34px rgb(60 50 30 / 0.4); }
+:root.is-desktop-modern .ws3-mini__head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+:root.is-desktop-modern .ws3-mini__title { display: grid; gap: 3px; min-width: 0; }
+:root.is-desktop-modern .ws3-mini__title small { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-mini__title strong { font-size: 16px; font-weight: 620; letter-spacing: -0.012em; }
+:root.is-desktop-modern .ws3-mini__meta { margin-left: auto; font-size: 12.5px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-mini__pipe {
+  --n: 8;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  gap: 10px;
+}
+:root.is-desktop-modern .ws3-mini__track {
+  position: absolute;
+  left: calc(100% / var(--n) / 2);
+  right: calc(100% / var(--n) / 2);
+  top: 21px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ws-cobalt) 55%, transparent), color-mix(in srgb, var(--ws-violet) 45%, transparent) 50%, color-mix(in srgb, var(--ws-green) 40%, transparent));
+  opacity: 0.55;
+  pointer-events: none;
+}
+@keyframes ws3-impulse { from { left: 0; opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } to { left: calc(var(--to) * 100%); opacity: 0; } }
+:root.is-desktop-modern .ws3-mini__impulse {
+  position: absolute;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--dsk-ink);
+  box-shadow: 0 0 10px 2px color-mix(in srgb, var(--ws-cobalt) 70%, transparent);
+  animation: ws3-impulse 2.6s cubic-bezier(0.45, 0, 0.25, 1) forwards;
+}
+:root.is-desktop-modern .ws3-mini__stage {
+  --tone: var(--ws-cyan);
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 0 2px 4px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  text-align: center;
+}
+:root.is-desktop-modern .ws3-mini__stage.is-cobalt { --tone: var(--ws-cobalt); }
+:root.is-desktop-modern .ws3-mini__stage.is-violet { --tone: var(--ws-violet); }
+:root.is-desktop-modern .ws3-mini__stage.is-amber { --tone: var(--ws-amber); }
+:root.is-desktop-modern .ws3-mini__stage.is-gold { --tone: var(--ws-gold); }
+:root.is-desktop-modern .ws3-mini__stage.is-graphite { --tone: var(--ws-graphite); }
+:root.is-desktop-modern .ws3-mini__stage.is-green { --tone: var(--ws-green); }
+:root.is-desktop-modern .ws3-mini__glyph {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  color: var(--tone);
+  background: var(--ws-node-sheen), var(--ws-node-fill);
+  box-shadow: inset 0 1px 0 var(--ws-node-top), inset 0 0 0 1px color-mix(in srgb, var(--tone) 34%, var(--ws-node-rim)), 0 14px 26px -16px rgb(0 0 0 / 0.9);
+  transition: transform 0.2s var(--dsk-ease), box-shadow 0.2s ease;
+}
+:root.is-desktop-modern .ws3-mini__glyph svg { width: 18px; height: 18px; }
+:root.is-desktop-modern .ws3-mini__stage:hover .ws3-mini__glyph { transform: translateY(-2px); box-shadow: inset 0 1px 0 var(--ws-node-top), inset 0 0 0 1px color-mix(in srgb, var(--tone) 70%, transparent), 0 18px 30px -16px rgb(0 0 0 / 0.95); }
+:root.is-desktop-modern .ws3-mini__stage.is-lit .ws3-mini__glyph { box-shadow: inset 0 1px 0 var(--ws-node-top), inset 0 0 0 1.5px var(--tone), 0 0 0 5px color-mix(in srgb, var(--tone) 16%, transparent); }
+:root.is-desktop-modern .ws3-mini__stage.is-human .ws3-mini__glyph { box-shadow: inset 0 1px 0 var(--ws-node-top), inset 0 0 0 1px color-mix(in srgb, var(--ws-gold) 60%, transparent), 0 0 18px -6px color-mix(in srgb, var(--ws-gold) 70%, transparent); }
+:root.is-desktop-modern .ws3-mini__stage b { margin-top: 3px; font-size: 20px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-mini__stage strong { max-width: 100%; overflow: hidden; font-size: 12.5px; font-weight: 580; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-mini__stage small { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; min-height: 16px; font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-mini__stage small em { font-style: normal; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-mini__stage small em.is-bad { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-mini__stage small em.is-held { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-mini__stage small em.is-human { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-mini__foot { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsk-ink-3); }
+
+/* needs you + activity: floating plate rows, no rules */
+:root.is-desktop-modern :is(.ws3-needs, .ws3-act) { display: flex; flex-direction: column; min-height: 0; }
+:root.is-desktop-modern :is(.ws3-needs__list, .ws3-act__list) { flex: 1; min-height: 0; display: grid; align-content: start; gap: 2px; margin: 0; padding: 0; list-style: none; overflow-y: auto; scrollbar-width: thin; }
+:root.is-desktop-modern :is(.ws3-needs__row, .ws3-act__row) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  transition: background 0.14s ease;
+}
+:root.is-desktop-modern :is(.ws3-needs__row, .ws3-act__row):hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern :is(.ws3-needs__row, .ws3-act__row) .ws3-dot { margin-top: 6px; }
+:root.is-desktop-modern :is(.ws3-needs__text, .ws3-act__text) { display: grid; gap: 2px; min-width: 0; flex: 1; }
+:root.is-desktop-modern :is(.ws3-needs__text, .ws3-act__text) strong { overflow: hidden; font-size: 13px; font-weight: 580; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern :is(.ws3-needs__text, .ws3-act__text) small { font-size: 12px; line-height: 1.45; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-needs__spec { overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.ws3-needs__row, .ws3-act__row) time { flex: 0 0 auto; margin-top: 1px; font-size: 11.5px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-needs { padding: 16px 12px 12px 14px; border-radius: 16px; background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); height: 100%; box-sizing: border-box; }
+:root.is-desktop-modern .ws3-act__wf { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-act__wf em { font-style: normal; font-weight: 600; letter-spacing: 0.04em; }
+:root.is-desktop-modern .ws3-act__row.is-needs_you .ws3-act__wf em { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-act__row.is-failed .ws3-act__wf em { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-act__row.is-held .ws3-act__wf em { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-act__text small { color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-act { min-height: 0; padding: 16px 12px 8px 14px; border-radius: 16px; background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); }
+
+/* ── canvas mode ─────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-canvasmode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  padding: 0 16px 16px;
+  box-sizing: border-box;
+  min-height: 0;
+}
+:root.is-desktop-modern .ws3-canvasmode.has-lib { grid-template-columns: 250px minmax(0, 1fr); }
+:root.is-desktop-modern .ws3-canvasmode.has-insp { grid-template-columns: minmax(0, 1fr) minmax(340px, 380px); }
+:root.is-desktop-modern .ws3-canvasmode.has-lib.has-insp { grid-template-columns: 250px minmax(0, 1fr) minmax(340px, 380px); }
+@container ws3 (max-width: 1200px) {
+  :root.is-desktop-modern .ws3-canvasmode.has-lib.has-insp { grid-template-columns: minmax(0, 1fr) minmax(320px, 360px); }
+  :root.is-desktop-modern .ws3-canvasmode.has-lib.has-insp > .ws3-lib { display: none; }
+}
+@container ws3 (min-width: 2400px) {
+  :root.is-desktop-modern .ws3-canvasmode.has-lib { grid-template-columns: 290px minmax(0, 1fr); }
+  :root.is-desktop-modern .ws3-canvasmode.has-lib.has-insp { grid-template-columns: 290px minmax(0, 1fr) 440px; }
+}
+:root.is-desktop-modern .ws3-canvasmode > .ws3-lib { padding-top: 2px; }
+:root.is-desktop-modern .ws3-stage {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 30px 60px -40px rgb(0 0 0 / 0.95);
+}
+:root.is-desktop-modern .ws3-stage > .ws3-board { position: absolute; inset: 0; }
+:root.is-desktop-modern .ws3-stage:fullscreen { border-radius: 0; }
+:root.is-desktop-modern .ws3-canvasmode.is-full .ws3-stage { position: fixed; inset: 0; z-index: 90; border-radius: 0; }
+:root.is-desktop-modern .ws3-board.is-empty { display: grid; place-items: center; }
+
+/* floating instrument chrome over the board */
+:root.is-desktop-modern .ws3-tool { position: absolute; z-index: 5; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+:root.is-desktop-modern .ws3-tool > * { pointer-events: auto; }
+:root.is-desktop-modern .ws3-tool.is-top { top: 12px; left: 12px; right: 12px; }
+:root.is-desktop-modern .ws3-tool.is-left { top: 70px; left: 12px; flex-direction: column; align-items: flex-start; }
+:root.is-desktop-modern .ws3-tool.is-bottom { left: 14px; bottom: 12px; right: 220px; gap: 12px; }
+:root.is-desktop-modern .ws3-tool__grow { flex: 1; pointer-events: none; }
+:root.is-desktop-modern .ws3-tool__title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 12px 7px 10px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--ws-field) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 0 0 1px var(--ws-node-rim);
+}
+:root.is-desktop-modern .ws3-tool__title strong { overflow: hidden; font-size: 13.5px; font-weight: 620; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-tool__title small { overflow: hidden; font-size: 10.5px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-tool .ws3-seg,
+:root.is-desktop-modern .ws3-tool .ws3-select,
+:root.is-desktop-modern .ws3-tool .ws3-find,
+:root.is-desktop-modern .ws3-tool .ws3-toolcol,
+:root.is-desktop-modern .ws3-tool > .ws3-iconbtn {
+  background: color-mix(in srgb, var(--ws-field) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 0 0 1px var(--ws-node-rim);
+}
+:root.is-desktop-modern .ws3-find { display: flex; align-items: center; gap: 8px; width: 210px; height: 34px; padding: 0 8px 0 10px; border-radius: 10px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-find svg { width: 14px; height: 14px; }
+:root.is-desktop-modern .ws3-find input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: 12.5px; color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-find kbd { padding: 1px 6px; border-radius: 5px; font: 500 11px/1.4 var(--dsk-font); color: var(--dsk-ink-3); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-toolcol { display: grid; gap: 2px; padding: 3px; border-radius: 11px; }
+:root.is-desktop-modern .ws3-zoomword { padding: 4px 8px; border-radius: 7px; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dsk-ink-3); background: color-mix(in srgb, var(--ws-field) 70%, transparent); box-shadow: inset 0 0 0 1px var(--ws-node-rim); }
+:root.is-desktop-modern .ws3-tool__spec { overflow: hidden; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+
+/* ── inspector (Level 3) ─────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-insp {
+  --tone: var(--ws-cyan);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 16px 16px 14px;
+  overflow-y: auto;
+  border-radius: 16px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), inset 0 0 0 1px var(--dsk-edge-hi), 0 30px 60px -34px rgb(0 0 0 / 0.95);
+  scrollbar-width: thin;
+}
+:root.is-desktop-modern .ws3-insp > * { flex-shrink: 0; }
+:root.is-desktop-modern .ws3-insp.is-cobalt { --tone: var(--ws-cobalt); }
+:root.is-desktop-modern .ws3-insp.is-violet { --tone: var(--ws-violet); }
+:root.is-desktop-modern .ws3-insp.is-amber { --tone: var(--ws-amber); }
+:root.is-desktop-modern .ws3-insp.is-gold { --tone: var(--ws-gold); }
+:root.is-desktop-modern .ws3-insp.is-graphite { --tone: var(--ws-graphite); }
+:root.is-desktop-modern .ws3-insp.is-green { --tone: var(--ws-green); }
+:root.is-desktop-modern .ws3-insp.is-red { --tone: var(--ws-red); }
+:root.is-desktop-modern .ws3-insp__head { display: flex; align-items: flex-start; gap: 10px; }
+:root.is-desktop-modern .ws3-insp__glyph { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--tone); background: color-mix(in srgb, var(--tone) 13%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 28%, transparent); }
+:root.is-desktop-modern .ws3-insp__glyph svg { width: 16px; height: 16px; }
+:root.is-desktop-modern .ws3-insp__glyph.is-good { --tone: var(--ws-green); }
+:root.is-desktop-modern .ws3-insp__glyph.is-held { --tone: var(--ws-amber); }
+:root.is-desktop-modern .ws3-insp__glyph.is-human { --tone: var(--ws-gold); }
+:root.is-desktop-modern .ws3-insp__glyph.is-bad { --tone: var(--ws-red); }
+:root.is-desktop-modern .ws3-insp__glyph.is-active { --tone: var(--ws-cobalt); }
+:root.is-desktop-modern .ws3-insp__title { display: grid; gap: 3px; min-width: 0; flex: 1; }
+:root.is-desktop-modern .ws3-insp__title small { font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__title strong { font-size: 15px; font-weight: 620; line-height: 1.3; letter-spacing: -0.01em; }
+:root.is-desktop-modern .ws3-insp__spec { margin: -6px 0 0; font-size: 12px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__desc { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-insp__figs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border-radius: 12px; background: var(--dsk-edge); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-insp__figs > span { display: grid; gap: 3px; padding: 10px 10px 9px; background: var(--dsk-glass-strong); }
+:root.is-desktop-modern .ws3-insp__figs b { font-size: 16px; font-weight: 620; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-insp__figs small { font-size: 11px; line-height: 1.3; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__figs .is-held b { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-insp__figs .is-bad b { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-insp__figs .is-human b { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-insp__pressure { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 12.5px; font-weight: 580; color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-insp__pressure svg { width: 14px; height: 14px; }
+:root.is-desktop-modern .ws3-insp__quiet { margin: 0; font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__sec h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__sec h4 em { font-style: normal; letter-spacing: 0; }
+:root.is-desktop-modern .ws3-insp__sec h4 .ws3-textbtn { margin-left: auto; font-size: 12px; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .ws3-insp__dl { display: grid; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 12.5px; }
+:root.is-desktop-modern .ws3-insp__dl dt { color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__dl dd { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 0; min-width: 0; color: var(--dsk-ink); overflow-wrap: anywhere; }
+:root.is-desktop-modern .ws3-insp__dl dd small { display: block; width: 100%; font-size: 11px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__dl code { padding: 1px 5px; border-radius: 5px; font: 500 11.5px/1.45 ui-monospace, 'SF Mono', Menlo, monospace; color: var(--dsk-ink-2); background: var(--dsk-tile); }
+:root.is-desktop-modern .ws3-exit { padding: 1px 6px; border-radius: 5px; font-size: 11px; font-weight: 650; letter-spacing: 0.05em; color: var(--dsk-ink-2); background: var(--dsk-tile); }
+:root.is-desktop-modern .ws3-exit.is-human { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-exit.is-failure { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-exit.is-exception { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-insp__note { margin: 8px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__members { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-insp__members li { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px; }
+:root.is-desktop-modern .ws3-insp__members svg { width: 13px; height: 13px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__members span { flex: 1; min-width: 0; }
+:root.is-desktop-modern .ws3-insp__members b { font-weight: 600; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-insp__recent { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-insp__recent button { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 7px 6px; border: 0; border-radius: 8px; background: none; text-align: left; }
+:root.is-desktop-modern .ws3-insp__recent button:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-insp__recent .ws3-dot { margin-top: 5px; }
+:root.is-desktop-modern .ws3-insp__who { display: grid; gap: 1px; min-width: 0; flex: 1; font-size: 12.5px; }
+:root.is-desktop-modern .ws3-insp__who small { overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-insp__recent time { font-size: 11.5px; color: var(--dsk-ink-3); white-space: nowrap; }
+:root.is-desktop-modern .ws3-insp__foot { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+
+/* run inspector */
+:root.is-desktop-modern .ws3-why { padding: 12px 13px; border-radius: 12px; background: color-mix(in srgb, var(--dsk-tile) 70%, transparent); box-shadow: inset 3px 0 0 -1px var(--why, var(--ws-graphite)), inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-why.is-good { --why: var(--ws-green); }
+:root.is-desktop-modern .ws3-why.is-active { --why: var(--ws-cobalt); }
+:root.is-desktop-modern .ws3-why.is-held { --why: var(--ws-amber); }
+:root.is-desktop-modern .ws3-why.is-human { --why: var(--ws-gold); }
+:root.is-desktop-modern .ws3-why.is-bad { --why: var(--ws-red); }
+:root.is-desktop-modern .ws3-why h4 { margin: 0 0 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.09em; color: var(--why, var(--dsk-ink-3)); }
+:root.is-desktop-modern .ws3-why p { margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-io { display: grid; grid-template-columns: 1fr; gap: 12px; }
+:root.is-desktop-modern .ws3-tl { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-tl button { position: relative; display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 5px 4px 5px 2px; border: 0; background: none; text-align: left; }
+:root.is-desktop-modern .ws3-tl li:not(:last-child) button::after { content: ''; position: absolute; left: 5px; top: 17px; bottom: -5px; width: 1px; background: var(--dsk-edge-hi); }
+:root.is-desktop-modern .ws3-tl .ws3-dot { margin-top: 5px; }
+:root.is-desktop-modern .ws3-tl span { display: grid; gap: 1px; flex: 1; min-width: 0; font-size: 12.5px; }
+:root.is-desktop-modern .ws3-tl span b { font-weight: 560; }
+:root.is-desktop-modern .ws3-tl span small { font-size: 11.5px; color: var(--dsk-ink-3); overflow-wrap: anywhere; }
+:root.is-desktop-modern .ws3-tl span small.is-reason { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-tl time { font-size: 11px; color: var(--dsk-ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-disclose { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 6px 0; border: 0; background: none; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-disclose svg { width: 13px; height: 13px; }
+:root.is-desktop-modern .ws3-pre { max-height: 260px; margin: 6px 0 0; padding: 10px; overflow: auto; border-radius: 10px; font: 500 11.5px/1.5 ui-monospace, 'SF Mono', Menlo, monospace; color: var(--dsk-ink-2); background: var(--dsk-tile); white-space: pre-wrap; }
+
+/* ── shared bars, chips, finds ───────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+:root.is-desktop-modern .ws3-bar__note { margin-left: auto; font-size: 12px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-find.is-inline { width: auto; flex: 1 1 260px; max-width: 420px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-find.is-wide { max-width: 560px; }
+:root.is-desktop-modern .ws3-select.is-block { display: flex; width: 100%; box-sizing: border-box; }
+:root.is-desktop-modern .ws3-select.is-block select { flex: 1; min-width: 0; }
+:root.is-desktop-modern .ws3-select.is-title select { font-size: 13.5px; font-weight: 620; }
+:root.is-desktop-modern .ws3-btn.is-on { color: var(--ws-gold); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ws-gold) 40%, transparent); }
+:root.is-desktop-modern .ws3-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
+:root.is-desktop-modern .ws3-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; font-size: 12.5px; font-weight: 560; color: var(--dsk-ink-3); background: transparent; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-chip:hover { color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-chip b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-chip.is-on { color: var(--dsk-ink); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .ws3-chip.is-needs_you b { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-chip.is-failed b { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-chip.is-held b { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-chip.is-drill { color: var(--dsk-accent); }
+:root.is-desktop-modern .ws3-chip svg { width: 12px; height: 12px; }
+:root.is-desktop-modern .ws3-note { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+
+/* ── runs ────────────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-runs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; height: 100%; padding: 0 20px 16px; box-sizing: border-box; min-height: 0; }
+:root.is-desktop-modern .ws3-runs.has-insp { grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.95fr); }
+:root.is-desktop-modern .ws3-runs__ledger { display: flex; flex-direction: column; min-height: 0; }
+:root.is-desktop-modern .ws3-table { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+:root.is-desktop-modern .ws3-tr {
+  display: grid;
+  grid-template-columns: 72px minmax(150px, 1.3fr) minmax(100px, 0.8fr) 132px minmax(110px, 0.9fr) 64px minmax(150px, 1.4fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--dsk-ink);
+}
+:root.is-desktop-modern button.ws3-tr:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-tr.is-on { background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); }
+:root.is-desktop-modern .ws3-tr.is-head { position: sticky; top: 0; z-index: 1; min-height: 30px; font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--dsk-ink-3); background: color-mix(in srgb, var(--dsk-bg) 70%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+:root.is-desktop-modern .ws3-tr > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-tr > span:nth-child(4) { display: flex; align-items: center; gap: 7px; }
+:root.is-desktop-modern .ws3-tr .is-subject { display: grid; gap: 1px; }
+:root.is-desktop-modern .ws3-tr .is-subject b { overflow: hidden; font-weight: 580; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-tr .is-subject small, :root.is-desktop-modern .ws3-tr .is-result small { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-tr .is-result { display: grid; gap: 1px; }
+:root.is-desktop-modern .ws3-tr .is-dim, :root.is-desktop-modern .ws3-tr > span:first-child { color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-tr .is-num { font-variant-numeric: tabular-nums; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-human { font-style: normal; font-size: 10.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-btn.is-more { margin: 12px auto 4px; display: flex; }
+:root.is-desktop-modern .ws3-runs__insp { display: grid; grid-template-rows: minmax(220px, 38%) minmax(0, 1fr); gap: 12px; min-height: 0; }
+:root.is-desktop-modern .ws3-runs__board { position: relative; min-height: 0; border-radius: 16px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-runs__board > .ws3-board { position: absolute; inset: 0; }
+:root.is-desktop-modern .ws3-btn.is-float { position: absolute; right: 10px; top: 10px; z-index: 5; }
+@container ws3 (max-width: 1350px) { :root.is-desktop-modern .ws3-runs.has-insp { grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); } :root.is-desktop-modern .ws3-runs.has-insp .ws3-tr { grid-template-columns: 64px minmax(140px, 1.3fr) 124px minmax(140px, 1.3fr); } :root.is-desktop-modern .ws3-runs.has-insp .ws3-tr > span:is(:nth-child(3), :nth-child(5), :nth-child(6)) { display: none; } }
+
+/* replay */
+:root.is-desktop-modern .ws3-replay { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .ws3-replay__label { margin-right: 2px; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-replay .ws3-iconbtn { width: 28px; height: 28px; }
+:root.is-desktop-modern .ws3-replay__pos { flex: 1; min-width: 0; overflow: hidden; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-replay.is-on .ws3-replay__pos { color: var(--dsk-ink); }
+
+/* ── live ────────────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-livemode { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); gap: 12px; height: 100%; padding: 0 16px 16px; box-sizing: border-box; min-height: 0; }
+:root.is-desktop-modern .ws3-livebadge { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 9px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.08em; color: var(--dsk-ink); background: color-mix(in srgb, var(--ws-field) 78%, transparent); box-shadow: inset 0 0 0 1px var(--ws-node-rim); }
+:root.is-desktop-modern .ws3-liverail { display: flex; flex-direction: column; min-height: 0; padding: 16px 10px 10px 14px; border-radius: 16px; background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); }
+:root.is-desktop-modern .ws3-liverail__cadence { margin: -4px 0 10px; font-size: 11.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-liverail__list { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 2px; margin: 0; padding: 0; list-style: none; scrollbar-width: thin; }
+:root.is-desktop-modern .ws3-liverow { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 7px 8px; border: 0; border-radius: 9px; background: none; text-align: left; }
+:root.is-desktop-modern .ws3-liverow:hover:not(:disabled) { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-liverow:disabled { cursor: default; opacity: 0.85; }
+:root.is-desktop-modern .ws3-liverow.is-on { background: var(--ws-row-on); }
+:root.is-desktop-modern .ws3-liverow .ws3-dot { margin-top: 5px; }
+:root.is-desktop-modern .ws3-liverow span { display: grid; gap: 1px; flex: 1; min-width: 0; }
+:root.is-desktop-modern .ws3-liverow strong { overflow: hidden; font-size: 12.5px; font-weight: 580; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-liverow small { overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-liverow time { font-size: 11px; color: var(--dsk-ink-3); white-space: nowrap; }
+
+/* ── activity ────────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-activity { display: flex; flex-direction: column; height: 100%; padding: 0 24px 16px; box-sizing: border-box; min-height: 0; }
+:root.is-desktop-modern .ws3-activity__feed { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+:root.is-desktop-modern .ws3-daygroup h4 { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-daygroup h4 em { font-style: normal; letter-spacing: 0; }
+:root.is-desktop-modern .ws3-daygroup ol { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-actrow { display: grid; grid-template-columns: 62px 10px minmax(0, 1fr) auto 64px; align-items: center; gap: 12px; width: 100%; min-height: 46px; padding: 6px 12px; border: 0; border-radius: 10px; background: none; text-align: left; }
+:root.is-desktop-modern .ws3-actrow:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-actrow time { font-size: 12px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-actrow__main { display: grid; gap: 2px; min-width: 0; }
+:root.is-desktop-modern .ws3-actrow__wf { overflow: hidden; font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-actrow__wf b { font-weight: 620; letter-spacing: 0; text-transform: none; font-size: 13px; color: var(--dsk-ink); }
+:root.is-desktop-modern .ws3-actrow__facts { display: flex; flex-wrap: wrap; overflow: hidden; font-size: 12.5px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-actrow__facts > span + span::before { content: '·'; margin: 0 6px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-actrow__status { font-size: 12px; font-weight: 560; color: var(--dsk-ink-3); white-space: nowrap; }
+:root.is-desktop-modern .ws3-actrow__status.is-needs_you { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-actrow__status.is-failed { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-actrow__status.is-held { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-actrow > small { font-size: 11.5px; color: var(--dsk-ink-3); text-align: right; }
+
+/* ── analytics ───────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-analytics { display: flex; flex-direction: column; gap: 14px; height: 100%; padding: 0 24px 20px; box-sizing: border-box; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+:root.is-desktop-modern .ws3-agrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+:root.is-desktop-modern .ws3-card { grid-column: span 6; min-width: 0; padding: 16px 16px 14px; border-radius: 16px; background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); }
+:root.is-desktop-modern .ws3-card h4 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; font-size: 13px; font-weight: 620; }
+:root.is-desktop-modern .ws3-card h4 small { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-card.is-kpis { grid-column: span 12; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; padding: 0; overflow: hidden; background: var(--dsk-edge); }
+:root.is-desktop-modern .ws3-card.is-series { grid-column: span 8; }
+:root.is-desktop-modern .ws3-card.is-resolution { grid-column: span 4; }
+:root.is-desktop-modern .ws3-card.is-bottlenecks { grid-column: span 7; }
+:root.is-desktop-modern .ws3-card.is-reasons { grid-column: span 5; }
+:root.is-desktop-modern .ws3-card.is-trend { grid-column: span 5; }
+:root.is-desktop-modern .ws3-card.is-branches { grid-column: span 7; }
+:root.is-desktop-modern .ws3-card.is-versions { grid-column: span 12; }
+@container ws3 (max-width: 1300px) { :root.is-desktop-modern .ws3-card:is(.is-series, .is-resolution, .is-bottlenecks, .is-reasons, .is-trend, .is-branches) { grid-column: span 12; } :root.is-desktop-modern .ws3-card.is-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+:root.is-desktop-modern .ws3-kpi { display: grid; gap: 4px; align-content: start; padding: 14px 16px; border: 0; text-align: left; background: var(--ws-plate); }
+:root.is-desktop-modern .ws3-kpi:not(:disabled):hover { background: color-mix(in srgb, var(--dsk-tile-hi) 60%, var(--dsk-bg)); }
+:root.is-desktop-modern .ws3-kpi:disabled { cursor: default; }
+:root.is-desktop-modern .ws3-kpi small { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-kpi b { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-kpi em { font-style: normal; font-size: 11px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-kpi.is-held b { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-kpi.is-human b { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-kpi.is-bad b { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-bars { display: flex; align-items: flex-end; gap: 3px; height: 170px; }
+:root.is-desktop-modern .ws3-bars__col { flex: 1; display: flex; align-items: flex-end; height: 100%; min-width: 3px; padding: 0; border: 0; background: none; }
+:root.is-desktop-modern .ws3-bars__stack { display: flex; flex-direction: column-reverse; width: 100%; height: var(--h); min-height: 1px; overflow: hidden; border-radius: 3px 3px 1px 1px; opacity: 0.9; transition: opacity 0.12s ease; }
+:root.is-desktop-modern .ws3-bars__col:hover .ws3-bars__stack { opacity: 1; box-shadow: 0 0 0 1px var(--dsk-edge-hi); }
+:root.is-desktop-modern .ws3-bars__stack i { display: block; min-height: 1px; }
+:root.is-desktop-modern :is(.ws3-bars__stack, .ws3-legend) i.is-completed, :root.is-desktop-modern .ws3-resbar .is-system, :root.is-desktop-modern .ws3-reslist i.is-system { background: color-mix(in srgb, var(--ws-green) 70%, transparent); }
+:root.is-desktop-modern :is(.ws3-bars__stack, .ws3-legend) i:is(.is-waiting, .is-running), :root.is-desktop-modern .ws3-resbar .is-in_flight, :root.is-desktop-modern .ws3-reslist i.is-in_flight { background: color-mix(in srgb, var(--ws-cobalt) 70%, transparent); }
+:root.is-desktop-modern :is(.ws3-bars__stack, .ws3-legend) i.is-held, :root.is-desktop-modern .ws3-resbar .is-held, :root.is-desktop-modern .ws3-reslist i.is-held { background: color-mix(in srgb, var(--ws-amber) 75%, transparent); }
+:root.is-desktop-modern :is(.ws3-bars__stack, .ws3-legend) i.is-needs_you, :root.is-desktop-modern .ws3-resbar .is-human, :root.is-desktop-modern .ws3-reslist i.is-human { background: color-mix(in srgb, var(--ws-gold) 80%, transparent); }
+:root.is-desktop-modern :is(.ws3-bars__stack, .ws3-legend) i.is-failed, :root.is-desktop-modern .ws3-resbar .is-failed, :root.is-desktop-modern .ws3-reslist i.is-failed { background: color-mix(in srgb, var(--ws-red) 75%, transparent); }
+:root.is-desktop-modern :is(.ws3-bars__stack, .ws3-legend) i.is-cancelled, :root.is-desktop-modern .ws3-resbar .is-withdrawn, :root.is-desktop-modern .ws3-reslist i.is-withdrawn { background: color-mix(in srgb, var(--ws-graphite) 55%, transparent); }
+:root.is-desktop-modern .ws3-bars__axis { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 11.5px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-legend span { display: inline-flex; align-items: center; gap: 6px; }
+:root.is-desktop-modern .ws3-legend i { width: 8px; height: 8px; border-radius: 2px; }
+:root.is-desktop-modern .ws3-resbar { display: flex; gap: 2px; height: 14px; margin-bottom: 14px; overflow: hidden; border-radius: 7px; }
+:root.is-desktop-modern .ws3-resbar button { min-width: 4px; padding: 0; border: 0; }
+:root.is-desktop-modern .ws3-reslist { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-reslist button { display: grid; grid-template-columns: 10px 1fr auto 40px; align-items: center; gap: 10px; width: 100%; padding: 6px 4px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; text-align: left; }
+:root.is-desktop-modern .ws3-reslist button:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-reslist i { width: 8px; height: 8px; border-radius: 2px; }
+:root.is-desktop-modern .ws3-reslist b { font-weight: 600; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-reslist em { font-style: normal; font-size: 12px; color: var(--dsk-ink-3); text-align: right; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-mtable { display: grid; gap: 1px; }
+:root.is-desktop-modern .ws3-mtable > * { display: grid; grid-template-columns: minmax(0, 2fr) repeat(5, minmax(0, 1fr)); align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 4px 6px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; text-align: left; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-mtable > button:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-mtable .is-head { min-height: 26px; font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-mtable .is-name { display: grid; overflow: hidden; font-weight: 560; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-mtable .is-name small { font-size: 11px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-mtable .is-held { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-mtable .is-bad { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-mtable .is-human { color: var(--ws-gold); }
+:root.is-desktop-modern .ws3-hbars { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-hbars button { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 36px; align-items: center; gap: 10px; width: 100%; padding: 5px 4px; border: 0; border-radius: 8px; background: none; font-size: 12.5px; text-align: left; }
+:root.is-desktop-modern .ws3-hbars button:hover { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-hbars span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-hbars i { display: block; width: var(--w); height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--ws-amber) 70%, transparent); }
+:root.is-desktop-modern .ws3-hbars b { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .ws3-trend { display: block; width: 100%; height: 120px; }
+:root.is-desktop-modern .ws3-trend polyline { fill: none; stroke: var(--ws-gold); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+:root.is-desktop-modern .ws3-trend polygon { fill: color-mix(in srgb, var(--ws-gold) 12%, transparent); stroke: none; }
+:root.is-desktop-modern .ws3-branch { display: grid; grid-template-columns: minmax(120px, 0.8fr) minmax(0, 2fr); align-items: center; gap: 12px; margin-bottom: 8px; }
+:root.is-desktop-modern .ws3-branch__name { overflow: hidden; font-size: 12.5px; font-weight: 560; white-space: nowrap; text-overflow: ellipsis; }
+:root.is-desktop-modern .ws3-branch__bar { display: flex; gap: 2px; height: 26px; overflow: hidden; border-radius: 7px; }
+:root.is-desktop-modern .ws3-branch__bar button { min-width: 6px; overflow: hidden; padding: 0 8px; border: 0; font-size: 11px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; color: var(--dsk-ink); background: color-mix(in srgb, var(--ws-cobalt) 32%, transparent); }
+:root.is-desktop-modern .ws3-branch__bar button.is-primary { background: color-mix(in srgb, var(--ws-green) 34%, transparent); }
+:root.is-desktop-modern .ws3-branch__bar button.is-exception { background: color-mix(in srgb, var(--ws-amber) 36%, transparent); }
+:root.is-desktop-modern .ws3-branch__bar button.is-failure { background: color-mix(in srgb, var(--ws-red) 38%, transparent); }
+:root.is-desktop-modern .ws3-branch__bar button.is-human { background: color-mix(in srgb, var(--ws-gold) 38%, transparent); }
+:root.is-desktop-modern .ws3-branch__bar button span { display: block; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── design ──────────────────────────────────────────────────────────────── */
+:root.is-desktop-modern .ws3-design { display: grid; grid-template-columns: 250px minmax(0, 1fr) minmax(320px, 360px); gap: 12px; height: 100%; padding: 0 16px 16px; box-sizing: border-box; min-height: 0; }
+:root.is-desktop-modern .ws3-palette { min-height: 0; overflow-y: auto; padding: 14px 10px 12px 12px; border-radius: 16px; background: var(--ws-plate); box-shadow: var(--ws-plate-shadow); scrollbar-width: thin; }
+:root.is-desktop-modern .ws3-palette h4 { display: flex; align-items: baseline; gap: 6px; margin: 14px 0 6px; font-size: 11px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-palette h4:first-child { margin-top: 0; }
+:root.is-desktop-modern .ws3-palette h4 small { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .ws3-palette ul { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+:root.is-desktop-modern .ws3-palette li button { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 7px 6px; border: 0; border-radius: 8px; background: none; text-align: left; font-size: 12.5px; }
+:root.is-desktop-modern .ws3-palette li button:hover:not(:disabled) { background: var(--ws-row-hover); }
+:root.is-desktop-modern .ws3-palette li button:disabled { opacity: 0.4; cursor: not-allowed; }
+:root.is-desktop-modern .ws3-palette li svg { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-palette li span { display: grid; gap: 1px; }
+:root.is-desktop-modern .ws3-palette li small { font-size: 11px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-cantpublish { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; line-height: 30px; color: var(--ws-red); background: color-mix(in srgb, var(--ws-red) 12%, var(--ws-label-bg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ws-red) 30%, transparent); }
+:root.is-desktop-modern .ws3-issues { position: absolute; top: 64px; right: 12px; z-index: 6; display: grid; gap: 4px; width: min(380px, 60%); }
+:root.is-desktop-modern .ws3-issues button { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 0; border-radius: 10px; font-size: 12.5px; line-height: 1.4; text-align: left; color: var(--dsk-ink); background: color-mix(in srgb, var(--ws-field) 86%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ws-red) 30%, var(--ws-node-rim)); }
+:root.is-desktop-modern .ws3-issues svg { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; color: var(--ws-red); }
+:root.is-desktop-modern .ws3-toast { position: absolute; left: 50%; bottom: 16px; z-index: 7; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 12px; font-size: 12.5px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow); }
+:root.is-desktop-modern .ws3-form { display: grid; gap: 10px; }
+:root.is-desktop-modern .ws3-form label { display: grid; gap: 5px; font-size: 11.5px; font-weight: 560; color: var(--dsk-ink-3); text-transform: capitalize; }
+:root.is-desktop-modern .ws3-form label.is-check { display: flex; align-items: center; gap: 8px; text-transform: none; }
+:root.is-desktop-modern .ws3-form :is(input:not([type='checkbox']), select), :root.is-desktop-modern .ws3-input { height: 32px; padding: 0 10px; border: 0; border-radius: 8px; font-size: 13px; color: var(--dsk-ink); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); outline: none; box-sizing: border-box; width: 100%; }
+:root.is-desktop-modern .ws3-input.is-title { height: 30px; padding: 0 6px; font-size: 14px; font-weight: 600; background: transparent; box-shadow: none; }
+:root.is-desktop-modern .ws3-input.is-title:focus { background: var(--dsk-tile); }
+:root.is-desktop-modern .ws3-diff { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+:root.is-desktop-modern .ws3-diff li { display: flex; gap: 8px; }
+:root.is-desktop-modern .ws3-diff b { flex: 0 0 auto; min-width: 64px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .ws3-diff .is-added b { color: var(--ws-green); }
+:root.is-desktop-modern .ws3-diff .is-removed b { color: var(--ws-red); }
+:root.is-desktop-modern .ws3-diff .is-changed b, :root.is-desktop-modern .ws3-diff .is-routing b { color: var(--ws-amber); }
+:root.is-desktop-modern .ws3-simbox h4 em { color: var(--ws-cobalt); font-style: normal; letter-spacing: 0.04em; }
+:root.is-desktop-modern .ws3-modal { position: fixed; inset: 0; z-index: 10050; display: grid; place-items: center; background: rgb(0 0 0 / 0.45); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+:root.is-desktop-modern .ws3-modal__card { display: grid; gap: 12px; width: min(560px, calc(100vw - 48px)); max-height: 80vh; overflow-y: auto; padding: 22px; border-radius: 18px; background: var(--dsk-glass-strong); -webkit-backdrop-filter: var(--dsk-blur); backdrop-filter: var(--dsk-blur); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 40px 90px -40px rgb(0 0 0 / 0.95); }
+:root.is-desktop-modern .ws3-modal__card h3 { margin: 0; font-size: 17px; font-weight: 640; }
+:root.is-desktop-modern .ws3-modal__card p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .ws3-modal__actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── narrow panes (split screen: 50% / 33% / 25% of a desk) ──────────────── */
+@container ws3 (max-width: 1000px) {
+  :root.is-desktop-modern .ws3-head { flex-wrap: wrap; gap: 10px 16px; padding: 14px 16px 10px; }
+  :root.is-desktop-modern .ws3-modes { margin-left: 0; order: 3; flex-wrap: wrap; }
+  :root.is-desktop-modern .ws3-head__side { margin-left: auto; }
+  :root.is-desktop-modern .ws3-overview { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: 'mini' 'needs' 'act' 'lib'; height: auto; min-height: 100%; overflow-y: auto; padding: 4px 16px 20px; }
+  :root.is-desktop-modern .ws3-main:has(> .ws3-overview) { overflow-y: auto; }
+  :root.is-desktop-modern .ws3-overview__needs, :root.is-desktop-modern .ws3-overview__act { max-height: 420px; }
+  :root.is-desktop-modern .ws3-overview__lib { max-height: 460px; }
+  :root.is-desktop-modern .ws3-mini__pipe { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); row-gap: 14px; }
+  :root.is-desktop-modern .ws3-mini__track { display: none; }
+  :root.is-desktop-modern .ws3-canvasmode, :root.is-desktop-modern .ws3-canvasmode.has-lib, :root.is-desktop-modern .ws3-canvasmode.has-insp, :root.is-desktop-modern .ws3-canvasmode.has-lib.has-insp { grid-template-columns: minmax(0, 1fr); position: relative; padding: 0 10px 10px; }
+  :root.is-desktop-modern .ws3-canvasmode > .ws3-lib { display: none; }
+  :root.is-desktop-modern .ws3-canvasmode > .ws3-insp { position: absolute; top: 8px; right: 18px; bottom: 18px; z-index: 8; width: min(360px, calc(100% - 36px)); }
+  :root.is-desktop-modern .ws3-tool__title small, :root.is-desktop-modern .ws3-tool .ws3-select { display: none; }
+  :root.is-desktop-modern .ws3-find { width: 160px; }
+  :root.is-desktop-modern .ws3-runs.has-insp { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+  :root.is-desktop-modern .ws3-livemode { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr); }
+  :root.is-desktop-modern .ws3-design { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(360px, 1fr) auto; overflow-y: auto; }
+  :root.is-desktop-modern .ws3-palette { max-height: 220px; }
+  :root.is-desktop-modern .ws3-card.is-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  :root.is-desktop-modern .ws3-actrow { grid-template-columns: 52px 10px minmax(0, 1fr) auto; }
+  :root.is-desktop-modern .ws3-actrow > small { display: none; }
+}
+@container ws3 (max-width: 560px) {
+  :root.is-desktop-modern .ws3-spec { font-size: 12px; }
+  :root.is-desktop-modern .ws3-modes button { padding: 0 9px; }
+  :root.is-desktop-modern .ws3-tr, :root.is-desktop-modern .ws3-runs.has-insp .ws3-tr { grid-template-columns: 56px minmax(0, 1fr) 110px; }
+  :root.is-desktop-modern .ws3-tr > span:is(:nth-child(3), :nth-child(5), :nth-child(6), :nth-child(7)) { display: none; }
+}
+
+/* ultrawide: the overview's first frame is the whole real topology */
+:root.is-desktop-modern .ws3-mini__board { position: relative; height: clamp(360px, 44cqh, 620px); margin: -4px -8px 0; border-radius: 12px; overflow: hidden; }
+:root.is-desktop-modern .ws3-mini__board > .ws3-board { position: absolute; inset: 0; background-color: transparent; }
+:root.is-desktop-modern .ws3-mini__board > .ws3-board::before { display: none; }
+:root.is-desktop-modern .ws3-mini__pipe.is-hidden { display: none; }
+:root.is-desktop-modern .ws3-overview.is-wide { grid-template-rows: auto minmax(0, 1fr); }
+
+/* inputs sit on the studio's own glass in every theme (the light theme's global input fill must not leak in) */
+:root.is-desktop-modern .ws3 :is(.ws3-find, .ws3-lib__search) input,
+:root.is-desktop-modern .ws3 .ws3-select select { background: transparent !important; box-shadow: none !important; border: 0 !important; }

@@ -1,0 +1,93 @@
+/**
+ * OUTBOUND DISPATCH · QUEUE RUNNER — the real gate order of
+ * processSendQueueItem → processSupabaseQueueItem (queue/process-send-queue.js):
+ * operator brakes and campaign authority before the claim; then contact
+ * window, sender, the content guards, the stale-reply guard, sender health,
+ * compliance (DNC / suppression, re-checked here on EVERY send), the §11
+ * canonical dispatch, and the delivery result written later by the provider
+ * callback or the reconciler. One run = one send_queue row.
+ */
+import { edge as e, group as g, node as n } from '../core.js'
+
+const OWNER = 'Queue runner (queue/run)'
+
+export const QUEUE_DISPATCH = Object.freeze({
+  workflow_key: 'queue_dispatch',
+  topology_version: 'queue-dispatch-topology-v1',
+  direction: 'LR',
+  badge: 'SYSTEM WORKFLOW · observed from the queue runner · read-only topology',
+  groups: [g('content_guards', 'Content guards', 'CONDITION', 'sequence', 'deferred body · name · duplicate · greeting · asset')],
+  stages: [
+    { key: 'due', label: 'Row due', nodes: ['row_due', 'send_authority', 'campaign_authority'] },
+    { key: 'claim', label: 'Claim', nodes: ['claim_once', 'contact_window', 'select_sender'] },
+    { key: 'guards', label: 'Guards', nodes: ['resolve_body', 'name_guard', 'duplicate_lock', 'greeting_guard', 'asset_guard', 'stale_reply_guard', 'health_guard', 'compliance'] },
+    { key: 'dispatch', label: 'Dispatch', nodes: ['provider_dispatch', 'provider_accepted'] },
+    { key: 'delivery', label: 'Delivered', nodes: ['delivery_result', 'delivered'] },
+  ],
+  nodes: [
+    n('row_due', 'TRIGGER', 'Queued message due', { summary: 'scheduled_for ≤ now · every minute', evidence: ['queue:due'], owner: OWNER, action: 'processSendQueue (Cloudflare * * * * *)', description: 'The runner is the only SMS sender. Limits, batch size, caps and the contact window come from system_control — the scheduler passes no body, so a deploy cannot outrank a live operator setting.', link: { app: 'Queue', href: '/queue' } }),
+    n('send_authority', 'CONDITION', 'Operator brakes clear?', { summary: 'execution mode · processor · emergency stop', evidence: ['queue:brake'], owner: 'Canonical send authority', action: 'evaluateCanonicalSendAuthority', inputs: ['queue_execution_mode', 'queue_processor_mode', 'queue_emergency_stop_at'] }),
+    n('campaign_authority', 'CONDITION', 'Campaign still live?', { optional: true, summary: 'paused campaign → deferred', evidence: ['queue:campaign_authority'], owner: 'Campaign lifecycle authority', action: 'evaluateCampaignDispatchAuthority' }),
+    n('brake_hold', 'WAIT', 'Held by operator brake', { lane: 1, summary: 'row untouched · retried next minute', evidence: ['queue:brake_hold'] }),
+    n('claim_once', 'ACTION', 'Claim once', { summary: 'atomic claim · lock token', evidence: ['queue:claimed'], action: 'queue_atomic_claim_send_row', outputs: ['queue_claim_audit'] }),
+    n('contact_window', 'CONDITION', 'Inside contact window?', { summary: 'fresh replies exempt', evidence: ['queue:window'], action: 'buildContactWindowDeferral' }),
+    n('window_defer', 'RETRY', 'Defer to the window', { lane: 1, summary: 'released · reclaimed later', evidence: ['queue:deferred'] }),
+    n('select_sender', 'ACTION', 'Select sender number', { summary: 'routing · per-number caps', evidence: ['queue:sender'], action: 'selectAvailableTextgridNumber' }),
+    n('sender_ineligible', 'TERMINAL', 'Sender ineligible', { lane: 2, terminal: 'neutral', evidence: ['status:blocked_sender_ineligible'] }),
+    n('resolve_body', 'CONDITION', 'Resolve deferred body', { group: 'content_guards', optional: true, evidence: ['status:paused_deferred_unresolved'], action: 'resolveDeferredQueueMessage' }),
+    n('name_guard', 'CONDITION', 'Seller name present?', { group: 'content_guards', evidence: ['status:paused_name_missing'] }),
+    n('duplicate_lock', 'CONDITION', 'Hard idempotency lock', { group: 'content_guards', summary: 'same content · same number · 24h', evidence: ['status:duplicate_blocked'] }),
+    n('greeting_guard', 'CONDITION', 'Blank-greeting guard', { group: 'content_guards', evidence: ['status:blocked:greeting'] }),
+    n('asset_guard', 'CONDITION', 'Template ↔ asset guard', { group: 'content_guards', evidence: ['status:blocked:asset'], action: 'evaluateTemplateAssetGuard' }),
+    n('content_hold', 'TERMINAL', 'Held for operator', { lane: 2, terminal: 'human', summary: 'name · body · duplicate · template', evidence: ['status:paused_*'], link: { app: 'Queue', href: '/queue' } }),
+    n('stale_reply_guard', 'CONDITION', 'Still the right reply?', { summary: 'a newer inbound supersedes it', evidence: ['queue:stale_guard'], action: 'evaluateAutoReplySuperseded' }),
+    n('withdrawn', 'TERMINAL', 'Withdrawn', { lane: 1, terminal: 'neutral', summary: 'superseded · cancelled · expired', evidence: ['status:cancelled', 'status:expired'] }),
+    n('health_guard', 'CONDITION', 'Sender healthy?', { summary: 'SMS health guard', evidence: ['queue:health'], action: 'loadSmsHealthGuardSystemControl' }),
+    n('health_hold', 'TERMINAL', 'Held by sender health', { lane: 2, terminal: 'neutral', evidence: ['status:blocked_by_health_guard'] }),
+    n('compliance', 'CONDITION', 'Suppressed or opted out?', { summary: 'DNC · suppression · contactability', evidence: ['queue:compliance'], owner: 'Compliance', action: 'evaluateAndBlockSendAtCompliance → evaluateCanonicalContactability', description: 'Suppression is checked immediately before every dispatch on both send paths — no workflow and no queue row can bypass it.' }),
+    n('compliance_block', 'TERMINAL', 'Blocked by compliance', { lane: 3, terminal: 'neutral', evidence: ['status:cancelled:compliance'] }),
+    n('provider_dispatch', 'ACTION', 'Dispatch to provider', { summary: '§11 canonical dispatch · TextGrid', evidence: ['attempt'], owner: '§11 dispatch ledger', action: 'dispatchSellerQueueRow', outputs: ['seller_logical_communications', 'seller_communication_attempts'] }),
+    n('transport_failed', 'TERMINAL', 'Transport failed', { lane: 3, terminal: 'failure', evidence: ['status:failed'] }),
+    n('provider_accepted', 'STATE_CHANGE', 'Sent · provider accepted', { summary: 'queue row → sent', evidence: ['status:sent'], action: 'finalizeSendQueueSuccess', outputs: ['send_queue.sent_at', 'lead state (send seam)'], measured: { latency: true, note: 'Measured: queued → sent (send_queue.created_at → sent_at).' } }),
+    n('delivery_result', 'DECISION', 'Delivery result', { summary: 'callback · or the reconciler', evidence: ['queue:delivery'], owner: 'Delivery reconciliation', measured: { latency: true, note: 'Measured: sent → delivered.' } }),
+    n('delivered', 'TERMINAL', 'Delivered', { terminal: 'success', evidence: ['status:delivered'] }),
+    n('carrier_failed', 'TERMINAL', 'Carrier failed', { lane: 2, terminal: 'failure', evidence: ['status:failed_transport'] }),
+    n('review_hold', 'TERMINAL', 'Review hold', { lane: -1, terminal: 'human', summary: 'created non-executable', evidence: ['status:paused_operator_review'], description: 'While the queue is not fully live, producers may only create rows in the canonical review-hold status; a person releases them.', link: { app: 'Inbox', href: '/inbox' } }),
+  ],
+  edges: [
+    e('row_due', 'review_hold', 'human', 'FOR APPROVAL'),
+    e('row_due', 'send_authority'),
+    e('send_authority', 'brake_hold', 'exception', 'IF BLOCKED'),
+    e('send_authority', 'campaign_authority', 'primary', 'CLEAR'),
+    e('campaign_authority', 'brake_hold', 'exception', 'PAUSED'),
+    e('campaign_authority', 'claim_once'),
+    e('send_authority', 'claim_once', 'branch'),
+    e('claim_once', 'contact_window'),
+    e('contact_window', 'window_defer', 'exception', 'IF DEFERRED'),
+    e('window_defer', 'row_due', 'retry', 'RETRY'),
+    e('contact_window', 'select_sender', 'primary', 'CLEAR'),
+    e('select_sender', 'sender_ineligible', 'exception', 'IF BLOCKED'),
+    e('select_sender', 'resolve_body'),
+    e('resolve_body', 'name_guard'),
+    e('name_guard', 'duplicate_lock'),
+    e('duplicate_lock', 'greeting_guard'),
+    e('greeting_guard', 'asset_guard'),
+    e('asset_guard', 'stale_reply_guard'),
+    e('resolve_body', 'content_hold', 'human', 'IF HELD'),
+    e('name_guard', 'content_hold', 'human', 'IF HELD'),
+    e('duplicate_lock', 'content_hold', 'human', 'IF DUPLICATE'),
+    e('greeting_guard', 'content_hold', 'human', 'IF HELD'),
+    e('asset_guard', 'content_hold', 'human', 'IF HELD'),
+    e('stale_reply_guard', 'withdrawn', 'exception', 'SUPERSEDED'),
+    e('stale_reply_guard', 'health_guard', 'primary', 'CLEAR'),
+    e('health_guard', 'health_hold', 'exception', 'IF HELD'),
+    e('health_guard', 'compliance', 'primary', 'CLEAR'),
+    e('compliance', 'compliance_block', 'exception', 'IF BLOCKED'),
+    e('compliance', 'provider_dispatch', 'primary', 'CLEAR'),
+    e('provider_dispatch', 'transport_failed', 'failure', 'IF FAILED'),
+    e('provider_dispatch', 'provider_accepted'),
+    e('provider_accepted', 'delivery_result'),
+    e('delivery_result', 'delivered', 'primary', 'DELIVERED'),
+    e('delivery_result', 'carrier_failed', 'failure', 'IF FAILED'),
+  ],
+})
