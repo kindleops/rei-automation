@@ -56,6 +56,72 @@ export interface CalendarTimeline {
   property_scope: string | null
 }
 
+/* ── desk contract (view=desk, CALENDAR 3.0) — additive; the phone never asks for it ── */
+export type DeskOwner = 'you' | 'system' | 'seller' | 'buyer' | 'title' | 'external'
+export type DeskState = 'upcoming' | 'live' | 'waiting' | 'needs_you' | 'overdue' | 'completed' | 'cancelled' | 'superseded'
+export type DeskLane = 'campaign' | 'closing' | 'automation' | 'workflow' | 'manual'
+export type DeskKind = 'window' | 'start' | 'group' | 'message' | 'capsule' | 'deadline' | 'milestone' | 'timer'
+export type AttentionCategory = 'overdue' | 'due_today' | 'tomorrow' | 'missing_date' | 'blocking_closing' | 'stale_follow_up' | 'missed_campaign_schedule' | 'waiting_too_long'
+export type DeskType = CalType | 'workflow_timer' | 'workflow_approval' | 'workflow_held' | 'workflow_run' | 'email_scheduled' | 'closing_missing_date'
+
+export interface DeskEvent extends Omit<CalEvent, 'type' | 'app' | 'links' | 'start'> {
+  type: DeskType
+  app: CalApp | 'workflow' | 'email'
+  start: string
+  source_id?: string
+  owner: DeskOwner
+  state: DeskState
+  history: boolean
+  lane: DeskLane
+  kind: DeskKind
+  manual?: boolean
+  undated?: boolean
+  attention_state: 'none' | 'attention' | 'overdue' | 'blocking'
+  attention_category: AttentionCategory | null
+  subject: { type: string; id: string } | null
+  editable: { mode: 'read_only' | 'reschedulable' | 'manual'; owner_app: string; how: string; effects: string[] }
+  provenance: { scheduled_by: string; basis: string | null; policy?: string | null; timezone: string | null; timezone_basis: string }
+  why: string | null
+  next: string | null
+  deep_link: { app: string; label: string; path: string } | null
+  contact_window?: { tz: string; abbr: string; window: string; planned_within: boolean; earliest_at: string; deferred: boolean } | null
+  updated_at?: string | null
+  links: CalEvent['links'] & { run_id?: string | null; queue_id?: string | null; email_thread_id?: string | null }
+}
+export interface DeskDay { total: number; campaign: number; windows: number; closing: number; attention: number; automation: number; manual: number; workflow: number; external: number; completed: number; sends: number }
+export interface DeskBrief { id: string; type: DeskType; title: string; subtitle: string | null; start: string; end: string | null; at: string; tz: string | null; owner: DeskOwner }
+export interface DeskTimeline extends Omit<CalendarTimeline, 'events' | 'attention'> {
+  contract: 'calendar.desk/v3'
+  demo?: boolean
+  events: DeskEvent[]
+  attention: DeskEvent[]
+  system: { processor: string; execution_mode: string | null; emergency_stop: boolean; email_sending: boolean; workflow_orchestrator: boolean; workflow_heartbeat_at: string | null; contact_window: { start: string; end: string } }
+  days: Record<string, DeskDay>
+  board: Record<AttentionCategory, string[]>
+  definitions: Record<AttentionCategory, string>
+  telemetry: {
+    today: { total: number; system: number; you: number; external: number; ids: string[] }
+    needs_you: { total: number }
+    attention: { total: number; overdue: number }
+    live: DeskBrief[]
+    next: DeskBrief | null
+    next_system: DeskBrief | null
+    basis: Record<string, string>
+  }
+}
+
+export async function fetchDeskTimeline(p: { from: string; to: string; tz: string; propertyId?: string | null }, signal?: AbortSignal): Promise<DeskTimeline> {
+  const qs = new URLSearchParams({ from: p.from, to: p.to, tz: p.tz, view: 'desk' })
+  if (p.propertyId) qs.set('property_id', p.propertyId)
+  const res = await callBackend<{ ok: boolean; data: DeskTimeline }>(`/api/cockpit/calendar/timeline?${qs.toString()}`, { signal, timeoutMs: 45_000 })
+  if (!res.ok) {
+    const upstream = (res as { upstream?: { error?: string } }).upstream
+    throw new Error(upstream?.error || res.error || 'calendar_failed')
+  }
+  if (!res.data?.data || res.data.data.contract !== 'calendar.desk/v3') throw new Error('calendar_contract_mismatch')
+  return res.data.data
+}
+
 export const operatorZone = () => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Chicago' } catch { return 'America/Chicago' }
 }

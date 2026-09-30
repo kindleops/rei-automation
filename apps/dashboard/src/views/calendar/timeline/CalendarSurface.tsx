@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import { pushRoutePath } from '../../../app/router'
 import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import { useOperatorName } from '../../../shared/useOperatorName'
@@ -57,7 +58,26 @@ function greetingFor(now: Date) {
   return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
+// The desktop Temporal Command Center (CALENDAR 3.0). Lazy: a phone never loads it.
+const CalendarDesk = lazy(() => import('../desktop/CalendarDesk').then((m) => ({ default: m.CalendarDesk })))
+
+/**
+ * One route, two instruments: a phone keeps the time command surface below
+ * exactly as it was; the modern desktop gets the Temporal Command Center.
+ */
 export function CalendarSurface() {
+  const { isPhone } = useBreakpoint()
+  if (!isPhone) {
+    return (
+      <Suspense fallback={<div className="cal3" aria-busy="true" />}>
+        <CalendarDesk />
+      </Suspense>
+    )
+  }
+  return <CalendarPhoneSurface />
+}
+
+function CalendarPhoneSurface() {
   const tz = useMemo(operatorZone, [])
   const name = useOperatorName()
   const initial = useMemo(readUrl, [])

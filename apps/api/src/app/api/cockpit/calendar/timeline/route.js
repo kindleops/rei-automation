@@ -1,7 +1,8 @@
 /**
  * CALENDAR TIMELINE — read-only projection of every real, time-bearing record
  * (scheduled sends, seller follow-ups, pipeline actions, campaign starts and
- * send windows, closing deadlines, offers) for a bounded date range.
+ * send windows, closing deadlines, offers; desk adds workflow timers and the
+ * email outbox) for a bounded date range.
  */
 import { NextResponse } from 'next/server.js'
 import { getCalendarTimeline } from '@/lib/domain/calendar/calendar-timeline-service.js'
@@ -30,6 +31,9 @@ export async function GET(request) {
       to: get('to', DATE),
       tz: get('tz', ZONE),
       propertyId: get('property_id', ID),
+      // view=desk: the desktop contract (history, workflow timers, email outbox,
+      // day aggregates, attention board, telemetry). The phone omits it.
+      view: get('view', /^desk$/),
     })
     return NextResponse.json({ ok: true, data }, { status: 200, headers })
   } catch (error) {
