@@ -50,6 +50,7 @@ import { LivingMap } from './world/LivingMap'
 import { isOwnedMapLayer } from './map-layer-ownership'
 import { selectionNeedsNudge } from './mobile/map-mobile-model'
 import './mobile/map-mobile.css'
+import './map-desktop.css'
 import { CommandMapLiveActivityRail } from './components/CommandMapLiveActivityRail'
 import {
   buildOverlayGeoJson,
@@ -4487,10 +4488,23 @@ export function InboxCommandMap({
    * meaningful amount, so a padding ease cannot feed back into another padding ease.
    */
   const appliedBottomPaddingRef = useRef(0)
+  const appliedRightPaddingRef = useRef(0)
   useEffect(() => {
     const map = mapRef.current
     if (!map || !isMobile) return
     const measure = () => {
+      // Desktop: the card docks on the RIGHT of the Map pane — frame the map beside
+      // it, not above a sheet that isn't there.
+      if (document.documentElement.classList.contains('is-desktop-modern')) {
+        const dock = document.querySelector('.smc-dock') as HTMLElement | null
+        const w = propertySheetVisible && dock ? dock.getBoundingClientRect().width : 0
+        const right = w > 0 ? Math.round(w + 28) : 0
+        if (Math.abs(right - appliedRightPaddingRef.current) < 24 && appliedBottomPaddingRef.current === 0) return
+        appliedRightPaddingRef.current = right
+        appliedBottomPaddingRef.current = 0
+        map.easeTo({ padding: { top: 0, right, bottom: 0, left: 0 }, duration: 420 })
+        return
+      }
       const sheet = document.querySelector('.smc-shell') as HTMLElement | null
       const raw = propertySheetVisible && sheet ? sheet.getBoundingClientRect().height : 0
       // Cap so a tall focus sheet cannot squeeze the usable map to nothing.

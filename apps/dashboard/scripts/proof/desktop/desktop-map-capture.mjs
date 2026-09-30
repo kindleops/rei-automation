@@ -36,7 +36,9 @@ await page.waitForFunction(() => /in view/.test(document.querySelector('.mx-cont
 if (CENTER.length === 2) {
   await page.evaluate(([c, z]) => window.__nxMap.jumpTo({ center: c, zoom: z }), [CENTER, ZOOM])
 }
-await page.waitForTimeout(6000)
+// wait for the pins at the new camera (the lens pill counts them), bounded
+await page.waitForFunction(() => /\d[\d,]* in view/.test(document.querySelector('.mx-context')?.textContent || ''), null, { timeout: 45000 }).catch(() => {})
+await page.waitForTimeout(3000)
 const shot = async (name) => { await page.screenshot({ path: `${OUT}/${TAG}-${name}.png` }); console.log('shot', name) }
 const esc = async () => { await page.keyboard.press('Escape'); await page.waitForTimeout(700) }
 if (STATES.includes('rest')) await shot('rest')
@@ -50,21 +52,40 @@ if (STATES.includes('activity')) {
 }
 if (STATES.includes('card')) {
   // click the property marker nearest the middle of the pane
-  const pt = await page.evaluate(() => {
+  const findPin = () => page.evaluate(() => {
     const m = window.__nxMap
     const canvas = m.getCanvas().getBoundingClientRect()
-    const feats = m.queryRenderedFeatures().filter((f) => f.geometry?.type === 'Point' && /pin|seller|marker|property|dot/i.test(f.layer?.id || ''))
+    const layers = ['command-pin-icon-raw', 'command-pin-core-raw'].filter((id) => m.getLayer(id))
+    const all = (layers.length ? m.queryRenderedFeatures({ layers }) : []).filter((f) => f.geometry?.type === 'Point')
+    // a pin backed by a real conversation opens the seller card; bare inventory may not
+    const withThread = all.filter((f) => f.properties?.conversation_id)
     const cx = canvas.width / 2; const cy = canvas.height / 2
     let best = null
-    for (const f of feats) {
+    for (const f of [...withThread, ...all.filter((f) => !f.properties?.conversation_id && f.properties?.property_id)]) {
+      if (best && !f.properties?.conversation_id && best.thread) break
       const p = m.project(f.geometry.coordinates)
       const d = Math.hypot(p.x - cx, p.y - cy)
-      if (p.x > 80 && p.y > 160 && p.x < canvas.width - 90 && p.y < canvas.height - 120 && (!best || d < best.d)) best = { d, x: canvas.left + p.x, y: canvas.top + p.y, layer: f.layer.id }
+      const x = canvas.left + p.x; const y = canvas.top + p.y
+      const onTop = document.elementFromPoint(x, y)?.classList?.contains('maplibregl-canvas')
+      if (onTop && p.x > 80 && p.y > 160 && p.x < canvas.width - 90 && p.y < canvas.height - 120 && (!best || (d < best.d && Boolean(f.properties?.conversation_id) === best.thread))) best = { d, x, y, layer: f.layer.id, thread: Boolean(f.properties?.conversation_id) }
     }
     return best
   })
+  let pt = null
+  for (let i = 0; i < 12 && !pt; i += 1) { pt = await findPin(); if (!pt) await page.waitForTimeout(2000) }
   console.log('pin', JSON.stringify(pt))
-  if (pt) { await page.mouse.click(pt.x, pt.y); await page.waitForTimeout(4500); await shot('card') }
+  if (pt) {
+    await page.mouse.click(pt.x, pt.y)
+    const opened = await page.waitForSelector('.smc-dock, .smc-shell', { timeout: 45000 }).then(() => true).catch(() => false)
+    await page.waitForTimeout(opened ? 3500 : 500)
+    console.log('card opened', opened)
+    await shot('card')
+    if (opened) {
+      // detail (focus) state: click the peek body, not a control
+      const peek = await page.$('.smc-dock.is-peek .smc-shell')
+      if (peek) { await peek.click({ position: { x: 60, y: 40 } }).catch(() => {}); await page.waitForTimeout(3000); await shot('card-detail') }
+    }
+  }
 }
 const info = await page.evaluate(() => ({
   context: document.querySelector('.mx-context')?.textContent?.trim() || null,

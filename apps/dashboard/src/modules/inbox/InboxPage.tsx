@@ -3609,7 +3609,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (event.key === 'Escape') {
         setCommandOpen(false)
         setSchedulePanelOpen(false)
-        setLayoutState((current) => ({ ...current, activeOverlay: null }))
+        // Same object when nothing changed: an unconditional new state here
+        // re-rendered the whole workspace mid-keydown on every Escape.
+        setLayoutState((current) => (current.activeOverlay == null ? current : { ...current, activeOverlay: null }))
         return
       }
 

@@ -25,6 +25,7 @@ import {
   type CompFilters,
   type CompSource,
 } from './useSoldComps'
+import { mapOverlayTarget } from '../map-overlay-host'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const usd = (v?: number | null) => (v == null || !Number.isFinite(v) || v <= 0 ? '—' : v >= 1e6 ? `$${(v / 1e6).toFixed(v >= 1e7 ? 1 : 2)}M` : `$${Math.round(v / 1000)}K`)
@@ -265,10 +266,10 @@ export function MapCompCard({ map, compId, onClose, reducedMotion }: { map: mapl
             <button type="button" className="smc-look__done" onClick={() => setLookAround(false)}>Done</button>
           </div>
         </div>,
-        document.body,
+        mapOverlayTarget(),
       )}
     </div>,
-    document.body,
+    mapOverlayTarget(),
   )
 }
 

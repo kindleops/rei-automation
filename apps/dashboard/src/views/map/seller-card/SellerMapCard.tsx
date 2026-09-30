@@ -44,6 +44,7 @@ import {
 import '../../../modules/inbox/conversation-composer-premium.css'
 import '../../../modules/inbox/conversation-live.css'
 import './seller-map-card.css'
+import { mapOverlayTarget } from '../map-overlay-host'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -144,7 +145,7 @@ export const SellerMapCard = ({
   onActivityRefresh?: () => void
   detailLoading?: boolean
 }) => {
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
   const [cardMode, setCardMode] = useState<SellerMapCardMode>(mode)
   const [trackedMode, setTrackedMode] = useState(mode)
   const [localDraft, setLocalDraft] = useState(draftText)
@@ -640,7 +641,7 @@ export const SellerMapCard = ({
         <button type="button" className="smc-look__done" onClick={() => setLookAroundOpen(false)} data-look-around-close>Done</button>
       </div>
     </div>,
-    document.body,
+    mapOverlayTarget(),
   ) : null
 
   const focusBody = (
@@ -784,6 +785,51 @@ export const SellerMapCard = ({
     </>
   )
 
+  // Desktop: the same modern card, docked as a glass inspector on the right of
+  // the Map pane — the map stays visible and interactive beside it. A peek is
+  // a compact card; opening it (or a conversation) extends the dock to full
+  // height. Escape and × step back exactly as the sheet's swipe-down does.
+  if (isModernDesktop && typeof document !== 'undefined') {
+    return createPortal(
+      <div className={cls('smc-dock', `is-${cardMode}`)} role="presentation">
+        <article
+          className={shellClassName}
+          onMouseEnter={onMouseEnter}
+          onMouseLeave={onMouseLeave}
+          onClick={(event) => {
+            event.stopPropagation()
+            const target = event.target as HTMLElement | null
+            if (isPeek && !isConversation && !target?.closest('button, a, input, textarea, select, [role="button"], [data-no-expand]')) {
+              setCardMode('focus')
+              setSheetSnap('half')
+              onPeekToFocus?.()
+            }
+          }}
+          role={isPeek && !isConversation ? 'button' : 'region'}
+          aria-label={isPeek && !isConversation ? 'Seller property preview' : isConversation ? 'Seller message composer' : 'Seller property card'}
+        >
+          <button
+            type="button"
+            className="smc-dock__close"
+            aria-label={isConversation ? 'Back to property' : 'Close'}
+            onClick={(event) => {
+              event.stopPropagation()
+              if (isConversation) { setCardMode('focus'); return }
+              onClose?.()
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+              {isConversation ? <path d="M15 5l-7 7 7 7" /> : <path d="M6 6l12 12M18 6 6 18" />}
+            </svg>
+          </button>
+          {shellInner}
+        </article>
+        {lookAroundOverlay}
+      </div>,
+      mapOverlayTarget(),
+    )
+  }
+
   if (isMobile && typeof document !== 'undefined') {
     return createPortal(
       <MobileBottomSheet
@@ -854,7 +900,7 @@ export const SellerMapCard = ({
         </article>
         {lookAroundOverlay}
       </MobileBottomSheet>,
-      document.body,
+      mapOverlayTarget(),
     )
   }
 

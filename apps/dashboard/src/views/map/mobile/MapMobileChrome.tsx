@@ -54,6 +54,8 @@ import { MapSearch } from './MapSearch'
 import { MapEventCard } from './MapEventCard'
 import { landEvent, useLiveOrbs } from './useLiveOrbs'
 import { useLivingSettings, living } from '../world/living-settings'
+import { mapOverlayTarget, setMapOverlayHost } from '../map-overlay-host'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -124,11 +126,17 @@ function MapSheet({ title, onClose, children, className, header }: {
 }) {
   const [closing, setClosing] = useState(false)
   const dismiss = useCallback(() => { setClosing(true); window.setTimeout(onClose, 180) }, [onClose])
+  // Subscribe ONCE and call the latest dismiss through a ref. Re-subscribing on
+  // every render (onClose is an inline arrow) let a re-render flushed by an
+  // earlier Escape listener remove this one mid-dispatch — the DOM then skips
+  // it, and Escape never closed the sheet.
+  const dismissRef = useRef(dismiss)
+  dismissRef.current = dismiss
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismissRef.current() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dismiss])
+  }, [])
   return createPortal(
     <div className={cls('mx-sheet', className, closing && 'is-closing')} role="presentation">
       <button type="button" className="mx-sheet__backdrop" aria-label="Close" onClick={dismiss} />
@@ -144,7 +152,7 @@ function MapSheet({ title, onClose, children, className, header }: {
         <div className="mx-sheet__body">{children}</div>
       </section>
     </div>,
-    document.body,
+    mapOverlayTarget(),
   )
 }
 
@@ -186,6 +194,16 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
   const [sheet, setSheet] = useState<SheetKey>(null)
   const [layersTab, setLayersTab] = useState<LayersTab>('mode')
+  // Desktop: sheets dock inside the Map pane, and the rail gains zoom + north.
+  const { isModernDesktop } = useBreakpoint()
+  const [bearing, setBearing] = useState(0)
+  useEffect(() => {
+    if (!map || !isModernDesktop) return
+    const on = () => setBearing(map.getBearing())
+    on()
+    map.on('rotate', on)
+    return () => { map.off('rotate', on) }
+  }, [map, mapEpoch, isModernDesktop])
   // The Living Map chip's "settings" link opens Appearance.
   useEffect(() => {
     const on = (e: Event) => { const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab; setLayersTab(tab === 'appearance' ? 'appearance' : 'mode'); setSheet('layers') }
@@ -733,7 +751,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const pillSwatch = lensSwatch(lens)
 
   return (
-    <div className={cls('mx', (cardOpen || compId || compList) && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing')}>
+    <div className={cls('mx', (cardOpen || compId || compList) && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing', isModernDesktop && 'is-desk', isModernDesktop && (sheet || compList) && 'has-dock')}>
       <MapAreaTool map={map} epoch={mapEpoch} drawing={drawing} onDrawingChange={setDrawing} reducedMotion={reducedMotion} />
       <MapFocusSet map={map} mapEpoch={mapEpoch} reducedMotion={reducedMotion} />
       {!drawing && (
@@ -799,6 +817,23 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           <Icon name="target" size={17} />
         </button>
       </div>
+
+      {isModernDesktop && (
+        <div className="mx-zoom" role="group" aria-label="Zoom and orientation">
+          <button type="button" className="mx-btn" aria-label="Zoom in" data-map-control="zoom-in" onClick={() => map?.zoomIn({ duration: reducedMotion ? 0 : 260 })}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+          <button type="button" className="mx-btn" aria-label="Zoom out" data-map-control="zoom-out" onClick={() => map?.zoomOut({ duration: reducedMotion ? 0 : 260 })}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>
+          <button type="button" className={cls('mx-btn', Math.abs(bearing) > 0.5 && 'is-turned')} aria-label="Reset to north" data-map-control="north" onClick={() => map?.easeTo({ bearing: 0, pitch: 0, duration: reducedMotion ? 0 : 520 })}>
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style={{ transform: `rotate(${-bearing}deg)` }}>
+              <path d="M12 3.5 15 12h-6z" fill="var(--mx-critical)" />
+              <path d="M12 20.5 9 12h6z" fill="currentColor" opacity="0.55" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {scanKey > 0 && !reducedMotion && <span key={scanKey} className="mx-scan" aria-hidden="true" style={{ backgroundImage: rampGradient(lens, '180deg') }} />}
 
@@ -1067,6 +1102,9 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           )}
         </MapSheet>
       )}
+
+      {/* Desktop: sheets and cards mount here, inside the Map pane. */}
+      <div className="mx-overlay-host" ref={setMapOverlayHost} />
     </div>
   )
 }

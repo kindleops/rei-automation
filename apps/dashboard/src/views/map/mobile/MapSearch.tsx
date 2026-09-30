@@ -14,6 +14,7 @@ import type maplibregl from 'maplibre-gl'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
 import { Icon } from '../../../shared/icons'
+import { mapOverlayTarget } from '../map-overlay-host'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -258,7 +259,7 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
             </div>
           )}
         </div>,
-        document.body,
+        mapOverlayTarget(),
       )}
     </>
   )

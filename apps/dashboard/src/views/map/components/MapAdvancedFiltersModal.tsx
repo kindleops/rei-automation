@@ -42,6 +42,7 @@ import {
 } from '../../../domain/map/map-filter-draft'
 import '../../../modules/inbox/inbox-polish.css'
 import '../map-advanced-filters.css'
+import { mapOverlayTarget } from '../map-overlay-host'
 
 export interface MapAdvancedFiltersModalProps {
   open: boolean
@@ -502,7 +503,7 @@ export function MapAdvancedFiltersModal({
         </footer>
       </section>
     </div>,
-    document.body,
+    mapOverlayTarget(),
   )
 }
 

@@ -1,0 +1,493 @@
+/*
+ * MAP — DESKTOP.
+ *
+ * The map stays the surface; the chrome becomes instruments. On a desk the Map
+ * lives in a pane, so everything is laid out against the pane (its glass body
+ * is the containing block), sheets and cards dock on the right as one glass
+ * inspector instead of rising as phone sheets, and the controls read as two
+ * quiet capsules with tooltips. Rides the Map's own --mx-* theme tokens, lifted
+ * to the desktop material; nothing here reaches a phone.
+ */
+
+html.is-desktop-modern .mx {
+  --mxd-gap: 14px;
+  --mxd-dock-w: 408px;
+  --mxd-radius: 15px;
+  --mx-glass: rgba(13, 16, 23, 0.64);
+  --mx-glass-strong: rgba(11, 14, 21, 0.86);
+  --mx-glass-hi: rgba(255, 255, 255, 0.075);
+  --mx-glass-lo: rgba(255, 255, 255, 0.012);
+  --mx-edge: rgba(255, 255, 255, 0.11);
+  --mx-spec: rgba(255, 255, 255, 0.13);
+  --mx-blur: blur(26px) saturate(175%);
+  --mx-shadow: 0 18px 42px -20px rgba(0, 0, 0, 0.85), 0 2px 8px -4px rgba(0, 0, 0, 0.5);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .mx {
+  --mx-glass: rgba(252, 253, 255, 0.72);
+  --mx-glass-strong: rgba(252, 253, 255, 0.9);
+  --mx-glass-hi: rgba(255, 255, 255, 0.95);
+  --mx-glass-lo: rgba(255, 255, 255, 0.55);
+  --mx-edge: rgba(11, 18, 32, 0.09);
+  --mx-spec: rgba(255, 255, 255, 1);
+  --mx-blur: blur(26px) saturate(190%);
+  --mx-shadow: 0 16px 34px -18px rgba(20, 32, 60, 0.38), 0 1px 3px rgba(11, 18, 32, 0.08);
+}
+html.is-desktop-modern[data-nexus-theme='true_black'] .mx {
+  --mx-glass: rgba(0, 0, 0, 0.62);
+  --mx-glass-strong: rgba(0, 0, 0, 0.86);
+  --mx-edge: rgba(255, 255, 255, 0.13);
+}
+
+/* ── Top-left instruments: place search, then lens + world on one row ─────── */
+html.is-desktop-modern .mx-searchrow {
+  top: var(--mxd-gap);
+  left: var(--mxd-gap);
+  right: auto;
+  width: min(420px, calc(100% - 150px));
+}
+html.is-desktop-modern .mx-search {
+  height: 42px;
+  border-radius: 13px;
+  background: linear-gradient(180deg, var(--mx-glass-hi), var(--mx-glass-lo) 70%), var(--mx-glass);
+  -webkit-backdrop-filter: var(--mx-blur);
+  backdrop-filter: var(--mx-blur);
+  box-shadow: inset 0 0 0 1px var(--mx-edge), inset 0 1px 0 var(--mx-spec), var(--mx-shadow);
+  transition: box-shadow 0.2s ease;
+}
+html.is-desktop-modern .mx-search:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mx-accent) 60%, transparent), 0 0 0 4px color-mix(in srgb, var(--mx-accent) 14%, transparent), var(--mx-shadow);
+}
+html.is-desktop-modern .mx-search input { font-size: 13.5px; font-weight: 500; letter-spacing: -0.005em; }
+
+html.is-desktop-modern .mx-top {
+  top: calc(var(--mxd-gap) + 50px);
+  left: var(--mxd-gap);
+  right: auto;
+  max-width: calc(100% - 120px);
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 8px;
+}
+html.is-desktop-modern .mx-worldslot { flex-basis: auto; flex: 0 1 auto; }
+html.is-desktop-modern .mx-context {
+  min-height: 46px;
+  padding: 6px 12px 6px 11px;
+  border-radius: var(--mxd-radius);
+  gap: 11px;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+html.is-desktop-modern .mx-context:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mx-accent) 38%, var(--mx-edge)), inset 0 1px 0 var(--mx-spec), var(--mx-shadow); }
+html.is-desktop-modern .mx-context:active { transform: none; }
+html.is-desktop-modern .mx-context__copy strong { font-size: 13.5px; font-weight: 650; letter-spacing: -0.012em; }
+html.is-desktop-modern .mx-context__copy span { font-size: 11.5px; font-weight: 500; }
+html.is-desktop-modern .mx-context__swatch i { width: 5px; height: 20px; }
+html.is-desktop-modern .mx-top .nxw-chip {
+  min-height: 46px !important;
+  padding: 6px 13px 6px 10px;
+  border-radius: var(--mxd-radius);
+}
+html.is-desktop-modern .mx-top .nxw-chip__main b { font-size: 11px; letter-spacing: 0.08em; }
+html.is-desktop-modern .mx-top .nxw-chip__main em { font-size: 11.5px; }
+html.is-desktop-modern .mx-chip { min-height: 32px; border-radius: 11px; font-size: 12.5px; font-weight: 600; align-self: center; }
+
+/* ── Right: one tool capsule + one zoom capsule, with tooltips ────────────── */
+html.is-desktop-modern .mx-stack,
+html.is-desktop-modern .mx-zoom {
+  position: fixed;
+  right: var(--mxd-gap);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--mx-glass-hi), var(--mx-glass-lo) 60%), var(--mx-glass);
+  -webkit-backdrop-filter: var(--mx-blur);
+  backdrop-filter: var(--mx-blur);
+  box-shadow: inset 0 0 0 1px var(--mx-edge), inset 0 1px 0 var(--mx-spec), var(--mx-shadow);
+  transition: right 0.32s var(--mx-ease);
+}
+html.is-desktop-modern .mx-stack { top: var(--mxd-gap); }
+html.is-desktop-modern .mx-zoom { bottom: 30px; animation: mx-drop 0.5s var(--mx-ease) 90ms both; }
+html.is-desktop-modern .mx-stack .mx-btn,
+html.is-desktop-modern .mx-zoom .mx-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  color: var(--mx-ink-2);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+html.is-desktop-modern .mx-stack .mx-btn:hover,
+html.is-desktop-modern .mx-zoom .mx-btn:hover { background: var(--mx-well); color: var(--mx-ink); }
+html.is-desktop-modern .mx-stack .mx-btn:active,
+html.is-desktop-modern .mx-zoom .mx-btn:active { transform: scale(0.94); }
+html.is-desktop-modern .mx-stack .mx-btn.is-lit {
+  color: var(--mx-accent);
+  background: color-mix(in srgb, var(--mx-accent) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mx-accent) 42%, transparent);
+}
+html.is-desktop-modern .mx-stack .mx-btn:focus-visible,
+html.is-desktop-modern .mx-zoom .mx-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--mx-accent), 0 0 0 3px color-mix(in srgb, var(--mx-accent) 20%, transparent); }
+html.is-desktop-modern .mx-stack .mx-btn__badge { top: 2px; right: 2px; min-width: 16px; height: 16px; font-size: 10px; }
+html.is-desktop-modern .mx-stack .mx-live { top: 7px; right: 7px; }
+html.is-desktop-modern .mx-zoom .mx-btn:nth-child(2) { position: relative; }
+html.is-desktop-modern .mx-zoom .mx-btn:last-child { margin-top: 3px; }
+html.is-desktop-modern .mx-zoom .mx-btn:last-child::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  top: -3px;
+  height: 1px;
+  background: var(--mx-rule);
+}
+html.is-desktop-modern .mx-zoom .mx-btn svg { transition: transform 0.35s var(--mx-ease); }
+
+/* tooltips: the control's own label, to its left, after a short beat */
+html.is-desktop-modern .mx-stack .mx-btn::before,
+html.is-desktop-modern .mx-zoom .mx-btn::before {
+  content: attr(aria-label);
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translate(4px, -50%);
+  padding: 6px 10px;
+  border-radius: 9px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: -0.005em;
+  color: var(--mx-ink);
+  background: var(--mx-glass-strong);
+  -webkit-backdrop-filter: var(--mx-blur);
+  backdrop-filter: var(--mx-blur);
+  box-shadow: inset 0 0 0 1px var(--mx-edge), 0 10px 24px -12px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease, transform 0.18s var(--mx-ease);
+}
+html.is-desktop-modern .mx-stack .mx-btn:hover::before,
+html.is-desktop-modern .mx-zoom .mx-btn:hover::before {
+  opacity: 1;
+  transform: translate(0, -50%);
+  transition-delay: 0.35s;
+}
+
+/* A docked inspector owns the right edge: the capsules step left of it. */
+html.is-desktop-modern .mx.has-dock .mx-stack,
+html.is-desktop-modern .mx.has-dock .mx-zoom,
+html.is-desktop-modern .mx:has(.smc-dock) .mx-stack,
+html.is-desktop-modern .mx:has(.smc-dock) .mx-zoom,
+html.is-desktop-modern .mx:has(.mx-overlay-host > .mx-comp) .mx-stack,
+html.is-desktop-modern .mx:has(.mx-overlay-host > .mx-comp) .mx-zoom { right: calc(var(--mxd-dock-w) + var(--mxd-gap) * 2); }
+
+/* ── Bottom: legend + market plates (left), activity ticker (centre) ──────── */
+html.is-desktop-modern .mx-cards {
+  left: var(--mxd-gap);
+  right: auto;
+  bottom: 30px;
+  max-width: min(360px, calc(100% - 140px));
+}
+html.is-desktop-modern .mx-cards.has-peek { bottom: 30px; }
+html.is-desktop-modern .mx-cards > * { border-radius: var(--mxd-radius); }
+
+html.is-desktop-modern .mx-peek {
+  left: 50%;
+  right: auto;
+  bottom: 28px;
+  width: min(460px, calc(100% - 480px));
+  min-width: 300px;
+  min-height: 46px;
+  padding: 6px 8px 6px 14px;
+  border-radius: var(--mxd-radius);
+  transform: translateX(-50%);
+  animation: mxd-rise-centered 0.45s var(--mx-ease) both;
+}
+html.is-desktop-modern .mx-peek__copy strong { font-size: 13px; font-weight: 620; }
+html.is-desktop-modern .mx-peek__copy span { font-size: 11.5px; }
+html.is-desktop-modern .mx-peek__count { min-width: 26px; height: 26px; border-radius: 8px; font-size: 12px; }
+html.is-desktop-modern .mx:has(.mx-cards) .mx-peek { left: calc(50% + 120px); }
+
+/* ── Event card (a Live Activity event) docks top-right like the inspector ── */
+html.is-desktop-modern .mx-event {
+  left: auto;
+  right: calc(38px + 8px + var(--mxd-gap) * 2);
+  top: var(--mxd-gap);
+  bottom: auto;
+  width: min(360px, calc(100% - 140px));
+  border-radius: 16px;
+  animation: mxd-dock-in 0.32s var(--mx-ease) both;
+}
+html.is-desktop-modern .mx-event__title { font-size: 15px; font-weight: 650; }
+
+/* ── The overlay host: desktop sheets and cards mount here, inside the pane ─ */
+html.is-desktop-modern .mx > .mx-overlay-host {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+html.is-desktop-modern .mx-overlay-host > * { pointer-events: auto; }
+
+/* MapSheet → a right-docked glass inspector; the map stays interactive. */
+html.is-desktop-modern .mx-overlay-host .mx-sheet {
+  position: absolute;
+  inset: var(--mxd-gap) var(--mxd-gap) var(--mxd-gap) auto;
+  width: var(--mxd-dock-w);
+  max-width: calc(100% - 120px);
+  z-index: 4;
+  justify-content: stretch;
+}
+html.is-desktop-modern .mx-overlay-host .mx-sheet__backdrop { display: none; }
+html.is-desktop-modern .mx-overlay-host .mx-sheet__panel {
+  flex: 1;
+  max-height: none;
+  margin: 0;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--mx-glass-hi), var(--mx-glass-lo) 28%), var(--mx-glass-strong);
+  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  backdrop-filter: blur(34px) saturate(180%);
+  box-shadow: inset 0 0 0 1px var(--mx-edge), inset 0 1px 0 var(--mx-spec), 0 28px 70px -28px rgba(0, 0, 0, 0.85);
+  animation: mxd-dock-in 0.34s var(--mx-ease) both;
+}
+html.is-desktop-modern .mx-overlay-host .mx-sheet.is-closing .mx-sheet__panel { animation: mxd-dock-out 0.18s ease-in both; }
+html.is-desktop-modern .mx-overlay-host .mx-sheet__grip { display: none; }
+html.is-desktop-modern .mx-overlay-host .mx-sheet__head {
+  padding: 15px 12px 13px 20px;
+  border-bottom: 1px solid var(--mx-rule);
+}
+html.is-desktop-modern .mx-overlay-host .mx-sheet__head > strong { font-size: 16px; font-weight: 650; letter-spacing: -0.02em; }
+html.is-desktop-modern .mx-overlay-host .mx-sheet__body {
+  padding: 14px 16px 22px;
+  gap: 18px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mx-ink-4) transparent;
+}
+html.is-desktop-modern .mx-overlay-host .mx-sheet__body::-webkit-scrollbar { display: block; width: 8px; }
+html.is-desktop-modern .mx-overlay-host .mx-sheet__body::-webkit-scrollbar-thumb { background: var(--mx-ink-4); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+html.is-desktop-modern .mx-overlay-host .mx-block > h3 { font-size: 11px; letter-spacing: 0.08em; font-weight: 650; }
+html.is-desktop-modern .mx-overlay-host .mx-row__copy strong { font-size: 13.5px; font-weight: 600; }
+html.is-desktop-modern .mx-overlay-host .mx-row__copy span { font-size: 12px; }
+html.is-desktop-modern .mx-overlay-host .mx-seg__tab { font-size: 12.5px; }
+html.is-desktop-modern .mx-overlay-host .mx-feedrow { min-height: 50px; padding: 8px 14px; transition: background 0.14s ease; }
+html.is-desktop-modern .mx-overlay-host .mx-feedrow:hover { background: var(--mx-well); }
+html.is-desktop-modern .mx-overlay-host .mx-tile { transition: background 0.14s ease, box-shadow 0.14s ease; }
+html.is-desktop-modern .mx-overlay-host .mx-note { font-size: 12.5px; }
+
+/* Cards that were phone bottom cards dock top-right on a desk. */
+html.is-desktop-modern .mx-overlay-host .mx-comp,
+html.is-desktop-modern .mx-overlay-host .mx-areacard {
+  position: absolute;
+  left: auto;
+  right: var(--mxd-gap);
+  top: var(--mxd-gap);
+  bottom: auto;
+  width: var(--mxd-dock-w);
+  max-width: calc(100% - 120px);
+  max-height: calc(100% - var(--mxd-gap) * 2);
+  border-radius: 18px;
+  z-index: 5;
+  animation: mxd-dock-in 0.34s var(--mx-ease) both;
+}
+html.is-desktop-modern .mx-overlay-host .mx-focusset { top: calc(var(--mxd-gap) + 2px); }
+
+/* ── Seller card → docked inspector ───────────────────────────────────────── */
+html.is-desktop-modern .smc-dock {
+  position: absolute;
+  top: var(--mxd-gap, 14px);
+  right: var(--mxd-gap, 14px);
+  width: var(--mxd-dock-w, 408px);
+  max-width: calc(100% - 120px);
+  max-height: calc(100% - var(--mxd-gap, 14px) * 2);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  animation: mxd-dock-in 0.34s var(--mx-ease, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
+}
+html.is-desktop-modern .smc-dock.is-focus,
+html.is-desktop-modern .smc-dock.is-conversation { bottom: var(--mxd-gap, 14px); }
+html.is-desktop-modern .smc-dock > .smc-shell.is-mobile-sheet {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.012) 30%), rgba(11, 14, 21, 0.86);
+  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  backdrop-filter: blur(34px) saturate(180%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 28px 70px -28px rgba(0, 0, 0, 0.85);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .smc-dock > .smc-shell.is-mobile-sheet {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.6) 30%), rgba(252, 253, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.09), inset 0 1px 0 #fff, 0 26px 60px -30px rgba(20, 32, 60, 0.45);
+}
+html.is-desktop-modern[data-nexus-theme='true_black'] .smc-dock > .smc-shell.is-mobile-sheet {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 30%), rgba(0, 0, 0, 0.88);
+}
+html.is-desktop-modern .smc-dock .smc-shell::before { display: none; }
+html.is-desktop-modern .smc-dock .smc-mobile-sheet__content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+html.is-desktop-modern .smc-dock .smc-mobile-sheet__scroll,
+html.is-desktop-modern .smc-dock .smc-mobile-sheet__content.is-peek {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+html.is-desktop-modern .smc-dock.is-peek .smc-mobile-sheet__scroll { max-height: min(420px, calc(100vh - 200px)); }
+html.is-desktop-modern .smc-dock .smc-sticky-head { flex-shrink: 0; }
+html.is-desktop-modern .smc-dock .smc-actions { flex-shrink: 0; position: sticky; bottom: 0; z-index: 2; }
+html.is-desktop-modern .smc-dock .smc-shell.is-peek { cursor: pointer; }
+html.is-desktop-modern .smc-dock__close {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0 !important;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(8, 10, 14, 0.46);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .smc-dock__close:hover { background: rgba(8, 10, 14, 0.66); }
+html.is-desktop-modern .smc-dock__close:focus-visible { box-shadow: inset 0 0 0 1px #fff, 0 0 0 3px color-mix(in srgb, var(--nexus-accent, #38bdf8) 40%, transparent); }
+
+@keyframes mxd-dock-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@keyframes mxd-dock-out { to { opacity: 0; transform: translateX(10px); } }
+@keyframes mxd-rise-centered { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .mx-overlay-host .mx-sheet__panel,
+  html.is-desktop-modern .mx-overlay-host .mx-comp,
+  html.is-desktop-modern .mx-overlay-host .mx-areacard,
+  html.is-desktop-modern .smc-dock,
+  html.is-desktop-modern .mx-event,
+  html.is-desktop-modern .mx-peek,
+  html.is-desktop-modern .mx-zoom { animation: none !important; }
+  html.is-desktop-modern .mx-stack .mx-btn::before,
+  html.is-desktop-modern .mx-zoom .mx-btn::before { transition: none; }
+}
+
+/* With a dock open the ticker sits left of the capsules — and the Live Activity
+   panel is the feed itself, so the ticker steps away while it is open. */
+html.is-desktop-modern .mx.has-dock .mx-peek,
+html.is-desktop-modern .mx:has(.smc-dock) .mx-peek {
+  left: auto;
+  right: calc(var(--mxd-dock-w) + var(--mxd-gap) * 3 + 46px);
+  width: min(420px, calc(100% - var(--mxd-dock-w) - 480px));
+  transform: none;
+  animation-name: mx-rise;
+}
+html.is-desktop-modern .mx:has(.mx-activity-sheet) .mx-peek { display: none; }
+
+/* Narrow Map panes (a split): the legend and ticker give the dock room. */
+@container pane (max-width: 980px) {
+  html.is-desktop-modern .mx.has-dock .mx-peek,
+  html.is-desktop-modern .mx:has(.smc-dock) .mx-peek,
+  html.is-desktop-modern .mx.has-dock .mx-cards,
+  html.is-desktop-modern .mx:has(.smc-dock) .mx-cards { display: none; }
+  html.is-desktop-modern .mx .mx-peek { left: auto; right: calc(38px + 8px + var(--mxd-gap) * 2); transform: none; width: min(380px, calc(100% - 420px)); animation-name: mx-rise; }
+}
+
+/* The dock's close sits top-right; the hero's Look Around steps left of it. */
+html.is-desktop-modern .smc-dock .smc-mpeek__look { right: 46px; }
+html.is-desktop-modern .smc-dock .smc-close { display: none; }
+
+/* ── Every Map menu lives on the side: Filters + Live Activity settings ───── */
+html.is-desktop-modern .mx-overlay-host .nx-ifm-overlay--map {
+  position: absolute;
+  inset: var(--mxd-gap) var(--mxd-gap) var(--mxd-gap) auto;
+  width: min(520px, calc(100% - 120px));
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  z-index: 6;
+  animation: none;
+}
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border-radius: 18px !important;
+  border: 0 !important;
+  box-shadow: inset 0 0 0 1px var(--mx-edge), inset 0 1px 0 var(--mx-spec), 0 28px 70px -28px rgba(0, 0, 0, 0.85) !important;
+  animation: mxd-dock-in 0.34s var(--mx-ease) both !important;
+}
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map .nx-ifm-body { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map .nx-ifm-rail {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-right: none;
+  border-bottom: 1px solid var(--mx-rule);
+  padding: 10px 14px;
+}
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map .nx-ifm-rail-item { flex: 0 0 auto; white-space: nowrap; }
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map .nx-ifm-fields { grid-template-columns: 1fr; }
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map .nx-ifm-active { border-top: 1px solid var(--mx-rule); max-height: 180px; overflow-y: auto; }
+
+html.is-desktop-modern .mx-overlay-host .nx-icm-activity-sheet-root {
+  position: absolute;
+  inset: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  pointer-events: none;
+  z-index: 6;
+}
+html.is-desktop-modern .mx-overlay-host .nx-icm-activity-sheet {
+  pointer-events: auto;
+  top: var(--mxd-gap);
+  right: var(--mxd-gap);
+  bottom: var(--mxd-gap);
+  left: auto;
+  width: min(var(--mxd-dock-w), calc(100% - 120px));
+  height: auto;
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--mx-glass-hi), var(--mx-glass-lo) 28%), var(--mx-glass-strong);
+  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  backdrop-filter: blur(34px) saturate(180%);
+  box-shadow: inset 0 0 0 1px var(--mx-edge), inset 0 1px 0 var(--mx-spec), 0 28px 70px -28px rgba(0, 0, 0, 0.85);
+  animation: mxd-dock-in 0.34s var(--mx-ease) both;
+}
+
+/* those docks own the right edge too */
+html.is-desktop-modern .mx:has(.mx-overlay-host > .nx-ifm-overlay--map) .mx-stack,
+html.is-desktop-modern .mx:has(.mx-overlay-host > .nx-ifm-overlay--map) .mx-zoom { right: calc(min(520px, 100% - 120px) + var(--mxd-gap) * 2); }
+html.is-desktop-modern .mx:has(.mx-overlay-host > .nx-icm-activity-sheet-root) .mx-stack,
+html.is-desktop-modern .mx:has(.mx-overlay-host > .nx-icm-activity-sheet-root) .mx-zoom { right: calc(var(--mxd-dock-w) + var(--mxd-gap) * 2); }
+/* the phone sheet's drag grip has no meaning in a side dock */
+html.is-desktop-modern .mx-overlay-host .nx-ifm-modal--map .nx-ifm-header::before { display: none; }

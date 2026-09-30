@@ -7,6 +7,7 @@ import type {
   LiveActivityDisplayMode,
   LiveActivitySpeed,
 } from '../commandMapLiveActivity'
+import { mapOverlayTarget } from '../map-overlay-host'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -181,6 +182,6 @@ export const LiveActivitySettingsSheet = memo(function LiveActivitySettingsSheet
         </div>
       </aside>
     </div>,
-    document.body,
+    mapOverlayTarget(),
   )
 })

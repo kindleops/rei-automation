@@ -7,6 +7,7 @@ import type maplibregl from 'maplibre-gl'
 import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import { clearMapFocusSet, MAP_FOCUS_SET_EVENT, readMapFocusSet, type MapFocusSet as FocusSet } from '../../../domain/map/map-focus-set'
+import { mapOverlayTarget } from '../map-overlay-host'
 
 const SRC = 'nx-focus-set'
 const TONE: Record<FocusSet['tone'], string> = { property: '#5ee7ff', buyer: '#34e8c4', portfolio: '#f7c75b' }
@@ -67,6 +68,6 @@ export function MapFocusSet({ map, mapEpoch, reducedMotion }: { map: maplibregl.
       <span className="mx-focusset__text"><b>{set.points.length.toLocaleString()}</b> {set.label}</span>
       <button type="button" className="mx-focusset__x" onClick={() => { clearMapFocusSet(); if (map) paint(map, null) }} aria-label="Clear highlighted set"><Icon name="close" /></button>
     </div>,
-    document.body,
+    mapOverlayTarget(),
   )
 }
