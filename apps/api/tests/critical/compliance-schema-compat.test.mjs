@@ -18,6 +18,33 @@ import { SEND_TIME_BLOCK_REASONS } from "@/lib/domain/compliance/canonical-no-co
 
 const THREAD = "+15005550006";
 
+/**
+ * inbox_thread_state's production columns (2026-09-30). The mock used to return
+ * the row whatever was selected, so a select naming `reply_intent` (a column
+ * prod does not have) passed here while in production PostgREST answered 400
+ * and the paused-review / quarantine / contactability checks never ran.
+ */
+const PROD_INBOX_THREAD_STATE_COLUMNS = new Set(
+  ("id,thread_key,seller_phone,canonical_e164,our_number,master_owner_id,prospect_id,property_id,market,stage,status,priority," +
+    "is_archived,is_read,is_pinned,is_urgent,last_read_at,archived_at,metadata,created_at,updated_at,is_starred,is_hidden," +
+    "is_suppressed,hidden_at,suppressed_at,last_intent,next_action,automation_state,latest_reply_template_id,message_count," +
+    "inbound_count,outbound_count,latest_message_event_id,latest_message_body,latest_message_at,latest_direction," +
+    "latest_event_type,latest_delivery_status,last_inbound_at,last_outbound_at,pending_queue_count,failed_queue_count," +
+    "blocked_queue_count,next_scheduled_for,is_hot_lead,follow_up_at,agent_id,persona_id,automation_status,inbox_bucket," +
+    "automation_lane,disposition,next_action_at,reason_codes,confidence,classifier_version,classified_at," +
+    "classification_run_id,previous_inbox_bucket,previous_automation_lane,manual_override,manual_override_at," +
+    "manual_override_by,lifecycle_stage,operational_status,lead_temperature,temperature,seller_stage,conversation_status," +
+    "contactability_status,stage_source,status_source,temperature_source,disposition_source,contactability_source," +
+    "manual_stage_lock,manual_temperature_lock,snoozed_until,snooze_reason,archive_scope,archive_reason,paused_reason," +
+    "updated_by,legacy_stage,legacy_status,temperature_confidence,temperature_reason,seller_display_name," +
+    "source_application,source_channel,source_submission_id,source_metadata").split(",")
+);
+
+function unknownColumns(columns = "*", known = PROD_INBOX_THREAD_STATE_COLUMNS) {
+  if (!columns || columns === "*") return [];
+  return String(columns).split(",").map((c) => c.trim()).filter((c) => c && !known.has(c));
+}
+
 function makePhonesSupabase(phone_row, options = {}) {
   const { suppression = [], inbox_thread_state = null, deal_thread_state = null, message_events = [] } =
     options;
@@ -67,9 +94,16 @@ function makePhonesSupabase(phone_row, options = {}) {
 
       if (table === "inbox_thread_state") {
         return {
-          select: () => ({
+          // Like PostgREST: one unknown column fails the whole select.
+          select: (columns) => ({
             eq: () => ({
-              maybeSingle: async () => ({ data: inbox_thread_state, error: null }),
+              maybeSingle: async () => {
+                const unknown = unknownColumns(columns);
+                if (unknown.length) {
+                  return { data: null, error: { code: "42703", message: `column inbox_thread_state.${unknown[0]} does not exist` } };
+                }
+                return { data: inbox_thread_state, error: null };
+              },
             }),
           }),
         };
@@ -354,4 +388,39 @@ test("J: manual operator send blocked by quarantine policy", async () => {
     { supabase }
   );
   assert.equal(manual.blocked, false);
+});
+// ── the thread-state checks actually run against the production schema ──────
+const ACTIVE_PHONE = {
+  phone_id: "ph_prod_ts",
+  canonical_e164: THREAD,
+  phone_contact_status: "active",
+  activity_status: "active",
+  wrong_number_at: null,
+};
+
+test("K: an opted-out thread is blocked at send time (the thread-state read uses only real columns)", async () => {
+  const supabase = makePhonesSupabase(ACTIVE_PHONE, {
+    inbox_thread_state: { status: "active", contactability_status: "opted_out", metadata: {} },
+  });
+  const guard = await evaluateCanonicalContactability(
+    { thread_key: THREAD, to_phone_number: THREAD, contact_check_mode: CONTACT_CHECK_MODES.SEND_TIME },
+    { supabase }
+  );
+  assert.equal(guard.blocked, true);
+  assert.equal(guard.reason, "contactability_opted_out");
+});
+
+test("L: paused-review and quarantined threads are blocked for automated sends", async () => {
+  for (const [row, reason] of [
+    [{ status: "paused_review", contactability_status: "contactable", metadata: {} }, "thread_paused_review"],
+    [{ status: "active", contactability_status: "contactable", metadata: { incident_quarantine: true } }, "thread_quarantined"],
+  ]) {
+    const supabase = makePhonesSupabase(ACTIVE_PHONE, { inbox_thread_state: row });
+    const guard = await evaluateCanonicalContactability(
+      { thread_key: THREAD, to_phone_number: THREAD, contact_check_mode: CONTACT_CHECK_MODES.SEND_TIME },
+      { supabase }
+    );
+    assert.equal(guard.blocked, true, reason);
+    assert.equal(guard.reason, reason);
+  }
 });
