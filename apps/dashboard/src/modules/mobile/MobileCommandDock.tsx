@@ -257,6 +257,7 @@ export const MobileCommandDock = ({
           type="button"
           className={cls(
             'nx-mobile-command-dock__btn',
+            'nx-mobile-command-dock__btn--search',
             (searchActive || activeSurface === 'search') && 'is-active',
           )}
           aria-label="Universal search"
@@ -266,6 +267,8 @@ export const MobileCommandDock = ({
           <DockGlyph>
             <Icon name="search" size={DOCK_ICON} strokeWidth={1.55} />
           </DockGlyph>
+          {/* Wide screens show the search as a field; phones keep the glyph. */}
+          <span className="nx-mobile-command-dock__search-hint" aria-hidden="true">Search sellers, properties, buyers, conversations…<kbd>⌘K</kbd></span>
         </button>
 
 
@@ -273,6 +276,7 @@ export const MobileCommandDock = ({
           type="button"
           className={cls(
             'nx-mobile-command-dock__btn',
+            'nx-mobile-command-dock__btn--notifications',
             notificationsActive && 'is-active',
           )}
           aria-label="Notifications"

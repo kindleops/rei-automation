@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useState } from 'react'
+import { createContext, startTransition, useCallback, useContext, useEffect, useState } from 'react'
 import { resolveBreakpoint } from '../modules/mobile/useBreakpoint'
 import { resolveViewportMetrics } from '../modules/mobile/viewport-metrics'
 
@@ -38,6 +38,20 @@ const dispatchRouteChange = () => {
 }
 
 /**
+ * SPLIT PANES — a surface rendered in a secondary pane of the desktop split
+ * workspace reads ITS pane's path, not the window URL, and its navigation is
+ * routed back to that pane (see modules/desktop/split-workspace.ts). The main
+ * pane has no provider, so it keeps the URL exactly as before.
+ */
+export interface PaneRoute { paneId: string; path: string; location: string }
+export const PaneRouteContext = createContext<PaneRoute | null>(null)
+
+type RouteInterceptor = (path: string, mode: 'push' | 'replace') => boolean
+let routeInterceptor: RouteInterceptor | null = null
+/** Registered by the split workspace; returns true when it handled the navigation. */
+export const setRouteNavigationInterceptor = (fn: RouteInterceptor | null) => { routeInterceptor = fn }
+
+/**
  * How many entries this session has pushed on top of where it started.
  *
  * `history.length` cannot answer "is there anywhere of MINE to go back to" — it
@@ -61,12 +75,14 @@ export const getRouteDepth = (): number => {
 }
 
 export const replaceRoutePath = (path: string) => {
+  if (routeInterceptor?.(path, 'replace')) return
   // Replace keeps the current depth: it is the same entry, renamed.
   window.history.replaceState({ [DEPTH_KEY]: getRouteDepth() }, '', path)
   dispatchRouteChange()
 }
 
 export const pushRoutePath = (path: string) => {
+  if (routeInterceptor?.(path, 'push')) return
   window.history.pushState({ [DEPTH_KEY]: getRouteDepth() + 1 }, '', path)
   dispatchRouteChange()
 }
@@ -80,6 +96,7 @@ export const pushRoutePath = (path: string) => {
  * never learns that the context was cleared.
  */
 export const useRouteLocation = () => {
+  const pane = useContext(PaneRouteContext)
   const read = () => `${normalizeRoutePath(window.location.pathname)}${window.location.search}`
   const [location, setLocation] = useState(read)
 
@@ -93,10 +110,11 @@ export const useRouteLocation = () => {
     return () => window.removeEventListener('popstate', sync)
   }, [])
 
-  return location
+  return pane ? pane.location : location
 }
 
 export const useRoutePath = () => {
+  const pane = useContext(PaneRouteContext)
   const [path, setPath] = useState(() => normalizeRoutePath(window.location.pathname))
 
   const syncPath = useCallback(() => {
@@ -124,5 +142,5 @@ export const useRoutePath = () => {
     }
   }, [syncPath])
 
-  return path
+  return pane ? pane.path : path
 }

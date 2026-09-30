@@ -1,3 +1,4 @@
+import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { getSupabaseClient, hasSupabaseEnv } from '../../lib/supabaseClient'
 import type { SellerAutomationExecutionStep } from './seller-automation.types'
@@ -62,7 +63,7 @@ export function subscribeSellerAutomationRealtime(
 
   handlers.onStatus?.('connecting')
 
-  const channel: RealtimeChannel = supabase.channel(channelKey)
+  const channel: RealtimeChannel = supabase.channel(uniqueChannelName(channelKey))
 
   const stepFilter = filters.executionId
     ? `execution_id=eq.${filters.executionId}`

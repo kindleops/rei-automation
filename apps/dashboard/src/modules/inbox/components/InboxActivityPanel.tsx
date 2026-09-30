@@ -64,7 +64,8 @@ export const InboxActivityPanel = ({
   onClose: () => void
   onViewThread?: (threadKey: string) => void
 }) => {
-  const { isMobile } = useBreakpoint()
+  // Presentation is a device choice: a sheet on a phone, the drawer on a wide screen.
+  const { isPhone: isMobile } = useBreakpoint()
   const [activities, setActivities] = useState<InboxActivityEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState<ActivityCategory>('All')

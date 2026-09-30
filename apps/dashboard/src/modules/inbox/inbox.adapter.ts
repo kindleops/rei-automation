@@ -1,3 +1,4 @@
+import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import { useState, useEffect, useCallback, useRef, useReducer } from 'react'
 import { inboxReducer, EMPTY_INBOX_STORE_STATE, type InboxStoreAction } from './inbox-store'
 import type { CommandCenterStore } from '../../domain/types'
@@ -1845,7 +1846,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
       try {
         const supabase = getSupabaseClient()
         channel = supabase
-          .channel('nexus-inbox-realtime')
+          .channel(uniqueChannelName('nexus-inbox-realtime'))
           /*
            * §10 — ONLY PUBLISHED TABLES. Every binding here is load-bearing for
            * the other bindings.

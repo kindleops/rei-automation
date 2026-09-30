@@ -649,7 +649,9 @@ function PipelineSection({ kpis }: { kpis: KpiData }) {
 const HOVER_CLOSE_MS = 140
 
 export const InboxKpiOrb = () => {
-  const { isMobile } = useBreakpoint()
+  // isMobile = the modern product (live readout in the bar); isPhone = the device
+  // (a drawer instead of the hover dashboard).
+  const { isMobile, isPhone } = useBreakpoint()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dashboardRef = useRef<HTMLDivElement | null>(null)
   const hoverCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -672,7 +674,7 @@ export const InboxKpiOrb = () => {
   }, [])
 
   const kpiPanelActive = isOpen || isPinned
-  const useDrawerPanel = isMobile || isTouchUi
+  const useDrawerPanel = isPhone || isTouchUi
   // The phone bar carries a live readout, so telemetry runs while the panel is
   // closed there (realtime-driven, idle-deferred — cheap).
   const { kpis, isLive, recommendations, error: kpiError, refresh: refreshKpis } = useOperationalKpis(timeWindow, { enabled: kpiPanelActive || isMobile })

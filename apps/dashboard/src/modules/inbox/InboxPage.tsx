@@ -1,3 +1,4 @@
+import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
 import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
@@ -2759,7 +2760,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     }
 
     const channel = supabase
-      .channel(`nexus-inbox-thread-${selectedKey}`)
+      .channel(uniqueChannelName(`nexus-inbox-thread-${selectedKey}`))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, (payload) => {
         console.log('[InboxPage realtime message_events]', { eventType: payload.eventType, threadKey: selectedKey })
         const row = (payload.new ?? payload.old ?? {}) as Record<string, unknown>

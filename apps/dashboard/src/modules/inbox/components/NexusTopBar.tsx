@@ -180,7 +180,7 @@ export const NexusTopBar = ({
 }: NexusTopBarProps) => {
   const DEV = Boolean(import.meta.env.DEV)
   const DEBUG_INBOX = DEV && String(import.meta.env.VITE_INBOX_DEBUG ?? 'false').toLowerCase() === 'true'
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
 
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -439,6 +439,10 @@ export const NexusTopBar = ({
       else openOverlayExclusive('notifications')
     }
   }
+
+  // The desktop command center (sidebar + command bar) owns the chrome on a
+  // wide screen; mounting the phone dock here too would double its KPI stream.
+  if (isModernDesktop) return null
 
   if (isMobile) {
     return (

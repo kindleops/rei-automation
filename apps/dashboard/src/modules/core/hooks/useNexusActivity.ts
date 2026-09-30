@@ -1,3 +1,4 @@
+import { uniqueChannelName } from '../../../lib/data/realtime-channel'
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getSupabaseClient } from '../../../lib/supabaseClient';
 import type { NexusCoreState, OrbActivityMetrics } from '../types/orb';
@@ -44,7 +45,7 @@ export function useNexusActivity() {
   useEffect(() => {
     // 1. Subscribe to Outbound Activity
     const queueSub = supabase
-      .channel('orb-queue-activity')
+      .channel(uniqueChannelName('orb-queue-activity'))
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'send_queue' },
@@ -57,7 +58,7 @@ export function useNexusActivity() {
 
     // 2. Subscribe to Inbound Activity (Replies)
     const replySub = supabase
-      .channel('orb-reply-activity')
+      .channel(uniqueChannelName('orb-reply-activity'))
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'message_events' },
@@ -72,7 +73,7 @@ export function useNexusActivity() {
 
     // 3. Subscribe to AI Activity (Classifications & Underwriting)
     const aiSub = supabase
-      .channel('orb-ai-activity')
+      .channel(uniqueChannelName('orb-ai-activity'))
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'thread_ai_state' },

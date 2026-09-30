@@ -74,14 +74,15 @@ scripts-podio/
 scripts.local-backup
 Google\ Drive
 
-# macOS user directories
-Desktop/
-Documents/
-Downloads/
-Library/
-Movies/
-Music/
-Pictures/
+# macOS user directories — anchored: with core.ignorecase they otherwise match
+# any src/**/desktop/ folder (the desktop command center lives in one).
+/Desktop/
+/Documents/
+/Downloads/
+/Library/
+/Movies/
+/Music/
+/Pictures/
 Projects/
 # macOS ~/Public — do not match vite `static/` or legacy `public/`
 /public/

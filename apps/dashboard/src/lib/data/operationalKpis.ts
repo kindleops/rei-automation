@@ -1,3 +1,4 @@
+import { uniqueChannelName } from './realtime-channel'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getSupabaseClient } from '../supabaseClient'
 import { fetchOperationalKpis, type OperationalKpis, type OperationalKpi } from './inboxKpis'
@@ -67,7 +68,7 @@ export const useOperationalKpis = (
     
     // Subscribe to message events for real-time messaging updates
     const messageSub = supabase
-      .channel('kpi-messages')
+      .channel(uniqueChannelName('kpi-messages'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_events' }, () => {
         setIsLive(true)
         debouncedLoad()
@@ -77,7 +78,7 @@ export const useOperationalKpis = (
 
     // Subscribe to send_queue for real-time automation updates
     const queueSub = supabase
-      .channel('kpi-queue')
+      .channel(uniqueChannelName('kpi-queue'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'send_queue' }, () => {
         setIsLive(true)
         debouncedLoad()

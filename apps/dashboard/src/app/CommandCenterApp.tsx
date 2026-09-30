@@ -23,6 +23,8 @@ import {
   type GlobalCommandSearchContext,
 } from '../domain/command-center/command.types'
 import { useBreakpoint } from '../modules/mobile/useBreakpoint'
+import { DesktopCommandShell } from '../modules/desktop/DesktopCommandShell'
+import { DesktopWorkspace } from '../modules/desktop/DesktopWorkspace'
 import { PortableCommandShell } from '../modules/mobile/PortableCommandShell'
 import { PinnedAppDock } from '../modules/mobile/PinnedAppDock'
 import { routeHasInboxCommandShell } from '../modules/mobile/inbox-shell-routes'
@@ -107,11 +109,14 @@ const GlobalNotificationShell = ({
   children,
   routePath,
   isMobile,
+  isModernDesktop = false,
   onOpenSearch,
 }: {
   children: ReactNode
   routePath: string
   isMobile: boolean
+  /** Wide screens get the desktop command center instead of the phone's top dock. */
+  isModernDesktop?: boolean
   onOpenSearch: () => void
 }) => {
   const [notifCenterOpen, setNotifCenterOpen] = useState(false)
@@ -123,7 +128,7 @@ const GlobalNotificationShell = ({
   // Island. Campaigns now uses the same global mobile chrome as every other
   // route, so the shared stage reservation gives it the same
   // safe-top -> global app switcher -> route content order.
-  const showPortableShell = isMobile && !routeHasInboxCommandShell(routePath)
+  const showPortableShell = isMobile && !isModernDesktop && !routeHasInboxCommandShell(routePath)
 
   return (
     <>
@@ -153,7 +158,7 @@ const GlobalNotificationShell = ({
 export const CommandCenterApp = () => {
   const path = useRoutePath()
   const route = resolveRoute(path)
-  const { isMobile, isLandscapeMobile } = useBreakpoint()
+  const { isMobile, isPhone, isModernDesktop, isLandscapeMobile } = useBreakpoint()
 
   const [routeState, setRouteState] = useState<RouteLoadState>({
     ...initialState,
@@ -187,14 +192,18 @@ export const CommandCenterApp = () => {
 
   useEffect(() => {
     document.documentElement.classList.toggle('is-mobile-layout', isMobile)
+    // The same modern product on a wide screen: desktop-modern.css recomposes the
+    // shell and every surface for width (it is never a stretched phone).
+    document.documentElement.classList.toggle('is-desktop-modern', isModernDesktop)
     // Same shell, sideways. Published so the shell chrome can tighten against a
     // ~390px tall viewport and so spatial surfaces can claim the extra width.
     document.documentElement.classList.toggle('is-landscape-phone', isLandscapeMobile)
     return () => {
       document.documentElement.classList.remove('is-mobile-layout')
+      document.documentElement.classList.remove('is-desktop-modern')
       document.documentElement.classList.remove('is-landscape-phone')
     }
-  }, [isMobile, isLandscapeMobile])
+  }, [isMobile, isModernDesktop, isLandscapeMobile])
 
   // ── Room transition sound ──
   const prevPathRef = useRef(route.path)
@@ -588,9 +597,21 @@ export const CommandCenterApp = () => {
       <GlobalNotificationShell
         routePath={route.path}
         isMobile={isMobile}
+        isModernDesktop={isModernDesktop}
         onOpenSearch={() => openCmd()}
       >
-        <div className={`nx-os${isMobile ? ' is-mobile-os' : ''}`}>
+        <div className={`nx-os${isMobile ? ' is-mobile-os' : ''}${isModernDesktop ? ' is-desktop-os' : ''}`}>
+          {isModernDesktop ? (
+            <DesktopCommandShell
+              routePath={route.path}
+              searchOpen={cmdOpen}
+              searchQuery={cmdInitialQuery}
+              commandContext={commandContext}
+              onSearchOpen={() => { if (!cmdOpen) openCmd() }}
+              onSearchClose={closeCmd}
+              onExecute={executeGlobalCommand}
+            />
+          ) : null}
           {!isMobile && route.path !== '/map' && activeNav && (
             <div className="nx-room-label">
               <span className="nx-room-label__name">{activeNav.room}</span>
@@ -598,7 +619,9 @@ export const CommandCenterApp = () => {
           )}
 
           <main className="nx-stage">
-            {stageContent}
+            {isModernDesktop
+              ? <DesktopWorkspace main={stageContent} mainPath={`${route.path}${typeof window === 'undefined' ? '' : window.location.search}`} />
+              : stageContent}
           </main>
 
           {/*
@@ -610,7 +633,7 @@ export const CommandCenterApp = () => {
             The mobile half of this replaced a second search (MobileSearchOverlay +
             useInboxTopSearch) that the inbox family opened instead.
           */}
-          {isMobile ? (
+          {isPhone ? (
             <MobileGlobalSearch
               open={cmdOpen}
               initialQuery={cmdInitialQuery}
@@ -618,7 +641,7 @@ export const CommandCenterApp = () => {
               onClose={closeCmd}
               onExecute={executeGlobalCommand}
             />
-          ) : (
+          ) : !isModernDesktop ? (
             <GlobalCommandOverlay
               open={cmdOpen}
               initialQuery={cmdInitialQuery}
@@ -626,7 +649,7 @@ export const CommandCenterApp = () => {
               onClose={closeCmd}
               onExecute={executeGlobalCommand}
             />
-          )}
+          ) : null}
 
           {grammarState.pending && (
             <div className="nx-grammar-hint">

@@ -1,6 +1,8 @@
-import { useEffect } from 'react'
-import { openInboxDealIntelligence } from '../../modules/mobile/mobile-inbox-bridge'
-import { getUniversalEntityContextSnapshot } from '../../domain/entity-graph/universal-entity-context-store'
+import { useContext, useEffect, useState } from 'react'
+import { openInboxDealIntelligence, openInboxThread } from '../../modules/mobile/mobile-inbox-bridge'
+import { getUniversalEntityContextSnapshot, subscribeUniversalEntityContext } from '../../domain/entity-graph/universal-entity-context-store'
+import { PaneRouteContext } from '../../app/router'
+import { MobileSellerCommandCenter } from '../../modules/deal-intelligence/mobile/MobileSellerCommandCenter'
 
 /**
  * THE ROUTE HAS TO CARRY THE SUBJECT.
@@ -22,14 +24,14 @@ import { getUniversalEntityContextSnapshot } from '../../domain/entity-graph/uni
  * If neither has anything the call stays argument-free, which preserves the
  * bridge's "do not erase an established identity" contract.
  */
-function identityFromUrl(): {
+function identityFromUrl(search?: string): {
   threadKey?: string
   propertyId?: string
   prospectId?: string
   masterOwnerId?: string
 } {
   if (typeof window === 'undefined') return {}
-  const params = new URLSearchParams(window.location.search)
+  const params = new URLSearchParams(search ?? window.location.search)
   const read = (...keys: string[]) => {
     for (const key of keys) {
       const value = params.get(key)
@@ -45,8 +47,52 @@ function identityFromUrl(): {
   }
 }
 
-/** Redirect into the Deal Desk inbox workspace — do not mount InboxPage here (state would be lost on /inbox navigation). */
+/**
+ * In a desktop SPLIT PANE, Deal Intelligence is a companion instead of a
+ * redirect: it follows whichever seller is selected (the universal entity
+ * context every surface publishes), so Inbox | Deal Intelligence side by side
+ * reads the thread on the left. Redirecting from a pane would take over the
+ * main window, which is exactly what a split must never do.
+ */
 export function DealIntelligenceInboxRoute() {
+  const pane = useContext(PaneRouteContext)
+  if (pane) return <DealIntelligenceCompanion search={pane.location.includes('?') ? pane.location.slice(pane.location.indexOf('?')) : ''} />
+  return <DealIntelligenceRedirect />
+}
+
+function DealIntelligenceCompanion({ search }: { search: string }) {
+  const [ctx, setCtx] = useState(getUniversalEntityContextSnapshot)
+  useEffect(() => subscribeUniversalEntityContext(() => setCtx(getUniversalEntityContextSnapshot())), [])
+  const fromPane = identityFromUrl(search)
+  const identity = {
+    threadKey: ctx?.threadKey ?? fromPane.threadKey,
+    propertyId: ctx?.propertyId ?? (ctx?.entityType === 'property' && ctx?.entityId ? ctx.entityId : fromPane.propertyId),
+    prospectId: ctx?.prospectId ?? fromPane.prospectId,
+    masterOwnerId: ctx?.masterOwnerId ?? fromPane.masterOwnerId,
+  }
+  const key = [identity.threadKey, identity.propertyId, identity.prospectId, identity.masterOwnerId].map((v) => v ?? '').join('|')
+  if (!identity.threadKey && !identity.propertyId && !identity.prospectId && !identity.masterOwnerId) {
+    return (
+      <div className="nx-route-redirect-shell nx-di-companion-empty" role="status">
+        <p><strong>Deal Intelligence follows your selection</strong></p>
+        <p>Select a seller or property in any pane and its decision, evidence and economics appear here.</p>
+      </div>
+    )
+  }
+  return (
+    <MobileSellerCommandCenter
+      key={key}
+      threadKey={identity.threadKey ?? undefined}
+      propertyId={identity.propertyId ?? undefined}
+      prospectId={identity.prospectId ?? undefined}
+      masterOwnerId={identity.masterOwnerId ?? undefined}
+      onOpenConversation={identity.threadKey ? () => openInboxThread({ threadKey: identity.threadKey as string }) : null}
+    />
+  )
+}
+
+/** Redirect into the Deal Desk inbox workspace — do not mount InboxPage here (state would be lost on /inbox navigation). */
+function DealIntelligenceRedirect() {
   useEffect(() => {
     const fromUrl = identityFromUrl()
     const hasUrlIdentity = Boolean(

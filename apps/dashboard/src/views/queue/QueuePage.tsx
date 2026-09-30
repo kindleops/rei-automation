@@ -1,3 +1,4 @@
+import { uniqueChannelName } from '../../lib/data/realtime-channel'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { getSupabaseClient } from '../../lib/supabaseClient'
 import {
@@ -1130,7 +1131,7 @@ export const QueuePage = ({
   paneWidth: paneWidthProp,
 }: QueuePageProps = {}) => {
   const { rootRef, layoutMode: observedLayoutMode, paneWidth: observedPaneWidth } = useQueueLayout()
-  const { isPhone } = useBreakpoint()
+  const { isMobile: isPhone } = useBreakpoint()
   const layoutMode = layoutModeProp ?? observedLayoutMode
   const paneWidth = paneWidthProp ?? observedPaneWidth
   const isMobileLayout = isPhone || layoutMode === 'compact'
@@ -1277,7 +1278,7 @@ export const QueuePage = ({
     }
     const supabase = getSupabaseClient()
     const ch = supabase
-      .channel('occ-queue-live')
+      .channel(uniqueChannelName('occ-queue-live'))
       .on('postgres_changes', { event: '*', table: 'send_queue', schema: 'public' }, debouncedRefresh)
       .subscribe()
     return () => { supabase.removeChannel(ch); if (realtimeRef.current) clearTimeout(realtimeRef.current) }

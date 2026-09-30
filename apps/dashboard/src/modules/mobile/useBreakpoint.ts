@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { resolveViewportMetrics } from './viewport-metrics'
+import { isClassicDesktop, PRODUCT_PLATFORM_EVENT } from './product-platform'
 
 export type Breakpoint = 'phone' | 'tablet' | 'desktop'
 
@@ -33,11 +34,17 @@ function readViewportState() {
 
 export function useBreakpoint(): {
   breakpoint: Breakpoint
+  /** A real phone (device class), in either orientation. Use for device concerns: keyboard, safe areas, touch. */
   isPhone: boolean
   isTablet: boolean
   isDesktop: boolean
-  /** Phone in either orientation — the mobile shell owns the whole product */
+  /**
+   * The modern product owns the screen: every phone, and desktop/tablet unless the
+   * operator switched to Classic desktop. Product decisions branch on this.
+   */
   isMobile: boolean
+  /** The modern product on a desktop/tablet screen — recompose for width, not a phone. */
+  isModernDesktop: boolean
   /**
    * Phone held sideways. The mobile shell still owns the screen; this exists so
    * explicitly spatial surfaces (full-screen map, workflow canvas) can opt into
@@ -53,6 +60,13 @@ export function useBreakpoint(): {
   layoutHeight: number
 } {
   const [viewport, setViewport] = useState(readViewportState)
+  const [classic, setClassic] = useState(isClassicDesktop)
+
+  useEffect(() => {
+    const onPlatform = () => setClassic(isClassicDesktop())
+    window.addEventListener(PRODUCT_PLATFORM_EVENT, onPlatform)
+    return () => window.removeEventListener(PRODUCT_PLATFORM_EVENT, onPlatform)
+  }, [])
 
   useEffect(() => {
     const sync = () => setViewport(readViewportState())
@@ -91,7 +105,8 @@ export function useBreakpoint(): {
   const isPhone = isPhoneClass || isNarrowPortrait
   const breakpoint: Breakpoint = isPhone ? 'phone' : resolveBreakpoint(width)
   const isLandscapeMobile = isPhone && !isPortrait
-  const isMobile = isPhone
+  const isModernDesktop = !isPhone && !classic
+  const isMobile = isPhone || isModernDesktop
 
   return {
     breakpoint,
@@ -99,6 +114,7 @@ export function useBreakpoint(): {
     isTablet: breakpoint === 'tablet',
     isDesktop: breakpoint === 'desktop',
     isMobile,
+    isModernDesktop,
     isLandscapeMobile,
     isCommandCenterLayout: !isMobile,
     isPortrait,
