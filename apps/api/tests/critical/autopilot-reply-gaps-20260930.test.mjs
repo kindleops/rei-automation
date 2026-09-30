@@ -30,7 +30,10 @@ import {
   applyInboundAutomationDecision,
   selectSafeAutoReplyTemplate,
   isPureDeclineTurn,
+  isTimingDeferralTurn,
+  inboundCarriesNumber,
   DECLINE_SAFE_REPLY_USE_CASES,
+  TIMING_SAFE_REPLY_USE_CASES,
 } from "@/lib/domain/seller-flow/apply-inbound-automation-decision.js";
 import {
   processSellerInboundMessage,
@@ -546,4 +549,84 @@ test("'Ok I am ready to sell.' with no established thread language is answered i
   assert.equal(inserts[0].use_case_template, "seller_asking_price");
   assert.equal(inserts[0].message_body, SELLER_ASKING_PRICE.template_body);
   assert.equal(out.execution.selected_template.language, "English");
+});
+
+
+// ── 4. "Not at this time." never gets a price question ──────────────────────
+// +16122720901, 2026-09-30 16:19Z: after "Would you consider a proposal?" the
+// seller wrote "Not at this time." (need_time) and was answered "Just so I
+// understood the number right, what price would work for you on the
+// property?" -- need_time listed asking_price_follow_up and row order won.
+
+const ASKING_PRICE_FOLLOW_UP = tpl("lc-asking-price-follow-up-en-1", "asking_price_follow_up", "S3", "auto", null, "Just so I understood the number right, what price would work for you on the property?");
+const TIMING_CATALOG = [ASKING_PRICE_FOLLOW_UP, CS_FOLLOW_UP_A, CS_FOLLOW_UP_B, CONSIDER_SELLING, FUTURE_NURTURE, NOT_INTERESTED];
+
+function consideredDecision(message, classification) {
+  return applyInboundAutomationDecision({
+    message,
+    threadKey: "+16122720901",
+    propertyId: "2127000000",
+    ownerId: "mo_timing",
+    classification,
+    latestThreadContext: { summary: { conversation_stage: "consider_selling" } },
+  });
+}
+
+test("'Not at this time.' is a timing deferral and is answered only with an acknowledgment, in every catalog order", async () => {
+  for (const message of ["Not at this time.", "Not right now", "Maybe next year"]) {
+    const classification = await classify(message, null, { heuristicOnly: true });
+    const decision = consideredDecision(message, classification);
+    if (classification.primary_intent !== "need_time") continue; // other intents are pinned elsewhere
+    assert.equal(isTimingDeferralTurn({ classification, decision }), true, message);
+    for (const rows of [TIMING_CATALOG, [...TIMING_CATALOG].reverse()]) {
+      const result = await selectSafeAutoReplyTemplate({
+        supabaseClient: memoryDb({ sms_templates: rows }).client,
+        classification,
+        decision,
+        context: { summary: { language_preference: "English" }, automation_decision: { inbound_detection: { latest_inbound_text: message } } },
+      });
+      if (!result.ok) continue; // failing closed is acceptable; a price or pitch is not
+      assert.ok(TIMING_SAFE_REPLY_USE_CASES.includes(result.template.use_case), `${message} -> ${result.template.use_case}`);
+      assert.notEqual(result.template.use_case, "asking_price_follow_up");
+      assert.equal(INTEREST_PROBES.has(result.template.use_case), false);
+    }
+  }
+});
+
+test("the production message classifies need_time and selects future_nurture", async () => {
+  const message = "Not at this time.";
+  const classification = await classify(message, null, { heuristicOnly: true });
+  assert.equal(classification.primary_intent, "need_time");
+  const result = await selectSafeAutoReplyTemplate({
+    supabaseClient: memoryDb({ sms_templates: TIMING_CATALOG }).client,
+    classification,
+    decision: consideredDecision(message, classification),
+    context: { summary: { language_preference: "English" }, automation_decision: { inbound_detection: { latest_inbound_text: message } } },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.template.use_case, "future_nurture");
+  assert.match(result.template.template_body, /check back down the road/);
+});
+
+test("'Just so I understood the number right' only answers a message that carries a number", async () => {
+  assert.equal(inboundCarriesNumber("Not at this time."), false);
+  assert.equal(inboundCarriesNumber("maybe 300k"), true);
+  assert.equal(inboundCarriesNumber("two hundred fifty thousand"), true);
+  const priceDecision = { route_hint: "asking_price_follow_up", allowed_template_stages: ["asking_price_follow_up"] };
+  const classification = { primary_intent: "asking_price_provided", language: "English" };
+  const without = await selectSafeAutoReplyTemplate({
+    supabaseClient: memoryDb({ sms_templates: [ASKING_PRICE_FOLLOW_UP] }).client,
+    classification,
+    decision: priceDecision,
+    context: { summary: { language_preference: "English" }, automation_decision: { inbound_detection: { latest_inbound_text: "I would need more" } } },
+  });
+  assert.notEqual(without.template?.template_id, "lc-asking-price-follow-up-en-1");
+  const withNumber = await selectSafeAutoReplyTemplate({
+    supabaseClient: memoryDb({ sms_templates: [ASKING_PRICE_FOLLOW_UP] }).client,
+    classification,
+    decision: priceDecision,
+    context: { summary: { language_preference: "English" }, automation_decision: { inbound_detection: { latest_inbound_text: "300" } } },
+  });
+  assert.equal(withNumber.ok, true);
+  assert.equal(withNumber.template.template_id, "lc-asking-price-follow-up-en-1");
 });
