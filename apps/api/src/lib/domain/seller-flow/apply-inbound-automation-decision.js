@@ -162,11 +162,13 @@ export const ROUTE_PROFILES = Object.freeze({
   need_time: {
     route_hint: "soft_followup",
     allowed_template_stages: ["soft_followup", "future_followup"],
-    template_use_case_candidates: [
-      "consider_selling_follow_up",
-      "asking_price_follow_up",
-      "reengagement",
-    ],
+    // The IMMEDIATE reply to "not now" acknowledges and leaves the door open;
+    // the check-back is the scheduled later follow-up (next_action below).
+    // This listed consider_selling_follow_up / asking_price_follow_up /
+    // reengagement, and on 2026-09-30 "Not at this time." was answered "Just so
+    // I understood the number right, what price would work for you on the
+    // property?" (see isTimingDeferralTurn).
+    template_use_case_candidates: ["future_nurture"],
     next_action: "schedule_later_followup",
   },
   who_is_this: {
@@ -1276,6 +1278,39 @@ export function isPureDeclineTurn({ classification = null, decision = null } = {
   return true;
 }
 
+// A timing deferral ("Not at this time.", "Maybe next year") is a soft no for
+// the immediate reply: only an acknowledgment may go out (future nurture, or
+// the decline profile's soft close). Same narrowing-only contract as the pure
+// decline above; negotiation-strategy turns keep their own authority.
+export const TIMING_SAFE_REPLY_USE_CASES = Object.freeze(
+  uniq(["future_nurture", ...DECLINE_SAFE_REPLY_USE_CASES])
+);
+
+export function isTimingDeferralTurn({ classification = null, decision = null } = {}) {
+  const intent = normalizeCanonicalIntent(
+    classification?.primary_intent || classification?.detected_intent || null
+  );
+  if (intent !== "need_time") return false;
+  if (
+    clean(decision?.negotiation_strategy) ||
+    decision?.send_authority === "negotiation_strategy_directive"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+// Templates whose wording presumes the seller already gave a number ("Just so
+// I understood the number right, what price would work for you?"). They may
+// only answer a message that actually carries one.
+export const NUMBER_PRESUMING_USE_CASES = Object.freeze(["asking_price_follow_up"]);
+
+export function inboundCarriesNumber(text = "") {
+  const value = String(text || "").toLowerCase();
+  if (/\d/.test(value)) return true;
+  return /\b(hundred|thousand|million|mil|grand|k)\b/.test(value);
+}
+
 export async function selectSafeAutoReplyTemplate({
   supabaseClient = null,
   classification = null,
@@ -1360,13 +1395,25 @@ export async function selectSafeAutoReplyTemplate({
         lower(decision?.route_hint),
         ...templateCandidateSet(decision, classification).map(lower),
       ]);
-  // Pure decline: intersect with the decline profile (see DECLINE_SAFE_REPLY_USE_CASES).
-  // A required use case outside it is dropped too, so this fails closed.
+  // Pure decline / timing deferral: intersect with the safe profile (see
+  // DECLINE_SAFE_REPLY_USE_CASES / TIMING_SAFE_REPLY_USE_CASES). A required use
+  // case outside it is dropped too, so this fails closed.
   const decline_turn = isPureDeclineTurn({ classification, decision });
-  const allowed_matches = decline_turn
-    ? route_matches.filter((value) => DECLINE_SAFE_REPLY_USE_CASES.includes(value))
+  const timing_turn = !decline_turn && isTimingDeferralTurn({ classification, decision });
+  const safe_use_cases = decline_turn
+    ? DECLINE_SAFE_REPLY_USE_CASES
+    : timing_turn
+      ? TIMING_SAFE_REPLY_USE_CASES
+      : null;
+  const allowed_matches = safe_use_cases
+    ? route_matches.filter((value) => safe_use_cases.includes(value))
     : route_matches;
   const property_type_scope = derivePropertyTypeScope(context);
+  const latest_inbound_text =
+    context?.automation_decision?.inbound_detection?.latest_inbound_text ||
+    classification?.message_text ||
+    classification?.normalized_text ||
+    "";
 
   if (!supabase || allowed_matches.length === 0) {
     return {
@@ -1375,7 +1422,9 @@ export async function selectSafeAutoReplyTemplate({
         allowed_matches.length === 0
           ? decline_turn && route_matches.length > 0
             ? "decline_turn_no_decline_safe_route"
-            : "no_template_route_candidates"
+            : timing_turn && route_matches.length > 0
+              ? "timing_turn_no_timing_safe_route"
+              : "no_template_route_candidates"
           : "missing_supabase",
       template: null,
     };
@@ -1398,8 +1447,14 @@ export async function selectSafeAutoReplyTemplate({
         return matches.some((value) => allowed_matches.includes(value));
       })
       // Rows also match on stage_code/stage_label/template_name; on a decline
-      // turn the row's own use case must be decline-safe as well.
-      .filter((row) => !decline_turn || DECLINE_SAFE_REPLY_USE_CASES.includes(lower(row.use_case)))
+      // or timing turn the row's own use case must be in the safe profile too.
+      .filter((row) => !safe_use_cases || safe_use_cases.includes(lower(row.use_case)))
+      // "Just so I understood the number right..." only answers a number.
+      .filter(
+        (row) =>
+          !NUMBER_PRESUMING_USE_CASES.includes(lower(row.use_case)) ||
+          inboundCarriesNumber(latest_inbound_text)
+      )
       .filter((row) => {
         const reply_mode = lower(row.reply_mode);
         return !reply_mode || reply_mode === "auto" || reply_mode === "auto_reply";
