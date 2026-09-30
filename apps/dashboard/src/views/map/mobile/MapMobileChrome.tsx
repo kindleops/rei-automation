@@ -53,6 +53,7 @@ import { MapFocusSet } from './MapFocusSet'
 import { MapSearch } from './MapSearch'
 import { MapEventCard } from './MapEventCard'
 import { landEvent, useLiveOrbs } from './useLiveOrbs'
+import { useLivingSettings, living } from '../world/living-settings'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -185,6 +186,12 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
   const [sheet, setSheet] = useState<SheetKey>(null)
   const [layersTab, setLayersTab] = useState<LayersTab>('mode')
+  // The Living Map chip's "settings" link opens Appearance.
+  useEffect(() => {
+    const on = (e: Event) => { const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab; setLayersTab(tab === 'appearance' ? 'appearance' : 'mode'); setSheet('layers') }
+    window.addEventListener('nexus:map-open-layers', on)
+    return () => window.removeEventListener('nexus:map-open-layers', on)
+  }, [])
   const initial = useMemo(readActivityPref, [])
   const [activityOn, setActivityOn] = useState(initial.on)
   const [scope, setScope] = useState<ActivityScope>(initial.scope)
@@ -300,7 +307,8 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map.on('click', onClick)
     return () => { map.off('click', onClick) }
   }, [map, mapEpoch])
-  useMapImagery(map, mapEpoch, { labels: prefs.labels, trueColor: prefs.trueColor, relief: prefs.relief, tilted: dimension === '3d', theme: styleMode, reducedMotion })
+  const [livingSettings, setLiving] = useLivingSettings()
+  useMapImagery(map, mapEpoch, { labels: prefs.labels, trueColor: prefs.trueColor, relief: prefs.relief, tilted: dimension === '3d', theme: styleMode, reducedMotion, skyOwnedByWorld: living(livingSettings).daylight })
   // The Command Map's own mode follows the lens (marker styling, overlays).
   const modeSynced = useRef(false)
   useEffect(() => {
@@ -752,6 +760,10 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           <Icon name="chevron-down" size={13} />
         </button>
         )}
+        <div
+          className="mx-worldslot"
+          ref={(el) => { (window as unknown as { __nxWorldSlot?: HTMLElement | null }).__nxWorldSlot = el; window.dispatchEvent(new CustomEvent('nexus:world-slot', { detail: el })) }}
+        />
         {compsOn && (
           <button type="button" className="mx-chip is-comps" onClick={() => setSheet('comps')} data-map-control="comps">
             <i aria-hidden="true" /> {comps.loading && !comps.total ? 'Comps…' : `${comps.total.toLocaleString()} sold`}{activeCompFilterCount(prefs.compFilters) ? ` · ${activeCompFilterCount(prefs.compFilters)}` : ''}
@@ -888,6 +900,21 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
                 )
               })}
               <section className="mx-block">
+                <h3>Living Map</h3>
+                <p className="mx-note">The physical world under the glass: real daylight from the sun over each place, local time and the seller contact window where you are looking, and real building volumes when tilted.</p>
+                <div className="mx-list">
+                  <Toggle label="Living Map" sub={livingSettings.enabled ? 'On — the world is live under your theme' : 'Off — the map renders exactly as before'} on={livingSettings.enabled} onChange={(v) => setLiving({ enabled: v })} />
+                  {livingSettings.enabled && (
+                    <>
+                      <Toggle label="Real daylight" sub="Day, golden hour, twilight and night from the sun's real position — each place in its own light" on={livingSettings.daylight} onChange={(v) => setLiving({ daylight: v })} />
+                      <Toggle label="Local time & contact window" sub="Time where you are looking, and whether sellers there can be contacted now (canonical policy)" on={livingSettings.localTime} onChange={(v) => setLiving({ localTime: v })} />
+                      <Toggle label="Zone clocks" sub="At country zoom: every US zone's time and contact window" on={livingSettings.zones} onChange={(v) => setLiving({ zones: v })} />
+                      <Toggle label="3D buildings" sub="Real building heights from the map source, while tilted — none are invented" on={livingSettings.buildings} onChange={(v) => setLiving({ buildings: v })} />
+                    </>
+                  )}
+                </div>
+              </section>
+              <section className="mx-block">
                 <h3>Liquid glass</h3>
                 <LiquidGlassControls />
               </section>
@@ -911,7 +938,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
           )}
           {layersTab === 'intel' && (
             <div className="mx-list">
-              <Toggle label="Living map" sub="Glowing orbs where replies, sends, deliveries and stage moves happened today; new ones land with a shockwave" on={prefs.liveOrbs} onChange={(v) => setPref('liveOrbs', v)} />
+              <Toggle label="Activity orbs" sub="Glowing orbs where replies, sends, deliveries and stage moves happened today; new ones land with a shockwave" on={prefs.liveOrbs} onChange={(v) => setPref('liveOrbs', v)} />
               <Toggle label="Property pins" sub="Every property's pin — stage ring, asset shape, activity pulse — over any mode or heat map" on={prefs.pins} onChange={(v) => setPref('pins', v)} />
               <Toggle label="Every property" sub="A glowing dot for every property at any zoom, a real pin for each one up close" on={prefs.everyProperty} onChange={(v) => setPref('everyProperty', v)} />
               <Toggle label="Sold comps" sub="Every MLS, public-record and investor sale — buyer, portfolio and hedge-fund buys flagged" on={prefs.comps} onChange={(v) => setPref('comps', v)} />

@@ -46,6 +46,8 @@ import type { LiveActivityEvent } from './live-activity-engine'
 import { useCommandMapLiveActivitySettings } from './useCommandMapLiveActivitySettings'
 import { useCommandMapPerformanceMode } from './useCommandMapPerformanceMode'
 import { MapMobileChrome } from './mobile/MapMobileChrome'
+import { LivingMap } from './world/LivingMap'
+import { isOwnedMapLayer } from './map-layer-ownership'
 import { selectionNeedsNudge } from './mobile/map-mobile-model'
 import './mobile/map-mobile.css'
 import { CommandMapLiveActivityRail } from './components/CommandMapLiveActivityRail'
@@ -1500,18 +1502,7 @@ const fetchDarkStyleSpec = async (): Promise<maplibregl.StyleSpecification | nul
   return darkStyleSpecPromise
 }
 
-const isCustomLayer = (id?: string) => !id ? false : (
-  id.startsWith('command-') ||
-  id.startsWith('census-') ||
-  id.startsWith('buyer-demand-') ||
-  id.startsWith('sold-comps-') ||
-  id.startsWith('prop-univ-') ||
-  id.startsWith('prop-tiles-') ||
-  id.startsWith('map-agg-') ||
-  id.startsWith('seller-pins-') ||
-  id.startsWith('command-map-theme-') ||
-  id.startsWith('nx-icm-hybrid-')
-)
+const isCustomLayer = isOwnedMapLayer
 const hybridLayerPrefix = 'nx-icm-hybrid-'
 const THEME_TINT_GEOJSON: FeatureCollection<Polygon, GeoJsonProperties> = {
   type: 'FeatureCollection',
@@ -10646,6 +10637,24 @@ export function InboxCommandMap({
           </button>
         ))}
       </div>}
+
+      {!commandMode && (
+        <LivingMap
+          map={mapRef.current}
+          mapEpoch={mapInstanceEpoch}
+          theme={mapStyleMode}
+          tilted={mapDimension === '3d'}
+          selected={
+            activeSellerMapCard && propertySheetVisible
+              && isMappableCoord(activeSellerMapCard.coordinates[1], activeSellerMapCard.coordinates[0])
+              ? activeSellerMapCard.coordinates
+              : selectedPin && isMappableCoord(selectedPin.lat, selectedPin.lng) ? [selectedPin.lng, selectedPin.lat] : null
+          }
+          reducedMotion={prefersReducedMotion || performanceSettings.animation === 'off'}
+          isMobile={isMobile}
+          cardOpen={Boolean(activeSellerMapCard && propertySheetVisible)}
+        />
+      )}
 
       {!commandMode && isMobile && (
         <MapMobileChrome

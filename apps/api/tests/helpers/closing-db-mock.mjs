@@ -64,6 +64,7 @@ export function makeClosingDb(seed = {}, ext = {}) {
     let op = 'select'
     let payload = null
     let limitN = Infinity
+    let offsetN = 0
     let wantRows = false
     let orderBy = null
     let upsertOn = null
@@ -96,6 +97,7 @@ export function makeClosingDb(seed = {}, ext = {}) {
       is(c, v) { filters.push((r) => (v === null ? r[c] === null || r[c] === undefined : r[c] === v)); return api },
       order(c, o = {}) { orderBy = { c, asc: o.ascending !== false }; return api },
       limit(n) { limitN = n; return api },
+      range(a, b) { offsetN = a; limitN = b - a + 1; return api },
       insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return api },
       update(patch) { op = 'update'; payload = patch; return api },
       upsert(rows, o = {}) { op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows]; upsertOn = String(o.onConflict || 'id').split(','); ignoreDup = Boolean(o.ignoreDuplicates); return api },
@@ -143,7 +145,7 @@ export function makeClosingDb(seed = {}, ext = {}) {
       }
       let matched = rows.filter((r) => filters.every((f) => f(r)))
       if (orderBy) matched = [...matched].sort((a, b) => ((a[orderBy.c] ?? '') < (b[orderBy.c] ?? '') ? -1 : (a[orderBy.c] ?? '') > (b[orderBy.c] ?? '') ? 1 : 0) * (orderBy.asc ? 1 : -1))
-      matched = matched.slice(0, limitN)
+      matched = matched.slice(offsetN, offsetN + limitN)
       if (op === 'update') {
         const out = []
         for (const r of matched) {

@@ -60,10 +60,12 @@ export interface ImageryOptions {
   tilted: boolean
   theme: string
   reducedMotion: boolean
+  /** Living Map daylight owns the sky (it follows the real sun); stay out of its way. */
+  skyOwnedByWorld?: boolean
 }
 
 export function useMapImagery(map: maplibregl.Map | null, epoch: number, opts: ImageryOptions) {
-  const { labels, relief, tilted, theme, trueColor } = opts
+  const { labels, relief, tilted, theme, trueColor, skyOwnedByWorld = false } = opts
   const truePhoto = trueColor && theme === TRUE_COLOR_THEME
   const esriLabels = labels && truePhoto
 
@@ -140,7 +142,9 @@ export function useMapImagery(map: maplibregl.Map | null, epoch: number, opts: I
         // Atmosphere whenever the camera is tilted — the horizon fades into sky.
         // Set once per style + tilt, so our own style events can't loop.
         const setSky = (map as unknown as { setSky?: (s: unknown) => void }).setSky
-        if (typeof setSky === 'function' && SKY_APPLIED.get(styleObj) !== tilted) {
+        // While Living Map owns the sky, forget ours so it is re-applied the moment it hands back.
+        if (skyOwnedByWorld) SKY_APPLIED.delete(styleObj)
+        if (!skyOwnedByWorld && typeof setSky === 'function' && SKY_APPLIED.get(styleObj) !== tilted) {
           SKY_APPLIED.set(styleObj, tilted)
           setSky.call(map, tilted
             ? { 'sky-color': '#0b1a33', 'horizon-color': '#1d3a66', 'fog-color': '#0a1222', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.7, 'fog-ground-blend': 0.2, 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 10, 1, 12, 0] }
@@ -151,7 +155,7 @@ export function useMapImagery(map: maplibregl.Map | null, epoch: number, opts: I
     apply()
     map.on('styledata', apply)
     return () => { map.off('styledata', apply) }
-  }, [map, epoch, esriLabels, truePhoto, labels, relief, tilted])
+  }, [map, epoch, esriLabels, truePhoto, labels, relief, tilted, skyOwnedByWorld])
 
   // Leaving the component (e.g. desktop layout) drops terrain so desktop keeps its 2D contract.
   useEffect(() => () => {

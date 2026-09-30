@@ -109,6 +109,10 @@ html[data-nexus-theme='red_ops'] .mx-sheet {
   pointer-events: none;
 }
 .mx-top > * { pointer-events: auto; }
+/* Living Map: its own full row under the mode pill */
+.mx-top { flex-wrap: wrap; align-items: flex-start; }
+.mx-worldslot { flex-basis: 100%; min-width: 0; display: flex; }
+.mx-worldslot:empty { display: none; }
 
 .mx-context {
   display: inline-flex;
