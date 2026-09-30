@@ -65,6 +65,7 @@ interface ReasonRule {
 // First match wins; most specific first.
 const REASON_RULES: ReasonRule[] = [
   { match: /template_asset_incompatible|asset_type_incompatible/, title: 'Template mismatch', detail: "The message was written for a different kind of property, so it was held before sending.", tone: 'amber' },
+  { match: /logical_communication|identity_conflict|uniqueness_conflict|state_forbids_attempt|retry_authority|ambiguous_outcome|attempt_already_in_flight|campaign_touch_|queue_row_identity/, title: 'Duplicate-send guard', detail: "The send ledger couldn't confirm this is safe to send, so the processor held it. It retries on its own.", tone: 'amber' },
   { match: /21610|blacklist/, title: 'Carrier blocked this contact', detail: 'The carrier refuses this sender and recipient pair. It will not be retried.', tone: 'red', permanent: true },
   { match: /opted?_?out|opt-out|stop_request/, title: 'Seller opted out', detail: 'This contact asked not to be texted. It will not be retried.', tone: 'red', permanent: true },
   { match: /suppress|dnc|do_not_text/, title: 'Suppressed contact', detail: 'This contact is on a suppression list. It will not be retried.', tone: 'red', permanent: true },
@@ -94,6 +95,41 @@ function reasonCodes(item: QueueItem): string[] {
   ].map(clean).filter(Boolean)
 }
 
+function matchReason(codes: string[]): DispatchReason | null {
+  const haystack = codes.join(' ').toLowerCase()
+  for (const rule of REASON_RULES) {
+    if (rule.match.test(haystack)) {
+      const code = codes.find((c) => rule.match.test(c.toLowerCase())) ?? null
+      return { title: rule.title, detail: rule.detail, tone: rule.tone, permanent: Boolean(rule.permanent), code }
+    }
+  }
+  return null
+}
+
+/**
+ * A `queued` row the processor claimed and put back WITHOUT sending. Its status
+ * still reads queued, so on status alone it looks Ready; for ~25 hours on
+ * 2026-09-29/30, 166 rows read "Ready" while every pass refused them. It counts
+ * as held when the processor recorded a refusal after the row was due (or the
+ * refusal backoff has pushed it). A row re-planned to a later time after an old
+ * refusal is waiting, not held.
+ */
+export function processorHold(item: QueueItem): { reason: DispatchReason; tries: number } | null {
+  if (segmentOf(item) !== 'ready') return null
+  const md = meta(item)
+  const code = clean(md.skip_reason)
+  if (!code) return null
+  const tries = Math.max(0, Math.trunc(Number(md.dispatch_refusal_count) || 0))
+  const refusedAt = Date.parse(clean(md.finalized_at))
+  const dueAt = Date.parse(clean(item.scheduledForUtc || item.scheduledForLocal))
+  const current = tries > 0 || (Number.isFinite(refusedAt) && Number.isFinite(dueAt) && refusedAt >= dueAt)
+  if (!current) return null
+  const reason = matchReason([code]) ?? {
+    title: 'Held by the processor', detail: 'The processor picked this row up and put it back without sending.', tone: 'amber' as const, permanent: false, code,
+  }
+  return { reason, tries }
+}
+
 export function dispatchReason(item: QueueItem): DispatchReason | null {
   const s = lower(item.queueStatusRaw || item.status)
   if (s === 'approval' || s === 'awaiting_approval') {
@@ -102,16 +138,13 @@ export function dispatchReason(item: QueueItem): DispatchReason | null {
   if (s === 'expired') return { title: 'Window passed', detail: 'Its contact window closed before it could send.', tone: 'muted', permanent: false, code: s }
   if (s === 'cancelled') return { title: 'Cancelled', detail: 'This row was cancelled and will not send.', tone: 'muted', permanent: false, code: s }
   if (s === 'replied_before_send') return { title: 'Seller replied first', detail: 'The seller answered before this went out, so it was withdrawn.', tone: 'muted', permanent: false, code: s }
+  const hold = processorHold(item)
+  if (hold) return hold.reason
   if (segmentOf(item) !== 'attention') return null
 
   const codes = reasonCodes(item)
-  const haystack = codes.join(' ').toLowerCase()
-  for (const rule of REASON_RULES) {
-    if (rule.match.test(haystack)) {
-      const code = codes.find((c) => rule.match.test(c.toLowerCase())) ?? null
-      return { title: rule.title, detail: rule.detail, tone: rule.tone, permanent: Boolean(rule.permanent), code }
-    }
-  }
+  const matched = matchReason(codes)
+  if (matched) return matched
   const failed = FAILED.has(s)
   return {
     title: failed ? 'Send failed' : 'Held before sending',
@@ -205,7 +238,9 @@ export interface DispatchStatus {
 export function dispatchStatus(item: QueueItem): DispatchStatus {
   const s = lower(item.queueStatusRaw || item.status)
   switch (segmentOf(item)) {
-    case 'ready': return { label: s === 'approved' ? 'Approved' : 'Ready', tone: 'green' }
+    case 'ready':
+      if (processorHold(item)) return { label: 'Held', tone: 'amber' }
+      return { label: s === 'approved' ? 'Approved' : 'Ready', tone: 'green' }
     case 'scheduled': return { label: 'Scheduled', tone: 'blue' }
     case 'sending': return { label: 'Sending', tone: 'cyan' }
     case 'history':
@@ -228,6 +263,11 @@ export function dispatchWhen(item: QueueItem, now: Date = new Date()): { primary
     const at = item.scheduledForUtc || item.scheduledForLocal
     const local = localWhen(at, tz, now)
     const rel = relative(at, now)
+    const hold = seg === 'ready' ? processorHold(item) : null
+    if (hold) {
+      const tries = hold.tries > 1 ? ` · ${hold.tries} tries` : ''
+      return { primary: `Held by the processor${tries}`, secondary: rel && rel.startsWith('in ') ? `Retries ${rel}` : 'Retries next pass' }
+    }
     if (seg === 'ready') return { primary: rel && rel.startsWith('in ') ? `Sends ${rel}` : 'Next processor pass', secondary: local }
     return { primary: local ?? 'Time not set', secondary: rel }
   }

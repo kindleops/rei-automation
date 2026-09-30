@@ -27,6 +27,7 @@ import {
   sendTextgridSMS,
 } from "@/lib/providers/textgrid.js";
 import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-seller-queue-row.js";
+import { buildDispatchRefusalBackoff } from "@/lib/domain/queue/dispatch-refusal-backoff.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
@@ -2296,15 +2297,24 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
     );
 
     // A refusal BEFORE the wire is not a provider failure: it must not consume
-    // a retry or be recorded as a delivery attempt. Release the row and say why.
+    // a retry or be recorded as a delivery attempt. Release the row and say why,
+    // pushed back so a row that keeps being refused cannot hold the front of
+    // every claim batch (dispatch-refusal-backoff.js).
     if (dispatch.provider_invoked === false) {
+      const backoff = buildDispatchRefusalBackoff(queue_row, now);
       warn("queue.canonical_dispatch_refused", {
         queue_row_id,
         stage: dispatch.stage,
         reason: dispatch.reason,
         logical_communication_id: dispatch.logical_communication_id || null,
+        refusal_count: backoff.metadata.dispatch_refusal_count,
+        next_eligible_at: backoff.next_eligible_at,
       });
-      await releaseSkippedQueueRow(queue_row, lock_token, dispatch.reason, { ...deps, now });
+      await releaseSkippedQueueRow(queue_row, lock_token, dispatch.reason, {
+        ...deps,
+        now,
+        metadata_patch: { ...backoff.metadata, next_eligible_at: backoff.next_eligible_at },
+      });
       return {
         ok: true,
         skipped: true,
@@ -2314,6 +2324,7 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
         queue_row_id,
         queue_item_id: queue_row_id,
         logical_communication_id: dispatch.logical_communication_id || null,
+        next_eligible_at: backoff.next_eligible_at,
       };
     }
 
