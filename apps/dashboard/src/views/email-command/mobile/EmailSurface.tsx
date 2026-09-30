@@ -134,10 +134,10 @@ export function EmailSurface() {
       ) : home ? (
         filter === 'all' ? (
           <>
-            <Section title="Needs you" tone="attention" rows={home.needs_you} onOpen={open} empty={total ? { title: 'Nothing needs you', body: 'LeadCommand is handling active conversations.' } : null} />
-            <Section title="Active automations" tone="active" rows={home.system_handling} onOpen={open} />
-            <Section title="Waiting on reply" tone="external" rows={home.waiting.slice(0, 12)} onOpen={open} more={home.waiting.length > 12 ? () => setFilter('waiting') : null} />
-            {home.failed.length ? <Section title="Failed" tone="blocked" rows={home.failed} onOpen={open} /> : null}
+            <Section title="Needs you" tone="attention" rows={home.needs_you} onOpen={open} openId={openId} empty={total ? { title: 'Nothing needs you', body: 'LeadCommand is handling active conversations.' } : null} />
+            <Section title="Active automations" tone="active" rows={home.system_handling} onOpen={open} openId={openId} />
+            <Section title="Waiting on reply" tone="external" rows={home.waiting.slice(0, 12)} onOpen={open} openId={openId} more={home.waiting.length > 12 ? () => setFilter('waiting') : null} />
+            {home.failed.length ? <Section title="Failed" tone="blocked" rows={home.failed} onOpen={open} openId={openId} /> : null}
             {!total ? (
               <section className="em2-state is-empty">
                 <span className="em2-empty-mark" aria-hidden><Icon name="mail" /></span>
@@ -145,12 +145,12 @@ export function EmailSurface() {
                 <p>Seller replies, title and buyer threads appear here as soon as email is used. Nothing is simulated.</p>
               </section>
             ) : null}
-            {home.unresolved.length ? <Section title="Unresolved senders" tone="muted" rows={home.unresolved.slice(0, 5)} onOpen={open} more={home.unresolved.length > 5 ? () => setFilter('unresolved') : null} /> : null}
+            {home.unresolved.length ? <Section title="Unresolved senders" tone="muted" rows={home.unresolved.slice(0, 5)} onOpen={open} openId={openId} more={home.unresolved.length > 5 ? () => setFilter('unresolved') : null} /> : null}
           </>
         ) : (
           <section className="em2-section">
             {list.length ? (
-              <ul className="em2-list">{list.map((t, i) => <li key={t.id} style={{ ['--i' as string]: Math.min(i, 10) }}><ThreadRow t={t} onOpen={() => open(t.id)} /></li>)}</ul>
+              <ul className="em2-list">{list.map((t, i) => <li key={t.id} style={{ ['--i' as string]: Math.min(i, 10) }}><ThreadRow t={t} onOpen={() => open(t.id)} open={t.id === openId} /></li>)}</ul>
             ) : (
               <p className="em2-none">{debounced ? `Nothing matches “${debounced}”.` : filter === 'needs_you' ? 'Nothing needs you. LeadCommand is handling active conversations.' : `No ${FILTERS.find((f) => f.key === filter)?.label.toLowerCase()} conversations.`}</p>
             )}
@@ -162,20 +162,20 @@ export function EmailSurface() {
 
       {openId ? (
         <Suspense fallback={<div className="em2-room is-loading" />}>
-          <EmailThreadRoom id={openId} fallback={all.find((t) => t.id === openId) ?? null} onClose={close} onChanged={() => void load()} />
+          <EmailThreadRoom key={openId} id={openId} fallback={all.find((t) => t.id === openId) ?? null} onClose={close} onChanged={() => void load()} />
         </Suspense>
       ) : null}
     </div>
   )
 }
 
-function Section({ title, tone, rows, onOpen, empty = null, more = null }: { title: string; tone: string; rows: ThreadSummary[]; onOpen: (id: string) => void; empty?: { title: string; body: string } | null; more?: (() => void) | null }) {
+function Section({ title, tone, rows, onOpen, openId = null, empty = null, more = null }: { title: string; tone: string; rows: ThreadSummary[]; onOpen: (id: string) => void; openId?: string | null; empty?: { title: string; body: string } | null; more?: (() => void) | null }) {
   if (!rows.length && !empty) return null
   return (
     <section className="em2-section" aria-label={title}>
       <h2 className={`em2-h2 is-${tone}`}>{title}{rows.length ? <span>{rows.length}</span> : null}</h2>
       {rows.length ? (
-        <ul className="em2-list">{rows.map((t, i) => <li key={t.id} style={{ ['--i' as string]: Math.min(i, 10) }}><ThreadRow t={t} onOpen={() => onOpen(t.id)} /></li>)}</ul>
+        <ul className="em2-list">{rows.map((t, i) => <li key={t.id} style={{ ['--i' as string]: Math.min(i, 10) }}><ThreadRow t={t} onOpen={() => onOpen(t.id)} open={t.id === openId} /></li>)}</ul>
       ) : empty ? (
         <div className="em2-calm"><Icon name="check" /><span><b>{empty.title}</b>{empty.body}</span></div>
       ) : null}
@@ -241,12 +241,12 @@ function SystemHero({ home, onFilter, onOpen }: { home: Home; onFilter: (f: Filt
   )
 }
 
-export function ThreadRow({ t, onOpen }: { t: ThreadSummary; onOpen: () => void }) {
+export function ThreadRow({ t, onOpen, open = false }: { t: ThreadSummary; onOpen: () => void; open?: boolean }) {
   const tone = STATE_TONE[t.state]
   const line = businessLine(t)
   const place = where(t)
   return (
-    <button type="button" className={`em2-row is-${tone}${t.operator_unread ? ' is-unread' : ''}`} onClick={onOpen} data-thread-id={t.id}>
+    <button type="button" className={`em2-row is-${tone}${t.operator_unread ? ' is-unread' : ''}${open ? ' is-open' : ''}`} onClick={onOpen} data-thread-id={t.id} aria-current={open || undefined}>
       <span className="em2-row__rail" aria-hidden />
       <span className="em2-row__top">
         <Monogram t={t} />

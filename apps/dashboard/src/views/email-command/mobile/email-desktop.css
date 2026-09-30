@@ -1,0 +1,694 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   EMAIL COMMAND · DESKTOP
+   The phone's control plane (EmailSurface → EmailThreadRoom), set in the calm
+   desktop language: no liquid field, no orbs or rims — hairline glass on the
+   pane, 13px type, monochrome identity chips, colour only for state (small,
+   muted) and the accent for selection, focus and the primary action.
+
+   It recomposes by its PANE (container: pane), never the window:
+     < 700px    the phone composition, calmed
+     ≥ 700px    title + search share one row
+     ≥ 1000px   the system state reads as one band (status · tiles · next);
+                Needs you / Handling / Waiting sit side by side; a
+                conversation docks as a room on the right while the list
+                stays beside it
+   The room mounts inside Email Command's pane (mobile/sheet-host.ts).
+
+   This sheet loads before the lazily-loaded email-surface.css, so every rule
+   carries `.dsk-pane__body` to out-rank it. Every rule is scoped to
+   html.is-desktop-modern — phones are untouched.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern .dsk-pane__body :is(.em2, .em2-room, .em2-sheet) {
+  --k-ink: transparent;
+  --k-text: var(--dsk-ink);
+  --k-text-2: var(--dsk-ink-2);
+  --k-text-3: var(--dsk-ink-3);
+  --k-edge: var(--dsk-edge);
+  --k-edge-hi: var(--dsk-edge-hi);
+  --k-glass: var(--dsk-glass);
+  --k-glass-hi: var(--dsk-glass-strong);
+  --k-track: var(--dsk-tile);
+  --k-cobalt: var(--dsk-ink-2);
+  --k-violet: var(--dsk-ink-2);
+  --k-teal: var(--dsk-ink-2);
+  --k-ext: var(--dsk-ink-3);
+  --k-amb: var(--dsk-ink-3);
+  --k-gold: #f0b64a;
+  --k-good: #4ade9a;
+  --k-bad: #ff7b86;
+  --k-spec: linear-gradient(transparent, transparent);
+  --k-rim: linear-gradient(var(--dsk-edge), var(--dsk-edge));
+  --k-blur: var(--dsk-blur);
+  --k-blur-deep: var(--dsk-blur);
+  --k-sheen: 0;
+  --k-display: var(--dsk-font);
+  font-family: var(--dsk-font);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body :is(.em2, .em2-room, .em2-sheet) {
+  --k-gold: #b45309;
+  --k-good: #15803d;
+  --k-bad: #c81e1e;
+}
+
+/* ── ground: the pane is the glass ─────────────────────────────────────── */
+html.is-desktop-modern .dsk-pane__body .em2 {
+  gap: 16px;
+  padding: 26px 28px 48px;
+  background: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsk-edge-hi) transparent;
+}
+html.is-desktop-modern .dsk-pane__body :is(.em2, .em2-room) .em2-liquid { display: none; }
+
+/* ── header: the page title, then search ──────────────────────────────── */
+html.is-desktop-modern .dsk-pane__body .em2-head { gap: 12px; padding: 0; }
+html.is-desktop-modern .dsk-pane__body .em2-head .em2-eyebrow {
+  flex: none;
+  gap: 10px;
+  white-space: nowrap;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .dsk-pane__body .em2-eyebrow i { display: none; }
+html.is-desktop-modern .dsk-pane__body .em2-demo {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  margin-left: 0;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0;
+  color: var(--k-gold);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .dsk-pane__body .em2-search {
+  gap: 9px;
+  min-height: 34px;
+  padding: 0 6px 0 11px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsk-ink-3);
+  background: var(--dsk-tile);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge) !important;
+  transition: box-shadow 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-search:hover { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-search:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent) !important; }
+/* :not([type]) out-ranks the light theme's global input !important fill */
+html.is-desktop-modern .dsk-pane__body .em2 .em2-search input:not([type='range']) { font-size: 13px; background: transparent !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; color: var(--dsk-ink) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-search button { width: 24px; height: 24px; border-radius: 6px; }
+html.is-desktop-modern .dsk-pane__body .em2-search button:hover { background: var(--dsk-hover); color: var(--dsk-ink); }
+
+/* ── system state ──────────────────────────────────────────────────────── */
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero {
+  gap: 16px;
+  padding: 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur) !important;
+  backdrop-filter: var(--dsk-blur) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12) !important;
+  animation: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero::before,
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero::after,
+html.is-desktop-modern .dsk-pane__body .em2-sheen { display: none; }
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero__top { gap: 12px; }
+html.is-desktop-modern .dsk-pane__body .em2-orb {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .dsk-pane__body .em2-orb i { display: none; }
+html.is-desktop-modern .dsk-pane__body .em2-orb b {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsk-ink-3);
+  box-shadow: none;
+  animation: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-orb.is-live b { background: var(--k-good); }
+html.is-desktop-modern .dsk-pane__body .em2-orb.is-needs b { background: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero__copy { gap: 2px; }
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero__copy strong {
+  font-family: var(--dsk-font);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+}
+html.is-desktop-modern .dsk-pane__body .em2-sys-hero__copy small { font-size: 13px; font-weight: 400; color: var(--dsk-ink-3); }
+
+html.is-desktop-modern .dsk-pane__body .em2-instr {
+  gap: 1px;
+  border-radius: 12px;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg {
+  gap: 2px;
+  min-height: 72px;
+  padding: 12px 16px 14px;
+  background: var(--dsk-glass-strong);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg:hover { background: color-mix(in srgb, var(--dsk-glass-strong) 90%, var(--dsk-ink)); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg:focus-visible { outline: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg b {
+  order: 1;
+  font-family: var(--dsk-font);
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--dsk-ink);
+  text-shadow: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg:not(.is-zero) b { color: var(--dsk-ink); text-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg.is-gold:not(.is-zero) b { color: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg span { order: 2; font-size: 12.5px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg.is-zero { opacity: 1; }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg.is-zero b { color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg.is-gold { --seg: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg:is(.is-cobalt, .is-ext) { --seg: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-instr__seg i {
+  height: 2px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--seg) 70%, transparent);
+  background-size: auto;
+  box-shadow: none;
+  animation: none;
+}
+
+html.is-desktop-modern .dsk-pane__body .em2-ticker {
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-ticker:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-ticker:focus-visible { outline: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent); }
+html.is-desktop-modern .dsk-pane__body .em2-ticker::after { display: none; }
+html.is-desktop-modern .dsk-pane__body .em2-ticker__dot { width: 6px; height: 6px; background: var(--dsk-ink-3); box-shadow: none; animation: none; }
+html.is-desktop-modern .dsk-pane__body .em2-ticker__body em { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-ticker__what { font-size: 13px; font-weight: 550; color: var(--dsk-ink); }
+
+/* ── banners, filters, sections ────────────────────────────────────────── */
+html.is-desktop-modern .dsk-pane__body .em2-banner {
+  gap: 8px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  background: var(--dsk-tile);
+  box-shadow: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-banner.is-muted { color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-banner.is-bad { font-weight: 550; color: var(--k-bad); background: var(--dsk-tile); box-shadow: inset 2px 0 0 var(--k-bad); }
+html.is-desktop-modern .dsk-pane__body .em2-banner svg { width: 14px !important; height: 14px !important; margin-top: 1px; }
+
+html.is-desktop-modern .dsk-pane__body .em2-chips { gap: 4px; margin: 0; padding: 0; flex-wrap: wrap; overflow: visible; }
+html.is-desktop-modern .dsk-pane__body .em2-chip {
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-chip:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .dsk-pane__body .em2-chip:focus-visible { outline: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent); }
+html.is-desktop-modern .dsk-pane__body .em2-chip b { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-chip.is-on {
+  color: var(--dsk-ink);
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.18);
+}
+
+html.is-desktop-modern .dsk-pane__body .em2-h2 {
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .dsk-pane__body .em2-h2::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-h2.is-attention::before { background: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-h2.is-active::before { background: var(--k-good); }
+html.is-desktop-modern .dsk-pane__body .em2-h2.is-blocked::before { background: var(--k-bad); }
+html.is-desktop-modern .dsk-pane__body .em2-h2 span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-h2::after { background: var(--dsk-edge); opacity: 1; margin-left: 4px; }
+html.is-desktop-modern .dsk-pane__body .em2-list { gap: 6px; }
+html.is-desktop-modern .dsk-pane__body .em2-list > li { animation: em2-dsk-fade 0.24s var(--dsk-ease) both; animation-delay: calc(var(--i, 0) * 16ms); }
+@keyframes em2-dsk-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ── thread rows ───────────────────────────────────────────────────────── */
+html.is-desktop-modern .dsk-pane__body .em2-row {
+  gap: 4px;
+  padding: 12px 14px !important;
+  border: 0 !important;
+  border-radius: 10px;
+  background: var(--dsk-tile) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-row:hover { background: var(--dsk-tile-hi) !important; }
+/* the conversation open beside the list */
+html.is-desktop-modern .dsk-pane__body .em2-row.is-open { background: var(--dsk-tile-hi) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), inset 2px 0 0 var(--dsk-accent) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-row:active { transform: none; }
+html.is-desktop-modern .dsk-pane__body .em2-row:focus:not(:focus-visible) { outline: none; }
+html.is-desktop-modern .dsk-pane__body .em2-row.is-attention::after,
+html.is-desktop-modern .dsk-pane__body .em2-row__rail { display: none !important; }
+html.is-desktop-modern .dsk-pane__body .em2-row__top { gap: 10px; }
+html.is-desktop-modern .dsk-pane__body .em2-mono {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-family: var(--dsk-font);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .dsk-pane__body .em2-mono.is-live::after { display: none; }
+html.is-desktop-modern .dsk-pane__body .em2-row__id { gap: 1px; }
+html.is-desktop-modern .dsk-pane__body .em2-row__who { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .dsk-pane__body .em2-row.is-unread .em2-row__who::after { width: 6px; height: 6px; margin-left: 7px; vertical-align: 2px; background: var(--dsk-accent); box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-row__id .em2-role { font-size: 11.5px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-row__top time { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body :is(.em2-row__place, .em2-row__line, .em2-row__preview, .em2-row__foot) { margin-left: 38px; }
+html.is-desktop-modern .dsk-pane__body .em2-row__place { font-size: 13px; font-weight: 400; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-row__line { font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-row__line.is-needs { color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-row__preview { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-row__foot { gap: 8px; margin-top: 6px; }
+html.is-desktop-modern .dsk-pane__body .em2-next { font-size: 11.5px; color: var(--dsk-ink-3); }
+
+html.is-desktop-modern .dsk-pane__body .em2-pill {
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .dsk-pane__body .em2-pill::before { width: 6px; height: 6px; background: var(--dsk-ink-3); animation: none !important; }
+html.is-desktop-modern .dsk-pane__body .em2-pill.is-attention { color: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-pill.is-attention::before { background: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-pill:is(.is-active, .is-ready)::before { background: var(--k-good); }
+html.is-desktop-modern .dsk-pane__body .em2-pill.is-blocked { color: var(--k-bad); }
+html.is-desktop-modern .dsk-pane__body .em2-pill.is-blocked::before { background: var(--k-bad); }
+
+/* ── states, links, buttons ────────────────────────────────────────────── */
+html.is-desktop-modern .dsk-pane__body .em2-calm {
+  gap: 12px;
+  padding: 14px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--dsk-ink-3);
+  background: var(--dsk-tile);
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-calm > svg { width: 16px !important; height: 16px !important; opacity: 0.7; }
+html.is-desktop-modern .dsk-pane__body .em2-calm span { font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-calm b { font-size: 13px; font-weight: 550; color: var(--dsk-ink-2); }
+/* a page-level state is a calm centred line, not a card */
+html.is-desktop-modern .dsk-pane__body .em2-state {
+  gap: 6px;
+  padding: 56px 24px 48px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-state > svg,
+html.is-desktop-modern .dsk-pane__body .em2-empty-mark svg { width: 28px !important; height: 28px !important; color: var(--dsk-ink); opacity: 0.35; }
+html.is-desktop-modern .dsk-pane__body .em2-state strong { margin-top: 6px; font-size: 13px; font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-state p { max-width: 420px; font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-state.is-error strong { color: var(--k-bad); }
+html.is-desktop-modern .dsk-pane__body .em2-empty-mark { width: auto; height: auto; border-radius: 0; background: none; box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-none { margin: 4px 2px; padding: 14px; border-radius: 10px; font-size: 13px; color: var(--dsk-ink-3); background: var(--dsk-tile); }
+html.is-desktop-modern .dsk-pane__body .em2-prov { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-link { min-height: 24px; font-size: 12.5px; font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-link:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-btn {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body .em2-btn { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern .dsk-pane__body .em2-btn.is-quiet { color: var(--dsk-ink); background: var(--dsk-tile); border: 0; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .dsk-pane__body .em2-btn.is-quiet:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-icon:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-skel__row { padding: 16px; border-radius: 10px; background: var(--dsk-tile); box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-skel__row i { height: 9px; background: var(--dsk-tile-hi); animation-duration: 2.2s; }
+
+/* ══ THE ROOM ═════════════════════════════════════════════════════════════
+   Mounted in the pane, so position:fixed is the pane. Narrow panes: it
+   covers the pane (the phone's push). Wide panes: it docks on the right. */
+html.is-desktop-modern .dsk-pane__body .em2-room {
+  z-index: 40;
+  background: var(--dsk-glass-strong);
+  animation: em2-dsk-room 0.24s var(--dsk-ease) both;
+}
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body .em2-room { background: var(--dsk-glass-strong); }
+@keyframes em2-dsk-room { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+/* Covering the pane (narrow panes), the room's glass must not show the list
+   through it: the list steps out of sight (layout and scroll kept) while the
+   room is open, exactly as the phone's opaque push does. */
+@container pane (max-width: 999.98px) {
+  html.is-desktop-modern .dsk-pane__body .em2.has-room > * { visibility: hidden; }
+}
+html.is-desktop-modern .dsk-pane__body .em2-room__scroll {
+  gap: 12px;
+  padding: 0 16px 128px !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsk-edge-hi) transparent;
+}
+html.is-desktop-modern .dsk-pane__body .em2-room__bar {
+  gap: 10px;
+  justify-content: flex-start;
+  margin: 0 -16px;
+  padding: 10px 14px !important;
+  background: color-mix(in srgb, rgb(var(--dsk-fill)) 86%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  backdrop-filter: blur(18px) saturate(1.1);
+  border-bottom: 1px solid var(--dsk-edge);
+}
+html.is-desktop-modern .dsk-pane__body .em2-room__bar .em2-eyebrow { flex: 1; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-room__bar .em2-role { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .dsk-pane__body .em2-room__state { gap: 8px; padding: 40px 20px; font-size: 13px; color: var(--dsk-ink-3); }
+
+/* context header */
+html.is-desktop-modern .dsk-pane__body .em2-hero { gap: 4px; padding: 8px 2px 14px !important; background: none !important; border-bottom: 1px solid var(--dsk-edge) !important; box-shadow: none !important; }
+html.is-desktop-modern .dsk-pane__body .em2-hero .em2-mono { width: 26px; height: 26px; font-size: 10.5px; border-radius: 7px; }
+html.is-desktop-modern .dsk-pane__body .em2-hero__who { font-size: 13px !important; font-weight: 600 !important; letter-spacing: 0 !important; color: var(--dsk-ink) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-hero__addr { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-hero .em2-pill { padding: 0 8px 0 7px; font-size: 11.5px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .dsk-pane__body .em2-hero__place { margin-top: 8px; font-family: var(--dsk-font); font-size: 16px !important; font-weight: 600 !important; letter-spacing: -0.01em; }
+html.is-desktop-modern .dsk-pane__body .em2-hero__state { gap: 8px; font-size: 13px; font-weight: 400; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-hero__state em { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-hero__pref { font-size: 12px; color: var(--dsk-ink-3); }
+/* a spec line: every fact carries its dot; the line starts early inside the
+   hero's clip, so a wrapped line never begins with an orphan separator */
+html.is-desktop-modern .dsk-pane__body .em2-facts { gap: 2px 0; margin: 6px 0 0 -18px; }
+html.is-desktop-modern .dsk-pane__body .em2-facts li { gap: 5px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-facts li::before { content: '·'; flex: none; width: 13px; text-align: center; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-facts em { font-size: 12.5px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-facts b { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-ball-track { margin-top: 10px; }
+html.is-desktop-modern .dsk-pane__body .em2-ball-track::before { top: 4px; background: var(--dsk-edge-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-ball-track li { gap: 5px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-ball-track li i { width: 9px; height: 9px; background: rgb(var(--dsk-fill)); border-color: var(--dsk-edge-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-ball-track li.is-on { color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-ball-track li.is-on i { background: var(--dsk-ink); box-shadow: 0 0 0 3px var(--dsk-tile-hi); animation: none; }
+html.is-desktop-modern .dsk-pane__body .em2-capsule { gap: 8px; margin-top: 10px; padding: 10px 0 0; font-size: 13px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-capsule > i { width: 6px; height: 6px; background: var(--dsk-ink-3); box-shadow: none; animation: none; }
+html.is-desktop-modern .dsk-pane__body .em2-capsule.is-failed > i { background: var(--k-bad); }
+html.is-desktop-modern .dsk-pane__body :is(.em2-capsule.is-paused_you_own_it, .em2-capsule.is-paused) > i { background: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-capsule__what em { font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-capsule__why { font-size: 12px; font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-capsule.is-next:hover .em2-capsule__why { color: var(--dsk-ink); }
+
+/* needs you · drafts · handoff: a quiet strip with one hairline of colour */
+html.is-desktop-modern .dsk-pane__body .em2-needs { column-gap: 12px; padding: 4px 4px 4px 12px !important; background: none !important; box-shadow: none !important; }
+html.is-desktop-modern .dsk-pane__body .em2-needs::before { width: 2px !important; background: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-needs.is-draft::before { background: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-needs__eyebrow { font-size: 11px !important; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--k-gold); }
+html.is-desktop-modern .dsk-pane__body .em2-needs.is-draft .em2-needs__eyebrow { color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-needs p { font-size: 13px !important; line-height: 1.45; color: var(--dsk-ink) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-needs small { font-size: 12px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-needs__act {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-needs__act:hover:not(:disabled) { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-needs__acts .em2-btn { height: 32px !important; min-height: 0; padding: 0 12px; border-radius: 8px; font-size: 13px; }
+html.is-desktop-modern .dsk-pane__body .em2-handoff { gap: 10px; font-size: 13px; border-left-color: var(--k-gold) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-handoff small { font-size: 12px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-notice { padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 500; background: var(--dsk-tile); }
+
+/* the conversation: only the emails are cards */
+html.is-desktop-modern .dsk-pane__body .em2-thread { gap: 10px; }
+html.is-desktop-modern .dsk-pane__body .em2-item { animation: em2-dsk-fade 0.24s var(--dsk-ease) both; }
+html.is-desktop-modern .dsk-pane__body .em2-bubble {
+  gap: 6px;
+  max-width: 72ch;
+  padding: 12px 14px;
+  border-radius: 12px;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.is-desktop-modern .dsk-pane__body .em2-bubble.is-in {
+  border: 0 !important;
+  border-bottom-left-radius: 3px;
+  background: var(--dsk-tile) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge) !important;
+}
+html.is-desktop-modern .dsk-pane__body .em2-bubble.is-out {
+  border: 0 !important;
+  border-bottom-right-radius: 3px;
+  background: var(--dsk-tile-hi) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi) !important;
+}
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body .em2-bubble.is-out { background: var(--dsk-tile-hi) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-bubble__meta { gap: 8px; font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-bubble__meta b { font-weight: 600; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-bubble__meta em { font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-text { font-size: 13px; line-height: 1.6; color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-html { font-size: 13px; line-height: 1.6; }
+html.is-desktop-modern .dsk-pane__body .em2-html a { color: var(--dsk-ink); text-decoration: underline; text-decoration-color: var(--dsk-edge-hi); text-underline-offset: 2px; }
+html.is-desktop-modern .dsk-pane__body .em2-sig { font-size: 12px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-link.is-small { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-link.is-small:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .dsk-pane__body .em2-telbtn { border-radius: 6px; }
+html.is-desktop-modern .dsk-pane__body .em2-telbtn:hover { background: var(--dsk-hover); }
+html.is-desktop-modern .dsk-pane__body .em2-tel { font-size: 11.5px !important; font-weight: 500; letter-spacing: 0 !important; text-transform: none; color: var(--dsk-ink-3) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-tel > span.is-on { color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-tel > span.is-on::before { background: var(--dsk-ink-2); border-color: var(--dsk-ink-2); box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-tel > span.is-on.is-good { color: var(--k-good); }
+html.is-desktop-modern .dsk-pane__body .em2-tel > span.is-on.is-good::before { background: var(--k-good); border-color: var(--k-good); box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-tel > span.is-on.is-bad { color: var(--k-bad); }
+html.is-desktop-modern .dsk-pane__body .em2-tel > span.is-on.is-bad::before { background: var(--k-bad); border-color: var(--k-bad); box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-applied { font-size: 12px; font-weight: 550; }
+html.is-desktop-modern .dsk-pane__body .em2-warn { border-radius: 7px; font-size: 12.5px; font-weight: 550; }
+html.is-desktop-modern .dsk-pane__body .em2-item.is-system::before { background: var(--dsk-edge-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-sys { font-size: 12.5px; }
+html.is-desktop-modern .dsk-pane__body .em2-sys > i { background: rgb(var(--dsk-fill)); border: 1.5px solid var(--dsk-ink-3); box-shadow: none; }
+html.is-desktop-modern .dsk-pane__body .em2-sys b { font-weight: 550; }
+html.is-desktop-modern .dsk-pane__body .em2-att { gap: 10px; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .dsk-pane__body .em2-att.is-needs_review { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-gold) 32%, transparent); }
+html.is-desktop-modern .dsk-pane__body .em2-att__body b { font-size: 13px; font-weight: 550; }
+html.is-desktop-modern .dsk-pane__body .em2-att__body small,
+html.is-desktop-modern .dsk-pane__body .em2-att__body em { font-size: 12px; }
+html.is-desktop-modern .dsk-pane__body :is(.em2-att__acts a, .em2-att__acts button) { height: 28px; padding: 0 10px; border-radius: 7px; font-size: 12.5px; font-weight: 550; color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+
+/* composer + action bar */
+html.is-desktop-modern .dsk-pane__body .em2-room .em2-compose {
+  margin: 0 12px 8px !important;
+  padding: 8px 8px 8px 14px;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: var(--dsk-glass-strong) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.1) !important;
+  backdrop-filter: blur(18px) saturate(1.1) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow) !important;
+}
+html.is-desktop-modern .dsk-pane__body .em2-room .em2-compose:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent), var(--dsk-shadow) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-compose__ctx { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-compose textarea { font-size: 13px; line-height: 1.55; }
+html.is-desktop-modern .dsk-pane__body .em2-send {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body .em2-send { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff) !important; }
+html.is-desktop-modern .dsk-pane__body .em2-send:disabled { opacity: 1; color: var(--dsk-ink-3); background: var(--dsk-tile) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .dsk-pane__body .em2-actionbar {
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--dsk-edge);
+  background: color-mix(in srgb, rgb(var(--dsk-fill)) 92%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .dsk-pane__body .em2-actionbar button {
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .dsk-pane__body .em2-actionbar button:hover:not(:disabled) { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .dsk-pane__body .em2-actionbar button svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern .dsk-pane__body .em2-actionbar .is-owner { color: #fff; background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body .em2-actionbar .is-owner { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+
+/* why / message sheets: a centred panel, not a bottom sheet */
+html.is-desktop-modern .dsk-pane__body .em2-sheet {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--dsk-bg) 42%, transparent);
+  animation: em2-dsk-fade 0.18s ease both;
+}
+html.is-desktop-modern .dsk-pane__body .em2-sheet__panel {
+  width: min(480px, 100%);
+  max-height: min(640px, 100%);
+  padding: 18px 20px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: blur(22px) saturate(1.1);
+  backdrop-filter: blur(22px) saturate(1.1);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  scrollbar-width: thin;
+}
+html.is-desktop-modern .dsk-pane__body .em2-sheet__grip { display: none; }
+html.is-desktop-modern .dsk-pane__body .em2-sheet h3 { margin-bottom: 10px; font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .dsk-pane__body .em2-sheet h3 + * { margin-top: 0; }
+html.is-desktop-modern .dsk-pane__body .em2-sheet h4 { margin: 16px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-dl > div { padding: 6px 0; border-bottom: 0; }
+html.is-desktop-modern .dsk-pane__body .em2-links li { border-bottom: 0; padding: 6px 0; }
+html.is-desktop-modern .dsk-pane__body .em2-details li { border-bottom: 0; }
+html.is-desktop-modern .dsk-pane__body .em2-dl dt { font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .dsk-pane__body .em2-dl dd { font-size: 13px; font-weight: 500; }
+html.is-desktop-modern .dsk-pane__body :is(.em2-caveat, .em2-links li, .em2-details) { font-size: 12px; }
+html.is-desktop-modern .dsk-pane__body .em2-details summary { min-height: 30px; font-weight: 550; }
+html.is-desktop-modern .dsk-pane__body .em2-sheet__close { margin-top: 14px; }
+
+/* ══ WIDER PANES ══════════════════════════════════════════════════════════ */
+@container pane (min-width: 700px) {
+  html.is-desktop-modern .dsk-pane__body .em2-head { flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; }
+  html.is-desktop-modern .dsk-pane__body .em2-head .em2-search { flex: 0 1 420px; min-width: 200px; }
+}
+
+@container pane (min-width: 1000px) {
+  /* the list becomes a board: state band, filters, then columns of sections */
+  html.is-desktop-modern .dsk-pane__body .em2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    /* the root is also the scroller (a definite height): rows must never
+       shrink below their content to fit it */
+    grid-auto-rows: max-content;
+    align-content: start;
+    align-items: start;
+    column-gap: 16px;
+    row-gap: 16px;
+    padding: 26px 28px 48px;
+  }
+  html.is-desktop-modern .dsk-pane__body .em2 > :is(.em2-head, .em2-sys-hero, .em2-banner, .em2-chips, .em2-state, .em2-skel, .em2-prov, .em2-section:not([aria-label])) { grid-column: 1 / -1; }
+  html.is-desktop-modern .dsk-pane__body .em2 > .em2-section:not([aria-label]) > .em2-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    align-items: start;
+  }
+
+  /* system state as one band: status · tiles, then what runs next */
+  html.is-desktop-modern .dsk-pane__body .em2-sys-hero {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(0, 1.7fr);
+    align-items: center;
+    column-gap: 20px;
+    row-gap: 12px;
+  }
+  html.is-desktop-modern .dsk-pane__body .em2-sys-hero > .em2-ticker { grid-column: 1 / -1; }
+
+  /* a conversation docks on the right; the list keeps the rest */
+  html.is-desktop-modern .dsk-pane__body .em2-room {
+    inset: 10px 10px 10px auto;
+    width: clamp(440px, 44cqw, 680px);
+    border-radius: 14px;
+    overflow: hidden;
+    contain: layout paint;
+    box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  }
+  html.is-desktop-modern .dsk-pane__body .em2.has-room { padding-right: calc(clamp(440px, 44cqw, 680px) + 30px); }
+}
+
+@container pane (min-width: 1500px) {
+  html.is-desktop-modern .dsk-pane__body .em2 { padding: 28px 36px 56px; column-gap: 20px; }
+  html.is-desktop-modern .dsk-pane__body .em2.has-room { padding-right: calc(clamp(440px, 44cqw, 680px) + 36px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .dsk-pane__body :is(.em2-room, .em2-item, .em2-list > li, .em2-sheet, .em2-skel__row i) { animation: none !important; }
+}

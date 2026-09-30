@@ -25,6 +25,7 @@ import {
   localWhen,
   segmentOf,
 } from './queue-dispatch-model'
+import { queueSheetHost } from './sheet-host'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -280,7 +281,7 @@ export function QueueDispatchSheet({
         )}
       </section>
     </div>,
-    document.body,
+    queueSheetHost(),
   )
 }
 
@@ -322,6 +323,6 @@ export function QueueDispatchPicker({
         {footer && <footer className="qx-actions">{footer}</footer>}
       </section>
     </div>,
-    document.body,
+    queueSheetHost(),
   )
 }

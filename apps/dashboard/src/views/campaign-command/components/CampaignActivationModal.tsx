@@ -6,6 +6,7 @@ import { computeCampaignReadiness } from '../campaign-health'
 import { mergeCampaignDetail } from '../campaign-detail-merge'
 import { CAMPAIGN_HYDRATION_CHUNK } from '../campaign-builder-launch'
 import type { CampaignSummary } from '../campaigns.types'
+import { campaignSheetHost } from '../mobile/sheet-host'
 
 type ActivationStep =
   | 'review'
@@ -378,5 +379,5 @@ export const CampaignActivationModal = ({
     </div>
   )
 
-  return createPortal(modal, document.body)
+  return createPortal(modal, campaignSheetHost())
 }

@@ -44,6 +44,8 @@ import type {
   InboxFolder,
 } from './email.types'
 import './email.css'
+// Desktop composition of the modern surface (html.is-desktop-modern only).
+import './mobile/email-desktop.css'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { CampaignSummary } from '../campaigns.types'
+import { campaignSheetHost } from './sheet-host'
 
 export type ConfirmTone = 'go' | 'danger' | 'neutral'
 
@@ -174,7 +175,7 @@ export function CampaignConfirmSheet({
         </div>
       </section>
     </div>,
-    document.body,
+    campaignSheetHost(),
   )
 }
 

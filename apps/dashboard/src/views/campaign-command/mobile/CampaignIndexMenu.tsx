@@ -12,6 +12,7 @@ import type { CampaignSummary } from '../campaigns.types'
 import { canArchiveCampaign } from '../campaign-health'
 import { CampaignConfirmSheet, confirmSpecFor, type ConfirmSpec } from './CampaignConfirmSheet'
 import { cardKindOf, displayName } from './campaign-index-model'
+import { campaignSheetHost } from './sheet-host'
 
 export type IndexMenuAction = 'open' | 'setup' | 'pause' | 'resume' | 'duplicate' | 'archive' | 'restore'
 
@@ -116,6 +117,6 @@ export function CampaignIndexMenu({
         <button type="button" className="cxs__cancel" onClick={dismiss}>Cancel</button>
       </section>
     </div>,
-    document.body,
+    campaignSheetHost(),
   )
 }

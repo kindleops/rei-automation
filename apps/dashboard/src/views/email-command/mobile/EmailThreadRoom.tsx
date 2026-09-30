@@ -9,6 +9,7 @@ import {
 } from './email-command-api'
 import { AUTOMATION_LABEL, ROLE_LABEL, STATE_LABEL, STATE_TONE, ago, human, money, stamp, until, where, who } from './email-format'
 import { LiquidField, Monogram } from './Monogram'
+import { emailRoomHost } from './sheet-host'
 
 /**
  * CONVERSATION ROOM. Entity, deal and business state first; then the email
@@ -117,7 +118,7 @@ export function EmailThreadRoom({ id, fallback, onClose, onChanged }: { id: stri
 
       {sheet ? <SheetView sheet={sheet} onClose={() => setSheet(null)} /> : null}
     </div>,
-    document.body,
+    emailRoomHost(),
   )
 }
 

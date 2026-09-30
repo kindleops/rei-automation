@@ -85,6 +85,8 @@ import { QueueDispatchSheet, QueueDispatchPicker } from './dispatch/QueueDispatc
 import { QueueShell, type QueueView } from './dispatch/QueueShell'
 import { QueueEventsView, QueueFailuresView, QueueMarketsView, QueueSendersView } from './dispatch/QueueSections'
 import './dispatch/queue-dispatch.css'
+// Desktop authority (html.is-desktop-modern only) — the calm desktop composition.
+import './queue-desktop.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

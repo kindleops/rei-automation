@@ -5,6 +5,7 @@ import { emitNotification } from '../../shared/NotificationToast'
 import { campaignLifecycle } from './campaigns.adapter'
 import type { CampaignSummary } from './campaigns.types'
 import { friendlyTimezone } from './campaign-launch-plan'
+import { campaignSheetHost } from './mobile/sheet-host'
 
 interface CampaignScheduleModalProps {
   campaign: CampaignSummary
@@ -169,5 +170,5 @@ export const CampaignScheduleModal = ({
     </div>
   )
 
-  return createPortal(modal, document.body)
+  return createPortal(modal, campaignSheetHost())
 }

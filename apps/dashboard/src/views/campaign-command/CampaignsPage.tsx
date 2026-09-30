@@ -81,6 +81,8 @@ import './campaign-command-glass.css'
 import './campaign-mobile.css'
 // Final authority: corrects the component sheets above. Must stay last.
 import './campaign-cinematic.css'
+// Desktop authority (html.is-desktop-modern only): the calm desktop composition.
+import './mobile/campaign-desktop.css'
 
 export { cls, fmt, fmtPct, fmtInterval, fmtRelative }
 

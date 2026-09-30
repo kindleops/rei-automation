@@ -5,6 +5,7 @@ import type { CampaignActionDef } from '../campaign-health'
 import type { CampaignSummary } from '../campaigns.types'
 import { cls, fmt } from '../campaign-formatters'
 import { CampaignConfirmSheet, confirmSpecFor, type ConfirmSpec } from '../mobile/CampaignConfirmSheet'
+import { campaignSheetHost } from '../mobile/sheet-host'
 
 /**
  * Campaign Detail — mobile action dock.
@@ -161,7 +162,7 @@ export function CampaignMobileActionDock({
         <button type="button" className="cad-sheet__cancel" onClick={() => setSheetOpen(false)}>Close</button>
       </section>
     </div>,
-    document.body,
+    campaignSheetHost(),
   ) : null
 
   return (

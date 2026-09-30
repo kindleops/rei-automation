@@ -1,0 +1,714 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   QUEUE · DESKTOP
+   The phone's dispatch surface (QueueShell → QueueDispatchMobile /
+   QueueSections / QueueDispatchSheet), set in the calm desktop language:
+   it sits on the pane's glass, reads in 13px type with monochrome chrome, and
+   spends colour only on state (small, muted) and on the accent (selection,
+   focus, the one primary action).
+
+   It recomposes by its PANE (container: pane), never the window:
+     < 700px    the phone composition, calmed
+     ≥ 700px    segments become one row of KPI tiles; cards flow into columns
+     ≥ 1000px   an opened row docks as an inspector on the right of the pane
+                while the list stays live beside it
+   Sheets mount inside the Queue's pane (dispatch/sheet-host.ts), so they
+   cover and lay out by that pane, not the workspace.
+
+   Every rule is scoped to html.is-desktop-modern — phones are untouched.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern :is(.qx-root, .qx-sheet, .nx-mobile-bottom-sheet.qm-tpl-sheet, .nx-mobile-bottom-sheet.qm-filter-sheet) {
+  --qx-font: var(--dsk-font);
+  --qx-bg: transparent;
+  --qx-ink-base: var(--dsk-ink);
+  --qx-ink: var(--dsk-ink);
+  --qx-ink-2: var(--dsk-ink-2);
+  --qx-ink-3: var(--dsk-ink-3);
+  --qx-ink-4: color-mix(in srgb, var(--dsk-ink-3) 64%, transparent);
+  --qx-rule: var(--dsk-edge);
+  --qx-plate: var(--dsk-glass);
+  --qx-sheen: none;
+  --qx-edge-top: var(--dsk-edge);
+  --qx-edge-mid: var(--dsk-edge);
+  --qx-edge-low: var(--dsk-edge);
+  --qx-spec: transparent;
+  --qx-shadow: none;
+  --qx-press: var(--dsk-hover);
+  --qx-glass: var(--dsk-glass-strong);
+  --qx-glass-hi: transparent;
+  --qx-glass-lo: transparent;
+  --qx-blur: var(--dsk-blur);
+  --qx-control: var(--dsk-tile);
+  --qx-control-edge: var(--dsk-edge);
+  --qx-well: var(--dsk-tile);
+  --qx-accent: var(--dsk-accent);
+  --qx-accent-ink: var(--dsk-ink);
+  --qx-aurora-strength: 0;
+  /* state: small and muted */
+  --qx-green: #4ade9a;
+  --qx-blue: #8eb4f0;
+  --qx-cyan: #74c7d8;
+  --qx-amber: #f0b64a;
+  --qx-red: #ff7b86;
+  --qx-muted: var(--dsk-ink-3);
+  --qx-spring: var(--dsk-ease);
+  --qx-ease: var(--dsk-ease);
+  font-family: var(--dsk-font);
+  font-feature-settings: normal;
+  font-variant-numeric: tabular-nums;
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.qx-root, .qx-sheet, .nx-mobile-bottom-sheet.qm-tpl-sheet, .nx-mobile-bottom-sheet.qm-filter-sheet) {
+  --qx-green: #15803d;
+  --qx-blue: #1d4ed8;
+  --qx-cyan: #0e7490;
+  --qx-amber: #b45309;
+  --qx-red: #c81e1e;
+}
+
+/* ── ground: the pane is the glass ─────────────────────────────────────── */
+html.is-desktop-modern .occ-root.is-dispatch { background: transparent; }
+html.is-desktop-modern .qx-root {
+  background: transparent;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dsk-edge-hi) transparent;
+}
+html.is-desktop-modern .qx-aurora { display: none; }
+html.is-desktop-modern .qx-body { animation-duration: 0.22s; }
+
+/* ── chrome ────────────────────────────────────────────────────────────── */
+html.is-desktop-modern .qx-head {
+  padding: 18px 0 12px;
+  background: color-mix(in srgb, rgb(var(--dsk-fill)) 45%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  backdrop-filter: blur(18px) saturate(1.1);
+  border-bottom: 1px solid var(--dsk-edge);
+}
+html.is-desktop-modern .qx-head__top { gap: 12px; padding: 0 20px 0 24px; }
+html.is-desktop-modern .qx-head__title {
+  gap: 10px;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+html.is-desktop-modern .qx-head__sum { margin-top: 4px; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-live { width: 7px; height: 7px; box-shadow: none; }
+html.is-desktop-modern .qx-live::after { display: none; }
+
+html.is-desktop-modern .qx-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .qx-icon::after { inset: 0; }
+html.is-desktop-modern .qx-icon:hover:not(:disabled) { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .qx-icon:active { transform: none; }
+html.is-desktop-modern .qx-icon.is-busy svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-icon.is-sm { width: 28px; height: 28px; border-radius: 7px; }
+html.is-desktop-modern .qx-icon:focus-visible,
+html.is-desktop-modern :is(.qx-rail__tab, .qx-seg__tab, .qx-filter, .qx-chiptab, .qx-choice, .qx-act, .qx-more__btn, .qx-empty__cta, .qx-rowlink):focus-visible,
+html.is-desktop-modern .qx-card:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+}
+
+/* view rail: quiet tabs, the active one a clear-glass chip */
+html.is-desktop-modern .qx-rail {
+  gap: 2px;
+  margin: 14px 0 0;
+  padding: 0 20px;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+html.is-desktop-modern .qx-rail__tab {
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .qx-rail__tab::after { inset: 0; }
+html.is-desktop-modern .qx-rail__tab:active { transform: none; }
+html.is-desktop-modern .qx-rail__tab:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .qx-rail__tab svg { opacity: 1; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-rail__tab.is-active {
+  color: var(--dsk-ink);
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.18);
+}
+html.is-desktop-modern .qx-rail__tab.is-active svg { color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-rail__badge {
+  min-width: 18px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile-hi);
+}
+html.is-desktop-modern .qx-rail__badge.tone-amber { color: var(--qx-amber); }
+html.is-desktop-modern .qx-rail__badge.tone-red { color: var(--qx-red); }
+
+/* search + filter */
+html.is-desktop-modern .qx-search-row { gap: 8px; padding: 12px 20px 0 24px; }
+html.is-desktop-modern .qx-search {
+  gap: 9px;
+  height: 34px;
+  padding: 0 6px 0 11px;
+  border-radius: 8px;
+  color: var(--dsk-ink-3);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: box-shadow 0.15s ease;
+}
+html.is-desktop-modern .qx-search:hover { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .qx-search:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent); }
+html.is-desktop-modern .qx-search input,
+html.is-desktop-modern[data-nexus-theme] .qx-root .qx-search input.qx-search__input[type='search'] { font-size: 13px !important; letter-spacing: 0; }
+html.is-desktop-modern .qx-search input::placeholder { color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-search__clear { width: 22px; height: 22px; border-radius: 6px; background: var(--dsk-tile-hi); color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-search__clear::after { inset: -4px; }
+html.is-desktop-modern .qx-filter {
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px 0 11px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .qx-filter:hover:not(.is-static) { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .qx-filter:active { transform: none; }
+html.is-desktop-modern .qx-filter svg { color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-filter.is-active { color: var(--dsk-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent); }
+html.is-desktop-modern .qx-filter__badge {
+  min-width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 30%, transparent);
+}
+
+/* segments (phone composition): a calm segmented control */
+html.is-desktop-modern .qx-seg {
+  gap: 2px;
+  margin: 12px 20px 0 24px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .qx-seg__tab {
+  height: 44px;
+  border-radius: 7px;
+  color: var(--dsk-ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .qx-seg__tab:active { transform: none; }
+html.is-desktop-modern .qx-seg__tab:hover { color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-seg__tab.is-active {
+  color: var(--dsk-ink);
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.18);
+}
+html.is-desktop-modern .qx-seg__tab.is-active::before { left: 38%; right: 38%; bottom: 3px; height: 2px; animation: none; background: var(--dsk-accent); }
+html.is-desktop-modern .qx-seg__label { font-size: 12px; font-weight: 500; letter-spacing: 0; }
+html.is-desktop-modern .qx-seg__count { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* scope note + chip filters */
+html.is-desktop-modern .qx-scope {
+  height: 32px;
+  margin: 10px 20px 0 24px;
+  padding: 0 4px 0 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 40%, transparent);
+}
+html.is-desktop-modern .qx-scope button { width: 24px; height: 24px; border-radius: 6px; cursor: pointer; }
+html.is-desktop-modern .qx-scope button::after { inset: -4px; }
+html.is-desktop-modern .qx-chips { gap: 6px; margin: 12px 0 0; padding: 0 20px 0 24px; flex-wrap: wrap; overflow: visible; }
+html.is-desktop-modern .qx-chiptab {
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .qx-chiptab::after { inset: 0; }
+html.is-desktop-modern .qx-chiptab:active { transform: none; }
+html.is-desktop-modern .qx-chiptab:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .qx-chiptab em { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-chiptab.is-active {
+  color: var(--dsk-ink);
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent);
+}
+html.is-desktop-modern .qx-chiptab.is-active em { color: var(--dsk-ink-2); }
+
+/* ── list + cards ──────────────────────────────────────────────────────── */
+html.is-desktop-modern .qx-list { gap: 12px; padding: 16px 20px 32px 24px; }
+
+html.is-desktop-modern .qx-card {
+  gap: 6px;
+  padding: 16px 18px 14px;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  animation-duration: 0.24s;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+html.is-desktop-modern .qx-card::after { display: none; }
+html.is-desktop-modern .qx-card:not(.is-skeleton):hover { background: color-mix(in srgb, var(--dsk-glass) 70%, var(--dsk-tile-hi)); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .qx-card:active { transform: none; }
+html.is-desktop-modern :is(.qx-card, .qx-rowlink):focus:not(:focus-visible) { outline: none; }
+html.is-desktop-modern .qx-card.is-open,
+html.is-desktop-modern .qx-card.is-open:hover {
+  background: color-mix(in srgb, var(--dsk-glass) 60%, var(--dsk-tile-hi));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), inset 2px 0 0 var(--dsk-accent), 0 1px 2px rgb(0 0 0 / 0.12);
+}
+/* timeline entries are rows: floating plates, no hairline at rest */
+html.is-desktop-modern .qx-card.is-compact { gap: 4px; padding: 11px 14px; border-radius: 10px; background: var(--dsk-tile); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+html.is-desktop-modern .qx-card.is-compact:not(.is-skeleton):hover { background: var(--dsk-tile-hi); box-shadow: none; }
+html.is-desktop-modern .qx-card.is-compact.is-open { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), inset 2px 0 0 var(--dsk-accent); }
+html.is-desktop-modern .qx-card__top { gap: 10px; }
+html.is-desktop-modern .qx-card__name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .qx-card__addr { margin: 0; font-size: 13px; font-weight: 400; color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-card__msg {
+  margin: 6px 0 2px;
+  padding: 9px 11px;
+  border-radius: 10px 10px 10px 3px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .qx-card__why { gap: 6px; font-size: 12.5px; }
+html.is-desktop-modern .qx-card__why strong { font-weight: 550; }
+html.is-desktop-modern .qx-card__foot { gap: 10px; margin-top: 6px; padding-top: 10px; }
+html.is-desktop-modern .qx-card__when-main { font-size: 12.5px; font-weight: 550; letter-spacing: 0; }
+html.is-desktop-modern .qx-card__when-sub,
+html.is-desktop-modern .qx-card__time { font-size: 11.5px; font-weight: 400; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-card__state { font-size: 11.5px; font-weight: 500; letter-spacing: 0; }
+html.is-desktop-modern .qx-card__phone,
+html.is-desktop-modern .qx-card__action { font-size: 13px; line-height: 1.5; color: var(--dsk-ink-2); }
+/* a card's route facts read as one spec line, not a row of pills */
+html.is-desktop-modern .qx-card__meta { gap: 0; align-self: flex-end; }
+html.is-desktop-modern .qx-card__meta .qx-chip { height: auto; padding: 0; border-radius: 0; font-size: 11.5px; color: var(--dsk-ink-3); background: none; box-shadow: none; }
+html.is-desktop-modern .qx-card__meta .qx-chip + .qx-chip::before { content: '·'; margin: 0 6px; font-family: var(--dsk-font); color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-chip {
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .qx-chip.is-mono,
+html.is-desktop-modern .qx-root .is-mono,
+html.is-desktop-modern .qx-sheet .is-mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11px; letter-spacing: 0; }
+html.is-desktop-modern .qx-chip:is(.tone-green, .tone-red) { color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .qx-chip:is(.tone-green, .tone-red)::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--qx-green); }
+html.is-desktop-modern .qx-chip.tone-red { color: var(--qx-red); }
+html.is-desktop-modern .qx-chip.tone-red::before { background: var(--qx-red); }
+
+html.is-desktop-modern .qx-pill {
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .qx-pill::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--p); }
+html.is-desktop-modern .qx-pill:is(.tone-red, .tone-amber) { color: var(--p); }
+html.is-desktop-modern .qx-pill.tone-muted::before { background: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-pill:is(.tone-blue, .tone-cyan)::before { background: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-pill__pulse { display: none; }
+
+/* skeleton + empty + more */
+html.is-desktop-modern .qx-skel { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 200% 100%; animation-duration: 2.2s; animation-timing-function: ease-in-out; }
+html.is-desktop-modern .qx-skel.is-tall { height: 30px; border-radius: 8px; }
+html.is-desktop-modern .qx-empty { gap: 6px; padding: 56px 24px 40px; animation-duration: 0.24s; }
+html.is-desktop-modern .qx-empty > svg {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0;
+  margin-bottom: 8px;
+  border-radius: 0;
+  color: var(--dsk-ink);
+  opacity: 0.35;
+  background: none;
+  box-shadow: none;
+}
+html.is-desktop-modern .qx-empty strong { font-size: 13px; font-weight: 550; letter-spacing: 0; color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-empty span { font-size: 13px; max-width: 360px; color: var(--dsk-ink-3); }
+html.is-desktop-modern :is(.qx-empty__cta, .qx-more__btn) {
+  height: 32px;
+  width: auto;
+  margin-top: 10px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern :is(.qx-empty__cta, .qx-more__btn):hover:not(:disabled) { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .qx-more { gap: 6px; padding: 12px 0 0; font-size: 12px; }
+html.is-desktop-modern .qx-more__btn { margin-top: 0; }
+
+/* ── analytics views: KPI panel, spark, timeline, meters ───────────────── */
+html.is-desktop-modern .qx-panel {
+  padding: 18px 20px 16px;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  animation-duration: 0.24s;
+}
+html.is-desktop-modern .qx-panel::before { display: none; }
+html.is-desktop-modern .qx-kpis { gap: 0; }
+html.is-desktop-modern .qx-kpi { gap: 4px; }
+html.is-desktop-modern .qx-kpi + .qx-kpi { padding-left: 16px; }
+html.is-desktop-modern .qx-kpi__value { font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; animation: none; }
+html.is-desktop-modern .qx-kpi__label { font-size: 12.5px; font-weight: 400; color: var(--dsk-ink-3); }
+/* colour only for exceptions: failed (red) and warnings (amber) */
+html.is-desktop-modern .qx-kpi:is(.tone-cyan, .tone-blue, .tone-green) .qx-kpi__value { color: var(--dsk-ink); }
+html.is-desktop-modern .qx-panel__foot { margin-top: 12px; font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-spark { gap: 3px; height: 52px; margin-top: 14px; }
+html.is-desktop-modern .qx-spark__bar {
+  border-radius: 2px 2px 1px 1px;
+  background: color-mix(in srgb, var(--dsk-ink) 22%, transparent);
+  animation-duration: 0.3s;
+  animation-timing-function: var(--dsk-ease);
+  animation-delay: calc(var(--i) * 12ms);
+}
+html.is-desktop-modern .qx-spark__bar.lvl-peak { background: color-mix(in srgb, var(--dsk-ink) 36%, transparent); box-shadow: none; }
+html.is-desktop-modern .qx-spark__bar.lvl-low { opacity: 0.6; }
+html.is-desktop-modern .qx-spark__bar.lvl-idle { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .qx-spark__axis em { font-size: 11px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-tl::before { background: var(--dsk-edge); }
+html.is-desktop-modern .qx-tl__dot { top: 19px; width: 9px; height: 9px; left: 2.5px; box-shadow: 0 0 0 3px rgb(var(--dsk-fill)); }
+html.is-desktop-modern .qx-tl.is-live .qx-tl__dot::after { display: none; }
+html.is-desktop-modern .qx-bigstat strong { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .qx-bigstat > span { font-size: 12.5px; }
+html.is-desktop-modern .qx-trio strong { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
+html.is-desktop-modern .qx-trio em { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-trio .tone-green-soft strong { color: var(--dsk-ink); }
+html.is-desktop-modern .qx-meter { height: 4px; border-radius: 3px; background: var(--dsk-tile-hi); }
+html.is-desktop-modern .qx-meter > span {
+  background: color-mix(in srgb, var(--m, var(--dsk-ink-2)) 70%, transparent);
+  box-shadow: none;
+  animation-duration: 0.4s;
+}
+html.is-desktop-modern .qx-meter:is(:not([class*='tone-']), .tone-green, .tone-cyan, .tone-muted) > span { --m: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-usage { font-size: 12.5px; font-weight: 500; }
+html.is-desktop-modern .qx-rows { gap: 4px; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
+html.is-desktop-modern .qx-rowlink { min-height: 48px; padding: 8px 12px; border-radius: 10px; background: var(--dsk-tile); transition: background 0.12s ease; }
+html.is-desktop-modern .qx-rowlink + .qx-rowlink { border-top: 0; }
+html.is-desktop-modern .qx-rowlink:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .qx-rowlink__copy strong { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+html.is-desktop-modern .qx-rowlink__copy span { font-size: 12.5px; }
+
+/* templates view */
+html.is-desktop-modern .qx-tpl-controls { padding-top: 12px; }
+html.is-desktop-modern .qx-tpl-panel { margin: 14px 20px 0 24px; }
+html.is-desktop-modern .qx-tpl-pager { padding: 0 20px 32px 24px; }
+
+/* ══ WIDER PANES ══════════════════════════════════════════════════════════ */
+@container pane (min-width: 700px) {
+  /* segments read as one row of KPI tiles */
+  html.is-desktop-modern .qx-seg {
+    gap: 1px;
+    padding: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--dsk-edge);
+    box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  }
+  html.is-desktop-modern .qx-seg__tab {
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    height: 72px;
+    padding: 0 18px;
+    border-radius: 0;
+    background: var(--dsk-glass-strong);
+  }
+  html.is-desktop-modern .qx-seg__tab:hover { background: color-mix(in srgb, var(--dsk-glass-strong) 88%, var(--dsk-ink)); }
+  html.is-desktop-modern .qx-seg__tab.is-active {
+    background: color-mix(in srgb, var(--dsk-glass-strong) 92%, var(--dsk-ink));
+    box-shadow: inset 0 -2px 0 var(--dsk-accent);
+  }
+  html.is-desktop-modern .qx-seg__tab.is-active::before { display: none; }
+  html.is-desktop-modern .qx-seg__label { order: 2; font-size: 12.5px; color: var(--dsk-ink-3); }
+  html.is-desktop-modern .qx-seg__tab.is-active .qx-seg__label { color: var(--dsk-ink-2); }
+  html.is-desktop-modern .qx-seg__count { order: 1; font-size: 28px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; color: var(--dsk-ink); }
+  html.is-desktop-modern .qx-seg__tab.has-alert .qx-seg__count { color: var(--qx-amber); }
+
+  /* cards flow into as many columns as the list's width holds */
+  html.is-desktop-modern .qx-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    align-items: start;
+    gap: 12px;
+  }
+  html.is-desktop-modern .qx-list > :is(.qx-panel, .qx-timeline, .qx-empty, .qx-more) { grid-column: 1 / -1; }
+  html.is-desktop-modern .qx-card { height: 100%; }
+  html.is-desktop-modern .qx-list > .qx-card { min-height: 0; }
+  html.is-desktop-modern .qx-card__foot { margin-top: auto; }
+  html.is-desktop-modern .qx-timeline { max-width: 960px; }
+  html.is-desktop-modern .qx-more { flex-direction: row; justify-content: center; gap: 14px; }
+  html.is-desktop-modern .qx-kpi + .qx-kpi { padding-left: 20px; }
+}
+@container pane (min-width: 1300px) {
+  html.is-desktop-modern .qx-head__top,
+  html.is-desktop-modern .qx-search-row { padding-left: 28px; padding-right: 24px; }
+  html.is-desktop-modern .qx-rail,
+  html.is-desktop-modern .qx-chips { padding-left: 24px; padding-right: 24px; }
+  html.is-desktop-modern :is(.qx-seg, .qx-scope, .qx-tpl-panel) { margin-left: 28px; margin-right: 24px; }
+  html.is-desktop-modern .qx-list { padding: 18px 24px 36px 28px; }
+}
+
+/* ══ SHEETS ═══════════════════════════════════════════════════════════════
+   They mount inside the Queue's pane, so position:fixed is the pane. */
+html.is-desktop-modern .qx-sheet { z-index: 40; font-family: var(--dsk-font); }
+html.is-desktop-modern .qx-sheet__backdrop {
+  background: color-mix(in srgb, var(--dsk-bg) 42%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation-duration: 0.18s;
+}
+html.is-desktop-modern .qx-sheet__panel {
+  max-height: calc(100% - 12px);
+  margin: 0 6px 6px;
+  border-radius: 14px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: blur(22px) saturate(1.1);
+  backdrop-filter: blur(22px) saturate(1.1);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  animation: qx-dsk-rise 0.26s var(--dsk-ease) both;
+}
+html.is-desktop-modern .qx-sheet.is-closing .qx-sheet__panel { animation: qx-dsk-fall 0.18s ease-in both; }
+html.is-desktop-modern .qx-sheet__panel::before,
+html.is-desktop-modern .qx-sheet__grip { display: none; }
+@keyframes qx-dsk-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes qx-dsk-fall { to { opacity: 0; transform: translateY(8px); } }
+html.is-desktop-modern .qx-sheet__head { gap: 10px; padding: 12px 12px 12px 16px; }
+html.is-desktop-modern .qx-sheet__id { gap: 6px; }
+html.is-desktop-modern .qx-sheet__name { font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
+html.is-desktop-modern .qx-sheet__nav { gap: 4px; }
+html.is-desktop-modern .qx-sheet__count { min-width: 38px; font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .qx-sheet__scroll { gap: 20px; padding: 16px 18px 20px; scrollbar-width: thin; scrollbar-color: var(--dsk-edge-hi) transparent; }
+
+html.is-desktop-modern .qx-hero { height: 180px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .qx-hero__cap strong { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; }
+html.is-desktop-modern .qx-hero__cap span { font-size: 12px; }
+html.is-desktop-modern .qx-hero__maps { height: 28px; padding: 0 10px; border-radius: 7px; font-size: 12px; font-weight: 550; }
+html.is-desktop-modern .qx-when__main { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .qx-when__sub { font-size: 13px; }
+html.is-desktop-modern .qx-note {
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), inset 2px 0 0 color-mix(in srgb, var(--n) 70%, transparent);
+}
+html.is-desktop-modern .qx-note strong { font-size: 13px; font-weight: 600; letter-spacing: 0; }
+html.is-desktop-modern .qx-note p { font-size: 12.5px; }
+html.is-desktop-modern .qx-block { gap: 8px; }
+html.is-desktop-modern .qx-block__title { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-block__title em { font-size: 11.5px; font-weight: 400; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-bubble {
+  padding: 10px 12px;
+  border-radius: 10px 10px 10px 3px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern :is(.qx-facts, .qx-diag) { border-radius: 10px; background: var(--dsk-tile); box-shadow: none; }
+html.is-desktop-modern .qx-facts { padding: 4px 0; }
+html.is-desktop-modern .qx-fact { gap: 12px; padding: 7px 12px; font-size: 13px; }
+html.is-desktop-modern .qx-fact + .qx-fact { border-top: 0; }
+html.is-desktop-modern .qx-diag .qx-facts { border-top: 0; padding-top: 0; }
+html.is-desktop-modern .qx-fact__k { width: 92px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-fact__v { font-weight: 500; }
+html.is-desktop-modern .qx-diag > summary { min-height: 38px; padding: 0 12px; font-size: 13px; font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .qx-diag > summary::after { font-size: 16px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qx-diag .qx-fact { font-size: 12.5px; }
+html.is-desktop-modern .qx-path__step { min-height: 30px; gap: 10px; font-size: 13px; }
+html.is-desktop-modern .qx-path__step:not(:last-child)::after { left: 4px; top: 21px; bottom: -9px; width: 1px; }
+html.is-desktop-modern .qx-path__step.is-done:not(:last-child)::after { background: color-mix(in srgb, var(--qx-green) 40%, transparent); }
+html.is-desktop-modern .qx-path__dot { width: 9px; height: 9px; box-shadow: inset 0 0 0 1.5px var(--dsk-ink-3); }
+html.is-desktop-modern .qx-path__step.is-done .qx-path__dot { box-shadow: none; }
+html.is-desktop-modern .qx-path__label { font-weight: 500; }
+html.is-desktop-modern .qx-path__at { font-size: 12px; }
+
+html.is-desktop-modern :is(.qx-actions, .qx-confirm) { gap: 6px; padding: 10px 12px 12px; background: none; }
+html.is-desktop-modern .qx-actions__none { padding: 8px 4px; font-size: 12.5px; }
+html.is-desktop-modern .qx-act {
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: 0;
+  transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .qx-act:active { transform: none; }
+html.is-desktop-modern .qx-act.is-primary {
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .qx-act.is-primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern .qx-act.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--dsk-accent) 42%, #16171a); }
+html.is-desktop-modern .qx-act.is-secondary { color: var(--dsk-ink); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .qx-act.is-secondary:hover:not(:disabled) { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .qx-act.is-danger { color: var(--qx-red); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--qx-red) 26%, transparent); }
+html.is-desktop-modern .qx-act.is-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--qx-red) 9%, transparent); }
+html.is-desktop-modern .qx-confirm { gap: 6px; padding: 14px 14px 12px; }
+html.is-desktop-modern .qx-confirm strong { font-size: 14px; font-weight: 600; letter-spacing: 0; }
+html.is-desktop-modern .qx-confirm p { margin: 0 0 6px; font-size: 12.5px; }
+
+html.is-desktop-modern .qx-choices { gap: 6px; }
+html.is-desktop-modern .qx-choice {
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .qx-choice::after { inset: 0; }
+html.is-desktop-modern .qx-choice:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .qx-choice.is-active {
+  color: var(--dsk-ink);
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern .qx-view { min-height: 52px; padding: 8px 12px 8px 8px; border-radius: 10px; }
+html.is-desktop-modern .qx-view__icon { width: 30px; height: 30px; border-radius: 8px; }
+html.is-desktop-modern .qx-view__copy strong { font-size: 13px; font-weight: 600; letter-spacing: 0; }
+html.is-desktop-modern .qx-view__copy span { font-size: 12px; }
+
+/* any pane wider than a phone: pickers and a narrow-pane inspector float as
+   a centred panel instead of a bottom sheet */
+@container pane (min-width: 700px) {
+  html.is-desktop-modern .qx-sheet { justify-content: center; align-items: center; padding: 24px; }
+  html.is-desktop-modern .qx-sheet__panel {
+    width: min(560px, 100%);
+    max-height: min(760px, 100%);
+    margin: 0;
+  }
+  html.is-desktop-modern .qx-sheet.is-picker .qx-sheet__panel { width: min(520px, 100%); }
+}
+
+/* wide panes: an opened row docks as an inspector on the right; the list
+   stays live beside it (click another row to inspect it; Esc or × closes) */
+@container pane (min-width: 1000px) {
+  html.is-desktop-modern .qx-sheet:not(.is-picker) { pointer-events: none; padding: 0; }
+  html.is-desktop-modern .qx-sheet:not(.is-picker) .qx-sheet__backdrop { display: none; }
+  html.is-desktop-modern .qx-sheet:not(.is-picker) .qx-sheet__panel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: clamp(400px, 36cqw, 520px);
+    max-height: none;
+    pointer-events: auto;
+    animation-name: qx-dsk-dock;
+  }
+  html.is-desktop-modern .qx-sheet.is-closing:not(.is-picker) .qx-sheet__panel { animation-name: qx-dsk-undock; }
+  html.is-desktop-modern .dsk-pane__body:has(> .qx-sheet:not(.is-picker):not(.is-closing)) .qx-root {
+    padding-right: calc(clamp(400px, 36cqw, 520px) + 10px);
+  }
+}
+@keyframes qx-dsk-dock { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@keyframes qx-dsk-undock { to { opacity: 0; transform: translateX(12px); } }
+
+/* template dossier + filter sheets (shared MobileBottomSheet), calm */
+html.is-desktop-modern .nx-mobile-bottom-sheet:is(.qm-tpl-sheet, .qm-filter-sheet) {
+  border-radius: 14px !important;
+  background: var(--dsk-glass-strong) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow) !important;
+  font-family: var(--dsk-font);
+  animation: qx-dsk-rise 0.26s var(--dsk-ease) both;
+}
+html.is-desktop-modern :is(.qm-tpl-sheet, .qm-filter-sheet) .nx-mobile-bottom-sheet__handle { display: none !important; }
+html.is-desktop-modern .qm-tpl-sheet .qms-chrome__eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .qm-tpl-sheet .qms-chrome__name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern :is(.qm-tpl-sheet, .qm-filter-sheet) .qms-chrome__btn { width: 28px !important; height: 28px !important; min-height: 28px !important; border-radius: 7px !important; box-shadow: inset 0 0 0 1px var(--dsk-edge) !important; }
+html.is-desktop-modern :is(.qm-tpl-sheet .qms-block__title, .qm-filter-sheet .qm-filter__section > h3, .qm-filter-sheet .qm-filter__label) {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: none;
+  color: var(--dsk-ink-3) !important;
+}
+html.is-desktop-modern .qm-tpl-sheet .qms-msg { border-radius: 10px 10px 10px 3px; font-size: 13.5px; }
+html.is-desktop-modern .qm-tpl-sheet .qm-tpl-metric__val { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
+html.is-desktop-modern :is(.qm-tpl-sheet .qm-tpl-tab, .qm-filter-sheet .qm-chip, .qm-filter-sheet .qm-filter__rail button) {
+  border-radius: 7px !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  min-height: 30px;
+}
+html.is-desktop-modern :is(.qm-tpl-sheet .qm-tpl-tab.is-active, .qm-tpl-sheet .qm-tpl-tab[aria-selected='true'], .qm-filter-sheet .qm-chip.is-active, .qm-filter-sheet .qm-filter__rail button.is-active) {
+  background: var(--dsk-tile-hi) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent) !important;
+}
+html.is-desktop-modern :is(.qm-tpl-sheet .qm-tpl-queuelink, .qm-filter-sheet .qms-action.is-primary) {
+  min-height: 34px;
+  border-radius: 8px !important;
+  color: #fff !important;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent) !important;
+  font-weight: 550 !important;
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.qm-tpl-sheet .qm-tpl-queuelink, .qm-filter-sheet .qms-action.is-primary) { color: #0b0c0e !important; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern :is(.qx-sheet__panel, .qx-card, .qx-panel, .qx-spark__bar, .qx-meter > span, .qx-body, .qx-skel, .qx-empty) { animation: none !important; }
+}

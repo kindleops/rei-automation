@@ -18,6 +18,7 @@ import {
 import { CampaignCategorySheet } from './mobile/CampaignCategorySheet'
 import { CampaignLaunchMobile } from './mobile/CampaignLaunchMobile'
 import './mobile/campaign-creator-mobile.css'
+import { campaignSheetHost } from './mobile/sheet-host'
 import {
   activateCampaignWithReview,
   buildCampaignTargetSnapshots,
@@ -1891,7 +1892,7 @@ export const CreateCampaignModal = ({
           </div>
         </div>
       </div>,
-      document.body,
+      campaignSheetHost(),
     )
   }
 
@@ -2877,7 +2878,7 @@ export const CreateCampaignModal = ({
     </div>
   )
 
-  return createPortal(modal, document.body)
+  return createPortal(modal, campaignSheetHost())
 }
 
 const _LaunchStripMetric = ({
