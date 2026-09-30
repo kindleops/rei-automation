@@ -1949,7 +1949,9 @@ export const InboxSidebar = ({
   const renderSecondaryControls = () => (
     <>
       <div className={cls('nx-sidebar-rebuilt__secondary-controls', catRailCollapsed && 'is-rail-collapsed')}>
-        {inboxLoadFailed && (
+        {/* With no rows the list's own empty state carries the retry; one
+            failure, one message (desktop QA showed both at once). */}
+        {inboxLoadFailed && displayedActiveThreads.length > 0 && (
           <button
             type="button"
             className="nx-sidebar-rebuilt__telemetry-indicator"

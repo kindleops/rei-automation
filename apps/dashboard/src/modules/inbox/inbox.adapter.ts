@@ -390,19 +390,32 @@ export const loadInbox = async (options: InboxFetchOptions = {}): Promise<InboxM
     return { ...emptyLiveErrorModel(liveFetchError), _requestedFilter: filterKey }
   }
 
+  const fetchWithin = (ms: number) => withTimeout(
+    (signal) => fetchInboxModel({ ...fetchOptions, signal }),
+    ms,
+    `Live Inbox request timed out after ${ms}ms (${timeoutMode})`,
+    options.signal,
+    {
+      filterKey,
+      timeoutMode,
+      automatic: options._automatic === true,
+      refreshReason: options._refreshReason ?? null,
+    },
+  )
+
   try {
-    const result = await withTimeout(
-      (signal) => fetchInboxModel({ ...fetchOptions, signal }),
-      timeoutMs,
-      `Live Inbox request timed out after ${timeoutMs}ms (${timeoutMode})`,
-      options.signal,
-      {
-        filterKey,
-        timeoutMode,
-        automatic: options._automatic === true,
-        refreshReason: options._refreshReason ?? null,
-      },
-    )
+    let result: Awaited<ReturnType<typeof fetchInboxModel>>
+    try {
+      result = await fetchWithin(timeoutMs)
+    } catch (firstError) {
+      // One slow response is not an outage. Desktop QA 2026-09-30: a single
+      // 12 s answer against the 10 s boot budget painted "Inbox could not
+      // load. Retry." while the next request answered in 1.6 s. A timeout gets
+      // one quiet retry with a longer budget before the operator sees an error.
+      const timedOut = firstError instanceof Error && firstError.message.includes('timed out')
+      if (!timedOut || options.signal?.aborted) throw firstError
+      result = await fetchWithin(Math.round(timeoutMs * 1.6))
+    }
 
     // Save lightweight cache scoped to this filter key so different filters never bleed
     try {
