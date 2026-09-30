@@ -405,6 +405,18 @@ async function upsertAutomationSuppression({ db, event, action, params, dry_run 
   };
 }
 
+const CANCEL_SELECT_COLUMNS = "id,queue_status,type,use_case_template";
+
+/**
+ * A nurture follow-up is the seller flow's own answer to the reply that just
+ * arrived ("not interested" -> check back in 30 days). The not-interested rule
+ * ran a few seconds after the flow and cancelled every one of them: from July
+ * to 2026-09-30 no `nurture_not_interested` follow-up ever reached a seller.
+ */
+export function isNurtureFollowUpRow(row = {}) {
+  return lower(row?.type) === "followup" && lower(row?.use_case_template).startsWith("nurture_");
+}
+
 async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
   const phone_e164 = resolvePhoneE164(event, params);
   const queue_item_id = clean(params.queue_item_id || event.queue_item_id);
@@ -425,12 +437,12 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
 
   let select_query = db
     .from("send_queue")
-    .select("id,queue_status")
+    .select(CANCEL_SELECT_COLUMNS)
     .in("queue_status", ACTIVE_QUEUE_STATUSES)
     .limit(500);
 
   if (queue_item_id) {
-    select_query = db.from("send_queue").select("id,queue_status").eq("id", queue_item_id).limit(1);
+    select_query = db.from("send_queue").select(CANCEL_SELECT_COLUMNS).eq("id", queue_item_id).limit(1);
   } else if (phone_e164) {
     select_query = select_query.eq("to_phone_number", phone_e164);
   } else if (clean(event.master_owner_id)) {
@@ -449,12 +461,20 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
     return { ok: false, reason: "queue_select_failed", error: error.message };
   }
 
-  const ids = (Array.isArray(data) ? data : [])
+  const rows = Array.isArray(data) ? data : [];
+  const kept = params.keep_nurture_follow_ups === true ? rows.filter(isNurtureFollowUpRow) : [];
+  const ids = rows
+    .filter((row) => !kept.includes(row))
     .map((row) => clean(row?.id))
     .filter(Boolean);
 
   if (!ids.length) {
-    return { ok: true, canceled_count: 0, reason: "no_cancelable_queue_items" };
+    return {
+      ok: true,
+      canceled_count: 0,
+      kept_nurture_follow_up_ids: kept.map((row) => row.id),
+      reason: "no_cancelable_queue_items",
+    };
   }
 
   const update_payload = {
@@ -478,6 +498,7 @@ async function cancelPendingQueue({ db, event, params, dry_run } = {}) {
     ok: !update_result?.error,
     canceled_count: update_result?.error ? 0 : ids.length,
     queue_item_ids: ids,
+    kept_nurture_follow_up_ids: kept.map((row) => row.id),
     reason,
     error: update_result?.error?.message || null,
   };

@@ -12,11 +12,14 @@
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
 import {
   promoteThreadToOpportunity,
+  reopenClosedLostOpportunity,
+  REOPENABLE_CLOSED_LOST_STATUSES,
   transitionOpportunityStage,
   updateOpportunity,
 } from "@/lib/domain/opportunity/opportunity-service.js";
 import { buildOpportunityDedupeKey } from "@/lib/domain/opportunity/universal-pipeline-registry.js";
 import {
+  contactabilityBlocksSend,
   lifecycleStageNumber,
   normalizeLifecycleStage,
 } from "@/lib/domain/lead-state/universal-lead-state-registry.js";
@@ -33,6 +36,10 @@ const SOURCE = "seller_autopilot";
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function lower(value) {
+  return clean(value).toLowerCase();
 }
 
 function num(value) {
@@ -149,6 +156,198 @@ export async function findExistingOpportunity(supabase, { ownerId, propertyId, t
     if (data?.[0]) return data[0];
   }
   return null;
+}
+
+/**
+ * Replies that make a deal live, and replies that make it a follow-up.
+ *
+ * Owner rules (2026-09-30): a closed-lost deal whose seller answers a NEW
+ * campaign text comes back at the stage the conversation is at; and "A not
+ * interested is a 30 day follow up", so "not interested" and "not now" bring it
+ * back as a nurture (the seller flow schedules the follow-up), never as dead.
+ * Anything else ("unclear", opt-out, wrong number, hostile) leaves it closed.
+ */
+export const REENGAGEMENT_ACTIVE_INTENTS = Object.freeze([
+  "ownership_confirmed",
+  "seller_interested",
+  "asks_offer",
+  "asking_price_provided",
+  "counter_offer",
+  "condition_disclosed",
+  "callback_requested",
+]);
+export const NURTURE_INTENTS = Object.freeze(["not_interested", "need_time"]);
+
+function reopenStatusForIntent(intent) {
+  const key = lower(intent);
+  if (REENGAGEMENT_ACTIVE_INTENTS.includes(key)) return "active";
+  if (NURTURE_INTENTS.includes(key)) return "nurture";
+  return null;
+}
+
+/**
+ * The status an open deal takes from this reply, or null to leave it. "Not
+ * interested" / "not now" make a live deal a nurture (its 30-day follow-up is
+ * scheduled by the seller flow); engaging again makes a nurture live. Paused
+ * and closed deals are not this function's to move.
+ */
+export function opportunityStatusForReply(currentStatus, intent) {
+  const status = lower(currentStatus);
+  const forReply = reopenStatusForIntent(intent);
+  if (forReply === "nurture" && ["active", "waiting"].includes(status)) return "nurture";
+  if (forReply === "active" && status === "nurture") return "active";
+  return null;
+}
+
+/**
+ * Pure. Thread +16122720901: a deal backfilled dead at `closed` on 2026-05-26;
+ * a campaign reached the owner on 2026-09-30, she answered "Yes." and the
+ * conversation moved to S2 while the deal stayed closed ("S10 · Closed").
+ *
+ * Reopens only when the deal is closed-lost (dead/lost), the reply reopens (see
+ * above), nothing blocks contact, and a campaign text was delivered AFTER the
+ * deal closed: the reply answers new outreach, not the conversation that ended.
+ */
+export function decideReengagementReopen({
+  opportunity = null,
+  transition = null,
+  intent = null,
+  thread = null,
+  campaignTouch = null,
+  closedAt = null,
+} = {}) {
+  if (!REOPENABLE_CLOSED_LOST_STATUSES.includes(lower(opportunity?.opportunity_status))) {
+    return { reopen: false, reason: "not_closed_lost" };
+  }
+  const toStatus = reopenStatusForIntent(intent);
+  if (!toStatus) return { reopen: false, reason: "reply_does_not_reopen" };
+  if (!transition || transition.contactability_patch || transition.next_action === "no_action_contact_blocked") {
+    return { reopen: false, reason: "contact_blocked" };
+  }
+  const facts = transition.facts_patch || {};
+  if (SUPPRESSION_OWNERSHIP_STATUSES.has(lower(facts.ownership_status)) || lower(facts.ownership_claim) === "denied") {
+    return { reopen: false, reason: "ownership_denied" };
+  }
+  if (!thread) return { reopen: false, reason: "thread_state_unknown" };
+  if (thread.is_suppressed === true || contactabilityBlocksSend(thread.contactability_status)) {
+    return { reopen: false, reason: "contact_blocked" };
+  }
+  const closedMs = Date.parse(closedAt || "");
+  if (!Number.isFinite(closedMs)) return { reopen: false, reason: "closed_at_unknown" };
+  const touchMs = Date.parse(campaignTouch?.sent_at || "");
+  if (!clean(campaignTouch?.id) || !Number.isFinite(touchMs) || touchMs <= closedMs) {
+    return { reopen: false, reason: "no_campaign_touch_after_close" };
+  }
+  const current = normalizeLifecycleStage(opportunity.acquisition_stage);
+  const toStage = current === "closed" ? normalizeLifecycleStage(transition.stage_after) : current;
+  if (!toStage || toStage === "closed") return { reopen: false, reason: "no_reopen_stage" };
+
+  return {
+    reopen: true,
+    to_stage: toStage,
+    to_status: toStatus,
+    evidence: {
+      campaign_id: clean(campaignTouch.campaign_id) || null,
+      queue_id: clean(campaignTouch.id),
+      touch_number: campaignTouch.touch_number ?? null,
+      touch_sent_at: campaignTouch.sent_at,
+      closed_at: closedAt,
+      intent: lower(intent),
+    },
+  };
+}
+
+/** When the deal last became closed-lost: history first, `stage_entered_at` for a stage-closed row. */
+async function loadClosedAt(supabase, opportunity) {
+  const times = [];
+  if (normalizeLifecycleStage(opportunity.acquisition_stage) === "closed" && opportunity.stage_entered_at) {
+    times.push(Date.parse(opportunity.stage_entered_at));
+  }
+  const { data, error } = await supabase
+    .from("acquisition_opportunity_history")
+    .select("field_name,new_value,created_at")
+    .eq("opportunity_id", opportunity.id)
+    .in("field_name", ["opportunity_status", "acquisition_stage"])
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return null;
+  for (const row of data || []) {
+    const value = lower(row.new_value);
+    const closedLost =
+      (row.field_name === "opportunity_status" && REOPENABLE_CLOSED_LOST_STATUSES.includes(value)) ||
+      (row.field_name === "acquisition_stage" && value === "closed");
+    if (closedLost) times.push(Date.parse(row.created_at));
+  }
+  const valid = times.filter(Number.isFinite);
+  return valid.length ? new Date(Math.max(...valid)).toISOString() : null;
+}
+
+/** The latest delivered campaign touch to this phone after `sinceIso`. */
+async function loadCampaignTouchSince(supabase, threadKey, sinceIso) {
+  const key = clean(threadKey);
+  const bare = key.replace(/^\+1/, "");
+  const phones = [...new Set([key, bare, bare ? `+1${bare}` : ""].filter(Boolean))];
+  const { data, error } = await supabase
+    .from("send_queue")
+    .select("id,campaign_id,touch_number,queue_status,sent_at")
+    .in("to_phone_number", phones)
+    .not("campaign_id", "is", null)
+    .not("touch_number", "is", null)
+    .in("queue_status", ["sent", "delivered"])
+    .gt("sent_at", sinceIso)
+    .order("sent_at", { ascending: false })
+    .limit(1);
+  if (error) return null;
+  return data?.[0] || null;
+}
+
+async function reopenOnReengagement(supabase, { opportunity, transition, intent, threadKey, inboundEventId }) {
+  if (!reopenStatusForIntent(intent)) return { reopened: false, reason: "reply_does_not_reopen" };
+  try {
+    const [threadResult, closedAt] = await Promise.all([
+      supabase
+        .from("inbox_thread_state")
+        .select("is_suppressed,contactability_status")
+        .eq("thread_key", threadKey)
+        .maybeSingle(),
+      loadClosedAt(supabase, opportunity),
+    ]);
+    const thread = threadResult?.error ? null : threadResult?.data || null;
+    const campaignTouch = closedAt ? await loadCampaignTouchSince(supabase, threadKey, closedAt) : null;
+    const decision = decideReengagementReopen({ opportunity, transition, intent, thread, campaignTouch, closedAt });
+    if (!decision.reopen) return { reopened: false, reason: decision.reason };
+
+    const result = await reopenClosedLostOpportunity(
+      opportunity.id,
+      {
+        to_stage: decision.to_stage,
+        to_status: decision.to_status,
+        reason: decision.to_status === "nurture" ? "reengaged_new_campaign_touch_follow_up" : "reengaged_new_campaign_touch",
+        source: SOURCE,
+        actor: "seller_inbound_orchestrator",
+        evidence: { ...decision.evidence, inbound_event_id: clean(inboundEventId) || null },
+        idempotency_key: `${decision.evidence.queue_id}:${clean(inboundEventId) || "inbound"}`,
+      },
+      { supabase }
+    );
+    if (!result?.ok) return { reopened: false, reason: result?.error || "reopen_refused" };
+    return {
+      reopened: true,
+      from_stage: result.from_stage,
+      to_stage: result.to_stage,
+      from_status: result.from_status,
+      to_status: result.to_status,
+      thread_synced: result.thread_synced,
+      evidence: decision.evidence,
+      opportunity: result.opportunity,
+    };
+  } catch (reopen_error) {
+    warn("[SELLER_TRANSITION_REOPEN_FAILED]", {
+      opportunity_id: opportunity?.id || null,
+      error: reopen_error?.message || "reopen_failed",
+    });
+    return { reopened: false, reason: "reopen_failed" };
+  }
 }
 
 /**
@@ -501,6 +700,23 @@ export async function persistSellerTransitionArtifacts({
     }
     summary.opportunity_id = opportunity.id;
 
+    // ── Re-engagement reopen ─────────────────────────────────────────────
+    // Before anything reads the stage: the advancement below is monotonic and
+    // nothing is above `closed`, so a reopened deal must carry its new stage.
+    if (REOPENABLE_CLOSED_LOST_STATUSES.includes(lower(opportunity.opportunity_status))) {
+      const { opportunity: reopened = null, ...reopen } = await reopenOnReengagement(supabase, {
+        opportunity,
+        transition,
+        intent,
+        threadKey,
+        inboundEventId,
+      });
+      summary.reopen = reopen;
+      if (reopen.reopened && reopened) {
+        opportunity = { ...opportunity, ...reopened, metadata: opportunity.metadata };
+      }
+    }
+
     // ── Canonical ADE execution (spec §5/§6/§7) ─────────────────────────
     // A snapshot precomputed by the orchestrator (pre-reply, so the strategy
     // router saw fresh authority) is reused — ADE never runs twice per turn.
@@ -606,6 +822,8 @@ export async function persistSellerTransitionArtifacts({
       actor: "seller_inbound_orchestrator",
       reason: transition.reasoning_code || null,
     };
+    const statusForReply = opportunityStatusForReply(opportunity.opportunity_status, intent);
+    if (statusForReply) columnPatch.opportunity_status = statusForReply;
     if (askingPrice) {
       const atOffer = Number(transition.stage_after_number || 0) >= 5;
       if (atOffer && num(opportunity.asking_price) && askingPrice !== num(opportunity.asking_price)) {

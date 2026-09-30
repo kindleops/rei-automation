@@ -615,7 +615,9 @@ function mapUniversalStatusToOpportunityStatus(universalStatus, thread = {}) {
   const status = normalizeUniversalStatusCode(universalStatus);
   if (thread.wrong_number || thread.not_interested || status === UNIVERSAL_STATUS_CODES.UNKNOWN) {
     if (thread.opt_out) return OPPORTUNITY_STATUS_CODES.SUPPRESSED;
-    if (thread.wrong_number || thread.not_interested) return OPPORTUNITY_STATUS_CODES.DEAD;
+    if (thread.wrong_number) return OPPORTUNITY_STATUS_CODES.DEAD;
+    // Owner rule (2026-09-30): "A not interested is a 30 day follow up."
+    if (thread.not_interested) return OPPORTUNITY_STATUS_CODES.NURTURE;
   }
   if (status === UNIVERSAL_STATUS_CODES.WAITING || status === UNIVERSAL_STATUS_CODES.COLD) {
     return OPPORTUNITY_STATUS_CODES.WAITING;

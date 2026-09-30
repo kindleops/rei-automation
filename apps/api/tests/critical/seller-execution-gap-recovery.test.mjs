@@ -205,6 +205,55 @@ test("stale reply-pending follow-up is cancelled after a newer inbound", async (
   assert.equal(supabase._state.send_queue[0].metadata.skip_reason, "cancelled_stale_followup_after_reply");
 });
 
+// Production 2026-09-10/11: the reply that SCHEDULES a nurture follow-up is
+// stamped received_at ~5 s after the follow-up row, and last_inbound_at is that
+// received_at, so the sweep read the follow-up's own trigger as "a newer
+// reply". 30 not-interested follow-ups were cancelled with no second reply.
+function nurtureFixture({ lastInboundAt, triggerFound = true }) {
+  return makeFakeSupabase({
+    send_queue: [
+      {
+        id: "nurture-1",
+        thread_key: "+13125550144",
+        type: "followup",
+        queue_status: "scheduled",
+        use_case_template: "nurture_not_interested",
+        created_at: "2026-09-11T15:03:01.305Z",
+        metadata: { source: "seller_inbound_orchestrator", intent: "not_interested", inbound_message_event_id: "evt-trigger" },
+      },
+    ],
+    message_events: triggerFound
+      ? [{ id: "evt-trigger", direction: "inbound", created_at: "2026-09-11T15:02:59.334Z", received_at: "2026-09-11T15:03:04.284Z" }]
+      : [],
+    inbox_thread_state: [{ thread_key: "+13125550144", last_inbound_at: lastInboundAt, is_archived: false }],
+  });
+}
+
+test("a nurture follow-up is not stale because of the reply that scheduled it", async () => {
+  const supabase = nurtureFixture({ lastInboundAt: "2026-09-11T15:03:04.284Z" });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW, sweeps: ["stale_followup_after_reply"] });
+  const sweep = result.sweeps.find((s) => s.gap === "stale_followup_after_reply");
+  assert.equal(sweep.repaired, 0, JSON.stringify(sweep));
+  assert.equal(supabase._state.send_queue[0].queue_status, "scheduled");
+});
+
+test("a nurture follow-up IS stale once the seller replies again", async () => {
+  const supabase = nurtureFixture({ lastInboundAt: "2026-09-12T09:00:00.000Z" });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW, sweeps: ["stale_followup_after_reply"] });
+  const sweep = result.sweeps.find((s) => s.gap === "stale_followup_after_reply");
+  assert.equal(sweep.repaired, 1, JSON.stringify(sweep));
+  assert.equal(supabase._state.send_queue[0].queue_status, "cancelled");
+});
+
+test("an unreadable trigger reply leaves the follow-up alone", async () => {
+  const supabase = nurtureFixture({ lastInboundAt: "2026-09-12T09:00:00.000Z", triggerFound: false });
+  const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW, sweeps: ["stale_followup_after_reply"] });
+  const sweep = result.sweeps.find((s) => s.gap === "stale_followup_after_reply");
+  assert.equal(sweep.repaired, 0);
+  assert.equal(supabase._state.send_queue[0].queue_status, "scheduled");
+  assert.ok(sweep.results.some((r) => r.reason === "trigger_reply_unreadable"));
+});
+
 test("recorded transition missing from thread state is re-applied monotonically", async () => {
   const supabase = makeFakeSupabase({
     message_events: [
