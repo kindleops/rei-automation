@@ -383,12 +383,17 @@ export function EntityGraphMobile({
         if (generation !== listGenerationRef.current) return
         setList((current) => {
           const appending = requestCursor > 0 && current.signature === requestSignature
-          const merged = appending
-            ? (() => {
-                const seen = new Set(current.results.map(resultKey))
-                return [...current.results, ...response.results.filter((row) => !seen.has(resultKey(row)))]
-              })()
-            : response.results
+          // One row per entity, within a page as well as across pages: a page
+          // can carry the same entity twice (desktop QA 2026-09-30: React
+          // "two children with the same key" on /entity-graph).
+          const seen = new Set(appending ? current.results.map(resultKey) : [])
+          const fresh = response.results.filter((row) => {
+            const key = resultKey(row)
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+          const merged = appending ? [...current.results, ...fresh] : fresh
           return {
             signature: requestSignature,
             cursor: requestCursor,
