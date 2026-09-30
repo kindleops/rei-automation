@@ -25,6 +25,8 @@ import {
   QuickActionsModule,
 } from './HomeModules'
 import './home.css'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { DesktopHome } from './desktop/DesktopHome'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -275,7 +277,16 @@ const CustomizeSheet = ({ open, onClose }: { open: boolean; onClose: () => void 
 
 // ── Screen ──────────────────────────────────────────────────────────────────
 
+/**
+ * Desktop gets a dashboard, not the phone's cinematic column: the same honest
+ * sources, arranged as widgets the operator composes (see desktop/DesktopHome).
+ */
 export const HomeView = () => {
+  const { isModernDesktop } = useBreakpoint()
+  return isModernDesktop ? <DesktopHome /> : <MobileHomeView />
+}
+
+const MobileHomeView = () => {
   const now = useMinuteClock()
   const name = useOperatorName()
   const { signals, refresh, refreshing } = useHomeSignals()

@@ -18,6 +18,7 @@ import { DesktopLayoutPanel } from './DesktopLayoutPanel'
 import { useDisplayMode } from './display-mode'
 import { applyLayout, getSplitState, useSplitWorkspace } from './split-workspace'
 import './desktop-shell.css'
+import './desktop-calm.css'
 
 /**
  * THE DESKTOP COMMAND CENTER — the chrome around every modern surface on a

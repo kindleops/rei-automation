@@ -1,0 +1,282 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   DESKTOP · CALM
+   The desktop is a precision instrument, not a light show: neutral surfaces,
+   hairline edges, crisp 13px type, clear-glass monochrome icons, accent spent
+   only on focus / active / primary. Glass stays (it follows the operator's
+   Liquid Glass settings) but without colour blooms; motion stays short and
+   quiet. The cinematic language belongs to the phone. The Map is exempt.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern {
+  --dsk-ink: #ececee;
+  --dsk-ink-2: #a3a4ab;
+  --dsk-ink-3: #6f7078;
+  --dsk-edge: rgba(255, 255, 255, 0.07);
+  --dsk-edge-hi: rgba(255, 255, 255, 0.11);
+  --dsk-bg: #0b0c0e;
+  --dsk-fill: var(--lg-fill, 20 21 24);
+  --dsk-glass: rgb(var(--dsk-fill) / calc(0.8 * var(--lg-alpha, 1)));
+  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.95 * var(--lg-alpha, 1)));
+  --dsk-blur: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.15));
+  --dsk-shadow: 0 18px 44px -26px rgba(0, 0, 0, 0.85), 0 2px 8px -4px rgba(0, 0, 0, 0.5);
+  --dsk-tile: rgba(255, 255, 255, 0.045);
+  --dsk-tile-hi: rgba(255, 255, 255, 0.08);
+  --dsk-hover: rgba(255, 255, 255, 0.045);
+  --dsk-ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --dsk-spring: cubic-bezier(0.3, 1.1, 0.4, 1);
+  --dsk-pane-radius: 12px;
+  --dsk-font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
+}
+html.is-desktop-modern[data-nexus-theme='light'] {
+  --dsk-ink: #17181b;
+  --dsk-ink-2: #5b5d64;
+  --dsk-ink-3: #8a8c93;
+  --dsk-edge: rgba(15, 17, 22, 0.08);
+  --dsk-edge-hi: rgba(15, 17, 22, 0.13);
+  --dsk-bg: #f4f4f5;
+  --dsk-fill: var(--lg-fill, 255 255 255);
+  --dsk-glass: rgb(var(--dsk-fill) / calc(0.82 * var(--lg-alpha, 1)));
+  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.97 * var(--lg-alpha, 1)));
+  --dsk-shadow: 0 18px 44px -28px rgba(20, 24, 34, 0.28), 0 2px 8px -4px rgba(20, 24, 34, 0.12);
+  --dsk-tile: rgba(15, 17, 22, 0.04);
+  --dsk-tile-hi: rgba(15, 17, 22, 0.07);
+  --dsk-hover: rgba(15, 17, 22, 0.045);
+}
+
+/* the room: flat, near-black (or near-white), no ambient colour */
+html.is-desktop-modern body,
+html.is-desktop-modern .nx-os.is-desktop-os {
+  background: var(--dsk-bg) !important;
+}
+html.is-desktop-modern .nx-os.is-desktop-os::before,
+html.is-desktop-modern .nx-os.is-desktop-os::after { display: none !important; }
+
+/* shared glass, restated calm */
+.dsk-side__glass,
+.dsk-top__glass,
+.dsk-pop,
+.dsk-cmd__panel {
+  font-family: var(--dsk-font);
+  background: var(--dsk-glass);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), var(--dsk-shadow);
+}
+.dsk-pop,
+.dsk-cmd__panel { background: var(--dsk-glass-strong); }
+.dsk-side__liquid,
+.dsk-top__liquid,
+.dsk-side__sheen { display: none !important; }
+
+/* ── sidebar ─────────────────────────────────────────────────────────── */
+html.is-desktop-modern { --dsk-side-open: 236px; --dsk-side-shut: 60px; --dsk-top-h: 52px; --dsk-gap: 10px; }
+.dsk-side__glass { border-radius: 14px; }
+.dsk-side__brand { height: 54px; padding: 0 10px 0 14px; gap: 10px; }
+.dsk-side__mark { width: 28px; height: 28px; border-radius: 8px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); color: var(--dsk-ink); }
+.dsk-side__mark svg { width: 22px; height: 22px; }
+.dsk-side { --hue: var(--dsk-ink-2) !important; }
+.dsk-side__word b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+.dsk-side__word small { font-size: 10.5px; font-weight: 500; letter-spacing: 0.01em; text-transform: none; color: var(--dsk-ink-3); }
+.dsk-side__fold { width: 26px; height: 26px; border-radius: 7px; background: transparent; box-shadow: none; color: var(--dsk-ink-3); }
+.dsk-side__fold:hover { background: var(--dsk-hover); color: var(--dsk-ink); }
+.dsk-side__nav { padding: 2px 8px 10px; }
+.dsk-side__group + .dsk-side__group { margin-top: 6px; }
+.dsk-side__group + .dsk-side__group .dsk-side__group-head { border-top: 0; }
+.dsk-side__group-head {
+  height: 26px;
+  padding: 8px 8px 0 10px;
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+.dsk-side__group-head em { background: var(--dsk-tile-hi); color: var(--dsk-ink-2); font-weight: 600; }
+.dsk-side__item { height: 32px; gap: 10px; padding: 0 8px 0 6px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--dsk-ink-2); }
+.dsk-side__item:hover { background: var(--dsk-hover); color: var(--dsk-ink); }
+.dsk-side__item.is-active { color: var(--dsk-ink); font-weight: 560; }
+.dsk-side__item:hover .dsk-side__label { transform: none; }
+/* clear-glass icon chips: monochrome, a hairline and a breath of light */
+.dsk-side__glyph,
+html[data-nexus-theme='light'] .dsk-side__glyph {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html[data-nexus-theme='light'] .dsk-side__glyph { background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(15, 17, 22, 0.03)); }
+.dsk-side__glyph svg { width: 14px !important; height: 14px !important; }
+.dsk-side__item:hover .dsk-side__glyph { transform: none; color: var(--dsk-ink); }
+.dsk-side__item.is-active .dsk-side__glyph { color: var(--dsk-ink); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+.dsk-side__glide {
+  left: 8px;
+  right: 8px;
+  border-radius: 8px;
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: transform 0.32s var(--dsk-spring), height 0.2s var(--dsk-ease);
+}
+.dsk-side__glide::before { left: -8px; top: 28%; bottom: 28%; width: 2px; background: var(--dsk-accent); box-shadow: none; opacity: 0.9; }
+.dsk-side__badge { min-width: 18px; height: 18px; padding: 0 5px; font-size: 10.5px; font-weight: 600; color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+.dsk-side__badge.is-warning { color: #f0b64a; background: rgba(240, 182, 74, 0.12); box-shadow: inset 0 0 0 1px rgba(240, 182, 74, 0.22); }
+.dsk-side__badge.is-critical { color: #ff7b86; background: rgba(255, 91, 108, 0.12); box-shadow: inset 0 0 0 1px rgba(255, 91, 108, 0.24); }
+.dsk-side__dot { width: 6px; height: 6px; box-shadow: none; }
+.dsk-side__split { width: 22px; height: 22px; border-radius: 6px; }
+.dsk-side__split:hover { background: var(--dsk-tile-hi); }
+.dsk-side__inpane { width: 12px; height: 9px; box-shadow: inset 0 0 0 1.25px var(--dsk-ink-3); background: linear-gradient(90deg, transparent 50%, var(--dsk-ink-3) 50%); }
+.dsk-side__foot { padding: 8px 10px 10px; }
+.dsk-side__status { gap: 9px; padding: 6px; }
+.dsk-side__status i { width: 7px; height: 7px; margin: 0 8px; }
+.dsk-side__status.is-live i { box-shadow: 0 0 6px rgba(61, 220, 151, 0.6); }
+.dsk-side__status b { font-size: 12px; font-weight: 550; }
+.dsk-side.is-collapsed .dsk-side__item { padding: 0 0 0 12px; }
+.dsk-side.is-collapsed .dsk-side__badge { left: 28px; top: 1px; }
+.dsk-side.is-collapsed [data-tip]:hover::after { border-radius: 7px; font-size: 12px; font-weight: 500; padding: 5px 9px; }
+
+/* ── top bar ─────────────────────────────────────────────────────────── */
+.dsk-top__glass { border-radius: 12px; gap: 12px; padding: 0 8px 0 8px; }
+.dsk-cmd { max-width: 640px; }
+.dsk-cmd__field { height: 34px; border-radius: 8px; gap: 9px; padding: 0 7px 0 11px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); color: var(--dsk-ink-3); }
+.dsk-cmd__field:hover { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+.dsk-cmd__field input { font-size: 13px; }
+.dsk-cmd__field kbd { padding: 1px 6px; border-radius: 5px; font-size: 10.5px; font-weight: 500; }
+.dsk-cmd.is-open .dsk-cmd__field { color: var(--dsk-ink-2); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent), 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent); }
+.dsk-cmd__panel { top: calc(100% + 8px); border-radius: 12px; grid-template-columns: minmax(0, 1fr) 280px; }
+.dsk-cmd__group header { font-size: 11px; font-weight: 550; letter-spacing: 0.02em; text-transform: none; padding: 10px 10px 4px; }
+.dsk-cmd__item { min-height: 40px; border-radius: 7px; padding: 4px 10px 4px 6px; gap: 10px; }
+.dsk-cmd__item.is-active { background: var(--dsk-tile-hi); box-shadow: none; }
+.dsk-cmd__icon { width: 26px; height: 26px; border-radius: 7px; background: var(--dsk-tile); }
+.dsk-cmd__item.is-active .dsk-cmd__icon { color: var(--dsk-ink); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+.dsk-cmd__copy strong { font-size: 13px; font-weight: 550; }
+.dsk-cmd__copy small { font-size: 11.5px; }
+.dsk-cmd__hint { color: var(--dsk-ink-3); font-weight: 500; }
+.dsk-cmd__preview { background: none; padding: 18px 16px 14px; }
+.dsk-cmd__eyebrow, .dsk-pop__eyebrow { font-size: 11px; font-weight: 550; letter-spacing: 0.02em; text-transform: none; }
+.dsk-cmd__preview h3 { font-size: 16px; font-weight: 600; }
+.dsk-cmd__run b { color: var(--dsk-ink-2); font-weight: 600; }
+.dsk-top__btn { width: 32px; height: 32px; border-radius: 8px; }
+.dsk-top__btn:hover { background: var(--dsk-hover); }
+.dsk-top__btn.is-active { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); color: var(--dsk-ink); }
+.dsk-top__btn svg { width: 16px !important; height: 16px !important; }
+.dsk-top__badge { top: 1px; right: 0; min-width: 15px; height: 15px; font-size: 9px; font-weight: 650; box-shadow: 0 0 0 2px var(--dsk-glass-strong); }
+.dsk-top__badge.is-warn { box-shadow: 0 0 0 2px var(--dsk-glass-strong); }
+.dsk-top__live { top: 7px; right: 7px; width: 5px; height: 5px; box-shadow: none; }
+.dsk-top__q { width: 20px; height: 20px; font-size: 10.5px; font-weight: 700; background: transparent; box-shadow: inset 0 0 0 1.5px var(--q, #6f7078); }
+.dsk-top__btn--queue .dsk-top__q::after { display: none; }
+.dsk-top__sep { height: 20px; margin: 0 6px; background: var(--dsk-edge-hi); }
+.dsk-top__profile { height: 34px; border-radius: 9px; padding: 0 6px 0 3px; }
+.dsk-top__avatar, .dsk-prof__avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--dsk-ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+}
+.dsk-prof__avatar { width: 40px; height: 40px; font-size: 14px; }
+.dsk-top__kpi { margin-right: 2px; }
+.dsk-top__panes { width: 17px; height: 13px; box-shadow: inset 0 0 0 1.25px currentColor; }
+.dsk-top__btn--layout.is-split { color: var(--dsk-ink); }
+
+/* ── panes ───────────────────────────────────────────────────────────── */
+html.is-desktop-modern { --dsk-divider: 8px; }
+.dsk-pane { background: transparent; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+.dsk-pane.is-focused { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent); }
+.dsk-pane__bar { height: 34px; gap: 8px; padding: 0 6px 0 10px; font-family: var(--dsk-font); background: var(--dsk-glass-strong); box-shadow: inset 0 -1px 0 var(--dsk-edge); }
+.dsk-ws.is-split .dsk-pane__body { top: 34px; }
+.dsk-pane__glyph { width: 20px; height: 20px; border-radius: 6px; color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+.dsk-pane__bar b { font-size: 12.5px; font-weight: 550; }
+.dsk-pane__bar em { font-size: 10px; font-weight: 550; letter-spacing: 0.02em; text-transform: none; }
+.dsk-pane__tools button { width: 24px; height: 24px; border-radius: 6px; }
+.dsk-divider i { width: 3px; height: 36px; margin: -18px 0 0 -1.5px; background: var(--dsk-edge-hi); }
+.dsk-divider:hover i, .dsk-divider.is-active i { height: 64px; margin-top: -32px; background: var(--dsk-accent); box-shadow: none; }
+
+/* ── popovers ────────────────────────────────────────────────────────── */
+.dsk-pop { border-radius: 12px; padding: 14px; }
+.dsk-pop__head h3 { font-size: 14.5px; font-weight: 600; }
+.dsk-pop__cta { height: 34px; border-radius: 8px; font-size: 13px; font-weight: 550; background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+.dsk-pop__cta:hover { background: rgba(255, 255, 255, 0.11); }
+.dsk-q-tile, .dsk-lay__opt, .dsk-lay__mode, .dsk-prof__sound { border-radius: 9px; background: var(--dsk-tile); }
+.dsk-q-tile b { font-size: 17px; font-weight: 600; }
+.dsk-seg { border-radius: 9px; background: var(--dsk-tile); }
+.dsk-seg__tab { height: 28px; border-radius: 6px; font-size: 12px; font-weight: 550; }
+.dsk-seg__tab.is-active, .dsk-lay__opt.is-active, .dsk-lay__mode.is-active, .dsk-prof__sound.is-active {
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  color: var(--dsk-ink);
+}
+.dsk-lay__opt.is-active .dsk-lay__glyph i { background: var(--dsk-ink-2); box-shadow: none; }
+.dsk-lay__glyph i { background: var(--dsk-tile-hi); }
+.dsk-lay__pane-glyph { color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .dsk-activity .nx-activity-panel { border-radius: 12px; }
+
+/* ── the phone's cinematic backdrops, quieted on a desk ─────────────────
+   Decorative layers only: removing them changes no data and no control. */
+html.is-desktop-modern .wfx-liquid,
+html.is-desktop-modern .cxi__aurora,
+html.is-desktop-modern .nx-cal__aurora,
+html.is-desktop-modern .egx-aurora,
+html.is-desktop-modern .plc__liquid,
+html.is-desktop-modern .egq__liquid,
+html.is-desktop-modern .egd-hero__liquid,
+html.is-desktop-modern .nx-pulse-hero2__liquid,
+html.is-desktop-modern .nx-pulse-drop__liquid,
+html.is-desktop-modern .nx-conv-header__liquid,
+html.is-desktop-modern .nx-conv-header__atmosphere,
+html.is-desktop-modern .nx-medium-header__atmosphere,
+html.is-desktop-modern .nx-conv-header__glow {
+  display: none !important;
+}
+
+/* the theme's ambient glow belongs to the phone */
+html.is-desktop-modern body::before,
+html.is-desktop-modern body::after { display: none !important; }
+html.is-desktop-modern .dsk-pane__body { background: color-mix(in srgb, var(--dsk-bg) 88%, rgb(var(--dsk-fill))); }
+
+/* KPI: one quiet inline readout, not the phone's stacked glyph */
+.dsk-top__kpi { height: 32px; }
+.dsk-top__kpi .nx-kpi-orb-container,
+.dsk-top__kpi .nx-kpi-orb {
+  width: auto !important;
+  min-width: 0 !important;
+  height: 32px !important;
+  min-height: 0 !important;
+  transform: none !important;
+}
+.dsk-top__kpi .nx-kpi-orb {
+  display: flex !important;
+  align-items: center;
+  padding: 0 10px 0 8px !important;
+  border-radius: 8px !important;
+  border: 0 !important;
+  background: var(--dsk-tile) !important;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge) !important;
+  cursor: pointer;
+}
+.dsk-top__kpi .nx-kpi-orb:hover { background: var(--dsk-tile-hi) !important; }
+.dsk-top__kpi .nx-kpi-orb__glow { display: none !important; }
+.dsk-top__kpi .nx-kpi-orb__inner {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 7px !important;
+  width: auto !important;
+  height: 100% !important;
+  padding: 0 !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.dsk-top__kpi .nx-kpi-orb__icon-box { width: 16px !important; height: 16px !important; min-height: 0 !important; color: var(--dsk-ink-2) !important; }
+.dsk-top__kpi .nx-kpi-orb__icon-box svg { width: 14px !important; height: 14px !important; }
+.dsk-top__kpi .nx-kpi-orb__mini-value {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  font: 600 12.5px/1 var(--dsk-font) !important;
+  letter-spacing: -0.01em !important;
+  color: var(--dsk-ink) !important;
+  font-variant-numeric: tabular-nums;
+}
+.dsk-top__kpi .nx-kpi-orb__readout { display: none !important; }
