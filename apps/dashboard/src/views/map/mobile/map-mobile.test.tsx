@@ -2,7 +2,7 @@
  * Mobile Map + Live Activity — focused tests (model + render contract).
  */
 import React from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { LiveActivityEvent } from '../live-activity-engine'
 import {
@@ -24,6 +24,23 @@ import {
 import { MapMobileChrome } from './MapMobileChrome'
 
 ;(globalThis as any).React = React
+
+/**
+ * The breakpoint is pinned per test: the phone contract renders the phone chrome,
+ * the desk contract the desktop one. (Unpinned, a window-less test resolves to a
+ * 1280px desktop — the phone contract would silently test the desk instead.)
+ */
+const screen = vi.hoisted(() => ({ desk: false }))
+/** The realtime stream, pinned: off by default (exactly what a server render sees). */
+const stream = vi.hoisted(() => ({ live: false }))
+vi.mock("./useRealtimeActivity", () => ({ useRealtimeActivity: () => ({ events: [], live: stream.live, coveredSince: stream.live ? Date.now() - 3600_000 : null }) }))
+vi.mock('../../../modules/mobile/useBreakpoint', () => ({
+  useBreakpoint: () => ({
+    breakpoint: screen.desk ? 'desktop' : 'phone', isPhone: !screen.desk, isTablet: false, isDesktop: screen.desk,
+    isMobile: true, isModernDesktop: screen.desk, isLandscapeMobile: false, isCommandCenterLayout: false,
+    isPortrait: !screen.desk, width: screen.desk ? 1440 : 390, height: screen.desk ? 900 : 844, layoutWidth: screen.desk ? 1440 : 390, layoutHeight: screen.desk ? 900 : 844,
+  }),
+}))
 
 const NOW = new Date('2026-09-25T16:00:00Z')
 const ev = (over: Partial<LiveActivityEvent> = {}): LiveActivityEvent => ({
@@ -136,5 +153,47 @@ describe('render contract (I, Y)', () => {
     const html = renderToStaticMarkup(<MapMobileChrome {...props} />)
     expect(html).not.toContain('data-map-control="activity-feed"')
     expect(html).toContain('aria-pressed="false"')
+  })
+})
+
+describe('desk render contract (map desktop 2.0)', () => {
+  const props = {
+    map: null, mapEpoch: 0,
+    modes: [{ key: 'acquisition', label: 'Acquisition Radar', description: 'Seller leads', swatches: ['#fff'] }],
+    mode: 'acquisition', onMode: () => {},
+    themes: [{ id: 'dark_ops', label: 'Dark', accentColor: '#38bdf8' }], styleMode: 'dark_ops', onStyle: () => {},
+    dimension: '2d' as const, onDimension: () => {},
+    filterCount: 7, filterMatching: 18492, onOpenFilters: () => {},
+    activityEvents: [ev()], onSelectEvent: () => {},
+    showMapKey: false, onShowMapKey: () => {}, showCensusDock: false, onShowCensusDock: () => {},
+    performance: { performanceMode: 'auto', markerDensity: 'high', animation: 'full', liveActivityMode: 'minimal', showHeatEffects: false, clusterAggressiveness: 'medium' } as any,
+    onPerformance: () => {}, cardOpen: false, selectedLngLat: null, reducedMotion: true,
+  }
+  const render = () => { screen.desk = true; try { return renderToStaticMarkup(<MapMobileChrome {...props} />) } finally { screen.desk = false } }
+  it('renders the rail, the command stack, the legend and the zoom capsule — not the phone chrome', () => {
+    const html = render()
+    for (const c of ['layers', 'filters', 'draw', 'activity', 'appearance', 'recenter', 'mode', 'filter-summary', 'color-by', 'zoom-in', 'zoom-out', 'dimension', 'north']) expect(html).toContain(`data-map-control="${c}"`)
+    expect(html).toContain('mxd-rail')
+    expect(html).not.toContain('mx-searchrow')
+    expect(html).not.toContain('class="mx-stack"')
+    expect(html).not.toContain('data-map-control="activity-feed"')
+  })
+  it('never offers a measure tool', () => {
+    expect(render()).not.toMatch(/measure|ruler/i)
+  })
+  it('the applied filter collapses to a capsule with its real count', () => {
+    expect(render()).toContain('7 filters · 18,492 properties')
+  })
+  it('LIVE is not claimed while the stream is not flowing', () => {
+    // Server render: the realtime channel never subscribes, so no LIVE badge.
+    expect(render()).not.toContain('mxd-livebadge')
+  })
+  it('LIVE shows on the lens pill only while the stream is flowing', () => {
+    stream.live = true
+    try {
+      const html = render()
+      expect(html).toContain('mxd-livebadge')
+      expect(html).toMatch(/Acquisition Radar<\/b><em class="mxd-livebadge"/)
+    } finally { stream.live = false }
   })
 })

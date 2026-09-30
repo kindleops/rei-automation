@@ -52,6 +52,9 @@ const titleCase = (s?: string | null) => (s ? s.toLowerCase().replace(/\b\w/g, (
 
 const SRC = 'nx-search-area'
 
+/** Open an area's card from elsewhere on the map (detail: { kind, key, label }). */
+export const MAP_OPEN_AREA_EVENT = 'nexus:map-open-area'
+
 function drawOutline(map: maplibregl.Map, geom: GeoJSON.Geometry | null) {
   try {
     if (!map.getSource(SRC)) {
@@ -85,7 +88,10 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
   const [busy, setBusy] = useState(false)
   const [facts, setFacts] = useState<AreaFacts | null>(null)
   const [factsLoading, setFactsLoading] = useState(false)
+  const [factsMissing, setFactsMissing] = useState<string | null>(null)
   const seq = useRef(0)
+  /** Newest area request wins (a search pick or a map-chosen area). */
+  const areaSeq = useRef(0)
   const input = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => { onActiveChange?.(focused || Boolean(facts) || factsLoading) }, [focused, facts, factsLoading, onActiveChange])
@@ -117,8 +123,15 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
   const fly = (bbox?: [number, number, number, number], center?: [number, number], zoom?: number) => {
     if (!map) return
     if (bbox && bbox[0] !== bbox[2]) {
+      // [desktop] frame the area beside the command stack and above the bottom shelf.
+      const desk = typeof document !== 'undefined' && document.documentElement.classList.contains('is-desktop-modern')
+      const w = desk ? map.getContainer().clientWidth : 0
+      const h = desk ? map.getContainer().clientHeight : 0
       map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
-        padding: { top: 150, bottom: 380, left: 36, right: 76 }, maxZoom: 14, duration: reducedMotion ? 0 : 1800, curve: 1.6, essential: true,
+        padding: desk
+          ? { top: 70, bottom: Math.min(340, Math.round(h * 0.42)), left: Math.min(460, Math.round(w * 0.34)), right: 80 }
+          : { top: 150, bottom: 380, left: 36, right: 76 },
+        maxZoom: 14, duration: reducedMotion ? 0 : 1800, curve: 1.6, essential: true,
       })
     } else if (center) {
       map.flyTo({ center, zoom: zoom ?? 13, duration: reducedMotion ? 0 : 1800, curve: 1.6, essential: true })
@@ -137,7 +150,9 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
       return
     }
     fly(hit.bbox, hit.center)
+    areaSeq.current += 1
     setFacts(null)
+    setFactsMissing(null)
     setFactsLoading(true)
     const { data } = await getSupabaseClient().rpc('get_map_area_facts', { p_kind: hit.kind, p_key: hit.key })
     setFactsLoading(false)
@@ -152,8 +167,48 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
     setHits([])
     setFacts(null)
     setFactsLoading(false)
+    setFactsMissing(null)
     if (map) drawOutline(map, null)
   }
+
+  /**
+   * [map desktop 2.0] An area chosen on the map itself (a market bubble) opens
+   * the same area card as a search would — framed from the facts' own bbox.
+   * Read-only (get_map_area_facts); when the facts have no row for it, the
+   * card says so instead of silently closing.
+   */
+  const openAreaRef = useRef<(detail: { kind: SearchKind; key: string; label: string }) => void>(() => {})
+  openAreaRef.current = (detail) => {
+    if (!shouldUseSupabase() || detail.kind === 'property') return
+    const id = ++areaSeq.current
+    setFocused(false)
+    setQ(detail.label)
+    setFacts(null)
+    setFactsMissing(null)
+    setFactsLoading(true)
+    void getSupabaseClient().rpc('get_map_area_facts', { p_kind: detail.kind, p_key: detail.key }).then(({ data }) => {
+      if (id !== areaSeq.current) return
+      setFactsLoading(false)
+      if (!data) { setFactsMissing(detail.label); return }
+      const f = data as AreaFacts
+      setFacts(f)
+      if (map) drawOutline(map, f.outline)
+      fly(f.bbox)
+    }, () => { if (id === areaSeq.current) { setFactsLoading(false); setFactsMissing(detail.label) } })
+  }
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ kind?: SearchKind; key?: string; label?: string }>).detail
+      if (d?.kind && d.key) openAreaRef.current({ kind: d.kind, key: d.key, label: d.label || d.key })
+    }
+    window.addEventListener(MAP_OPEN_AREA_EVENT, on)
+    return () => window.removeEventListener(MAP_OPEN_AREA_EVENT, on)
+  }, [])
+  useEffect(() => {
+    if (!factsMissing) return undefined
+    const t = window.setTimeout(() => setFactsMissing(null), 5000)
+    return () => window.clearTimeout(t)
+  }, [factsMissing])
 
   const open = focused && q.trim().length >= 2
   const s = facts?.sales
@@ -202,14 +257,15 @@ export function MapSearch({ map, epoch, reducedMotion, onProperty, onActiveChang
         </ul>
       )}
 
-      {(facts || factsLoading) && createPortal(
+      {(facts || factsLoading || factsMissing) && createPortal(
         <div className="mx-areacard" role="dialog" aria-label={facts?.label ?? 'Area'} data-map-card="area">
           <div className="mx-areacard__head">
             <span className="mx-areacard__kind">{facts ? KIND_LABEL[facts.kind] : 'Area'}</span>
-            <strong>{facts ? (facts.kind === 'zip' ? `ZIP ${facts.label}` : facts.label) : 'Reading the area…'}</strong>
+            <strong>{facts ? (facts.kind === 'zip' ? `ZIP ${facts.label}` : facts.label) : factsMissing ?? 'Reading the area…'}</strong>
             <button type="button" className="mx-btn is-sm" aria-label="Close area" onClick={clear} data-map-sheet-close><Icon name="close" size={13} /></button>
           </div>
           {factsLoading && !facts && <div className="mx-area__loading"><span /><span /><span /></div>}
+          {factsMissing && !facts && !factsLoading && <p className="mx-note">No area facts are on record for {factsMissing}.</p>}
           {facts && s && p && (
             <div className="mx-areacard__body">
               <div className="mx-areacard__hero">

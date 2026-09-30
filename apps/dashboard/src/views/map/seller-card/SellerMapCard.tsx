@@ -25,6 +25,7 @@ import type { AppId } from '../../../domain/app-registry/app-registry'
 import type { PropertyLocator } from '../../../domain/locator/property-locator'
 import { SellerMapCardDesk, type DeskHero, type DeskLaunch, type DeskPrimary } from './SellerMapCardDesk'
 import { buildSellerDeskModel, type DeskState, type DeskTab } from './seller-card-desk-model'
+import { DESK_CARD_EXPAND_EVENT, publishDeskCardPresence, readDeskCardPresence, type DeskCardPresence } from './desk-card-presence'
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English', es: 'Spanish', pt: 'Portuguese', fr: 'French', ht: 'Haitian Creole', zh: 'Chinese', 'zh-cn': 'Chinese',
@@ -904,6 +905,30 @@ export const SellerMapCard = ({
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   const onDeskClose = useCallback(() => closeRef.current?.(), [])
+
+  // [map desktop 2.0] The card publishes its shape so a click on its own pin can
+  // promote PREVIEW → HALF (and never demote a wider card); the Map asks the card
+  // to expand through one event, because only the card knows it was collapsed.
+  const deskPropertyId = viewModel.propertyId || null
+  const deskShape: DeskCardPresence['state'] = isConversation ? 'conversation' : deskState
+  useEffect(() => {
+    if (!isModernDesktop) return undefined
+    const mine = { propertyId: deskPropertyId, state: deskShape }
+    publishDeskCardPresence(mine)
+    return () => { if (readDeskCardPresence() === mine) publishDeskCardPresence(null) }
+  }, [isModernDesktop, deskPropertyId, deskShape])
+  const cardModeRef = useRef(cardMode)
+  cardModeRef.current = cardMode
+  useEffect(() => {
+    if (!isModernDesktop) return undefined
+    const onExpand = (event: Event) => {
+      const wanted = (event as CustomEvent<{ propertyId?: string | null }>).detail?.propertyId ?? null
+      if (wanted && deskPropertyId && wanted !== deskPropertyId) return
+      if (cardModeRef.current === 'peek') deskRef.current.expand()
+    }
+    window.addEventListener(DESK_CARD_EXPAND_EVENT, onExpand)
+    return () => window.removeEventListener(DESK_CARD_EXPAND_EVENT, onExpand)
+  }, [isModernDesktop, deskPropertyId])
 
   if (isModernDesktop && overlayTarget && deskModel) {
     return (

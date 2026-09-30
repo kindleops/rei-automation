@@ -56,6 +56,8 @@ import { landEvent, useLiveOrbs } from './useLiveOrbs'
 import { useLivingSettings, living } from '../world/living-settings'
 import { mapOverlayTarget, setMapOverlayHost } from '../map-overlay-host'
 import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
+import { MapDeskChrome } from '../desktop/MapDeskChrome'
+import { clampOpacity, type DeskTool } from '../desktop/map-desk-model'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -91,6 +93,11 @@ export interface MapMobileChromeProps {
   loading?: boolean
   /** Bounds of the operator's live sellers — the home view. */
   homeBounds?: [[number, number], [number, number]] | null
+  /** [desktop] The Filters inspector (owned by the Command Map) is open. */
+  filtersOpen?: boolean
+  onCloseFilters?: () => void
+  /** [desktop] Properties matching the applied filter (null = unknown). */
+  filterMatching?: number | null
 }
 
 const ACTIVITY_STORE = 'nexus.map.mobileActivity'
@@ -103,8 +110,10 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 
 /** Phone-only map preferences: the active lens and what floats on the map. */
 const LENS_STORE = 'nexus.map.mobileLens'
-interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number; liveOrbs: boolean; pins: boolean }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true, pins: true }
+interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number; liveOrbs: boolean; pins: boolean
+  /** Desktop only (the phone never reads these): pin and lens opacity, the legend folded, the lens to restore. */
+  pinOpacity: number; lensOpacity: number; legendCollapsed: boolean; lastLens: string }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true, pins: true, pinOpacity: 1, lensOpacity: 1, legendCollapsed: false, lastLens: 'radar' }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }
@@ -190,12 +199,17 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map, mapEpoch, mode, onMode, themes, styleMode, onStyle, dimension, onDimension,
     filterCount, onOpenFilters, activityEvents, onSelectEvent,
     performance, onPerformance, cardOpen, selectedLngLat, reducedMotion, loading, homeBounds,
+    filtersOpen = false, onCloseFilters, filterMatching = null,
   } = props
 
   const [sheet, setSheet] = useState<SheetKey>(null)
   const [layersTab, setLayersTab] = useState<LayersTab>('mode')
   // Desktop: sheets dock inside the Map pane, and the rail gains zoom + north.
   const { isModernDesktop } = useBreakpoint()
+  const isDeskRef = useRef(isModernDesktop)
+  isDeskRef.current = isModernDesktop
+  /** [desktop] Which of the desk's own tools is open (Layers / Live / Appearance). */
+  const [deskTool, setDeskTool] = useState<Exclude<DeskTool, 'filters' | 'draw'> | null>(null)
   const [bearing, setBearing] = useState(0)
   useEffect(() => {
     if (!map || !isModernDesktop) return
@@ -206,7 +220,11 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   }, [map, mapEpoch, isModernDesktop])
   // The Living Map chip's "settings" link opens Appearance.
   useEffect(() => {
-    const on = (e: Event) => { const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab; setLayersTab(tab === 'appearance' ? 'appearance' : 'mode'); setSheet('layers') }
+    const on = (e: Event) => {
+      // [desktop] the desk's Appearance popover holds the Living Map settings.
+      if (isDeskRef.current) { setDeskTool('appearance'); return }
+      const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab; setLayersTab(tab === 'appearance' ? 'appearance' : 'mode'); setSheet('layers')
+    }
     window.addEventListener('nexus:map-open-layers', on)
     return () => window.removeEventListener('nexus:map-open-layers', on)
   }, [])
@@ -234,9 +252,16 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
   // ── Intelligence lens ──────────────────────────────────────────────────────
   const lens = lensById(prefs.lens)
-  const lensLook = useMemo(() => ({ style: prefs.lensStyle, blend: prefs.lensBlend }), [prefs.lensStyle, prefs.lensBlend])
+  // [desktop] the Layers opacity for the colour lens; the phone look carries none (= exactly as before).
+  const lensLook = useMemo(
+    () => (isModernDesktop ? { style: prefs.lensStyle, blend: prefs.lensBlend, opacity: clampOpacity(prefs.lensOpacity) } : { style: prefs.lensStyle, blend: prefs.lensBlend }),
+    [isModernDesktop, prefs.lensStyle, prefs.lensBlend, prefs.lensOpacity],
+  )
   const lensState = useMapLens(map, mapEpoch, lens, lensLook)
-  usePropertyDots(map, mapEpoch, prefs.pins && prefs.everyProperty, (prefs.pins && prefs.everyProperty) || (Boolean(lens.source) && !lens.ambient), openSearchProperty, reducedMotion, lens.id === 'radar')
+  // [desktop] The dot tiles can't carry a filter: while one is applied they pause,
+  // so the filtered market bubbles and clusters show the cohort instead.
+  const dotsOn = prefs.pins && prefs.everyProperty && !(isModernDesktop && filterCount > 0)
+  usePropertyDots(map, mapEpoch, dotsOn, dotsOn || (Boolean(lens.source) && !lens.ambient), openSearchProperty, reducedMotion, lens.id === 'radar')
   // Property pins on/off: every property layer, over any lens.
   useEffect(() => {
     if (!map) return
@@ -342,6 +367,21 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     if (next.legacyMode !== mode) onMode(next.legacyMode)
     setScanKey((k) => k + 1)
     setSheet(null)
+  }
+  // [desktop] Color by picks a lens (picking the active one keeps it); the Layers
+  // switch turns colour off and back on to the lens it had.
+  const pickDeskLens = (picked: MapLens) => {
+    if (picked.id === lens.id) return
+    setPrefs((p) => ({ ...p, lens: picked.id, lastLens: picked.id === 'none' ? p.lastLens : picked.id }))
+    if (picked.legacyMode !== mode) onMode(picked.legacyMode)
+    setScanKey((k) => k + 1)
+  }
+  const setDeskLensVisible = (on: boolean) => {
+    const target = on ? lensById(prefs.lastLens && prefs.lastLens !== 'none' ? prefs.lastLens : 'radar') : lensById('none')
+    if (target.id === lens.id) return
+    setPrefs((p) => ({ ...p, lens: target.id, lastLens: lens.id !== 'none' ? lens.id : p.lastLens }))
+    if (target.legacyMode !== mode) onMode(target.legacyMode)
+    setScanKey((k) => k + 1)
   }
 
   // Read the heat under a finger: press-and-hold anywhere (a property marker
@@ -498,7 +538,8 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   // the Property pins switch); they only soften enough for the colour to read.
   const lensDim = !lens.source || lens.ambient ? 1 : zoom >= 13 ? 0.95 : lens.areal ? 0.85 : 0.78
   // Sold comps on: properties soften so the red sales read.
-  const markerDim = Math.min(lensDim, compsOn ? (zoom >= 14 ? 0.8 : 0.6) : 1)
+  // [desktop] …and the Layers opacity for property pins scales it (the phone has no such control).
+  const markerDim = Math.min(lensDim, compsOn ? (zoom >= 14 ? 0.8 : 0.6) : 1) * (isModernDesktop ? clampOpacity(prefs.pinOpacity) : 1)
   const originalsRef = useRef(new Map<string, unknown>())
   const appliedRef = useRef(new Map<string, string>())
   useEffect(() => { originalsRef.current = new Map(); appliedRef.current = new Map() }, [map, mapEpoch])
@@ -634,6 +675,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
       const place = placesRef.current.find((p) => p.key === key)
       if (!place) return
       if (place.events.length === 1) setOpenEvent(place.events[0])
+      else if (isDeskRef.current) setDeskTool('live')
       else { setSheet('activity') }
     }
     const layer = `${SRC}-core`
@@ -667,8 +709,12 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     map.once('moveend', () => { framingRef.current = false })
     const [[w, s], [e, n]] = homeBounds
     const top = 130
+    // [desktop] frame beside the left command stack, above the legend.
+    const deskW = isDeskRef.current ? map.getContainer().clientWidth : 0
     map.fitBounds([[w, s], [e, n]], {
-      padding: { top, bottom: 170, left: 40, right: 72 },
+      padding: isDeskRef.current
+        ? { top: 70, bottom: 110, left: Math.min(440, Math.round(deskW * 0.32)), right: 80 }
+        : { top, bottom: 170, left: 40, right: 72 },
       maxZoom: 10,
       duration: animate && !reducedMotion ? 900 : 0,
     })
@@ -751,88 +797,138 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
   const pillSwatch = lensSwatch(lens)
 
   return (
-    <div className={cls('mx', (cardOpen || compId || compList) && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing', isModernDesktop && 'is-desk', isModernDesktop && (sheet || compList) && 'has-dock')}>
+    <div className={cls('mx', (cardOpen || compId || compList) && 'has-card', activityOn && 'is-activity', drawing && 'is-drawing', isModernDesktop && 'is-desk', isModernDesktop && (sheet === 'comps' || compList) && 'has-dock', isModernDesktop && (deskTool === 'layers' || deskTool === 'live' || filtersOpen) && 'has-left')}>
       <MapAreaTool map={map} epoch={mapEpoch} drawing={drawing} onDrawingChange={setDrawing} reducedMotion={reducedMotion} />
       <MapFocusSet map={map} mapEpoch={mapEpoch} reducedMotion={reducedMotion} />
-      {!drawing && (
-        <div className="mx-searchrow">
-          <MapSearch map={map} epoch={mapEpoch} reducedMotion={reducedMotion} onProperty={openSearchProperty} onActiveChange={setSearchActive} />
-        </div>
-      )}
-      {!drawing && <div className={cls('mx-top', searchActive && 'is-yielding')}>
-        {prefs.modePill && (
-        <button type="button" className="mx-context" data-map-control="mode" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
-          <span className={cls('mx-context__swatch', !pillSwatch && 'is-ramp')} aria-hidden="true" style={pillSwatch ? undefined : { backgroundImage: rampGradient(lens, '0deg') }}>
-            {pillSwatch?.map((c) => <i key={c} style={{ background: c }} />)}
-          </span>
-          <span className="mx-context__copy">
-            <strong>{lens.label}</strong>
-            <span>
-              {inView === null
-                ? 'Loading properties…'
-                : inView === 0
-                  ? (loading ? 'Updating…' : zoom < 9 ? 'Zoom in to see properties' : 'No properties in this view')
-                  : `${inView.toLocaleString()} in view${loading ? ' · updating' : ''}`}
-            </span>
-          </span>
-          <Icon name="chevron-down" size={13} />
-        </button>
-        )}
-        <div
-          className="mx-worldslot"
-          ref={(el) => { (window as unknown as { __nxWorldSlot?: HTMLElement | null }).__nxWorldSlot = el; window.dispatchEvent(new CustomEvent('nexus:world-slot', { detail: el })) }}
+      {isModernDesktop ? (
+        // [map desktop 2.0] The desk composes its own instruments over the same state.
+        <MapDeskChrome
+          tool={deskTool}
+          onTool={setDeskTool}
+          map={map}
+          mapEpoch={mapEpoch}
+          reducedMotion={reducedMotion}
+          lens={lens}
+          lensState={lensState}
+          lensLook={lensLook}
+          onPickLens={pickDeskLens}
+          onLensVisible={setDeskLensVisible}
+          onLensLook={(next) => setPrefs((p) => ({
+            ...p,
+            ...(next.style !== undefined ? { lensStyle: next.style } : {}),
+            ...(next.blend !== undefined ? { lensBlend: next.blend } : {}),
+            ...(next.opacity !== undefined ? { lensOpacity: clampOpacity(next.opacity) } : {}),
+          }))}
+          inView={inView}
+          zoom={zoom}
+          loading={Boolean(loading)}
+          prefs={prefs}
+          setPref={(k, v) => setPref(k, v as never)}
+          comps={{ total: comps.total, loading: comps.loading }}
+          onOpenCompFilters={() => setSheet('comps')}
+          filterCount={filterCount}
+          filterMatching={filterMatching}
+          filtersOpen={filtersOpen}
+          onOpenFilters={onOpenFilters}
+          onCloseFilters={() => onCloseFilters?.()}
+          drawing={drawing}
+          onToggleDraw={() => { setSheet(null); setOpenEvent(null); setDrawing((v) => !v) }}
+          activityOn={activityOn}
+          onActivity={setActivityOn}
+          // LIVE = the realtime channel is subscribed AND its window has loaded — data is flowing.
+          streamLive={realtime.live && realtime.coveredSince !== null}
+          events={events}
+          liveEvents={realtime.events}
+          liveCoveredSince={realtime.coveredSince}
+          scopeCounts={counts}
+          scope={scope}
+          onScope={setScope}
+          activityWindow={window_}
+          onActivityWindow={setWindow}
+          clock={clock}
+          onOpenEvent={setOpenEvent}
+          dimension={dimension}
+          onDimension={onDimension}
+          themes={themes}
+          styleMode={styleMode}
+          onStyle={onStyle}
+          living={livingSettings}
+          onLiving={setLiving}
+          performance={performance}
+          onPerformance={onPerformance}
+          bearing={bearing}
+          onRecenter={recenter}
+          recenterLabel={selectedLngLat ? 'Center on selected property' : homeBounds ? 'Show your active sellers' : 'Show the whole country'}
+          onSearchProperty={openSearchProperty}
+          onSearchActive={setSearchActive}
         />
-        {compsOn && (
-          <button type="button" className="mx-chip is-comps" onClick={() => setSheet('comps')} data-map-control="comps">
-            <i aria-hidden="true" /> {comps.loading && !comps.total ? 'Comps…' : `${comps.total.toLocaleString()} sold`}{activeCompFilterCount(prefs.compFilters) ? ` · ${activeCompFilterCount(prefs.compFilters)}` : ''}
-          </button>
+      ) : (
+        <>
+        {!drawing && (
+          <div className="mx-searchrow">
+            <MapSearch map={map} epoch={mapEpoch} reducedMotion={reducedMotion} onProperty={openSearchProperty} onActiveChange={setSearchActive} />
+          </div>
         )}
-        {filterCount > 0 && (
-          <button type="button" className="mx-chip" onClick={onOpenFilters} data-map-control="filter-summary">
-            <Icon name="filter" size={12} /> Filters · {filterCount}
+        {!drawing && <div className={cls('mx-top', searchActive && 'is-yielding')}>
+          {prefs.modePill && (
+          <button type="button" className="mx-context" data-map-control="mode" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
+            <span className={cls('mx-context__swatch', !pillSwatch && 'is-ramp')} aria-hidden="true" style={pillSwatch ? undefined : { backgroundImage: rampGradient(lens, '0deg') }}>
+              {pillSwatch?.map((c) => <i key={c} style={{ background: c }} />)}
+            </span>
+            <span className="mx-context__copy">
+              <strong>{lens.label}</strong>
+              <span>
+                {inView === null
+                  ? 'Loading properties…'
+                  : inView === 0
+                    ? (loading ? 'Updating…' : zoom < 9 ? 'Zoom in to see properties' : 'No properties in this view')
+                    : `${inView.toLocaleString()} in view${loading ? ' · updating' : ''}`}
+              </span>
+            </span>
+            <Icon name="chevron-down" size={13} />
           </button>
-        )}
-      </div>}
+          )}
+          <div
+            className="mx-worldslot"
+            ref={(el) => { (window as unknown as { __nxWorldSlot?: HTMLElement | null }).__nxWorldSlot = el; window.dispatchEvent(new CustomEvent('nexus:world-slot', { detail: el })) }}
+          />
+          {compsOn && (
+            <button type="button" className="mx-chip is-comps" onClick={() => setSheet('comps')} data-map-control="comps">
+              <i aria-hidden="true" /> {comps.loading && !comps.total ? 'Comps…' : `${comps.total.toLocaleString()} sold`}{activeCompFilterCount(prefs.compFilters) ? ` · ${activeCompFilterCount(prefs.compFilters)}` : ''}
+            </button>
+          )}
+          {filterCount > 0 && (
+            <button type="button" className="mx-chip" onClick={onOpenFilters} data-map-control="filter-summary">
+              <Icon name="filter" size={12} /> Filters · {filterCount}
+            </button>
+          )}
+        </div>}
 
-      <div className="mx-stack" role="toolbar" aria-label="Map controls">
-        <button type="button" className="mx-btn" aria-label="Layers and map mode" data-map-control="layers" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
-          <Icon name="layers" size={18} />
-        </button>
-        <button type="button" className={cls('mx-btn', filterCount > 0 && 'is-lit')} aria-label={filterCount > 0 ? `Filters, ${filterCount} active` : 'Filters'} data-map-control="filters" onClick={onOpenFilters}>
-          <Icon name="filter" size={17} />
-          {filterCount > 0 && <span className="mx-btn__badge">{filterCount}</span>}
-        </button>
-        <button type="button" className={cls('mx-btn', activityOn && 'is-lit')} aria-label={activityOn ? 'Live Activity on' : 'Live Activity'} aria-pressed={activityOn} data-map-control="activity" onClick={() => { if (!activityOn) { setActivityOn(true) } else { setSheet('activity') } }}>
-          <Icon name="activity" size={18} />
-          {activityOn && <span className="mx-live" aria-hidden="true" />}
-        </button>
-        <button type="button" className={cls('mx-btn', drawing && 'is-lit')} aria-label="Draw an area" aria-pressed={drawing} data-map-control="draw" onClick={() => { setSheet(null); setOpenEvent(null); setDrawing((v) => !v) }}>
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M7 18.5c-2.6-1.2-4-3.2-4-5.5C3 8.6 7 5 12 5s9 3.6 9 8c0 4.1-3.6 7.3-8.4 7.9" strokeDasharray="0.1 3.6" />
-            <path d="M7 18.5c0 1.6 1.2 2.5 2.6 2.5 1.2 0 2-.7 2-1.7 0-1.4-1.6-2-3.1-1.6-.6.2-1.1.5-1.5.8Z" />
-            <path d="M9.6 21c-.3 1-.9 1.6-1.8 2" />
-          </svg>
-        </button>
-        <button type="button" className="mx-btn" aria-label={selectedLngLat ? 'Center on selected property' : homeBounds ? 'Show your active sellers' : 'Show the whole country'} data-map-control="recenter" onClick={recenter}>
-          <Icon name="target" size={17} />
-        </button>
-      </div>
-
-      {isModernDesktop && (
-        <div className="mx-zoom" role="group" aria-label="Zoom and orientation">
-          <button type="button" className="mx-btn" aria-label="Zoom in" data-map-control="zoom-in" onClick={() => map?.zoomIn({ duration: reducedMotion ? 0 : 260 })}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        <div className="mx-stack" role="toolbar" aria-label="Map controls">
+          <button type="button" className="mx-btn" aria-label="Layers and map mode" data-map-control="layers" onClick={() => { setLayersTab('mode'); setSheet('layers') }}>
+            <Icon name="layers" size={18} />
           </button>
-          <button type="button" className="mx-btn" aria-label="Zoom out" data-map-control="zoom-out" onClick={() => map?.zoomOut({ duration: reducedMotion ? 0 : 260 })}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+          <button type="button" className={cls('mx-btn', filterCount > 0 && 'is-lit')} aria-label={filterCount > 0 ? `Filters, ${filterCount} active` : 'Filters'} data-map-control="filters" onClick={onOpenFilters}>
+            <Icon name="filter" size={17} />
+            {filterCount > 0 && <span className="mx-btn__badge">{filterCount}</span>}
           </button>
-          <button type="button" className={cls('mx-btn', Math.abs(bearing) > 0.5 && 'is-turned')} aria-label="Reset to north" data-map-control="north" onClick={() => map?.easeTo({ bearing: 0, pitch: 0, duration: reducedMotion ? 0 : 520 })}>
-            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style={{ transform: `rotate(${-bearing}deg)` }}>
-              <path d="M12 3.5 15 12h-6z" fill="var(--mx-critical)" />
-              <path d="M12 20.5 9 12h6z" fill="currentColor" opacity="0.55" />
+          <button type="button" className={cls('mx-btn', activityOn && 'is-lit')} aria-label={activityOn ? 'Live Activity on' : 'Live Activity'} aria-pressed={activityOn} data-map-control="activity" onClick={() => { if (!activityOn) { setActivityOn(true) } else { setSheet('activity') } }}>
+            <Icon name="activity" size={18} />
+            {activityOn && <span className="mx-live" aria-hidden="true" />}
+          </button>
+          <button type="button" className={cls('mx-btn', drawing && 'is-lit')} aria-label="Draw an area" aria-pressed={drawing} data-map-control="draw" onClick={() => { setSheet(null); setOpenEvent(null); setDrawing((v) => !v) }}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M7 18.5c-2.6-1.2-4-3.2-4-5.5C3 8.6 7 5 12 5s9 3.6 9 8c0 4.1-3.6 7.3-8.4 7.9" strokeDasharray="0.1 3.6" />
+              <path d="M7 18.5c0 1.6 1.2 2.5 2.6 2.5 1.2 0 2-.7 2-1.7 0-1.4-1.6-2-3.1-1.6-.6.2-1.1.5-1.5.8Z" />
+              <path d="M9.6 21c-.3 1-.9 1.6-1.8 2" />
             </svg>
           </button>
+          <button type="button" className="mx-btn" aria-label={selectedLngLat ? 'Center on selected property' : homeBounds ? 'Show your active sellers' : 'Show the whole country'} data-map-control="recenter" onClick={recenter}>
+            <Icon name="target" size={17} />
+          </button>
         </div>
+
+        </>
       )}
 
       {scanKey > 0 && !reducedMotion && <span key={scanKey} className="mx-scan" aria-hidden="true" style={{ backgroundImage: rampGradient(lens, '180deg') }} />}
@@ -846,7 +942,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
 
       {compId && <MapCompCard map={map} compId={compId} onClose={() => setCompId(null)} reducedMotion={reducedMotion} />}
 
-      {!cardOpen && !compId && !searchActive && (prefs.market || prefs.mapKey) && (
+      {!isModernDesktop && !cardOpen && !compId && !searchActive && (prefs.market || prefs.mapKey) && (
         <div className={cls('mx-cards', activityOn && 'has-peek')}>
           {prefs.market && <MarketPanel map={map} epoch={mapEpoch} onClose={() => setPref('market', false)} />}
           {prefs.mapKey && (
@@ -861,7 +957,7 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
         </div>
       )}
 
-      {activityOn && !cardOpen && !compId && !searchActive && (
+      {!isModernDesktop && activityOn && !cardOpen && !compId && !searchActive && (
         <button type="button" className="mx-peek" data-map-control="activity-feed" onClick={() => setSheet('activity')}>
           <span className={cls('mx-peek__dot', latest && `tier-${tierOf(latest)}`)} aria-hidden="true" />
           <span className="mx-peek__copy" key={latest?.id ?? 'none'}>

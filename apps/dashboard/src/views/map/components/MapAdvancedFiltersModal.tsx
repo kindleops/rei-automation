@@ -507,7 +507,7 @@ export function MapAdvancedFiltersModal({
   )
 }
 
-function MultiSelectField({ label, selected, onChange, loadOptions, cached }: {
+export function MultiSelectField({ label, selected, onChange, loadOptions, cached }: {
   label: string
   selected: string[]
   onChange: (values: string[]) => void
@@ -585,7 +585,7 @@ function MultiSelectField({ label, selected, onChange, loadOptions, cached }: {
   )
 }
 
-function FlagPicker({ selected, onChange, loadOptions }: {
+export function FlagPicker({ selected, onChange, loadOptions }: {
   selected: string[]
   onChange: (flags: string[]) => void; loadOptions: () => Promise<FilterOption[]>
 }) {

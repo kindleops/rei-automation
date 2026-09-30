@@ -94,7 +94,8 @@ function ensureLayers(map: maplibregl.Map) {
 
 const LAST_AREAS = new WeakMap<maplibregl.Map, GeoJSON.FeatureCollection>()
 
-export interface LensLook { style: LensStyle; blend: number }
+/** `opacity` (0.2–1, desktop Layers) scales every lens paint; absent = 1, exactly as before. */
+export interface LensLook { style: LensStyle; blend: number; opacity?: number }
 export const DEFAULT_LOOK: LensLook = { style: 'surface', blend: 0.7 }
 
 function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: LensLook = DEFAULT_LOOK) {
@@ -103,6 +104,7 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
   const areas = look.style === 'areas' && !lens.ambient
   // 0 = crisp individual dots, 1 = one melted surface.
   const b = look.style === 'dots' ? 0 : Math.min(1, Math.max(0, look.blend))
+  const o = typeof look.opacity === 'number' && Number.isFinite(look.opacity) ? Math.min(1, Math.max(0, look.opacity)) : 1
   const vis = (on: boolean) => (on ? 'visible' : 'none')
   try {
     // Execution Live: every send is its own marker, coloured by what happened
@@ -123,7 +125,7 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
         ['>=', ['get', 'v'], 0.3], '#7aa2ff',
         '#ff5a64'] as never)
       map.setPaintProperty(L_FIELD, 'circle-blur', 0.12)
-      map.setPaintProperty(L_FIELD, 'circle-opacity', 0.95)
+      map.setPaintProperty(L_FIELD, 'circle-opacity', 0.95 * o)
       map.setPaintProperty(L_FIELD, 'circle-stroke-width', ['interpolate', ['linear'], ['zoom'], 3, 0.6, 12, 1.4] as never)
       map.setPaintProperty(L_FIELD, 'circle-stroke-color', 'rgba(255,255,255,0.75)')
       map.setPaintProperty(L_FIELD, 'circle-pitch-alignment', 'map')
@@ -136,7 +138,7 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
     map.setLayoutProperty(L_AREA_LINE, 'visibility', vis(areas))
     if (areas) {
       map.setPaintProperty(L_AREA_FILL, 'fill-color', rampExpression(ramp, ['get', 't']) as never)
-      map.setPaintProperty(L_AREA_FILL, 'fill-opacity', ['interpolate', ['linear'], ['zoom'], 3, 0.5, 10, 0.42, 14, 0.28] as never)
+      map.setPaintProperty(L_AREA_FILL, 'fill-opacity', ['interpolate', ['linear'], ['zoom'], 3, 0.5 * o, 10, 0.42 * o, 14, 0.28 * o] as never)
     }
 
     // Value field: big soft discs, colour by value.
@@ -162,8 +164,8 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
     map.setPaintProperty(L_FIELD, 'circle-blur', 0.12 + b * (lens.areal ? 0.88 : 0.8))
     // Market fields stay translucent so the map (and its names) read through.
     map.setPaintProperty(L_FIELD, 'circle-opacity', (lens.areal
-      ? ['interpolate', ['linear'], ['zoom'], 3, 0.5 + (1 - b) * 0.3, 10, 0.42 + (1 - b) * 0.3, 13, 0.3]
-      : ['interpolate', ['linear'], ['zoom'], 3, 0.72 + (1 - b) * 0.2, 12.5, 0.68 + (1 - b) * 0.2, 13, 0]) as never)
+      ? ['interpolate', ['linear'], ['zoom'], 3, (0.5 + (1 - b) * 0.3) * o, 10, (0.42 + (1 - b) * 0.3) * o, 13, 0.3 * o]
+      : ['interpolate', ['linear'], ['zoom'], 3, (0.72 + (1 - b) * 0.2) * o, 12.5, (0.68 + (1 - b) * 0.2) * o, 13, 0]) as never)
     map.setPaintProperty(L_FIELD, 'circle-stroke-width', b < 0.25 ? 0.6 : 0)
     map.setPaintProperty(L_FIELD, 'circle-stroke-color', 'rgba(255,255,255,0.35)')
     map.setPaintProperty(L_FIELD, 'circle-pitch-alignment', 'map')
@@ -177,15 +179,15 @@ function styleFor(map: maplibregl.Map, lens: MapLens, fetchZoom?: number, look: 
       : ['interpolate', ['linear'], ['zoom'], 3, 14 * hm, 7, 22 * hm, 10, 30 * hm, 13, 36 * hm, 16, 48 * hm]) as never)
     map.setPaintProperty(L_HEAT, 'heatmap-color', rampExpression(ramp, ['heatmap-density'], true) as never)
     map.setPaintProperty(L_HEAT, 'heatmap-opacity', (lens.ambient
-      ? ['interpolate', ['linear'], ['zoom'], 3, 0.6, 8, 0.5, 9.5, 0]
-      : ['interpolate', ['linear'], ['zoom'], 3, 0.85, 15, 0.7, 17, 0.35]) as never)
+      ? ['interpolate', ['linear'], ['zoom'], 3, 0.6 * o, 8, 0.5 * o, 9.5, 0]
+      : ['interpolate', ['linear'], ['zoom'], 3, 0.85 * o, 15, 0.7 * o, 17, 0.35 * o]) as never)
 
     // Street level: every property glows its own value — a soft coloured
     // aura under its marker, so the marker still reads and taps as normal.
     map.setPaintProperty(L_DOTS, 'circle-radius', ['interpolate', ['linear'], ['zoom'], 12.9, 0, 13, 10, 16, 20] as never)
     map.setPaintProperty(L_DOTS, 'circle-color', rampExpression(ramp, ['get', 't']) as never)
     map.setPaintProperty(L_DOTS, 'circle-blur', 0.55)
-    map.setPaintProperty(L_DOTS, 'circle-opacity', ['interpolate', ['linear'], ['zoom'], 12.9, 0, 13.2, 0.85] as never)
+    map.setPaintProperty(L_DOTS, 'circle-opacity', ['interpolate', ['linear'], ['zoom'], 12.9, 0, 13.2, 0.85 * o] as never)
     map.setPaintProperty(L_DOTS, 'circle-pitch-alignment', 'map')
 
   } catch { /* style mid-swap */ }
@@ -215,7 +217,7 @@ export function useMapLens(map: maplibregl.Map | null, epoch: number, lens: MapL
     ensure()
     map.on('styledata', ensure)
     return () => { map.off('styledata', ensure) }
-  }, [map, epoch, lens, look.style, look.blend])
+  }, [map, epoch, lens, look.style, look.blend, look.opacity])
 
   useEffect(() => {
     if (!map) return

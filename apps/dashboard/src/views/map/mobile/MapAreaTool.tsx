@@ -235,7 +235,15 @@ export function MapAreaTool({ map, epoch, drawing, onDrawingChange, reducedMotio
     if (!map || !ring) return
     let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity
     for (const [x, y] of ring) { w = Math.min(w, x); e = Math.max(e, x); s = Math.min(s, y); n = Math.max(n, y) }
-    map.fitBounds([[w, s], [e, n]], { padding: { top: 140, bottom: 380, left: 40, right: 72 }, duration: reducedMotion ? 0 : 900 })
+    // [desktop] beside the command stack, above the bottom shelf.
+    const desk = document.documentElement.classList.contains('is-desktop-modern')
+    const box = map.getContainer()
+    map.fitBounds([[w, s], [e, n]], {
+      padding: desk
+        ? { top: 70, bottom: Math.min(340, Math.round(box.clientHeight * 0.42)), left: Math.min(460, Math.round(box.clientWidth * 0.34)), right: 80 }
+        : { top: 140, bottom: 380, left: 40, right: 72 },
+      duration: reducedMotion ? 0 : 900,
+    })
   }
 
   const s = summary

@@ -47,10 +47,15 @@ import { useCommandMapLiveActivitySettings } from './useCommandMapLiveActivitySe
 import { useCommandMapPerformanceMode } from './useCommandMapPerformanceMode'
 import { MapMobileChrome } from './mobile/MapMobileChrome'
 import { LivingMap } from './world/LivingMap'
+import { resolveDeskPinClick, type DeskPinClick } from './desktop/map-desk-model'
+import { readDeskCardPresence, requestDeskCardExpand } from './seller-card/desk-card-presence'
+import { MapDeskFilters } from './desktop/MapDeskFilters'
 import { isOwnedMapLayer } from './map-layer-ownership'
 import { selectionNeedsNudge } from './mobile/map-mobile-model'
 import './mobile/map-mobile.css'
 import './map-desktop.css'
+// [map desktop 2.0] after map-desktop.css: the desk chrome's material and layout.
+import './desktop/map-desk.css'
 import { CommandMapLiveActivityRail } from './components/CommandMapLiveActivityRail'
 import {
   buildOverlayGeoJson,
@@ -727,6 +732,35 @@ const resolveActiveSellerMapCard = (
   if (selected?.kind === 'seller') return selected
   if (hovered?.kind === 'seller') return hovered
   return null
+}
+
+/** The property a seller card stands for (card ids can be composite locators). */
+const cardPropertyIdOf = (card: MapCardState): string => {
+  if (!card || card.kind !== 'seller') return ''
+  const f = (card.feature ?? {}) as Record<string, unknown>
+  const pid = String(f.property_id ?? f.propertyId ?? '').trim()
+  if (pid) return pid
+  return card.id.startsWith('property:') ? card.id.slice('property:'.length) : ''
+}
+
+/**
+ * [map desktop 2.0] What a click on a property does to the desk card: a new
+ * property opens PREVIEW; the same property showing PREVIEW opens HALF; a card
+ * already open wider (HALF / FULL / its conversation) is kept — a click never
+ * demotes it. The card's own shape wins over our selection state (the operator
+ * can collapse or expand it from the card itself).
+ */
+const deskClickFor = (selected: MapCardState, propertyId: string, sameIdHint = false): DeskPinClick => {
+  const same = Boolean(selected && selected.kind === 'seller' && ((propertyId && cardPropertyIdOf(selected) === propertyId) || sameIdHint))
+  if (!same || !selected) return resolveDeskPinClick({ sameProperty: false, cardState: null })
+  const presence = readDeskCardPresence()
+  const known = presence && (!presence.propertyId || !propertyId || presence.propertyId === propertyId) ? presence.state : null
+  const decision = resolveDeskPinClick({ sameProperty: true, cardState: known ?? (selected.presentation === 'peek' ? 'preview' : 'half') })
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    // Dev-only, like __nexusSubject: proof harnesses read the last desk click decision.
+    ;(window as unknown as Record<string, unknown>).__nxDeskClick = { propertyId, presence, presentation: selected.presentation ?? null, decision }
+  }
+  return decision
 }
 
 const buildMapCardContainerContext = (
@@ -4044,11 +4078,32 @@ export function InboxCommandMap({
     soundFx: 'off',
     mapAtmosphere: 'clean',
   })
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
   const isMobileRef = useRef(isMobile)
   useEffect(() => {
     isMobileRef.current = isMobile
   }, [isMobile])
+  /** [map desktop 2.0] The desk's click contract (PREVIEW → HALF) reads this from map handlers. */
+  const isModernDesktopRef = useRef(isModernDesktop)
+  isModernDesktopRef.current = isModernDesktop
+  /**
+   * [map desktop 2.0] One click = one property. Each pin family registers the same
+   * handler on several sub-layers (hit target, glass, ring, icon) and MapLibre calls
+   * it once per layer with that layer's own top feature. Near the selected property
+   * the visual layers exclude it (its gold star replaces them) while the hit target
+   * keeps it, so one click resolved to the subject AND a neighbour — last write won,
+   * and a second click on the star opened the neighbour instead of HALF. On a desk the
+   * first handler to see the click claims it (the hit target registers first).
+   */
+  const deskClaimClick = useCallback((event: unknown): boolean => {
+    if (!isModernDesktopRef.current) return true
+    const e = event as { _deskPropertyClaimed?: boolean }
+    if (e._deskPropertyClaimed) return false
+    e._deskPropertyClaimed = true
+    return true
+  }, [])
+  const deskClaimClickRef = useRef(deskClaimClick)
+  deskClaimClickRef.current = deskClaimClick
   const [dockTier, setDockTier] = useState<'mini' | 'compact' | 'full'>(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'compact' : 'full'
   ))
@@ -4442,12 +4497,15 @@ export function InboxCommandMap({
   const activeMajorMapSurface = useMemo<
     'advanced-filters' | 'map-command' | 'live-activity' | 'property' | 'none'
   >(() => {
-    if (mapAdvancedFiltersOpen) return 'advanced-filters'
+    // [map desktop 2.0] On a desk the Filters inspector docks LEFT and the property
+    // card docks right: they share the pane instead of taking turns, so a cohort
+    // being previewed stays on the map while the operator opens its properties.
+    if (mapAdvancedFiltersOpen && !isModernDesktop) return 'advanced-filters'
     if (filtersOpen) return 'map-command'
     if (isMobile && liveActivityExpanded) return 'live-activity'
     if (activeSellerMapCard && !propertySheetYielded) return 'property'
     return 'none'
-  }, [mapAdvancedFiltersOpen, filtersOpen, isMobile, liveActivityExpanded, activeSellerMapCard, propertySheetYielded])
+  }, [mapAdvancedFiltersOpen, filtersOpen, isMobile, isModernDesktop, liveActivityExpanded, activeSellerMapCard, propertySheetYielded])
 
   /** A property sheet owns the viewport only when it wins precedence. */
   const propertySheetVisible = activeMajorMapSurface === 'property'
@@ -4474,7 +4532,8 @@ export function InboxCommandMap({
     if (!selectedMapCardId) return
     setPropertySheetYielded(false)
     setFiltersOpen(false)
-    setMapAdvancedFiltersOpen(false)
+    // [map desktop 2.0] the desk's left Filters inspector stays open beside the card.
+    if (!isModernDesktopRef.current) setMapAdvancedFiltersOpen(false)
   }, [selectedMapCardId])
 
   /**
@@ -4500,7 +4559,10 @@ export function InboxCommandMap({
         // conversation); the PREVIEW capsule rides its pin and never moves the camera.
         const dock = document.querySelector('.smc-dock') as HTMLElement | null
         const w = propertySheetVisible && dock ? dock.getBoundingClientRect().width : 0
-        const right = w > 0 ? Math.round(w + 28) : 0
+        // [map desktop 2.0] In a narrow pane the dock takes the column beside the rail;
+        // framing the property in the sliver left over would only shove the map aside.
+        const paneW = map.getContainer().clientWidth
+        const right = w > 0 && paneW - w - 28 >= 180 ? Math.round(w + 28) : 0
         if (Math.abs(right - appliedRightPaddingRef.current) < 24 && appliedBottomPaddingRef.current === 0) return
         appliedRightPaddingRef.current = right
         appliedBottomPaddingRef.current = 0
@@ -4623,17 +4685,21 @@ export function InboxCommandMap({
     setFiltersOpen(false)
     setMapAdvancedFiltersOpen(true)
     // Yield, don't clear: the property stays selected and its pin stays highlighted.
-    setPropertySheetYielded(true)
+    // [map desktop 2.0] A desk has room for both: the card stays docked right.
+    if (!isModernDesktopRef.current) setPropertySheetYielded(true)
   }, [])
 
-  const applyMapFilterToken = useCallback((token: string | null, activeRuleCount: number, matchingProperties?: number | null) => {
+  const applyMapFilterToken = useCallback((token: string | null, activeRuleCount: number, matchingProperties?: number | null, opts?: { keepCamera?: boolean }) => {
     propertyUniverseAbortRef.current?.abort()
     appliedMapFilterTokenRef.current = token
     setAppliedMapFilterToken(token)
     setAppliedMasterFilterRuleCount(activeRuleCount)
     const map = mapRef.current
     if (isStyleSafe(map)) {
-      if (token && map.getZoom() < MAP_ZOOM_BANDS.cityMin) {
+      // The desk keeps its camera: its market bubbles and spatial clusters are
+      // filtered at every zoom (and its unfilterable dots pause), so the cohort
+      // reads without being flown to city level.
+      if (token && map.getZoom() < MAP_ZOOM_BANDS.cityMin && !opts?.keepCamera) {
         map.easeTo({ zoom: 10.5, duration: 720 })
         setMapFilterStatusMessage('Zoomed to city level — filtered property pins are visible at zoom 9+')
       } else if (token) {
@@ -4656,7 +4722,7 @@ export function InboxCommandMap({
         masterFilterActive: Boolean(token),
       })
       map.triggerRepaint()
-      if (token && map.getZoom() < MAP_ZOOM_BANDS.cityMin) {
+      if (token && map.getZoom() < MAP_ZOOM_BANDS.cityMin && !opts?.keepCamera) {
         map.once('zoomend', () => {
           if (!isStyleSafe(map) || !appliedMapFilterTokenRef.current) return
           ensurePropertyTileSourceAndLayers(map, activeThemeRef.current.id, anchor, appliedMapFilterTokenRef.current)
@@ -4693,6 +4759,53 @@ export function InboxCommandMap({
       })
     }
   }, [sellerPinLayers.sellerPins])
+
+  /**
+   * [map desktop 2.0] The Filters inspector: PREVIEW a cohort on the map while
+   * the inspector stays open, APPLY it (the inspector collapses to a capsule),
+   * or close without applying — the map returns to whatever was applied before.
+   * The same filter engine and tile route as the phone; no new write path.
+   */
+  const [appliedMapFilterMatching, setAppliedMapFilterMatching] = useState<number | null>(null)
+  const appliedFilterSnapshotRef = useRef<{ token: string; rules: number; matching: number | null } | null>(null)
+  const deskFilterPreviewRef = useRef<string | null>(null)
+  const [deskFilterPreviewing, setDeskFilterPreviewing] = useState(false)
+  const previewDeskFilter = useCallback((token: string, rules: number, matching: number | null) => {
+    applyMapFilterToken(token, rules, matching, { keepCamera: true })
+    deskFilterPreviewRef.current = token
+    setDeskFilterPreviewing(true)
+  }, [applyMapFilterToken])
+  const applyDeskFilter = useCallback((payload: { token: string | null; activeRuleCount: number; matchingProperties: number | null; draft: MapAppliedFilterDraft }) => {
+    setAppliedMapFilterDraft(payload.draft)
+    applyMapFilterToken(payload.token, payload.activeRuleCount, payload.matchingProperties, { keepCamera: true })
+    appliedFilterSnapshotRef.current = payload.token ? { token: payload.token, rules: payload.activeRuleCount, matching: payload.matchingProperties } : null
+    setAppliedMapFilterMatching(payload.token ? payload.matchingProperties : null)
+    deskFilterPreviewRef.current = null
+    setDeskFilterPreviewing(false)
+  }, [applyMapFilterToken])
+  const discardDeskFilterPreview = useCallback(() => {
+    if (!deskFilterPreviewRef.current) return
+    deskFilterPreviewRef.current = null
+    setDeskFilterPreviewing(false)
+    const applied = appliedFilterSnapshotRef.current
+    applyMapFilterToken(applied?.token ?? null, applied?.rules ?? 0, applied?.matching ?? null, { keepCamera: true })
+  }, [applyMapFilterToken])
+  const clearDeskFilter = useCallback(() => {
+    clearMapFilterToken()
+    appliedFilterSnapshotRef.current = null
+    deskFilterPreviewRef.current = null
+    setDeskFilterPreviewing(false)
+    setAppliedMapFilterMatching(null)
+  }, [clearMapFilterToken])
+  const closeDeskFilters = useCallback(() => {
+    setMapAdvancedFiltersOpen(false)
+    discardDeskFilterPreview()
+  }, [discardDeskFilterPreview])
+  // However the inspector closes (Escape, another tool, a new subject), a cohort
+  // that was only previewed never stays on the map as if it had been applied.
+  useEffect(() => {
+    if (!mapAdvancedFiltersOpen) discardDeskFilterPreview()
+  }, [mapAdvancedFiltersOpen, discardDeskFilterPreview])
   const activeThemeDefinition = useMemo(() => getCommandMapTheme(mapStyleMode), [mapStyleMode])
   const mapThemeStyle = useMemo(
     () => ({
@@ -6841,6 +6954,7 @@ export function InboxCommandMap({
 
         const handlePropertyUniversePinClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
           ;(e as { _clickHandled?: boolean })._clickHandled = true
+          if (!deskClaimClickRef.current(e)) return
           const feature = e.features?.[0]
           if (!feature?.properties) return
           const props = feature.properties as Record<string, unknown>
@@ -6860,10 +6974,21 @@ export function InboxCommandMap({
             sourceView: 'map',
             intent: 'open_seller',
           })
+          // [map desktop 2.0] first click → PREVIEW; same property in PREVIEW → HALF; wider → kept.
+          const deskSelected = isModernDesktopRef.current ? selectedMapCardRef.current : null
+          const deskDecision = isModernDesktopRef.current ? deskClickFor(deskSelected, propertyId) : null
+          if (deskDecision === 'keep') return
+          if (deskDecision === 'promote' && deskSelected) {
+            setHoveredMapCard(null)
+            setSelectedMapCard({ ...deskSelected, presentation: 'detail' })
+            requestDeskCardExpand(propertyId)
+            return
+          }
           setHoveredMapCard(null)
           setSelectedMapCard({
             kind: 'seller',
             intent: 'selected',
+            ...(deskDecision === 'preview' ? { presentation: 'peek' as const } : {}),
             id: propertyId,
             anchor,
             coordinates,
@@ -6937,6 +7062,7 @@ export function InboxCommandMap({
         ]
         const handlePropertyTilePinClick = (e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
           ;(e as { _clickHandled?: boolean })._clickHandled = true
+          if (!deskClaimClickRef.current(e)) return
           const feature = e.features?.[0]
           if (!feature?.properties) return
           const props = feature.properties as Record<string, unknown>
@@ -6957,10 +7083,21 @@ export function InboxCommandMap({
             sourceView: 'map',
             intent: 'open_seller',
           })
+          // [map desktop 2.0] first click → PREVIEW; same property in PREVIEW → HALF; wider → kept.
+          const deskSelected = isModernDesktopRef.current ? selectedMapCardRef.current : null
+          const deskDecision = isModernDesktopRef.current ? deskClickFor(deskSelected, propertyId) : null
+          if (deskDecision === 'keep') return
+          if (deskDecision === 'promote' && deskSelected) {
+            setHoveredMapCard(null)
+            setSelectedMapCard({ ...deskSelected, presentation: 'detail' })
+            requestDeskCardExpand(propertyId)
+            return
+          }
           setHoveredMapCard(null)
           setSelectedMapCard({
             kind: 'seller',
             intent: 'selected',
+            ...(deskDecision === 'preview' ? { presentation: 'peek' as const } : {}),
             id: propertyId,
             anchor,
             coordinates,
@@ -7395,6 +7532,7 @@ export function InboxCommandMap({
 
       const handlePinClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         ;(event as any)._clickHandled = true
+        if (!deskClaimClickRef.current(event)) return
         const feature = event.features?.[0]
         if (!feature) return
         /**
@@ -7453,7 +7591,31 @@ export function InboxCommandMap({
           ? (existingSeller.id === id || (Boolean(propertyId) && existingPropertyId === propertyId))
           : false
 
-        if (mobile) {
+        if (isModernDesktopRef.current) {
+          // [map desktop 2.0] The phone branch below re-created a hover card on a
+          // click at a selected property — on a desk that demoted an open card back
+          // to a hover that vanished on mouse-leave. Desk contract instead: first
+          // click → PREVIEW, same property in PREVIEW → HALF, wider → kept.
+          const deskSelected = selectedMapCardRef.current?.kind === 'seller' ? selectedMapCardRef.current : null
+          const deskDecision = deskClickFor(deskSelected, propertyId, Boolean(deskSelected && deskSelected.id === id))
+          if (deskDecision === 'keep') return
+          setHoveredMapCard(null)
+          if (deskDecision === 'promote' && deskSelected) {
+            setSelectedMapCard({ ...deskSelected, presentation: 'detail' })
+            requestDeskCardExpand(propertyId || null)
+            return
+          }
+          setSelectedMapCard({
+            kind: 'seller',
+            intent: 'selected',
+            presentation: 'peek',
+            id,
+            anchor,
+            coordinates,
+            feature: sellerRecord,
+            containerSize,
+          })
+        } else if (mobile) {
           if (isSameProperty && existingSeller?.intent === 'hover') {
             setSelectedMapCard({ ...existingSeller, intent: 'selected', anchor, containerSize, coordinates })
             setHoveredMapCard(null)
@@ -7670,6 +7832,7 @@ export function InboxCommandMap({
 
       const handleSellerPinClick = (event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => {
         ;(event as any)._clickHandled = true
+        if (!deskClaimClickRef.current(event)) return
         const feature = event.features?.[0]
         if (!feature?.properties) return
         const props = sanitizeSellerPinRecord(feature.properties as unknown as Partial<CommandMapSellerPin>)
@@ -7726,7 +7889,19 @@ export function InboxCommandMap({
           containerSize,
         }
 
-        if (mobile) {
+        if (isModernDesktopRef.current) {
+          // [map desktop 2.0] first click → PREVIEW; same property in PREVIEW → HALF; wider → kept.
+          const deskSelected = selectedMapCardRef.current?.kind === 'seller' ? selectedMapCardRef.current : null
+          const deskDecision = deskClickFor(deskSelected, propertyId, Boolean(deskSelected && deskSelected.id === cardId))
+          if (deskDecision === 'keep') return
+          setHoveredMapCard(null)
+          if (deskDecision === 'promote' && deskSelected) {
+            setSelectedMapCard({ ...deskSelected, presentation: 'detail' })
+            requestDeskCardExpand(propertyId)
+            return
+          }
+          setSelectedMapCard({ ...nextCard, presentation: 'peek' })
+        } else if (mobile) {
           if (existingSeller?.id === cardId && existingSeller.intent === 'hover') {
             setSelectedMapCard({ ...existingSeller, ...nextCard, intent: 'selected' })
             setHoveredMapCard(null)
@@ -9813,10 +9988,24 @@ export function InboxCommandMap({
         })
       }
 
+      // [map desktop 2.0] a dot, a search result or "Show on map" follows the same
+      // click contract as a pin: PREVIEW first, the same property again → HALF.
+      const deskSelected = isModernDesktopRef.current && selectedMapCardRef.current?.kind === 'seller' ? selectedMapCardRef.current : null
+      const deskDecision = isModernDesktopRef.current
+        ? deskClickFor(deskSelected, activityPropertyId, Boolean(deskSelected && deskSelected.id === event.targetId))
+        : null
+      if (deskDecision === 'keep') return
+      if (deskDecision === 'promote' && deskSelected) {
+        setHoveredMapCard(null)
+        setSelectedMapCard({ ...deskSelected, presentation: 'detail' })
+        requestDeskCardExpand(activityPropertyId || null)
+        return
+      }
       setHoveredMapCard(null)
       setSelectedMapCard({
         kind: 'seller',
         intent: 'selected',
+        ...(deskDecision === 'preview' ? { presentation: 'peek' as const } : {}),
         id: event.targetId,
         anchor,
         coordinates: resolvedCenter,
@@ -10704,6 +10893,9 @@ export function InboxCommandMap({
           onDimension={setMapDimension}
           filterCount={activeFilterCount}
           onOpenFilters={openMapAdvancedFilters}
+          filtersOpen={mapAdvancedFiltersOpen}
+          onCloseFilters={closeDeskFilters}
+          filterMatching={appliedMapFilterMatching}
           activityEvents={mobileActivityEvents}
           onSelectEvent={handleActivitySelect}
           showMapKey={showLegendPanel}
@@ -10904,16 +11096,32 @@ export function InboxCommandMap({
         </div>
       )}
 
-      <MapAdvancedFiltersModal
-        open={mapAdvancedFiltersOpen}
-        initialDraft={appliedMapFilterDraft}
-        onClose={() => setMapAdvancedFiltersOpen(false)}
-        onApply={({ token, activeRuleCount, matchingProperties, draft }) => {
-          setAppliedMapFilterDraft(draft)
-          applyMapFilterToken(token, activeRuleCount, matchingProperties)
-        }}
-        onClear={clearMapFilterToken}
-      />
+      {isModernDesktop && !commandMode ? (
+        // [map desktop 2.0] Filters as a left intelligence inspector, not a modal.
+        <MapDeskFilters
+          open={mapAdvancedFiltersOpen}
+          initialDraft={appliedMapFilterDraft}
+          appliedToken={appliedMapFilterToken}
+          appliedRules={appliedMasterFilterRuleCount}
+          appliedMatching={appliedMapFilterMatching}
+          previewing={deskFilterPreviewing}
+          onClose={closeDeskFilters}
+          onPreview={previewDeskFilter}
+          onApply={applyDeskFilter}
+          onClear={clearDeskFilter}
+        />
+      ) : (
+        <MapAdvancedFiltersModal
+          open={mapAdvancedFiltersOpen}
+          initialDraft={appliedMapFilterDraft}
+          onClose={() => setMapAdvancedFiltersOpen(false)}
+          onApply={({ token, activeRuleCount, matchingProperties, draft }) => {
+            setAppliedMapFilterDraft(draft)
+            applyMapFilterToken(token, activeRuleCount, matchingProperties)
+          }}
+          onClear={clearMapFilterToken}
+        />
+      )}
     </div>
   )
 }
