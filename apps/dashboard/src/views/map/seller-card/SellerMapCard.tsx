@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { ThreadContext } from '../../../lib/data/inboxData'
@@ -18,8 +18,13 @@ import { buildThreadFromViewModel, useSellerMapCardActions } from './useSellerMa
 import { useSellerMapCardConversation } from './useSellerMapCardConversation'
 import { SellerMapCardThreadList } from './SellerMapCardThreadList'
 import { SellerMapCardConversationSkeleton } from './SellerMapCardConversationSkeleton'
-import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
+import { openInboxDealIntelligence, openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import { translateText } from '../../../modules/inbox/translate.api'
+import { navigateToAppId, type ContextualNavigationEffects } from '../../../domain/app-registry/contextual-navigation'
+import type { AppId } from '../../../domain/app-registry/app-registry'
+import type { PropertyLocator } from '../../../domain/locator/property-locator'
+import { SellerMapCardDesk, type DeskHero, type DeskLaunch, type DeskPrimary } from './SellerMapCardDesk'
+import { buildSellerDeskModel, type DeskState, type DeskTab } from './seller-card-desk-model'
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English', es: 'Spanish', pt: 'Portuguese', fr: 'French', ht: 'Haitian Creole', zh: 'Chinese', 'zh-cn': 'Chinese',
@@ -44,7 +49,8 @@ import {
 import '../../../modules/inbox/conversation-composer-premium.css'
 import '../../../modules/inbox/conversation-live.css'
 import './seller-map-card.css'
-import { mapOverlayTarget } from '../map-overlay-host'
+import './seller-card-desktop.css'
+import { mapOverlayTarget, useMapOverlayTarget } from '../map-overlay-host'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -146,6 +152,8 @@ export const SellerMapCard = ({
   detailLoading?: boolean
 }) => {
   const { isMobile, isModernDesktop } = useBreakpoint()
+  // Re-renders once the Map pane's overlay host mounts (desktop), so the card never lands on <body>.
+  const overlayTarget = useMapOverlayTarget()
   const [cardMode, setCardMode] = useState<SellerMapCardMode>(mode)
   const [trackedMode, setTrackedMode] = useState(mode)
   const [localDraft, setLocalDraft] = useState(draftText)
@@ -155,7 +163,10 @@ export const SellerMapCard = ({
 
   if (mode !== trackedMode) {
     setTrackedMode(mode)
-    setCardMode(mode)
+    // Desktop: opening Messages from a hover PREVIEW promotes the selection (so the
+    // docked conversation can't vanish on mouse-leave); that promotion must not
+    // flip the conversation back to the card it was opened from.
+    if (!(isModernDesktop && cardMode === 'conversation' && mode === 'focus')) setCardMode(mode)
   }
   if (draftText !== trackedDraftText) {
     setTrackedDraftText(draftText)
@@ -165,6 +176,15 @@ export const SellerMapCard = ({
   const viewModel = useMemo(() => buildSellerMapCardViewModel(record), [record])
   const conversationCacheKey = viewModel.threadKey || viewModel.propertyId
   const isConversation = cardMode === 'conversation'
+  /** Desktop only: which docked size HALF/FULL (and a conversation) occupies. */
+  const [deskFull, setDeskFull] = useState(false)
+  /** Desktop only: the tab on screen in HALF/FULL. */
+  const [deskTab, setDeskTab] = useState<DeskTab | null>(null)
+  const hasRealThread = Boolean(viewModel.threadKey && !viewModel.threadKey.startsWith('property:'))
+  // Desktop reads the real thread (messages + context) only when the operator opens
+  // Activity — the same hydration the conversation face uses, cached per thread. Opening
+  // a card never costs the database a transcript nobody asked to see.
+  const deskWantsThread = isModernDesktop && cardMode === 'focus' && hasRealThread && deskTab === 'activity'
 
   const conversationThread = useMemo(
     () => buildThreadFromViewModel(viewModel, record),
@@ -178,7 +198,7 @@ export const SellerMapCard = ({
     error: conversationError,
     refresh: refreshConversation,
   } = useSellerMapCardConversation({
-    enabled: isConversation,
+    enabled: isConversation || deskWantsThread,
     thread: conversationThread,
     cacheKey: conversationCacheKey,
   })
@@ -785,48 +805,144 @@ export const SellerMapCard = ({
     </>
   )
 
-  // Desktop: the same modern card, docked as a glass inspector on the right of
-  // the Map pane — the map stays visible and interactive beside it. A peek is
-  // a compact card; opening it (or a conversation) extends the dock to full
-  // height. Escape and × step back exactly as the sheet's swipe-down does.
-  if (isModernDesktop && typeof document !== 'undefined') {
-    return createPortal(
-      <div className={cls('smc-dock', `is-${cardMode}`)} role="presentation">
-        <article
-          className={shellClassName}
+  // ── Desktop: one spatial object in three states (PREVIEW → HALF → FULL) ──
+  // PREVIEW is a capsule tethered to the pin; HALF and FULL dock right inside the
+  // Map pane. Same view model, same actions, same conversation face as the phone;
+  // only the composition differs. The phone sheet below is untouched.
+  const deskState: DeskState = cardMode === 'peek' ? 'preview' : deskFull ? 'full' : 'half'
+  const deskModel = useMemo(
+    () => (isModernDesktop ? buildSellerDeskModel(viewModel, record, { messages, context: threadContext }) : null),
+    [isModernDesktop, viewModel, record, messages, threadContext],
+  )
+  const deskHero = useMemo<DeskHero>(() => ({
+    url: heroUrl,
+    ready: heroReady,
+    loading: heroState === 'loading' && !heroFailed,
+    usingFallback,
+    aerialUrl: viewModel.property.fallbackImageUrl,
+    onError: () => { if (!usingFallback) setHeroFailed(true) },
+  }), [heroUrl, heroReady, heroState, heroFailed, usingFallback, viewModel.property.fallbackImageUrl])
+
+  const primaryRunRef = useRef(handlePrimaryAction)
+  primaryRunRef.current = handlePrimaryAction
+  const primaryBar = viewModel.actionBar.primary
+  const deskPrimary = useMemo<DeskPrimary>(() => {
+    const run = () => primaryRunRef.current()
+    if (viewModel.messagingBlocked) {
+      return { kind: 'blocked', label: primaryBar.label, state: followUpState, reason: viewModel.messagingBlockReason || primaryBar.disabledReason || 'Suppressed', run }
+    }
+    if (primaryBar.action === 'reply') return { kind: 'reply', label: 'Reply', state: 'idle', reason: null, run }
+    if (!primaryBar.enabled) return { kind: 'unavailable', label: primaryBar.label, state: followUpState, reason: primaryBar.disabledReason, run }
+    return {
+      kind: 'send',
+      label: followUpButtonLabel(followUpState, primaryBar.label, followUpError),
+      state: followUpState,
+      reason: followUpError,
+      run,
+    }
+  }, [viewModel.messagingBlocked, viewModel.messagingBlockReason, primaryBar.action, primaryBar.enabled, primaryBar.label, primaryBar.disabledReason, followUpState, followUpError])
+
+  /**
+   * Launches go through the canonical contextual navigation with an explicit
+   * locator for THIS property — never a sessionStorage guess — so each app opens
+   * aimed at it: Deal Intelligence by identity, Comps and Buyer Match by
+   * ?property_id, Entity Graph by its property path.
+   */
+  const launchDesk = (target: DeskLaunch) => {
+    if (target === 'inbox') { openInInbox(); return }
+    const effects: ContextualNavigationEffects = {
+      openDealIntelligence: (identity) => openInboxDealIntelligence(identity ?? undefined),
+      openNotifications: () => {},
+      openSettings: () => {},
+    }
+    if (target === 'campaigns') { navigateToAppId('campaign-command', effects, null, 'switch'); return }
+    const locator: PropertyLocator = {
+      propertyId: viewModel.propertyId || null,
+      threadKey: inboxThreadKey,
+      masterOwnerId: viewModel.masterOwner.id,
+      prospectId: deskModel?.links.prospectId ?? null,
+      opportunityId: null,
+      address: viewModel.property.address,
+      setAt: Date.now(),
+    }
+    const app: AppId = target === 'deal' ? 'deal-intelligence' : target === 'comps' ? 'comp-intelligence' : target === 'buyers' ? 'buyer-match' : 'entity-graph'
+    navigateToAppId(app, effects, locator, 'contextual')
+  }
+
+  const deskRef = useRef({
+    expand: () => {},
+    full: () => {},
+    half: () => {},
+    collapse: () => {},
+    conversation: () => {},
+    look: () => {},
+    launch: (target: DeskLaunch) => { void target },
+  })
+  deskRef.current = {
+    expand: () => { setDeskFull(false); setCardMode('focus'); setSheetSnap('half'); onPeekToFocus?.() },
+    full: () => { setDeskFull(true); setCardMode('focus') },
+    half: () => setDeskFull(false),
+    collapse: () => setCardMode('peek'),
+    conversation: () => {
+      // From a hover preview the selection is promoted first, so the docked
+      // conversation can't be dismissed by the pointer leaving it.
+      if (cardMode === 'peek') { setDeskFull(false); onPeekToFocus?.() }
+      openConversation()
+    },
+    look: () => setLookAroundOpen(true),
+    launch: launchDesk,
+  }
+  const onDeskExpand = useCallback(() => deskRef.current.expand(), [])
+  const onDeskFull = useCallback(() => deskRef.current.full(), [])
+  const onDeskHalf = useCallback(() => deskRef.current.half(), [])
+  const onDeskCollapse = useCallback(() => deskRef.current.collapse(), [])
+  const onDeskConversation = useCallback(() => deskRef.current.conversation(), [])
+  const onDeskLook = useCallback(() => deskRef.current.look(), [])
+  const onDeskLaunch = useCallback((target: DeskLaunch) => deskRef.current.launch(target), [])
+  // The parent hands a fresh onClose every render (it re-renders on each map move);
+  // a stable proxy keeps the memoized faces from re-rendering while the camera eases.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  const onDeskClose = useCallback(() => closeRef.current?.(), [])
+
+  if (isModernDesktop && overlayTarget && deskModel) {
+    return (
+      <>
+        <SellerMapCardDesk
+          host={overlayTarget}
+          state={deskState}
+          conversation={isConversation}
+          full={deskFull}
+          anchor={anchor}
+          viewModel={viewModel}
+          model={deskModel}
+          hero={deskHero}
+          detailLoading={detailLoading}
+          // The shared hook only flags loading on a key change, so "enabled, nothing back
+          // yet" (no context, no error) also counts as loading for the Activity feed.
+          threadLoading={deskWantsThread && (conversationLoading || (!conversationError && !threadContext))}
+          threadError={deskWantsThread ? conversationError : null}
+          primary={deskPrimary}
+          canMessage={!viewModel.messagingBlocked}
+          canLookAround={canLookAround}
+          reducedMotion={Boolean(prefersReducedMotion)}
+          conversationNode={isConversation ? (
+            <article className={shellClassName} aria-label="Seller message composer">{shellInner}</article>
+          ) : null}
+          onExpand={onDeskExpand}
+          onFull={onDeskFull}
+          onHalf={onDeskHalf}
+          onCollapse={onDeskCollapse}
+          onClose={onClose ? onDeskClose : undefined}
+          onOpenConversation={onDeskConversation}
+          onLookAround={onDeskLook}
+          onLaunch={onDeskLaunch}
           onMouseEnter={onMouseEnter}
           onMouseLeave={onMouseLeave}
-          onClick={(event) => {
-            event.stopPropagation()
-            const target = event.target as HTMLElement | null
-            if (isPeek && !isConversation && !target?.closest('button, a, input, textarea, select, [role="button"], [data-no-expand]')) {
-              setCardMode('focus')
-              setSheetSnap('half')
-              onPeekToFocus?.()
-            }
-          }}
-          role={isPeek && !isConversation ? 'button' : 'region'}
-          aria-label={isPeek && !isConversation ? 'Seller property preview' : isConversation ? 'Seller message composer' : 'Seller property card'}
-        >
-          <button
-            type="button"
-            className="smc-dock__close"
-            aria-label={isConversation ? 'Back to property' : 'Close'}
-            onClick={(event) => {
-              event.stopPropagation()
-              if (isConversation) { setCardMode('focus'); return }
-              onClose?.()
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-              {isConversation ? <path d="M15 5l-7 7 7 7" /> : <path d="M6 6l12 12M18 6 6 18" />}
-            </svg>
-          </button>
-          {shellInner}
-        </article>
+          onVisibleTab={setDeskTab}
+        />
         {lookAroundOverlay}
-      </div>,
-      mapOverlayTarget(),
+      </>
     )
   }
 

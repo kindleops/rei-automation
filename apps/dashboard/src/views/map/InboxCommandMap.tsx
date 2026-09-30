@@ -4496,13 +4496,26 @@ export function InboxCommandMap({
       // Desktop: the card docks on the RIGHT of the Map pane — frame the map beside
       // it, not above a sheet that isn't there.
       if (document.documentElement.classList.contains('is-desktop-modern')) {
+        // [seller card] `.smc-dock` exists only for HALF/FULL (and the docked
+        // conversation); the PREVIEW capsule rides its pin and never moves the camera.
         const dock = document.querySelector('.smc-dock') as HTMLElement | null
         const w = propertySheetVisible && dock ? dock.getBoundingClientRect().width : 0
         const right = w > 0 ? Math.round(w + 28) : 0
         if (Math.abs(right - appliedRightPaddingRef.current) < 24 && appliedBottomPaddingRef.current === 0) return
         appliedRightPaddingRef.current = right
         appliedBottomPaddingRef.current = 0
-        map.easeTo({ padding: { top: 0, right, bottom: 0, left: 0 }, duration: 420 })
+        // [seller card] A property the dock would cover (or pin to an edge) is brought
+        // into the free map beside it; one already clear of the dock stays put.
+        const coords = right > 0 ? resolveActiveSellerMapCard(hoveredMapCardRef.current, selectedMapCardRef.current)?.coordinates : null
+        let center: [number, number] | undefined
+        if (coords) {
+          try {
+            const p = map.project(coords)
+            const box = map.getContainer()
+            if (p.x > box.clientWidth - right - 48 || p.x < 48 || p.y < 72 || p.y > box.clientHeight - 72) center = coords
+          } catch { /* style reloading */ }
+        }
+        map.easeTo({ padding: { top: 0, right, bottom: 0, left: 0 }, ...(center ? { center } : {}), duration: 420 })
         return
       }
       const sheet = document.querySelector('.smc-shell') as HTMLElement | null
@@ -4514,7 +4527,14 @@ export function InboxCommandMap({
       map.easeTo({ padding: { top: 0, right: 0, bottom: target, left: 0 }, duration: 420 })
     }
     const raf = requestAnimationFrame(measure)
-    return () => cancelAnimationFrame(raf)
+    // [seller card] The desktop card changes shape on its own (Preview ↔ Half ↔ Full)
+    // without the selection changing; it announces each settled geometry.
+    const onDockGeometry = () => requestAnimationFrame(measure)
+    window.addEventListener('nexus:smc-dock-geometry', onDockGeometry)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('nexus:smc-dock-geometry', onDockGeometry)
+    }
   }, [propertySheetVisible, activeSellerMapCard?.intent, isMobile, mapInstanceEpoch])
 
   const activeSellerCardHydrationKey = activeSellerMapCard

@@ -294,85 +294,8 @@ html.is-desktop-modern .mx-overlay-host .mx-areacard {
 }
 html.is-desktop-modern .mx-overlay-host .mx-focusset { top: calc(var(--mxd-gap) + 2px); }
 
-/* ── Seller card → docked inspector ───────────────────────────────────────── */
-html.is-desktop-modern .smc-dock {
-  position: absolute;
-  top: var(--mxd-gap, 14px);
-  right: var(--mxd-gap, 14px);
-  width: var(--mxd-dock-w, 408px);
-  max-width: calc(100% - 120px);
-  max-height: calc(100% - var(--mxd-gap, 14px) * 2);
-  z-index: 6;
-  display: flex;
-  flex-direction: column;
-  animation: mxd-dock-in 0.34s var(--mx-ease, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
-}
-html.is-desktop-modern .smc-dock.is-focus,
-html.is-desktop-modern .smc-dock.is-conversation { bottom: var(--mxd-gap, 14px); }
-html.is-desktop-modern .smc-dock > .smc-shell.is-mobile-sheet {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.012) 30%), rgba(11, 14, 21, 0.86);
-  -webkit-backdrop-filter: blur(34px) saturate(180%);
-  backdrop-filter: blur(34px) saturate(180%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 28px 70px -28px rgba(0, 0, 0, 0.85);
-}
-html.is-desktop-modern[data-nexus-theme='light'] .smc-dock > .smc-shell.is-mobile-sheet {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.6) 30%), rgba(252, 253, 255, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.09), inset 0 1px 0 #fff, 0 26px 60px -30px rgba(20, 32, 60, 0.45);
-}
-html.is-desktop-modern[data-nexus-theme='true_black'] .smc-dock > .smc-shell.is-mobile-sheet {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 30%), rgba(0, 0, 0, 0.88);
-}
-html.is-desktop-modern .smc-dock .smc-shell::before { display: none; }
-html.is-desktop-modern .smc-dock .smc-mobile-sheet__content {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
-html.is-desktop-modern .smc-dock .smc-mobile-sheet__scroll,
-html.is-desktop-modern .smc-dock .smc-mobile-sheet__content.is-peek {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-}
-html.is-desktop-modern .smc-dock.is-peek .smc-mobile-sheet__scroll { max-height: min(420px, calc(100vh - 200px)); }
-html.is-desktop-modern .smc-dock .smc-sticky-head { flex-shrink: 0; }
-html.is-desktop-modern .smc-dock .smc-actions { flex-shrink: 0; position: sticky; bottom: 0; z-index: 2; }
-html.is-desktop-modern .smc-dock .smc-shell.is-peek { cursor: pointer; }
-html.is-desktop-modern .smc-dock__close {
-  all: unset;
-  box-sizing: border-box;
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 8;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  min-height: 0 !important;
-  border-radius: 50%;
-  color: #fff;
-  background: rgba(8, 10, 14, 0.46);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
-  backdrop-filter: blur(12px) saturate(160%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-html.is-desktop-modern .smc-dock__close:hover { background: rgba(8, 10, 14, 0.66); }
-html.is-desktop-modern .smc-dock__close:focus-visible { box-shadow: inset 0 0 0 1px #fff, 0 0 0 3px color-mix(in srgb, var(--nexus-accent, #38bdf8) 40%, transparent); }
+/* ── Seller card: its desktop states (PREVIEW / HALF / FULL) live in
+   seller-card/seller-card-desktop.css, owned with the card. ─────────────── */
 
 @keyframes mxd-dock-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 @keyframes mxd-dock-out { to { opacity: 0; transform: translateX(10px); } }
@@ -382,7 +305,6 @@ html.is-desktop-modern .smc-dock__close:focus-visible { box-shadow: inset 0 0 0 
   html.is-desktop-modern .mx-overlay-host .mx-sheet__panel,
   html.is-desktop-modern .mx-overlay-host .mx-comp,
   html.is-desktop-modern .mx-overlay-host .mx-areacard,
-  html.is-desktop-modern .smc-dock,
   html.is-desktop-modern .mx-event,
   html.is-desktop-modern .mx-peek,
   html.is-desktop-modern .mx-zoom { animation: none !important; }
@@ -410,10 +332,6 @@ html.is-desktop-modern .mx:has(.mx-activity-sheet) .mx-peek { display: none; }
   html.is-desktop-modern .mx:has(.smc-dock) .mx-cards { display: none; }
   html.is-desktop-modern .mx .mx-peek { left: auto; right: calc(38px + 8px + var(--mxd-gap) * 2); transform: none; width: min(380px, calc(100% - 420px)); animation-name: mx-rise; }
 }
-
-/* The dock's close sits top-right; the hero's Look Around steps left of it. */
-html.is-desktop-modern .smc-dock .smc-mpeek__look { right: 46px; }
-html.is-desktop-modern .smc-dock .smc-close { display: none; }
 
 /* ── Every Map menu lives on the side: Filters + Live Activity settings ───── */
 html.is-desktop-modern .mx-overlay-host .nx-ifm-overlay--map {
