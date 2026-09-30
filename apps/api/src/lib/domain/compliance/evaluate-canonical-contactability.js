@@ -219,7 +219,7 @@ export async function evaluateCanonicalContactability(
     try {
       const { data: thread_state, error } = await supabase
         .from("inbox_thread_state")
-        .select("status,contactability_status,metadata,reply_intent")
+        .select("status,contactability_status,metadata")
         .eq("thread_key", normalized_thread)
         .maybeSingle();
       inbox_thread_state = thread_state;
