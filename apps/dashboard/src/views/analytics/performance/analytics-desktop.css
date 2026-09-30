@@ -1,34 +1,38 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   ANALYTICS · DESKTOP
-   The telemetry surface, finished as a 12-column board: the period's
-   headline figure beside its story, geography as a map with its controls
-   alongside, momentum as a full-width chart, flow and campaigns in columns.
-   Glass cards (radius 14, hairline + a 1px contact shadow), floating row
-   plates without rule lines, one data colour (the operator's accent, flat —
-   no glowing fills), tone colours only where the server marks a change good
-   or bad. Sheets become a right-side inspector inside the analytics pane.
-   Scoped to :root.is-desktop-modern; composed by the pane (container: pane).
+   ANALYTICS · DESKTOP — PREMIUM v2
+   The telemetry surface, finished as a 12-column board of liquid-glass
+   plates (--dsk-card-*: lit top edge, deep soft shadow): the period's
+   headline — "sellers replied", the page's one glowing figure — beside its
+   story, geography as a map with its controls alongside, momentum as a
+   full-width chart (a 2px accent line with a soft glow over a vertical
+   accent gradient), flow and campaigns in columns with rounded gradient
+   bars. Figures are large and tabular; tone colour appears only where the
+   server marks a change good or bad. Sheets become a right-side glass
+   inspector inside the analytics pane. Scoped to :root.is-desktop-modern;
+   composed by the pane (container: pane).
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root.is-desktop-modern :is(.anx, .anx-sheet) {
   --anxd-good: #4ade9a;
   --anxd-bad: #ff8f8f;
   --anxd-solid: color-mix(in srgb, var(--dsk-bg) 55%, rgb(var(--dsk-fill)));
-  --anxd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
-  --anxd-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12);
-  --anxd-halo: 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
-  --anxd-seg-on: rgb(255 255 255 / 0.1);
-  --anxd-seg-on-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.3);
-  --anxd-primary: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
-  --anxd-primary-hi: color-mix(in srgb, var(--dsk-accent) 44%, #16171a);
-  --anxd-primary-ink: #fff;
+  --anxd-halo: 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --anxd-well: rgb(0 0 0 / 0.2);
+  --anxd-well-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28), inset 0 0 0 1px rgb(255 255 255 / 0.05);
+  --anxd-raised: var(--dsk-chip-bg);
+  --anxd-raised-shadow: var(--dsk-chip-shadow), 0 1px 3px rgb(0 0 0 / 0.35);
+  --anxd-row-hover: rgb(255 255 255 / 0.045);
+  --anxd-grid: rgb(255 255 255 / 0.06);
+  --anxd-bar: linear-gradient(180deg, color-mix(in srgb, var(--dsk-accent) 94%, #fff 6%), color-mix(in srgb, var(--dsk-accent) 62%, transparent));
+  --anxd-bar-glow: 0 0 10px -3px color-mix(in srgb, var(--dsk-accent) 70%, transparent);
+  --anxd-figure-glow: 0 0 28px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
   --anx-ink: var(--dsk-bg);
   --anx-text: var(--dsk-ink);
   --anx-text-2: var(--dsk-ink-2);
   --anx-text-3: var(--dsk-ink-3);
   --anx-edge: var(--dsk-edge);
   --anx-edge-hi: var(--dsk-edge-hi);
-  --anx-glass: var(--dsk-glass);
+  --anx-glass: var(--dsk-card-bg);
   --anx-glass-hi: var(--dsk-glass-strong);
   --anx-track: var(--dsk-tile);
   --anx-blur: var(--dsk-blur);
@@ -49,43 +53,51 @@
 :root.is-desktop-modern[data-nexus-theme='light'] :is(.anx, .anx-sheet) {
   --anxd-good: #15803d;
   --anxd-bad: #c43b3b;
-  --anxd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
-  --anxd-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(15 17 22 / 0.08);
-  --anxd-seg-on: #fff;
-  --anxd-seg-on-shadow: 0 0 0 1px rgb(15 17 22 / 0.08), 0 1px 2px rgb(15 17 22 / 0.12);
-  --anxd-primary: color-mix(in srgb, var(--dsk-accent) 20%, #fff);
-  --anxd-primary-hi: color-mix(in srgb, var(--dsk-accent) 28%, #fff);
-  --anxd-primary-ink: #0b0c0e;
+  --anxd-well: rgb(15 17 22 / 0.05);
+  --anxd-well-shadow: inset 0 1px 2px rgb(15 17 22 / 0.06), inset 0 0 0 1px rgb(15 17 22 / 0.06);
+  --anxd-raised-shadow: var(--dsk-chip-shadow), 0 1px 3px rgb(30 40 90 / 0.14);
+  --anxd-row-hover: rgb(15 17 22 / 0.04);
+  --anxd-grid: rgb(15 17 22 / 0.06);
+  --anxd-bar-glow: 0 0 8px -3px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+  --anxd-figure-glow: 0 0 24px color-mix(in srgb, var(--dsk-accent) 32%, transparent);
 }
 
 /* ── the surface ─────────────────────────────────────────────────────────── */
 :root.is-desktop-modern .anx {
   --anxd-cap: 1360px;
   background: transparent;
-  gap: 12px;
-  padding: 24px max(28px, calc((100cqw - var(--anxd-cap)) / 2)) 56px;
+  gap: 16px;
+  padding: 32px max(36px, calc((100cqw - var(--anxd-cap)) / 2)) 64px;
   scrollbar-width: thin;
 }
 :root.is-desktop-modern .anx::before { display: none; }
 :root.is-desktop-modern .anx :is(.anx-hero__glow, .anx-geo__vignette) { display: none; }
-:root.is-desktop-modern .anx :is(.anx-panel, .anx-hero, .anx-top, .anx-geo, .anx-chapter, .anx-story__flow li, .anx-changes li, .anx-rank li, .anx-stages li, .anx-camp, .anx-chain li) {
-  animation: anxd-in 0.2s var(--dsk-ease) both !important;
-  animation-delay: 0s !important;
-}
-:root.is-desktop-modern :is(.anx, .anx-sheet) :is(.anx-eyebrow i, .anx-hero__primary strong, .anx-bottleneck, .anx-cohort li) { animation: none !important; }
-@keyframes anxd-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
-/* cards (radius 14) */
+/* first paint: plates fade and rise 8px, 40ms apart (at most eight steps) */
+@keyframes anxd-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+:root.is-desktop-modern .anx :is(.anx-top, .anx-panel, .anx-hero, .anx-geo, .anx-chapter) {
+  animation: anxd-in 0.38s var(--dsk-ease) backwards !important;
+  animation-delay: calc(min(var(--i, 0), 7) * 40ms) !important;
+}
+:root.is-desktop-modern .anx :is(.anx-story__flow li, .anx-changes li, .anx-rank li, .anx-stages li, .anx-camp, .anx-chain li, .anx-cohort li) { animation: none !important; }
+:root.is-desktop-modern .anx > .anx-hero { --i: 1; }
+:root.is-desktop-modern .anx > .anx-story { --i: 2; }
+:root.is-desktop-modern .anx > .anx-changes { --i: 3; }
+:root.is-desktop-modern .anx > :nth-child(n + 5) { --i: 4; }
+:root.is-desktop-modern .anx > :nth-child(n + 7) { --i: 5; }
+:root.is-desktop-modern .anx :is(.anx-eyebrow i, .anx-hero__primary strong, .anx-bottleneck) { animation: none !important; }
+
+/* cards (radius 16) */
 :root.is-desktop-modern .anx :is(.anx-panel, .anx-hero),
 :root.is-desktop-modern .anx .anx-geo {
   border: 0;
-  border-radius: 14px;
-  background: var(--dsk-glass);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: var(--anxd-card);
+  border-radius: 16px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
 }
-:root.is-desktop-modern .anx .anx-panel { padding: 18px; }
+:root.is-desktop-modern .anx .anx-panel { padding: 22px 24px 24px; }
 /* focus: a 1px accent line and a soft 3px halo */
 :root.is-desktop-modern :is(.anx, .anx-sheet) :is(button, summary):focus-visible {
   outline: 1px solid var(--dsk-accent);
@@ -94,30 +106,30 @@
 }
 
 /* ── type ────────────────────────────────────────────────────────────────── */
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-head { gap: 2px 12px; margin-bottom: 14px; }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-head span { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-head em { font-size: 12.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-note { max-width: 72ch; margin-top: 14px; font-size: 12.5px; line-height: 1.5; color: var(--dsk-ink-3); }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-sub { margin: 18px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-eyebrow { gap: 7px; font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-head { gap: 4px 12px; margin-bottom: 18px; }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-head span { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-head em { font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-note { max-width: 72ch; margin-top: 16px; font-size: 12.5px; line-height: 1.55; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-sub { margin: 22px 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-eyebrow { gap: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-eyebrow i { width: 6px; height: 6px; background: var(--dsk-ink-3); box-shadow: none; }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-eyebrow.is-warn i { background: var(--anxd-bad); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-eyebrow.is-warn i { background: var(--anxd-bad); box-shadow: 0 0 8px color-mix(in srgb, var(--anxd-bad) 70%, transparent); }
 /* deltas: small coloured text, never a coloured background */
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-delta { margin-left: 6px; font-size: 11.5px; font-weight: 550; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-delta { margin-left: 6px; font-size: 12px; font-weight: 560; font-variant-numeric: tabular-nums; }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-delta span { font-weight: 500; color: var(--dsk-ink-3); }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .t-neutral,
 :root.is-desktop-modern :is(.anx, .anx-sheet) .t-up { color: var(--dsk-ink-2); }
 
-/* chapter marks: a quiet index, not an editorial flourish */
-:root.is-desktop-modern .anx .anx-chapter { gap: 12px; margin: 20px 2px 0; }
-:root.is-desktop-modern .anx .anx-chapter .n { font-family: var(--dsk-font); font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-chapter .t { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; letter-spacing: -0.005em; text-transform: none; color: var(--dsk-ink); }
-:root.is-desktop-modern .anx .anx-chapter i { height: 1px; background: var(--dsk-edge); }
-:root.is-desktop-modern .anx .anx-chapter em { font-size: 12.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+/* chapter marks: a quiet index */
+:root.is-desktop-modern .anx .anx-chapter { gap: 12px; margin: 28px 2px 2px; }
+:root.is-desktop-modern .anx .anx-chapter .n { font-family: var(--dsk-font); font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-chapter .t { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; text-transform: none; color: var(--dsk-ink); }
+:root.is-desktop-modern .anx .anx-chapter i { height: 1px; background: linear-gradient(90deg, var(--dsk-edge-hi), transparent); }
+:root.is-desktop-modern .anx .anx-chapter em { font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
 
 /* ── page header ─────────────────────────────────────────────────────────── */
 :root.is-desktop-modern .anx .anx-top {
-  gap: 12px;
+  gap: 14px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -126,309 +138,328 @@
   backdrop-filter: none;
   box-shadow: none;
 }
-:root.is-desktop-modern .anx .anx-top__title h1 { margin: 6px 0 0; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; }
-/* segmented: a track with a raised active segment */
+:root.is-desktop-modern .anx .anx-top__title h1 { margin: 8px 0 0; font-family: var(--dsk-font); font-size: var(--dsk-title-size, 28px); font-weight: 650; line-height: 1.15; letter-spacing: -0.028em; }
+/* segmented controls: a recessed well with a raised glass segment */
 :root.is-desktop-modern .anx :is(.anx-ranges, .anx-tabs, .anx-seg) {
   gap: 2px;
   padding: 3px;
-  border-radius: 10px;
-  background: var(--dsk-tile);
+  border-radius: 11px;
+  background: var(--anxd-well);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  box-shadow: var(--anxd-well-shadow);
 }
 :root.is-desktop-modern .anx .anx-ranges { display: inline-flex; justify-self: start; align-self: flex-start; }
 :root.is-desktop-modern .anx :is(.anx-ranges, .anx-tabs, .anx-seg) button {
   min-height: 0 !important;
   height: 28px;
-  padding: 0 12px;
-  border-radius: 7px;
-  font-size: 12.5px !important;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px !important;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
   color: var(--dsk-ink-2);
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 :root.is-desktop-modern .anx :is(.anx-ranges, .anx-tabs, .anx-seg) button:hover { color: var(--dsk-ink); }
-:root.is-desktop-modern .anx :is(.anx-ranges, .anx-tabs, .anx-seg) button.is-on { color: var(--dsk-ink); background: var(--anxd-seg-on); box-shadow: var(--anxd-seg-on-shadow); }
+:root.is-desktop-modern .anx :is(.anx-ranges, .anx-tabs, .anx-seg) button.is-on { color: var(--dsk-ink); font-weight: 560; background: var(--anxd-raised); box-shadow: var(--anxd-raised-shadow); }
 :root.is-desktop-modern .anx .anx-seg button:disabled { opacity: 0.35; }
-/* facts as a spec line */
-:root.is-desktop-modern .anx .anx-top__meta { gap: 6px 12px; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-top__meta .fresh i { width: 6px; height: 6px; background: var(--anxd-good); box-shadow: none; }
+/* facts as a spec line; the live dot glows and breathes */
+@keyframes anxd-breathe { 0%, 100% { box-shadow: 0 0 4px 0 var(--anxd-glow-c); } 50% { box-shadow: 0 0 11px 2px var(--anxd-glow-c); } }
+:root.is-desktop-modern .anx .anx-top__meta { gap: 6px 14px; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-top__meta .fresh { gap: 7px; }
+:root.is-desktop-modern .anx .anx-top__meta .fresh i { --anxd-glow-c: color-mix(in srgb, var(--anxd-good) 70%, transparent); width: 7px; height: 7px; background: var(--anxd-good); box-shadow: 0 0 8px var(--anxd-glow-c); animation: anxd-breathe 2.4s ease-in-out infinite !important; }
 :root.is-desktop-modern .anx .anx-scope {
   min-height: 0 !important;
-  height: 24px;
+  height: 26px;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   font-size: 12.5px !important;
-  font-weight: 550;
-  background: var(--dsk-tile-hi);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  font-weight: 560;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
 }
 
-/* ── hero: the period's key figure ───────────────────────────────────────── */
-:root.is-desktop-modern .anx .anx-hero { padding: 20px; }
-:root.is-desktop-modern .anx .anx-hero__primary { gap: 12px; margin-top: 12px; }
+/* ── hero: the period's key figure carries the page's one glow ──────────── */
+:root.is-desktop-modern .anx .anx-hero { padding: 24px 24px 22px; }
+:root.is-desktop-modern .anx .anx-hero__primary { gap: 14px; margin-top: 14px; }
 :root.is-desktop-modern .anx .anx-hero__primary strong {
   font-family: var(--dsk-font);
-  font-size: 34px;
-  font-weight: 600;
+  font-size: var(--dsk-figure-size, 40px);
+  font-weight: 560;
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   background: none;
   -webkit-background-clip: border-box;
   background-clip: border-box;
   color: var(--dsk-ink);
+  text-shadow: var(--anxd-figure-glow);
 }
-:root.is-desktop-modern .anx .anx-hero__primary span { padding-bottom: 2px; font-size: 13px; font-weight: 500; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx .anx-hero__primary span .anx-delta { margin: 2px 0 0; }
-:root.is-desktop-modern .anx .anx-hero__primary:hover strong { text-decoration: underline; text-decoration-thickness: 1px; text-decoration-color: var(--dsk-edge-hi); text-underline-offset: 6px; }
+:root.is-desktop-modern .anx .anx-hero__primary span { padding-bottom: 2px; font-size: 13.5px; font-weight: 500; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .anx .anx-hero__primary span .anx-delta { margin: 3px 0 0; }
+:root.is-desktop-modern .anx .anx-hero__primary:hover strong { text-decoration: underline; text-decoration-thickness: 1px; text-decoration-color: var(--dsk-edge-hi); text-underline-offset: 7px; }
 /* the inbox shell's `.nx-premium-inbox svg { width:16px; height:16px }` outranks the
    surface's own chart sizing, collapsing both charts to a 16px sliver */
-:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) { width: 100%; max-width: none; }
-:root.is-desktop-modern .anx .anx-hero__spark { height: 48px; margin-top: 14px; }
-/* one accent series, a hairline stroke and a flat, faint fill — no glow; the
-   phone's 900px draw-in dash would end before the line does at desk scale */
-:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) .line { stroke: var(--dsk-accent); stroke-width: 1.5; stroke-dasharray: none; animation: none !important; }
-:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) path:not(.line) { fill: color-mix(in srgb, var(--dsk-accent) 7%, transparent); }
-:root.is-desktop-modern .anx .anx-hero__row { gap: 1px; margin-top: 14px; border-radius: 10px; background: var(--dsk-edge); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .anx .anx-hero__row > div { padding: 12px 14px; background: var(--anxd-solid); }
-:root.is-desktop-modern .anx .anx-hero__row b { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-hero__row span { margin-top: 4px; font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-hero__row span .anx-delta { font-size: 11.5px; }
-:root.is-desktop-modern .anx .anx-hero__meta { max-width: 72ch; margin: 14px 2px 0; font-size: 12.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) { width: 100%; max-width: none; overflow: visible; }
+:root.is-desktop-modern .anx .anx-hero__spark { height: 56px; margin-top: 16px; }
+/* charts: a 2px accent line with a soft glow over a vertical accent gradient
+   (≈28% → 0); the phone's 900px draw-in dash would end before the line at
+   desk scale, so the line is simply drawn */
+:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) .line {
+  stroke: var(--dsk-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: none;
+  animation: none !important;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--dsk-accent) 60%, transparent));
+}
+:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) stop { stop-color: var(--dsk-accent); }
+:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) stop:first-child { stop-opacity: 0.28; }
+:root.is-desktop-modern .anx :is(.anx-hero__spark, .anx-trend__svg) stop:last-child { stop-opacity: 0; }
+/* the headline's figures: glass tiles */
+:root.is-desktop-modern .anx .anx-hero__row { gap: 10px; margin-top: 18px; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
+:root.is-desktop-modern .anx .anx-hero__row > div { padding: 14px 16px 12px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .anx .anx-hero__row b { font-family: var(--dsk-font); font-size: 26px; font-weight: 560; line-height: 1.05; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-hero__row span { margin-top: 6px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-hero__row span .anx-delta { font-size: 12px; }
+:root.is-desktop-modern .anx .anx-hero__meta { max-width: 72ch; margin: 18px 2px 0; font-size: 12.5px; line-height: 1.55; color: var(--dsk-ink-3); }
 
 /* ── story + changes ─────────────────────────────────────────────────────── */
-:root.is-desktop-modern .anx .anx-story__flow li { gap: 12px; padding: 6px 0 6px 16px; }
-:root.is-desktop-modern .anx .anx-story__flow li::before { left: 2.5px; background: var(--dsk-edge); }
-:root.is-desktop-modern .anx .anx-story__flow li::after { left: 0; width: 6px; height: 6px; margin-top: -3px; background: var(--dsk-ink-3); box-shadow: none; }
-:root.is-desktop-modern .anx .anx-story__flow b { min-width: 52px; font-family: var(--dsk-font); font-size: 16px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-story__flow span { font-size: 13px; font-weight: 500; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx .anx-story__note { max-width: 72ch; margin-top: 8px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; color: var(--dsk-ink-2); background: var(--dsk-tile); }
-/* changes: floating row plates */
-:root.is-desktop-modern .anx .anx-changes ul { gap: 6px; }
+:root.is-desktop-modern .anx .anx-story__flow li { gap: 16px; padding: 8px 0 8px 18px; }
+:root.is-desktop-modern .anx .anx-story__flow li::before { left: 2.5px; background: linear-gradient(180deg, transparent, var(--dsk-edge-hi), transparent); }
+:root.is-desktop-modern .anx .anx-story__flow li::after { left: 0; width: 6px; height: 6px; margin-top: -3px; background: var(--dsk-accent); box-shadow: 0 0 8px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
+:root.is-desktop-modern .anx .anx-story__flow b { min-width: 64px; font-family: var(--dsk-font); font-size: 26px; font-weight: 560; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-story__flow span { font-size: 13.5px; font-weight: 500; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .anx .anx-story__note { margin-top: 10px; padding: 12px 14px; border-radius: 12px; font-size: 13px; color: var(--dsk-ink-2); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+/* changes: floating glass rows */
+:root.is-desktop-modern .anx .anx-changes ul { gap: 8px; }
 :root.is-desktop-modern .anx .anx-changes li button {
-  column-gap: 12px;
-  min-height: 48px !important;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--dsk-tile);
-  transition: background 0.12s ease;
+  column-gap: 14px;
+  min-height: 56px !important;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+  transition: filter 0.15s ease, transform 0.18s var(--dsk-ease);
 }
-:root.is-desktop-modern .anx .anx-changes li button:not(:disabled):hover { background: var(--dsk-tile-hi); }
+:root.is-desktop-modern .anx .anx-changes li button:not(:disabled):hover { filter: brightness(1.1); transform: translateY(-1px); }
 /* rows without a market to open are facts, not disabled controls: the inbox
    shell's `button:disabled { opacity: .48 }` must not grey them out */
 :root.is-desktop-modern .anx .anx-changes li button:disabled { opacity: 1; cursor: default; }
-:root.is-desktop-modern .anx .anx-changes .dot { width: 6px; height: 6px; box-shadow: none; }
+:root.is-desktop-modern .anx .anx-changes .dot { width: 7px; height: 7px; box-shadow: 0 0 8px currentColor; }
 :root.is-desktop-modern .anx .anx-changes li.t-neutral { color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-changes .t { font-size: 14px; font-weight: 550; }
+:root.is-desktop-modern .anx .anx-changes li.t-neutral .dot { box-shadow: none; }
+:root.is-desktop-modern .anx .anx-changes .t { font-size: 14px; font-weight: 560; }
 :root.is-desktop-modern .anx .anx-changes .t em { font-weight: 500; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-changes b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-changes .sub { font-size: 11.5px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-changes b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-changes .sub { margin-top: 2px; font-size: 12px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
 
 /* ── geography ───────────────────────────────────────────────────────────── */
 :root.is-desktop-modern .anx .anx-geo { overflow: hidden; }
-:root.is-desktop-modern .anx .anx-geo__map { border-radius: 14px 14px 0 0; }
-:root.is-desktop-modern .anx .anx-geo__top { left: 12px; right: 12px; top: 12px; }
+:root.is-desktop-modern .anx .anx-geo__map { border-radius: 16px 16px 0 0; }
+:root.is-desktop-modern .anx .anx-geo__top { left: 14px; right: 14px; top: 14px; }
 :root.is-desktop-modern .anx :is(.anx-crumbs, .anx-legend, .anx-round) {
   border: 0;
   background: var(--dsk-glass-strong);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.2);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--dsk-edge-hi), 0 8px 20px -10px rgb(0 0 0 / 0.6);
 }
-:root.is-desktop-modern .anx .anx-crumbs { padding: 3px; border-radius: 10px; }
-:root.is-desktop-modern .anx .anx-crumbs button { min-height: 0 !important; height: 26px; padding: 0 9px; border-radius: 7px; font-size: 12.5px !important; font-weight: 500; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx .anx-crumbs button.is-on { color: var(--dsk-ink); background: var(--anxd-seg-on); box-shadow: var(--anxd-seg-on-shadow); }
-:root.is-desktop-modern .anx .anx-geo__tools { gap: 6px; }
-:root.is-desktop-modern .anx .anx-round { width: 32px; height: 32px; min-height: 0 !important; border-radius: 8px; color: var(--dsk-ink-2); transition: color 0.15s ease; }
-:root.is-desktop-modern .anx .anx-round:hover { color: var(--dsk-ink); }
+:root.is-desktop-modern[data-nexus-theme='light'] .anx :is(.anx-crumbs, .anx-legend, .anx-round) { box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgb(15 17 22 / 0.08), 0 8px 20px -10px rgb(30 40 90 / 0.25); }
+:root.is-desktop-modern .anx .anx-crumbs { padding: 3px; border-radius: 11px; }
+:root.is-desktop-modern .anx .anx-crumbs button { min-height: 0 !important; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 13px !important; font-weight: 500; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .anx .anx-crumbs button.is-on { color: var(--dsk-ink); font-weight: 560; background: var(--anxd-raised); box-shadow: var(--anxd-raised-shadow); }
+:root.is-desktop-modern .anx .anx-geo__tools { gap: 8px; }
+:root.is-desktop-modern .anx .anx-round { width: 34px; height: 34px; min-height: 0 !important; border-radius: 10px; color: var(--dsk-ink-2); transition: color 0.18s ease, filter 0.18s ease; }
+:root.is-desktop-modern .anx .anx-round:hover { color: var(--dsk-ink); filter: brightness(1.15); }
 :root.is-desktop-modern .anx .anx-round:active { transform: none; }
 :root.is-desktop-modern .anx .anx-round svg { width: 14px !important; height: 14px !important; }
-:root.is-desktop-modern .anx .anx-legend { left: 12px; bottom: 12px; gap: 2px; padding: 10px 12px; border-radius: 10px; }
-:root.is-desktop-modern .anx .anx-legend b { font-size: 12.5px; font-weight: 550; }
-:root.is-desktop-modern .anx .anx-legend span { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--dsk-ink); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-legend em { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-legend { left: 14px; bottom: 14px; gap: 3px; padding: 12px 14px; border-radius: 12px; }
+:root.is-desktop-modern .anx .anx-legend b { font-size: 12.5px; font-weight: 560; }
+:root.is-desktop-modern .anx .anx-legend span { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--dsk-ink); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-legend em { font-size: 12px; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .anx .anx-legend em.is-2 { color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx .anx-legend em.is-2 i { background: #d9b45f; box-shadow: none; }
-:root.is-desktop-modern .anx .anx-geo__controls { padding: 18px; }
-:root.is-desktop-modern .anx .anx-metricbar { flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; overflow: visible; }
-/* filter chips (24px): tile + hairline; the selected one gets an accent hairline */
+:root.is-desktop-modern .anx .anx-legend em.is-2 i { background: #d9b45f; box-shadow: 0 0 6px rgb(217 180 95 / 0.7); }
+:root.is-desktop-modern .anx .anx-geo__controls { padding: 22px 22px 24px; }
+:root.is-desktop-modern .anx .anx-metricbar { flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; overflow: visible; }
+/* filter chips (26px): glass; the selected one lit with an accent hairline */
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-pill {
   min-height: 0 !important;
-  height: 24px;
-  padding: 0 9px;
+  height: 26px;
+  padding: 0 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   font-size: 12.5px !important;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
   color: var(--dsk-ink-2);
-  background: var(--dsk-tile);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
-  transition: background 0.15s ease, color 0.15s ease;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+  transition: color 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
 }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-pill:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-pill:hover { color: var(--dsk-ink); filter: brightness(1.12); }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-pill:active { transform: none; }
-:root.is-desktop-modern :is(.anx, .anx-sheet) :is(.anx-pill.is-on, .anx-pill.is-gold.is-on) { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, var(--dsk-edge-hi)); }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-pill.is-sm { height: 24px; padding: 0 9px; font-size: 12.5px !important; }
-:root.is-desktop-modern .anx .anx-segrow { gap: 8px; margin-top: 14px; }
+:root.is-desktop-modern :is(.anx, .anx-sheet) :is(.anx-pill.is-on, .anx-pill.is-gold.is-on) { color: var(--dsk-ink); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 14px -6px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-pill.is-sm { height: 26px; padding: 0 10px; font-size: 12.5px !important; }
+:root.is-desktop-modern .anx .anx-segrow { gap: 10px; margin-top: 16px; }
 :root.is-desktop-modern .anx .anx-seg button { padding: 0 6px; }
-:root.is-desktop-modern .anx .anx-second { gap: 6px; margin-top: 14px; }
-:root.is-desktop-modern .anx .anx-second > span { margin-right: 2px; font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-/* the ranking: floating plates; the selected market = plate + hairline + a 2px accent bar */
-:root.is-desktop-modern .anx .anx-rank { gap: 4px; margin-top: 14px; }
-:root.is-desktop-modern .anx .anx-rank button { grid-template-columns: 18px minmax(0, 1fr) auto; min-height: 38px !important; padding: 0 12px; border-radius: 10px; background: var(--dsk-tile); transition: background 0.12s ease; }
-:root.is-desktop-modern .anx .anx-rank button:hover { background: var(--dsk-tile-hi); }
-:root.is-desktop-modern .anx .anx-rank button.is-on { background: var(--dsk-tile-hi); box-shadow: inset 2px 0 0 var(--dsk-accent), inset 0 0 0 1px var(--dsk-edge-hi); }
-:root.is-desktop-modern .anx .anx-rank .n { font-family: var(--dsk-font); font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-rank .t { font-size: 14px; font-weight: 550; }
-:root.is-desktop-modern .anx .anx-rank b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-rank button > i { background: color-mix(in srgb, var(--dsk-accent) 10%, transparent); }
+:root.is-desktop-modern .anx .anx-second { gap: 8px; margin-top: 16px; }
+:root.is-desktop-modern .anx .anx-second > span { margin-right: 2px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+/* the ranking: glass rows; the selected market = a 2px accent bar + hairline */
+:root.is-desktop-modern .anx .anx-rank { gap: 6px; margin-top: 16px; }
+:root.is-desktop-modern .anx .anx-rank button { grid-template-columns: 20px minmax(0, 1fr) auto; min-height: 42px !important; padding: 0 14px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); transition: filter 0.15s ease; }
+:root.is-desktop-modern .anx .anx-rank button:hover { filter: brightness(1.1); }
+:root.is-desktop-modern .anx .anx-rank button.is-on { box-shadow: var(--dsk-chip-shadow), inset 2px 0 0 var(--dsk-accent), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent); }
+:root.is-desktop-modern .anx .anx-rank .n { font-family: var(--dsk-font); font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-rank .t { font-size: 14px; font-weight: 560; }
+:root.is-desktop-modern .anx .anx-rank b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-rank button > i { background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 22%, transparent), color-mix(in srgb, var(--dsk-accent) 5%, transparent)); }
 
-/* buttons: secondary tile + hairline, sized to their words */
+/* buttons: secondary glass, sized to their words; primary glossy */
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn {
   width: auto;
   min-height: 0 !important;
-  height: 32px;
-  margin-top: 16px;
-  padding: 0 12px;
-  gap: 7px;
+  height: 34px;
+  margin-top: 18px;
+  padding: 0 14px;
+  gap: 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 13px !important;
-  font-weight: 550;
+  font-weight: 560;
   color: var(--dsk-ink);
-  background: var(--dsk-tile);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow), 0 1px 2px rgb(0 0 0 / 0.18);
+  transition: filter 0.18s ease, transform 0.18s var(--dsk-ease), box-shadow 0.18s ease;
 }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn:hover { background: var(--dsk-tile-hi); }
+:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn:active { transform: none; }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn svg { width: 14px !important; height: 14px !important; }
 :root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn.is-primary {
-  color: var(--anxd-primary-ink);
-  background: var(--anxd-primary);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 1px 2px rgb(0 0 0 / 0.12);
+  font-weight: 600;
+  color: var(--dsk-primary-ink);
+  background: var(--dsk-primary-bg);
+  box-shadow: var(--dsk-primary-shadow);
 }
-:root.is-desktop-modern :is(.anx, .anx-sheet) .anx-btn.is-primary:hover { background: var(--anxd-primary-hi); }
 
 /* ── trend ───────────────────────────────────────────────────────────────── */
 :root.is-desktop-modern .anx .anx-tabs { width: max-content; max-width: 100%; }
-:root.is-desktop-modern .anx .anx-trend__read { gap: 8px; margin-top: 16px; }
-:root.is-desktop-modern .anx .anx-trend__read b { font-family: var(--dsk-font); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-tabs button { padding: 0 12px; }
+:root.is-desktop-modern .anx .anx-trend__read { gap: 10px; margin-top: 20px; }
+:root.is-desktop-modern .anx .anx-trend__read b { font-family: var(--dsk-font); font-size: 28px; font-weight: 560; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 :root.is-desktop-modern .anx .anx-trend__read span { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-trend__svg { height: 140px; }
-:root.is-desktop-modern .anx .anx-trend__svg .grid { stroke: var(--dsk-edge); }
+:root.is-desktop-modern .anx .anx-trend__svg { height: 150px; margin-top: 8px; }
+:root.is-desktop-modern .anx .anx-trend__svg .grid { stroke: var(--anxd-grid); }
 :root.is-desktop-modern .anx .anx-trend__svg .cursor { stroke: var(--dsk-ink-3); stroke-dasharray: 2 3; }
 :root.is-desktop-modern .anx .anx-trend__svg .knob { fill: var(--dsk-accent); stroke: var(--anxd-solid); stroke-width: 2; }
-:root.is-desktop-modern .anx .anx-trend__axis { margin-top: 4px; font-size: 11.5px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-trend__axis { margin-top: 6px; font-size: 12px; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
 
 /* ── flow ────────────────────────────────────────────────────────────────── */
-:root.is-desktop-modern .anx :is(.anx-flow__sum, .anx-grid) { gap: 8px; }
-:root.is-desktop-modern .anx :is(.anx-flow__sum > div, .anx-grid > div) { padding: 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .anx :is(.anx-flow__sum b, .anx-grid b) { margin-bottom: 4px; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx :is(.anx-flow__sum span, .anx-grid span) { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx :is(.anx-flow__sum, .anx-grid) { gap: 10px; }
+:root.is-desktop-modern .anx :is(.anx-flow__sum > div, .anx-grid > div) { padding: 16px 16px 14px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .anx :is(.anx-flow__sum b, .anx-grid b) { margin-bottom: 6px; font-family: var(--dsk-font); font-size: 26px; font-weight: 560; line-height: 1.05; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx :is(.anx-flow__sum span, .anx-grid span) { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .anx .anx-grid > div.is-warn b { color: var(--anxd-bad); }
 :root.is-desktop-modern .anx .anx-bottleneck {
   gap: 4px 12px;
   margin-top: 12px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border: 0;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--anxd-bad) 5%, var(--dsk-tile));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--anxd-bad) 26%, transparent);
-  transition: background 0.15s ease;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--anxd-bad) 7%, transparent);
+  box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--anxd-bad) 30%, transparent), 0 0 24px -12px color-mix(in srgb, var(--anxd-bad) 60%, transparent);
+  transition: filter 0.15s ease, transform 0.18s var(--dsk-ease);
 }
-:root.is-desktop-modern .anx .anx-bottleneck:hover { background: color-mix(in srgb, var(--anxd-bad) 9%, var(--dsk-tile)); }
+:root.is-desktop-modern .anx .anx-bottleneck:hover { filter: brightness(1.1); transform: translateY(-1px); }
 :root.is-desktop-modern .anx .anx-bottleneck b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; }
 :root.is-desktop-modern .anx .anx-bottleneck em { font-size: 12.5px; color: var(--dsk-ink-2); }
 :root.is-desktop-modern .anx .anx-bottleneck svg { width: 14px !important; height: 14px !important; }
-/* stages: floating row plates */
-:root.is-desktop-modern .anx .anx-stages { gap: 6px; margin-top: 14px; }
-:root.is-desktop-modern .anx .anx-stages button { gap: 6px 8px; padding: 10px 12px; border-radius: 10px; background: var(--dsk-tile); transition: background 0.12s ease; }
-:root.is-desktop-modern .anx .anx-stages button:not(:disabled):hover { background: var(--dsk-tile-hi); }
-:root.is-desktop-modern .anx .anx-stages li.is-hot button { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--anxd-bad) 40%, transparent); }
+/* stages: glass rows with rounded gradient bars */
+:root.is-desktop-modern .anx .anx-stages { gap: 8px; margin-top: 16px; }
+:root.is-desktop-modern .anx .anx-stages button { gap: 8px 10px; padding: 12px 14px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); transition: filter 0.15s ease; }
+:root.is-desktop-modern .anx .anx-stages button:not(:disabled):hover { filter: brightness(1.1); }
+:root.is-desktop-modern .anx .anx-stages li.is-hot button { box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--anxd-bad) 42%, transparent); }
 :root.is-desktop-modern .anx .anx-stages button:disabled { opacity: 1; cursor: default; }
 :root.is-desktop-modern .anx .anx-stages li.is-quiet button { opacity: 0.55; }
-:root.is-desktop-modern .anx .anx-stages .code { font-family: var(--dsk-font); font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-stages .name { font-size: 14px; font-weight: 550; }
-:root.is-desktop-modern .anx .anx-stages .live b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-stages .live em { font-size: 11.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-stages .bar { height: 3px; border-radius: 3px; background: var(--dsk-tile-hi); }
-:root.is-desktop-modern .anx .anx-stages .bar i { border-radius: 3px; background: color-mix(in srgb, var(--dsk-accent) 75%, transparent); }
+:root.is-desktop-modern .anx .anx-stages .code { font-family: var(--dsk-font); font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-stages .name { font-size: 14px; font-weight: 560; }
+:root.is-desktop-modern .anx .anx-stages .live b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-stages .live em { font-size: 12px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-stages .bar { height: 5px; border-radius: 5px; background: var(--dsk-tile-hi); overflow: visible; }
+:root.is-desktop-modern .anx .anx-stages .bar i { border-radius: 5px; background: var(--anxd-bar); box-shadow: var(--anxd-bar-glow); }
 :root.is-desktop-modern .anx .anx-stages .meta { gap: 0; }
 :root.is-desktop-modern .anx .anx-stages .meta em { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); }
 :root.is-desktop-modern .anx .anx-stages .meta em + em::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .anx .anx-stages .meta em.muted { color: var(--dsk-ink-3); }
 :root.is-desktop-modern .anx .anx-stages .meta em.warn { color: var(--anxd-bad); }
 
-/* ── campaigns: floating row plates ──────────────────────────────────────── */
-:root.is-desktop-modern .anx .anx-camp { margin-top: 8px; padding: 14px 16px; border-radius: 10px; background: var(--dsk-tile); box-shadow: none; transition: background 0.12s ease; }
-:root.is-desktop-modern .anx .anx-camp:hover { background: var(--dsk-tile-hi); }
+/* ── campaigns: glass rows, rounded gradient step bars ──────────────────── */
+:root.is-desktop-modern .anx .anx-camp { margin-top: 10px; padding: 16px 18px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); transition: filter 0.15s ease, transform 0.18s var(--dsk-ease); }
+:root.is-desktop-modern .anx .anx-camp:hover { filter: brightness(1.08); transform: translateY(-1px); }
 :root.is-desktop-modern .anx .anx-camp__head b { font-size: 14px; font-weight: 600; }
-:root.is-desktop-modern .anx .anx-camp__head span { font-family: var(--dsk-font); font-size: 12.5px; font-weight: 550; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-camp .tag { padding: 1px 6px; border: 0; border-radius: 6px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .anx .anx-camp__steps { gap: 12px; margin-top: 12px; }
-:root.is-desktop-modern .anx .anx-camp__steps i { height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
-:root.is-desktop-modern .anx .anx-camp__steps b { margin-top: 6px; font-family: var(--dsk-font); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-camp__steps span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-camp__foot { margin-top: 8px; font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-camp__head span { font-family: var(--dsk-font); font-size: 13px; font-weight: 560; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-camp .tag { height: 20px; padding: 0 7px; border: 0; border-radius: 6px; font-size: 11.5px; font-weight: 500; line-height: 20px; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+:root.is-desktop-modern .anx .anx-camp__steps { gap: 14px; margin-top: 14px; }
+:root.is-desktop-modern .anx .anx-camp__steps i { height: 5px; border-radius: 5px; background: var(--anxd-bar); box-shadow: var(--anxd-bar-glow); }
+:root.is-desktop-modern .anx .anx-camp__steps b { margin-top: 8px; font-family: var(--dsk-font); font-size: 18px; font-weight: 560; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-camp__steps span { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-camp__foot { margin-top: 10px; font-size: 12.5px; color: var(--dsk-ink-3); }
 
 /* ── down-funnel + ops ───────────────────────────────────────────────────── */
-:root.is-desktop-modern .anx .anx-chain { gap: 6px; }
-:root.is-desktop-modern .anx .anx-chain li { padding: 10px 12px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); opacity: 0.6; }
-:root.is-desktop-modern .anx .anx-chain li.is-on { opacity: 1; box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
-:root.is-desktop-modern .anx .anx-chain b { margin-bottom: 2px; font-family: var(--dsk-font); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx .anx-chain span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-split { gap: 2px; height: 8px; border-radius: 4px; }
-:root.is-desktop-modern .anx :is(.anx-split .a, .anx-split__legend .a) { background: color-mix(in srgb, var(--dsk-accent) 75%, transparent); }
-:root.is-desktop-modern .anx :is(.anx-split .o, .anx-split__legend .o) { background: var(--dsk-ink-2); }
+:root.is-desktop-modern .anx .anx-chain { gap: 8px; }
+:root.is-desktop-modern .anx .anx-chain li { padding: 12px 14px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); opacity: 0.55; }
+:root.is-desktop-modern .anx .anx-chain li.is-on { opacity: 1; box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 35%, transparent); }
+:root.is-desktop-modern .anx .anx-chain b { margin-bottom: 4px; font-family: var(--dsk-font); font-size: 20px; font-weight: 560; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-chain span { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-split { gap: 3px; height: 10px; border-radius: 5px; }
+:root.is-desktop-modern .anx .anx-split i { border-radius: 5px; }
+:root.is-desktop-modern .anx :is(.anx-split .a, .anx-split__legend .a) { background: var(--anxd-bar); box-shadow: var(--anxd-bar-glow); }
+:root.is-desktop-modern .anx :is(.anx-split .o, .anx-split__legend .o) { background: linear-gradient(180deg, color-mix(in srgb, var(--dsk-ink-2) 100%, #fff 0%), color-mix(in srgb, var(--dsk-ink-2) 60%, transparent)); }
 :root.is-desktop-modern .anx :is(.anx-split .u, .anx-split__legend .u) { background: var(--dsk-ink-3); opacity: 0.5; }
-:root.is-desktop-modern .anx .anx-split__legend { gap: 4px 16px; margin-top: 10px; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx .anx-split__legend i { width: 7px; height: 7px; border-radius: 2px; }
+:root.is-desktop-modern .anx .anx-split__legend { gap: 6px 18px; margin-top: 12px; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .anx .anx-split__legend i { width: 8px; height: 8px; border-radius: 3px; box-shadow: none; }
 /* hold reasons: a dot-separated spec line, not a row of pills */
-:root.is-desktop-modern .anx .anx-reasons { gap: 4px 0; margin-top: 12px; }
+:root.is-desktop-modern .anx .anx-reasons { gap: 6px 0; margin-top: 14px; }
 :root.is-desktop-modern .anx .anx-reasons span { gap: 5px; padding: 0; border-radius: 0; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); background: none; }
-:root.is-desktop-modern .anx .anx-reasons span + span::before { content: '·'; margin: 0 8px 0 3px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-reasons b { font-family: var(--dsk-font); font-size: 12.5px; font-weight: 600; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx .anx-reasons span + span::before { content: '·'; margin: 0 9px 0 4px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-reasons b { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
 
 /* ── method ──────────────────────────────────────────────────────────────── */
-:root.is-desktop-modern .anx .anx-method summary { min-height: 24px; font-family: var(--dsk-font); font-size: 13px; font-weight: 600; }
+:root.is-desktop-modern .anx .anx-method summary { min-height: 26px; font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 :root.is-desktop-modern .anx .anx-method summary svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-method dl { gap: 12px; margin-top: 14px; }
-:root.is-desktop-modern .anx .anx-method dt { font-size: 13px; font-weight: 600; }
-:root.is-desktop-modern .anx .anx-method dt em { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx .anx-method dd { max-width: 72ch; font-size: 12.5px; line-height: 1.5; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx .anx-method dd small { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-method dl { gap: 14px; margin-top: 18px; }
+:root.is-desktop-modern .anx .anx-method dt { font-size: 13.5px; font-weight: 600; }
+:root.is-desktop-modern .anx .anx-method dt em { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-method dd { max-width: 72ch; font-size: 13px; line-height: 1.55; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .anx .anx-method dd small { font-size: 12px; color: var(--dsk-ink-3); }
 
 /* ── calm loading + empty ────────────────────────────────────────────────── */
 :root.is-desktop-modern .anx .anx-boot { gap: 16px; }
-:root.is-desktop-modern .anx .anx-boot > div { border: 0; border-radius: 14px; background: var(--dsk-glass); box-shadow: var(--anxd-card); }
+:root.is-desktop-modern .anx .anx-boot > div { border: 0; border-radius: 16px; background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow); }
 :root.is-desktop-modern .anx .anx-boot > div::after { background: linear-gradient(100deg, transparent 25%, var(--dsk-tile) 50%, transparent 75%); animation-duration: 2.4s !important; }
-:root.is-desktop-modern .anx .anx-boot__hero { height: 200px; }
+:root.is-desktop-modern .anx .anx-boot__hero { height: 220px; }
 :root.is-desktop-modern .anx .anx-boot__hero p { font-size: 13px; font-weight: 500; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .anx .anx-boot__hero p i { background: var(--dsk-ink-3); box-shadow: none; }
-:root.is-desktop-modern .anx .anx-empty { gap: 10px; padding: 64px 16px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .anx .anx-empty { gap: 12px; padding: 72px 16px; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .anx .anx-empty > svg { width: 28px !important; height: 28px !important; color: var(--dsk-ink); opacity: 0.35; }
 :root.is-desktop-modern .anx .anx-empty p { max-width: 52ch; font-size: 13px; }
-:root.is-desktop-modern .anx .anx-empty .anx-btn { margin-top: 6px; }
+:root.is-desktop-modern .anx .anx-empty .anx-btn { margin-top: 8px; }
 
 /* ══ composition by pane width ═════════════════════════════════════════════ */
 @container pane (min-width: 760px) {
-  :root.is-desktop-modern .anx .anx-chain { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
-  :root.is-desktop-modern .anx .anx-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  :root.is-desktop-modern .anx .anx-chain { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  :root.is-desktop-modern .anx .anx-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   :root.is-desktop-modern .anx .anx-buyers .anx-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  :root.is-desktop-modern .anx .anx-changes ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; }
-  :root.is-desktop-modern .anx .anx-stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
-  :root.is-desktop-modern .anx .anx-campaigns { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); column-gap: 8px; align-content: start; }
+  :root.is-desktop-modern .anx .anx-changes ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+  :root.is-desktop-modern .anx .anx-stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  :root.is-desktop-modern .anx .anx-campaigns { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); column-gap: 10px; align-content: start; }
   :root.is-desktop-modern .anx .anx-campaigns > :is(.anx-head, .anx-note) { grid-column: 1 / -1; }
-  :root.is-desktop-modern .anx .anx-trend__svg { height: 180px; }
+  :root.is-desktop-modern .anx .anx-trend__svg { height: 190px; }
   /* at desk scale the chart stretches; the scrub cursor alone marks the day */
   :root.is-desktop-modern .anx .anx-trend__svg .knob { display: none; }
 }
@@ -439,36 +470,39 @@
     /* the root is the scroller with a definite height: rows must never be
        squeezed to fit it (overflow-hidden panels have a zero minimum) */
     grid-auto-rows: max-content;
-    column-gap: 16px;
-    row-gap: 16px;
+    column-gap: 18px;
+    row-gap: 18px;
     align-content: start;
     align-items: start;
   }
   :root.is-desktop-modern .anx > * { grid-column: 1 / -1; min-width: 0; }
-  :root.is-desktop-modern .anx > .anx-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 24px; margin-bottom: 8px; }
+  :root.is-desktop-modern .anx > .anx-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px 24px; margin-bottom: 10px; }
   :root.is-desktop-modern .anx > .anx-top .anx-top__title { grid-column: 1; }
   :root.is-desktop-modern .anx > .anx-top .anx-ranges { grid-column: 2; grid-row: 1; justify-self: end; align-self: end; }
   :root.is-desktop-modern .anx > .anx-top .anx-top__meta { grid-column: 1 / -1; }
   :root.is-desktop-modern .anx > .anx-hero { grid-column: span 7; align-self: stretch; }
   :root.is-desktop-modern .anx > .anx-story { grid-column: span 5; align-self: stretch; }
   :root.is-desktop-modern .anx > .anx-hero:not(:has(+ .anx-story)) { grid-column: 1 / -1; }
-  :root.is-desktop-modern .anx > .anx-chapter { margin-top: 20px; }
+  :root.is-desktop-modern .anx > .anx-chapter { margin-top: 28px; }
   :root.is-desktop-modern .anx > .anx-ops { grid-column: span 8; }
   :root.is-desktop-modern .anx > .anx-buyers { grid-column: span 4; }
-  /* six figures in one row only when the hero spans the board */
+  /* the down-funnel chain reads as one line across the board */
+  :root.is-desktop-modern .anx .anx-chain { grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+  /* the headline's six figures sit in one row only when the hero spans the board */
+  :root.is-desktop-modern .anx > .anx-hero .anx-hero__row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   :root.is-desktop-modern .anx > .anx-hero:not(:has(+ .anx-story)) .anx-hero__row { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  :root.is-desktop-modern .anx .anx-trend__svg { height: 220px; }
+  :root.is-desktop-modern .anx .anx-trend__svg { height: 230px; }
   /* geography: the map, its controls alongside */
-  :root.is-desktop-modern .anx .anx-geo:not(.is-full) { display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
-  :root.is-desktop-modern .anx .anx-geo:not(.is-full) .anx-geo__map { height: 480px; border-radius: 14px 0 0 14px; }
-  :root.is-desktop-modern .anx .anx-geo:not(.is-full) .anx-geo__controls { max-height: 480px; overflow-y: auto; box-shadow: inset 1px 0 0 var(--dsk-edge); scrollbar-width: thin; }
-  :root.is-desktop-modern .anx .anx-geo.is-full { display: grid; grid-template-columns: minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr); }
+  :root.is-desktop-modern .anx .anx-geo:not(.is-full) { display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+  :root.is-desktop-modern .anx .anx-geo:not(.is-full) .anx-geo__map { height: 500px; border-radius: 16px 0 0 16px; }
+  :root.is-desktop-modern .anx .anx-geo:not(.is-full) .anx-geo__controls { max-height: 500px; overflow-y: auto; box-shadow: inset 1px 0 0 var(--dsk-edge); scrollbar-width: thin; }
+  :root.is-desktop-modern .anx .anx-geo.is-full { display: grid; grid-template-columns: minmax(0, 1fr) 400px; grid-template-rows: minmax(0, 1fr); }
   :root.is-desktop-modern .anx .anx-geo.is-full .anx-geo__map { height: auto; }
   :root.is-desktop-modern .anx .anx-geo.is-full .anx-geo__controls { max-height: none; overflow-y: auto; box-shadow: inset 1px 0 0 var(--dsk-edge); }
   /* in the narrow controls column the two segmented controls stack, full width */
   :root.is-desktop-modern .anx .anx-geo .anx-segrow { grid-template-columns: minmax(0, 1fr); }
   /* flow: the counts beside the bottleneck, nine stages in three columns */
-  :root.is-desktop-modern .anx .anx-flow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 8px; }
+  :root.is-desktop-modern .anx .anx-flow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 10px; }
   :root.is-desktop-modern .anx .anx-flow > :is(.anx-head, .anx-stages, .anx-note) { grid-column: 1 / -1; }
   :root.is-desktop-modern .anx .anx-flow > .anx-bottleneck { margin-top: 0; }
   :root.is-desktop-modern .anx .anx-flow:not(:has(> .anx-bottleneck)) > .anx-flow__sum { grid-column: 1 / -1; }
@@ -477,12 +511,14 @@
 
 /* the full-screen map fills its pane, not the viewport (no phone top dock inside a pane) */
 :root.is-desktop-modern .anx .anx-geo.is-full { border-radius: 0; box-shadow: none; }
-:root.is-desktop-modern .anx .anx-geo.is-full .anx-geo__top { top: 12px; }
+:root.is-desktop-modern .anx .anx-geo.is-full .anx-geo__top { top: 14px; }
 :root.is-desktop-modern .anx .anx-geo.is-full .anx-geo__map { border-radius: 0; }
 
 /* ══ SHEETS — portaled; the inspector floats inside the analytics pane ════ */
 :root.is-desktop-modern .dsk-pane__body:has(.anx) { anchor-name: --anx-pane; }
 
+@keyframes anxd-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes anxd-panel-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 :root.is-desktop-modern .anx-sheet {
   position: fixed;
   position-anchor: --anx-pane;
@@ -496,63 +532,67 @@
   flex-direction: row;
   justify-content: flex-end;
   align-items: stretch;
-  padding: 10px;
+  padding: 12px;
   border-radius: var(--dsk-pane-radius, 12px);
   overflow: hidden;
 }
-:root.is-desktop-modern .anx-sheet .anx-sheet__scrim { background: rgb(4 5 7 / 0.22); -webkit-backdrop-filter: none; backdrop-filter: none; animation: anxd-fade 0.16s ease both; }
+:root.is-desktop-modern .anx-sheet .anx-sheet__scrim { background: rgb(4 5 7 / 0.24); -webkit-backdrop-filter: none; backdrop-filter: none; animation: anxd-fade 0.18s ease both; }
 :root.is-desktop-modern[data-nexus-theme='light'] .anx-sheet .anx-sheet__scrim { background: rgb(15 17 22 / 0.08); }
-@keyframes anxd-fade { from { opacity: 0; } to { opacity: 1; } }
 :root.is-desktop-modern .anx-sheet .anx-sheet__panel {
-  width: min(480px, 100%);
+  width: min(500px, 100%);
   max-height: none;
-  padding: 18px 20px 20px;
+  padding: 22px 24px 24px;
   border: 0;
-  border-radius: 14px;
-  background: var(--dsk-glass-strong);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 28px 70px -30px rgb(0 0 0 / 0.75), 0 2px 10px -4px rgb(0 0 0 / 0.45);
-  animation: anxd-panel-in 0.22s var(--dsk-ease) both;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 30%),
+    var(--dsk-glass-strong);
+  -webkit-backdrop-filter: blur(30px) saturate(1.4);
+  backdrop-filter: blur(30px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--dsk-edge-hi), 0 34px 80px -30px rgb(0 0 0 / 0.8), 0 4px 14px -6px rgb(0 0 0 / 0.45);
+  animation: anxd-panel-in 0.28s var(--dsk-ease) both;
   scrollbar-width: thin;
 }
-:root.is-desktop-modern[data-nexus-theme='light'] .anx-sheet .anx-sheet__panel { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 28px 70px -34px rgb(20 24 34 / 0.3), 0 2px 10px -4px rgb(20 24 34 / 0.12); }
-@keyframes anxd-panel-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+:root.is-desktop-modern[data-nexus-theme='light'] .anx-sheet .anx-sheet__panel {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.96), rgb(255 255 255 / 0.86));
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgb(15 17 22 / 0.08), 0 34px 80px -34px rgb(30 40 90 / 0.34), 0 4px 14px -6px rgb(30 40 90 / 0.12);
+}
 :root.is-desktop-modern .anx-sheet .anx-sheet__grab { display: none; }
-:root.is-desktop-modern .anx-sheet h3 { margin: 6px 0 0; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -0.02em; }
-:root.is-desktop-modern .anx-sheet .anx-x { width: 32px; height: 32px; min-height: 0 !important; border-radius: 8px; color: var(--dsk-ink-2); background: transparent; box-shadow: none; transition: background 0.15s ease, color 0.15s ease; }
-:root.is-desktop-modern .anx-sheet .anx-x:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+:root.is-desktop-modern .anx-sheet h3 { margin: 8px 0 0; font-family: var(--dsk-font); font-size: 24px; font-weight: 650; line-height: 1.2; letter-spacing: -0.024em; }
+:root.is-desktop-modern .anx-sheet .anx-x { width: 32px; height: 32px; min-height: 0 !important; border-radius: 9px; color: var(--dsk-ink-2); background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); transition: filter 0.18s ease, color 0.18s ease; }
+:root.is-desktop-modern .anx-sheet .anx-x:hover { color: var(--dsk-ink); filter: brightness(1.15); }
 :root.is-desktop-modern .anx-sheet .anx-x svg { width: 14px !important; height: 14px !important; }
 /* figures: tabular numbers with their label under */
-:root.is-desktop-modern .anx-sheet .anx-insp__kpis { gap: 8px; margin-top: 16px; }
-:root.is-desktop-modern .anx-sheet .anx-insp__kpis > div { padding: 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .anx-sheet .anx-insp__kpis b { margin-bottom: 4px; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx-sheet .anx-insp__kpis span { font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-/* the comparison table: aligned figures, no rule lines between rows */
-:root.is-desktop-modern .anx-sheet .anx-table { margin-top: 16px; font-size: 13px; border-collapse: separate; border-spacing: 0; }
-:root.is-desktop-modern .anx-sheet .anx-table :is(th, td) { padding: 7px 8px; border-bottom: 0; }
-:root.is-desktop-modern .anx-sheet .anx-table thead th { padding-bottom: 8px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); box-shadow: inset 0 -1px 0 var(--dsk-edge); }
+:root.is-desktop-modern .anx-sheet .anx-insp__kpis { gap: 10px; margin-top: 18px; }
+:root.is-desktop-modern .anx-sheet .anx-insp__kpis > div { padding: 16px 16px 14px; border-radius: 14px; background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow); }
+:root.is-desktop-modern .anx-sheet .anx-insp__kpis b { margin-bottom: 6px; font-family: var(--dsk-font); font-size: 28px; font-weight: 560; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx-sheet .anx-insp__kpis span { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+/* the comparison table: aligned figures, row plates on hover, no rule lines */
+:root.is-desktop-modern .anx-sheet .anx-table { margin-top: 18px; font-size: 13.5px; border-collapse: separate; border-spacing: 0; }
+:root.is-desktop-modern .anx-sheet .anx-table :is(th, td) { padding: 8px 10px; border-bottom: 0; }
+:root.is-desktop-modern .anx-sheet .anx-table thead th { padding-bottom: 10px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); box-shadow: inset 0 -1px 0 var(--dsk-edge); }
 :root.is-desktop-modern .anx-sheet .anx-table tbody th { font-weight: 500; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .anx-sheet .anx-table td { font-family: var(--dsk-font); font-weight: 550; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .anx-sheet .anx-table tbody tr:hover :is(th, td) { background: var(--dsk-hover); }
-:root.is-desktop-modern .anx-sheet .anx-table tbody tr :is(th, td):first-child { border-radius: 8px 0 0 8px; }
-:root.is-desktop-modern .anx-sheet .anx-table tbody tr :is(th, td):last-child { border-radius: 0 8px 8px 0; }
-:root.is-desktop-modern .anx-sheet .anx-actions { gap: 8px; margin-top: 12px; }
+:root.is-desktop-modern .anx-sheet .anx-table td { font-family: var(--dsk-font); font-weight: 560; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx-sheet .anx-table tbody tr:hover :is(th, td) { background: var(--anxd-row-hover); }
+:root.is-desktop-modern .anx-sheet .anx-table tbody tr :is(th, td):first-child { border-radius: 10px 0 0 10px; }
+:root.is-desktop-modern .anx-sheet .anx-table tbody tr :is(th, td):last-child { border-radius: 0 10px 10px 0; }
+:root.is-desktop-modern .anx-sheet .anx-actions { gap: 10px; margin-top: 16px; }
 :root.is-desktop-modern .anx-sheet .anx-actions .anx-btn { width: 100%; margin-top: 0; justify-content: center; }
-:root.is-desktop-modern .anx-sheet .anx-search { min-height: 0; height: 34px; margin-top: 14px; padding: 0 11px; border: 0; border-radius: 8px; font-family: var(--dsk-font); font-size: 13px; background: var(--dsk-tile) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge-hi) !important; }
+:root.is-desktop-modern .anx-sheet .anx-search { min-height: 0; height: 36px; margin-top: 16px; padding: 0 12px; border: 0; border-radius: 10px; font-family: var(--dsk-font); font-size: 13px; background: var(--anxd-well) !important; box-shadow: var(--anxd-well-shadow) !important; }
 :root.is-desktop-modern .anx-sheet .anx-search:focus { outline: none; box-shadow: inset 0 0 0 1px var(--dsk-accent), var(--anxd-halo) !important; }
 /* cohort rows: floating plates */
-:root.is-desktop-modern .anx-sheet .anx-cohort { gap: 2px; margin-top: 12px; }
-:root.is-desktop-modern .anx-sheet .anx-cohort button { min-height: 48px !important; padding: 8px 10px; border-radius: 10px; background: transparent; transition: background 0.12s ease; }
-:root.is-desktop-modern .anx-sheet .anx-cohort button:hover { background: var(--dsk-hover); }
-:root.is-desktop-modern .anx-sheet .anx-cohort .t { gap: 2px; }
-:root.is-desktop-modern .anx-sheet .anx-cohort .t b { font-size: 14px; font-weight: 550; }
+:root.is-desktop-modern .anx-sheet .anx-cohort { gap: 2px; margin-top: 14px; }
+:root.is-desktop-modern .anx-sheet .anx-cohort button { min-height: 52px !important; padding: 9px 12px; border-radius: 12px; background: transparent; transition: background 0.15s ease; }
+:root.is-desktop-modern .anx-sheet .anx-cohort button:hover { background: var(--anxd-row-hover); }
+:root.is-desktop-modern .anx-sheet .anx-cohort .t { gap: 3px; }
+:root.is-desktop-modern .anx-sheet .anx-cohort .t b { font-size: 14px; font-weight: 560; }
 :root.is-desktop-modern .anx-sheet .anx-cohort .t em { font-size: 12.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .anx-sheet .anx-cohort .tag { height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 500; line-height: 20px; letter-spacing: 0; text-transform: none; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .anx-sheet .anx-cohort .d { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .anx-sheet .anx-cohort .tag { height: 22px; padding: 0 8px; border-radius: 7px; font-size: 12px; font-weight: 500; line-height: 22px; letter-spacing: 0; text-transform: none; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .anx-sheet .anx-cohort .d { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
 :root.is-desktop-modern .anx-sheet .anx-cohort svg { width: 13px !important; height: 13px !important; }
 
 @media (prefers-reduced-motion: reduce) {
   :root.is-desktop-modern :is(.anx, .anx-sheet),
   :root.is-desktop-modern :is(.anx, .anx-sheet) * { animation: none !important; transition: none !important; }
+  :root.is-desktop-modern :is(.anx, .anx-sheet) :is(.anx-btn, .anx-camp, .anx-bottleneck, .anx-changes li button):hover { transform: none; }
 }

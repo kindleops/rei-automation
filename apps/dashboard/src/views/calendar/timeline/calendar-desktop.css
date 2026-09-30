@@ -1,12 +1,13 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   CALENDAR · DESKTOP
-   The time surface, finished for a desk: the day's figures in the header,
-   views and filters on one toolbar, the next two weeks laid across the
-   width, the week as seven real columns, the month as a proper grid, and
-   event detail as a right-side inspector inside the calendar's own pane.
-   Glass cards (radius 14, hairline + a 1px contact shadow), floating row
-   plates without rule lines, monochrome icons; colour marks only exceptions
-   (a thin red bar, a red figure) and the tiny category dots of the strip.
+   CALENDAR · DESKTOP — PREMIUM v2
+   The time surface, finished for a desk: the day's figures as glass tiles in
+   the header, views and filters on one toolbar, the next two weeks as glass
+   plates across the width (today carries a soft accent glow), the NOW line
+   lit, the week as seven real columns, the month as a proper grid, and event
+   detail as a right-side glass inspector inside the calendar's own pane.
+   Cards are liquid-glass plates (--dsk-card-*: lit top edge, deep soft
+   shadow) that lift on hover; icons sit in glass chips; colour marks only
+   exceptions (a thin red bar, a red figure) and the strip's category dots.
    Scoped to :root.is-desktop-modern, composed by the pane (container: pane).
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -15,21 +16,20 @@
   --cald-warn: #f0b64a;
   --cald-bad: #ff7b86;
   --cald-solid: color-mix(in srgb, var(--dsk-bg) 55%, rgb(var(--dsk-fill)));
-  --cald-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
-  --cald-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.12);
-  --cald-halo: 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
-  --cald-seg-on: rgb(255 255 255 / 0.1);
-  --cald-seg-on-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.3);
-  --cald-primary: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
-  --cald-primary-hi: color-mix(in srgb, var(--dsk-accent) 44%, #16171a);
-  --cald-primary-ink: #fff;
+  --cald-halo: 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --cald-well: rgb(0 0 0 / 0.2);
+  --cald-well-shadow: inset 0 1px 2px rgb(0 0 0 / 0.28), inset 0 0 0 1px rgb(255 255 255 / 0.05);
+  --cald-raised: var(--dsk-chip-bg);
+  --cald-raised-shadow: var(--dsk-chip-shadow), 0 1px 3px rgb(0 0 0 / 0.35);
+  --cald-row-hover: rgb(255 255 255 / 0.045);
+  --cald-accent-glow: 0 0 22px -6px color-mix(in srgb, var(--dsk-accent) 65%, transparent);
   --c-ink: var(--dsk-bg);
   --c-text: var(--dsk-ink);
   --c-text-2: var(--dsk-ink-2);
   --c-text-3: var(--dsk-ink-3);
   --c-edge: var(--dsk-edge);
   --c-edge-hi: var(--dsk-edge-hi);
-  --c-glass: var(--dsk-glass);
+  --c-glass: var(--dsk-card-bg);
   --c-glass-hi: var(--dsk-glass-strong);
   --c-track: var(--dsk-tile);
   --c-blur: var(--dsk-blur);
@@ -51,13 +51,11 @@
   --cald-good: #15803d;
   --cald-warn: #a16207;
   --cald-bad: #c43b3b;
-  --cald-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
-  --cald-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(15 17 22 / 0.08);
-  --cald-seg-on: #fff;
-  --cald-seg-on-shadow: 0 0 0 1px rgb(15 17 22 / 0.08), 0 1px 2px rgb(15 17 22 / 0.12);
-  --cald-primary: color-mix(in srgb, var(--dsk-accent) 20%, #fff);
-  --cald-primary-hi: color-mix(in srgb, var(--dsk-accent) 28%, #fff);
-  --cald-primary-ink: #0b0c0e;
+  --cald-well: rgb(15 17 22 / 0.05);
+  --cald-well-shadow: inset 0 1px 2px rgb(15 17 22 / 0.06), inset 0 0 0 1px rgb(15 17 22 / 0.06);
+  --cald-raised-shadow: var(--dsk-chip-shadow), 0 1px 3px rgb(30 40 90 / 0.14);
+  --cald-row-hover: rgb(15 17 22 / 0.04);
+  --cald-accent-glow: 0 0 20px -6px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
   --c-aqua: #3d7f94;
   --c-cobalt: #5059a3;
   --c-violet: #6a57a3;
@@ -68,35 +66,58 @@
 :root.is-desktop-modern .cal2 {
   --cald-cap: 1280px;
   background: transparent;
-  gap: 12px;
-  padding: 24px max(28px, calc((100cqw - var(--cald-cap)) / 2)) 56px;
+  gap: 14px;
+  padding: 32px max(36px, calc((100cqw - var(--cald-cap)) / 2)) 64px;
   scrollbar-width: thin;
 }
 :root.is-desktop-modern .cal2::before { display: none; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) :is(.cal2-hero, .cal2-search, .cal2-window, .cal2-slot, .cal2-week__row) { animation: cald-in 0.2s var(--dsk-ease) both !important; animation-delay: 0s !important; }
-@keyframes cald-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
-/* cards (radius 14) */
+/* first paint: plates fade and rise 8px, 40ms apart (at most eight steps) */
+@keyframes cald-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+:root.is-desktop-modern .cal2 :is(.cal2-hero, .cal2-summary > *, .cal2-strip__day, .cal2-window, .cal2-slot, .cal2-week__row, .cal2-month, .cal2-attn__group, .cal2-tomorrow, .cal2-clear, .cal2-result) {
+  animation: cald-in 0.38s var(--dsk-ease) backwards !important;
+  animation-delay: calc(min(var(--i, 0), 7) * 40ms) !important;
+}
+:root.is-desktop-modern .cal2 .cal2-summary > :nth-child(2) { --i: 1; }
+:root.is-desktop-modern .cal2 .cal2-summary > :nth-child(3) { --i: 2; }
+:root.is-desktop-modern .cal2 .cal2-summary > :nth-child(4) { --i: 3; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:nth-child(n + 2) { --i: 1; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:nth-child(n + 4) { --i: 2; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:nth-child(n + 6) { --i: 3; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:nth-child(n + 8) { --i: 4; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:nth-child(n + 10) { --i: 5; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:nth-child(n + 12) { --i: 6; }
+:root.is-desktop-modern .cal2 .cal2-week__row:nth-child(2) { --i: 1; }
+:root.is-desktop-modern .cal2 .cal2-week__row:nth-child(3) { --i: 2; }
+:root.is-desktop-modern .cal2 .cal2-week__row:nth-child(4) { --i: 3; }
+:root.is-desktop-modern .cal2 .cal2-week__row:nth-child(5) { --i: 4; }
+:root.is-desktop-modern .cal2 .cal2-week__row:nth-child(6) { --i: 5; }
+:root.is-desktop-modern .cal2 .cal2-week__row:nth-child(7) { --i: 6; }
+:root.is-desktop-modern .cal2 .cal2-band > :nth-child(2) { --i: 1; }
+:root.is-desktop-modern .cal2 .cal2-attn__group:nth-child(2) { --i: 1; }
+:root.is-desktop-modern .cal2 .cal2-attn__group:nth-child(n + 3) { --i: 2; }
+
+/* cards (radius 16) */
 :root.is-desktop-modern .cal2 :is(.cal2-window, .cal2-month, .cal2-tomorrow, .cal2-clear, .cal2-error, .cal2-scope) {
   border: 0;
-  border-radius: 14px;
-  background: var(--dsk-glass);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: var(--cald-card);
+  border-radius: 16px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
 }
-/* row plates (radius 10) */
+/* event and result rows: plates (radius 14) */
 :root.is-desktop-modern .cal2 :is(.cal2-card, .cal2-week__row, .cal2-result) {
   border: 0;
-  border-radius: 10px;
-  background: var(--dsk-glass);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  border-radius: 14px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease);
 }
-:root.is-desktop-modern .cal2 :is(.cal2-window, .cal2-tomorrow):hover { background: color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-hover)); box-shadow: var(--cald-card-hi); }
-:root.is-desktop-modern .cal2 :is(.cal2-card, .cal2-week__row, .cal2-result):hover { background: color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-hover)); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+:root.is-desktop-modern .cal2 :is(.cal2-window, .cal2-tomorrow, .cal2-card, .cal2-week__row, .cal2-result):hover { box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+:root.is-desktop-modern .cal2 :is(.cal2-window, .cal2-tomorrow) { transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease); }
 /* focus: a 1px accent line and a soft 3px halo */
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) button:focus-visible {
   outline: 1px solid var(--dsk-accent);
@@ -108,7 +129,7 @@
 :root.is-desktop-modern .cal2 .cal2-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px 24px;
+  gap: 8px 24px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -117,46 +138,47 @@
   backdrop-filter: none;
   box-shadow: none;
 }
-:root.is-desktop-modern .cal2-hero > .cal2-summary { margin-top: 10px; }
+:root.is-desktop-modern .cal2-hero > .cal2-summary { margin-top: 12px; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-eyebrow {
-  gap: 7px;
-  font-size: 12.5px;
+  gap: 8px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
   color: var(--dsk-ink-3);
 }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-eyebrow i { width: 6px; height: 6px; background: var(--dsk-ink-3); box-shadow: none; }
-:root.is-desktop-modern .cal2-hero h1 { margin: 0; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; }
-/* figures: a big tabular number with its label under it */
-:root.is-desktop-modern .cal2 .cal2-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+:root.is-desktop-modern .cal2-hero h1 { margin: 2px 0 0; font-family: var(--dsk-font); font-size: var(--dsk-title-size, 28px); font-weight: 650; line-height: 1.15; letter-spacing: -0.028em; }
+/* figures: a large tabular number with its label under it */
+:root.is-desktop-modern .cal2 .cal2-summary { display: flex; flex-wrap: wrap; gap: 12px; }
 :root.is-desktop-modern .cal2 .cal2-summary > * {
-  gap: 6px;
-  min-width: 104px;
-  padding: 14px 16px 12px;
-  border-radius: 14px;
-  background: var(--dsk-glass);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: var(--cald-card);
+  gap: 8px;
+  min-width: 112px;
+  padding: 16px 20px 14px;
+  border-radius: 16px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
 }
-:root.is-desktop-modern .cal2 .cal2-summary b { font-family: var(--dsk-font); font-size: 28px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2 .cal2-summary span { font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-summary b { font-family: var(--dsk-font); font-size: 28px; font-weight: 560; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-summary span { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .cal2 .cal2-summary .is-you b { color: var(--cald-warn); }
-:root.is-desktop-modern .cal2 .cal2-summary__attn { transition: background 0.15s ease, box-shadow 0.15s ease; }
-:root.is-desktop-modern .cal2 .cal2-summary__attn:hover { background: color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-hover)); box-shadow: var(--cald-card-hi); }
+:root.is-desktop-modern .cal2 .cal2-summary__attn { transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease); }
+:root.is-desktop-modern .cal2 .cal2-summary__attn:hover { box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
 :root.is-desktop-modern .cal2 .cal2-summary__attn.is-bad b { color: var(--cald-bad); }
-:root.is-desktop-modern .cal2 .cal2-summary.is-skel i { width: 104px; height: 70px; border-radius: 14px; background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 200% 100%; animation: cald-shimmer 2.4s ease-in-out infinite !important; }
-:root.is-desktop-modern .cal2 .cal2-hero__line { margin: 4px 0 0; gap: 7px; font-size: 13px; font-weight: 400; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-hero__line svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
+@keyframes cald-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+:root.is-desktop-modern .cal2 .cal2-summary.is-skel i { width: 112px; height: 76px; border-radius: 16px; background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 200% 100%; animation: cald-shimmer 2.4s ease-in-out infinite !important; }
+:root.is-desktop-modern .cal2 .cal2-hero__line { margin: 4px 0 0; gap: 8px; font-size: 13px; font-weight: 400; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-hero__line svg { width: 13px !important; height: 13px !important; color: var(--cald-good); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cald-good) 60%, transparent)); }
 
 /* ── scope, views, chips, search ─────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-scope { padding: 8px 8px 8px 14px; font-size: 13px; }
-:root.is-desktop-modern .cal2 .cal2-scope span { color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cal2 .cal2-scope { padding: 10px 10px 10px 18px; font-size: 13px; }
+:root.is-desktop-modern .cal2 .cal2-scope span { gap: 8px; color: var(--dsk-ink-2); }
 :root.is-desktop-modern .cal2 .cal2-scope svg { width: 13px !important; height: 13px !important; }
-:root.is-desktop-modern .cal2 .cal2-scope button { min-height: 0 !important; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 550; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+:root.is-desktop-modern .cal2 .cal2-scope button { min-height: 0 !important; height: 32px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 560; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
 
-/* segmented: a track with a raised active segment */
+/* segmented: a recessed well with a raised glass segment */
 :root.is-desktop-modern .cal2 .cal2-views {
   position: relative;
   top: auto;
@@ -166,190 +188,195 @@
   gap: 2px;
   padding: 3px;
   border: 0;
-  border-radius: 10px;
-  background: var(--dsk-tile);
+  border-radius: 11px;
+  background: var(--cald-well);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  box-shadow: var(--cald-well-shadow);
 }
 :root.is-desktop-modern .cal2 .cal2-views__tab {
   min-height: 0 !important;
   height: 28px;
-  padding: 0 12px;
-  gap: 6px;
-  border-radius: 7px;
+  padding: 0 14px;
+  gap: 7px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
   color: var(--dsk-ink-2);
-  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 :root.is-desktop-modern .cal2 .cal2-views__tab:hover { color: var(--dsk-ink); }
-:root.is-desktop-modern .cal2 .cal2-views__tab.is-on { color: var(--dsk-ink); background: var(--cald-seg-on); box-shadow: var(--cald-seg-on-shadow); }
-:root.is-desktop-modern .cal2 .cal2-views__tab em { padding: 0 5px; border-radius: 5px; font-size: 11.5px; font-weight: 600; line-height: 16px; color: var(--cald-bad); background: color-mix(in srgb, var(--cald-bad) 13%, transparent); }
+:root.is-desktop-modern .cal2 .cal2-views__tab.is-on { color: var(--dsk-ink); font-weight: 560; background: var(--cald-raised); box-shadow: var(--cald-raised-shadow); }
+:root.is-desktop-modern .cal2 .cal2-views__tab em { min-width: 18px; padding: 0 5px; border-radius: 6px; font-size: 11.5px; font-weight: 600; line-height: 18px; text-align: center; color: var(--cald-bad); background: color-mix(in srgb, var(--cald-bad) 15%, transparent); }
 
 :root.is-desktop-modern .cal2 .cal2-tools { gap: 8px; min-width: 0; }
-:root.is-desktop-modern .cal2 .cal2-chips { gap: 6px; }
-/* filter chips (24px): tile + hairline; the selected one gets an accent hairline */
+:root.is-desktop-modern .cal2 .cal2-chips { gap: 8px; }
+/* filter chips (26px): glass; the selected one lit with an accent hairline */
 :root.is-desktop-modern .cal2 .cal2-chip {
   min-height: 0 !important;
-  height: 24px;
-  padding: 0 9px;
+  height: 26px;
+  padding: 0 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   font-size: 12.5px;
   font-weight: 500;
   color: var(--dsk-ink-2);
-  background: var(--dsk-tile);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
-  transition: background 0.15s ease, color 0.15s ease;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+  transition: color 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
 }
-:root.is-desktop-modern .cal2 .cal2-chip:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
-:root.is-desktop-modern .cal2 .cal2-chip.is-on { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, var(--dsk-edge-hi)); }
+:root.is-desktop-modern .cal2 .cal2-chip:hover { color: var(--dsk-ink); filter: brightness(1.12); }
+:root.is-desktop-modern .cal2 .cal2-chip.is-on { color: var(--dsk-ink); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent), 0 0 14px -6px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-icon-btn {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   min-height: 0 !important;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--dsk-ink-2);
-  background: transparent;
-  box-shadow: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+  transition: filter 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-icon-btn:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-icon-btn.is-on { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-icon-btn:hover { color: var(--dsk-ink); filter: brightness(1.15); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-icon-btn.is-on { color: var(--dsk-ink); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-icon-btn svg { width: 14px !important; height: 14px !important; }
 :root.is-desktop-modern .cal2 .cal2-search {
-  gap: 9px;
-  padding: 0 4px 0 11px;
+  gap: 10px;
+  padding: 0 4px 0 12px;
   border: 0;
-  border-radius: 8px;
-  background: var(--dsk-tile);
+  border-radius: 10px;
+  background: var(--cald-well);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  box-shadow: var(--cald-well-shadow);
 }
 :root.is-desktop-modern .cal2 .cal2-search:focus-within { box-shadow: inset 0 0 0 1px var(--dsk-accent), var(--cald-halo); }
 :root.is-desktop-modern .cal2 .cal2-search svg { width: 14px !important; height: 14px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-search input { height: 34px; font-family: var(--dsk-font); font-size: 13px; background: transparent !important; box-shadow: none !important; }
+:root.is-desktop-modern .cal2 .cal2-search input { height: 36px; font-family: var(--dsk-font); font-size: 13px; background: transparent !important; box-shadow: none !important; }
 :root.is-desktop-modern .cal2 .cal2-search input:focus-visible { outline: none; }
-:root.is-desktop-modern .cal2 .cal2-search button { width: 26px; height: 26px; border-radius: 6px; }
-:root.is-desktop-modern .cal2 .cal2-degraded { gap: 8px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; color: var(--dsk-ink-2); background: var(--dsk-glass); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cald-warn) 26%, var(--dsk-edge)); }
+:root.is-desktop-modern .cal2 .cal2-search button { width: 28px; height: 28px; border-radius: 7px; }
+:root.is-desktop-modern .cal2 .cal2-degraded { gap: 10px; padding: 12px 16px; border-radius: 12px; font-size: 13px; color: var(--dsk-ink-2); background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow), inset 0 0 0 1px color-mix(in srgb, var(--cald-warn) 26%, transparent); }
 :root.is-desktop-modern .cal2 .cal2-degraded svg { width: 14px !important; height: 14px !important; color: var(--cald-warn); }
 
-/* ── day strip: selectable plates ────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-strip { gap: 6px; margin: 4px 0 0; padding: 0 0 2px; }
+/* ── day strip: glass plates; today glows ────────────────────────────────── */
+:root.is-desktop-modern .cal2 .cal2-strip { gap: 8px; margin: 6px 0 0; padding: 2px 0 4px; }
 :root.is-desktop-modern .cal2 .cal2-strip__day {
-  width: 56px;
-  min-height: 62px !important;
-  gap: 4px;
+  width: 58px;
+  min-height: 68px !important;
+  gap: 5px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 14px;
   color: var(--dsk-ink-3);
-  background: var(--dsk-glass);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease);
 }
-:root.is-desktop-modern .cal2 .cal2-strip__day:hover { background: color-mix(in srgb, var(--dsk-glass) 100%, var(--dsk-hover)); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
-:root.is-desktop-modern .cal2 .cal2-strip__wd { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
-:root.is-desktop-modern .cal2 .cal2-strip__n { font-family: var(--dsk-font); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-strip__dots { gap: 3px; height: 4px; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-strip__dots i { width: 4px; height: 4px; }
-:root.is-desktop-modern .cal2 .cal2-strip__day.is-today .cal2-strip__wd { color: var(--dsk-accent); font-weight: 600; }
+:root.is-desktop-modern .cal2 .cal2-strip__day:hover { box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+:root.is-desktop-modern .cal2 .cal2-strip__wd { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+:root.is-desktop-modern .cal2 .cal2-strip__n { font-family: var(--dsk-font); font-size: 18px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-strip__dots { gap: 3px; height: 5px; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-strip__dots i { width: 5px; height: 5px; }
 :root.is-desktop-modern .cal2 .cal2-strip__day.is-selected {
   transform: none;
   color: var(--dsk-ink-2);
-  background: var(--dsk-tile-hi);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, var(--dsk-edge-hi)), 0 1px 2px rgb(0 0 0 / 0.12);
+  box-shadow: var(--dsk-card-shadow-hover), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, transparent);
 }
+:root.is-desktop-modern .cal2 .cal2-strip__day.is-today .cal2-strip__wd { color: var(--dsk-accent); font-weight: 600; text-shadow: 0 0 12px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
+:root.is-desktop-modern .cal2 .cal2-strip__day.is-today { box-shadow: var(--dsk-card-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 40%, transparent), var(--cald-accent-glow); }
+:root.is-desktop-modern .cal2 .cal2-strip__day.is-today.is-selected { box-shadow: var(--dsk-card-shadow-hover), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 70%, transparent), var(--cald-accent-glow); }
 
-:root.is-desktop-modern .cal2 .cal2-dayhead { gap: 12px; align-items: center; padding: 8px 2px 0; }
+:root.is-desktop-modern .cal2 .cal2-dayhead { gap: 12px; align-items: center; padding: 12px 2px 2px; }
 :root.is-desktop-modern .cal2 .cal2-dayhead h2 { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-:root.is-desktop-modern .cal2 .cal2-dayhead > span { font-size: 12.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-link { height: 28px; padding: 0 8px; border-radius: 7px; font-size: 12.5px; font-weight: 550; line-height: 28px; color: var(--dsk-ink-2); transition: background 0.15s ease, color 0.15s ease; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-link:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+:root.is-desktop-modern .cal2 .cal2-dayhead > span { font-size: 13px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-link { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 560; line-height: 30px; color: var(--dsk-ink-2); transition: background 0.18s ease, color 0.18s ease; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-link:hover { color: var(--dsk-ink); background: var(--cald-row-hover); }
 
 /* ── the day: band, rail, now ────────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-day { gap: 16px; }
-:root.is-desktop-modern .cal2 .cal2-band { gap: 12px; }
-:root.is-desktop-modern .cal2 .cal2-window { gap: 8px; padding: 16px 18px; }
-:root.is-desktop-modern .cal2 .cal2-window__top b { font-size: 14px; font-weight: 600; }
-:root.is-desktop-modern .cal2 .cal2-window__top span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-day { gap: 18px; }
+:root.is-desktop-modern .cal2 .cal2-band { gap: 16px; }
+:root.is-desktop-modern .cal2 .cal2-window { gap: 10px; padding: 20px 22px; }
+:root.is-desktop-modern .cal2 .cal2-window__top b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+:root.is-desktop-modern .cal2 .cal2-window__top span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .cal2 .cal2-window.is-open .cal2-window__top span { color: var(--cald-good); }
-:root.is-desktop-modern .cal2 .cal2-window__time { font-size: 13px; font-weight: 500; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2 .cal2-window__track { height: 3px; margin-top: 4px; border-radius: 3px; background: var(--dsk-tile-hi); }
-:root.is-desktop-modern .cal2 .cal2-window__track i { border-radius: 3px; background: color-mix(in srgb, var(--dsk-accent) 75%, transparent); box-shadow: none; }
-:root.is-desktop-modern .cal2 .cal2-window__meta { font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-window.is-open .cal2-window__top span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--cald-good); box-shadow: 0 0 8px color-mix(in srgb, var(--cald-good) 70%, transparent); animation: cald-breathe 2.4s ease-in-out infinite; --cald-glow-c: color-mix(in srgb, var(--cald-good) 70%, transparent); }
+@keyframes cald-breathe { 0%, 100% { box-shadow: 0 0 4px 0 var(--cald-glow-c); } 50% { box-shadow: 0 0 11px 2px var(--cald-glow-c); } }
+:root.is-desktop-modern .cal2 .cal2-window__time { font-size: 13.5px; font-weight: 500; color: var(--dsk-ink-2); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-window__track { height: 4px; margin-top: 6px; border-radius: 4px; background: var(--dsk-tile-hi); overflow: visible; }
+:root.is-desktop-modern .cal2 .cal2-window__track i { border-radius: 4px; background: linear-gradient(180deg, color-mix(in srgb, var(--dsk-accent) 92%, #fff 8%), color-mix(in srgb, var(--dsk-accent) 65%, transparent)); box-shadow: 0 0 10px -2px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
+:root.is-desktop-modern .cal2 .cal2-window__meta { font-size: 12px; color: var(--dsk-ink-3); }
 
-:root.is-desktop-modern .cal2 .cal2-rail { gap: 8px; }
+:root.is-desktop-modern .cal2 .cal2-rail { gap: 10px; }
 :root.is-desktop-modern .cal2 .cal2-rail::before { left: 57px; background: var(--dsk-edge); }
-:root.is-desktop-modern .cal2 .cal2-slot__time { padding-top: 14px; }
-:root.is-desktop-modern .cal2 .cal2-slot__time b { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; letter-spacing: 0; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2 .cal2-slot__time small { font-size: 11px; font-weight: 500; letter-spacing: 0.02em; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-slot__node { margin-top: 18px; width: 7px; height: 7px; border-width: 1.5px; border-color: var(--dsk-ink-3); background: var(--cald-solid); }
+:root.is-desktop-modern .cal2 .cal2-slot__time { padding-top: 16px; }
+:root.is-desktop-modern .cal2 .cal2-slot__time b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-slot__time small { font-size: 11.5px; font-weight: 500; letter-spacing: 0.02em; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-slot__node { margin-top: 20px; width: 8px; height: 8px; border: 0; background: var(--dsk-ink-3); box-shadow: 0 0 0 3px var(--cald-solid); }
 :root.is-desktop-modern .cal2 .cal2-slot.is-past { opacity: 0.6; }
-:root.is-desktop-modern .cal2 .cal2-now { margin: 0; }
+/* NOW: the one lit line on the day */
+:root.is-desktop-modern .cal2 .cal2-now { margin: 2px 0; }
 :root.is-desktop-modern .cal2 .cal2-now__label {
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
   text-transform: none;
   font-variant-numeric: tabular-nums;
   color: var(--dsk-accent);
-  background: color-mix(in srgb, var(--dsk-accent) 12%, var(--cald-solid));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 35%, transparent);
+  background: var(--dsk-chip-bg), var(--cald-solid);
+  box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent), 0 0 18px -4px color-mix(in srgb, var(--dsk-accent) 60%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
 }
-:root.is-desktop-modern .cal2 .cal2-now__line { height: 1px; background: color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+:root.is-desktop-modern .cal2 .cal2-now__line { height: 1.5px; background: linear-gradient(90deg, var(--dsk-accent), color-mix(in srgb, var(--dsk-accent) 40%, transparent) 70%, transparent); box-shadow: 0 0 10px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
 
-/* event rows: monochrome icon; a thin red bar only when it is an exception */
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card { grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 12px 14px; }
+/* event rows: icon in a glass chip; a thin red bar only for an exception */
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card { grid-template-columns: 28px minmax(0, 1fr); gap: 14px; padding: 16px 18px; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card:active { transform: none; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__accent { display: none; top: 12px; bottom: 12px; width: 2px; border-radius: 0 2px 2px 0; background: var(--cald-bad); box-shadow: none; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__accent { display: none; top: 14px; bottom: 14px; width: 2px; border-radius: 0 2px 2px 0; background: var(--cald-bad); box-shadow: 0 0 8px color-mix(in srgb, var(--cald-bad) 60%, transparent); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card.t-bad .cal2-card__accent { display: block; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__icon {
   width: 28px;
   height: 28px;
   border-radius: 8px;
   color: var(--dsk-ink-2);
-  background: var(--dsk-tile);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
 }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__icon svg { width: 13px !important; height: 13px !important; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__body { gap: 2px; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__body { gap: 3px; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__top { align-items: center; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__title { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; line-height: 1.35; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__title { font-size: 14px; font-weight: 600; letter-spacing: -0.008em; line-height: 1.35; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__sub { font-size: 13px; color: var(--dsk-ink-2); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__place { font-size: 12.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__why { margin-top: 2px; font-size: 12.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__why { margin-top: 3px; font-size: 12.5px; color: var(--dsk-ink-3); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card__why.is-bad { color: var(--cald-bad); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card.is-past { filter: none; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card.is-compact { padding: 10px 14px; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-card.is-compact { padding: 12px 18px; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .t-bad { --acc: var(--cald-bad); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .t-done { --acc: var(--cald-good); }
 
-/* actor chips (20px): tile + hairline + a small dot */
+/* actor chips (22px): glass + a small glowing dot */
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill {
   --pc: var(--dsk-ink-3);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 20px;
-  padding: 0 7px 0 6px;
-  border-radius: 6px;
-  font-size: 11.5px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 7px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
   color: var(--dsk-ink-2);
-  background: var(--dsk-tile);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
 }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--pc); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--pc); box-shadow: 0 0 7px color-mix(in srgb, var(--pc) 65%, transparent); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill.is-system { --pc: var(--c-cobalt); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill.is-operator { --pc: var(--cald-warn); }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill.is-external { --pc: var(--c-gold); }
@@ -357,85 +384,86 @@
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-pill.is-completed { --pc: var(--cald-good); }
 
 /* ── tomorrow, clear, results ────────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-tomorrow { gap: 4px 12px; margin-top: 4px; padding: 16px 18px; }
-:root.is-desktop-modern .cal2 .cal2-tomorrow b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; }
+:root.is-desktop-modern .cal2 .cal2-tomorrow { gap: 4px 14px; margin-top: 6px; padding: 20px 22px; }
+:root.is-desktop-modern .cal2 .cal2-tomorrow b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 :root.is-desktop-modern .cal2 .cal2-tomorrow > span:not(.cal2-eyebrow) { font-size: 13px; color: var(--dsk-ink-2); }
 :root.is-desktop-modern .cal2 .cal2-tomorrow svg { width: 14px !important; height: 14px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear { gap: 6px; padding: 40px 24px 32px; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear { gap: 8px; padding: 48px 28px 40px; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear__orb { width: 28px; height: 28px; margin-bottom: 8px; color: var(--dsk-ink); background: none; box-shadow: none; opacity: 0.35; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear__orb svg { width: 28px !important; height: 28px !important; }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-clear p { max-width: 52ch; font-size: 13px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-clear__next { max-width: 520px; gap: 2px; margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); transition: background 0.12s ease; }
-:root.is-desktop-modern .cal2 .cal2-clear__next:hover { background: var(--dsk-tile-hi); }
-:root.is-desktop-modern .cal2 .cal2-clear__next small { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-clear__next span { font-size: 14px; font-weight: 550; }
+:root.is-desktop-modern .cal2 .cal2-clear__next { max-width: 520px; gap: 3px; margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); transition: filter 0.15s ease; }
+:root.is-desktop-modern .cal2 .cal2-clear__next:hover { filter: brightness(1.1); }
+:root.is-desktop-modern .cal2 .cal2-clear__next small { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-clear__next span { font-size: 14px; font-weight: 560; }
 :root.is-desktop-modern .cal2 .cal2-clear__next em { font-size: 12.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-results { gap: 6px; }
-:root.is-desktop-modern .cal2 .cal2-result { padding: 10px 14px; }
-:root.is-desktop-modern .cal2 .cal2-result time { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2 .cal2-result b { font-size: 14px; font-weight: 550; }
+:root.is-desktop-modern .cal2 .cal2-results { gap: 10px; }
+:root.is-desktop-modern .cal2 .cal2-result { padding: 14px 18px; }
+:root.is-desktop-modern .cal2 .cal2-result time { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-result b { font-size: 14px; font-weight: 560; }
 :root.is-desktop-modern .cal2 .cal2-result em { font-size: 12.5px; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .cal2 .cal2-result svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-error { padding: 40px 24px; }
-:root.is-desktop-modern .cal2 .cal2-error b { font-size: 14px; font-weight: 600; }
+:root.is-desktop-modern .cal2 .cal2-error { padding: 48px 28px; }
+:root.is-desktop-modern .cal2 .cal2-error b { font-size: 15px; font-weight: 600; }
 :root.is-desktop-modern .cal2 .cal2-error p { font-size: 13px; color: var(--dsk-ink-3); }
 
 /* ── week ────────────────────────────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-week { gap: 6px; }
-:root.is-desktop-modern .cal2 .cal2-week__row { gap: 12px; padding: 12px 14px 12px 10px; }
-:root.is-desktop-modern .cal2 .cal2-week__row.is-empty { opacity: 0.6; }
-:root.is-desktop-modern .cal2 .cal2-week__date small { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-week__date b { margin-top: 2px; font-family: var(--dsk-font); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2 .cal2-week__row.is-today .cal2-week__date small { color: var(--dsk-accent); font-weight: 600; }
-:root.is-desktop-modern .cal2 .cal2-week__counts { font-size: 13px; font-weight: 550; }
+:root.is-desktop-modern .cal2 .cal2-week { gap: 10px; }
+:root.is-desktop-modern .cal2 .cal2-week__row { gap: 14px; padding: 16px 18px 16px 14px; }
+:root.is-desktop-modern .cal2 .cal2-week__row.is-empty { opacity: 0.62; }
+:root.is-desktop-modern .cal2 .cal2-week__date small { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-week__date b { margin-top: 2px; font-family: var(--dsk-font); font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-week__row.is-today { box-shadow: var(--dsk-card-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 40%, transparent), var(--cald-accent-glow); }
+:root.is-desktop-modern .cal2 .cal2-week__row.is-today .cal2-week__date small { color: var(--dsk-accent); font-weight: 600; text-shadow: 0 0 12px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
+:root.is-desktop-modern .cal2 .cal2-week__counts { font-size: 13.5px; font-weight: 560; }
 :root.is-desktop-modern .cal2 .cal2-week__counts em { font-weight: 500; color: var(--dsk-ink-3); }
 :root.is-desktop-modern .cal2 .cal2-week__counts em.is-you { color: var(--dsk-ink-2); }
 :root.is-desktop-modern .cal2 .cal2-week__counts em.is-bad { color: var(--cald-bad); }
-:root.is-desktop-modern .cal2 .cal2-week__item { gap: 7px; font-size: 12.5px; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .cal2 .cal2-week__item i { width: 5px; height: 5px; }
+:root.is-desktop-modern .cal2 .cal2-week__item { gap: 8px; font-size: 13px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cal2 .cal2-week__item i { width: 5px; height: 5px; box-shadow: 0 0 6px var(--acc); }
 :root.is-desktop-modern .cal2 .cal2-week__row > svg { width: 14px !important; height: 14px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-pager { gap: 4px; }
+:root.is-desktop-modern .cal2 .cal2-pager { gap: 6px; }
 
 /* ── month ───────────────────────────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-month { padding: 16px 18px 18px; }
-:root.is-desktop-modern .cal2 .cal2-month__head { margin-bottom: 12px; }
+:root.is-desktop-modern .cal2 .cal2-month { padding: 18px 20px 20px; }
+:root.is-desktop-modern .cal2 .cal2-month__head { margin-bottom: 14px; }
 :root.is-desktop-modern .cal2 .cal2-month__head b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-:root.is-desktop-modern .cal2 .cal2-month__wd span { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-month__cell { border-radius: 10px; transition: background 0.12s ease; }
-:root.is-desktop-modern .cal2 .cal2-month__cell:hover { background: var(--dsk-hover); }
-:root.is-desktop-modern .cal2 .cal2-month__cell b { font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-month__wd span { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-month__cell { border-radius: 12px; transition: background 0.15s ease, box-shadow 0.15s ease; }
+:root.is-desktop-modern .cal2 .cal2-month__cell:hover { background: var(--cald-row-hover); }
+:root.is-desktop-modern .cal2 .cal2-month__cell b { font-size: 13.5px; font-weight: 560; font-variant-numeric: tabular-nums; }
 :root.is-desktop-modern .cal2 .cal2-month__cell.is-past b { color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2 .cal2-month__cell.is-today b { color: var(--dsk-accent); font-weight: 650; }
-:root.is-desktop-modern .cal2 .cal2-month__cell.is-selected { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, var(--dsk-edge-hi)); }
+:root.is-desktop-modern .cal2 .cal2-month__cell.is-today b { color: var(--dsk-accent); font-weight: 650; text-shadow: 0 0 12px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
+:root.is-desktop-modern .cal2 .cal2-month__cell.is-selected { background: var(--cald-raised); box-shadow: var(--cald-raised-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
 
 /* ── attention ───────────────────────────────────────────────────────────── */
-:root.is-desktop-modern .cal2 .cal2-attn { gap: 28px; }
-:root.is-desktop-modern .cal2 .cal2-attn__group { display: flex; flex-direction: column; gap: 8px; }
-:root.is-desktop-modern .cal2 .cal2-attn__group h4 { gap: 8px; margin: 0 2px 4px; font-size: 13px; font-weight: 600; letter-spacing: -0.005em; text-transform: none; color: var(--dsk-ink); }
-:root.is-desktop-modern .cal2 .cal2-attn__group h4 span { padding: 0; border-radius: 0; font-size: 12.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); background: none; }
-:root.is-desktop-modern .cal2 .cal2-attn__row { gap: 6px; margin-bottom: 0; }
-:root.is-desktop-modern .cal2 .cal2-attn__row time { padding-left: 2px; font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-attn { gap: 32px; }
+:root.is-desktop-modern .cal2 .cal2-attn__group { display: flex; flex-direction: column; gap: 10px; }
+:root.is-desktop-modern .cal2 .cal2-attn__group h4 { gap: 10px; margin: 0 2px 6px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; text-transform: none; color: var(--dsk-ink); }
+:root.is-desktop-modern .cal2 .cal2-attn__group h4 span { padding: 0; border-radius: 0; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); background: none; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2 .cal2-attn__row { gap: 7px; margin-bottom: 0; }
+:root.is-desktop-modern .cal2 .cal2-attn__row time { padding-left: 2px; font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
 /* the group already says why: the row's reason reads calm */
 :root.is-desktop-modern .cal2 .cal2-attn .cal2-card__why.is-bad { color: var(--dsk-ink-2); }
 
 /* ── skeleton ────────────────────────────────────────────────────────────── */
 :root.is-desktop-modern .cal2 :is(.cal2-skel__strip i, .cal2-skel__row i, .cal2-skel__row span) { background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 200% 100%; animation: cald-shimmer 2.4s ease-in-out infinite !important; }
-:root.is-desktop-modern .cal2 .cal2-skel__strip i { width: 56px; height: 62px; border-radius: 10px; }
-:root.is-desktop-modern .cal2 .cal2-skel__row span { height: 64px; border-radius: 10px; }
-@keyframes cald-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+:root.is-desktop-modern .cal2 .cal2-skel__strip { gap: 8px; }
+:root.is-desktop-modern .cal2 .cal2-skel__strip i { width: 58px; height: 68px; border-radius: 14px; }
+:root.is-desktop-modern .cal2 .cal2-skel__row span { height: 72px; border-radius: 14px; }
 
 /* ══ composition by pane width ═════════════════════════════════════════════ */
 @container pane (min-width: 760px) {
   /* views and filters share one toolbar */
   :root.is-desktop-modern .cal2 { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-auto-rows: max-content; column-gap: 12px; align-content: start; }
   :root.is-desktop-modern .cal2 > * { grid-column: 1 / -1; min-width: 0; }
-  :root.is-desktop-modern .cal2 > .cal2-hero { margin-bottom: 8px; }
+  :root.is-desktop-modern .cal2 > .cal2-hero { margin-bottom: 12px; }
   :root.is-desktop-modern .cal2 > .cal2-views { grid-column: 1; }
   :root.is-desktop-modern .cal2 > .cal2-tools { grid-column: 2; align-self: center; }
   :root.is-desktop-modern .cal2 .cal2-band { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); }
   :root.is-desktop-modern .cal2 .cal2-search { max-width: 480px; }
-  :root.is-desktop-modern .cal2 .cal2-attn__group { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; align-items: start; }
+  :root.is-desktop-modern .cal2 .cal2-attn__group { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; align-items: start; }
   :root.is-desktop-modern .cal2 .cal2-attn__group h4 { grid-column: 1 / -1; }
   :root.is-desktop-modern .cal2 .cal2-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
 }
@@ -447,41 +475,47 @@
   :root.is-desktop-modern .cal2-hero > .cal2-summary { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; justify-content: flex-end; }
   :root.is-desktop-modern .cal2-hero > .cal2-hero__line { grid-column: 1; grid-row: 3; }
 }
+@container pane (min-width: 760px) {
+  /* a desk-sized pane lays the fortnight across its width — a mouse does not scroll sideways */
+  :root.is-desktop-modern .cal2 .cal2-strip { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 6px; overflow: visible; scroll-snap-type: none; }
+  :root.is-desktop-modern .cal2 .cal2-strip__day { width: auto; }
+}
 @container pane (min-width: 1000px) {
   /* the next two weeks laid across the width */
-  :root.is-desktop-modern .cal2 .cal2-strip { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); overflow: visible; }
+  :root.is-desktop-modern .cal2 .cal2-strip { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 8px; overflow: visible; }
   :root.is-desktop-modern .cal2 .cal2-strip__day { width: auto; }
   /* the week as seven real columns */
-  :root.is-desktop-modern .cal2 .cal2-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
-  :root.is-desktop-modern .cal2 .cal2-week__row { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-height: 220px; padding: 14px; border-radius: 14px; box-shadow: var(--cald-card); }
-  :root.is-desktop-modern .cal2 .cal2-week__row:hover { box-shadow: var(--cald-card-hi); }
+  :root.is-desktop-modern .cal2 .cal2-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+  :root.is-desktop-modern .cal2 .cal2-week__row { display: flex; flex-direction: column; align-items: stretch; gap: 12px; min-height: 240px; padding: 16px; border-radius: 16px; }
   :root.is-desktop-modern .cal2 .cal2-week__row > svg { display: none; }
   :root.is-desktop-modern .cal2 .cal2-week__date { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 6px; padding-bottom: 4px; }
-  :root.is-desktop-modern .cal2 .cal2-week__body { gap: 8px; }
-  :root.is-desktop-modern .cal2 .cal2-week__counts { font-size: 12.5px; line-height: 1.45; }
+  :root.is-desktop-modern .cal2 .cal2-week__body { gap: 10px; }
+  :root.is-desktop-modern .cal2 .cal2-week__counts { font-size: 13px; line-height: 1.45; }
   :root.is-desktop-modern .cal2 .cal2-week__item { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow: hidden; line-height: 1.45; }
-  :root.is-desktop-modern .cal2 .cal2-week__item i { display: inline-block; margin-right: 6px; vertical-align: 1px; }
-  /* the month as a proper grid */
+  :root.is-desktop-modern .cal2 .cal2-week__item i { display: inline-block; margin-right: 7px; vertical-align: 1px; }
+  /* the month as a proper grid of quiet cells */
   :root.is-desktop-modern .cal2 .cal2-month__wd,
-  :root.is-desktop-modern .cal2 .cal2-month__grid { gap: 6px; }
+  :root.is-desktop-modern .cal2 .cal2-month__grid { gap: 8px; }
   :root.is-desktop-modern .cal2 .cal2-month__wd span { text-align: left; padding: 2px 12px; }
   :root.is-desktop-modern .cal2 .cal2-month__cell {
     aspect-ratio: auto;
-    min-height: 80px !important;
+    min-height: 84px !important;
     align-items: flex-start;
     justify-content: space-between;
     padding: 10px 12px 12px;
     background: transparent;
     box-shadow: inset 0 0 0 1px var(--dsk-edge);
   }
-  :root.is-desktop-modern .cal2 .cal2-month__cell:hover { background: var(--dsk-hover); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
-  :root.is-desktop-modern .cal2 .cal2-month__cell.is-today { background: var(--dsk-tile); }
-  :root.is-desktop-modern .cal2 .cal2-month__cell.is-selected { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 60%, var(--dsk-edge-hi)); }
+  :root.is-desktop-modern .cal2 .cal2-month__cell:hover { background: var(--cald-row-hover); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+  :root.is-desktop-modern .cal2 .cal2-month__cell.is-today { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 45%, transparent), var(--cald-accent-glow); }
+  :root.is-desktop-modern .cal2 .cal2-month__cell.is-selected { background: var(--cald-raised); box-shadow: var(--cald-raised-shadow), inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 65%, transparent), var(--cald-accent-glow); }
 }
 
 /* ══ EVENT INSPECTOR — portaled; it floats inside the calendar's pane ═════ */
 :root.is-desktop-modern .dsk-pane__body:has(.cal2) { anchor-name: --cal2-pane; }
 
+@keyframes cald-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cald-panel-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 :root.is-desktop-modern .cal2-sheet {
   position: fixed;
   position-anchor: --cal2-pane;
@@ -495,85 +529,90 @@
   flex-direction: row;
   justify-content: flex-end;
   align-items: stretch;
-  padding: 10px;
+  padding: 12px;
   border-radius: var(--dsk-pane-radius, 12px);
   overflow: hidden;
 }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__scrim { background: rgb(4 5 7 / 0.22); -webkit-backdrop-filter: none; backdrop-filter: none; animation: cald-fade 0.16s ease both; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__scrim { background: rgb(4 5 7 / 0.24); -webkit-backdrop-filter: none; backdrop-filter: none; animation: cald-fade 0.18s ease both; }
 :root.is-desktop-modern[data-nexus-theme='light'] .cal2-sheet .cal2-sheet__scrim { background: rgb(15 17 22 / 0.08); }
-@keyframes cald-fade { from { opacity: 0; } to { opacity: 1; } }
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__panel {
-  width: min(460px, 100%);
+  width: min(480px, 100%);
   max-height: none;
-  padding: 18px 20px 20px;
+  padding: 22px 24px 24px;
   border: 0 !important;
-  border-radius: 14px;
-  background: var(--dsk-glass-strong);
-  -webkit-backdrop-filter: var(--dsk-blur);
-  backdrop-filter: var(--dsk-blur);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 28px 70px -30px rgb(0 0 0 / 0.75), 0 2px 10px -4px rgb(0 0 0 / 0.45);
-  animation: cald-panel-in 0.22s var(--dsk-ease) both;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 30%),
+    var(--dsk-glass-strong);
+  -webkit-backdrop-filter: blur(30px) saturate(1.4);
+  backdrop-filter: blur(30px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px var(--dsk-edge-hi), 0 34px 80px -30px rgb(0 0 0 / 0.8), 0 4px 14px -6px rgb(0 0 0 / 0.45);
+  animation: cald-panel-in 0.28s var(--dsk-ease) both;
   scrollbar-width: thin;
 }
-:root.is-desktop-modern[data-nexus-theme='light'] .cal2-sheet .cal2-sheet__panel { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 28px 70px -34px rgb(20 24 34 / 0.3), 0 2px 10px -4px rgb(20 24 34 / 0.12); }
-@keyframes cald-panel-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+:root.is-desktop-modern[data-nexus-theme='light'] .cal2-sheet .cal2-sheet__panel {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.96), rgb(255 255 255 / 0.86));
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgb(15 17 22 / 0.08), 0 34px 80px -34px rgb(30 40 90 / 0.34), 0 4px 14px -6px rgb(30 40 90 / 0.12);
+}
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__grab { display: none; }
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__panel .cal2-eyebrow i { background: var(--dsk-ink-3); box-shadow: none; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__panel.t-bad .cal2-eyebrow i { background: var(--cald-bad); }
-:root.is-desktop-modern .cal2-sheet h3 { margin: 6px 0 0; font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -0.02em; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__sub { margin-top: 4px; font-size: 13px; color: var(--dsk-ink-2); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__when { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__when b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__panel.t-bad .cal2-eyebrow i { background: var(--cald-bad); box-shadow: 0 0 8px color-mix(in srgb, var(--cald-bad) 70%, transparent); }
+:root.is-desktop-modern .cal2-sheet h3 { margin: 8px 0 0; font-family: var(--dsk-font); font-size: 24px; font-weight: 650; line-height: 1.2; letter-spacing: -0.024em; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__sub { margin-top: 6px; font-size: 13.5px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__when { margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__when b { font-family: var(--dsk-font); font-size: 17px; font-weight: 600; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; }
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__when span:not(.cal2-pill) { font-size: 12.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__place { gap: 8px; margin-top: 12px; font-size: 13px; color: var(--dsk-ink-2); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__place { gap: 8px; margin-top: 14px; font-size: 13px; color: var(--dsk-ink-2); }
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__place svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__why { margin-top: 12px; padding: 12px 14px; border: 0; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__why.is-bad { background: color-mix(in srgb, var(--cald-bad) 5%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cald-bad) 26%, transparent); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__why small { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__why p { margin-top: 4px; font-size: 13px; line-height: 1.5; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__why { margin-top: 14px; padding: 14px 16px; border: 0; border-radius: 14px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__why.is-bad { box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px color-mix(in srgb, var(--cald-bad) 30%, transparent); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__why small { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__why p { margin-top: 5px; font-size: 13.5px; line-height: 1.5; }
 /* figures: tabular numbers with their label under */
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats { gap: 8px; margin-top: 12px; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats div { gap: 4px; padding: 12px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats b { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats span { font-size: 12.5px; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__rows { gap: 10px 16px; margin: 16px 2px 0; font-size: 13px; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats { gap: 10px; margin-top: 14px; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats div { gap: 6px; padding: 14px 16px; border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats b { font-family: var(--dsk-font); font-size: 26px; font-weight: 560; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__stats span { font-size: 12px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__rows { gap: 12px 18px; margin: 18px 2px 0; font-size: 13.5px; }
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__rows dt { color: var(--dsk-ink-3); }
 :root.is-desktop-modern .cal2-sheet .cal2-sheet__rows dd { font-weight: 500; font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__members { gap: 2px; margin-top: 16px; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__members small { margin: 0 2px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2-sheet .cal2-member { min-height: 40px !important; padding: 8px 10px; border-radius: 10px; background: transparent; transition: background 0.12s ease; }
-:root.is-desktop-modern .cal2-sheet .cal2-member:not(:disabled):hover { background: var(--dsk-hover); }
-:root.is-desktop-modern .cal2-sheet .cal2-member time { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
-:root.is-desktop-modern .cal2-sheet .cal2-member b { font-size: 13px; font-weight: 550; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__members { gap: 2px; margin-top: 18px; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__members small { margin: 0 4px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2-sheet .cal2-member { min-height: 42px !important; padding: 8px 12px; border-radius: 12px; background: transparent; transition: background 0.15s ease; }
+:root.is-desktop-modern .cal2-sheet .cal2-member:not(:disabled):hover { background: var(--cald-row-hover); }
+:root.is-desktop-modern .cal2-sheet .cal2-member time { font-size: 12px; font-weight: 500; color: var(--dsk-ink-3); font-variant-numeric: tabular-nums; }
+:root.is-desktop-modern .cal2-sheet .cal2-member b { font-size: 13.5px; font-weight: 560; }
 :root.is-desktop-modern .cal2-sheet .cal2-member em { font-size: 12.5px; }
 :root.is-desktop-modern .cal2-sheet .cal2-member svg { width: 13px !important; height: 13px !important; color: var(--dsk-ink-3); }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__acts { gap: 8px; margin-top: 18px; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__acts { gap: 10px; margin-top: 20px; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act {
   min-height: 0 !important;
-  height: 34px;
-  gap: 7px;
-  padding: 0 12px;
+  height: 36px;
+  gap: 8px;
+  padding: 0 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 560;
   color: var(--dsk-ink);
-  background: var(--dsk-tile);
-  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow), 0 1px 2px rgb(0 0 0 / 0.18);
+  transition: filter 0.18s ease, transform 0.18s var(--dsk-ease), box-shadow 0.18s ease;
 }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act:hover { background: var(--dsk-tile-hi); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act:hover { filter: brightness(1.1); transform: translateY(-1px); }
+:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act:active { transform: none; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act svg { width: 14px !important; height: 14px !important; }
 :root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act.is-primary {
-  color: var(--cald-primary-ink);
-  background: var(--cald-primary);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), 0 1px 2px rgb(0 0 0 / 0.12);
+  font-weight: 600;
+  color: var(--dsk-primary-ink);
+  background: var(--dsk-primary-bg);
+  box-shadow: var(--dsk-primary-shadow);
 }
-:root.is-desktop-modern :is(.cal2, .cal2-sheet) .cal2-act.is-primary:hover { background: var(--cald-primary-hi); }
-:root.is-desktop-modern .cal2 .cal2-error .cal2-act { display: inline-flex; margin-top: 12px; height: 32px; min-height: 0 !important; padding: 0 14px; }
-:root.is-desktop-modern .cal2-sheet .cal2-sheet__prov { margin-top: 18px; font-size: 11.5px; color: var(--dsk-ink-3); }
+:root.is-desktop-modern .cal2 .cal2-error .cal2-act { display: inline-flex; margin-top: 14px; height: 34px; min-height: 0 !important; padding: 0 16px; }
+:root.is-desktop-modern .cal2-sheet .cal2-sheet__prov { margin-top: 20px; font-size: 12px; color: var(--dsk-ink-3); }
 
 @media (prefers-reduced-motion: reduce) {
   :root.is-desktop-modern :is(.cal2, .cal2-sheet),
   :root.is-desktop-modern :is(.cal2, .cal2-sheet) * { animation: none !important; transition: none !important; }
+  :root.is-desktop-modern .cal2 :is(.cal2-window, .cal2-tomorrow, .cal2-card, .cal2-week__row, .cal2-result, .cal2-strip__day, .cal2-summary__attn):hover { transform: none; }
 }
