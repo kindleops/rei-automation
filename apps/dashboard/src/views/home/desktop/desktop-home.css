@@ -254,3 +254,51 @@ html[data-nexus-theme='light'] .dh-btn.is-primary { color: #0b0c0e; background: 
 @media (prefers-reduced-motion: reduce) {
   .dh-w, .dh-catalog, .dh-skel i, .dh-pipe__bar i { animation: none !important; transition: none !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMIUM v2 — the board as liquid-glass plates on the pane's glass: lit top
+   edges, deep soft shadows, bolder figures, more air.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-desktop-modern .dh { padding: 32px 36px 48px; }
+html.is-desktop-modern .dh-head { margin-bottom: 26px; }
+html.is-desktop-modern .dh-head h1 { font-size: var(--dsk-title-size, 28px); font-weight: 650; letter-spacing: -0.028em; }
+html.is-desktop-modern .dh-head p { margin-top: 8px; }
+html.is-desktop-modern .dh-grid { gap: 16px; }
+html.is-desktop-modern .dh-w {
+  border-radius: 16px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  animation: dh-in 0.38s var(--dsk-ease, ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease, ease), opacity 0.2s ease;
+}
+html.is-desktop-modern .dh-w:hover { box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+html.is-desktop-modern .dh.is-editing .dh-w { box-shadow: var(--dsk-card-shadow-hover); }
+html.is-desktop-modern .dh-w__head { height: 48px; padding: 0 12px 0 20px; }
+html.is-desktop-modern .dh-w__head h2 { font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--dsk-ink); }
+html.is-desktop-modern .dh-w__body { padding: 0 20px 18px; }
+/* figures: bigger, tabular, calm plates between them */
+html.is-desktop-modern .dh-stats { gap: 10px; background: none; border-radius: 0; overflow: visible; }
+html.is-desktop-modern .dh-stat {
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+}
+html.is-desktop-modern .dh-stat b { font-size: 28px; font-weight: 560; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .dh-stat span { font-size: 12px; font-weight: 500; }
+html.is-desktop-modern .dh-stats--quiet .dh-stat b { font-size: 20px; }
+/* the first figure on the board carries the one glow */
+html.is-desktop-modern .dh-grid > .dh-w:first-child .dh-stat:first-child b { text-shadow: 0 0 24px color-mix(in srgb, var(--dsk-accent) 45%, transparent); }
+html.is-desktop-modern .dh-btn.is-primary {
+  color: var(--dsk-primary-ink);
+  background: var(--dsk-primary-bg);
+  box-shadow: var(--dsk-primary-shadow);
+}
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern .dh-w { animation: none; transition: none; }
+  html.is-desktop-modern .dh-w:hover { transform: none; }
+}

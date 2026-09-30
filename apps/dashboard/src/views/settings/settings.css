@@ -425,3 +425,20 @@ html[data-nexus-theme='light'] .st-quiet input[type='time'] { color-scheme: ligh
 @media (prefers-reduced-motion: reduce) {
   .st-body { animation: none; }
 }
+
+/* PREMIUM v2 — grouped rows on liquid-glass plates, bolder heading */
+html.is-desktop-modern .st-head h2 { font-size: var(--dsk-title-size, 28px); font-weight: 650; letter-spacing: -0.028em; }
+html.is-desktop-modern .st-main { padding: 32px 36px 64px; }
+html.is-desktop-modern .st-group { margin-top: 28px; }
+html.is-desktop-modern .st-group__card {
+  border-radius: 16px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+}
+html.is-desktop-modern .st-row { min-height: 58px; padding: 13px 20px; }
+html.is-desktop-modern .st-row + .st-row { box-shadow: inset 0 1px 0 var(--dsk-edge); }
+html.is-desktop-modern .st-nav__item.is-active { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .st-theme__preview,
+html.is-desktop-modern .st-bdstyle__preview { border-radius: 12px; box-shadow: var(--dsk-chip-shadow), 0 10px 24px -16px rgb(0 0 0 / 0.6); }

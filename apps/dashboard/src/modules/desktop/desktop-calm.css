@@ -331,3 +331,58 @@ html.is-desktop-modern[data-nexus-theme='light'] .dsk-side__glass,
 html.is-desktop-modern[data-nexus-theme='light'] .dsk-top__glass {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(255 255 255 / 0.55), 0 0 0 1px rgb(15 17 22 / 0.05), 0 18px 44px -30px rgb(30 40 90 / 0.28);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMIUM MATERIAL (v2) — shared by every desktop app.
+   Cards are liquid-glass plates: a lit top edge (specular), a faint inner
+   gradient, a soft deep shadow, and the flowing colour behind the pane just
+   reading through. Primary actions are glossy accent; icon chips are glass.
+   Apps use these tokens rather than inventing their own.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-desktop-modern {
+  --dsk-card-bg:
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.018) 40%, rgb(255 255 255 / 0.008)),
+    rgb(var(--dsk-fill) / calc(0.46 * var(--lg-alpha, 1)));
+  --dsk-card-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.09),
+    inset 0 0 0 1px rgb(255 255 255 / 0.065),
+    0 20px 44px -28px rgb(0 0 0 / 0.85),
+    0 2px 6px -3px rgb(0 0 0 / 0.35);
+  --dsk-card-shadow-hover:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1),
+    0 26px 54px -28px rgb(0 0 0 / 0.9),
+    0 3px 10px -4px rgb(0 0 0 / 0.4);
+  --dsk-chip-bg: linear-gradient(180deg, rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.035));
+  --dsk-chip-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  --dsk-primary-bg: linear-gradient(180deg, color-mix(in srgb, var(--dsk-accent) 94%, #fff 6%), color-mix(in srgb, var(--dsk-accent) 80%, #000 20%));
+  --dsk-primary-ink: var(--ix-accent-ink, #04121a);
+  --dsk-primary-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 10px 26px -12px color-mix(in srgb, var(--dsk-accent) 80%, transparent);
+  --dsk-glow: 0 0 28px -6px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+  --dsk-title-size: 28px;
+  --dsk-figure-size: 40px;
+}
+html.is-desktop-modern[data-nexus-theme='light'] {
+  --dsk-card-bg: linear-gradient(180deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.66));
+  --dsk-card-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 1),
+    inset 0 0 0 1px rgb(15 17 22 / 0.065),
+    0 20px 44px -30px rgb(30 40 90 / 0.32),
+    0 1px 3px rgb(30 40 90 / 0.06);
+  --dsk-card-shadow-hover:
+    inset 0 1px 0 rgb(255 255 255 / 1),
+    inset 0 0 0 1px rgb(15 17 22 / 0.09),
+    0 26px 54px -30px rgb(30 40 90 / 0.4),
+    0 2px 6px rgb(30 40 90 / 0.08);
+  --dsk-chip-bg: linear-gradient(180deg, #ffffff, rgb(240 242 246 / 0.9));
+  --dsk-chip-shadow: inset 0 1px 0 #ffffff, inset 0 0 0 1px rgb(15 17 22 / 0.08);
+}
+
+/* chrome in the v2 material: lit edges, deeper depth, glass active plate */
+html.is-desktop-modern:not([data-nexus-theme='light']) .dsk-side__glass,
+html.is-desktop-modern:not([data-nexus-theme='light']) .dsk-top__glass {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.075), inset 0 0 0 1px var(--dsk-edge), 0 26px 64px -36px rgb(0 0 0 / 0.95);
+}
+html.is-desktop-modern .dsk-side__glide { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .dsk-side__item.is-active .dsk-side__glyph { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .dsk-cmd__field { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
