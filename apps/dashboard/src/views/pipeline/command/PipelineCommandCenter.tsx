@@ -38,6 +38,7 @@ import {
 import { PipelineDealInspector } from './PipelineDealInspector'
 import './pipeline-command-tokens.css'
 import './pipeline-command.css'
+import './pipeline-desktop.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const fmt = (n: number) => Math.round(n).toLocaleString()

@@ -1,0 +1,990 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   PIPELINE · DESKTOP
+   The phone's command center, recomposed for a desk. Everything here is
+   scoped to html.is-desktop-modern (phones never carry it) and composes by
+   the PANE's width (container: pane), never the window's:
+
+     < 700px    the phone's single column, in the desktop finish
+     ≥ 700px    stat row across, lanes and deals in columns
+     ≥ 1100px   a board: lifecycle beside whose-move, exceptions beside
+                movement, the deals as a card grid under a sticky toolbar
+     ≥ 1900px   the board stops growing and centres
+
+   Finish: transparent root (the pane is the glass); 14px glass cards on a
+   hairline with a soft drop; one type scale (11.5 meta · 12.5 labels ·
+   13 body · 14 list primary · 15 card titles · 22 page · 32 hero figure);
+   figures sit above their labels; rows are floating plates (no rules);
+   facts are dot-separated spec lines; chips only for status and filters;
+   32–34px controls with a raised active segment and an accent focus halo;
+   colour only where something needs attention. The deal inspector opens as
+   a right-side panel inside Pipeline's own pane (PipelineDealInspector
+   mounts it there on desktop; <body> on phones).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern :is(.plc, .pli) {
+  --plc-text: var(--dsk-ink);
+  --plc-text-2: var(--dsk-ink-2);
+  --plc-text-3: var(--dsk-ink-3);
+  --plc-edge: var(--dsk-edge);
+  --plc-edge-hi: var(--dsk-edge-hi);
+  --plc-glass: var(--dsk-glass);
+  --plc-glass-hi: var(--dsk-glass-strong);
+  --plc-track: var(--dsk-tile);
+  --plc-blur: var(--dsk-blur);
+  --plc-sheen: linear-gradient(transparent, transparent);
+  /* the neutral every stage / lane colour is muted toward */
+  --plc-mute: #6f7078;
+  --plc-good: #4ade9a;
+  --plc-warn: #f0b64a;
+  --plc-bad: #ff7b86;
+  --pd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  --pd-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.14);
+  --pd-raised: color-mix(in srgb, var(--dsk-ink) 10%, rgb(var(--dsk-fill)));
+  --pd-raised-edge: 0 1px 2px rgb(0 0 0 / 0.3), inset 0 0 0 1px var(--dsk-edge-hi);
+  --pd-halo: 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --pd-primary: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  --pd-primary-ink: #fff;
+  font-family: var(--dsk-font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.plc, .pli) {
+  --plc-mute: #8a8c93;
+  --plc-good: #0f8f5c;
+  --plc-warn: #a86612;
+  --plc-bad: #c62f28;
+  --pd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
+  --pd-card-hi: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 3px rgb(15 17 22 / 0.08);
+  --pd-raised: #fff;
+  --pd-raised-edge: 0 1px 2px rgb(15 17 22 / 0.12), inset 0 0 0 1px var(--dsk-edge);
+  --pd-primary: color-mix(in srgb, var(--dsk-accent) 20%, #fff);
+  --pd-primary-ink: #0b0c0e;
+}
+
+/* ── root + scroll ───────────────────────────────────────────────────── */
+html.is-desktop-modern .plc { background: transparent; color: var(--dsk-ink); }
+html.is-desktop-modern .plc__liquid { display: none !important; }
+html.is-desktop-modern .plc__scroll {
+  --plc-pad-t: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: var(--plc-pad-t) 16px 32px;
+  scrollbar-width: thin;
+}
+/* A column of cards in a height-bound scroller: nothing may shrink (the
+   lifecycle card clips its overflow, so it would be the first to go). */
+html.is-desktop-modern .plc .plc__scroll > * { flex-shrink: 0; }
+/* Quiet the phone's entrance choreography and every ambient loop. */
+html.is-desktop-modern .plc :is(*, *::before, *::after) { animation: none !important; }
+html.is-desktop-modern .plc :is(.plc-lanes, .plc-exceptions, .plc-moves, .plc-calm, .plc-flow, .plc-feed > .plc-card) { margin: 0; }
+
+/* ── shared primitives ───────────────────────────────────────────────── */
+html.is-desktop-modern .plc :is(.plc-flow, .plc-lanes, .plc-exceptions, .plc-moves, .plc-calm, .plc-card:not(.is-ghost)) {
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--pd-card);
+}
+html.is-desktop-modern .plc .plc-eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink); }
+/* ghost icon control: a plate appears on hover */
+html.is-desktop-modern .plc .plc-icon {
+  width: 32px;
+  height: 32px;
+  min-height: 32px !important;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-icon:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .plc .plc-icon svg { width: 15px; height: 15px; }
+/* the filter control is the secondary one: tile + hairline */
+html.is-desktop-modern .plc .plc-hero__top .plc-icon:last-of-type { background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .plc .plc-hero__top .plc-icon:last-of-type:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .plc .plc-icon.is-on,
+html.is-desktop-modern .plc .plc-hero__top .plc-icon.is-on { color: var(--dsk-ink); background: color-mix(in srgb, var(--dsk-accent) 10%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent); }
+/* card-header action: ghost, hover plate */
+html.is-desktop-modern .plc .plc-link {
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-link:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern :is(.plc, .pli) :is(button, a, input):focus-visible {
+  outline: 1px solid var(--dsk-accent);
+  outline-offset: 0;
+  box-shadow: var(--pd-halo);
+}
+
+/* ── page header ─────────────────────────────────────────────────────── */
+html.is-desktop-modern .plc .plc-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 4px;
+}
+html.is-desktop-modern .plc .plc-hero__top { gap: 6px; min-height: 32px; }
+html.is-desktop-modern .plc .plc-hero__top .plc-eyebrow { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+html.is-desktop-modern .plc .plc-live {
+  gap: 7px;
+  margin-right: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .plc .plc-live i { width: 6px; height: 6px; background: var(--plc-good); box-shadow: none; }
+html.is-desktop-modern .plc .plc-search {
+  height: 34px;
+  margin: 0;
+  padding: 0 8px 0 11px;
+  gap: 9px;
+  border-radius: 9px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-accent), var(--pd-halo);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .plc .plc-search svg { width: 14px; height: 14px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-search input { font-size: 13px; color: var(--dsk-ink); font-family: inherit; }
+html.is-desktop-modern .plc .plc-search input::placeholder { color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-search input:focus-visible { outline: 0; box-shadow: none; }
+html.is-desktop-modern .plc .plc-search button { width: 24px; height: 24px; min-height: 24px !important; border-radius: 6px; color: var(--dsk-ink-3); background: transparent; }
+html.is-desktop-modern .plc .plc-search button:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+
+/* the hero figure: whether the machine is working, in one number */
+html.is-desktop-modern .plc .plc-hero__headline { margin: 0; gap: 12px; align-items: baseline; }
+html.is-desktop-modern .plc .plc-hero__num {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--dsk-ink);
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .plc .plc-hero__words { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0; }
+html.is-desktop-modern .plc .plc-hero__words b { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-hero__words small { font-size: 13px; color: var(--dsk-ink-3); }
+/* still reading: soft plates, never a bare "Loading…" */
+html.is-desktop-modern .plc .plc-ghost.is-num { width: 56px; height: 30px; border-radius: 8px; background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 200% 100%; animation: plc-shimmer 2.4s ease-in-out infinite !important; }
+html.is-desktop-modern .plc .plc-hero__headline:has(.plc-ghost) .plc-hero__words small {
+  color: transparent;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile));
+  background-size: 200% 100%;
+  animation: plc-shimmer 2.4s ease-in-out infinite !important;
+}
+
+/* four figures, one strip: number above its label */
+html.is-desktop-modern .plc .plc-hero__pills {
+  gap: 1px;
+  margin: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: var(--pd-card);
+}
+html.is-desktop-modern .plc .plc-pill {
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 3px;
+  min-height: 66px !important;
+  padding: 12px 16px;
+  border-radius: 0;
+  background: var(--dsk-glass-strong);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-pill::before { display: none; }
+html.is-desktop-modern .plc .plc-pill:hover { background: color-mix(in srgb, var(--dsk-glass-strong), var(--dsk-ink) 4%); }
+html.is-desktop-modern .plc .plc-pill:active { transform: none; }
+html.is-desktop-modern .plc .plc-pill span { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-pill b { font-size: 22px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-pill.is-exception:not(.is-calm) b { color: var(--plc-warn); }
+html.is-desktop-modern .plc .plc-pill.is-on {
+  background: color-mix(in srgb, var(--dsk-glass-strong), var(--dsk-ink) 5%);
+  box-shadow: inset 0 -2px 0 var(--dsk-accent);
+}
+html.is-desktop-modern .plc .plc-pill.is-on span { color: var(--dsk-ink-2); }
+html.is-desktop-modern .plc .plc-hero__money { margin: 0; font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-hero__money b { font-weight: 600; color: var(--dsk-ink-2); }
+
+/* ── card headers ────────────────────────────────────────────────────── */
+html.is-desktop-modern .plc :is(.plc-lanes, .plc-exceptions, .plc-moves) { padding: 16px 18px 14px; }
+html.is-desktop-modern .plc :is(.plc-lanes, .plc-exceptions, .plc-moves) header { align-items: center; gap: 8px; min-height: 24px; margin-bottom: 12px; }
+html.is-desktop-modern .plc :is(.plc-lanes, .plc-exceptions, .plc-moves) header small { font-size: 12.5px; color: var(--dsk-ink-3); }
+
+/* ── lifecycle: S1–S10 as a quiet bar chart ─────────────────────────── */
+html.is-desktop-modern .plc .plc-flow { padding: 16px 18px 14px; overflow: hidden; }
+html.is-desktop-modern .plc .plc-flow::before { content: 'Lifecycle'; display: block; margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-flow__stream { display: none; }
+html.is-desktop-modern .plc .plc-flow__cols { height: 168px; gap: 6px; }
+html.is-desktop-modern .plc .plc-col { gap: 6px; border-radius: 10px; transition: background 0.15s ease; }
+html.is-desktop-modern .plc .plc-col:not(:disabled):hover { background: var(--dsk-hover); }
+html.is-desktop-modern .plc .plc-col__count { font-size: 12.5px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-col.is-empty .plc-col__count { font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-col__bar {
+  max-width: 28px;
+  border-radius: 6px 6px 3px 3px;
+  background: color-mix(in srgb, var(--tone) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 22%, transparent);
+}
+html.is-desktop-modern .plc .plc-col.is-empty .plc-col__bar { background: var(--dsk-tile-hi); box-shadow: none; }
+html.is-desktop-modern .plc .plc-col__dormant { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--tone) 14%, transparent) 0 2px, transparent 2px 5px); }
+html.is-desktop-modern .plc .plc-col__working { background: color-mix(in srgb, var(--tone) 62%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .plc .plc-col__alert {
+  top: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+  color: #1b1406;
+  background: var(--plc-warn);
+  box-shadow: none;
+}
+html.is-desktop-modern[data-nexus-theme='light'] .plc .plc-col__alert { color: #fff; }
+html.is-desktop-modern .plc .plc-col__label { font-size: 11.5px; font-weight: 550; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-col.is-on .plc-col__label { color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-col.is-on .plc-col__bar { box-shadow: inset 0 0 0 1.5px var(--dsk-accent); }
+html.is-desktop-modern .plc .plc-col.is-moved .plc-col__label::after { width: 4px; height: 4px; background: var(--plc-good); }
+html.is-desktop-modern .plc .plc-flow__groups { gap: 6px; margin-top: 8px; }
+html.is-desktop-modern .plc .plc-flow__groups span {
+  padding-top: 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .plc .plc-flow__groups span::before { height: 2px; background: color-mix(in srgb, var(--tone) 45%, var(--plc-mute)); opacity: 0.8; }
+html.is-desktop-modern .plc .plc-flow__focus {
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 6px 6px 6px 12px;
+  border-radius: 10px;
+  background: var(--dsk-tile);
+  box-shadow: inset 2px 0 0 var(--dsk-accent), inset 0 0 0 1px var(--dsk-edge-hi);
+}
+html.is-desktop-modern .plc .plc-flow__focus b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .plc .plc-flow__focus span { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-flow__focus button { width: 28px; height: 28px; min-height: 28px !important; border-radius: 7px; color: var(--dsk-ink-3); background: transparent; }
+html.is-desktop-modern .plc .plc-flow__focus button:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+
+/* ── whose move ──────────────────────────────────────────────────────── */
+html.is-desktop-modern .plc .plc-lanes__meter { gap: 2px; height: 8px; border-radius: 4px; }
+html.is-desktop-modern .plc .plc-lanes__meter i { min-width: 3px; background: color-mix(in srgb, var(--tone) 60%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .plc .plc-lanes__keys { gap: 2px 12px; margin-top: 12px; }
+html.is-desktop-modern .plc .plc-lane { gap: 10px; min-height: 34px !important; padding: 0 10px; border-radius: 10px; transition: background 0.15s ease, box-shadow 0.15s ease; }
+html.is-desktop-modern .plc .plc-lane:not(:disabled):hover { background: var(--dsk-hover); }
+html.is-desktop-modern .plc .plc-lane.is-on { background: var(--dsk-tile-hi); box-shadow: inset 2px 0 0 var(--dsk-accent), inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .plc .plc-lane i { width: 7px; height: 7px; border-radius: 2px; background: color-mix(in srgb, var(--tone) 65%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .plc .plc-lane span { font-size: 13px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .plc .plc-lane b { font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+
+/* ── exceptions / nothing needs you / movement: floating row plates ─── */
+html.is-desktop-modern .plc .plc-calm { gap: 14px; padding: 18px 20px; align-items: center; }
+html.is-desktop-modern .plc .plc-calm__orb {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--dsk-ink);
+  opacity: 0.35;
+}
+html.is-desktop-modern .plc .plc-calm__orb::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 9px;
+  width: 9px;
+  height: 5px;
+  border-left: 1.5px solid var(--dsk-ink);
+  border-bottom: 1.5px solid var(--dsk-ink);
+  transform: rotate(-45deg);
+}
+html.is-desktop-modern .plc .plc-calm b { font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .plc .plc-calm small { font-size: 13px; color: var(--dsk-ink-3); }
+
+html.is-desktop-modern .plc :is(.plc-exception, .plc-move) {
+  gap: 12px;
+  min-height: 52px !important;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .plc :is(.plc-exception, .plc-move):hover { background: var(--dsk-hover); }
+html.is-desktop-modern .plc :is(.plc-exception, .plc-move):active { transform: none; }
+html.is-desktop-modern .plc .plc-exception + .plc-exception { margin-top: 2px; }
+html.is-desktop-modern .plc .plc-exceptions header + .plc-exception { margin-top: -4px; }
+html.is-desktop-modern .plc :is(.plc-exception__icon, .plc-move__icon) {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .plc :is(.plc-exception__icon, .plc-move__icon) { background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(15, 17, 22, 0.03)); }
+html.is-desktop-modern .plc :is(.plc-exception__icon, .plc-move__icon) svg { width: 14px; height: 14px; }
+html.is-desktop-modern .plc :is(.plc-exception__body, .plc-move__body) { gap: 2px; }
+html.is-desktop-modern .plc :is(.plc-exception__body, .plc-move__body) b { font-size: 14px; font-weight: 550; letter-spacing: -0.005em; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-move__body b em { color: var(--dsk-ink-3); font-weight: 500; }
+html.is-desktop-modern .plc :is(.plc-exception__body, .plc-move__body) small { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc :is(.plc-exception__since, .plc-move__at) { display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+/* it needs you: a small dot in the lane's own warning colour */
+html.is-desktop-modern .plc .plc-exception__since::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--tone) 80%, var(--plc-mute)); }
+
+/* movement: a hairline timeline through the icon column */
+html.is-desktop-modern .plc .plc-moves ol::before { left: 24px; top: 22px; bottom: 22px; background: var(--dsk-edge); }
+html.is-desktop-modern .plc .plc-move.is-advance .plc-move__icon,
+html.is-desktop-modern .plc .plc-move.is-reply .plc-move__icon { color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-move.is-exit .plc-move__icon { color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-move__icon { background: var(--dsk-glass-strong); }
+
+/* ── deals: one toolbar strip, which the grid scrolls under ──────────── */
+/* Chrome sticks this against the scroller's padding box, so the offset
+   subtracts the padding: the bar rides 10px under the pane's top edge. */
+html.is-desktop-modern .plc .plc-feedhead {
+  top: calc(10px - var(--plc-pad-t, 20px));
+  margin: 4px 0 0;
+  padding: 5px 6px 5px 5px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  border-radius: 12px;
+  /* near-opaque: panes carry no live blur, and deals scroll beneath it */
+  background: rgb(var(--dsk-fill) / 0.985);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: var(--pd-card), 0 12px 28px -22px rgba(0, 0, 0, 0.7);
+  scroll-margin-top: 10px;
+}
+/* views: a segmented control with a raised active segment */
+html.is-desktop-modern .plc .plc-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .plc .plc-tab {
+  gap: 6px;
+  height: 28px;
+  min-height: 28px !important;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-3);
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-tab:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-tab.is-on { color: var(--dsk-ink); background: var(--pd-raised); box-shadow: var(--pd-raised-edge); }
+html.is-desktop-modern .plc .plc-tab.is-stage { color: var(--dsk-ink); background: var(--pd-raised); box-shadow: inset 0 -2px 0 var(--dsk-accent), var(--pd-raised-edge); }
+html.is-desktop-modern .plc .plc-tab svg { width: 10px; height: 10px; }
+html.is-desktop-modern .plc .plc-feedhead__bar { flex: 1 1 auto; gap: 6px; padding: 0; }
+html.is-desktop-modern .plc .plc-feedhead__bar > span { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-feedhead__bar b { font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-feedhead__bar > span:not(:has(b)) {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 12px;
+  color: transparent;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile));
+  background-size: 200% 100%;
+  animation: plc-shimmer 2.4s ease-in-out infinite !important;
+}
+/* secondary controls: tile + hairline */
+html.is-desktop-modern .plc .plc-chip {
+  gap: 6px;
+  height: 32px;
+  min-height: 32px !important;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-chip:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .plc .plc-chip svg { width: 13px; height: 13px; color: var(--dsk-ink-3); }
+
+/* ── deal cards ──────────────────────────────────────────────────────── */
+html.is-desktop-modern .plc .plc-feed { gap: 12px; padding: 0; }
+html.is-desktop-modern .plc .plc-card {
+  gap: 8px;
+  padding: 16px 18px;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-card:not(.is-ghost):hover { box-shadow: var(--pd-card-hi); background: color-mix(in srgb, var(--dsk-glass), var(--dsk-ink) 3%); }
+html.is-desktop-modern .plc .plc-card:active { transform: none; }
+html.is-desktop-modern .plc .plc-card::before,
+html.is-desktop-modern .plc .plc-card__glow { display: none; }
+html.is-desktop-modern .plc .plc-card.is-late,
+html.is-desktop-modern .plc .plc-card.is-closed { background: var(--dsk-glass); box-shadow: var(--pd-card); }
+html.is-desktop-modern .plc .plc-card.is-dormant { opacity: 0.74; }
+/* status chip */
+html.is-desktop-modern .plc .plc-stage {
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  max-width: 70%;
+}
+html.is-desktop-modern .plc .plc-stage i { width: 6px; height: 6px; background: color-mix(in srgb, var(--tone) 70%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .plc .plc-stage em { font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-card.is-dormant .plc-stage i { background: var(--plc-mute); }
+html.is-desktop-modern .plc .plc-hot { gap: 3px; font-size: 11.5px; font-weight: 600; color: color-mix(in srgb, #ff9f5a 80%, var(--dsk-ink-2)); }
+html.is-desktop-modern .plc .plc-card__age { font-size: 11.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-card__title { margin-top: 2px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-card__sub { font-size: 12.5px; color: var(--dsk-ink-3); }
+/* whose move: colour only when it is an exception */
+html.is-desktop-modern .plc .plc-card__lane { gap: 7px; margin: 0; font-size: 12.5px; }
+html.is-desktop-modern .plc .plc-card__lane-dot { width: 6px; height: 6px; background: var(--dsk-ink-3); box-shadow: none; }
+html.is-desktop-modern .plc .plc-card.lane-operator .plc-card__lane-dot { background: var(--plc-warn); }
+html.is-desktop-modern .plc .plc-card.lane-blocked .plc-card__lane-dot { background: var(--plc-bad); }
+html.is-desktop-modern .plc .plc-card__lane b { font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .plc .plc-card__lane span { color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-card__lane em { font-size: 11.5px; color: var(--dsk-ink-3); }
+/* figures: number above its label */
+html.is-desktop-modern .plc .plc-card__figures { gap: 22px; margin: 4px 0 0; padding-top: 12px; border-top: 1px solid var(--dsk-edge); }
+html.is-desktop-modern .plc .plc-card__figures span { flex-direction: column-reverse; gap: 2px; }
+html.is-desktop-modern .plc .plc-card__figures small { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-card__figures b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--dsk-ink); }
+html.is-desktop-modern .plc .plc-card__quote {
+  max-width: 72ch;
+  font-size: 12.5px;
+  font-style: normal;
+  line-height: 1.5;
+  color: var(--dsk-ink-2);
+  padding-left: 10px;
+  box-shadow: inset 2px 0 0 var(--dsk-edge-hi);
+}
+html.is-desktop-modern .plc .plc-card__stall {
+  height: 22px;
+  padding: 0 8px;
+  gap: 5px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--plc-warn);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .plc .plc-card.is-ghost {
+  height: 150px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile));
+  background-size: 200% 100%;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  animation: plc-shimmer 2.4s ease-in-out infinite !important;
+}
+html.is-desktop-modern .plc .plc-more {
+  height: 34px;
+  margin: 4px 0 0;
+  border-radius: 9px;
+  line-height: 34px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-more:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+/* empty: a centred calm state */
+html.is-desktop-modern .plc .plc-empty { gap: 6px; padding: 48px 20px; border-radius: 14px; background: transparent; box-shadow: none; }
+html.is-desktop-modern .plc .plc-empty .plc-calm__orb { margin-bottom: 8px; }
+html.is-desktop-modern .plc .plc-empty b { font-size: 13px; font-weight: 600; color: var(--dsk-ink-2); }
+html.is-desktop-modern .plc .plc-empty small { font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-error {
+  gap: 4px;
+  margin: 0;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--dsk-glass);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--plc-bad) 30%, var(--dsk-edge)), 0 1px 2px rgb(0 0 0 / 0.12);
+}
+html.is-desktop-modern .plc .plc-error b { font-size: 13px; font-weight: 600; color: var(--plc-bad); }
+html.is-desktop-modern .plc .plc-error span { font-size: 13px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .plc .plc-error button {
+  margin-top: 10px;
+  height: 32px;
+  min-height: 32px !important;
+  line-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+}
+html.is-desktop-modern .plc .plc-error button:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .plc .plc-toast {
+  bottom: 20px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  background: rgb(var(--dsk-fill) / 0.985);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+}
+
+/* ── filter sheet: a right-side panel inside the pane ───────────────── */
+html.is-desktop-modern .plc .plc-sheet { justify-content: stretch; align-items: flex-end; }
+html.is-desktop-modern .plc .plc-sheet__scrim { background: rgb(2 4 8 / 0.32); }
+html.is-desktop-modern[data-nexus-theme='light'] .plc .plc-sheet__scrim { background: rgb(15 17 22 / 0.12); }
+html.is-desktop-modern .plc .plc-sheet__panel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(400px, calc(100% - 16px));
+  max-height: none;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  /* Inside a pane there is no live blur (the pane tints instead), so a panel
+     that sits over busy content for a while is made near-opaque. */
+  background: rgb(var(--dsk-fill) / 0.985);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  animation: plc-desk-panel 0.22s var(--dsk-ease) both !important;
+}
+@keyframes plc-desk-panel { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+html.is-desktop-modern .plc .plc-sheet__grip { display: none; }
+html.is-desktop-modern .plc .plc-sheet__panel header { margin-bottom: 6px; }
+html.is-desktop-modern .plc .plc-sheet__panel header b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .plc .plc-sheet__panel section { margin: 16px 0 2px; }
+html.is-desktop-modern .plc .plc-sheet__panel h4 { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dsk-ink-3); }
+/* choice chips: 24px, tile + hairline; chosen = accent */
+html.is-desktop-modern .plc .plc-seg { flex-wrap: wrap; gap: 6px; }
+html.is-desktop-modern .plc .plc-seg button {
+  height: 26px;
+  min-height: 26px !important;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .plc .plc-seg button:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .plc .plc-seg button.is-on { color: var(--dsk-ink); background: color-mix(in srgb, var(--dsk-accent) 12%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+html.is-desktop-modern .plc .plc-sheet__fields { gap: 12px; }
+html.is-desktop-modern .plc .plc-sheet__fields label { gap: 6px; }
+html.is-desktop-modern .plc .plc-sheet__fields span { font-size: 12.5px; font-weight: 550; color: var(--dsk-ink-2); }
+html.is-desktop-modern .plc .plc-sheet__fields input {
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .plc .plc-sheet__fields input::placeholder { color: var(--dsk-ink-3); }
+html.is-desktop-modern .plc .plc-sheet__fields input:focus,
+html.is-desktop-modern .plc .plc-sheet__fields input:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--dsk-accent), var(--pd-halo); }
+html.is-desktop-modern .plc .plc-sheet__panel footer { gap: 8px; margin-top: auto; padding-top: 16px; }
+html.is-desktop-modern .plc .plc-btn {
+  height: 34px;
+  min-height: 34px !important;
+  border-radius: 9px;
+  line-height: 34px;
+  font-size: 13px;
+  font-weight: 550;
+}
+html.is-desktop-modern .plc .plc-btn.is-ghost { flex: 0 0 auto; padding: 0 14px; color: var(--dsk-ink-2); background: transparent; box-shadow: none; }
+html.is-desktop-modern .plc .plc-btn.is-ghost:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .plc .plc-btn.is-primary { color: var(--pd-primary-ink); background: var(--pd-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+
+/* ══ COMPOSITION BY PANE WIDTH ═══════════════════════════════════════════ */
+
+/* A narrow pane keeps the phone's order with tighter gutters. */
+@container pane (max-width: 699px) {
+  html.is-desktop-modern .plc .plc__scroll { --plc-pad-t: 14px; padding: var(--plc-pad-t) 10px 24px; gap: 10px; }
+  html.is-desktop-modern .plc .plc-flow__groups span { font-size: 10px; }
+  html.is-desktop-modern .plc .plc-tabs { flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
+  html.is-desktop-modern .plc :is(.plc-flow, .plc-lanes, .plc-exceptions, .plc-moves) { padding: 14px 14px 12px; }
+  html.is-desktop-modern .plc .plc-card { padding: 14px 16px; }
+}
+@container pane (max-width: 479px) {
+  html.is-desktop-modern .plc .plc-hero__pills { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html.is-desktop-modern .plc .plc-flow__cols { gap: 3px; }
+  html.is-desktop-modern .plc .plc-flow__groups { gap: 3px; }
+  html.is-desktop-modern .plc .plc-flow__groups span { font-size: 9.5px; }
+  html.is-desktop-modern .plc .plc-hero__top .plc-eyebrow { font-size: 20px; }
+}
+
+@container pane (min-width: 700px) {
+  html.is-desktop-modern .plc .plc__scroll { --plc-pad-t: 24px; padding: var(--plc-pad-t) 22px 36px; gap: 12px; }
+  html.is-desktop-modern .plc .plc-lanes__keys { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  html.is-desktop-modern .plc .plc-feed {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+    align-items: stretch;
+  }
+  html.is-desktop-modern .plc .plc-feed > :is(.plc-more, .plc-empty, .plc-error) { grid-column: 1 / -1; }
+  html.is-desktop-modern .plc .plc-feed > .plc-more { justify-self: center; width: auto; padding: 0 18px; }
+}
+
+/* The board. A wrapping flex row (not a grid) so the toolbar can stay
+   sticky over the whole deal list — a grid item may only stick inside its
+   own row. Bases leave 1% so rounding never wraps a pair apart. */
+@container pane (min-width: 1100px) {
+  html.is-desktop-modern .plc .plc__scroll {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    align-items: stretch;
+    --plc-pad-t: 28px;
+    padding: var(--plc-pad-t) 28px 40px;
+    gap: 14px;
+  }
+  html.is-desktop-modern .plc .plc__scroll > * { min-width: 0; }
+  html.is-desktop-modern .plc :is(.plc-hero, .plc-feedhead, .plc-feed) { flex: 0 0 100%; }
+  html.is-desktop-modern .plc .plc-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 580px);
+    grid-template-areas:
+      'top top'
+      'search search'
+      'headline pills'
+      'money pills';
+    align-items: center;
+    column-gap: 32px;
+    row-gap: 0;
+    margin-bottom: 10px;
+  }
+  html.is-desktop-modern .plc .plc-hero__top { grid-area: top; margin-bottom: 20px; }
+  html.is-desktop-modern .plc .plc-search { grid-area: search; max-width: 580px; margin-bottom: 16px; }
+  html.is-desktop-modern .plc .plc-hero > .plc-error { grid-column: 1 / -1; }
+  html.is-desktop-modern .plc .plc-hero__headline { grid-area: headline; align-self: end; }
+  html.is-desktop-modern .plc .plc-hero__pills { grid-area: pills; align-self: stretch; }
+  html.is-desktop-modern .plc .plc-hero__money { grid-area: money; align-self: start; margin-top: 10px; }
+  html.is-desktop-modern .plc .plc-flow { flex: 2 1 calc((100% - 14px) * 0.655); }
+  html.is-desktop-modern .plc .plc-lanes { flex: 1 1 calc((100% - 14px) * 0.325); display: flex; flex-direction: column; }
+  html.is-desktop-modern .plc .plc-lanes__keys { grid-template-columns: minmax(0, 1fr); margin-top: 14px; }
+  html.is-desktop-modern .plc :is(.plc-exceptions, .plc-calm, .plc-moves) { flex: 1 1 calc((100% - 14px) * 0.49); }
+  html.is-desktop-modern .plc .plc-calm { align-self: stretch; }
+  html.is-desktop-modern .plc .plc-feedhead { position: sticky; z-index: 5; margin-top: 10px; }
+  html.is-desktop-modern .plc .plc-feed { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  html.is-desktop-modern .plc .plc-col__bar { max-width: 34px; }
+}
+
+/* Past ~1900px the board stops growing: centred, with room for four
+   columns of deals. */
+@container pane (min-width: 1900px) {
+  html.is-desktop-modern .plc .plc__scroll {
+    padding-left: max(28px, calc((100% - 1840px) / 2));
+    padding-right: max(28px, calc((100% - 1840px) / 2));
+  }
+  html.is-desktop-modern .plc .plc-flow__cols { height: 190px; }
+  html.is-desktop-modern .plc .plc-col__bar { max-width: 40px; }
+}
+
+/* ══ DEAL INSPECTOR — a right-side panel ═════════════════════════════════ */
+html.is-desktop-modern .pli :is(*, *::before, *::after) { animation: none !important; }
+html.is-desktop-modern .pli .pli-scrim { background: rgb(2 4 8 / 0.3); -webkit-backdrop-filter: none; backdrop-filter: none; animation: pli-fade 0.2s ease both !important; }
+html.is-desktop-modern[data-nexus-theme='light'] .pli .pli-scrim { background: rgb(15 17 22 / 0.12); }
+/* a <body> mount (fallback): under the top bar, against the window edge */
+html.is-desktop-modern .pli .pli-sheet {
+  left: auto;
+  right: var(--dsk-gap, 10px);
+  top: calc(var(--dsk-gap, 10px) * 2 + var(--dsk-top-h, 52px));
+  bottom: var(--dsk-gap, 10px);
+  width: min(540px, calc(100vw - var(--dsk-gap, 10px) * 2));
+  height: auto !important;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  transform: none;
+  transition: none;
+  animation: pli-desk-in 0.24s var(--dsk-ease) both !important;
+}
+@keyframes pli-desk-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+/* Mounted in Pipeline's own pane (the usual case): the pane is the frame.
+   Panes carry no live blur, so the panel is near-opaque rather than glass
+   that would let the deal grid ghost through it. */
+html.is-desktop-modern .dsk-pane__body > .pli .pli-sheet {
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(540px, calc(100% - 16px));
+  background: rgb(var(--dsk-fill) / 0.985);
+}
+html.is-desktop-modern .dsk-pane__body > .pli .pli-scrim { background: rgb(2 4 8 / 0.36); }
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body > .pli .pli-scrim { background: rgb(15 17 22 / 0.14); }
+html.is-desktop-modern .dsk-pane__body > .pli .pli-actions { background: rgb(var(--dsk-fill) / 0.985); }
+html.is-desktop-modern .pli :is(.pli-field, .pli-grip) { display: none; }
+html.is-desktop-modern .pli .pli-close {
+  top: 16px;
+  right: 16px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  border-radius: 8px;
+  color: var(--dsk-ink-3);
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .pli .pli-close:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .pli .pli-close svg { width: 14px; height: 14px; }
+html.is-desktop-modern .pli .pli-body { padding: 20px 22px 88px; scrollbar-width: thin; }
+
+/* hero: status chips, a title, a spec line */
+html.is-desktop-modern .pli .pli-hero { padding: 0; }
+html.is-desktop-modern .pli .pli-hero__top { gap: 6px; padding-right: 40px; }
+html.is-desktop-modern .pli .pli-chip {
+  height: 22px;
+  padding: 0 8px;
+  gap: 5px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .pli .pli-chip.is-stage { color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-chip.is-stage b { font-weight: 650; letter-spacing: 0; color: var(--dsk-ink); }
+html.is-desktop-modern .pli .pli-chip.is-hot { color: color-mix(in srgb, #ff9f5a 80%, var(--dsk-ink-2)); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-chip.is-sync i { background: var(--dsk-accent); }
+html.is-desktop-modern .pli .pli-hero__title { margin: 14px 0 4px; font-size: 20px; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; color: var(--dsk-ink); }
+html.is-desktop-modern .pli .pli-hero__seller { gap: 6px; font-size: 13px; font-weight: 500; color: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-hero__seller em { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-hero__place { font-size: 12.5px; color: var(--dsk-ink-3); }
+
+/* the rail: ten quiet dots, the current one haloed in the accent */
+html.is-desktop-modern .pli .pli-rail { margin: 20px 0 16px; }
+html.is-desktop-modern .pli .pli-rail__track::before { height: 1px; background: var(--dsk-edge-hi); box-shadow: none; }
+html.is-desktop-modern .pli .pli-rail__fill { height: 2px; background: color-mix(in srgb, var(--stage) 55%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .pli .pli-rail__dot { width: 8px; height: 8px; background: rgb(var(--dsk-fill)); box-shadow: inset 0 0 0 1.5px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-rail__dot.is-past { background: color-mix(in srgb, var(--tone) 60%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .pli .pli-rail__dot.is-now {
+  width: 12px;
+  height: 12px;
+  background: color-mix(in srgb, var(--tone) 75%, var(--plc-mute));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 22%, transparent);
+}
+html.is-desktop-modern .pli .pli-rail__dot.is-now i { display: none; }
+html.is-desktop-modern .pli .pli-rail__dot.is-resolved { background: var(--plc-good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--plc-good) 20%, transparent); }
+html.is-desktop-modern .pli .pli-rail__groups span { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-rail__groups span.is-now { color: var(--dsk-ink); font-weight: 600; }
+
+/* whose move, stated plainly */
+html.is-desktop-modern .pli .pli-lane {
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .pli .pli-lane.is-exception { box-shadow: inset 2px 0 0 var(--plc-warn), inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-lane.is-blocked.is-exception { box-shadow: inset 2px 0 0 var(--plc-bad), inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-lane.is-system::before { display: none; }
+html.is-desktop-modern .pli .pli-lane__orb {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .pli .pli-lane__orb { background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(15, 17, 22, 0.03)); }
+html.is-desktop-modern .pli .pli-lane__orb svg { width: 14px; height: 14px; }
+html.is-desktop-modern .pli .pli-lane__eyebrow { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-lane.is-exception .pli-lane__eyebrow { color: var(--plc-warn); }
+html.is-desktop-modern .pli .pli-lane__text b { font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .pli .pli-lane__text small { font-size: 12.5px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-stall { padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 550; color: var(--plc-warn); background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+
+/* sections: plates on the panel */
+html.is-desktop-modern .pli .pli-sections { gap: 10px; margin-top: 16px; }
+html.is-desktop-modern .pli .pli-sec { border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-sec__head { gap: 10px; min-height: 46px !important; padding: 0 14px; border-radius: 12px; transition: background 0.15s ease; }
+html.is-desktop-modern .pli .pli-sec__head:hover { background: var(--dsk-hover); }
+html.is-desktop-modern .pli .pli-sec__icon { width: 26px; height: 26px; border-radius: 7px; color: var(--dsk-ink-2); background: transparent; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-sec__icon svg { width: 13px; height: 13px; }
+html.is-desktop-modern .pli .pli-sec__title { font-size: 13px; font-weight: 600; letter-spacing: 0; }
+html.is-desktop-modern .pli .pli-sec__meta { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-sec__chev svg { width: 13px; height: 13px; }
+html.is-desktop-modern .pli .pli-sec__body { padding: 2px 14px 14px; }
+html.is-desktop-modern .pli .pli-note { max-width: 72ch; font-size: 12.5px; color: var(--dsk-ink-3); }
+
+/* story: a hairline timeline, monochrome nodes */
+html.is-desktop-modern .pli .pli-beat { grid-template-columns: 48px 26px minmax(0, 1fr); column-gap: 10px; padding-bottom: 14px; }
+html.is-desktop-modern .pli .pli-beat:not(:last-child)::before { left: 70px; top: 26px; width: 1px; background: var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-beat__date b { font-size: 11.5px; font-weight: 550; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-beat__date small { font-size: 11px; }
+html.is-desktop-modern .pli .pli-beat__node { width: 26px; height: 26px; color: var(--dsk-ink-2); background: rgb(var(--dsk-fill)); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-beat__node svg { width: 12px; height: 12px; }
+html.is-desktop-modern .pli .pli-beat__body { padding-top: 3px; }
+html.is-desktop-modern .pli .pli-beat__body b { font-size: 13px; font-weight: 550; }
+html.is-desktop-modern .pli .pli-beat__body small { font-size: 12.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-beat__quote { padding: 7px 10px; border-radius: 4px 10px 10px 10px; font-size: 12.5px; color: var(--dsk-ink-2); background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-beat.is-now .pli-beat__date b { color: var(--dsk-ink); }
+html.is-desktop-modern .pli .pli-beat.is-now .pli-beat__node { color: var(--dsk-ink); background: color-mix(in srgb, var(--dsk-accent) 14%, rgb(var(--dsk-fill))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+html.is-desktop-modern .pli .pli-beat.is-now .pli-beat__node::after { display: none; }
+html.is-desktop-modern .pli .pli-beat.is-now .pli-beat__body { padding: 8px 10px; border-radius: 10px; background: var(--dsk-glass-strong); box-shadow: inset 2px 0 0 var(--dsk-accent), inset 0 0 0 1px var(--dsk-edge-hi); }
+
+/* figures: number above its label */
+html.is-desktop-modern .pli .pli-figs { gap: 1px; border-radius: 10px; overflow: hidden; background: var(--dsk-edge); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-fig { gap: 2px; padding: 10px 12px; border-radius: 0; background: var(--dsk-glass-strong); box-shadow: none; }
+html.is-desktop-modern .pli .pli-fig__value { order: -1; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .pli .pli-fig__label { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-fig.is-strong .pli-fig__value { color: var(--dsk-ink); }
+html.is-desktop-modern .pli .pli-fig__sub { font-size: 11.5px; }
+html.is-desktop-modern .pli .pli-engine { margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-engine__badge { gap: 6px; font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-engine__badge svg { width: 13px; height: 13px; }
+html.is-desktop-modern .pli .pli-engine__when { font-size: 11.5px; }
+/* engine facts as one spec line */
+html.is-desktop-modern .pli .pli-engine__meta { gap: 0; margin: 10px 0; font-size: 12.5px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-engine__meta span { padding: 0; border-radius: 0; font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-2); background: none; box-shadow: none; }
+html.is-desktop-modern .pli .pli-engine__meta span + span::before { content: '·'; margin: 0 7px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-band__track { height: 10px; border-radius: 5px; }
+html.is-desktop-modern .pli .pli-band__value { top: 2px; bottom: 2px; background: color-mix(in srgb, color-mix(in srgb, var(--plc-s-dispo) 70%, var(--plc-mute)) 40%, transparent); }
+html.is-desktop-modern .pli .pli-band__offer { border-radius: 5px; background: color-mix(in srgb, var(--dsk-accent) 55%, var(--plc-mute)); box-shadow: none; }
+html.is-desktop-modern .pli .pli-band__tick.is-mid { background: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-band__tick.is-ask { background: var(--plc-warn); box-shadow: none; }
+html.is-desktop-modern .pli .pli-band__legend { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-band__legend .is-offer i { background: color-mix(in srgb, var(--dsk-accent) 55%, var(--plc-mute)); }
+html.is-desktop-modern .pli .pli-band__legend .is-ask i { background: var(--plc-warn); }
+
+/* conversation */
+html.is-desktop-modern .pli .pli-msg__meta { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-msg q { padding: 9px 12px; font-size: 13px; }
+html.is-desktop-modern .pli .pli-msg.is-in q { border-radius: 4px 12px 12px 12px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-msg.is-out q { border-radius: 12px 4px 12px 12px; background: color-mix(in srgb, var(--dsk-accent) 10%, var(--dsk-glass-strong)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 22%, transparent); }
+
+/* offers, buyers, closing: row plates, no rules */
+html.is-desktop-modern .pli :is(.pli-offers li, .pli-buyers li) { padding: 9px 12px; border-radius: 10px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-offers li b { font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .pli .pli-offers__v { font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-offers li.is-accepted { box-shadow: inset 2px 0 0 var(--plc-good), inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-offers li.is-accepted .pli-offers__v,
+html.is-desktop-modern .pli .pli-offers li.is-accepted span:last-child { color: var(--plc-good); }
+html.is-desktop-modern .pli .pli-offers li.is-counter .pli-offers__v { color: var(--plc-warn); }
+html.is-desktop-modern .pli .pli-buyers__grade { width: 26px; height: 26px; border-radius: 7px; font-size: 12px; font-weight: 650; color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .pli .pli-closing { padding: 4px 12px; border-radius: 10px; background: var(--dsk-glass-strong); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .pli .pli-row { min-height: 34px; padding: 7px 0; font-size: 13px; }
+html.is-desktop-modern .pli .pli-row + .pli-row { box-shadow: none; }
+html.is-desktop-modern .pli .pli-row span { color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-row b { font-weight: 600; }
+html.is-desktop-modern .pli .pli-resolved {
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--dsk-tile);
+  box-shadow: inset 2px 0 0 var(--plc-good), inset 0 0 0 1px var(--dsk-edge-hi);
+}
+html.is-desktop-modern .pli .pli-resolved__seal { width: 28px; height: 28px; color: var(--plc-good); background: transparent; box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .pli .pli-resolved__seal svg { width: 14px; height: 14px; }
+html.is-desktop-modern .pli .pli-resolved b { font-size: 14px; font-weight: 600; }
+
+/* buttons + states */
+html.is-desktop-modern .pli .pli-btn {
+  min-height: 32px !important;
+  height: 32px;
+  gap: 7px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .pli .pli-btn:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .pli .pli-btn:active { transform: none; }
+html.is-desktop-modern .pli .pli-btn svg { width: 13px; height: 13px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-btn.is-ghost { margin-top: 12px; color: var(--dsk-ink-2); background: transparent; box-shadow: none; }
+html.is-desktop-modern .pli .pli-btn.is-ghost:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .pli .pli-state { padding: 36px 20px; gap: 8px; }
+html.is-desktop-modern .pli .pli-state > svg { width: 28px; height: 28px; opacity: 0.35; color: var(--dsk-ink); }
+html.is-desktop-modern .pli .pli-state strong { font-size: 13px; font-weight: 600; color: var(--dsk-ink-2); }
+html.is-desktop-modern .pli .pli-state span { font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .pli .pli-skel i { height: 56px; border-radius: 12px; background: linear-gradient(90deg, var(--dsk-tile), var(--dsk-tile-hi), var(--dsk-tile)); background-size: 220% 100%; animation: pli-shimmer 2.4s ease-in-out infinite !important; }
+html.is-desktop-modern .pli .pli-skel i:first-child { height: 120px; }
+
+/* hand-offs: one row; the conversation is the primary action */
+html.is-desktop-modern .pli .pli-actions {
+  gap: 6px;
+  padding: 12px 14px;
+  flex-wrap: wrap;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 1px 0 var(--dsk-edge);
+  border-radius: 0 0 14px 14px;
+}
+html.is-desktop-modern .pli .pli-act {
+  flex: 1 1 auto;
+  flex-direction: row;
+  gap: 6px;
+  min-height: 32px !important;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .pli .pli-act svg { width: 14px; height: 14px; }
+html.is-desktop-modern .pli .pli-act:not(:disabled):hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .pli .pli-act:active:not(:disabled) { transform: none; }
+html.is-desktop-modern .pli .pli-act.is-primary { color: var(--pd-primary-ink); background: var(--pd-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern :is(.plc .plc-sheet__panel, .pli .pli-sheet, .pli .pli-scrim) { animation: none !important; }
+  html.is-desktop-modern .plc :is(.plc-card.is-ghost, .plc-ghost.is-num, .plc-hero__words small, .plc-feedhead__bar > span),
+  html.is-desktop-modern .pli .pli-skel i { animation: none !important; }
+}

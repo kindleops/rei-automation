@@ -27,6 +27,7 @@ import {
 } from './mobile-seller-format'
 import { DealDecisionSurface } from './decision/DealDecisionSurface'
 import './mobile-seller-command.css'
+import './deal-intelligence-desktop.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 

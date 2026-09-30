@@ -38,6 +38,7 @@ import {
   type CompFilterKey,
 } from './utils/comp-display'
 import './comp-intelligence.css'
+import './comp-intelligence-desktop.css'
 
 /**
  * The mobile composition is lazy because it is never both: a phone loads the mobile

@@ -72,7 +72,22 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
   const [lookAround, setLookAround] = useState(false)
   const [theme, setTheme] = useState(readTheme)
   const railRef = useRef<HTMLDivElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const firstLoad = useRef(true)
+
+  /**
+   * Where a sheet mounts. On the desktop every app lives in a workspace pane
+   * that is its own containing block, so the search-area sheet, the comp
+   * inspector and Street View open inside this surface's pane — never over an
+   * app open beside it. Phones (and any render outside a pane) use <body>.
+   */
+  const sheetHost = (): HTMLElement => {
+    if (document.documentElement.classList.contains('is-desktop-modern')) {
+      const pane = rootRef.current?.closest('.dsk-pane__body')
+      if (pane instanceof HTMLElement) return pane
+    }
+    return document.body
+  }
 
   useEffect(() => {
     const mo = new MutationObserver(() => setTheme(readTheme()))
@@ -233,7 +248,7 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
   }
 
   return (
-    <div className={cls('cev', loading && 'is-refreshing')} data-theme={theme}>
+    <div className={cls('cev', loading && 'is-refreshing')} data-theme={theme} ref={rootRef}>
       <SubjectHero w={w} onMap={openMap} onGraph={() => openGraph()} onDeal={openDeal} onLookAround={() => setLookAround(true)} />
 
       <Chapter n="01" title="Evidence" note={isSystem ? (systemKeys.size ? 'engine pricing set' : 'starter set') : 'your set'} />
@@ -352,7 +367,7 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
             <button type="button" className="cev-x" onClick={() => setLookAround(false)} aria-label="Close"><Icon name="close" /></button>
           </div>
         </div>,
-        document.body,
+        sheetHost(),
       ) : null}
 
       {sheet ? createPortal(
@@ -369,7 +384,7 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
             <button type="button" className="cev-btn is-primary" onClick={() => setSheet(false)}>Done</button>
           </div>
         </div>,
-        document.body,
+        sheetHost(),
       ) : null}
 
       {inspected ? createPortal(
@@ -383,7 +398,7 @@ export function CompsEvidenceSurface({ propertyId }: { propertyId: string }) {
           onGraph={() => openGraph(inspected.propertyId)}
           onBuyer={inspected.buyerId ? () => openBuyer(inspected.buyerId as string) : null}
         />,
-        document.body,
+        sheetHost(),
       ) : null}
     </div>
   )

@@ -11,9 +11,10 @@
  * history, messages, offers, closing events, the Decision Engine row. Nothing
  * is synthesised; an absent section is hidden, an absent engine run is stated.
  *
- * Portalled to <body>, so all tokens are defined on `.pli`.
+ * Portalled outside `.plc` (into Pipeline's pane on desktop, <body> on
+ * phones), so all tokens are defined on `.pli`.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from '../../../shared/icons'
@@ -116,6 +117,20 @@ function fullMoney(n: number | null | undefined): string | null {
 }
 
 /* ── Sheet chrome ───────────────────────────────────────────────────────── */
+
+/**
+ * Where the inspector mounts. On the desktop every app lives in a workspace
+ * pane that is its own containing block, so the inspector opens inside
+ * Pipeline's pane — a side panel over Pipeline, never over an app open beside
+ * it. Phones (and any render outside a pane) portal to <body> as before.
+ */
+function inspectorHost(): HTMLElement {
+  if (document.documentElement.classList.contains('is-desktop-modern')) {
+    const pane = document.querySelector('.plc')?.closest('.dsk-pane__body')
+    if (pane instanceof HTMLElement) return pane
+  }
+  return document.body
+}
 
 type Snap = 'half' | 'full'
 
@@ -428,7 +443,12 @@ export function PipelineDealInspector({
     }
   }, [data])
 
-  if (!open || typeof document === 'undefined') return null
+  // Resolved after commit (the pane lookup needs the surface in the DOM) and
+  // before paint, so a deep-linked (?opp=) inspector never flashes elsewhere.
+  const [host, setHost] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => { if (open) setHost(inspectorHost()) }, [open])
+
+  if (!open || typeof document === 'undefined' || !host) return null
 
   const tone = card ? STAGE_TONE[card.stage] ?? 'var(--plc-s-early)' : 'var(--plc-s-early)'
   const showDispo = Boolean(data && (stageIndex >= 7 || data.disposition.matched > 0))
@@ -663,7 +683,7 @@ export function PipelineDealInspector({
       </aside>
     </div>
   )
-  return createPortal(sheet, document.body)
+  return createPortal(sheet, host)
 }
 
 export default PipelineDealInspector

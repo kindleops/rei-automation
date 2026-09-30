@@ -1,0 +1,1032 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   COMP INTELLIGENCE · DESKTOP
+   The valuation-evidence surface (.cev, evidence/CompsEvidenceSurface) and
+   its portalled sheets, recomposed for a desk. Scoped to
+   html.is-desktop-modern; phones never carry it. Composes by the PANE:
+
+     < 700px    the phone's single column in the calm skin
+     ≥ 700px    the subject as a horizontal record card, comps as a grid
+     ≥ 1100px   analysis beside evidence: the reading column (readout,
+                comparables, distribution, market) on the left, the map
+                sticky on the right for the whole scroll
+     wide       centred at a reading width instead of stretching
+
+   Calm skin: transparent root, translucent glass on a hairline, 13px type,
+   no auroras, caustics, spinning rims, letterbox openings, grain or flowing
+   numerals. Set/candidate/excluded and subject keep small muted marks. On
+   desktop the sheets mount inside the Comps pane (CompsEvidenceSurface's
+   sheetHost): the comp inspector is a right-side panel, the search-area
+   sheet a centred one, Street View fills the pane. Rules for a <body> mount
+   remain as the fallback.
+
+   Loaded with the workspace (before the evidence chunk), so selectors here
+   out-rank the base sheet by specificity rather than by order.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root.is-desktop-modern :is(.cev, .cev-sheet, .cev-look) {
+  --cev-ink: var(--dsk-bg);
+  --cev-text: var(--dsk-ink);
+  --cev-text-2: var(--dsk-ink-2);
+  --cev-text-3: var(--dsk-ink-3);
+  --cev-edge: var(--dsk-edge);
+  --cev-edge-hi: var(--dsk-edge-hi);
+  --cev-glass: var(--dsk-glass);
+  --cev-glass-hi: var(--dsk-glass-strong);
+  --cev-track: var(--dsk-tile);
+  --cev-blur: var(--dsk-blur);
+  --cev-accent: var(--dsk-accent);
+  --cev-set: var(--dsk-accent);
+  --cev-gold: #d6b15e;
+  --cev-cand: #8f97a8;
+  --cev-excl: #6f7078;
+  --cev-good: #4ade9a;
+  --cev-warn: #f0b64a;
+  --cev-bad: #ff7b86;
+  --cev-ask: #e0a468;
+  --cev-deed: #a598d6;
+  --cev-rim: linear-gradient(var(--dsk-edge), var(--dsk-edge));
+  --cev-spec: linear-gradient(transparent, transparent);
+  --cev-liquid: linear-gradient(var(--dsk-ink), var(--dsk-ink));
+  --cev-sweep: transparent;
+  --cev-grain: none;
+  --cev-hair: var(--dsk-edge-hi);
+  --cev-display: var(--dsk-font);
+  --cev-mute: #6f7078;
+  font-family: var(--dsk-font);
+}
+:root.is-desktop-modern[data-nexus-theme='light'] :is(.cev, .cev-sheet, .cev-look) {
+  --cev-gold: #9a7420;
+  --cev-cand: #64748b;
+  --cev-excl: #9aa3b2;
+  --cev-good: #0f8f5c;
+  --cev-warn: #a86612;
+  --cev-bad: #c62f28;
+  --cev-ask: #b45f16;
+  --cev-deed: #6d4fc2;
+  --cev-mute: #8a8c93;
+}
+
+/* ── no subject yet ──────────────────────────────────────────────────── */
+/* The classic workspace sheet paints this box opaque (!important) and lays
+   it out as its two-column map grid; the modern entry is neither. */
+html.is-desktop-modern .ci-workspace[data-comp-intelligence^='mobile'] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  grid-template-columns: none;
+  background: transparent !important;
+  font-family: var(--dsk-font);
+}
+html.is-desktop-modern .ci-workspace[data-comp-intelligence^='mobile']::before { display: none; }
+html.is-desktop-modern .ci-workspace[data-comp-intelligence='mobile'] .ci-empty-state { max-width: 360px; padding: 32px 28px; }
+html.is-desktop-modern .ci-workspace[data-comp-intelligence='mobile'] .ci-empty-state__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 14px;
+  border-radius: 11px;
+  font-size: 19px;
+  line-height: 1;
+  color: var(--dsk-ink-2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .ci-workspace[data-comp-intelligence='mobile'] .ci-empty-state__icon { background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(15, 17, 22, 0.03)); }
+html.is-desktop-modern .ci-workspace[data-comp-intelligence='mobile'] .ci-empty-state strong { margin-bottom: 6px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--dsk-ink); }
+html.is-desktop-modern .ci-workspace[data-comp-intelligence='mobile'] .ci-empty-state p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--dsk-ink-3); }
+
+/* ── root ────────────────────────────────────────────────────────────── */
+html.is-desktop-modern .cev {
+  gap: 12px;
+  padding: 20px 18px 32px;
+  color: var(--dsk-ink);
+  scrollbar-width: thin;
+}
+html.is-desktop-modern .cev::before,
+html.is-desktop-modern .cev::after { display: none; }
+html.is-desktop-modern .cev :is(*, *::before, *::after) { animation: none !important; }
+html.is-desktop-modern .cev .cev-boot > div::after { animation: cev-sheen 1.5s infinite !important; }
+html.is-desktop-modern .cev.is-refreshing :is(.cev-readout__hero strong, .cev-rail) { opacity: 0.6; }
+
+/* one surface language */
+html.is-desktop-modern .cev :is(.cev-readout, .cev-mapwrap, .cev-strip, .cev-market, .cev-none) {
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev :is(.cev-readout, .cev-strip, .cev-market)::after { display: none; }
+html.is-desktop-modern .cev .cev-footnote { font-size: 11.5px; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-footnote b { font-weight: 600; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-sources { padding: 0 4px; }
+
+/* chapters: quiet section labels */
+html.is-desktop-modern .cev .cev-chapter { gap: 8px; margin: 10px 2px -2px; }
+html.is-desktop-modern .cev .cev-chapter__n { font-family: var(--dsk-font); font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-chapter__t { font-family: var(--dsk-font); font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-chapter i { background: var(--dsk-edge); }
+html.is-desktop-modern .cev .cev-chapter em { font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--dsk-ink-3); }
+
+/* ── subject: the house as a record ──────────────────────────────────── */
+html.is-desktop-modern .cev .cev-subject,
+html.is-desktop-modern .cev .cev-subject .cev-subject__body { min-height: 0; }
+html.is-desktop-modern .cev .cev-subject {
+  border-radius: 12px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev .cev-subject::before,
+html.is-desktop-modern .cev .cev-subject::after { display: none; }
+html.is-desktop-modern .cev .cev-subject__mesh,
+html.is-desktop-modern .cev .cev-subject__leak,
+html.is-desktop-modern .cev .cev-subject__caustic,
+html.is-desktop-modern .cev .cev-subject__grain { display: none; }
+html.is-desktop-modern .cev .cev-subject__photo { background: var(--dsk-tile); }
+html.is-desktop-modern .cev .cev-subject__photo img { transform: none; transition: opacity 0.3s ease; }
+html.is-desktop-modern .cev .cev-subject__photo.is-ready img { animation: none; }
+html.is-desktop-modern .cev .cev-subject__scrim { background: linear-gradient(180deg, rgb(0 0 0 / 0.34) 0%, rgb(0 0 0 / 0) 30%, rgb(0 0 0 / 0.1) 50%, rgb(0 0 0 / 0.66) 100%); }
+html.is-desktop-modern .cev .cev-subject .cev-subject__body { padding: 60px 16px 14px; gap: 4px; }
+html.is-desktop-modern .cev .cev-subject__body .cev-eyebrow {
+  top: 12px;
+  left: 12px;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+  background: rgb(8 10 14 / 0.5);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+html.is-desktop-modern .cev .cev-eyebrow i { width: 6px; height: 6px; background: var(--cev-gold); box-shadow: none; }
+html.is-desktop-modern .cev .cev-lookbtn {
+  top: 10px;
+  right: 10px;
+  min-height: 28px !important;
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 12px !important;
+  font-weight: 550;
+  background: rgb(8 10 14 / 0.5);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .cev .cev-lookbtn:hover { background: rgb(8 10 14 / 0.66); }
+html.is-desktop-modern .cev .cev-lookbtn svg { width: 13px !important; height: 13px !important; }
+html.is-desktop-modern .cev .cev-subject h2 { font-family: var(--dsk-font); font-size: 22px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; text-shadow: 0 1px 14px rgb(0 0 0 / 0.45); }
+html.is-desktop-modern .cev .cev-subject p { font-size: 12.5px; color: rgb(255 255 255 / 0.82); }
+html.is-desktop-modern .cev .cev-subject .cev-subject__specs { gap: 5px; margin-top: 8px; }
+html.is-desktop-modern .cev .cev-subject .cev-subject__specs span {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  background: rgb(8 10 14 / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+/* values: one hairline stat strip */
+html.is-desktop-modern .cev .cev-subject .cev-subject__values {
+  grid-auto-columns: minmax(0, 190px);
+  width: fit-content;
+  max-width: 100%;
+  gap: 1px;
+  margin-top: 12px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--dsk-edge);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev .cev-subject .cev-subject__values > div,
+html.is-desktop-modern .cev .cev-subject .cev-subject__values > div:first-child {
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 0;
+  background: var(--dsk-glass-strong);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .cev .cev-subject__values span { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-subject .cev-subject__values b,
+html.is-desktop-modern .cev .cev-subject .cev-subject__values > div:first-child b {
+  font-family: var(--dsk-font);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--dsk-ink);
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .cev .cev-subject__values em { font-size: 11px; color: var(--dsk-ink-3); }
+/* actions */
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button {
+  flex: 0 0 auto;
+  min-height: 30px !important;
+  height: 30px;
+  padding: 0 12px;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:active { transform: none; }
+html.is-desktop-modern .cev .cev-subject__actions svg { color: var(--dsk-ink-2); }
+
+/* ── evidence readout ────────────────────────────────────────────────── */
+html.is-desktop-modern .cev .cev-readout { padding: 14px 16px; gap: 12px; }
+html.is-desktop-modern .cev .cev-setpill {
+  gap: 8px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev .cev-setpill span { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-setpill.is-system span { color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-setpill b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; }
+html.is-desktop-modern .cev .cev-setpill em { font-size: 11.5px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-setpill.is-yours { background: color-mix(in srgb, var(--dsk-accent) 8%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 40%, transparent); }
+html.is-desktop-modern .cev .cev-setpill.is-yours span { color: var(--dsk-ink); }
+html.is-desktop-modern .cev .cev-reset { min-height: 28px !important; padding: 0 9px; gap: 5px; border-radius: 7px; font-size: 12.5px; font-weight: 550; color: var(--dsk-ink-2); transition: background 0.15s ease, color 0.15s ease; }
+html.is-desktop-modern .cev .cev-reset:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .cev .cev-readout__main { gap: 10px; }
+html.is-desktop-modern .cev .cev-readout__hero {
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev .cev-readout__hero span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-readout__hero strong {
+  font-family: var(--dsk-font);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--dsk-ink);
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .cev .cev-readout__hero em { font-size: 12px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-meter { height: 4px; margin: 10px 0 2px; background: var(--dsk-tile-hi); }
+html.is-desktop-modern .cev .cev-meter i { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: var(--dsk-ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsk-accent) 30%, transparent); transition: left 0.3s var(--dsk-ease); }
+html.is-desktop-modern .cev .cev-readout__grid { gap: 1px; border-radius: 10px; overflow: hidden; background: var(--dsk-edge); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev .cev-readout__grid > div,
+html.is-desktop-modern .cev .cev-market__grid > div { padding: 8px 11px; border-radius: 0; background: var(--dsk-glass-strong); box-shadow: none; }
+html.is-desktop-modern .cev :is(.cev-readout__grid, .cev-market__grid) span { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev :is(.cev-readout__grid, .cev-market__grid) b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .cev .cev-suff { gap: 9px; padding: 8px 11px; border-radius: 8px; font-size: 12.5px; color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev .cev-suff i { width: 6px; height: 6px; margin-top: 6px; box-shadow: none; }
+html.is-desktop-modern .cev .cev-suff b { font-weight: 600; }
+
+/* ── map ─────────────────────────────────────────────────────────────── */
+html.is-desktop-modern .cev .cev-mapwrap { overflow: hidden; }
+html.is-desktop-modern .cev .cev-mapwrap::after { background: none; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev .cev-map { height: clamp(300px, 46vh, 440px); }
+html.is-desktop-modern .cev .cev-mapbar { left: 10px; top: 10px; gap: 6px; }
+html.is-desktop-modern .cev .cev-map__recenter {
+  right: 10px;
+  top: 10px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px !important;
+  border: 0;
+  border-radius: 8px;
+  font-size: 15px;
+  color: var(--dsk-ink);
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 6px 16px -10px rgb(0 0 0 / 0.6);
+}
+html.is-desktop-modern .cev .cev-map__legend {
+  left: 10px;
+  bottom: 10px;
+  gap: 10px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev .cev-map__legend i { width: 6px; height: 6px; }
+html.is-desktop-modern .cev .cev-map__legend :is(.k-subject, .k-set) { box-shadow: none; }
+
+/* ── controls: views, refine, sort ───────────────────────────────────── */
+html.is-desktop-modern .cev .cev-chip,
+html.is-desktop-modern .cev .cev-chipbar .cev-chip,
+html.is-desktop-modern .cev .cev-none .cev-chip {
+  min-height: 28px !important;
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  font-size: 12px !important;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .cev .cev-chip:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .cev .cev-chip:active { transform: none; }
+html.is-desktop-modern .cev .cev-chip svg { width: 12px !important; height: 12px !important; }
+html.is-desktop-modern .cev .cev-chip.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 12%, var(--dsk-glass-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent);
+}
+html.is-desktop-modern .cev .cev-views {
+  top: 8px;
+  padding: 3px;
+  gap: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 12px 28px -22px rgba(0, 0, 0, 0.7);
+}
+html.is-desktop-modern .cev .cev-views__ink {
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 4);
+  border-radius: 7px;
+  background: var(--dsk-tile-hi);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  transition: transform 0.25s var(--dsk-ease);
+}
+html.is-desktop-modern .cev .cev-views__tab {
+  min-height: 30px !important;
+  flex-direction: row;
+  gap: 7px;
+  border-radius: 7px;
+  font-size: 12.5px !important;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+html.is-desktop-modern .cev .cev-views__tab:hover { color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-views__tab.is-on { color: var(--dsk-ink); }
+html.is-desktop-modern .cev .cev-views__tab b { margin: 0; font-family: var(--dsk-font); font-size: 12px !important; font-weight: 600; letter-spacing: 0; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-views__tab.is-on b { color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-chipbar { gap: 6px; margin: 0; padding: 0; flex-wrap: wrap; overflow: visible; }
+html.is-desktop-modern .cev .cev-sortbar { gap: 10px; }
+html.is-desktop-modern .cev .cev-sortbar > span { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-sortbar__opts { gap: 2px; flex-wrap: wrap; overflow: visible; }
+html.is-desktop-modern .cev .cev-sortbar__opts button {
+  min-height: 26px !important;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px !important;
+  font-weight: 550;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+html.is-desktop-modern .cev .cev-sortbar__opts button:hover { color: var(--dsk-ink); }
+html.is-desktop-modern .cev .cev-sortbar__opts button.is-on { color: var(--dsk-ink); background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+
+/* ── comp cards ──────────────────────────────────────────────────────── */
+html.is-desktop-modern .cev .cev-rail > div { animation: none; }
+html.is-desktop-modern .cev .cev-card,
+html.is-desktop-modern .cev .cev-card.in-set,
+html.is-desktop-modern .cev .cev-card.is-focus {
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsk-glass);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transform: none;
+  transition: box-shadow 0.15s ease;
+}
+html.is-desktop-modern .cev .cev-card:hover { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .cev .cev-card.in-set { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 32%, var(--dsk-edge)); }
+html.is-desktop-modern .cev .cev-card.is-focus { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
+html.is-desktop-modern .cev .cev-card:active,
+html.is-desktop-modern .cev .cev-card.is-focus:active { transform: none; }
+html.is-desktop-modern .cev .cev-card.is-excluded { opacity: 0.8; }
+html.is-desktop-modern .cev .cev-card__media { height: 132px; border-radius: 12px 12px 0 0; background: var(--dsk-tile); }
+html.is-desktop-modern .cev .cev-card__media::after { display: none; }
+html.is-desktop-modern .cev .cev-card__media img,
+html.is-desktop-modern .cev .cev-card.is-focus .cev-card__media img { transform: none; transition: none; }
+html.is-desktop-modern .cev .cev-card__mono { font-family: var(--dsk-font); font-size: 40px; font-weight: 600; color: var(--dsk-ink-3); opacity: 0.4; }
+html.is-desktop-modern .cev .cev-card__shade { background: linear-gradient(180deg, rgb(0 0 0 / 0.28), transparent 42%, rgb(0 0 0 / 0.66)); }
+html.is-desktop-modern .cev :is(.cev-card__src, .cev-card__state) {
+  top: 8px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 550;
+  color: #fff;
+  background: rgb(8 10 14 / 0.52);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+html.is-desktop-modern .cev .cev-card__src:is(.is-mls, .is-deed) { background: rgb(8 10 14 / 0.52); }
+html.is-desktop-modern .cev .cev-card__state.is-system { color: #fff; background: rgb(8 10 14 / 0.52); box-shadow: inset 0 0 0 1px color-mix(in srgb, #d6b15e 70%, transparent); }
+html.is-desktop-modern .cev .cev-card__state.is-excluded { color: rgb(255 255 255 / 0.75); }
+html.is-desktop-modern .cev .cev-card__price { left: 12px; bottom: 9px; }
+html.is-desktop-modern .cev .cev-card__price b,
+html.is-desktop-modern .cev .cev-card.in-set .cev-card__price b {
+  font-family: var(--dsk-font);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #fff;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  filter: none;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.5);
+}
+html.is-desktop-modern .cev .cev-card__price em { font-size: 11.5px; font-weight: 550; color: rgb(255 255 255 / 0.82); }
+html.is-desktop-modern .cev .cev-card__body { padding: 11px 12px 10px; gap: 8px; }
+html.is-desktop-modern .cev .cev-card__addr { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; letter-spacing: 0; line-height: 1.3; }
+html.is-desktop-modern .cev .cev-card__kind { margin-top: -5px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-card__spec { border-radius: 8px; background: var(--dsk-edge); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev .cev-card__spec > div { padding: 6px 8px; background: var(--dsk-glass-strong); }
+html.is-desktop-modern .cev .cev-card__spec dt { font-size: 10.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-card__spec dd { font-family: var(--dsk-font); font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .cev .cev-card__why span {
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11px !important;
+  font-weight: 550;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev .cev-card__why span.is-good { color: var(--cev-good); }
+html.is-desktop-modern .cev .cev-card__why span.is-off { color: var(--cev-warn); }
+html.is-desktop-modern .cev .cev-card__reason { font-size: 12px; font-weight: 550; }
+html.is-desktop-modern .cev .cev-card__tx span { padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 550; }
+html.is-desktop-modern .cev .cev-card__tx span.is-eng { color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-card__toggle {
+  margin: 0 12px 12px;
+  min-height: 30px !important;
+  height: 30px;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+html.is-desktop-modern .cev .cev-card__toggle:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .cev .cev-card__toggle:active { transform: none; }
+/* selected, not shouting: an accent hairline on a quiet tile */
+html.is-desktop-modern .cev .cev-card__toggle.is-on {
+  color: var(--dsk-ink);
+  background: color-mix(in srgb, var(--dsk-accent) 10%, var(--dsk-tile));
+  background-size: auto;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 48%, transparent);
+}
+html.is-desktop-modern .cev .cev-card__toggle.is-on svg { color: var(--dsk-accent); }
+html.is-desktop-modern .cev .cev-card__toggle svg { width: 13px !important; height: 13px !important; }
+
+/* ── distribution strips + market ────────────────────────────────────── */
+html.is-desktop-modern .cev .cev-strip,
+html.is-desktop-modern .cev .cev-market { padding: 12px 16px; }
+html.is-desktop-modern .cev .cev-strip__head span { font-size: 12.5px; font-weight: 600; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-strip__head b,
+html.is-desktop-modern .cev .cev-market__head span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsk-ink);
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+}
+html.is-desktop-modern .cev .cev-strip__rail { height: 2px; margin-top: -1px; background: var(--dsk-edge-hi); }
+html.is-desktop-modern .cev .cev-strip__band { height: 10px; margin-top: -5px; background: color-mix(in srgb, var(--dsk-accent) 26%, transparent); opacity: 1; box-shadow: none; }
+html.is-desktop-modern .cev .cev-dot.is-set { background: var(--dsk-accent); border: 1.5px solid color-mix(in srgb, var(--dsk-bg) 80%, transparent); box-shadow: none; }
+html.is-desktop-modern .cev .cev-dot.is-cand { background: var(--cev-cand); opacity: 0.75; }
+html.is-desktop-modern .cev .cev-dot.is-focus { transform: scale(1.45); }
+html.is-desktop-modern .cev .cev-dot.is-focus::before { display: none; }
+html.is-desktop-modern .cev .cev-mark i { width: 1.5px; background: var(--m); box-shadow: none; }
+html.is-desktop-modern .cev .cev-mark em {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--dsk-glass-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m) 35%, var(--dsk-edge));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .cev .cev-mark.tone-value { --m: color-mix(in srgb, var(--cev-gold) 85%, var(--cev-mute)); }
+html.is-desktop-modern .cev .cev-mark.tone-ask { --m: color-mix(in srgb, var(--cev-ask) 85%, var(--cev-mute)); }
+html.is-desktop-modern .cev .cev-mark.tone-offer { --m: color-mix(in srgb, var(--cev-good) 85%, var(--cev-mute)); }
+html.is-desktop-modern .cev .cev-strip__scale { font-size: 11px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-market__head { font-size: 12.5px; font-weight: 600; }
+html.is-desktop-modern .cev .cev-market__head em { font-size: 11.5px; font-weight: 500; }
+html.is-desktop-modern .cev .cev-market__grid { gap: 1px; margin-top: 10px; border-radius: 10px; overflow: hidden; background: var(--dsk-edge); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+
+/* ── empty + boot ────────────────────────────────────────────────────── */
+html.is-desktop-modern .cev .cev-none { padding: 16px; gap: 12px; }
+html.is-desktop-modern .cev .cev-none p { font-size: 12.5px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-boot > div { border: 0; border-radius: 12px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev .cev-boot > div::after { background: linear-gradient(100deg, transparent 30%, var(--dsk-tile-hi) 50%, transparent 70%); }
+html.is-desktop-modern .cev .cev-boot__label { font-size: 12.5px; font-weight: 500; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-boot__label i { width: 6px; height: 6px; background: var(--dsk-accent); box-shadow: none; }
+html.is-desktop-modern .cev .cev-empty { font-size: 13px; color: var(--dsk-ink-2); }
+
+/* ══ SHEETS (portalled to <body>) ════════════════════════════════════════ */
+html.is-desktop-modern .cev-sheet { align-items: center; justify-content: center; font-family: var(--dsk-font); }
+html.is-desktop-modern .cev-sheet :is(*, *::before, *::after) { animation: none !important; }
+html.is-desktop-modern .cev-sheet .cev-sheet__scrim { background: rgb(2 4 8 / 0.3); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.is-desktop-modern[data-nexus-theme='light'] .cev-sheet .cev-sheet__scrim { background: rgb(15 17 22 / 0.12); }
+html.is-desktop-modern .cev-sheet .cev-sheet__panel {
+  width: min(460px, calc(100% - 32px));
+  max-height: min(80vh, 640px);
+  padding: 18px 18px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsk-glass-strong);
+  -webkit-backdrop-filter: var(--dsk-blur);
+  backdrop-filter: var(--dsk-blur);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  animation: cev-desk-in 0.2s var(--dsk-ease) both !important;
+}
+@keyframes cev-desk-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+html.is-desktop-modern .cev-sheet .cev-sheet__grab { display: none; }
+html.is-desktop-modern .cev-sheet h3 { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+html.is-desktop-modern .cev-sheet .cev-sub { margin: 14px 0 8px; font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev-sheet .cev-seg { gap: 6px; }
+html.is-desktop-modern .cev-sheet .cev-seg button {
+  min-height: 30px !important;
+  min-width: 0;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+}
+html.is-desktop-modern .cev-sheet .cev-seg button:hover { color: var(--dsk-ink); background: var(--dsk-tile-hi); }
+html.is-desktop-modern .cev-sheet .cev-seg button.is-on { color: var(--dsk-ink); background: color-mix(in srgb, var(--dsk-accent) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 50%, transparent); }
+html.is-desktop-modern .cev-sheet .cev-footnote { margin-top: 12px; font-size: 12px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev-sheet .cev-btn {
+  min-height: 32px !important;
+  padding: 0 14px;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--dsk-ink);
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi);
+  transition: background 0.15s ease;
+}
+html.is-desktop-modern .cev-sheet .cev-btn:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .cev-sheet .cev-btn:active { transform: none; }
+html.is-desktop-modern .cev-sheet .cev-btn svg { width: 13px !important; height: 13px !important; }
+html.is-desktop-modern .cev-sheet .cev-btn.is-primary {
+  margin-top: 14px;
+  color: #fff;
+  background: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .cev-sheet .cev-btn.is-primary { color: #0b0c0e; background: color-mix(in srgb, var(--dsk-accent) 20%, #fff); }
+html.is-desktop-modern .cev-sheet .cev-btn.is-on { margin-top: 14px; }
+html.is-desktop-modern .cev-sheet .cev-x { width: 28px; height: 28px; min-height: 28px !important; border-radius: 8px; color: var(--dsk-ink-3); background: transparent; transition: background 0.15s ease, color 0.15s ease; }
+html.is-desktop-modern .cev-sheet .cev-x:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+html.is-desktop-modern .cev-sheet .cev-x svg { width: 14px !important; height: 14px !important; }
+
+/* the comp inspector: a right-side panel under the top bar */
+html.is-desktop-modern .cev-sheet.is-inspector { align-items: stretch; justify-content: flex-start; }
+html.is-desktop-modern .cev-sheet.is-inspector .cev-sheet__panel {
+  position: absolute;
+  top: calc(var(--dsk-gap, 10px) * 2 + var(--dsk-top-h, 52px));
+  right: var(--dsk-gap, 10px);
+  bottom: var(--dsk-gap, 10px);
+  width: min(500px, calc(100vw - var(--dsk-gap, 10px) * 2));
+  max-height: none;
+  padding: 18px 20px 20px;
+  animation: cev-desk-side 0.24s var(--dsk-ease) both !important;
+}
+@keyframes cev-desk-side { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+/* Mounted in the Comps pane (the usual case): the pane is the frame. Panes
+   carry no live blur, so panels are near-opaque rather than glass that
+   would let the comp photos ghost through. */
+html.is-desktop-modern .dsk-pane__body > .cev-sheet .cev-sheet__panel { background: rgb(var(--dsk-fill) / 0.985); }
+html.is-desktop-modern .dsk-pane__body > .cev-sheet .cev-sheet__scrim { background: rgb(2 4 8 / 0.36); }
+html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body > .cev-sheet .cev-sheet__scrim { background: rgb(15 17 22 / 0.14); }
+html.is-desktop-modern .dsk-pane__body > .cev-sheet.is-inspector .cev-sheet__panel {
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: min(500px, calc(100% - 16px));
+}
+html.is-desktop-modern .dsk-pane__body > .cev-look { top: 8px; left: 8px; right: 8px; bottom: 8px; }
+html.is-desktop-modern .cev-sheet .cev-card__state { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11px; font-weight: 550; color: var(--dsk-ink-2); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev-sheet .cev-card__state.is-system { color: var(--dsk-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cev-gold) 60%, transparent); }
+html.is-desktop-modern .cev-sheet .cev-insp__head h3 { font-size: 17px; line-height: 1.3; }
+html.is-desktop-modern .cev-sheet .cev-insp__head p { font-size: 12.5px; color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev-sheet .cev-why { margin-top: 14px; padding: 10px 12px; border: 0; border-radius: 10px; }
+html.is-desktop-modern .cev-sheet .cev-why b { font-size: 12.5px; font-weight: 600; }
+html.is-desktop-modern .cev-sheet .cev-why ul { font-size: 12.5px; }
+html.is-desktop-modern .cev-sheet .cev-why.is-not { background: color-mix(in srgb, var(--cev-bad) 7%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cev-bad) 26%, transparent); }
+html.is-desktop-modern .cev-sheet .cev-why.is-note { background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev-sheet .cev-vs { font-size: 12.5px; }
+html.is-desktop-modern .cev-sheet .cev-vs thead th { font-size: 11px; font-weight: 550; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .cev-sheet .cev-vs td:last-child { color: var(--dsk-ink); font-weight: 600; }
+html.is-desktop-modern .cev-sheet :is(.cev-eng > div, .cev-kv > div, .cev-adj li) { border-radius: 8px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev-sheet :is(.cev-eng span, .cev-kv dt) { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev-sheet .cev-eng b { font-family: var(--dsk-font); font-size: 15px; font-weight: 600; color: var(--dsk-ink); background: none; -webkit-background-clip: border-box; background-clip: border-box; -webkit-text-fill-color: currentColor; }
+html.is-desktop-modern .cev-sheet .cev-kv dd { font-size: 12.5px; font-weight: 600; }
+html.is-desktop-modern .cev-sheet .cev-dims span { padding: 2px 7px; border: 0; border-radius: 6px; font-size: 11px; font-weight: 550; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .cev-sheet .cev-dims .st-similar { color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev-sheet .cev-insp__actions { gap: 8px; margin-top: 14px; }
+html.is-desktop-modern .cev-sheet .cev-insp__actions .cev-btn.is-primary,
+html.is-desktop-modern .cev-sheet .cev-insp__actions .cev-btn.is-on { margin-top: 0; }
+
+/* Street View opens over the content area, inside the chrome */
+html.is-desktop-modern .cev-look {
+  top: calc(var(--dsk-gap, 10px) * 2 + var(--dsk-top-h, 52px));
+  left: var(--dsk-inset-left, 10px);
+  right: var(--dsk-gap, 10px);
+  bottom: var(--dsk-gap, 10px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), var(--dsk-shadow);
+  animation: cev-fade 0.2s ease both !important;
+}
+html.is-desktop-modern .cev-look .cev-look__bar {
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  padding: 8px 8px 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  font-family: var(--dsk-font);
+  background: rgb(8 10 14 / 0.56);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+  animation: none !important;
+}
+html.is-desktop-modern .cev-look .cev-eyebrow { gap: 6px; font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .cev-look .cev-eyebrow i { width: 6px; height: 6px; box-shadow: none; animation: none !important; }
+html.is-desktop-modern .cev-look .cev-look__bar b { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .cev-look .cev-x { width: 30px; height: 30px; min-height: 30px !important; border-radius: 8px; }
+
+/* ══ FINISH ═══════════════════════════════════════════════════════════════
+   One type scale (11.5 meta · 12.5 labels · 13 body · 14 list primary ·
+   22 page · 28 hero figure), 14px cards with a hairline and a soft drop,
+   figures above their labels, facts as dot-separated spec lines, chips only
+   for status and filters, 32px controls, a raised active segment, and
+   colour only where something needs attention. */
+:root.is-desktop-modern :is(.cev, .cev-sheet, .cev-look) {
+  --cd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(0 0 0 / 0.12);
+  --cd-raised: color-mix(in srgb, var(--dsk-ink) 10%, rgb(var(--dsk-fill)));
+  --cd-raised-edge: 0 1px 2px rgb(0 0 0 / 0.3), inset 0 0 0 1px var(--dsk-edge-hi);
+  --cd-halo: 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 12%, transparent);
+  --cd-primary: color-mix(in srgb, var(--dsk-accent) 34%, #16171a);
+  --cd-primary-hi: color-mix(in srgb, var(--dsk-accent) 42%, #16171a);
+  --cd-primary-ink: #fff;
+}
+:root.is-desktop-modern[data-nexus-theme='light'] :is(.cev, .cev-sheet, .cev-look) {
+  --cd-card: inset 0 0 0 1px var(--dsk-edge), 0 1px 2px rgb(15 17 22 / 0.06);
+  --cd-raised: #fff;
+  --cd-raised-edge: 0 1px 2px rgb(15 17 22 / 0.12), inset 0 0 0 1px var(--dsk-edge);
+  --cd-primary: color-mix(in srgb, var(--dsk-accent) 20%, #fff);
+  --cd-primary-hi: color-mix(in srgb, var(--dsk-accent) 28%, #fff);
+  --cd-primary-ink: #0b0c0e;
+}
+
+/* cards */
+html.is-desktop-modern .cev :is(.cev-readout, .cev-mapwrap, .cev-strip, .cev-market) { border-radius: 14px; box-shadow: var(--cd-card); }
+html.is-desktop-modern .cev .cev-subject { border-radius: 14px; box-shadow: var(--cd-card); }
+html.is-desktop-modern .cev .cev-readout { padding: 18px 20px; gap: 14px; }
+html.is-desktop-modern .cev :is(.cev-strip, .cev-market) { padding: 18px 20px 16px; }
+html.is-desktop-modern .cev .cev-strip__head span,
+html.is-desktop-modern .cev .cev-market__head { font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .cev .cev-market__head em { font-size: 12.5px; }
+
+/* section titles: plain, no ornamental index */
+html.is-desktop-modern .cev .cev-chapter__n { display: none; }
+html.is-desktop-modern .cev .cev-chapter__t { font-size: 13px; font-weight: 600; color: var(--dsk-ink); }
+html.is-desktop-modern .cev .cev-chapter em { font-size: 12.5px; color: var(--dsk-ink-3); }
+
+/* subject: facts as one spec line */
+html.is-desktop-modern .cev .cev-subject .cev-subject__specs { gap: 0; }
+html.is-desktop-modern .cev .cev-subject .cev-subject__specs span {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 500;
+  background: none;
+  box-shadow: none;
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.5);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .cev .cev-subject .cev-subject__specs span + span::before { content: '\00b7'; margin: 0 7px; opacity: 0.7; }
+/* subject values: the number above its label */
+html.is-desktop-modern .cev .cev-subject .cev-subject__values > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; }
+html.is-desktop-modern .cev .cev-subject .cev-subject__values b { order: -1; font-size: 18px; }
+/* subject actions over the photo (narrow): glass that reads on imagery */
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button {
+  height: 32px;
+  min-height: 32px !important;
+  color: #fff;
+  background: rgb(8 10 14 / 0.46);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
+}
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button svg { color: currentColor; }
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:hover { background: rgb(8 10 14 / 0.62); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.22); }
+/* the one primary: from this evidence to the decision it supports */
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:last-child,
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:last-child:hover {
+  color: var(--cd-primary-ink);
+  background: var(--cd-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent);
+}
+html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:last-child:hover { background: var(--cd-primary-hi); }
+
+/* readout + market figures: the number above its label */
+html.is-desktop-modern .cev :is(.cev-readout__grid, .cev-market__grid) > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; }
+html.is-desktop-modern .cev :is(.cev-readout__grid, .cev-market__grid) b { order: -1; font-size: 16px; }
+html.is-desktop-modern .cev :is(.cev-readout__grid, .cev-market__grid) span { font-size: 11.5px; }
+html.is-desktop-modern .cev .cev-readout__hero { padding: 14px 16px; border-radius: 12px; }
+html.is-desktop-modern .cev .cev-readout__hero span { font-size: 11.5px; }
+html.is-desktop-modern .cev .cev-readout__hero em { font-size: 12.5px; }
+html.is-desktop-modern .cev .cev-readout__grid,
+html.is-desktop-modern .cev .cev-market__grid { border-radius: 12px; }
+html.is-desktop-modern .cev .cev-suff { padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+html.is-desktop-modern .cev .cev-footnote { max-width: 72ch; font-size: 12px; }
+
+/* map: a card like the others */
+html.is-desktop-modern .cev .cev-mapwrap::after { border-radius: 14px; }
+html.is-desktop-modern .cev :is(.cev-map__recenter) { width: 32px; height: 32px; min-height: 32px !important; }
+
+/* comparable sets: a segmented control with a raised active segment */
+/* Not sticky on a desk: the rows after the tabs (presets, sort) would scroll
+   up into the band above a stuck bar. The map is the sticky element here. */
+html.is-desktop-modern .cev .cev-views { position: relative; top: auto; border-radius: 11px; }
+html.is-desktop-modern .cev .cev-views__ink { border-radius: 8px; background: var(--cd-raised); box-shadow: var(--cd-raised-edge); }
+html.is-desktop-modern .cev .cev-views__tab { min-height: 32px !important; font-size: 13px !important; }
+/* presets are filters: 24px chips */
+html.is-desktop-modern .cev .cev-chipbar .cev-chip {
+  height: 24px;
+  min-height: 24px !important;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px !important;
+  background: var(--dsk-tile);
+  box-shadow: inset 0 0 0 1px var(--dsk-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .cev .cev-chipbar .cev-chip:hover { background: var(--dsk-tile-hi); }
+html.is-desktop-modern .cev .cev-chipbar .cev-chip.is-on { color: var(--dsk-ink); background: color-mix(in srgb, var(--dsk-accent) 12%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+html.is-desktop-modern .cev .cev-sortbar__opts button { min-height: 26px !important; border-radius: 7px; }
+html.is-desktop-modern .cev .cev-sortbar__opts button.is-on { background: var(--cd-raised); box-shadow: var(--cd-raised-edge); }
+
+/* comp cards */
+html.is-desktop-modern .cev .cev-card,
+html.is-desktop-modern .cev .cev-card.in-set,
+html.is-desktop-modern .cev .cev-card.is-focus { border-radius: 14px; }
+html.is-desktop-modern .cev .cev-card { box-shadow: var(--cd-card); }
+html.is-desktop-modern .cev .cev-card:hover { box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), 0 1px 2px rgb(0 0 0 / 0.14); }
+html.is-desktop-modern .cev .cev-card.in-set { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 32%, var(--dsk-edge)), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .cev .cev-card.is-focus { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dsk-accent) 70%, transparent), 0 1px 2px rgb(0 0 0 / 0.12); }
+html.is-desktop-modern .cev .cev-card__media { border-radius: 14px 14px 0 0; }
+html.is-desktop-modern .cev .cev-card__body { padding: 14px 16px 12px; gap: 10px; }
+html.is-desktop-modern .cev .cev-card__addr { font-size: 14px; }
+html.is-desktop-modern .cev .cev-card__kind { font-size: 12px; }
+/* spec grid: numbers above labels */
+html.is-desktop-modern .cev .cev-card__spec > div { display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 1px; padding: 8px 10px; }
+html.is-desktop-modern .cev .cev-card__spec dd { margin: 0; font-size: 14px; }
+html.is-desktop-modern .cev .cev-card__spec dt { font-size: 11px; }
+/* comparability and transaction facts: spec lines, colour only when off */
+html.is-desktop-modern .cev :is(.cev-card__why, .cev-card__tx) { gap: 2px 0; }
+html.is-desktop-modern .cev :is(.cev-card__why, .cev-card__tx) span {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px !important;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--dsk-ink-2);
+  background: none;
+  box-shadow: none;
+}
+html.is-desktop-modern .cev :is(.cev-card__why, .cev-card__tx) span + span::before { content: '\00b7'; margin: 0 7px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-card__why span.is-good { color: var(--dsk-ink-2); }
+html.is-desktop-modern .cev .cev-card__why span.is-off { color: var(--cev-warn); }
+html.is-desktop-modern .cev .cev-card__tx span { color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-card__tx span.is-co { color: var(--dsk-ink-2); max-width: 100%; }
+html.is-desktop-modern .cev .cev-card__tx span.is-bad { color: var(--cev-bad); }
+html.is-desktop-modern .cev .cev-card__toggle { height: 32px; min-height: 32px !important; margin: 0 16px 16px; }
+
+/* nothing to show: a centred calm state */
+html.is-desktop-modern .cev .cev-none {
+  align-items: center;
+  gap: 12px;
+  padding: 36px 20px;
+  text-align: center;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.is-desktop-modern .cev .cev-none::before {
+  content: '';
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  opacity: 0.35;
+  box-shadow: inset 0 0 0 1.5px var(--dsk-ink);
+}
+html.is-desktop-modern .cev .cev-none p { max-width: 60ch; font-size: 13px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .cev .cev-none div { justify-content: center; }
+html.is-desktop-modern .cev .cev-empty svg { width: 28px !important; height: 28px !important; opacity: 0.35; color: var(--dsk-ink); }
+html.is-desktop-modern .cev .cev-empty p { margin: 0; font-size: 13px; color: var(--dsk-ink-3); }
+
+/* sheets */
+html.is-desktop-modern .cev-sheet .cev-sheet__panel { border-radius: 14px; }
+html.is-desktop-modern .cev-sheet .cev-seg button { min-height: 28px !important; height: 28px; border-radius: 7px; font-size: 12.5px; }
+html.is-desktop-modern .cev-sheet .cev-btn { min-height: 34px !important; border-radius: 9px; }
+html.is-desktop-modern .cev-sheet .cev-btn.is-primary { color: var(--cd-primary-ink); background: var(--cd-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
+html.is-desktop-modern .cev-sheet .cev-btn.is-primary:hover { background: var(--cd-primary-hi); }
+html.is-desktop-modern .cev-sheet .cev-vs td,
+html.is-desktop-modern .cev-sheet .cev-vs th { border-bottom-color: var(--dsk-edge); }
+
+/* ══ COMPOSITION BY PANE WIDTH ═══════════════════════════════════════════ */
+
+@container pane (max-width: 699px) {
+  html.is-desktop-modern .cev { padding: 14px 10px 24px; }
+  html.is-desktop-modern .cev .cev-chipbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  html.is-desktop-modern .cev .cev-sortbar__opts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+}
+/* A quarter pane is narrower than any phone: the readout stacks. */
+@container pane (max-width: 379px) {
+  html.is-desktop-modern .cev .cev-readout__main { grid-template-columns: minmax(0, 1fr); }
+  html.is-desktop-modern .cev .cev-readout__hero strong { font-size: 24px; }
+  html.is-desktop-modern .cev .cev-subject h2 { font-size: 19px; }
+}
+
+/* ≥ 700: the subject becomes a horizontal record, comps a grid */
+@container pane (min-width: 700px) {
+  html.is-desktop-modern .cev { padding: 22px 22px 36px; }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__photo {
+    inset: 8px auto 8px 8px;
+    width: clamp(220px, 34%, 340px);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__scrim { background: linear-gradient(180deg, rgb(0 0 0 / 0.2), rgb(0 0 0 / 0) 40%); }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__body {
+    margin-left: calc(clamp(220px, 34%, 340px) + 8px);
+    min-height: 212px;
+    padding: 16px 18px 16px 20px;
+    justify-content: flex-start;
+    color: var(--dsk-ink);
+  }
+  html.is-desktop-modern .cev .cev-subject__body .cev-eyebrow {
+    position: static;
+    align-self: flex-start;
+    margin-bottom: 6px;
+    padding: 0;
+    color: var(--dsk-ink-3);
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  /* on glass, Look around is a ghost: a plate only on hover */
+  html.is-desktop-modern .cev .cev-lookbtn {
+    top: 14px;
+    right: 14px;
+    height: 32px;
+    min-height: 32px !important;
+    color: var(--dsk-ink-2);
+    background: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  html.is-desktop-modern .cev .cev-lookbtn:hover { color: var(--dsk-ink); background: var(--dsk-hover); }
+  html.is-desktop-modern .cev .cev-subject h2 { padding-right: 120px; text-shadow: none; }
+  html.is-desktop-modern .cev .cev-subject p { color: var(--dsk-ink-2); }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__specs { margin-bottom: 14px; }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__specs span { color: var(--dsk-ink-2); text-shadow: none; }
+  /* on glass, the secondary actions are tiles with a hairline */
+  html.is-desktop-modern .cev .cev-subject .cev-subject__actions button { color: var(--dsk-ink); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__actions button svg { color: var(--dsk-ink-2); }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:hover { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); }
+  html.is-desktop-modern .cev .cev-subject .cev-subject__actions button:last-child svg { color: currentColor; }
+  /* the strip is as wide as its facts, never one tile stretched across */
+  html.is-desktop-modern .cev .cev-subject .cev-subject__values {
+    margin-top: auto;
+    grid-auto-columns: minmax(130px, 190px);
+    width: fit-content;
+    max-width: 100%;
+  }
+  html.is-desktop-modern .cev .cev-rail {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+    gap: 12px;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+    scroll-snap-type: none;
+  }
+  html.is-desktop-modern .cev .cev-market__grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* ≥ 1100: reading column + sticky evidence map */
+@container pane (min-width: 1100px) {
+  /* Rows are max-content, not auto: in a height-bound scroller an auto row
+     collapses an overflow:hidden card (the subject, the readout) to its
+     zero automatic minimum the moment the page is taller than the pane. */
+  html.is-desktop-modern .cev {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(360px, 1fr);
+    grid-template-rows: repeat(18, max-content) 1fr;
+    column-gap: 20px;
+    row-gap: 0;
+    align-content: start;
+    padding: 26px max(28px, calc((100% - 1640px) / 2)) 40px;
+  }
+  html.is-desktop-modern .cev > * { grid-column: 1; margin-bottom: 12px; min-width: 0; }
+  html.is-desktop-modern .cev > :is(.cev-subject, .cev-boot, .cev-empty) { grid-column: 1 / -1; }
+  html.is-desktop-modern .cev > .cev-chapter { margin: 10px 2px 10px; }
+  html.is-desktop-modern .cev > .cev-chapter:has(+ .cev-mapwrap) { grid-column: 2; grid-row: 2; }
+  html.is-desktop-modern .cev > .cev-mapwrap {
+    grid-column: 2;
+    grid-row: 3 / -1;
+    align-self: start;
+    position: sticky;
+    top: 12px;
+  }
+  html.is-desktop-modern .cev .cev-map { height: clamp(420px, calc(100vh - 210px), 860px); }
+  html.is-desktop-modern .cev > .cev-subject { margin-bottom: 8px; }
+  html.is-desktop-modern .cev .cev-market__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container pane (min-width: 1500px) {
+  html.is-desktop-modern .cev .cev-market__grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern :is(.cev-sheet .cev-sheet__panel, .cev-look) { animation: none !important; }
+  html.is-desktop-modern .cev .cev-views__ink { transition: none; }
+}
+
+/* keyboard focus: 1px accent with a soft accent halo */
+html.is-desktop-modern :is(.cev, .cev-sheet, .cev-look) :is(button, a, input):focus-visible {
+  outline: 1px solid var(--dsk-accent);
+  outline-offset: 0;
+  box-shadow: var(--cd-halo);
+}
