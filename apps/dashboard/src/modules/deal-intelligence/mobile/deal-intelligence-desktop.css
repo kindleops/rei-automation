@@ -280,14 +280,14 @@ html.is-desktop-modern .msc-root .msc-section__title { font-size: 13px; font-wei
 html.is-desktop-modern .msc-root .msc-section__summary { font-size: 12.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .msc-root .msc-section__caret { width: 13px; height: 13px; }
 html.is-desktop-modern .msc-root .msc-section__body { gap: 12px; padding: 0 18px 18px; }
-html.is-desktop-modern .msc-root .msc-subhead { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dsk-ink-3); }
+html.is-desktop-modern .msc-root .msc-subhead { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dsk-ink-3); }
 /* label / value pairs: spacing, not rules */
 html.is-desktop-modern .msc-root .msc-field { padding: 6px 0; gap: 12px; border-bottom: 0; }
 html.is-desktop-modern .msc-root .msc-field dt { font-size: 12.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .msc-root .msc-field dd { font-size: 13px; font-weight: 550; }
 html.is-desktop-modern .msc-root .msc-identities { gap: 8px; }
 html.is-desktop-modern .msc-root .msc-identity { padding: 10px 12px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-html.is-desktop-modern .msc-root .msc-identity__role { font-size: 11px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .msc-root .msc-identity__role { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .msc-root .msc-identity__name { font-size: 14px; font-weight: 600; }
 html.is-desktop-modern .msc-root .msc-identity__detail { font-size: 12px; color: var(--dsk-ink-2); }
 html.is-desktop-modern .msc-root .msc-identity__hint { font-size: 11.5px; color: var(--dsk-ink-3); }
@@ -296,7 +296,7 @@ html.is-desktop-modern .msc-root .msc-timeline__when { font-size: 11.5px; color:
 html.is-desktop-modern .msc-root .msc-timeline__item strong { font-size: 13px; font-weight: 550; }
 html.is-desktop-modern .msc-root .msc-timeline__detail { font-size: 12.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .msc-root .msc-quote { padding: 12px 14px; border-radius: 10px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-html.is-desktop-modern .msc-root .msc-quote figcaption { font-size: 11px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .msc-root .msc-quote figcaption { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .msc-root .msc-quote blockquote { max-width: 72ch; font-size: 13px; line-height: 1.5; color: var(--dsk-ink-2); }
 html.is-desktop-modern .msc-root .msc-note { max-width: 72ch; font-size: 12px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .msc-root .msc-empty { font-size: 13px; color: var(--dsk-ink-3); }
@@ -349,7 +349,7 @@ html.is-desktop-modern .msc-root .msc-visual :is(.egv-fallback, .egv.is-unavaila
 }
 html.is-desktop-modern .msc-root .msc-visual .egv.is-unavailable { aspect-ratio: 16 / 6; border-radius: 8px; border: 1px dashed var(--dsk-edge-hi); }
 html.is-desktop-modern .msc-root .msc-visual :is(.egv-fallback, .egv.is-unavailable) svg { width: 18px; height: 18px; opacity: 0.6; }
-html.is-desktop-modern .msc-root .msc-visual .egv-note { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 5px 8px; border-radius: 6px; font-size: 11px; color: #fff; text-align: center; background: rgb(0 0 0 / 0.6); }
+html.is-desktop-modern .msc-root .msc-visual .egv-note { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 5px 8px; border-radius: 6px; font-size: 11.5px; color: #fff; text-align: center; background: rgb(0 0 0 / 0.6); }
 html.is-desktop-modern .msc-root .msc-visual .egv-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 0 2px 2px; }
 html.is-desktop-modern .msc-root .msc-visual .egv-btn {
   display: inline-flex;
@@ -418,7 +418,9 @@ html.is-desktop-modern .ddx {
   padding: 0 0 12px;
 }
 html.is-desktop-modern .ddx::before { display: none; }
-html.is-desktop-modern .ddx :is(*, *::before, *::after) { animation: none !important; }
+html.is-desktop-modern .ddx *,
+html.is-desktop-modern .ddx *::before,
+html.is-desktop-modern .ddx *::after { animation: none !important; }
 html.is-desktop-modern .ddx .ddx-boot > div { border-radius: 14px; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
 html.is-desktop-modern .ddx .ddx-boot > div::after { background: linear-gradient(100deg, transparent 30%, var(--dsk-tile-hi) 50%, transparent 70%); animation: ddx-sheen 2.4s ease-in-out infinite !important; }
 html.is-desktop-modern .ddx .ddx-boot__hero { height: 300px; }
@@ -552,7 +554,7 @@ html.is-desktop-modern .ddx .ddx-tile > span,
 html.is-desktop-modern .ddx .ddx-tile.is-conf > div > span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx .ddx-tile > strong { order: -1; font-family: var(--dsk-font); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--dsk-ink); }
 html.is-desktop-modern .ddx .ddx-tile > em,
-html.is-desktop-modern .ddx .ddx-tile.is-conf > div > em { font-size: 11px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .ddx .ddx-tile.is-conf > div > em { font-size: 11.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx .ddx-tile.is-offer { background: var(--dsk-glass-strong); }
 html.is-desktop-modern .ddx .ddx-tile.is-offer > strong,
 html.is-desktop-modern .ddx .ddx-tile.is-ask > strong { font-size: 18px; color: var(--dsk-ink); }
@@ -573,11 +575,11 @@ html.is-desktop-modern .ddx .ddx-spectrum__legend .k-offer { background: repeati
 html.is-desktop-modern .ddx .ddx-spectrum__legend .k-band { background: color-mix(in srgb, var(--dsk-accent) 42%, transparent); }
 html.is-desktop-modern .ddx .ddx-spectrum__mid { background: var(--dsk-ink); box-shadow: none; }
 html.is-desktop-modern .ddx .ddx-pin__dot { border-color: color-mix(in srgb, var(--dsk-bg) 92%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 40%, transparent); }
-html.is-desktop-modern .ddx .ddx-pin__tag { padding: 3px 7px; border-radius: 6px; font-size: 10.5px; background: var(--dsk-glass-strong); border-color: color-mix(in srgb, var(--c) 32%, var(--dsk-edge)); }
+html.is-desktop-modern .ddx .ddx-pin__tag { padding: 3px 7px; border-radius: 6px; font-size: 11.5px; background: var(--dsk-glass-strong); border-color: color-mix(in srgb, var(--c) 32%, var(--dsk-edge)); }
 html.is-desktop-modern .ddx .ddx-pin__tag b { font-weight: 500; color: var(--dsk-ink-3); }
-html.is-desktop-modern .ddx .ddx-pin__tag em { font-size: 11px; font-weight: 600; }
+html.is-desktop-modern .ddx .ddx-pin__tag em { font-size: 11.5px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-pin.is-active .ddx-pin__tag { box-shadow: none; border-color: color-mix(in srgb, var(--c) 60%, transparent); }
-html.is-desktop-modern .ddx .ddx-spectrum__scale { font-size: 11px; color: var(--dsk-ink-3); }
+html.is-desktop-modern .ddx .ddx-spectrum__scale { font-size: 11.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx .ddx-spectrum__legend { font-size: 11.5px; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx :is(.ddx-spectrum__focus, .ddx-spectrum__hint) { font-size: 12px; }
 
@@ -652,9 +654,9 @@ html.is-desktop-modern .ddx .ddx-card__body { gap: 12px; padding: 0 18px 18px; }
 html.is-desktop-modern .ddx :is(.ddx-empty, .ddx-note, .ddx-vs__take, .ddx-mix p) { font-size: 13px; }
 html.is-desktop-modern .ddx .ddx-note { font-size: 12.5px; }
 /* section labels: small, tracked, and rare */
-html.is-desktop-modern .ddx .ddx-sub { margin-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dsk-ink-3); }
+html.is-desktop-modern .ddx .ddx-sub { margin-top: 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx .ddx-more { min-height: 30px !important; font-size: 12.5px !important; font-weight: 550; }
-html.is-desktop-modern .ddx .ddx-prov { padding: 1px 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0; }
+html.is-desktop-modern .ddx .ddx-prov { padding: 1px 6px; border-radius: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0; }
 
 /* chips of tint become quiet tiles */
 /* rows and facts: floating plates */
@@ -664,10 +666,10 @@ html.is-desktop-modern .ddx :is(.ddx-risk, .ddx-comp, .ddx-fact, .ddx-loans li, 
 }
 html.is-desktop-modern .ddx :is(.ddx-risk, .ddx-comp, .ddx-fact.is-multi, .ddx-factors li, .ddx-person, .ddx-grid > div) { border: 0; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
 html.is-desktop-modern .ddx .ddx-risk { border-left: 0; box-shadow: inset 2px 0 0 color-mix(in srgb, var(--c) 70%, var(--dd-mute)), inset 0 0 0 1px var(--dsk-edge); }
-html.is-desktop-modern .ddx .ddx-risk__sev { padding: 1px 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0; text-transform: none; background: color-mix(in srgb, var(--c) 10%, transparent); }
+html.is-desktop-modern .ddx .ddx-risk__sev { padding: 1px 6px; border-radius: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; background: color-mix(in srgb, var(--c) 10%, transparent); }
 html.is-desktop-modern .ddx .ddx-risk strong { font-size: 14px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-risk p { font-size: 12.5px; }
-html.is-desktop-modern .ddx .ddx-risk em { font-size: 10.5px; }
+html.is-desktop-modern .ddx .ddx-risk em { font-size: 11.5px; }
 html.is-desktop-modern .ddx .ddx-ladder__row { font-size: 12.5px; }
 html.is-desktop-modern .ddx .ddx-ladder__row i { height: 6px; background: color-mix(in srgb, var(--dsk-accent) 32%, transparent); }
 html.is-desktop-modern .ddx .ddx-ladder__row.is-rec i { background: color-mix(in srgb, var(--dsk-accent) 70%, var(--dd-mute)); box-shadow: none; }
@@ -675,11 +677,11 @@ html.is-desktop-modern .ddx .ddx-ladder__row.is-floor i { background: color-mix(
 html.is-desktop-modern .ddx .ddx-ladder__row b { font-size: 13px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-kv dt { font-size: 11.5px; font-weight: 500; }
 html.is-desktop-modern .ddx .ddx-kv dd { font-size: 12.5px; font-weight: 600; }
-html.is-desktop-modern .ddx .ddx-lineage__pill { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11px; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .ddx .ddx-lineage__pill { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11.5px; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
 html.is-desktop-modern .ddx .ddx-strat > button { min-height: 40px !important; }
 html.is-desktop-modern .ddx .ddx-strat.is-best > button { border: 0; background: color-mix(in srgb, var(--dsk-accent) 7%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 38%, transparent); }
 html.is-desktop-modern .ddx .ddx-strat__name { font-size: 13px; font-weight: 600; }
-html.is-desktop-modern .ddx .ddx-strat__name em { font-size: 11px; font-weight: 550; color: var(--dsk-ink-3); }
+html.is-desktop-modern .ddx .ddx-strat__name em { font-size: 11.5px; font-weight: 550; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx .ddx-strat b { font-size: 12.5px; font-weight: 600; }
 
 /* hand-offs to other apps */
@@ -700,7 +702,7 @@ html.is-desktop-modern .ddx .ddx-link:active { transform: none; }
 html.is-desktop-modern .ddx .ddx-link > svg:first-child { color: var(--dsk-ink-2); }
 html.is-desktop-modern .ddx .ddx-links .ddx-link { min-height: 64px !important; gap: 6px; font-size: 12.5px; }
 html.is-desktop-modern .ddx .ddx-links .ddx-link > svg:first-child { width: 16px; height: 16px; }
-html.is-desktop-modern .ddx .ddx-link__label small { font-size: 11px; font-weight: 500; }
+html.is-desktop-modern .ddx .ddx-link__label small { font-size: 11.5px; font-weight: 500; }
 html.is-desktop-modern .ddx .ddx-card__action .ddx-link { min-height: 36px !important; background: var(--dsk-tile); -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 /* buttons */
@@ -731,7 +733,7 @@ html.is-desktop-modern .ddx .ddx-integrity { padding: 10px 12px; border: 0; bord
 html.is-desktop-modern .ddx .ddx-integrity.is-off { background: color-mix(in srgb, var(--dd-crit) 6%, var(--dsk-tile)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dd-crit) 30%, transparent); }
 html.is-desktop-modern .ddx .ddx-integrity b { font-size: 12.5px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-quality span,
-html.is-desktop-modern .ddx .ddx-quality.is-4 span { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .ddx .ddx-quality.is-4 span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 html.is-desktop-modern .ddx .ddx-quality b,
 html.is-desktop-modern .ddx .ddx-quality.is-4 b { font-family: var(--dsk-font); font-size: 16px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-carousel { margin: 0 -14px; padding: 2px 14px 6px; }
@@ -741,17 +743,17 @@ html.is-desktop-modern .ddx .ddx-cc__media { height: 128px; background: var(--ds
 html.is-desktop-modern .ddx .ddx-cc__media img { transform: none; transition: none; }
 html.is-desktop-modern .ddx .ddx-cc__mono { font-family: var(--dsk-font); font-size: 40px; font-weight: 600; color: var(--dsk-ink-3); opacity: 0.4; }
 html.is-desktop-modern .ddx .ddx-cc__shade { background: linear-gradient(180deg, rgb(0 0 0 / 0.28), transparent 40%, rgb(0 0 0 / 0.66)); }
-html.is-desktop-modern .ddx :is(.ddx-cc__src, .ddx-cc__weight) { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11px; font-weight: 550; background: rgb(8 10 14 / 0.5); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14); }
+html.is-desktop-modern .ddx :is(.ddx-cc__src, .ddx-cc__weight) { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11.5px; font-weight: 550; background: rgb(8 10 14 / 0.5); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14); }
 html.is-desktop-modern .ddx .ddx-cc__src.is-mls { background: rgb(8 10 14 / 0.5); }
 html.is-desktop-modern .ddx .ddx-cc__price b { font-family: var(--dsk-font); font-size: 19px; font-weight: 600; letter-spacing: -0.02em; text-shadow: 0 1px 10px rgb(0 0 0 / 0.5); }
 html.is-desktop-modern .ddx .ddx-cc__price em { font-size: 11.5px; font-weight: 550; color: rgb(255 255 255 / 0.82); }
 html.is-desktop-modern .ddx .ddx-cc__addr { font-size: 13px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-cc__meta { font-size: 11.5px; }
-html.is-desktop-modern .ddx .ddx-cc__asset { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11px; font-weight: 550; }
+html.is-desktop-modern .ddx .ddx-cc__asset { padding: 2px 8px; border: 0; border-radius: 6px; font-size: 11.5px; font-weight: 550; }
 html.is-desktop-modern .ddx .ddx-cc__asset.is-match { background: color-mix(in srgb, var(--dd-go) 10%, transparent); box-shadow: none; }
 html.is-desktop-modern .ddx .ddx-cc__asset.is-off { background: color-mix(in srgb, var(--dd-crit) 10%, transparent); box-shadow: none; }
-html.is-desktop-modern .ddx .ddx-cc__specs span { padding: 2px 7px; border: 0; border-radius: 6px; font-size: 11px; font-weight: 550; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-html.is-desktop-modern .ddx .ddx-cc__nums span { font-size: 10.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .ddx .ddx-cc__specs span { padding: 2px 7px; border: 0; border-radius: 6px; font-size: 11.5px; font-weight: 550; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .ddx .ddx-cc__nums span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 html.is-desktop-modern .ddx .ddx-cc__nums b { font-family: var(--dsk-font); font-size: 13.5px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-cc__buyer.is-company svg { color: var(--dsk-ink-2); }
 html.is-desktop-modern .ddx .ddx-rejects__row i { height: 5px; background: color-mix(in srgb, var(--dsk-ink-3) 50%, transparent); }
@@ -773,11 +775,11 @@ html.is-desktop-modern .ddx .ddx-tl__row strong { font-size: 12.5px; font-weight
 /* ── signal + market ─────────────────────────────────────────────────── */
 html.is-desktop-modern .ddx .ddx-gauge__arc { filter: none; }
 html.is-desktop-modern .ddx .ddx-signal__score b { font-family: var(--dsk-font); font-size: 28px; font-weight: 600; letter-spacing: -0.03em; }
-html.is-desktop-modern .ddx .ddx-signal__score span { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; }
+html.is-desktop-modern .ddx .ddx-signal__score span { font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; }
 html.is-desktop-modern .ddx .ddx-signal__stats span,
 html.is-desktop-modern .ddx .ddx-cc__nums span,
 html.is-desktop-modern .ddx .ddx-grid dt,
-html.is-desktop-modern .ddx .ddx-mkt__hero span { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .ddx .ddx-mkt__hero span { font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx .ddx-signal__stats b { font-family: var(--dsk-font); font-size: 14px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-await { border: 0; border-radius: 8px; font-size: 12.5px; font-weight: 550; background: color-mix(in srgb, var(--dd-hold) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dd-hold) 26%, transparent); }
 html.is-desktop-modern .ddx .ddx-hours__bars i { background: color-mix(in srgb, var(--dsk-accent) 50%, var(--dd-mute)); }
@@ -811,7 +813,7 @@ html.is-desktop-modern .ddx .ddx-lever input[type='range'] { height: 32px; }
 html.is-desktop-modern .ddx .ddx-lever input[type='range']::-webkit-slider-runnable-track { height: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 70%, var(--dd-mute)) var(--p, 50%), var(--dsk-tile-hi) var(--p, 50%)); }
 html.is-desktop-modern .ddx .ddx-lever input[type='range']::-webkit-slider-thumb { width: 16px; height: 16px; margin-top: -6px; border-width: 2px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.35); }
 html.is-desktop-modern .ddx .ddx-compare { font-size: 12.5px; }
-html.is-desktop-modern .ddx .ddx-compare thead th { font-size: 11px; font-weight: 550; letter-spacing: 0; text-transform: none; }
+html.is-desktop-modern .ddx .ddx-compare thead th { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; }
 html.is-desktop-modern .ddx .ddx-compare tr.is-key th,
 html.is-desktop-modern .ddx .ddx-compare tr.is-key td { font-size: 13px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-tornado__track i.is-up { background: color-mix(in srgb, var(--dd-go) 60%, var(--dd-mute)); }
@@ -824,7 +826,7 @@ html.is-desktop-modern .ddx .ddx-person__mark { width: 26px; height: 26px; borde
 html.is-desktop-modern .ddx .ddx-owner__id b { font-size: 14px; font-weight: 600; }
 html.is-desktop-modern .ddx .ddx-person > button { min-height: 42px !important; }
 html.is-desktop-modern .ddx .ddx-person__name { font-size: 13px; font-weight: 600; }
-html.is-desktop-modern .ddx .ddx-person__name em { font-size: 10.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
+html.is-desktop-modern .ddx .ddx-person__name em { font-size: 11.5px; font-weight: 550; letter-spacing: 0; text-transform: none; color: var(--dsk-ink-3); }
 html.is-desktop-modern .ddx :is(.ddx-types span, .ddx-snaps li) { font-size: 12px; }
 html.is-desktop-modern .ddx .ddx-types span { border: 0; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--dsk-edge); }
 html.is-desktop-modern .ddx .ddx-chapter__index { font-family: var(--dsk-font); color: var(--dsk-ink-3); }
@@ -950,4 +952,272 @@ html.is-desktop-modern :is(.msc-root, .msc-sheet-root) :is(button, a, input):foc
   outline: 1px solid var(--dsk-accent);
   outline-offset: 0;
   box-shadow: var(--di-halo);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMIUM MATERIAL (v2)
+   Cards are lit glass plates (--dsk-card-bg / --dsk-card-shadow, radius 16,
+   22–24px in); inner rows are glass chips; icons sit in 28px glass chips; the
+   one primary (message the seller) is glossy accent. Type: the seller's name
+   is the page title (28px), card titles 15px, the valuation is the page's one
+   glowing 40px figure, secondary figures 26px, labels 12px — nothing under
+   11.5px. Charts: solid gradients with rounded ends, soft glows, no hatching.
+   Cards rise 8px on first paint with a 40ms stagger; everything holds still
+   under reduced motion.
+   ══════════════════════════════════════════════════════════════════════════ */
+html.is-desktop-modern :is(.msc-root, .msc-sheet-root, .ddx) {
+  --di-halo: 0 0 0 4px color-mix(in srgb, var(--dsk-accent) 14%, transparent);
+  --di-grid: rgb(255 255 255 / 0.06);
+  --di-glow-text: 0 0 26px color-mix(in srgb, var(--dsk-accent) 45%, transparent);
+}
+html.is-desktop-modern[data-nexus-theme='light'] :is(.msc-root, .msc-sheet-root, .ddx) { --di-grid: rgb(15 17 22 / 0.06); }
+@keyframes di-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ── cards ───────────────────────────────────────────────────────────── */
+html.is-desktop-modern .msc-root :is(.msc-section, .msc-decision, .msc-snapshot, .msc-visual),
+html.is-desktop-modern .ddx :is(.ddx-card, .ddx-verdict, .ddx-spectrum, .ddx-hero, .ddx-fail) {
+  border-radius: 16px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  transition: box-shadow 0.18s ease;
+}
+html.is-desktop-modern .ddx .ddx-card.is-bad { background: var(--dsk-card-bg); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--dd-crit) 75%, transparent), var(--dsk-card-shadow); }
+html.is-desktop-modern .ddx .ddx-card.is-warn { background: var(--dsk-card-bg); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--dd-high) 75%, transparent), var(--dsk-card-shadow); }
+/* a card whose head is under the pointer lifts its shadow (no jump: cards are long) */
+html.is-desktop-modern .msc-root .msc-section:has(> .msc-section__head:hover),
+html.is-desktop-modern .ddx .ddx-card:not(.is-bad, .is-warn):has(> .ddx-card__head:hover) { box-shadow: var(--dsk-card-shadow-hover); }
+html.is-desktop-modern .msc-root .msc-section__head,
+html.is-desktop-modern .ddx .ddx-card__head { min-height: 56px !important; padding: 0 22px; gap: 12px; border-radius: 16px; }
+html.is-desktop-modern .msc-root .msc-section__body { gap: 14px; padding: 2px 22px 22px; }
+html.is-desktop-modern .ddx .ddx-card__body { gap: 14px; padding: 2px 22px 22px; }
+html.is-desktop-modern .ddx .ddx-verdict { padding: 22px 24px 22px 26px; }
+html.is-desktop-modern .ddx .ddx-verdict::before { top: 22px; bottom: 22px; }
+html.is-desktop-modern .ddx .ddx-spectrum { padding: 22px 24px 20px; }
+html.is-desktop-modern .ddx .ddx-hero__media { border-radius: 16px 16px 0 0; }
+html.is-desktop-modern .ddx .ddx-hero__panel { padding: 22px 24px 24px; border-radius: 0 0 16px 16px; }
+html.is-desktop-modern .ddx .ddx-hero__title { padding: 0 24px 18px; }
+html.is-desktop-modern .ddx .ddx-hero__top { padding: 16px 16px 0; }
+html.is-desktop-modern .msc-root .msc-visual { padding: 6px; }
+html.is-desktop-modern .msc-root .msc-visual .egv-frame { border-radius: 12px; }
+html.is-desktop-modern .msc-root .msc-decision.is-running { padding: 22px 24px; }
+
+/* inner rows and facts: glass chips on the plate */
+html.is-desktop-modern .ddx :is(.ddx-risk, .ddx-comp, .ddx-fact, .ddx-loans li, .ddx-offers li, .ddx-steps li, .ddx-factors li, .ddx-person, .ddx-grid > div, .ddx-kv > div, .ddx-quality > div, .ddx-signal__stats > div, .ddx-mkt__stats > div, .ddx-cc__nums > div, .ddx-cc__buyer, .ddx-cover, .ddx-strat > button, .ddx-anchor, .ddx-auth, .ddx-mkt__hero),
+html.is-desktop-modern .msc-root :is(.msc-identity, .msc-quote) {
+  border-radius: 12px;
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+}
+html.is-desktop-modern .ddx .ddx-risk { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--c) 75%, var(--dd-mute)), var(--dsk-chip-shadow); }
+html.is-desktop-modern .ddx .ddx-auth.is-no { background: var(--dsk-chip-bg); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--dd-hold) 75%, transparent), var(--dsk-chip-shadow); }
+html.is-desktop-modern .ddx .ddx-strat.is-best > button { background: var(--dsk-chip-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsk-accent) 55%, transparent), var(--dsk-chip-shadow); }
+html.is-desktop-modern .ddx .ddx-steps li.is-key { background: var(--dsk-chip-bg); box-shadow: inset 2px 0 0 var(--dsk-accent), var(--dsk-chip-shadow); }
+html.is-desktop-modern .ddx :is(.ddx-integrity, .ddx-confirm, .ddx-fcl, .ddx-await) { border-radius: 12px; }
+html.is-desktop-modern .ddx .ddx-cc {
+  border-radius: 14px;
+  background: var(--dsk-card-bg);
+  box-shadow: var(--dsk-card-shadow);
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease);
+}
+html.is-desktop-modern .ddx .ddx-cc:hover { box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+html.is-desktop-modern .ddx .ddx-cc.is-off { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--dd-crit) 75%, transparent), var(--dsk-card-shadow); }
+
+/* ── type ────────────────────────────────────────────────────────────── */
+html.is-desktop-modern .msc-root .msc-header__name { font-size: 24px; font-weight: 650; letter-spacing: -0.028em; }
+html.is-desktop-modern :is(.msc-root .msc-section__title, .ddx .ddx-card__title, .ddx .ddx-spectrum__head span, .ddx .ddx-verdict.is-empty h3, .msc-root .msc-engine-run__title) { font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+html.is-desktop-modern .ddx .ddx-hero__value { font-size: var(--dsk-figure-size, 40px); font-weight: 560; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; text-shadow: var(--di-glow-text); }
+html.is-desktop-modern .ddx .ddx-tile > strong,
+html.is-desktop-modern .ddx .ddx-tile.is-offer > strong,
+html.is-desktop-modern .ddx .ddx-tile.is-ask > strong { font-size: 22px; font-weight: 560; letter-spacing: -0.025em; }
+html.is-desktop-modern .ddx .ddx-signal__score b { font-size: 28px; font-weight: 560; letter-spacing: -0.03em; }
+html.is-desktop-modern .ddx .ddx-mkt__hero b { font-size: 26px; font-weight: 560; letter-spacing: -0.03em; }
+html.is-desktop-modern .ddx :is(.ddx-quality b, .ddx-quality.is-4 b) { font-size: 18px; font-weight: 560; letter-spacing: -0.02em; }
+html.is-desktop-modern .ddx .ddx-cc__price b { font-size: 20px; font-weight: 560; }
+/* labels: 12px, sentence case, ink-3 */
+html.is-desktop-modern :is(.ddx .ddx-hero__label, .ddx .ddx-tile > span, .ddx .ddx-tile.is-conf > div > span, .ddx .ddx-sub, .msc-root .msc-subhead, .ddx .ddx-kv dt, .ddx .ddx-grid dt, .ddx .ddx-signal__stats span, .ddx .ddx-mkt__hero span, .ddx .ddx-quality span, .ddx .ddx-quality.is-4 span, .msc-root .msc-identity__role, .msc-root .msc-quote figcaption, .ddx .ddx-anchor figcaption) {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dsk-ink-3);
+}
+/* the phone's small print, held at the 11.5px floor */
+html.is-desktop-modern .msc-root :where(.msc-ctrl__label, .msc-metric span, .msc-decision__age, .msc-offer span, .msc-identity__hint, .msc-timeline__when, .msc-comp__row span, .msc-comp__meta, .msc-note),
+html.is-desktop-modern .ddx :where(.ddx-chapter__index, .ddx-chapter__title, .ddx-chapter__meta, .ddx-cc__buyer em, .ddx-cc__miss, .ddx-person__name em, .ddx-signal__score span, .ddx-hours__axis, .ddx-factors blockquote small, .ddx-mkt__hero em, .ddx-mkt__stats span, .ddx-bars__row em, .ddx-trend2__col span, .ddx-signal__stats b small, .ddx-tile > em, .ddx-spectrum__head em, .ddx-pin__tag em, .ddx-spectrum__scale, .ddx-spectrum__legend, .ddx-risk em, .ddx-kv dd small, .ddx-offers em, .ddx-strat__name em, .ddx-link__label small, .ddx-quality em, .ddx-comp__meta span, .ddx-comp__miss, .ddx-fact__val small, .ddx-loans li > div > span, .ddx-trend__legend, .ddx-conf__row em, .ddx-lever__head em, .ddx-compare thead th, .ddx-steps code, .ddx-cc__nums span, .ddx-cc__specs span) { font-size: 11.5px; }
+
+/* ── icon chips (28px glass) ─────────────────────────────────────────── */
+html.is-desktop-modern .ddx .ddx-card__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+}
+html.is-desktop-modern .ddx .ddx-card__icon svg { width: 14px; height: 14px; }
+html.is-desktop-modern .ddx .ddx-card.is-bad .ddx-card__icon { color: var(--dd-crit); background: var(--dsk-chip-bg); }
+html.is-desktop-modern .ddx .ddx-card.is-warn .ddx-card__icon { color: var(--dd-high); background: var(--dsk-chip-bg); }
+/* the record sections carry a bare glyph: the svg itself becomes the chip */
+html.is-desktop-modern .msc-root .msc-section__icon {
+  box-sizing: border-box;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 7px;
+  border-radius: 8px;
+  color: var(--dsk-ink-2);
+  background: var(--dsk-chip-bg);
+  box-shadow: var(--dsk-chip-shadow);
+  overflow: visible;
+}
+html.is-desktop-modern .ddx :is(.ddx-owner__mark, .ddx-person__mark) { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+html.is-desktop-modern .ddx .ddx-person__mark { width: 28px; height: 28px; border-radius: 8px; }
+
+/* ── controls ────────────────────────────────────────────────────────── */
+html.is-desktop-modern .msc-root .msc-ctrl,
+html.is-desktop-modern .msc-root .msc-action,
+html.is-desktop-modern .ddx .ddx-btn { border-radius: 9px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); transition: box-shadow 0.18s ease, color 0.18s ease; }
+html.is-desktop-modern .msc-root .msc-ctrl:hover,
+html.is-desktop-modern .msc-root .msc-action:hover,
+html.is-desktop-modern .ddx .ddx-btn:not(:disabled):hover { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow), inset 0 0 0 1px var(--dsk-edge-hi); }
+html.is-desktop-modern .msc-root .msc-ctrl.is-error { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--msc-bad) 45%, transparent), var(--dsk-chip-shadow); }
+html.is-desktop-modern .msc-root .msc-action--more { background: transparent; box-shadow: none; }
+html.is-desktop-modern .msc-root .msc-action--more:hover { background: var(--dsk-hover); box-shadow: none; }
+/* the one primary: glossy accent */
+html.is-desktop-modern .msc-root .msc-actions > .msc-action:nth-child(2),
+html.is-desktop-modern[data-nexus-theme='light'] .msc-root .msc-actions > .msc-action:nth-child(2),
+html.is-desktop-modern .ddx .ddx-btn.is-primary,
+html.is-desktop-modern[data-nexus-theme='light'] .ddx .ddx-btn.is-primary {
+  color: var(--dsk-primary-ink);
+  background: var(--dsk-primary-bg);
+  box-shadow: var(--dsk-primary-shadow);
+}
+html.is-desktop-modern .msc-root .msc-actions > .msc-action:nth-child(2):hover,
+html.is-desktop-modern .ddx .ddx-btn.is-primary:not(:disabled):hover { background: var(--dsk-primary-bg); box-shadow: var(--dsk-primary-shadow), inset 0 0 0 1px rgb(255 255 255 / 0.18); filter: brightness(1.06); }
+html.is-desktop-modern .msc-root .msc-actions > .msc-action:nth-child(2) svg { color: currentColor; }
+/* hand-offs: plates that lift */
+html.is-desktop-modern .ddx .ddx-link {
+  border-radius: 12px;
+  background: var(--dsk-card-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--dsk-card-shadow);
+  transition: box-shadow 0.18s ease, transform 0.18s var(--dsk-ease);
+}
+html.is-desktop-modern .ddx .ddx-link:not(:disabled):hover { background: var(--dsk-card-bg); box-shadow: var(--dsk-card-shadow-hover); transform: translateY(-1px); }
+html.is-desktop-modern .ddx .ddx-card__action .ddx-link { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+/* the layer switch: a raised segment on a recessed track */
+html.is-desktop-modern .ddx .ddx-layers { border-radius: 12px; box-shadow: var(--dsk-card-shadow); }
+html.is-desktop-modern .ddx .ddx-layers__glide { border-radius: 9px; }
+html.is-desktop-modern .ddx .ddx-layers__tab { min-height: 32px !important; }
+html.is-desktop-modern .ddx .ddx-layers__dot { --di-pulse: var(--dd-crit); background: var(--dd-crit); box-shadow: 0 0 8px var(--dd-crit); animation: di-pulse 2.4s ease-out infinite !important; }
+@keyframes di-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--di-pulse) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+
+/* ── charts ──────────────────────────────────────────────────────────── */
+html.is-desktop-modern .ddx .ddx-spectrum__rail { border-radius: 6px; background: var(--di-grid); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+html.is-desktop-modern .ddx .ddx-spectrum__band {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--dsk-accent) 58%, transparent), color-mix(in srgb, var(--dsk-accent) 26%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 0 18px -6px var(--dsk-accent);
+}
+html.is-desktop-modern .ddx .ddx-spectrum__offer {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--dsk-accent) 94%, #fff 10%), color-mix(in srgb, var(--dsk-accent) 62%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4), 0 0 16px -4px var(--dsk-accent);
+}
+html.is-desktop-modern .ddx .ddx-spectrum__legend .k-offer { background: var(--dsk-accent); }
+html.is-desktop-modern .ddx .ddx-spectrum__legend .k-band { background: color-mix(in srgb, var(--dsk-accent) 45%, transparent); }
+html.is-desktop-modern .ddx .ddx-spectrum__comps { border-color: color-mix(in srgb, var(--dd-system) 45%, transparent); background: color-mix(in srgb, var(--dd-system) 5%, transparent); }
+html.is-desktop-modern .ddx .ddx-spectrum__mid { width: 2px; background: var(--dsk-ink); box-shadow: 0 0 8px color-mix(in srgb, var(--dsk-accent) 60%, transparent); }
+html.is-desktop-modern .ddx .ddx-ring__arc { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ring) 45%, transparent)); animation: ddx-ring 1.3s 0.2s var(--dsk-ease) both !important; }
+html.is-desktop-modern .ddx .ddx-gauge__arc { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--g, var(--dsk-accent)) 40%, transparent)); animation: ddx-gauge 1.6s 0.2s var(--dsk-ease) both !important; }
+/* vertical bars: rounded tops, a vertical gradient, rising once */
+html.is-desktop-modern .ddx .ddx-hours__bars i {
+  --bar: var(--dsk-accent);
+  border-radius: 4px 4px 1px 1px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bar) 88%, #fff 8%), color-mix(in srgb, var(--bar) 40%, transparent));
+  transform-origin: bottom;
+  animation: ddx-bar 0.8s var(--dsk-ease) both !important;
+}
+html.is-desktop-modern .ddx .ddx-hours__bars i.is-night { --bar: var(--dd-alt); background: linear-gradient(180deg, color-mix(in srgb, var(--bar) 88%, #fff 8%), color-mix(in srgb, var(--bar) 40%, transparent)); }
+html.is-desktop-modern .ddx .ddx-hours__bars i.is-morning { --bar: var(--dd-system); background: linear-gradient(180deg, color-mix(in srgb, var(--bar) 88%, #fff 8%), color-mix(in srgb, var(--bar) 40%, transparent)); }
+html.is-desktop-modern .ddx .ddx-hours__bars i.is-evening { --bar: var(--dd-high); background: linear-gradient(180deg, color-mix(in srgb, var(--bar) 88%, #fff 8%), color-mix(in srgb, var(--bar) 40%, transparent)); }
+html.is-desktop-modern .ddx .ddx-hours__bars { background: linear-gradient(var(--di-grid), var(--di-grid)) 0 100% / 100% 1px no-repeat; }
+html.is-desktop-modern .ddx .ddx-trend2__col i {
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--dd-system) 85%, #fff 6%), color-mix(in srgb, var(--dd-system) 26%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2);
+  animation: ddx-bar 0.9s var(--dsk-ease) both !important;
+}
+html.is-desktop-modern .ddx .ddx-trend2__col em { background: var(--dsk-accent); box-shadow: 0 0 10px var(--dsk-accent); }
+/* horizontal bars: rounded, a gradient along the run, growing once */
+html.is-desktop-modern .ddx :is(.ddx-bars__row i, .ddx-vs__row i, .ddx-factors__row i, .ddx-ladder__row i, .ddx-rejects__row i) { border-radius: 999px; transform-origin: left; animation: ddx-grow 0.9s var(--dsk-ease) both !important; }
+html.is-desktop-modern .ddx .ddx-tornado__track i { border-radius: 999px; }
+html.is-desktop-modern .ddx .ddx-bars__row i { background: linear-gradient(90deg, color-mix(in srgb, var(--dd-record) 35%, transparent), color-mix(in srgb, var(--dd-record) 85%, #fff 5%)); }
+html.is-desktop-modern .ddx .ddx-ladder__row i { background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 18%, transparent), color-mix(in srgb, var(--dsk-accent) 45%, transparent)); }
+html.is-desktop-modern .ddx .ddx-ladder__row.is-rec i { background: linear-gradient(90deg, color-mix(in srgb, var(--dsk-accent) 40%, transparent), color-mix(in srgb, var(--dsk-accent) 92%, #fff 6%)); box-shadow: 0 0 12px -4px var(--dsk-accent); }
+html.is-desktop-modern .ddx .ddx-factors li.is-plus i { background: linear-gradient(90deg, color-mix(in srgb, var(--dd-go) 30%, transparent), color-mix(in srgb, var(--dd-go) 80%, transparent)); }
+html.is-desktop-modern .ddx .ddx-factors li.is-minus i { background: linear-gradient(90deg, color-mix(in srgb, var(--dd-stop) 30%, transparent), color-mix(in srgb, var(--dd-stop) 80%, transparent)); }
+html.is-desktop-modern .ddx .ddx-vs__row.is-inv i { background: linear-gradient(90deg, color-mix(in srgb, var(--dd-alt) 30%, transparent), color-mix(in srgb, var(--dd-alt) 80%, transparent)); }
+html.is-desktop-modern .ddx .ddx-vs__row.is-ret i { background: linear-gradient(90deg, color-mix(in srgb, var(--dd-record) 30%, transparent), color-mix(in srgb, var(--dd-record) 80%, transparent)); }
+
+/* ── first paint: the page assembles, 40ms apart ─────────────────────── */
+html.is-desktop-modern .msc-root--decision > :not(.msc-safe-bottom),
+html.is-desktop-modern .msc-root--decision > .ddx > * { animation: di-rise 0.38s var(--dsk-ease) both !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(2) { animation-delay: 40ms !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(3) { animation-delay: 80ms !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(4) { animation-delay: 120ms !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(5) { animation-delay: 160ms !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(6) { animation-delay: 200ms !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(7) { animation-delay: 240ms !important; }
+html.is-desktop-modern .msc-root--decision > :nth-child(n + 8) { animation-delay: 280ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(2) { animation-delay: 40ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(3) { animation-delay: 80ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(4) { animation-delay: 120ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(5) { animation-delay: 160ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(6) { animation-delay: 200ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(7) { animation-delay: 240ms !important; }
+html.is-desktop-modern .msc-root--decision > .ddx > :nth-child(n + 8) { animation-delay: 280ms !important; }
+/* the rising .ddx must not carry a transform that would trap its sticky layer tabs */
+html.is-desktop-modern .msc-root--decision > .ddx { animation: none !important; }
+
+/* Hosted in the Inbox's intelligence panel, the Inbox itself renders
+   underneath (the panel is 94% opaque); a fill of our own keeps its list
+   from ghosting through the page, most visibly in the light theme. */
+html.is-desktop-modern .nx-intelligence-panel--mobile-detail > .msc-root { background: rgb(var(--dsk-fill) / 0.9); }
+
+/* ── space: the page at desk scale ───────────────────────────────────── */
+html.is-desktop-modern .msc-root--decision > * { margin-bottom: 16px; }
+html.is-desktop-modern .ddx { gap: 16px; }
+html.is-desktop-modern .ddx .ddx-layer { gap: 16px; }
+@container pane (min-width: 980px) {
+  html.is-desktop-modern .dsk-pane__body > .msc-root { padding: 0 36px 32px; }
+}
+@container msc (min-width: 980px) {
+  html.is-desktop-modern .msc-root .msc-header__name { font-size: var(--dsk-title-size, 28px); }
+  html.is-desktop-modern .msc-root--decision > .msc-header { padding: 32px 2px 12px; margin-bottom: 18px; }
+  html.is-desktop-modern .msc-root--decision > * { margin-left: 24px; }
+  html.is-desktop-modern .msc-root--decision > :is(.msc-header, .ddx) { margin-left: 0; }
+}
+@container msc (min-width: 1240px) {
+  html.is-desktop-modern .msc-root--decision > * { margin-left: 28px; }
+  html.is-desktop-modern .msc-root--decision > :is(.msc-header, .ddx) { margin-left: 0; }
+}
+@container ddx (min-width: 560px) {
+  html.is-desktop-modern .ddx .ddx-hero__tiles { grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 18px; border-radius: 0; overflow: visible; background: none; box-shadow: none; }
+  html.is-desktop-modern .ddx .ddx-tile > strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  html.is-desktop-modern .ddx .ddx-tile { border-radius: 12px; background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+  html.is-desktop-modern .ddx .ddx-tile.is-offer { box-shadow: var(--dsk-chip-shadow), inset 0 -2px 0 color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
+}
+@container ddx (max-width: 559px) {
+  html.is-desktop-modern .ddx .ddx-tile > strong { font-size: 18px; }
+  html.is-desktop-modern .ddx .ddx-hero__value { font-size: 32px; }
+}
+
+/* ── reduced motion: everything holds still ──────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html.is-desktop-modern :is(.msc-root, .ddx, .msc-sheet-root) :is(*, #di-still),
+  html.is-desktop-modern :is(.msc-root, .ddx, .msc-sheet-root) :is(*, #di-still)::before,
+  html.is-desktop-modern :is(.msc-root, .ddx, .msc-sheet-root) :is(*, #di-still)::after { animation: none !important; transition: none !important; }
+  html.is-desktop-modern .ddx :is(.ddx-cc, .ddx-link, #di-still):hover { transform: none; }
 }
