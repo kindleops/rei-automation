@@ -19,6 +19,8 @@ import { useDisplayMode } from './display-mode'
 import { applyLayout, getSplitState, useSplitWorkspace } from './split-workspace'
 import './desktop-shell.css'
 import './desktop-calm.css'
+import './desktop-backdrop.css'
+import { DesktopBackdrop } from './DesktopBackdrop'
 
 /**
  * THE DESKTOP COMMAND CENTER — the chrome around every modern surface on a
@@ -96,6 +98,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
 
   return (
     <>
+      <DesktopBackdrop />
       <DesktopSidebar
         routePath={routePath}
         status={{ tone, label: queueLabel(queue), detail: queue.health ? `${(queue.health.sentTodayCount ?? 0).toLocaleString()} sent today` : undefined }}

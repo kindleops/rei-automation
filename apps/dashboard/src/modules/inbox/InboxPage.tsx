@@ -292,6 +292,8 @@ import './inbox-scheduled-panel.css'
 import './inbox-mobile-elite.css'
 // RISK-013: nx-ui-foundation-final.css MUST remain the LAST css import.
 import '../../styles/nx-ui-foundation-final.css'
+// Desktop two-pane composition — after the final-authority sheet, desktop-only selectors.
+import './inbox-desktop.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'
@@ -696,7 +698,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     publishMobileInboxBadge(data.unreadCount ?? 0)
   }, [data.unreadCount])
   const { user, loading: authLoading, signOut } = useAuth()
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
   // Published by the composer's own subscription; read here so the Active
   // Prospect card can collapse to an identity strip while the operator types.
   const keyboardInset = useMobileKeyboardInset(isMobile)
@@ -5253,10 +5255,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   /** Mount only the active mobile pane — hidden CSS panes were crashing mobile browsers. */
   const mobilePaneViews = useMemo((): InboxWorkspaceView[] | null => {
     if (!useMobileInboxFlow) return null
+    // A desk keeps the list beside the conversation (a mail client, not a phone
+    // flow). Both stay mounted; inbox-desktop.css places them side by side on a
+    // wide pane and falls back to the phone's one-at-a-time flow in a narrow one.
+    if (isModernDesktop) return mobileIntelOpen ? ['thread', 'deal_intelligence'] : ['thread', 'sms_thread']
     if (mobileIntelOpen) return ['deal_intelligence']
     if (mobileThreadOpen) return ['sms_thread']
     return ['thread']
-  }, [useMobileInboxFlow, mobileIntelOpen, mobileThreadOpen])
+  }, [useMobileInboxFlow, isModernDesktop, mobileIntelOpen, mobileThreadOpen])
 
   const viewsToRender = mobilePaneViews ?? renderViews
   const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'

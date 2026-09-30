@@ -114,17 +114,11 @@ export function DesktopSidebar({ routePath, status, onOpenSettings }: DesktopSid
 
         <header className="dsk-side__brand">
           <span className="dsk-side__mark" aria-hidden>
-            <svg viewBox="0 0 32 32" width="30" height="30">
-              <defs>
-                <radialGradient id="dsk-mark-core" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#ffffff" />
-                  <stop offset="45%" stopColor="var(--hue)" />
-                  <stop offset="100%" stopColor="transparent" />
-                </radialGradient>
-              </defs>
-              <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" strokeOpacity="0.28" strokeWidth="1.2" />
-              <circle className="dsk-side__orbit" cx="16" cy="16" r="9" fill="none" stroke="var(--hue)" strokeOpacity="0.7" strokeWidth="1.2" strokeDasharray="4 5" />
-              <path d="M16 6.5 L17.6 14.4 L25.5 16 L17.6 17.6 L16 25.5 L14.4 17.6 L6.5 16 L14.4 14.4 Z" fill="url(#dsk-mark-core)" />
+            {/* LeadCommand monogram: an L whose corner opens into a signal arc. */}
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+              <path d="M7 5.5v11.5h11" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M11 9.2a6.3 6.3 0 0 1 5.9 5.9" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" opacity="0.55" />
+              <circle cx="17.2" cy="6.8" r="1.55" fill="var(--dsk-accent, currentColor)" />
             </svg>
           </span>
           <span className="dsk-side__word">

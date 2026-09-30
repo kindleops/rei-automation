@@ -280,3 +280,27 @@ html.is-desktop-modern .dsk-pane__body { background: color-mix(in srgb, var(--ds
   font-variant-numeric: tabular-nums;
 }
 .dsk-top__kpi .nx-kpi-orb__readout { display: none !important; }
+
+/* type: Inter with its refined alternates, rendered the way Linear-class tools do */
+html.is-desktop-modern body,
+html.is-desktop-modern .dsk-side,
+html.is-desktop-modern .dsk-top,
+html.is-desktop-modern .dsk-pop,
+html.is-desktop-modern .dsk-pane {
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+/* brand mark: a quiet glass chip, the monogram in ink, one accent point */
+.dsk-side__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--dsk-ink);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 0 0 1px var(--dsk-edge-hi), inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 4px 12px -6px rgba(0, 0, 0, 0.6);
+}
+html[data-nexus-theme='light'] .dsk-side__mark { background: linear-gradient(180deg, #fff, rgba(15, 17, 22, 0.04)); }
+.dsk-side__mark svg { width: 17px !important; height: 17px !important; }
+.dsk-side__word b { font-weight: 620; letter-spacing: -0.015em; }

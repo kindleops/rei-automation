@@ -1,0 +1,71 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   INBOX · DESKTOP — a mail client, not a phone flow.
+   On a wide pane the thread list stays beside the open conversation; on a
+   narrow split pane the phone's one-at-a-time flow is kept. Calm desktop
+   language: neutral surfaces, hairlines, no liquid header atmosphere.
+   Every rule is scoped to html.is-desktop-modern — phones never see it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@container pane (min-width: 860px) {
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-workspace-split-grid {
+    display: grid !important;
+    grid-template-columns: minmax(320px, 380px) minmax(0, 1fr) !important;
+    gap: 0 !important;
+  }
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-thread,
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-workspace-pane.is-view-thread {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-width: none !important;
+    width: auto !important;
+    border-right: 1px solid var(--dsk-edge) !important;
+  }
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-thread .nx-workspace-pane-surface--thread-rail,
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-thread .nx-sidebar-rebuilt {
+    display: flex !important;
+    flex-direction: column !important;
+    position: relative !important;
+    transform: none !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__list-container,
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+  }
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-sidebar-rebuilt__threads-scroll { overflow-y: auto !important; }
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-sms_thread,
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-workspace-pane.is-view-deal_intelligence,
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-workspace-pane.is-view-sms_thread,
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-workspace-pane.is-view-deal_intelligence {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-width: none !important;
+    width: auto !important;
+  }
+}
+
+/* Narrow split pane: exactly the phone's flow (both panes are mounted on a desk). */
+@container pane (max-width: 859px) {
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox:not(.m-thread-open) .nx-workspace-pane.is-view-sms_thread { display: none !important; }
+  html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox.m-thread-open .nx-workspace-pane.is-view-thread { display: none !important; }
+}
+
+/* calm: no liquid atmosphere behind the conversation header on a desk */
+html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__glow,
+html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header .nx-conv-header__atmosphere,
+html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox .nx-conv-header.is-mobile-header [class*='nx-conv-header__liquid'] {
+  display: none !important;
+  animation: none !important;
+}
+html.is-desktop-modern .nx-inbox-shell.is-mobile-inbox,
+html.is-desktop-modern .nx-premium-inbox {
+  font-family: var(--dsk-font);
+  background: transparent !important;
+}

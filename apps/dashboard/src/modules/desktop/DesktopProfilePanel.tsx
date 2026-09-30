@@ -5,6 +5,50 @@ import { MobileAppearanceControls } from '../mobile/MobileAppearanceControls'
 import { AlertSettings } from '../notifications/AlertSettings'
 import { formatBuildIdentityLine } from '../../lib/build-identity'
 import { setClassicDesktop } from '../mobile/product-platform'
+import { useBackdropColors, useBackdropSettings, type BackdropStyle } from './backdrop-settings'
+
+const STYLES: Array<{ id: BackdropStyle; label: string }> = [
+  { id: 'liquid', label: 'Liquid' },
+  { id: 'waves', label: 'Waves' },
+  { id: 'aurora', label: 'Aurora' },
+  { id: 'still', label: 'Still' },
+]
+
+/** The flowing colour under the glass: style, colours, strength, motion. */
+function BackdropControls() {
+  const [bd, setBd] = useBackdropSettings()
+  const colors = useBackdropColors(bd.palette)
+  const swatch = { ['--pa' as string]: colors[0], ['--pb' as string]: colors[1], ['--pc' as string]: colors[2 % colors.length] }
+  return (
+    <section className="dsk-bdc">
+      <p className="dsk-pop__eyebrow">Background</p>
+      <div className="dsk-bdc__styles" role="radiogroup" aria-label="Background style">
+        {STYLES.map((st) => (
+          <button key={st.id} type="button" role="radio" aria-checked={bd.style === st.id} className={cls('dsk-bdc__style', `is-${st.id}`, bd.style === st.id && 'is-active')} style={swatch} onClick={() => setBd({ style: st.id })}>
+            <span className="dsk-bdc__preview" aria-hidden><i /><i /><i /></span>
+            <b>{st.label}</b>
+          </button>
+        ))}
+      </div>
+      <div className="dsk-bdc__row">
+        <span>Colours</span>
+        <div className="dsk-seg dsk-seg--inline" role="radiogroup" aria-label="Background colours">
+          <button type="button" role="radio" aria-checked={bd.palette === 'accent'} className={cls('dsk-seg__tab', bd.palette === 'accent' && 'is-active')} onClick={() => setBd({ palette: 'accent' })}>Accent</button>
+          <button type="button" role="radio" aria-checked={bd.palette === 'spectrum'} className={cls('dsk-seg__tab', bd.palette === 'spectrum' && 'is-active')} onClick={() => setBd({ palette: 'spectrum' })}>Spectrum</button>
+        </div>
+      </div>
+      <label className="dsk-bdc__row">
+        <span>Intensity</span>
+        <input type="range" min={0} max={100} step={1} value={bd.intensity} onChange={(e) => setBd({ intensity: Number(e.target.value) })} aria-label="Background intensity" />
+        <em>{bd.intensity}%</em>
+      </label>
+      <label className="dsk-bdc__row">
+        <span>Motion</span>
+        <button type="button" role="switch" aria-checked={bd.motion} className={cls('dsk-switch', bd.motion && 'is-on')} onClick={() => setBd({ motion: !bd.motion })}><i /></button>
+      </label>
+    </section>
+  )
+}
 
 /**
  * PROFILE — the operator, and the whole system's look and sound.
@@ -59,6 +103,7 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose }: { email
       <div className="dsk-prof__body">
         {tab === 'appearance' ? (
           <div className="dsk-prof__appearance">
+            <BackdropControls />
             <MobileAppearanceControls />
           </div>
         ) : null}
