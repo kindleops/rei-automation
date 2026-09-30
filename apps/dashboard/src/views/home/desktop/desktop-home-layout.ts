@@ -72,6 +72,11 @@ function commit(next: WidgetSlot[]) {
   listeners.forEach((l) => l())
 }
 const subscribe = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } }
+
+/** Back to the default board (Settings → Workspace). */
+export const resetDesktopHomeLayout = () => commit(DEFAULT_LAYOUT)
+export const isDesktopHomeLayoutDefault = () => JSON.stringify(layout) === JSON.stringify(DEFAULT_LAYOUT)
+export const subscribeDesktopHomeLayout = (fn: () => void) => subscribe(fn)
 const snapshot = () => layout
 
 export function useDesktopHomeLayout() {

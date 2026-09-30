@@ -98,6 +98,8 @@ export type GlobalCommandSearchContext = {
    * §26 exists to end.
    */
   isMobile?: boolean
+  /** The modern product on a desktop, where Settings is a page (/settings) rather than a sheet. */
+  isModernDesktop?: boolean
 }
 
 export type GlobalCommandProvider = {

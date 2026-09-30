@@ -1,5 +1,6 @@
 import { Icon } from '../../shared/icons'
 import { CommandPopover } from './primitives/CommandPopover'
+import { setClassicDesktop } from '../mobile/product-platform'
 
 export interface ProfileMenuProps {
   open: boolean
@@ -67,6 +68,10 @@ export const ProfileMenu = ({
       </button>
       <button type="button" role="menuitem" onClick={() => { onDiagnostics(); onClose() }}>
         <Icon name="activity" /> Diagnostics
+      </button>
+      {/* The way back from Classic desktop (Settings → Workspace → Classic desktop). */}
+      <button type="button" role="menuitem" onClick={() => { setClassicDesktop(false); onClose() }}>
+        <Icon name="layout-split" /> New desktop
       </button>
       <button
         type="button"

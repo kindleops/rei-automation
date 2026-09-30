@@ -290,10 +290,13 @@ import './inbox-scheduled-panel.css'
 // Mobile elite layer: material, type and motion for the phone Inbox,
 // Conversation, Composer and their sheets. Scoped html.is-mobile-layout.
 import './inbox-mobile-elite.css'
+// Desktop: two-pane composition + calm material. Every rule is scoped
+// html.is-desktop-modern and anchored on #nx-inbox-root, so it outranks the
+// sheets above on specificity rather than on order (RISK-013 keeps the
+// foundation sheet last).
+import './inbox-desktop.css'
 // RISK-013: nx-ui-foundation-final.css MUST remain the LAST css import.
 import '../../styles/nx-ui-foundation-final.css'
-// Desktop two-pane composition — after the final-authority sheet, desktop-only selectors.
-import './inbox-desktop.css'
 import { GLOBAL_COMMAND_ACTION_EVENT, GLOBAL_COMMAND_CONTEXT_EVENT, GLOBAL_COMMAND_OPEN_EVENT, type CommandResult } from '../../domain/command-center/command.types'
 import { useInboxTopSearch } from '../command-center/useInboxTopSearch'
 import { saveRecentCommandLocation } from '../command-center/providers/locationCommandProvider'

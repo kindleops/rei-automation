@@ -1329,3 +1329,10 @@ html[data-nexus-theme='light'] .mx-focusset { color: #0b1220; background: rgb(25
 @keyframes mx-focusset-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes mx-focusset-pulse { 50% { opacity: 0.4; } }
 @media (prefers-reduced-motion: reduce) { .mx-focusset, .mx-focusset__dot { animation: none; } }
+
+/* ── Desktop: the map stays elite; only the search tightens ───────────────
+   The global command bar already spans the top of a desk, so the map's own
+   place search becomes a compact field instead of a full-width strip. */
+html.is-desktop-modern .mx-searchrow { right: auto; width: min(440px, calc(100% - 92px)); }
+html.is-desktop-modern .mx-search { height: 40px; border-radius: 12px; }
+html.is-desktop-modern .mx-search input { font-size: 13.5px; font-weight: 520; }

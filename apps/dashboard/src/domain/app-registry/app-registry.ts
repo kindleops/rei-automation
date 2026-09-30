@@ -558,6 +558,10 @@ export function resolveAppForRoute(routePath: string): NexusApp {
   const direct = NEXUS_APPS.find((app) => isAppActive(routePath, app))
   if (direct) return direct
   const path = routePath.replace(/\/+$/, '') || '/'
+  // The desktop's Settings page. The registry entry is action-only (the phone
+  // opens a sheet), so it never matches above; without this a split pane showing
+  // Settings was labelled — and de-duplicated as — Inbox.
+  if (path === '/settings' || path.startsWith('/settings/')) return BY_ID.get('settings')!
   const alias = Object.entries(LEGACY_ROUTE_ALIASES).find(([from]) => path === from || path.startsWith(`${from}/`))
   const target = alias ? NEXUS_APPS.find((app) => isAppActive(alias[1], app)) : null
   return target ?? BY_ID.get('inbox')!

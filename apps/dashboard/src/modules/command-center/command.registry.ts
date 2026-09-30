@@ -47,7 +47,23 @@ const applicationDestinations = (context: GlobalCommandSearchContext): CommandRe
     ? NEXUS_APPS.filter((app) => app.mobile)
     : NEXUS_APPS.filter((app) => app.desktop)
 
-  return available
+  // On the modern desktop Settings is a real page, so it can be a destination.
+  const settingsPage: CommandResult[] = context.isModernDesktop
+    ? [buildStatic({
+      id: 'app-open-settings',
+      type: 'app',
+      title: 'Open Settings',
+      subtitle: 'Theme, background, alerts, workspace and keyboard',
+      badge: 'App',
+      icon: 'settings',
+      route: '/settings',
+      score: context.routePath === '/settings' ? 96 : 84,
+      preview: { eyebrow: 'App', title: 'Settings', summary: 'Theme, accent, Liquid Glass, background, alerts and sound, workspace, keyboard.' },
+      meta: { provider: 'app', groupLabel: 'Actions', keywords: ['settings', 'preferences', 'theme', 'appearance', 'sound', 'alerts', 'keyboard', 'shortcuts'] },
+    })]
+    : []
+
+  return [...settingsPage, ...available
     .filter((app: NexusApp) => !app.action)
     .map((app) => buildStatic({
       id: `app-open-${app.id}`,
@@ -68,7 +84,7 @@ const applicationDestinations = (context: GlobalCommandSearchContext): CommandRe
         groupLabel: 'Actions',
         keywords: [app.label.toLowerCase(), app.shortLabel.toLowerCase(), app.id],
       },
-    }))
+    }))]
 }
 
 export const getStaticCommandRegistry = (context: GlobalCommandSearchContext): CommandResult[] => {

@@ -182,7 +182,8 @@ export const CommandCenterApp = () => {
      * refuses to.
      */
     isMobile,
-  }), [commandContextOverrides, route.path, isMobile])
+    isModernDesktop,
+  }), [commandContextOverrides, route.path, isMobile, isModernDesktop])
 
   // ── Theme system — apply on mount + subscribe to changes ──
   useEffect(() => {
@@ -446,6 +447,11 @@ export const CommandCenterApp = () => {
   }, [dispatchSplitView, openBriefing, resolveThemeAlias, route.path])
 
   // Global keyboard — ⌘K, ⌘⇧K, ⌘J, ⌘., /, Escape
+  // The assistant chords (⌘J, ⌘V voice) and the briefing (⌘.) only exist where
+  // the assistant is mounted. On the modern product it is not, and ⌘V caught
+  // here cancelled every paste in every field; the briefing digest is built
+  // from placeholder zeros, so it is not offered there either.
+  const assistantChords = isCopilotSurfaceEnabled(isMobile)
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === 'k' || event.key === 'K')) {
@@ -461,7 +467,7 @@ export const CommandCenterApp = () => {
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === 'j') {
+      if (assistantChords && (event.metaKey || event.ctrlKey) && event.key === 'j') {
         event.preventDefault()
         setCopilotOpen((previous) => {
           if (!previous) playSound('copilot-wake')
@@ -470,14 +476,18 @@ export const CommandCenterApp = () => {
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === '.') {
+      if (assistantChords && (event.metaKey || event.ctrlKey) && event.key === '.') {
         event.preventDefault()
         if (!briefingOpen) openBriefing()
         else setBriefingOpen(false)
         return
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
+      const tag = (event.target as HTMLElement)?.tagName
+      const editable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean((event.target as HTMLElement)?.isContentEditable)
+
+      // Never inside a field: there ⌘V is paste.
+      if (assistantChords && !editable && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
         event.preventDefault()
         window.dispatchEvent(new CustomEvent('nx:copilot-voice-activate'))
         return
@@ -488,8 +498,6 @@ export const CommandCenterApp = () => {
         return
       }
 
-      const tag = (event.target as HTMLElement)?.tagName
-
       if (event.key === '/' && !cmdOpen && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
         event.preventDefault()
         openCmd()
@@ -498,7 +506,7 @@ export const CommandCenterApp = () => {
 
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [cmdOpen, openCmd, closeCmd, briefingOpen, openBriefing])
+  }, [cmdOpen, openCmd, closeCmd, briefingOpen, openBriefing, assistantChords])
 
   useEffect(() => {
     document.title = route.title

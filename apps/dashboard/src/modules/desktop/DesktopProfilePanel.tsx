@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../shared/icons'
-import { loadSettings, subscribeSettings, updateSetting, type SoundProfile } from '../../shared/settings'
+import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
 import { MobileAppearanceControls } from '../mobile/MobileAppearanceControls'
 import { AlertSettings } from '../notifications/AlertSettings'
 import { formatBuildIdentityLine } from '../../lib/build-identity'
@@ -59,13 +59,6 @@ function BackdropControls() {
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
-const SOUNDS: Array<{ id: SoundProfile; label: string; hint: string }> = [
-  { id: 'tactical', label: 'Tactical', hint: 'Crisp confirmations' },
-  { id: 'ambient', label: 'Ambient', hint: 'Soft, low tones' },
-  { id: 'minimal', label: 'Minimal', hint: 'Only what matters' },
-  { id: 'silent', label: 'Silent', hint: 'No sound' },
-]
-
 type Tab = 'appearance' | 'sound' | 'system'
 
 export function operatorInitials(email?: string | null, name?: string | null): string {
@@ -75,7 +68,7 @@ export function operatorInitials(email?: string | null, name?: string | null): s
   return letters.toUpperCase()
 }
 
-export function DesktopProfilePanel({ email, name, onSignOut, onClose }: { email?: string | null; name?: string | null; onSignOut?: () => void; onClose: () => void }) {
+export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSettings }: { email?: string | null; name?: string | null; onSignOut?: () => void; onClose: () => void; onOpenSettings?: () => void }) {
   const [tab, setTab] = useState<Tab>('appearance')
   const [settings, setSettings] = useState(() => loadSettings())
   useEffect(() => subscribeSettings(() => setSettings(loadSettings())), [])
@@ -95,7 +88,7 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose }: { email
       <div className="dsk-seg" role="tablist" aria-label="Settings">
         {(['appearance', 'sound', 'system'] as Tab[]).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} className={cls('dsk-seg__tab', tab === t && 'is-active')} onClick={() => setTab(t)}>
-            {t === 'appearance' ? 'Appearance' : t === 'sound' ? 'Sound & alerts' : 'System'}
+            {t === 'appearance' ? 'Appearance' : t === 'sound' ? 'Alerts' : 'System'}
           </button>
         ))}
       </div>
@@ -110,24 +103,12 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose }: { email
 
         {tab === 'sound' ? (
           <div className="dsk-prof__sound">
-            <p className="dsk-pop__eyebrow">Sound profile</p>
-            <div className="dsk-prof__sounds" role="radiogroup" aria-label="Sound profile">
-              {SOUNDS.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={settings.soundProfile === s.id}
-                  className={cls('dsk-prof__sound', settings.soundProfile === s.id && 'is-active')}
-                  onClick={() => updateSetting('soundProfile', s.id)}
-                >
-                  <Icon name={s.id === 'silent' ? 'slash' : 'volume'} size={15} />
-                  <b>{s.label}</b>
-                  <small>{s.hint}</small>
-                </button>
-              ))}
-            </div>
-            <p className="dsk-pop__eyebrow">Alerts</p>
+            {/* The UI-sound switch playSound() actually reads. (A "sound profile"
+                picker used to sit here; nothing ever read its value.) */}
+            <label className="dsk-prof__toggle">
+              <span><b>Interface sounds</b><small>Confirmations when you move between apps</small></span>
+              <button type="button" role="switch" aria-checked={Boolean(settings.soundEnabled)} className={cls('dsk-switch', settings.soundEnabled && 'is-on')} onClick={() => updateSetting('soundEnabled', !settings.soundEnabled)}><i /></button>
+            </label>
             <div className="dsk-prof__alerts"><AlertSettings /></div>
           </div>
         ) : null}
@@ -150,6 +131,16 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose }: { email
           </div>
         ) : null}
       </div>
+
+      {onOpenSettings ? (
+        <footer className="dsk-prof__foot">
+          <button type="button" className="dsk-prof__all" onClick={onOpenSettings}>
+            <Icon name="settings" size={14} />
+            <span>All settings</span>
+            <kbd>⌘,</kbd>
+          </button>
+        </footer>
+      ) : null}
     </div>
   )
 }

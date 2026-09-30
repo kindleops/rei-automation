@@ -199,6 +199,17 @@ export function DesktopSidebar({ routePath, status, onOpenSettings }: DesktopSid
         </nav>
 
         <footer className="dsk-side__foot">
+          <button
+            type="button"
+            className={cls('dsk-side__item dsk-side__settings', routePath === '/settings' && 'is-active')}
+            onClick={onOpenSettings}
+            aria-current={routePath === '/settings' ? 'page' : undefined}
+            data-tip="Settings  ⌘,"
+          >
+            <span className="dsk-side__glyph"><Icon name="settings" size={16} strokeWidth={1.7} /></span>
+            <span className="dsk-side__label">Settings</span>
+            <kbd className="dsk-side__kbd" aria-hidden>⌘,</kbd>
+          </button>
           <div className={cls('dsk-side__status', `is-${status.tone}`)} title={status.detail || status.label} data-tip={status.label}>
             <i aria-hidden />
             <span><b>{status.label}</b>{status.detail ? <small>{status.detail}</small> : null}</span>

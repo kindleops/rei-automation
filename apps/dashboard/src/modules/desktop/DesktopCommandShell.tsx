@@ -16,7 +16,8 @@ import { DesktopProfilePanel, operatorInitials } from './DesktopProfilePanel'
 import { useDesktopShellPrefs } from './desktop-shell-prefs'
 import { DesktopLayoutPanel } from './DesktopLayoutPanel'
 import { useDisplayMode } from './display-mode'
-import { applyLayout, getSplitState, useSplitWorkspace } from './split-workspace'
+import { MAIN, applyLayout, getSplitState, markPaneInteraction, useSplitWorkspace } from './split-workspace'
+import { pushRoutePath } from '../../app/router'
 import './desktop-shell.css'
 import './desktop-calm.css'
 import './desktop-backdrop.css'
@@ -58,6 +59,23 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
   const name = (user?.user_metadata?.full_name as string | undefined) || null
 
   const toggle = useCallback((p: Exclude<Panel, null>) => setPanel((cur) => (cur === p ? null : p)), [])
+
+  // Settings is a page on the desktop; it opens in whichever pane has focus.
+  const openSettings = useCallback(() => {
+    setPanel(null)
+    onSearchClose()
+    markPaneInteraction(getSplitState().focused || MAIN)
+    pushRoutePath('/settings')
+  }, [onSearchClose])
+
+  // ⌘, — the platform's own settings chord.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') { e.preventDefault(); openSettings() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openSettings])
 
   // The sidebar width drives the content inset; published on <html> so every
   // surface (and fixed-position layer) can clear it.
@@ -102,7 +120,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
       <DesktopSidebar
         routePath={routePath}
         status={{ tone, label: queueLabel(queue), detail: queue.health ? `${(queue.health.sentTodayCount ?? 0).toLocaleString()} sent today` : undefined }}
-        onOpenSettings={() => setPanel('profile')}
+        onOpenSettings={openSettings}
       />
 
       <header className="dsk-top" aria-label="Command bar">
@@ -181,7 +199,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
       {panel === 'layout' ? <div className="dsk-anchor dsk-anchor--right"><DesktopLayoutPanel mainPath={`${routePath}${typeof window === 'undefined' ? '' : window.location.search}`} onClose={() => setPanel(null)} /></div> : null}
       {panel === 'profile' ? (
         <div className="dsk-anchor dsk-anchor--right">
-          <DesktopProfilePanel email={email} name={name} onClose={() => setPanel(null)} onSignOut={() => { setPanel(null); void signOut() }} />
+          <DesktopProfilePanel email={email} name={name} onClose={() => setPanel(null)} onSignOut={() => { setPanel(null); void signOut() }} onOpenSettings={openSettings} />
         </div>
       ) : null}
       {panel === 'activity' ? (

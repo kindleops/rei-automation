@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { useGlobalCommandSearch } from '../command-center/useGlobalCommandSearch'
+import { canonicalizeRoutePath } from '../../domain/app-registry/app-registry'
+import { openInSplit } from './split-workspace'
 
 /**
  * THE COMMAND BAR — one field that searches the whole product.
@@ -66,9 +68,11 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
     listRef.current?.querySelector<HTMLElement>(`[data-cmd-index="${activeIndex}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [activeIndex, open])
 
-  const run = (r: CommandResult | null) => {
+  const run = (r: CommandResult | null, split = false) => {
     if (!r || r.meta?.disabled) return
-    onExecute(r)
+    // ⌥↵ / ⌥-click: open a routed result BESIDE what is on screen (split pane).
+    if (split && r.route) openInSplit(canonicalizeRoutePath(r.route))
+    else onExecute(r)
     setQuery('')
     onClose()
     inputRef.current?.blur()
@@ -77,7 +81,7 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, Math.max(ordered.length - 1, 0))); return }
     if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); return }
-    if (e.key === 'Enter') { e.preventDefault(); run(ordered[activeIndex] ?? null); return }
+    if (e.key === 'Enter') { e.preventDefault(); run(ordered[activeIndex] ?? null, e.altKey); return }
     if (e.key === 'Escape') { e.preventDefault(); if (query) setQuery(''); else { onClose(); inputRef.current?.blur() } }
   }
 
@@ -92,7 +96,7 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
         className={cls('dsk-cmd__item', i === activeIndex && 'is-active', r.meta?.disabled && 'is-disabled')}
         data-cmd-index={i}
         onMouseMove={() => { if (i !== activeIndex) setActiveIndex(i) }}
-        onClick={() => run(r)}
+        onClick={(e) => run(r, e.altKey)}
       >
         <span className="dsk-cmd__icon"><Icon name={r.icon || 'command'} size={15} strokeWidth={1.7} /></span>
         <span className="dsk-cmd__copy">
@@ -162,7 +166,7 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
             {active ? (
               <footer className="dsk-cmd__run">
                 <span>{active.route ? active.route : active.action?.label || 'Action'}</span>
-                <b>↵ {active.meta?.hint || (active.route ? 'Open' : 'Run')}</b>
+                <b>↵ {active.meta?.hint || (active.route ? 'Open' : 'Run')}{active.route ? <span className="dsk-cmd__alt">⌥↵ Split</span> : null}</b>
               </footer>
             ) : null}
           </aside>

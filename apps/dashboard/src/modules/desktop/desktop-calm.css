@@ -125,6 +125,21 @@ html[data-nexus-theme='light'] .dsk-side__glyph { background: linear-gradient(18
 .dsk-side__split:hover { background: var(--dsk-tile-hi); }
 .dsk-side__inpane { width: 12px; height: 9px; box-shadow: inset 0 0 0 1.25px var(--dsk-ink-3); background: linear-gradient(90deg, transparent 50%, var(--dsk-ink-3) 50%); }
 .dsk-side__foot { padding: 8px 10px 10px; }
+.dsk-side__settings { width: 100%; margin-bottom: 2px; }
+.dsk-side__settings.is-active { background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+.dsk-side__kbd { margin-left: auto; padding: 1px 5px; border-radius: 5px; font: 500 10.5px/1.4 var(--dsk-font); color: var(--dsk-ink-3); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); opacity: 0; transition: opacity 0.15s ease; }
+.dsk-side__settings:hover .dsk-side__kbd { opacity: 1; }
+.dsk-side.is-collapsed .dsk-side__kbd { display: none; }
+/* profile popover: the way through to the full Settings page */
+.dsk-prof__foot { margin-top: 10px; padding-top: 8px; box-shadow: inset 0 1px 0 var(--dsk-edge); }
+.dsk-prof__all { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 550; color: var(--dsk-ink); cursor: pointer; }
+.dsk-prof__all:hover { background: var(--dsk-hover); }
+.dsk-prof__all svg { color: var(--dsk-ink-3); }
+.dsk-prof__all kbd { margin-left: auto; padding: 1px 6px; border-radius: 5px; font: 500 11px/1.4 var(--dsk-font); color: var(--dsk-ink-3); background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
+.dsk-prof__toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 4px 2px 12px; margin-bottom: 10px; box-shadow: inset 0 -1px 0 var(--dsk-edge); }
+.dsk-prof__toggle span { display: grid; gap: 2px; }
+.dsk-prof__toggle b { font-size: 13px; font-weight: 550; color: var(--dsk-ink); }
+.dsk-prof__toggle small { font-size: 12px; color: var(--dsk-ink-3); }
 .dsk-side__status { gap: 9px; padding: 6px; }
 .dsk-side__status i { width: 7px; height: 7px; margin: 0 8px; }
 .dsk-side__status.is-live i { box-shadow: 0 0 6px rgba(61, 220, 151, 0.6); }
@@ -304,3 +319,4 @@ html.is-desktop-modern .dsk-pane {
 html[data-nexus-theme='light'] .dsk-side__mark { background: linear-gradient(180deg, #fff, rgba(15, 17, 22, 0.04)); }
 .dsk-side__mark svg { width: 17px !important; height: 17px !important; }
 .dsk-side__word b { font-weight: 620; letter-spacing: -0.015em; }
+.dsk-cmd__alt { margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--dsk-edge-hi); color: var(--dsk-ink-3); font-weight: 500; }

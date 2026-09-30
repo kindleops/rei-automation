@@ -78,6 +78,9 @@ const EmailCommandCenter = lazy(() =>
   })),
 )
 const WorkflowStudioV2 = lazy(() => import('../views/workflow-studio/v2/WorkflowStudioV2'))
+const SettingsView = lazy(() =>
+  import('../views/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
+)
 
 const loadAcquisitionWorkspace = () =>
   import('../domain/acquisition/acquisition.adapter').then((m) => m.loadAcquisitionWorkspace())
@@ -270,6 +273,14 @@ const workflowStudioRoute = defineRoute<null>({
   render: () => wrapFullscreen(<WorkflowStudioV2 />, 'workflow_studio'),
 })
 
+/** The desktop's Settings page (the phone keeps its settings sheet). */
+const settingsRoute = defineRoute<null>({
+  path: '/settings',
+  title: 'LeadCommand | Settings',
+  loader: async () => null,
+  render: () => <SettingsView />,
+})
+
 // DEV-ONLY: standalone Comp Intelligence V4 harness for deterministic, real-data
 // review of any property by id/theme/pane. Never registered in production builds.
 const CompIntelligenceV4Harness = lazy(
@@ -374,6 +385,7 @@ const routes = [
   campaignCommandRoute,
   emailCommandRoute,
   workflowStudioRoute,
+  settingsRoute,
   entityGraphRoute,
   entityGraphPropertyRoute,
   entityGraphOwnerRoute,
