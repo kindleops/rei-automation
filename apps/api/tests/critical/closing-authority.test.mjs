@@ -401,3 +401,100 @@ test("cadence is configuration, not code", () => {
   assert.equal(DEFAULT_CADENCE.title_ack.max, 3);
   assert.equal(typeof DEFAULT_CADENCE.catchUpHours, "number");
 });
+
+/* ── CLOSING DESK 3.0 — execution truths through the real authority ──── */
+
+import { evaluateSendSafety } from "@/lib/domain/email/email-send-safety.js";
+import { writeBackClosingRequest } from "@/lib/domain/email/email-closing-bridge.js";
+
+test("EMD overdue → automated reminder → receipt verified → the blocker resolves (and is shown resolved)", async () => {
+  const db = makeClosingDb(seed());
+  const { deps } = env(db);
+  const { offerId } = await committedBuyer(db, deps);
+  db.state.buyer_offers[0].metadata.buyer_email = "ops@acme.example";
+  const due = Date.parse("2026-10-03T00:00:00Z");
+  const t1 = due + 30 * H;
+  // Reminders on cadence (24h before due, then daily); each is marked sent as the dispatcher would.
+  for (const at of [due - 24 * H, due, t1]) {
+    await runAt(db, deps, at);
+    markSent(db, "buyer_emd", at + 60_000);
+  }
+  const view = (now) => deriveClosingExecution({ closingCase: db.state.closing_cases[0], offers: db.state.buyer_offers, agreements: db.state.buyer_agreements, emdReceipts: db.state.emd_receipts, emailRequests: db.state.closing_email_requests, runtime: { automationEnabled: true, emailSendEnabled: true, heartbeatAt: new Date(now).toISOString() }, now });
+  const before = view(t1 + H);
+  assert.equal(before.emd.buyer.state, "overdue");
+  assert.ok(before.blockers.some((b) => b.key === "emd_overdue"));
+  assert.equal(db.state.closing_email_requests.filter((r) => r.category === "buyer_emd" && r.status === "sent").length, 3, "three reminders went out");
+  const r = await A.recordEmdReceipt({ closingCaseId: CASE, buyerOfferId: offerId, amount: 5000, receivedAt: new Date(t1 + 2 * H).toISOString(), escrowDestination: "Westline escrow", idempotencyKey: "wire-late", actor }, deps);
+  await A.verifyEmdReceipt({ receiptId: r.receiptId, method: "title_provider", evidenceReference: "Westline EMD confirmation #91", actor }, { ...deps, now: () => t1 + 3 * H });
+  const after = view(t1 + 4 * H);
+  assert.equal(after.emd.buyer.state, "verified");
+  assert.ok(!after.blockers.some((b) => b.key === "emd_overdue"), "the blocker is gone");
+  const resolved = after.items.find((i) => i.key === "emd_resolved");
+  assert.equal(resolved?.severity, "resolved");
+  assert.match(resolved.why, /Westline EMD confirmation #91/);
+  const plan = planClosingAutomation({ closingCase: db.state.closing_cases[0], offers: db.state.buyer_offers, agreements: db.state.buyer_agreements, emdReceipts: db.state.emd_receipts, requests: db.state.closing_email_requests, now: t1 + 5 * H });
+  assert.ok(plan.schedule.some((s) => s.category === "buyer_emd" && s.state === "satisfied"), "the reminder loop stops");
+  assert.equal(plan.actions.filter((a) => a.type === "email" && a.category === "buyer_emd").length, 0);
+});
+
+test("a date change through the canonical route moves the closing — one event, same identity, prior date kept as history", async () => {
+  const db = makeClosingDb(seed());
+  const { deps } = env(db);
+  await A.setClosingDate({ closingCaseId: CASE, scheduledAt: "2026-10-05T19:00:00Z", tz: "America/Chicago", confirmed: true, reason: "Title scheduled", source: "title_email", actor }, deps);
+  const view = () => deriveClosingExecution({ closingCase: db.state.closing_cases[0], activity: db.state.closing_activity_events, now: T0 });
+  const first = view();
+  await A.setClosingDate({ closingCaseId: CASE, scheduledAt: "2026-10-07T20:30:00Z", tz: "America/Chicago", confirmed: true, reason: "Buyer's lender needs two days", source: "operator", actor }, { ...deps, now: () => T0 + H });
+  const moved = view();
+  assert.equal(moved.closing.calendar.eventId, first.closing.calendar.eventId, "the calendar event keeps its identity");
+  assert.equal(moved.closing.date, "2026-10-07");
+  assert.equal(moved.closing.time, "15:30");
+  assert.ok(!moved.deadlines.some((d) => d.key === "closing" || d.state === "superseded"), "the closing date is never a second deadline");
+  const history = moved.deadlineHistory.filter((d) => d.state === "superseded");
+  assert.equal(history.length, 1);
+  assert.equal(history[0].date, "2026-10-05");
+  assert.equal(history[0].reason, "Buyer's lender needs two days");
+  // Calendar projects closings from this same model (when that projection is present in the tree).
+  const cal = await import("@/lib/domain/calendar/calendar-timeline-service.js");
+  if (typeof cal.buildClosingModelEvents === "function") {
+    const events = cal.buildClosingModelEvents([moved], { from: "2026-09-01", to: "2026-12-31", today: "2026-10-01" })
+    const closings = events.filter((e) => e.type === "closing");
+    assert.equal(closings.length, 1, "no duplicate closing event after the move");
+    assert.equal(closings[0].id, moved.closing.calendar.eventId);
+    assert.equal(closings[0].date, "2026-10-07");
+  }
+});
+
+test("a title reply supersedes a planned follow-up (email safety policy) and the closing request records why", async () => {
+  const db = makeClosingDb(seed());
+  const { deps } = env(db);
+  await runAt(db, deps, T0);
+  markSent(db, "title_open", T0);
+  await runAt(db, deps, T0 + 25 * H);
+  const req = db.state.closing_email_requests.find((r) => r.category === "title_ack");
+  assert.equal(req.status, "pending_transport");
+  // Dispatch time: the title company replied after the chase was planned.
+  const row = { source: "closing", source_ref: req.request_key, action_key: "closing.title_followup", sequence: 1, to_email: "orders@westline.example", subject: "Following up", text_body: "…", created_at: new Date(T0 + 25 * H).toISOString(), scheduled_for: new Date(T0 + 25 * H).toISOString() };
+  const verdict = evaluateSendSafety({ row, thread: { automation_state: "active", resolution_status: "resolved", last_inbound_at: new Date(T0 + 25 * H + 20 * 60_000).toISOString() }, revalidation: { state: "still_needed" }, sender: { ok: true, sender: {} }, now: T0 + 25 * H + 30 * 60_000 });
+  assert.deepEqual([verdict.decision, verdict.code], ["supersede", "counterparty_replied"]);
+  await writeBackClosingRequest(db, row, { status: "superseded", code: verdict.code }, T0 + 25 * H + 30 * 60_000);
+  assert.equal(req.status, "cancelled");
+  assert.equal(req.status_reason, "counterparty_replied");
+  const x = deriveClosingExecution({ closingCase: db.state.closing_cases[0], emailRequests: db.state.closing_email_requests, now: T0 + 26 * H });
+  const shown = x.automation.emails.find((e) => e.category === "title_ack");
+  assert.equal(shown.status, "cancelled");
+  assert.equal(shown.reason, "counterparty_replied");
+  await runAt(db, deps, T0 + 27 * H);
+  assert.equal(db.state.closing_email_requests.filter((r) => r.category === "title_ack").length, 1, "the superseded follow-up is never re-sent");
+});
+
+test("automation never resolves a title issue — paused or running, it stays open until an operator resolves it with evidence", async () => {
+  const db = makeClosingDb(seed({ title_acknowledged_at: new Date(T0 - 2 * D).toISOString(), title_intro_sent_at: new Date(T0 - 3 * D).toISOString() }));
+  const { deps } = env(db);
+  const issue = await A.openTitleIssue({ closingCaseId: CASE, issueType: "missing_release", description: "Unreleased 2019 mortgage", owner: "you", source: "title_commitment", actor: "email_command" }, deps);
+  await A.setAutomationPaused({ closingCaseId: CASE, paused: true, reason: "Unreleased mortgage — needs operator direction", actor }, deps);
+  await runAt(db, deps, T0 + D);
+  await A.setAutomationPaused({ closingCaseId: CASE, paused: false, actor }, deps);
+  await runAt(db, deps, T0 + 2 * D);
+  assert.equal(db.state.closing_title_issues.find((i) => i.issue_id === issue.issueId).status, "open");
+  assert.equal((await A.recordClearToClose({ closingCaseId: CASE, source: "title_email", evidenceReference: "CTC email", actor: "email_command" }, deps)).code, "OPEN_TITLE_ISSUES", "a title email cannot clear it either");
+});

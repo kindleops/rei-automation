@@ -10,17 +10,20 @@ export async function OPTIONS(request) {
 }
 
 /**
- * GET /api/cockpit/closing-desk/execution?sort=most_urgent|next_closing|recently_updated|recently_closed
+ * GET /api/cockpit/closing-desk/execution?sort=most_urgent|next_closing|recently_updated|recently_closed[&view=summary]
  * The closing portfolio: every live closing + recent closed/cancelled, each
- * derived by closing-execution-model.js. Read-only.
+ * derived by closing-execution-model.js. Read-only. `view=summary` returns the
+ * portfolio row projection (the desktop navigation); the room loads by id.
  */
 export async function GET(request) {
   const headers = corsHeaders(request)
   const auth = ensureMutationAuth(request)
   if (!auth.ok) return unauthorizedJson(auth.response, headers)
   try {
-    const sort = new URL(request.url).searchParams.get('sort') || 'most_urgent'
-    const data = await getClosingPortfolio({ sort })
+    const params = new URL(request.url).searchParams
+    const sort = params.get('sort') || 'most_urgent'
+    const view = params.get('view') === 'summary' ? 'summary' : 'full'
+    const data = await getClosingPortfolio({ sort, view })
     return NextResponse.json({ ok: true, data }, { status: 200, headers })
   } catch (error) {
     return NextResponse.json({ ok: false, error: error?.message || 'closing_portfolio_failed' }, { status: 500, headers })

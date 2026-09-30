@@ -22,13 +22,23 @@ import { ClosingDeskDiagnosticsPanel } from './components/ClosingDeskDiagnostics
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
 
 const ClosingSurface = lazy(() => import('./mobile/ClosingSurface').then((m) => ({ default: m.ClosingSurface })))
+const ClosingDeskDesktop3 = lazy(() => import('./desktop/ClosingDeskDesktop').then((m) => ({ default: m.ClosingDeskDesktop })))
 
 /**
- * Mobile renders the execution surface (mobile/ClosingSurface): attention-first,
- * transaction rooms, server-derived states only. Desktop keeps the board.
+ * Phone: the execution surface (mobile/ClosingSurface) — unchanged.
+ * Modern desktop: the transaction war room (desktop/ClosingDeskDesktop) —
+ * navigation by real state, the execution room, a floating inspector.
+ * Classic desktop keeps the board.
  */
 export function ClosingDeskView() {
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
+  if (isModernDesktop) {
+    return (
+      <Suspense fallback={null}>
+        <ClosingDeskDesktop3 />
+      </Suspense>
+    )
+  }
   if (isMobile) {
     return (
       <Suspense fallback={null}>
