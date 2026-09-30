@@ -1265,6 +1265,7 @@ const MOBILE_INTELLIGENCE_TABS: { id: EmailTab; label: string; detail: string }[
 ]
 
 const EmailSurface = lazy(() => import('./mobile/EmailSurface').then((m) => ({ default: m.EmailSurface })))
+const EmailDesk = lazy(() => import('./desk/EmailDesk').then((m) => ({ default: m.EmailDesk })))
 
 const MOBILE_INTELLIGENCE_IDS = new Set<EmailTab>(MOBILE_INTELLIGENCE_TABS.map((tab) => tab.id))
 
@@ -1272,14 +1273,24 @@ const MOBILE_INTELLIGENCE_IDS = new Set<EmailTab>(MOBILE_INTELLIGENCE_TABS.map((
 
 /**
  * Phone: the Email Command control plane (mobile/EmailSurface) — Needs you,
- * System handling, Waiting, conversation rooms. Desktop keeps this workspace.
+ * System handling, Waiting, conversation rooms.
+ * Modern desktop: the same control plane composed as a multi-plane desk
+ * (desk/EmailDesk) — rail, conversation index, room, intelligence inspector.
+ * Classic desktop keeps this workspace.
  */
 export const EmailCommandCenter = ({
   paneWidth = '100',
 }: {
   paneWidth?: ViewWidthPercent
 }) => {
-  const { isMobile: phone } = useBreakpoint()
+  const { isMobile: phone, isModernDesktop } = useBreakpoint()
+  if (isModernDesktop && paneWidth === '100') {
+    return (
+      <Suspense fallback={null}>
+        <EmailDesk />
+      </Suspense>
+    )
+  }
   if (phone && paneWidth === '100') {
     return (
       <Suspense fallback={null}>

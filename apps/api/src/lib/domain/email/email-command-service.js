@@ -3,7 +3,8 @@
  * the operator's thread actions. No N+1: one query per table per page.
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { deriveThreadState, closingContext, sellerContext, engagementFromEvents, deliveryStatus } from './email-command-model.js'
+import { deriveThreadState, closingContext, sellerContext, engagementFromEvents, deliveryStatus, classifyFailure, currentFailure } from './email-command-model.js'
+import { buildThreadIntelligence, provenanceOf } from './email-command-intelligence.js'
 import { sanitizeEmailHtml, extractReply } from './email-content.js'
 import { signedAttachmentUrl } from './email-attachments.js'
 import { recordEmailEvent } from './email-telemetry.js'
@@ -21,12 +22,12 @@ async function hydrate(db, threads) {
   const owners = uniq(threads.map((t) => t.master_owner_id))
   const props = uniq(threads.map((t) => t.property_id))
   const [out, inb, cases, convs, opps, properties] = await Promise.all([
-    db.from('email_queue').select('id, thread_id, queue_status, approval_status, scheduled_for, sent_at, updated_at, action_key, sequence, reason, subject, failed_reason, source').in('thread_id', ids).limit(3000),
+    db.from('email_queue').select('id, thread_id, queue_status, approval_status, scheduled_for, sent_at, updated_at, created_at, action_key, sequence, reason, subject, failed_reason, cancel_reason, retry_count, next_retry_at, source, requested_by, campaign_id').in('thread_id', ids).limit(3000),
     db.from('email_inbound_messages').select('id, thread_id, processing_status').in('thread_id', ids).in('processing_status', ['received', 'resolved']).limit(1000),
     closingIds.length ? db.from('closing_cases').select('closing_case_id, property_address, title_acknowledged_at, title_commitment_received_at, title_commitment_date, clear_to_close_at, closing_date_confirmed_at, scheduled_closing_date, closing_tz, closed_at, terminal_outcome, automation_paused_at').in('closing_case_id', closingIds) : { data: [] },
     smsKeys.length ? db.from('inbox_thread_state').select('thread_key, seller_stage, lifecycle_stage, seller_display_name, contactability_status').in('thread_key', smsKeys) : { data: [] },
     owners.length ? db.from('acquisition_opportunities').select('id, master_owner_id, property_id, acquisition_stage, metadata').in('master_owner_id', owners) : { data: [] },
-    props.length ? db.from('properties').select('property_id, property_address_full, property_address').in('property_id', props) : { data: [] },
+    props.length ? db.from('properties').select('property_id, property_address_full, property_address, market').in('property_id', props) : { data: [] },
   ])
   const outBy = new Map()
   for (const q of out.data || []) (outBy.get(q.thread_id) || outBy.set(q.thread_id, []).get(q.thread_id)).push(q)
@@ -35,6 +36,7 @@ async function hydrate(db, threads) {
   const caseBy = new Map((cases.data || []).map((c) => [c.closing_case_id, c]))
   const convBy = new Map((convs.data || []).map((c) => [c.thread_key, c]))
   const propBy = new Map((properties.data || []).map((p) => [p.property_id, p.property_address_full || p.property_address]))
+  const marketBy = new Map((properties.data || []).map((p) => [p.property_id, p.market || null]))
   const oppFor = (t) => (opps.data || []).find((o) => o.master_owner_id === t.master_owner_id && (!t.property_id || o.property_id === t.property_id)) || null
 
   return threads.map((t) => {
@@ -49,6 +51,7 @@ async function hydrate(db, threads) {
       counterparty: { name: t.counterparty_name || null, email: t.counterparty_email || null, role: t.counterparty_role || t.category },
       subject: t.subject || null,
       property_address: address || context?.property_address || null,
+      market: marketBy.get(t.property_id) || null,
       last_message: { at: t.last_message_at, direction: t.last_message_direction, preview: t.last_message_preview },
       needs: t.needs_operator ? { code: t.needs_code, reason: t.needs_reason, since: t.needs_since } : null,
       resolution: t.resolution_status,
@@ -72,6 +75,21 @@ export async function getEmailCommandHome({ filter = null, q = null, limit = 150
   ])
   if (error) return { ok: false, error: 'threads_unreadable', message: error.message }
   let rows = await hydrate(db, threads || [])
+  // Party / automation lenses over everything loaded (before a state filter),
+  // so a rail can navigate by them without a second read.
+  const isClosing = (r) => ['title', 'buyer', 'lender'].includes(r.category) || r.context?.kind === 'closing'
+  const parties = {
+    seller: rows.filter((r) => r.category === 'seller').length,
+    buyer: rows.filter((r) => r.category === 'buyer').length,
+    title: rows.filter((r) => r.category === 'title').length,
+    closings: rows.filter(isClosing).length,
+  }
+  const automationCounts = {
+    // automation owns the conversation right now (not paused, not operator-owned)
+    active: rows.filter((r) => ['system_handling', 'waiting'].includes(r.state) && !['paused', 'paused_you_own_it'].includes(r.automation)).length,
+    escalated: rows.filter((r) => r.state === 'needs_you' && r.escalated).length,
+    manual: rows.filter((r) => r.automation === 'paused_you_own_it').length,
+  }
   if (STATES.includes(f)) rows = rows.filter((r) => r.state === f)
   const counts = Object.fromEntries(STATES.map((s) => [s, rows.filter((r) => r.state === s).length]))
   const c = Object.fromEntries((controls.data || []).map((r) => [r.key, r.value]))
@@ -86,6 +104,8 @@ export async function getEmailCommandHome({ filter = null, q = null, limit = 150
     failed: rows.filter((r) => r.state === 'failed'),
     unresolved: rows.filter((r) => r.state === 'unresolved'),
     recent: rows.slice(0, 40),
+    parties,
+    automation_counts: automationCounts,
     delivery: {
       send_enabled: clean(c.email_enabled) === 'true' && clean(process.env.EMAIL_SEND_ENABLED) === 'true',
       operator_switch: clean(c.email_enabled) === 'true',
@@ -102,11 +122,13 @@ export async function getEmailCommandThread(threadId, deps = {}) {
   if (error) return { ok: false, error: 'thread_unreadable' }
   if (!thread) return { ok: false, error: 'not_found', status: 404 }
   const [summary] = await hydrate(db, [thread])
-  const [out, inb, atts, closingEvents] = await Promise.all([
+  const [out, inb, atts, closingEvents, closingCase, controls] = await Promise.all([
     db.from('email_queue').select('*').eq('thread_id', threadId).order('created_at', { ascending: true }).limit(200),
     db.from('email_inbound_messages').select('*').eq('thread_id', threadId).order('received_at', { ascending: true }).limit(200),
     db.from('email_attachments').select('*').eq('thread_id', threadId).limit(200),
     thread.closing_case_id ? db.from('closing_activity_events').select('event_type, actor, source, detail, created_at').eq('closing_case_id', thread.closing_case_id).limit(200) : { data: [] },
+    thread.closing_case_id ? db.from('closing_cases').select('closing_case_id, title_acknowledged_at, title_commitment_received_at, title_commitment_date, clear_to_close_at, closing_date_confirmed_at, closed_at, terminal_outcome, automation_paused_at, automation_paused_reason').eq('closing_case_id', thread.closing_case_id).maybeSingle() : { data: null },
+    db.from('system_control').select('key, value').in('key', ['email_enabled']),
   ])
   // Events by MESSAGE id: provider events may arrive before a message is threaded.
   const outIds = (out.data || []).map((q) => q.id)
@@ -135,6 +157,9 @@ export async function getEmailCommandThread(threadId, deps = {}) {
       text: q.text_body || null, html: q.html_body ? sanitizeEmailHtml(q.html_body) : null,
       status: deliveryStatus(q, eng), engagement: eng, automated: q.source !== 'manual',
       action: q.action_key, sequence: q.sequence, why: q.reason || null, cancel_reason: q.cancel_reason || null,
+      provenance: provenanceOf(q),
+      failure: ['failed', 'bounced'].includes(q.queue_status) ? classifyFailure(q, { events: evBy.get(q.id) || [] }) : null,
+      retry_count: Number(q.retry_count) || 0,
       attachments: await Promise.all((attBy.get(q.id) || []).map(attachmentView)),
     })
   }
@@ -177,7 +202,16 @@ export async function getEmailCommandThread(threadId, deps = {}) {
     for (const a of applied.filter((x) => x.ok && !x.duplicate)) items.push({ kind: 'system', at: m.handled_at || m.received_at, label: `From this email: ${a.type.replace(/_/g, ' ')}${a.value ? ` · ${String(a.value).replace(/_/g, ' ')}` : ''}`, source: 'email_command' })
   }
   items.sort((a, b) => String(a.at).localeCompare(String(b.at)))
-  return { ok: true, thread: summary, sms_thread_key: thread.sms_thread_key || null, items }
+
+  // The room sees provider events, so the current failure is classified precisely here.
+  const room = { ...summary, failure: currentFailure(out.data || [], { eventsByQueue: evBy }) }
+  const switchOn = clean(Object.fromEntries((controls.data || []).map((r) => [r.key, r.value])).email_enabled) === 'true'
+  const delivery = { send_enabled: switchOn && clean(process.env.EMAIL_SEND_ENABLED) === 'true', operator_switch: switchOn }
+  const intelligence = buildThreadIntelligence({
+    thread, summary: room, outbound: out.data || [], inbound: inb.data || [], closingCase: closingCase.data || null,
+    eventsByQueue: evBy, delivery, market: summary.market || null,
+  })
+  return { ok: true, thread: room, sms_thread_key: thread.sms_thread_key || null, items, intelligence }
 }
 
 export async function getEmailMessageTelemetry(queueId, deps = {}) {

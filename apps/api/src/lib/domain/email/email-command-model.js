@@ -24,6 +24,92 @@ const ts = (v) => { const t = Date.parse(v); return Number.isFinite(t) ? t : nul
 const PENDING = new Set(['pending_send', 'scheduled', 'sending'])
 const APPROVAL = new Set(['awaiting_approval'])
 
+/**
+ * The outbox state of ONE pending message — the only thing an "automation is
+ * replying" marker may claim. Never inferred from the thread: read off the row.
+ *   sending    claimed by the dispatcher, in flight right now
+ *   retrying   a transport retry of the SAME message is waiting (retry_count > 0)
+ *   held       deferred by the dispatcher's safety gate (e.g. sender unavailable)
+ *   scheduled  planned for a future time
+ *   queued     due now, waiting for the next dispatcher tick
+ */
+export function outboxStatus(q, now = Date.now()) {
+  if (!q) return null
+  if (q.queue_status === 'sending') return 'sending'
+  const retryAt = ts(q.next_retry_at)
+  if (Number(q.retry_count) > 0 && retryAt !== null) return 'retrying'
+  if (retryAt !== null && retryAt > now && clean(q.failed_reason)) return 'held'
+  const due = ts(q.scheduled_for) ?? ts(q.created_at)
+  if (q.queue_status === 'scheduled' || (due !== null && due > now)) return 'scheduled'
+  return 'queued'
+}
+
+/*
+ * FAILURE CLASSES — what failed, whether anything will retry it, and whether a
+ * person has to act. Classified from the stored reason codes and provider
+ * events only (dispatcher, send-safety gate, provider normalisation, bounce
+ * webhooks); an unrecognised code stays `unknown` rather than being guessed.
+ */
+const SAFETY_BLOCKS = {
+  recipient_invalid: ['Invalid address', 'The recipient address is not a valid email address', 'Correct the address'],
+  content_missing: ['No content', 'The automated email had no subject or body, so it was never sent', 'Check the template'],
+  thread_unlinked: ['Not linked', 'The automated email had no conversation link, so it was never sent', 'Link the conversation'],
+  stale_scheduled_message: ['Held — overdue', 'The email was badly overdue when its turn came, so it was held instead of sent late', 'Review it before sending'],
+  recipient_identity_uncertain: ['Held — identity', 'Who this recipient is became uncertain, so the email was held', 'Confirm the recipient'],
+  business_state_changed: ['Held — deal changed', 'The deal changed after this email was planned, so it was held', 'Review it against the deal'],
+  title_contact_changed: ['Held — contact changed', 'The title contact changed after this email was planned, so it was held', 'Review the new contact'],
+}
+const TRANSPORT_RETRYABLE = new Set(['brevo_rate_limited', 'brevo_provider_unavailable', 'brevo_timeout', 'brevo_network_error'])
+const SUPPRESSED = new Set(['recipient_suppressed', 'recipient_hard_bounced', 'recipient_soft_bounced_repeatedly'])
+
+export function classifyFailure(q = {}, { events = [] } = {}) {
+  const code = clean(q.failed_reason) || clean(q.cancel_reason) || null
+  const bounce = events.find((e) => ['hard_bounce', 'invalid_address', 'soft_bounce', 'blocked'].includes(e.event_type)) || null
+  const attempts = Number(q.retry_count) || 0
+  const base = { code, attempts, at: q.updated_at || q.sent_at || null }
+  if (bounce?.event_type === 'blocked') {
+    return { ...base, class: 'blocked', label: 'Blocked by recipient', what: `The receiving mail system refused it${bounce.reason ? ` — ${bounce.reason}` : ''}`, retry: 'none', operator_must_act: true, action: 'Use another address or call' }
+  }
+  if (bounce?.event_type === 'soft_bounce') {
+    return { ...base, class: 'delivery', label: 'Soft bounce', what: `Temporarily rejected by the receiving server${bounce.reason ? ` — ${bounce.reason}` : ''}`, retry: 'none', operator_must_act: false, action: 'Try again later or use another address' }
+  }
+  if (bounce || q.queue_status === 'bounced') {
+    const reason = bounce?.reason || (q.queue_status === 'bounced' ? code : null)
+    return { ...base, class: 'delivery', label: 'Hard bounce', what: `The receiving server rejected the address${reason ? ` — ${reason}` : ''}`, retry: 'none', operator_must_act: true, action: 'Find another address or call' }
+  }
+  if (SUPPRESSED.has(code)) {
+    return { ...base, class: 'suppression', label: 'Suppressed address', what: 'This address bounced or unsubscribed before, so nothing is sent to it', retry: 'none', operator_must_act: true, action: 'Use another address or channel' }
+  }
+  if (code === 'transport_outcome_unknown') {
+    return { ...base, class: 'transport', label: 'Outcome unknown', what: 'The send timed out — the provider may have accepted it. It is never re-sent automatically', retry: 'none', operator_must_act: true, action: 'Check it arrived before resending' }
+  }
+  if (code?.startsWith('dispatch_error')) {
+    return { ...base, class: 'transport', label: 'Dispatch error', what: 'The dispatcher hit an internal error before the provider was reached', retry: 'none', operator_must_act: true, action: 'Resend after checking the dispatcher' }
+  }
+  if (TRANSPORT_RETRYABLE.has(code)) {
+    return { ...base, class: 'transport', label: 'Provider unreachable', what: `Every delivery attempt failed (${code.replace(/^brevo_/, '').replace(/_/g, ' ')})`, retry: 'exhausted', operator_must_act: true, action: 'Resend once the provider recovers' }
+  }
+  if (code?.startsWith('brevo_')) {
+    return { ...base, class: 'provider', label: 'Provider rejected', what: `The email provider refused the request (${code.replace(/^brevo_/, '').replace(/_/g, ' ')})`, retry: 'none', operator_must_act: true, action: 'Check the sender configuration' }
+  }
+  if (code && SAFETY_BLOCKS[code]) {
+    const [label, what, action] = SAFETY_BLOCKS[code]
+    return { ...base, class: 'blocked', label, what, retry: 'none', operator_must_act: true, action }
+  }
+  return { ...base, class: 'unknown', label: 'Failed', what: code ? `Failed with ${code.replace(/_/g, ' ')}` : 'Failed without a recorded reason', retry: 'none', operator_must_act: true, action: 'Review before resending' }
+}
+
+/** The failure that is still current on a thread: the newest failed attempt, unless a later send succeeded. */
+export function currentFailure(outbound = [], { eventsByQueue = null } = {}) {
+  const when = (q) => String(q.updated_at || q.sent_at || q.created_at || '')
+  const failed = outbound.filter((q) => ['failed', 'bounced'].includes(q.queue_status) || (q.queue_status === 'cancelled' && SUPPRESSED.has(clean(q.cancel_reason))))
+    .sort((a, b) => when(b).localeCompare(when(a)))[0]
+  if (!failed) return null
+  const laterOk = outbound.some((q) => ['sent', 'delivered'].includes(q.queue_status) && String(q.sent_at || '') > String(failed.sent_at || failed.updated_at || ''))
+  if (laterOk) return null
+  return classifyFailure(failed, { events: eventsByQueue?.get?.(failed.id) || [] })
+}
+
 export function deriveThreadState(thread = {}, { outbound = [], inboundUnhandled = 0 } = {}) {
   const pending = outbound.filter((q) => PENDING.has(q.queue_status)).sort((a, b) => String(a.scheduled_for).localeCompare(String(b.scheduled_for)))
   const approval = outbound.filter((q) => APPROVAL.has(q.queue_status) || (q.queue_status === 'draft' && q.approval_status === 'required'))
@@ -52,19 +138,34 @@ export function deriveThreadState(thread = {}, { outbound = [], inboundUnhandled
           : next ? (next.queue_status === 'scheduled' || ts(next.scheduled_for) > Date.now() ? 'follow_up_scheduled' : 'sending')
             : state === 'waiting' ? 'waiting'
               : state === 'done' ? 'completed' : 'on'
+  const status = outboxStatus(next)
   return {
     state,
     ball,
     automation,
-    next: next ? { at: next.scheduled_for, action: next.action_key, sequence: next.sequence, why: next.reason || null, queue_id: next.id } : null,
+    next: next ? {
+      at: next.scheduled_for, action: next.action_key, sequence: next.sequence, why: next.reason || null, queue_id: next.id,
+      status, attempts: Number(next.retry_count) || 0, held_reason: ['retrying', 'held'].includes(status) ? clean(next.failed_reason) || null : null,
+    } : null,
     approvals: approval.map((q) => ({ queue_id: q.id, subject: q.subject, why: q.reason || null })),
     last_failure: state === 'failed' ? { code: last.failed_reason, at: last.updated_at } : null,
+    // The failure that is still current (a later successful send clears it) —
+    // also on a Needs-you thread, where the dispatcher flagged it for a person.
+    failure: currentFailure(outbound),
+    // Automation was running and handed the decision to a person. A reply on a
+    // conversation the operator already owns is not an escalation.
+    escalated: Boolean(thread.needs_operator) && thread.automation_state !== 'taken_over',
+    // Who wrote the outbound messages on this conversation (any status).
+    origin: {
+      automated: outbound.filter((q) => clean(q.source) && q.source !== 'manual').length,
+      manual: outbound.filter((q) => q.source === 'manual').length,
+    },
     operator_unread: lastInbound !== null && (ts(thread.operator_read_at) === null || ts(thread.operator_read_at) < lastInbound),
   }
 }
 
 // A commitment date is a calendar date (stored at 00:00Z): format it in UTC so it never slips a day.
-const dueLabel = (v) => {
+export const dueLabel = (v) => {
   const t = ts(v)
   return t === null ? String(v).slice(0, 10) : new Date(t).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
@@ -94,7 +195,7 @@ export function closingContext(c = {}, leg = 'title') {
   }
 }
 
-const STAGE_LABEL = {
+export const STAGE_LABEL = {
   ownership_confirmation: 'S1 Ownership', ownership_check: 'S1 Ownership', offer_interest: 'S2 Offer interest', asking_price: 'S3 Asking price',
   property_condition: 'S4 Condition', offer: 'S5 Offer', formal_contract: 'S6 Contract', disposition: 'S7 Disposition',
   under_contract: 'S8 Under contract', prepared_to_close: 'S9 Prepared to close', closed: 'S10 Closed',

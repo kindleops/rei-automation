@@ -30,11 +30,20 @@ export interface ThreadSummary {
   state: OpState
   ball: Ball
   automation: string
-  next: { at: string; action: string | null; sequence: number | null; why: Why | null; queue_id: string } | null
+  next: { at: string; action: string | null; sequence: number | null; why: Why | null; queue_id: string; status?: OutboxStatus | null; attempts?: number; held_reason?: string | null } | null
   approvals: Array<{ queue_id: string; subject: string; why: Why | null }>
   last_failure: { code: string; at: string } | null
   operator_unread: boolean
+  /* desktop read-model fields (bounded, read-only; absent on older payloads) */
+  market?: string | null
+  failure?: Failure | null
+  escalated?: boolean
+  origin?: { automated: number; manual: number }
 }
+
+/** Outbox state of the next pending message — the only thing an "automation is replying" marker may claim. */
+export type OutboxStatus = 'sending' | 'retrying' | 'held' | 'scheduled' | 'queued'
+export interface Failure { class: 'delivery' | 'transport' | 'suppression' | 'blocked' | 'provider' | 'unknown'; label: string; what: string; code: string | null; retry: 'none' | 'exhausted'; attempts: number; operator_must_act: boolean; action: string; at: string | null }
 
 export interface Home {
   counts: Record<OpState, number>
@@ -46,6 +55,8 @@ export interface Home {
   recent: ThreadSummary[]
   delivery: { send_enabled: boolean; operator_switch: boolean; heartbeat_at: string | null; health: { status: string; issues: string[]; at: string } | null }
   truncated: boolean
+  parties?: { seller: number; buyer: number; title: number; closings: number }
+  automation_counts?: { active: number; escalated: number; manual: number }
 }
 
 export interface Engagement {
@@ -57,11 +68,34 @@ export interface Engagement {
 }
 export interface Attachment { id: string; filename: string; content_type: string; size_bytes: number | null; doc_type: string | null; confidence: number | null; review_state: string; fetch_status: string; routed: { type: string; id: string } | null; url: string | null }
 export type Item =
-  | { kind: 'outbound'; id: string; at: string; from: { email: string | null; name: string | null }; to: string; subject: string; text: string | null; html: string | null; status: string; engagement: Engagement; automated: boolean; action: string | null; sequence: number | null; why: Why | null; cancel_reason: string | null; attachments: Attachment[] }
+  | { kind: 'outbound'; id: string; at: string; from: { email: string | null; name: string | null }; to: string; subject: string; text: string | null; html: string | null; status: string; engagement: Engagement; automated: boolean; action: string | null; sequence: number | null; why: Why | null; cancel_reason: string | null; attachments: Attachment[]; provenance?: Provenance; failure?: Failure | null; retry_count?: number }
   | { kind: 'inbound'; id: string; at: string; from: { email: string; name: string | null }; subject: string | null; reply: string; quoted: boolean; signature: string | null; html: string | null; status: string; understood: { assertions?: Array<{ type: string; value?: unknown; excerpt: string }>; flags?: string[]; applied?: Array<{ type: string; ok: boolean }> }; attachments: Attachment[] }
   | { kind: 'system'; at: string; label: string; source: string | null }
 
-export interface ThreadRoom { thread: ThreadSummary; sms_thread_key: string | null; items: Item[] }
+export interface Provenance { kind: 'operator' | 'workflow' | 'system' | 'unknown'; label: string | null; workflow: string | null }
+
+/** One explanatory line; `{at}` in the text is replaced by the operator's own rendering of `at`. */
+export interface WhyLine { text: string; at: string | null; fmt: 'ago' | 'until' | 'stamp' | null; tone: 'good' | 'warn' | 'bad' | 'auto' | 'muted' | null }
+export interface ThreadIntelligence {
+  summary: {
+    intent: { label: string; source: string; at: string | null } | null
+    sentiment: null
+    stage: { label: string | null; moved: 'moved' | 'stayed' | null; from: string | null; at: string | null; closing?: boolean } | null
+    lead_state: string | null
+    next_action: { label: string; at: string | null; status: string | null } | null
+    last_reply_at: string | null
+    channel: { owner: 'you' | 'leadcommand' | 'them' | null; preference: 'email' | 'sms' | null; sms_linked: boolean }
+  }
+  automation: { mode: string; label: string; armed: Array<{ queue_id: string; label: string; at: string | null; status: OutboxStatus | null; sequence: number | null }>; next_send_at: string | null; approvals: number; send_enabled: boolean | null; operator_switch: boolean | null; taken_over_at: string | null }
+  why: { title: string; lines: WhyLine[] } | null
+  links: Array<{ system: string; label: string; detail: string | null; href: string; thread_key?: string }>
+  party: { name: string | null; email: string | null; role: string | null; resolution: string | null; method: string | null; candidates: number }
+  property: { address: string | null; market: string | null; property_id: string | null } | null
+  delivery: { status: string; at: string | null; subject: string | null; from: string | null; domain: string | null; provider: string | null; provenance: Provenance; engagement: { delivered_at: string | null; open_signals: number; likely_human_opens: number; clicks: number; replied_at: string | null; bounce: { type: string; at: string; reason: string | null } | null } } | null
+  activity: { inbound: number; outbound: number; planned: number; automated: number; manual: number; attachments: number; first_at: string | null; last_at: string | null }
+}
+
+export interface ThreadRoom { thread: ThreadSummary; sms_thread_key: string | null; items: Item[]; intelligence?: ThreadIntelligence }
 
 export interface MessageTelemetry {
   message: { id: string; logical_id: string; subject: string; to: string; from: string | null; sender: string | null; sending_domain: string | null; provider: string; provider_message_id: string | null; lane: string | null; origin: string | null; source: string | null; campaign_id: string | null; sequence_step: number | null; template: string | null; template_version: string | null; status: string; scheduled_for: string | null; sent_at: string | null; retry_count: number | null; why: Why | null; cancel_reason: string | null }
