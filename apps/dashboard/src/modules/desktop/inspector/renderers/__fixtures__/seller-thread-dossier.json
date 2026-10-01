@@ -1,0 +1,220 @@
+{
+ "ok": true,
+ "degraded": false,
+ "action": "thread-dossier",
+ "diagnostics": {
+  "thread_key": "+15550100001",
+  "context": {
+   "selected_thread": {
+    "inbox_thread_state": {
+     "id": "28325def-c58d-4f10-86c0-47b033419fa1",
+     "thread_key": "+15550100001",
+     "seller_phone": "+15550100001",
+     "canonical_e164": "+15550100001",
+     "our_number": "+15550100009",
+     "master_owner_id": null,
+     "prospect_id": "15021692175",
+     "property_id": "273312064",
+     "market": null,
+     "stage": "",
+     "status": "not_contacted",
+     "priority": "high",
+     "is_archived": false,
+     "is_read": false,
+     "is_pinned": false,
+     "is_urgent": false,
+     "last_read_at": "2026-10-01T16:08:08.361+00:00",
+     "archived_at": null,
+     "metadata": {},
+     "created_at": "2026-09-28T16:08:26.620343+00:00",
+     "updated_at": "2026-10-01T16:21:04.229716+00:00",
+     "is_starred": false,
+     "is_hidden": false,
+     "is_suppressed": false,
+     "hidden_at": null,
+     "suppressed_at": null,
+     "last_intent": "unclear",
+     "next_action": "",
+     "automation_state": "running",
+     "latest_reply_template_id": "",
+     "message_count": 20,
+     "inbound_count": 0,
+     "outbound_count": 0,
+     "latest_message_event_id": "e27a6b29-5403-4609-a2c6-ac3aa43c7667",
+     "latest_message_body": "[seller message]",
+     "latest_message_at": "2026-10-01T16:21:02.268+00:00",
+     "latest_direction": "inbound",
+     "latest_event_type": null,
+     "latest_delivery_status": null,
+     "last_inbound_at": "2026-10-01T16:21:02.268+00:00",
+     "last_outbound_at": "2026-10-01T16:10:24.164+00:00",
+     "pending_queue_count": 0,
+     "failed_queue_count": 0,
+     "blocked_queue_count": 0,
+     "next_scheduled_for": null,
+     "is_hot_lead": false,
+     "follow_up_at": null,
+     "agent_id": null,
+     "persona_id": null,
+     "automation_status": null,
+     "inbox_bucket": "new_replies",
+     "automation_lane": "active_conversation",
+     "disposition": null,
+     "next_action_at": "2026-10-01T12:58:05.985+00:00",
+     "reason_codes": [],
+     "confidence": null,
+     "classifier_version": null,
+     "classified_at": null,
+     "classification_run_id": null,
+     "previous_inbox_bucket": null,
+     "previous_automation_lane": null,
+     "manual_override": false,
+     "manual_override_at": null,
+     "manual_override_by": null,
+     "lifecycle_stage": "offer",
+     "operational_status": "not_contacted",
+     "lead_temperature": "hot",
+     "temperature": "hot",
+     "seller_stage": "offer",
+     "conversation_status": "not_contacted",
+     "contactability_status": "contactable",
+     "stage_source": "manual",
+     "status_source": "system",
+     "temperature_source": "autopilot",
+     "disposition_source": "autopilot",
+     "contactability_source": "autopilot",
+     "manual_stage_lock": true,
+     "manual_temperature_lock": false,
+     "snoozed_until": null,
+     "snooze_reason": null,
+     "archive_scope": null,
+     "archive_reason": null,
+     "paused_reason": null,
+     "updated_by": "automation_engine",
+     "legacy_stage": null,
+     "legacy_status": null,
+     "temperature_confidence": null,
+     "temperature_reason": "PRICE_PROVIDED,SELLER_ASKING_QUESTIONS,FLOOR_HOT_EXPLICIT_PRICE_OR_URGENT_INTENT",
+     "seller_display_name": "Seller One",
+     "source_application": null,
+     "source_channel": null,
+     "source_submission_id": null,
+     "source_metadata": {}
+    },
+    "send_queue": [
+     {
+      "id": "4a38db91-df0d-4017-8f91-b4d06f1f0208",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-10-01T16:10:24.065+00:00"
+     },
+     {
+      "id": "57a16ac4-50ba-4838-b4de-7b7d473264a8",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-10-01T12:47:08.944+00:00"
+     },
+     {
+      "id": "9395166e-da5e-4bb7-9a7b-ea3bd1f6c774",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-10-01T12:38:18.218+00:00"
+     },
+     {
+      "id": "deda64db-01b1-4aac-9ec2-77e1791edcb4",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-10-01T00:55:55.784+00:00"
+     },
+     {
+      "id": "a8b90003-cd2a-4eac-ab58-94ee7cdcfc09",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-09-30T15:30:02.488+00:00"
+     },
+     {
+      "id": "4839470c-226b-4a0c-8174-fa2eabcf8d3d",
+      "queue_status": "blocked_by_health_guard",
+      "scheduled_for": "2026-09-30T15:19:28.214+00:00"
+     },
+     {
+      "id": "4bb58a3b-20bb-4152-b6e9-f91a21b2a58c",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-09-30T15:16:15.049+00:00"
+     },
+     {
+      "id": "fc39b22b-70fa-46eb-a6c7-c4417e987ac3",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-09-30T14:51:00.967+00:00"
+     },
+     {
+      "id": "887507d5-e145-439d-9b09-3b8b46389748",
+      "queue_status": "delivered",
+      "scheduled_for": "2026-09-30T14:45:00+00:00"
+     },
+     {
+      "id": "06f880ef-5cda-482c-8bff-02f244a0ef26",
+      "queue_status": "failed_transport",
+      "scheduled_for": "2026-09-28T16:08:00+00:00"
+     }
+    ]
+   }
+  },
+  "automation_timeline": [
+   {
+    "timestamp": "2026-10-01T16:21:02.268Z",
+    "event_type": "inbound_received",
+    "status": "inbound_sms",
+    "actor": "TextGrid"
+   },
+   {
+    "timestamp": "2026-10-01T16:10:24.164Z",
+    "event_type": "outbound_sent",
+    "status": "delivered",
+    "actor": "system"
+   },
+   {
+    "timestamp": "2026-10-01T16:10:24.065Z",
+    "event_type": "auto_reply_queued",
+    "status": "delivered",
+    "actor": "system"
+   },
+   {
+    "timestamp": "2026-10-01T12:58:37.276Z",
+    "event_type": "inbound_received",
+    "status": "inbound_sms",
+    "actor": "TextGrid"
+   },
+   {
+    "timestamp": "2026-10-01T12:58:11.627Z",
+    "event_type": "inbound_received",
+    "status": "inbound_sms",
+    "actor": "TextGrid"
+   },
+   {
+    "timestamp": "2026-10-01T12:47:09.031Z",
+    "event_type": "outbound_sent",
+    "status": "delivered",
+    "actor": "system"
+   },
+   {
+    "timestamp": "2026-10-01T12:47:08.944Z",
+    "event_type": "auto_reply_queued",
+    "status": "delivered",
+    "actor": "system"
+   },
+   {
+    "timestamp": "2026-10-01T12:42:27.514Z",
+    "event_type": "inbound_received",
+    "status": "inbound_sms",
+    "actor": "TextGrid"
+   }
+  ],
+  "linkedRecords": {
+   "propertyIds": [
+    "273312064"
+   ],
+   "ownerIds": [
+    "15021692175"
+   ],
+   "masterOwnerIds": [],
+   "phoneIds": [],
+   "marketIds": []
+  }
+ }
+}

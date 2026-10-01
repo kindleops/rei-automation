@@ -1,0 +1,117 @@
+{
+ "ok": true,
+ "run": {
+  "run_id": "3004ae79-99a0-49ff-909f-7de5b03ad129",
+  "workflow_key": "seller_inbound",
+  "started_at": "2026-10-01T16:21:02.449619+00:00",
+  "finished_at": "2026-10-01T16:21:02.231+00:00",
+  "duration_ms": null,
+  "subject": {
+   "kind": "seller",
+   "id": "+15550100001",
+   "name": "Seller One",
+   "address": "3635 Emerson Ave N, Minneapolis, Mn 55412",
+   "href": "/inbox?thread=%2B15550100001"
+  },
+  "trigger": "Seller replied",
+  "status": "needs_you",
+  "status_label": "Needs you",
+  "current_node": "human_review",
+  "result": "Needs your review",
+  "reason": "Low confidence — needs a human read"
+ },
+ "decisions": [
+  {
+   "k": "Seller stage",
+   "v": "Stayed Offer",
+   "source": "canonical seller decision"
+  },
+  {
+   "k": "Lead status",
+   "v": "Needs review",
+   "source": "canonical seller decision"
+  },
+  {
+   "k": "Reply",
+   "v": "Template Accept terms",
+   "source": "decision → template selection"
+  },
+  {
+   "k": "Contactable now",
+   "v": "Held — Low confidence — needs a human read",
+   "source": "contactability / automation policy"
+  },
+  {
+   "k": "Next action",
+   "v": "Mark human review",
+   "source": "automation_decision (planned)"
+  },
+  {
+   "k": "Human review",
+   "v": "Open · Automation flagged it for review",
+   "source": "Inbox review bucket"
+  }
+ ],
+ "links": [
+  {
+   "label": "Open conversation",
+   "href": "/inbox?thread=%2B15550100001",
+   "app": "Inbox"
+  },
+  {
+   "label": "Open deal",
+   "href": "/deal-intelligence?property=273312064",
+   "app": "Deal Intelligence"
+  }
+ ],
+ "timeline": [
+  {
+   "occurred_at": "2026-10-01T16:21:02.48593+00:00",
+   "node_key": "reply_received",
+   "label": null,
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:02.526979+00:00",
+   "node_key": "resolve_property",
+   "label": null,
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:02.561118+00:00",
+   "node_key": "resolve_seller",
+   "label": null,
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:02.594958+00:00",
+   "node_key": "resolve_thread",
+   "label": null,
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:02.632562+00:00",
+   "node_key": "classify_message",
+   "label": "Unclear",
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:02.673584+00:00",
+   "node_key": "extract_facts",
+   "label": null,
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:02.709147+00:00",
+   "node_key": "seller_decision",
+   "label": "stays Offer",
+   "status": "succeeded"
+  },
+  {
+   "occurred_at": "2026-10-01T16:21:00.365259+00:00",
+   "node_key": "offer_negotiation",
+   "label": "Review required",
+   "status": "completed"
+  }
+ ]
+}

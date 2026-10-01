@@ -1,0 +1,135 @@
+{
+ "ok": true,
+ "campaign": {
+  "id": "c963defc-5672-4419-b494-807d453f8d18",
+  "name": "Map area · Dallas, TX · 197 properties",
+  "market": null,
+  "objective": "ownership_check",
+  "status": "active",
+  "contact_window_start": "08:00",
+  "contact_window_end": "21:00",
+  "updated_at": "2026-10-01T18:30:44.031533+00:00",
+  "metadata": {
+   "timezone": "America/Chicago",
+   "launch_timezone": "America/Chicago"
+  }
+ },
+ "summary": {
+  "total_targets": 95,
+  "explicit_target_count": 197,
+  "eligible_targets": 71,
+  "held_targets": 24,
+  "remaining_targets": 14,
+  "held_by_reason": {
+   "insufficient_template_rotation_pool:auto:0<2": 4,
+   "insufficient_template_rotation_pool:Portuguese:0<2": 1,
+   "insufficient_template_rotation_pool:Indian (Hindi or Other):0<2": 1,
+   "entity_contact_requires_review": 22,
+   "missing_identity_linkage": 2
+  },
+  "health_score": 90,
+  "health_status": "healthy",
+  "next_send_window": {
+   "id": "4728b649-ae21-47fe-a12e-bd47af194788",
+   "campaign_id": "c963defc-5672-4419-b494-807d453f8d18",
+   "market": "Dallas, TX",
+   "state": "TX",
+   "timezone": "America/Chicago",
+   "window_start_utc": "2026-09-30T13:40:00+00:00",
+   "window_end_utc": "2026-10-01T02:00:00+00:00",
+   "status": "planned",
+   "max_sends": 56,
+   "sends_attempted": 0,
+   "sends_successful": 0,
+   "sends_failed": 0,
+   "auto_pause_reason": null,
+   "created_at": "2026-09-30T13:24:25.579718+00:00",
+   "updated_at": "2026-09-30T13:24:25.579718+00:00"
+  },
+  "schedule_missed_for": null,
+  "feeder_last": {
+   "at": "2026-10-01T18:30:43.094Z",
+   "reason": "no_row_placed",
+   "stalled": true
+  }
+ },
+ "command_summary": {
+  "state": "blocked",
+  "state_label": "Blocked",
+  "mode_label": "Test Mode",
+  "blockers": [
+   "Campaign transmission is disabled (test mode / auto-send off)"
+  ],
+  "counts": {
+   "sent_rows": 55,
+   "delivered_rows": 50,
+   "replied_rows": 0,
+   "opted_out_rows": 0,
+   "remaining_targets": 38
+  },
+  "execution": {
+   "transmission_label": "Sending Disabled"
+  }
+ },
+ "send_windows": [
+  {
+   "id": "4728b649-ae21-47fe-a12e-bd47af194788",
+   "campaign_id": "c963defc-5672-4419-b494-807d453f8d18",
+   "market": "Dallas, TX",
+   "state": "TX",
+   "timezone": "America/Chicago",
+   "window_start_utc": "2026-09-30T13:40:00+00:00",
+   "window_end_utc": "2026-10-01T02:00:00+00:00",
+   "status": "planned",
+   "max_sends": 56,
+   "sends_attempted": 0,
+   "sends_successful": 0,
+   "sends_failed": 0,
+   "auto_pause_reason": null,
+   "created_at": "2026-09-30T13:24:25.579718+00:00",
+   "updated_at": "2026-09-30T13:24:25.579718+00:00"
+  }
+ ],
+ "events": [
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:30:43.902226+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:25:38.217617+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:21:02.682485+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:16:05.779088+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:11:08.026854+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:05:39.967747+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T18:00:40.72057+00:00"
+  },
+  {
+   "event_type": "campaign.launch_scheduled",
+   "title": "Campaign launch planned",
+   "created_at": "2026-10-01T17:55:39.741807+00:00"
+  }
+ ]
+}

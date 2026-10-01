@@ -1,0 +1,105 @@
+{
+ "ok": true,
+ "data": {
+  "closing": {
+   "id": "closing:2b3c261d-f3dd-494a-a60c-3437cbdf39b8",
+   "opportunityId": "2b3c261d-f3dd-494a-a60c-3437cbdf39b8",
+   "propertyId": "227876842",
+   "masterOwnerId": "mo_bd4687f62919629ba584d72f",
+   "threadKey": "+15550100002",
+   "property": {
+    "address": "935 Nw 20th St # 1-2, Fort Lauderdale, Fl 33311",
+    "line": "935 Nw 20th St # 1-2",
+    "city": "Fort Lauderdale",
+    "state": "FL",
+    "zip": "33311",
+    "tz": "America/New_York",
+    "tzConfident": true,
+    "addressSource": "property"
+   },
+   "market": "Miami, FL",
+   "seller": {
+    "name": null,
+    "signerEmail": null
+   },
+   "stage": {
+    "key": "formal_contract",
+    "code": "S6",
+    "label": "Formal Contract",
+    "opportunityStage": "asking_price",
+    "diverged": false
+   },
+   "state": {
+    "key": "voided",
+    "label": "Voided",
+    "tone": "terminated"
+   },
+   "closing": null,
+   "readiness": {
+    "met": 1,
+    "total": 7
+   },
+   "ball": null,
+   "blockers": [],
+   "cancellation": {
+    "outcome": "voided",
+    "label": "Voided",
+    "at": "2026-09-10T23:51:34.501Z",
+    "atSource": "provenance",
+    "lastUpdatedAt": "2026-09-10T23:51:34.501Z",
+    "reason": "Monetary correction — 4100 is a MONTHLY RENT. No asking price was ever stated by this seller.",
+    "actor": "operator: underwriting integrity mission, phase 2",
+    "lastMilestone": null
+   },
+   "buyer": null,
+   "title": {
+    "company": null
+   },
+   "contract": {
+    "status": "cancelled",
+    "executedAt": null,
+    "sentAt": null,
+    "acceptedAt": null,
+    "effectiveAt": null,
+    "signer": null,
+    "price": null,
+    "earnestMoney": null,
+    "envelope": null,
+    "docusignStatus": null,
+    "inspectionDeadline": null
+   },
+   "money": {
+    "estimated": {
+     "contractPrice": null,
+     "buyerPrice": null,
+     "assignmentFee": null,
+     "closingCosts": null,
+     "titleFees": null,
+     "grossRevenue": null
+    },
+    "actual": null,
+    "expectedFeeVsActual": null,
+    "comparison": [],
+    "pendingSettlement": [],
+    "statementReceived": false
+   },
+   "timeline": [
+    {
+     "at": "2026-09-10T11:59:19.081Z",
+     "label": "Closing case opened",
+     "source": "Closing case",
+     "kind": "origin"
+    },
+    {
+     "at": "2026-09-10T23:51:34.501Z",
+     "label": "Closing voided · Monetary correction — 4100 is a MONTHLY RENT. No asking price was ever stated by this seller.",
+     "source": "operator: underwriting integrity mission, phase 2",
+     "kind": "terminal"
+    }
+   ],
+   "updatedAt": "2026-09-10T23:51:34.501Z"
+  },
+  "activity": [],
+  "degraded": []
+ }
+}

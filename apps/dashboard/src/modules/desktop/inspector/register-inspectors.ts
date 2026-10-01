@@ -1,8 +1,15 @@
 /**
- * The renderers the Universal Inspector knows. Each lives in ./renderers and
- * registers itself; this file only makes sure they are loaded with the plane.
- * (Renderers are added as their read contract is verified against the
- * owning app's endpoint — a type without one shows an honest "not
- * inspectable yet" note instead of a guessed panel.)
+ * The renderers the Universal Inspector knows. Each reads its owning app's
+ * existing endpoint (see ./renderers/*); a type without one shows a quiet
+ * "open it in its app" note instead of a guessed panel.
  */
-export {}
+import { registerInspector } from './inspector-registry'
+import { buyerInspector } from './renderers/buyer'
+import { campaignInspector } from './renderers/campaign'
+import { closingInspector } from './renderers/closing'
+import { dealInspector } from './renderers/deal'
+import { propertyInspector } from './renderers/property'
+import { sellerInspector } from './renderers/seller'
+import { workflowInspector } from './renderers/workflow'
+
+for (const r of [propertyInspector, sellerInspector, campaignInspector, buyerInspector, closingInspector, workflowInspector, dealInspector]) registerInspector(r)

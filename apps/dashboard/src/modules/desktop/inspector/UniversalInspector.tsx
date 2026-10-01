@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { LCButton, LCError, LCFacts, LCIconButton, LCInspector, LCInspectorSection, LCSkeleton, LCStatus } from '../../../shared/lc'
+import { LCButton, LCEmpty, LCError, LCFacts, LCIconButton, LCInspector, LCInspectorSection, LCSkeleton, LCStatus } from '../../../shared/lc'
 import type { LCTone } from '../../../shared/lc/states-model'
 import { pushRoutePath } from '../../../app/router'
 import { sound } from '../../../shared/sound'
@@ -9,6 +9,7 @@ import { missionsFor, planMission } from '../workspace/missions'
 import { replaySubjectOf } from '../feed/feed-model'
 import { openReplay } from '../replay/replay-store'
 import { inspectorFor, type InspectorModel, type InspectorTone } from './inspector-registry'
+import { failureOfError, type InspectorFailure } from './inspector-read'
 import { closeInspector, inspectorBack, openInspector, refKey, setInspectorPinned, useInspector, type EntityRef } from './inspector-store'
 import './register-inspectors'
 import './universal-inspector.css'
@@ -28,7 +29,14 @@ import './universal-inspector.css'
 
 const TONE: Record<InspectorTone, LCTone> = { neutral: 'neutral', live: 'exec', attention: 'attn', ok: 'ok', crit: 'crit' }
 
-type Load = { key: string; model: InspectorModel | null; error: string | null }
+type Load = { key: string; model: InspectorModel | null; error: InspectorFailure | null }
+
+/** How each failed read reads to an operator (never a status code). */
+const FAILURE: Record<Exclude<InspectorFailure, 'unavailable'>, { title: string; body: string; icon: 'search' | 'shield' | 'database' }> = {
+  not_found: { title: 'Not on record', body: 'This object could not be found. It may have been merged or removed.', icon: 'search' },
+  denied: { title: 'Not available to this session', body: 'Your sign-in does not allow reading this object. Sign in again or ask an admin.', icon: 'shield' },
+  not_connected: { title: 'Not connected', body: 'LeadCommand could not reach its data service. Check your connection, then try again.', icon: 'database' },
+}
 
 function useModel(ref: EntityRef | null, attempt: number): Load | null {
   const key = ref ? `${refKey(ref)}#${attempt}` : ''
@@ -40,7 +48,7 @@ function useModel(ref: EntityRef | null, attempt: number): Load | null {
     const ctl = new AbortController()
     renderer.load(ref, ctl.signal).then(
       (model) => { if (!ctl.signal.aborted) setLoad({ key, model, error: null }) },
-      (e: unknown) => { if (!ctl.signal.aborted) setLoad({ key, model: null, error: e instanceof Error ? e.message : 'unavailable' }) },
+      (e: unknown) => { if (!ctl.signal.aborted) setLoad({ key, model: null, error: failureOfError(e) }) },
     )
     return () => ctl.abort()
   }, [ref, key])
@@ -70,8 +78,8 @@ export function UniversalInspector() {
   if (!current) return null
   if (!renderer) {
     return (
-      <LCInspector open onClose={closeInspector} id="universal" title={current.label ?? current.id} eyebrow="Not inspectable yet" className="uinsp">
-        <p className="uinsp__note">This kind of object has no inspector yet. Open it in its app instead.</p>
+      <LCInspector open onClose={closeInspector} id="universal" title={current.label ?? current.id} className="uinsp" label="Inspector">
+        <LCEmpty compact icon="eye" title="No quick view for this yet" body="Open it in its app to see the full picture." />
       </LCInspector>
     )
   }
@@ -133,8 +141,16 @@ export function UniversalInspector() {
     >
       {!load ? (
         <LCSkeleton shape="lines" count={6} label={`Loading ${renderer.noun.toLowerCase()}`} />
+      ) : load.error && load.error !== 'unavailable' ? (
+        <LCEmpty
+          compact
+          icon={FAILURE[load.error].icon}
+          title={FAILURE[load.error].title}
+          body={FAILURE[load.error].body}
+          action={load.error === 'not_connected' ? { label: 'Try again', onClick: () => setAttempt((n) => n + 1) } : undefined}
+        />
       ) : load.error || !model ? (
-        <LCError what={`this ${renderer.noun.toLowerCase()}`} onRetry={() => setAttempt((n) => n + 1)} detail={load.error ?? undefined} compact />
+        <LCError what={`Couldn't load this ${renderer.noun.toLowerCase()}`} onRetry={() => setAttempt((n) => n + 1)} compact />
       ) : (
         <>
           <LCInspectorSection>

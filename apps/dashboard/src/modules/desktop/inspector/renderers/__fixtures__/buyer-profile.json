@@ -1,0 +1,146 @@
+{
+ "ok": true,
+ "profile": {
+  "id": "company:us_ak:10043936",
+  "kind": "company",
+  "name": "ESSEX MORTGAGE",
+  "nameWithheld": false,
+  "identity": {
+   "grade": "canonical",
+   "confidence": 1,
+   "method": "exact_registry_company_identity",
+   "jurisdiction": "us_ak",
+   "companyNumber": "10043936",
+   "aliasCount": 1,
+   "modelAsOf": "2026-08-20T21:00:36.096435+00:00"
+  },
+  "roles": {
+   "purchases": 5,
+   "dispositions": 4,
+   "sold": 0,
+   "owned": 0,
+   "ownedRegistry": 0,
+   "portfolio": 0,
+   "portfolioValue": null,
+   "linkedSales": 0,
+   "crossover": false
+  },
+  "activity": {
+   "status": "active",
+   "score": 62.13,
+   "first": "2025-07-22",
+   "last": "2026-06-02",
+   "daysSinceLast": 56,
+   "trailing90": 1,
+   "trailing180": 2,
+   "trailing365": 4,
+   "perYear": null,
+   "components": {
+    "recency": 1,
+    "frequency": 0.5,
+    "consistency": 0.6667,
+    "portfolio_scale": 0,
+    "evidence_quality": 0.625,
+    "asset_consistency": 1,
+    "price_consistency": 0,
+    "geographic_concentration": 0.4
+   },
+   "byYear": [
+    {
+     "year": 2025,
+     "count": 2,
+     "volume": 716701
+    },
+    {
+     "year": 2026,
+     "count": 3,
+     "volume": 1532072
+    }
+   ]
+  },
+  "behavior": {
+   "archetype": "active_flipper",
+   "archetypeReasons": [
+    "4 dispositions, median hold 157.0d"
+   ],
+   "holdFlip": "flip_like",
+   "medianHoldDays": 157,
+   "evidenceCount": 5,
+   "confidence": 0.625
+  },
+  "assets": {
+   "families": [
+    {
+     "key": "sfr",
+     "label": "sfr",
+     "count": 5,
+     "share": 1
+    }
+   ],
+   "dominant": "sfr"
+  },
+  "price": {
+   "p10": 185532,
+   "p25": 201480,
+   "p50": 228250,
+   "p75": 515221,
+   "p90": 883442,
+   "recentMedian": 371736,
+   "recentCount": 4,
+   "cashShare": 0.2,
+   "armsLengthShare": 0
+  },
+  "geography": {
+   "states": [
+    {
+     "key": "AZ",
+     "label": "AZ",
+     "count": 2,
+     "share": 0.4
+    },
+    {
+     "key": "CA",
+     "label": "CA",
+     "count": 2,
+     "share": 0.4
+    },
+    {
+     "key": "TX",
+     "label": "TX",
+     "count": 1,
+     "share": 0.2
+    }
+   ]
+  },
+  "purchases": [
+   {
+    "date": "2026-06-02",
+    "price": 174900,
+    "docType": "Trustee’s Deed",
+    "city": null,
+    "state": null
+   },
+   {
+    "date": "2026-03-02",
+    "price": 1128922,
+    "docType": "Correction Document",
+    "city": null,
+    "state": null
+   },
+   {
+    "date": "2026-01-23",
+    "price": 228250,
+    "docType": "Trustee’s Deed",
+    "city": null,
+    "state": null
+   },
+   {
+    "date": "2025-11-18",
+    "price": 515221,
+    "docType": "Trustee’s Deed",
+    "city": null,
+    "state": null
+   }
+  ]
+ }
+}

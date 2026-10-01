@@ -1,0 +1,227 @@
+{
+ "ok": true,
+ "data": {
+  "property_id": "273312064",
+  "canonical_address": {
+   "value": "3635 Emerson Ave N, Minneapolis, Mn 55412",
+   "source": "properties.property_address_full",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "owner_id": {
+   "value": null,
+   "source": "properties.master_owner_id",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "empty_or_unknown",
+   "present": false
+  },
+  "master_owner_id": {
+   "value": null,
+   "source": "properties.master_owner_id",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "empty_or_unknown",
+   "present": false
+  },
+  "opportunity_id": {
+   "value": null,
+   "source": "universal_entity_context",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "opportunity_not_linked",
+   "present": false
+  },
+  "thread_key": {
+   "value": null,
+   "source": "universal_entity_context",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "thread_not_linked",
+   "present": false
+  },
+  "market": {
+   "value": "Minneapolis, MN",
+   "source": "properties.market",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "county": {
+   "value": "Hennepin",
+   "source": "properties.property_address_county_name",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "property_type": {
+   "value": "Single Family",
+   "source": "properties.property_type",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "units": {
+   "value": 1,
+   "source": "properties.units_count",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "bedrooms": {
+   "value": 4,
+   "source": "properties.total_bedrooms",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "bathrooms": {
+   "value": 2.5,
+   "source": "properties.total_baths",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "square_feet": {
+   "value": 1853,
+   "source": "properties.building_square_feet",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "year_built": {
+   "value": 1907,
+   "source": "properties.year_built",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "condition": {
+   "value": "Average",
+   "source": "properties.building_condition",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "parcel_apn": {
+   "value": "04-029-24-43-0175",
+   "source": "properties.apn_parcel_id",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "owner_name": {
+   "value": "Seller One",
+   "source": "properties.owner_name",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "estimated_value": {
+   "value": 213000,
+   "source": "properties.estimated_value",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "estimated_arv": {
+   "value": 213000,
+   "source": "properties.estimated_value",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "equity_amount": {
+   "value": 149257,
+   "source": "properties.equity_amount",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "equity_percent": {
+   "value": 71,
+   "source": "properties.equity_percent",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "repair_estimate": {
+   "value": 64855,
+   "source": "properties.estimated_repair_cost",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": null,
+   "present": true
+  },
+  "last_sale_date": {
+   "value": null,
+   "source": "properties.last_sale_date",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "not_selected_in_subject_query",
+   "present": false
+  },
+  "last_sale_price": {
+   "value": null,
+   "source": "properties.last_sale_price",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "not_selected_in_subject_query",
+   "present": false
+  },
+  "tax_assessed_value": {
+   "value": null,
+   "source": "properties.tax_assessed_value",
+   "source_timestamp": null,
+   "confidence": null,
+   "applicability": "subject",
+   "missing_reason": "not_selected_in_subject_query",
+   "present": false
+  },
+  "data_freshness": {
+   "property_updated_at": "2026-08-06T05:13:56.349453+00:00",
+   "loaded_at": "2026-10-01T18:31:40.648Z"
+  },
+  "contract_version": "comp_intelligence_subject_v1"
+ }
+}

@@ -6,6 +6,8 @@ import { canonicalizeRoutePath } from '../../domain/app-registry/app-registry'
 import { openApp } from './workspace/workspace-store'
 import type { WorkspaceCommand } from './deck/deck-model'
 import { sound } from '../../shared/sound'
+import { inspectRefOfCommand } from './inspector/command-inspect'
+import { openInspector } from './inspector/inspector-store'
 
 /**
  * THE COMMAND BAR — one field that searches the whole product.
@@ -13,7 +15,7 @@ import { sound } from '../../shared/sound'
  * Same providers, same ranking and same execute path as the command palette
  * (useGlobalCommandSearch + the app's executeGlobalCommand); on the desktop it
  * lives in the top bar instead of a modal. ⌘K focuses it from anywhere, arrows
- * move, Enter runs, Esc lets go. Results arrive grouped, best matches first,
+ * move, Enter runs (⌥↵ beside, ⇧↵ inspect a seller/property), Esc lets go. Results arrive grouped, best matches first,
  * with a live preview of the highlighted result beside them.
  */
 
@@ -100,6 +102,11 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, Math.max(ordered.length - 1, 0))); return }
     if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); return }
+    if (e.key === 'Enter' && e.shiftKey) {
+      // ⇧↵ inspects a seller/property result in place instead of navigating
+      const ref = inspectRefOfCommand(ordered[activeIndex] ?? null)
+      if (ref) { e.preventDefault(); openInspector(ref, { replace: true }); sound.ui.select(); setQuery(''); onClose(); inputRef.current?.blur(); return }
+    }
     if (e.key === 'Enter') { e.preventDefault(); run(ordered[activeIndex] ?? null, e.altKey); return }
     if (e.key === 'Escape') { e.preventDefault(); if (query) setQuery(''); else { onClose(); inputRef.current?.blur() } }
   }

@@ -18,6 +18,8 @@ export type EntityType =
   | 'campaign'
   | 'workflow'
   | 'closing'
+  /** a pipeline opportunity (id = opportunity uuid) */
+  | 'deal'
   | 'market'
   | 'search_page'
   | 'search_query'

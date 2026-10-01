@@ -1,0 +1,156 @@
+{
+ "ok": true,
+ "data": {
+  "card": {
+   "id": "2b3c261d-f3dd-494a-a60c-3437cbdf39b8",
+   "stage": "asking_price",
+   "stageIndex": 3,
+   "stageLabel": "Asking Price",
+   "group": "qualification",
+   "status": "active",
+   "lane": {
+    "key": "operator",
+    "label": "Needs you",
+    "detail": "Property relationship needs review",
+    "since": "2026-09-11T14:12:31.928639+00:00",
+    "reason": "property_relationship_review_required"
+   },
+   "owner": "needs_you",
+   "hold": "authority",
+   "intent_next": {
+    "action": "human_review",
+    "due": null,
+    "source": "seller_autopilot"
+   },
+   "queue": {
+    "next": null,
+    "held": null
+   },
+   "stall": {
+    "key": "operator",
+    "label": "Waiting on operator 20d"
+   },
+   "urgency": 140,
+   "daysInStage": 20,
+   "seller": "Seller Two Trust",
+   "sellerSource": "property_owner_name",
+   "address": "935 Nw 20th St # 1-2, Fort Lauderdale, Fl 33311",
+   "city": "Fort Lauderdale",
+   "state": "FL",
+   "market": "Miami, FL",
+   "propertyType": "Multifamily 2–4",
+   "units": 2,
+   "propertyId": "227876842",
+   "masterOwnerId": "mo_bd4687f62919629ba584d72f",
+   "threadKey": "+15550100002",
+   "temperature": null,
+   "hot": false,
+   "intent": "executor_heir_respondent",
+   "intentLabel": "Executor / heir replied",
+   "lastActivityAt": "2026-09-11T14:12:25.428+00:00",
+   "lastInboundAt": "2026-09-10T12:15:33.67+00:00",
+   "lastMessage": "[seller message]",
+   "lastMessageAt": "2026-09-10T12:15:33.67+00:00",
+   "lastDirection": "inbound",
+   "money": {
+    "asking": null,
+    "offer": null,
+    "counter": null,
+    "value": 533000,
+    "equity": 392006,
+    "contractPrice": null,
+    "buyerPrice": null,
+    "askImplausible": false,
+    "counterImplausible": false
+   },
+   "closing": null,
+   "createdAt": "2026-09-08T18:33:25.904106+00:00"
+  },
+  "story": [
+   {
+    "at": "2026-09-08T18:28:50.572+00:00",
+    "kind": "contact",
+    "title": "First message sent"
+   },
+   {
+    "at": "2026-09-08T18:33:23.247+00:00",
+    "kind": "reply",
+    "title": "Seller replied"
+   },
+   {
+    "at": "2026-09-08T18:33:25.944221+00:00",
+    "kind": "created",
+    "title": "Opened at S2"
+   },
+   {
+    "at": "2026-09-10T01:06:24.782+00:00",
+    "kind": "reply",
+    "title": "Seller asked for an offer"
+   },
+   {
+    "at": "2026-09-10T01:06:28.629685+00:00",
+    "kind": "heat",
+    "title": "Turned hot"
+   },
+   {
+    "at": "2026-09-10T01:06:28.945298+00:00",
+    "kind": "advance",
+    "title": "S2 → S3"
+   },
+   {
+    "at": "2026-09-10T01:39:56.933+00:00",
+    "kind": "reply",
+    "title": "Tenant replied"
+   },
+   {
+    "at": "2026-09-10T11:59:12.185+00:00",
+    "kind": "reply",
+    "title": "Reply unclear"
+   },
+   {
+    "at": "2026-09-10T11:59:17.868345+00:00",
+    "kind": "heat",
+    "title": "Turned hot"
+   },
+   {
+    "at": "2026-09-10T11:59:17.890851+00:00",
+    "kind": "price",
+    "title": "Asking price captured"
+   },
+   {
+    "at": "2026-09-10T11:59:18.231391+00:00",
+    "kind": "advance",
+    "title": "S3 → S6"
+   },
+   {
+    "at": "2026-09-10T12:15:28.334+00:00",
+    "kind": "reply",
+    "title": "Executor / heir replied"
+   },
+   {
+    "at": "2026-10-01T18:34:29.588Z",
+    "kind": "now",
+    "title": "Needs you"
+   }
+  ],
+  "negotiation": {
+   "recommended": 320900
+  },
+  "decision": {
+   "aos": 617,
+   "tier": "CREATIVE_TERMS",
+   "confidence": 72,
+   "strategy": "CASH_ASSIGNMENT",
+   "offer": 320900,
+   "floor": 303800,
+   "valueLow": 481100,
+   "valueMid": 568800,
+   "valueHigh": 673800,
+   "assignmentFee": 24400,
+   "computedAt": "2026-09-10T11:59:13.835+00:00"
+  },
+  "disposition": {
+   "matched": 0
+  }
+ }
+}

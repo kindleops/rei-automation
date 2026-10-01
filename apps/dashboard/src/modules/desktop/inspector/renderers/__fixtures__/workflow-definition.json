@@ -1,0 +1,36 @@
+{
+ "ok": true,
+ "workflow": {
+  "workflow_key": "seller_inbound",
+  "name": "Seller Conversation · Inbound",
+  "short_name": "Seller conversation",
+  "description": "Every seller reply: resolve the seller and property, classify the message and extract facts, let the canonical seller decision choose the next move, check contactability, then queue the permitted reply (deduplicated) or hold it for a person — and update canonical stage, lead state and follow-up.",
+  "family": "SELLER",
+  "kind": "system",
+  "owner_app": "Inbox",
+  "status": "live",
+  "status_note": null,
+  "trigger": {
+   "type": "seller_reply_received",
+   "label": "Seller replies by SMS or email",
+   "source": "TextGrid inbound webhook · Email Command inbound"
+  },
+  "stats": {
+   "runs_today": 7,
+   "runs_24h": 13,
+   "runs_7d": 105,
+   "needs_you": 11,
+   "in_flight": 0,
+   "executing": 0,
+   "waiting": 0,
+   "failed_24h": 0,
+   "last_run_at": "2026-10-01T16:21:02.449619+00:00",
+   "follow_ups_scheduled": 1
+  },
+  "policy": {
+   "auto_reply_mode": "live_limited",
+   "followup_automation_mode": "full_live"
+  }
+ },
+ "generated_at": "2026-10-01T18:38:32.726Z"
+}
