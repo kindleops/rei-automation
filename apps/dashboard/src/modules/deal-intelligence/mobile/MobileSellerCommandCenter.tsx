@@ -26,6 +26,8 @@ import {
   type IdentityRole,
 } from './mobile-seller-format'
 import { DealDecisionSurface } from './decision/DealDecisionSurface'
+import { CallActionLink } from '../../../domain/compliance/CallActionLink'
+import { callGateFromDossier, type CallGateInput } from '../../../domain/compliance/call-action'
 import './mobile-seller-command.css'
 import './deal-intelligence-desktop.css'
 
@@ -104,13 +106,13 @@ const SectionSkeleton = () => (
 /* ── header ─────────────────────────────────────────────────────────────── */
 
 function CommandHeader({
-  sellerName, address, locality, contactability, phoneNumber, threadKey, leadState, onPatched, onOpenConversation,
+  sellerName, address, locality, contactability, callGate, threadKey, leadState, onPatched, onOpenConversation,
 }: {
   sellerName: string
   address: string | null
   locality: string | null
   contactability: { label: string; tone: 'good' | 'warn' | 'bad' } | null
-  phoneNumber: string | null
+  callGate: CallGateInput
   threadKey: string
   leadState: React.ComponentProps<typeof MobileWorkflowControls>['data'] | null
   onPatched: () => void
@@ -139,13 +141,9 @@ function CommandHeader({
       {leadState ? <MobileWorkflowControls data={leadState} onPatched={onPatched} /> : null}
 
       <div className="msc-actions">
-        <a
-          className={cls('msc-action', !phoneNumber && 'is-disabled')}
-          href={phoneNumber ? `tel:${phoneNumber}` : undefined}
-          aria-disabled={!phoneNumber}
-        >
+        <CallActionLink gate={callGate} className="msc-action" disabledClassName="is-disabled">
           <Icon name="phone" /><span>Call</span>
-        </a>
+        </CallActionLink>
         <button
           type="button"
           className={cls('msc-action', !onOpenConversation && 'is-disabled')}
@@ -268,14 +266,14 @@ export function MobileSellerCommandCenter({
 
   const contactability = useMemo(() => {
     if (compliance?.is_suppressed) return { label: 'Suppressed', tone: 'bad' as const }
-    const raw = text(convo?.contactability_status) ?? text(phone?.contactability_status)
+    const raw = text(compliance?.contactability_status) ?? text(convo?.contactability_status) ?? text(phone?.contactability_status)
     if (!raw) return null
     const norm = raw.toLowerCase()
     if (norm.includes('do_not') || norm.includes('dnc')) return { label: 'Do not text', tone: 'bad' as const }
     if (norm.includes('wrong')) return { label: 'Wrong number', tone: 'warn' as const }
     if (norm.includes('contactable') || norm.includes('active')) return { label: 'Contactable', tone: 'good' as const }
     return { label: humanize(raw) ?? raw, tone: 'warn' as const }
-  }, [compliance?.is_suppressed, convo?.contactability_status, phone?.contactability_status])
+  }, [compliance?.is_suppressed, compliance?.contactability_status, convo?.contactability_status, phone?.contactability_status])
 
   const leadState = threadKey ? {
     threadKey,
@@ -357,7 +355,7 @@ export function MobileSellerCommandCenter({
         address={street}
         locality={locality}
         contactability={contactability}
-        phoneNumber={text(phone?.number) ?? text(canonicalE164) ?? text(seed?.phone)}
+        callGate={callGateFromDossier(d, text(phone?.number) ?? text(canonicalE164) ?? text(seed?.phone))}
         threadKey={threadKey ?? ''}
         leadState={leadState}
         onPatched={() => void refresh(undefined, { background: true })}

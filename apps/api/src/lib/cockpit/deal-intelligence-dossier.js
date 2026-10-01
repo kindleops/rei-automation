@@ -1595,6 +1595,30 @@ function buildDecisionSnapshot({ property, baseline, acquisition, buyerMarket, c
   }
 }
 
+/**
+ * The dossier's compliance verdict. A number is suppressed when the
+ * suppression list holds it OR the conversation itself is marked suppressed —
+ * production has threads opted out / invalid / do-not-text with no list row
+ * (137 on 2026-10-01), and reading the list alone showed them as eligible.
+ * Read-only projection: nothing here decides or writes eligibility.
+ */
+export function buildDossierCompliance({ suppressions, hydrated, threadState, phoneRow } = {}) {
+  const list = Array.isArray(suppressions) ? suppressions : []
+  const listSuppressed = list.length > 0
+  const threadSuppressed = threadState?.is_suppressed === true || hydrated?.is_suppressed === true
+  const contactability = typeof threadState?.contactability_status === 'string' && threadState.contactability_status.trim()
+    ? threadState.contactability_status.trim()
+    : null
+  return {
+    suppressions: list,
+    is_suppressed: listSuppressed || threadSuppressed,
+    list_suppressed: listSuppressed,
+    thread_suppressed: threadSuppressed,
+    contactability_status: contactability,
+    wrong_number: Boolean(phoneRow?.wrong_number_at),
+  }
+}
+
 export async function buildDealIntelligenceDossier({
   thread_key,
   property_id,
@@ -1625,6 +1649,7 @@ export async function buildDealIntelligenceDossier({
     phoneRow,
     acquisitionRow,
     suppressions,
+    threadStateRow,
   ] = await Promise.all([
     identity.property_id
       ? queryMaybe('properties', PROPERTY_SELECT, { property_id: identity.property_id }, abortSignal)
@@ -1647,6 +1672,11 @@ export async function buildDealIntelligenceDossier({
     identity.canonical_e164
       ? supabase.from('sms_suppression_list').select('phone_number, reason, suppressed_at, suppression_type').eq('phone_number', identity.canonical_e164).then((r) => r.data || [])
       : [],
+    // The thread's own compliance verdict. Guarded: queryMaybe drops empty
+    // filters, so an unkeyed call would return an arbitrary thread.
+    identity.thread_key
+      ? queryMaybe('inbox_thread_state', 'thread_key, contactability_status, is_suppressed', { thread_key: identity.thread_key }, abortSignal)
+      : null,
   ])
 
   const location = resolveCanonicalLocation({ propertyRow, hydrated, identity })
@@ -1706,10 +1736,7 @@ export async function buildDealIntelligenceDossier({
   const decisionSnapshot = buildDecisionSnapshot({ property, baseline: baseline_scores, acquisition, buyerMarket, comps, hydrated })
   const prospect = normalizeProspect(prospectRow, hydrated, phoneRow)
   const owner = normalizeOwner(ownerRow, hydrated)
-  const compliance = {
-    suppressions: suppressions || [],
-    is_suppressed: Array.isArray(suppressions) && suppressions.length > 0,
-  }
+  const compliance = buildDossierCompliance({ suppressions, hydrated, threadState: threadStateRow, phoneRow })
   const phone = normalizePhone(phoneRow, hydrated, identity.canonical_e164, ownerRow, compliance)
   const conversation_intelligence = buildConversationIntelligence(hydrated, acquisition, compliance)
 

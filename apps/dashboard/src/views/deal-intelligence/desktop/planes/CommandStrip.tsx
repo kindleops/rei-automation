@@ -1,6 +1,7 @@
 import { Icon } from '../../../../shared/icons'
 import { cx, LCButton, LCIconButton, LCMenu, LCStatus, LCTabs, LCTooltip, lcMenu } from '../../../../shared/lc'
 import { ago, humanize, phone as fmtPhone, splitAddress } from '../di-format'
+import { resolveCallAction } from '../../../../domain/compliance/call-action'
 import type { DiLinks } from '../di-links'
 import { STAGE_ORDER, statusContradicted, type DecisionState, type SellerIdentity, type UnderwritingStatus } from '../di-model'
 import type { DiSubject } from '../di-subject'
@@ -68,7 +69,7 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
   const conversation = statusLabel
     ? `${statusLabel}${lastReply ? ` · replied ${lastReply}` : ''}`
     : lastReply ? `Seller replied ${lastReply}` : lastSent ? `Last sent ${lastSent}` : null
-  const telHref = contact?.phone && !contact.suppressed ? `tel:${contact.phone}` : null
+  const call = resolveCallAction({ phone: contact?.phone, suppressed: contact?.suppressed, contactability: contact?.contactability, pending })
 
   const more = links ? lcMenu(
     [
@@ -110,12 +111,12 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
         </div>
 
         <div className="dr-strip__actions">
-          {telHref ? (
-            <a className="lc-btn is-secondary is-sm" href={telHref} aria-label={`Call ${fmtPhone(contact?.phone)}`}>
+          {call.allowed ? (
+            <a className="lc-btn is-secondary is-sm" href={call.href} aria-label={`Call ${fmtPhone(contact?.phone)}`}>
               <Icon name="phone" size={13} className="lc-btn__icon" /><span className="lc-btn__label">Call</span>
             </a>
           ) : (
-            <LCTooltip content={contact?.suppressed ? 'Contact is suppressed' : 'No phone on this conversation'}>
+            <LCTooltip content={call.reason}>
               <span><LCButton size="sm" icon="phone" disabled>Call</LCButton></span>
             </LCTooltip>
           )}

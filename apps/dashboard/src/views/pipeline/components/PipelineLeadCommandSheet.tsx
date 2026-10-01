@@ -5,6 +5,8 @@ import { MobileWorkflowControls } from '../../../modules/deal-intelligence/mobil
 import { useStreetViewAvailability } from '../../map/seller-card/use-street-view-availability'
 import { useLeadThreadMessages } from './use-lead-thread-messages'
 import type { PipelineOpportunity } from '../../../domain/pipeline/pipeline-opportunity.types'
+import { CallActionLink } from '../../../domain/compliance/CallActionLink'
+import { callGateFromDossier } from '../../../domain/compliance/call-action'
 import './pipeline-lead-command-sheet.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
@@ -257,9 +259,9 @@ export function PipelineLeadCommandSheet({
           {/* Call and Message are the operator's real actions; Full Detail is an
               escape hatch and lives in the footer, not beside them. */}
           <div className="plcs-actions">
-            <a className={cls('plcs-act', !phoneNumber && 'is-off')} href={phoneNumber ? `tel:${phoneNumber}` : undefined}>
+            <CallActionLink gate={callGateFromDossier(d, phoneNumber)} className="plcs-act" disabledClassName="is-off">
               <Icon name="phone" /><span>Call</span>
-            </a>
+            </CallActionLink>
             <button type="button" className={cls('plcs-act', !threadKey && 'is-off')}
               onClick={() => threadKey && onOpenConversation(threadKey)} disabled={!threadKey}>
               <Icon name="message" /><span>Message</span>
