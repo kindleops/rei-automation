@@ -510,10 +510,15 @@ export const CommandCenterApp = () => {
   }, [cmdOpen, openCmd, closeCmd, briefingOpen, openBriefing, assistantChords])
 
   useEffect(() => {
+    // On the desktop the workspace names the window after the focused pane.
+    if (isModernDesktop) return
     document.title = route.title
-  }, [route.title])
+  }, [route.title, isModernDesktop])
 
   useEffect(() => {
+    // The desktop workspace loads every pane's route itself (the URL-bound
+    // one included); loading here as well would fetch each blocking loader twice.
+    if (isModernDesktop) return
     let active = true
 
     route
@@ -541,7 +546,7 @@ export const CommandCenterApp = () => {
     return () => {
       active = false
     }
-  }, [route])
+  }, [route, isModernDesktop])
 
   const isRouteLoading = routeState.path !== route.path || routeState.status === 'loading'
   const activeNav = navItems.find((item) => item.path === route.path)
@@ -629,7 +634,7 @@ export const CommandCenterApp = () => {
 
           <main className="nx-stage">
             {isModernDesktop
-              ? <DesktopWorkspace main={stageContent} mainPath={`${route.path}${typeof window === 'undefined' ? '' : window.location.search}`} />
+              ? <DesktopWorkspace />
               : stageContent}
           </main>
 

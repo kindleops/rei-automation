@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { callBackend } from '../../../lib/api/backendClient'
-import { nextTransient, ROW_GAP_MS, type ShellEvent, type ShellTelemetry, type ShownTransient } from './rail-model'
+import { cueForEvent, machineState, nextTransient, ROW_GAP_MS, type ShellEvent, type ShellTelemetry, type ShownTransient } from './rail-model'
+import { sound } from '../../../shared/sound'
 
 /**
  * THE COMMAND RAIL STORE — one, for the whole shell.
@@ -109,6 +110,9 @@ function ingest(events: ShellEvent[]) {
   const now = Date.now()
   for (const e of fresh) {
     remember(e.id)
+    // the sound arbiter decides; most events stay silent by design
+    const cue = cueForEvent(e)
+    if (cue) sound.machine.event(cue)
     const q = pending.get(e.app) ?? []
     q.push(e)
     pending.set(e.app, q)
@@ -137,7 +141,14 @@ async function poll() {
     if (t?.ok) {
       cursor = t.cursor
       ingest(Array.isArray(t.events) ? t.events : [])
-      set({ telemetry: t, updatedAt: Date.now(), error: false })
+      const before = snap.telemetry ? machineState(snap.telemetry, snap.updatedAt ?? Date.now()).state : 'unknown'
+      const now = Date.now()
+      const after = machineState(t, now).state
+      // the machine falling behind is worth one quiet warning — never on the first read
+      if (before !== 'unknown' && before !== 'degraded' && after === 'degraded') {
+        sound.machine.event({ id: `degraded:${Math.floor(now / 600_000)}`, category: 'systemDegradation', priority: 2, cue: 'warning', at: now })
+      }
+      set({ telemetry: t, updatedAt: now, error: false })
     } else {
       set({ error: true })
     }

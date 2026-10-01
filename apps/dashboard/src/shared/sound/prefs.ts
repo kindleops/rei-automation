@@ -1,0 +1,85 @@
+import { loadSettings, saveSettings, subscribeSettings, type NexusSettings } from '../settings'
+
+/**
+ * Sound preferences live in the one LeadCommand settings store
+ * (`nexus-settings`) under `experienceSound`. Cuelume never stores anything;
+ * LeadCommand owns persistence, defaults and migration.
+ *
+ * Interface sounds and operational alerts are separate decisions: someone
+ * can want a seller reply to chime and never hear a button, or the reverse.
+ */
+
+export type InterfaceSoundMode = 'off' | 'subtle' | 'full'
+export type SoundMaterial = 'mech' | 'default' | 'press'
+
+export interface OperationalAlertPrefs {
+  sellerReplies: boolean
+  needsAttention: boolean
+  sendFailures: boolean
+  campaignCompletion: boolean
+  closingMilestones: boolean
+  workflowHolds: boolean
+  systemDegradation: boolean
+}
+
+export interface ExperienceSoundPrefs {
+  version: 1
+  interface: InterfaceSoundMode
+  /** global multiplier, 0–1 */
+  volume: number
+  material: SoundMaterial
+  /** keystroke sound — Full mode only, separate opt-in, very low */
+  typing: boolean
+  alerts: boolean
+  alertTypes: OperationalAlertPrefs
+  /** when this window is in the background: only P1 alerts, or nothing */
+  background: 'critical' | 'off'
+}
+
+export const DEFAULT_SOUND_PREFS: ExperienceSoundPrefs = {
+  version: 1,
+  interface: 'subtle',
+  volume: 0.35,
+  material: 'mech',
+  typing: false,
+  alerts: true,
+  alertTypes: {
+    sellerReplies: true,
+    needsAttention: true,
+    sendFailures: true,
+    campaignCompletion: true,
+    closingMilestones: true,
+    workflowHolds: true,
+    systemDegradation: true,
+  },
+  background: 'critical',
+}
+
+type WithSound = NexusSettings & { experienceSound?: Partial<ExperienceSoundPrefs> & { alertTypes?: Partial<OperationalAlertPrefs> } }
+
+const MODES: InterfaceSoundMode[] = ['off', 'subtle', 'full']
+const MATERIALS: SoundMaterial[] = ['mech', 'default', 'press']
+
+/** Read with defaults; anything stored that is invalid falls back, never breaks. */
+export function readSoundPrefs(): ExperienceSoundPrefs {
+  const raw = (loadSettings() as WithSound).experienceSound ?? {}
+  const vol = Number(raw.volume)
+  return {
+    version: 1,
+    interface: MODES.includes(raw.interface as InterfaceSoundMode) ? (raw.interface as InterfaceSoundMode) : DEFAULT_SOUND_PREFS.interface,
+    volume: Number.isFinite(vol) ? Math.min(1, Math.max(0, vol)) : DEFAULT_SOUND_PREFS.volume,
+    material: MATERIALS.includes(raw.material as SoundMaterial) ? (raw.material as SoundMaterial) : DEFAULT_SOUND_PREFS.material,
+    typing: raw.typing === true,
+    alerts: raw.alerts !== false,
+    alertTypes: { ...DEFAULT_SOUND_PREFS.alertTypes, ...(raw.alertTypes ?? {}) },
+    background: raw.background === 'off' ? 'off' : 'critical',
+  }
+}
+
+export function writeSoundPrefs(patch: Partial<ExperienceSoundPrefs>) {
+  const current = loadSettings() as WithSound
+  const next: ExperienceSoundPrefs = { ...readSoundPrefs(), ...patch, alertTypes: { ...readSoundPrefs().alertTypes, ...(patch.alertTypes ?? {}) } }
+  saveSettings({ ...current, experienceSound: next } as NexusSettings)
+}
+
+export const subscribeSoundPrefs = subscribeSettings

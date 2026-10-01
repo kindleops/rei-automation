@@ -6,6 +6,7 @@ import {
   shouldShowDevRuntimeDiagnostics,
   type RuntimeIdentity,
 } from './devRuntimeDiagnosticsState'
+import './dev-runtime-chip.css'
 
 const DASHBOARD_SHA = import.meta.env.VITE_DASHBOARD_GIT_SHA || 'unknown'
 const DASHBOARD_BRANCH = import.meta.env.VITE_DASHBOARD_GIT_BRANCH || 'unknown'
@@ -20,6 +21,7 @@ const BANNER_REASON_LABEL: Record<string, string> = {
 }
 
 export const DevRuntimeDiagnostics = () => {
+  const [devOpen, setDevOpen] = useState(false)
   const [apiIdentity, setApiIdentity] = useState<RuntimeIdentity | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [config, setConfig] = useState<ReturnType<typeof getBackendApiConfig> | null>(null)
@@ -96,40 +98,23 @@ export const DevRuntimeDiagnostics = () => {
   const reasonLabel = BANNER_REASON_LABEL[diagnosticsState.reason] || 'Development setup needs attention'
   const apiBaseLabel = formatApiBaseLabel(config.baseUrl)
 
+  // Development only (production never renders this). It stays a small chip so
+  // engineering state never occupies an application's UI; details on demand.
   return (
-    <div
-      role="alert"
-      // The banner is fixed to bottom:0 with z-index 9999, which on a phone put it
-      // directly on top of the app dock and swallowed every tap on it — the dock was
-      // unusable in dev, and Playwright reported the banner "intercepts pointer events"
-      // on every rail click. The class lifts it clear of the dock on mobile using the
-      // shared safe-area contract token, so it tracks the dock's real height.
-      className="nx-dev-runtime-banner"
-      data-testid="dev-runtime-banner"
-      style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        fontSize: '10px',
-        fontFamily: 'monospace',
-        padding: '8px 12px',
-        borderTop: '1px solid #7a1f1f',
-        zIndex: 9999,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px',
-        backgroundColor: '#3b0d0d',
-        color: '#ffb4b4',
-        pointerEvents: 'auto',
-      }}
-    >
-      <strong>{reasonLabel}</strong>
-      <span>Dashboard {DASHBOARD_SHA.slice(0, 12)} ({DASHBOARD_BRANCH})</span>
-      <span>API {apiIdentity?.commit_sha?.slice(0, 12) || 'unreachable'} ({apiIdentity?.branch || 'n/a'})</span>
-      <span>Connection {apiBaseLabel}</span>
-      {fetchError ? <span>Details: {fetchError}</span> : null}
-      <span>Fix: stop both servers, then run npm run dev:all from the repo root.</span>
+    <div className={`nx-dev-runtime-chip${devOpen ? ' is-open' : ''}`} data-testid="dev-runtime-banner" role="status">
+      {devOpen ? (
+        <div className="nx-dev-runtime-chip__details">
+          <strong>{reasonLabel}</strong>
+          <span>Dashboard {DASHBOARD_SHA.slice(0, 12)} ({DASHBOARD_BRANCH})</span>
+          <span>API {apiIdentity?.commit_sha?.slice(0, 12) || 'unreachable'} ({apiIdentity?.branch || 'n/a'})</span>
+          <span>Connection {apiBaseLabel}</span>
+          {fetchError ? <span>Details: {fetchError}</span> : null}
+          <span>Fix: stop both servers, then run npm run dev:all from the repo root.</span>
+        </div>
+      ) : null}
+      <button type="button" className="nx-dev-runtime-chip__pill" onClick={() => setDevOpen((v) => !v)} aria-expanded={devOpen}>
+        DEV · {reasonLabel}
+      </button>
     </div>
   )
 }

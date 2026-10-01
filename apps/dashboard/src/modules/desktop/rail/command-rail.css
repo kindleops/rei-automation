@@ -446,3 +446,16 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
   .cr__mark.is-tracing .cr__mark-trace { animation: none; }
   .cr.is-expanded .cr__word, .cr.is-expanded .cr-row__label { animation: none; }
 }
+
+/* a pane closed: its app resolves back into the rail — one quiet highlight */
+.cr-row.is-resolving .cr-row__glyph { animation: cr-resolve 0.9s cubic-bezier(0.2, 0.9, 0.25, 1) 1; }
+@keyframes cr-resolve {
+  0% { color: var(--lc-ink-3); filter: none; }
+  30% { color: var(--lc-ink-1); filter: drop-shadow(0 0 7px rgba(var(--lc-select-rgb), 0.85)); transform: scale(1.12); }
+  100% { filter: none; transform: none; }
+}
+/* drag-to-compose: rows are grabbable, the lifted app is shown by the workspace */
+.cr-row { touch-action: none; }
+html.lc-ws-dragging .cr-row:not(:hover) { opacity: 0.72; }
+@media (prefers-reduced-motion: reduce) { .cr-row.is-resolving .cr-row__glyph { animation: none; } }
+html[data-lc-motion='off'] .cr-row.is-resolving .cr-row__glyph { animation: none; }

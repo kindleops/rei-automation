@@ -241,3 +241,41 @@ export function machineState(t: Pick<ShellTelemetry, 'metrics' | 'runtimes'> | n
   const anyCurrent = t.runtimes.some((r) => runtimeHealth(r, now) === 'current')
   return { state: anyCurrent ? 'live' : 'idle', reason: null, needYou }
 }
+
+/* ── which machine events are worth a sound ─────────────────────────────
+   High-volume execution is visual. Only arrivals that matter, holds that
+   need a person, failures and real milestones are offered to the sound
+   arbiter — which still dedupes, prioritises and cools down. */
+
+export interface EventCue {
+  id: string
+  category: 'sellerReplies' | 'needsAttention' | 'sendFailures' | 'campaignCompletion' | 'closingMilestones' | 'workflowHolds' | 'systemDegradation'
+  priority: number
+  cue: 'ready' | 'success' | 'warning' | 'error' | 'attention'
+  emphasis?: 'subtle' | 'normal' | 'strong'
+  at: number
+}
+
+export function cueForEvent(e: ShellEvent): EventCue | null {
+  const at = Date.parse(e.occurred_at) || 0
+  const base = { id: e.id, at }
+  if (e.transient === 'attention') {
+    return { ...base, category: e.app === '/workflow-studio' ? 'workflowHolds' : e.app === '/closing-desk' ? 'closingMilestones' : 'needsAttention', priority: 1, cue: 'attention' }
+  }
+  if (e.transient === 'failure') {
+    // a seller-conversation send that failed is the operator's problem now; a
+    // carrier failure inside a campaign batch is awareness, not an alarm
+    return { ...base, category: 'sendFailures', priority: 1, cue: e.app === '/inbox' || e.app === '/email-command' ? 'error' : 'warning' }
+  }
+  if (e.app === '/inbox' && e.transient === 'typing' && e.kind === 'reply_received') {
+    return { ...base, category: 'sellerReplies', priority: 2, cue: 'ready', emphasis: 'subtle' }
+  }
+  if (e.app === '/campaign-command' && e.transient === 'complete') {
+    return { ...base, category: 'campaignCompletion', priority: 4, cue: 'success', emphasis: 'subtle' }
+  }
+  if (e.app === '/closing-desk' && (e.transient === 'milestone' || e.transient === 'complete')) {
+    const closed = e.transient === 'complete'
+    return { ...base, category: 'closingMilestones', priority: 3, cue: closed ? 'success' : 'ready', emphasis: closed ? 'strong' : 'subtle' }
+  }
+  return null
+}

@@ -1,0 +1,38 @@
+/* Development-only runtime diagnostics: a small chip, never an app-covering banner. */
+.nx-dev-runtime-chip {
+  position: fixed;
+  right: 12px;
+  bottom: calc(12px + var(--nx-mobile-chrome-bottom, 0px));
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
+.nx-dev-runtime-chip__pill {
+  all: unset;
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #ffc9c9;
+  background: rgba(59, 13, 13, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(255, 120, 120, 0.35);
+  opacity: 0.72;
+  transition: opacity 0.15s ease;
+}
+.nx-dev-runtime-chip__pill:hover, .nx-dev-runtime-chip.is-open .nx-dev-runtime-chip__pill { opacity: 1; }
+.nx-dev-runtime-chip__details {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 360px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  color: #ffd6d6;
+  background: rgba(40, 10, 10, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 120, 120, 0.3), 0 12px 30px -16px rgba(0, 0, 0, 0.9);
+}

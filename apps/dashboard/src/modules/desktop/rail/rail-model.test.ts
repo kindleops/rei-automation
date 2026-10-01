@@ -89,3 +89,21 @@ describe('machine state', () => {
     expect(machineState(null, now).state).toBe('unknown')
   })
 })
+
+describe('which machine events make a sound', () => {
+  it('a routine send is silent; a seller reply and a hold are not', async () => {
+    const { cueForEvent } = await import('./rail-model')
+    expect(cueForEvent(ev('d'))).toBeNull()
+    expect(cueForEvent(ev('r', { app: '/inbox', kind: 'reply_received', transient: 'typing', priority: 2 }))?.cue).toBe('ready')
+    expect(cueForEvent(ev('h', { app: '/inbox', kind: 'human_review', transient: 'attention', priority: 1 }))?.cue).toBe('attention')
+  })
+  it('a batch carrier failure is a warning; a conversation send failure is an error', async () => {
+    const { cueForEvent } = await import('./rail-model')
+    expect(cueForEvent(ev('q', { kind: 'carrier_failed', transient: 'failure', priority: 1 }))?.cue).toBe('warning')
+    expect(cueForEvent(ev('i', { app: '/inbox', kind: 'reply_failed', transient: 'failure', priority: 1 }))?.cue).toBe('error')
+  })
+  it('pipeline movement stays visual', async () => {
+    const { cueForEvent } = await import('./rail-model')
+    expect(cueForEvent(ev('s', { app: '/pipeline', kind: 'advance', transient: 'stage', priority: 3, display: 'S2→S3' }))).toBeNull()
+  })
+})

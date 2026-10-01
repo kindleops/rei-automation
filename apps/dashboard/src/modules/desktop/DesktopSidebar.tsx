@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from 'react'
 import { Icon } from '../../shared/icons'
-import { LCHoverCard, LCPopover, LCTooltip, cx } from '../../shared/lc'
+import { LCContextMenu, LCHoverCard, LCPopover, LCTooltip, cx, type LCMenuEntry } from '../../shared/lc'
 import { MOBILE_APPS_BY_GROUP, type NexusApp } from '../../domain/app-registry/app-registry'
-import { navigateToApp } from '../../domain/app-registry/contextual-navigation'
+import { navigateToApp, resolveAppDestination } from '../../domain/app-registry/contextual-navigation'
+import { pushRoutePath } from '../../app/router'
+import { readPropertyLocator } from '../../domain/locator/property-locator'
 import { appHue } from '../mobile/app-hues'
 import { captureAppSession, resolveAppIdFromRoute } from '../mobile/app-session-cache'
 import { closeInboxDealIntelligence, isInboxDealIntelligenceShowing, isInboxRoute, openInboxDealIntelligence, subscribeInboxDealIntelligenceShowing } from '../mobile/mobile-inbox-bridge'
 import { requestNotificationsSurface } from '../mobile/shell-surface-bridge'
 import { useDesktopShellPrefs } from './desktop-shell-prefs'
-import { MAIN, MAX_PANES, getSplitState, markPaneInteraction, openInSplit, useSplitWorkspace } from './split-workspace'
 import { MachinePlane } from './rail/MachinePlane'
 import { RailTelemetry } from './rail/RailTelemetry'
 import { machineState, restingFor } from './rail/rail-model'
 import { useRail } from './rail/rail-store'
 import { activeFor } from './rail/rail-nav'
+import { beginDrag, consumeDragClick, railDragSource } from './workspace/drag'
+import * as L from './workspace/layout'
+import { getWorkspace, onWorkspaceEvent, openApp, selectionInSession, useWorkspace } from './workspace/workspace-store'
+import { sound } from '../../shared/sound'
 import './rail/command-rail.css'
 
 /**
@@ -37,15 +42,58 @@ export interface DesktopSidebarProps {
   onOpenSettings: () => void
 }
 
+/**
+ * Where an app opens when it JOINS the workspace (drag, ⌥-click, Open beside).
+ * With a live selection in this workspace it opens on that subject — a Deal
+ * Intelligence dragged beside a seller opens that seller's property, never a
+ * blank landing. A plain click stays a plain switch.
+ */
+function launchPath(app: NexusApp): string {
+  const route = app.action === 'deal_intelligence' ? '/deal-intelligence' : app.route
+  const locator = selectionInSession() ? readPropertyLocator() : null
+  if (!locator) return route
+  if (app.action === 'deal_intelligence') return locator.propertyId ? `${route}?property=${encodeURIComponent(locator.propertyId)}` : route
+  const dest = resolveAppDestination(app, locator, 'contextual')
+  return dest.focused && dest.path ? dest.path : route
+}
+
+/** The keyboard (and right-click) path to everything a drag can do. */
+function composeMenu(app: NexusApp): LCMenuEntry[] {
+  const ws = getWorkspace().layout
+  const focus = ws.focus
+  const here = L.findPane(ws.root, focus)
+  const hereApp = here ? ws.instances[here.active]?.app : null
+  const open = (zone: L.Zone) => () => { const r = openApp(launchPath(app), { pane: focus, zone }); if (r !== 'refused') sound.workspace.drop(zone === 'stack' || zone === 'replace' ? 'stack' : 'split') }
+  const items: LCMenuEntry[] = [
+    { id: 'beside', label: 'Open beside', hint: '⌥ click', icon: 'layout-split', onSelect: open('right') },
+    { id: 'left', label: 'Open on the left', onSelect: open('left') },
+    { id: 'below', label: 'Open below', onSelect: open('bottom') },
+    { id: 'above', label: 'Open above', onSelect: open('top') },
+    { kind: 'separator', id: 's' },
+    { id: 'stack', label: 'Add to the focused pane', hint: 'As a tab in its stack', icon: 'layers', disabled: hereApp === app.id, reason: 'Already here', onSelect: open('stack') },
+    { id: 'replace', label: 'Replace the focused app', disabled: hereApp === app.id, reason: 'Already here', onSelect: open('replace') },
+  ]
+  return items
+}
+
 const PEEK_OPEN_MS = 200
 const PEEK_CLOSE_MS = 260
 
 export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProps) {
   const [prefs, setPrefs] = useDesktopShellPrefs()
   const rail = useRail()
-  const split = useSplitWorkspace()
-  const splitFull = split.panes.length + 1 >= MAX_PANES
-  const openRoutes = useMemo(() => new Set(split.panes.map((p) => p.path.split('?')[0])), [split.panes])
+  const ws = useWorkspace()
+  // the lens follows the pane the operator is working in, not just the URL
+  const focusedPath = L.focusedInstance(ws.layout)?.path.split('?')[0] ?? routePath
+  const presentApps = useMemo(() => new Set(Object.values(ws.layout.instances).map((i) => i.app)), [ws.layout.instances])
+  const multi = Object.keys(ws.layout.instances).length > 1
+  const [resolving, setResolving] = useState<string | null>(null)
+  // a closing pane resolves back into its app in the rail: one quiet highlight
+  useEffect(() => onWorkspaceEvent((e) => {
+    if (e.type !== 'closed') return
+    setResolving(e.app)
+    window.setTimeout(() => setResolving((cur) => (cur === e.app ? null : cur)), 950)
+  }), [])
   const navRef = useRef<HTMLElement | null>(null)
   const rootRef = useRef<HTMLElement | null>(null)
   const [lens, setLens] = useState<{ y: number; h: number } | null>(null)
@@ -57,7 +105,7 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
   const closed = useMemo(() => new Set(prefs.closedGroups), [prefs.closedGroups])
 
   const dealIntelShowing = useSyncExternalStore(subscribeInboxDealIntelligenceShowing, isInboxDealIntelligenceShowing, () => false)
-  const activeApp = useMemo(() => SECTIONS.flatMap((s) => s.apps).find((a) => activeFor(routePath, a, dealIntelShowing)) ?? null, [routePath, dealIntelShowing])
+  const activeApp = useMemo(() => SECTIONS.flatMap((s) => s.apps).find((a) => activeFor(focusedPath, a, dealIntelShowing)) ?? null, [focusedPath, dealIntelShowing])
   const hue = appHue(activeApp?.id)
   const machine = machineState(rail.telemetry, rail.updatedAt ?? 0)
 
@@ -72,10 +120,13 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
   }, [tracing])
 
   const go = useCallback((app: NexusApp, e?: MouseEvent) => {
-    // ⌥-click opens the app beside the current one
-    if (e?.altKey && !splitFull) { openInSplit(app.action === 'deal_intelligence' ? '/deal-intelligence' : app.route); return }
-    captureAppSession(resolveAppIdFromRoute(routePath))
-    markPaneInteraction(getSplitState().focused || MAIN)
+    if (consumeDragClick()) return
+    // ⌥-click opens the app beside the focused pane
+    if (e?.altKey) { openApp(launchPath(app), 'beside'); sound.workspace.drop('split'); return }
+    captureAppSession(resolveAppIdFromRoute(focusedPath))
+    // Deal Intelligence is its own application on the desktop: an open one is
+    // focused; otherwise it opens in the pane being worked in
+    if (app.action === 'deal_intelligence') { pushRoutePath('/deal-intelligence'); return }
     navigateToApp(app, {
       openDealIntelligence: (identity) => openInboxDealIntelligence(identity ?? undefined),
       openNotifications: requestNotificationsSurface,
@@ -83,7 +134,7 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
       closeInboxDealIntelligence,
       isInboxRoute,
     })
-  }, [onOpenSettings, routePath, splitFull])
+  }, [onOpenSettings, focusedPath])
 
   // ⌘\ pins / unpins the plane from anywhere
   useEffect(() => {
@@ -126,7 +177,7 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
     ro?.observe(nav)
     window.addEventListener('resize', schedule)
     return () => { if (raf) cancelAnimationFrame(raf); window.clearTimeout(settle); ro?.disconnect(); window.removeEventListener('resize', schedule) }
-  }, [routePath, dealIntelShowing, expanded, prefs.closedGroups])
+  }, [focusedPath, dealIntelShowing, expanded, prefs.closedGroups])
 
   return (
     <aside
@@ -175,16 +226,18 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
                 <div className="cr-sec__body">
                   <div className="cr-sec__inner">
                     {section.apps.map((app) => {
-                      const active = activeFor(routePath, app, dealIntelShowing)
+                      const active = activeFor(focusedPath, app, dealIntelShowing)
                       const resting = restingFor(app.route, rail.telemetry?.metrics ?? null)
                       const transient = rail.transients[app.route] ?? null
-                      const inPane = openRoutes.has(app.route)
+                      const inPane = multi && presentApps.has(app.id)
                       const said = transient ? transient.text : resting && resting.value > 0 ? resting.peek[0] : null
                       const row = (
                         <button
                           type="button"
-                          className={cx('cr-row', active && 'is-active', transient && 'is-moving', inPane && 'is-inpane')}
+                          className={cx('cr-row', active && 'is-active', transient && 'is-moving', inPane && 'is-inpane', resolving === app.id && 'is-resolving')}
                           style={{ ['--app' as string]: appHue(app.id) }}
+                          data-app={app.id}
+                          onPointerDown={(e) => beginDrag(e, () => railDragSource(app.route, app.label, launchPath(app)))}
                           onClick={(e) => go(app, e)}
                           aria-current={active ? 'page' : undefined}
                           aria-label={said ? `${app.label}, ${said}` : app.label}
@@ -206,14 +259,14 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
                           width={236}
                           className="cr-peek"
                           disabled={dockOpen}
-                          trigger={row}
+                          trigger={<LCContextMenu items={composeMenu(app)} label={app.label}>{row}</LCContextMenu>}
                         >
                           <span className="cr-peek__name">{app.label}</span>
                           {transient ? <span className="cr-peek__now" data-tone={transient.tone}>{transient.text}</span> : null}
                           {resting?.peek.map((line) => <span key={line} className="cr-peek__line">{line}</span>)}
                           {!resting && !transient ? <span className="cr-peek__line is-quiet">{app.description || 'Open'}</span> : null}
-                          {inPane ? <span className="cr-peek__line is-quiet">Open in a split pane</span> : !active && !splitFull ? (
-                            <button type="button" className="lc-link cr-peek__split" onClick={() => openInSplit(app.action === 'deal_intelligence' ? '/deal-intelligence' : app.route)}>Open beside · ⌥ click</button>
+                          {inPane ? <span className="cr-peek__line is-quiet">Open in this workspace</span> : !active ? (
+                            <button type="button" className="lc-link cr-peek__split" onClick={() => { openApp(launchPath(app), 'beside'); sound.workspace.drop('split') }}>Open beside · ⌥ click · or drag</button>
                           ) : null}
                         </LCHoverCard>
                       )
@@ -228,9 +281,9 @@ export function DesktopSidebar({ routePath, onOpenSettings }: DesktopSidebarProp
         <footer className="cr__foot">
           <button
             type="button"
-            className={cx('cr-row cr-row--settings', routePath === '/settings' && 'is-active')}
+            className={cx('cr-row cr-row--settings', focusedPath === '/settings' && 'is-active')}
             onClick={onOpenSettings}
-            aria-current={routePath === '/settings' ? 'page' : undefined}
+            aria-current={focusedPath === '/settings' ? 'page' : undefined}
             aria-label="Settings"
           >
             <span className="cr-row__glyph" aria-hidden="true"><Icon name="settings" size={17} strokeWidth={1.6} /></span>

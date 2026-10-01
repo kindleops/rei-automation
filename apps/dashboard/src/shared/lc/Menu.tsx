@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type ReactElement, type ReactNode } from 'react'
+import { forwardRef, useEffect, useRef, useState, type FocusEvent, type HTMLAttributes, type ReactElement, type ReactNode } from 'react'
 import * as DropdownPrimitive from '@radix-ui/react-dropdown-menu'
 import * as ContextPrimitive from '@radix-ui/react-context-menu'
 import { motion } from 'framer-motion'
@@ -182,13 +182,21 @@ export interface LCContextMenuProps {
   disabled?: boolean
 }
 
-/** Right-click (or Shift+F10 / the Menu key) on the object opens its actions at the pointer. */
-export function LCContextMenu({ children, items, label, title, disabled }: LCContextMenuProps) {
+/**
+ * Right-click (or Shift+F10 / the Menu key) on the object opens its actions at
+ * the pointer. Forwards its ref and any trigger props to the object, so it can
+ * sit inside another asChild trigger (a hover card, a tooltip) without breaking
+ * that trigger's anchoring.
+ */
+export const LCContextMenu = forwardRef<HTMLElement, LCContextMenuProps & Omit<HTMLAttributes<HTMLElement>, 'title' | 'children'>>(function LCContextMenu(
+  { children, items, label, title, disabled, ...triggerProps },
+  ref,
+) {
   const g = useGlide()
   if (disabled || !items.length) return children
   return (
     <ContextPrimitive.Root onOpenChange={(next) => { if (next) g.reset() }}>
-      <ContextPrimitive.Trigger asChild>{children}</ContextPrimitive.Trigger>
+      <ContextPrimitive.Trigger asChild {...triggerProps} ref={ref}>{children}</ContextPrimitive.Trigger>
       <ContextPrimitive.Portal>
         <ContextPrimitive.Content className="lc-menu is-context" collisionPadding={12} loop aria-label={label} {...g.surfaceProps}>
           {title ? <div className="lc-menu__title">{title}</div> : null}
@@ -198,4 +206,4 @@ export function LCContextMenu({ children, items, label, title, disabled }: LCCon
       </ContextPrimitive.Portal>
     </ContextPrimitive.Root>
   )
-}
+})

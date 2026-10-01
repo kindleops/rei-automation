@@ -33,21 +33,8 @@ const getMapboxToken = () => {
 
 const geocodeLocation = async (query: string): Promise<LocationResult[]> => {
   const token = getMapboxToken()
-  if (!token) {
-    return [
-      {
-        id: 'stub-1',
-        label: `Mock Location for: ${query}`,
-        query,
-        latitude: 32.7767,
-        longitude: -96.7970, // Dallas default
-        city: 'Dallas',
-        state: 'TX',
-        placeType: 'unknown',
-        source: 'stub',
-      },
-    ]
-  }
+  // No geocoder configured: offer nothing rather than an invented place.
+  if (!token) return []
 
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&country=us&limit=3`
   try {

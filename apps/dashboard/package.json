@@ -85,6 +85,7 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/supabase-js": "^2.104.1",
     "@types/react-window": "^1.8.8",
+    "cuelume": "^0.2.4",
     "dotenv": "^17.4.2",
     "framer-motion": "^12.38.0",
     "maplibre-gl": "^5.22.0",

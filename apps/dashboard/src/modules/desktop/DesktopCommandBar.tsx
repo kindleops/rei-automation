@@ -3,7 +3,9 @@ import { Icon } from '../../shared/icons'
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { useGlobalCommandSearch } from '../command-center/useGlobalCommandSearch'
 import { canonicalizeRoutePath } from '../../domain/app-registry/app-registry'
-import { openInSplit } from './split-workspace'
+import { openApp } from './workspace/workspace-store'
+import type { WorkspaceCommand } from './deck/deck-model'
+import { sound } from '../../shared/sound'
 
 /**
  * THE COMMAND BAR — one field that searches the whole product.
@@ -24,9 +26,16 @@ export interface DesktopCommandBarProps {
   onOpen: () => void
   onClose: () => void
   onExecute: (result: CommandResult) => void
+  /** the focused app's language: "Search sellers, replies, properties…" */
+  placeholder?: string
+  /** which app the search speaks for first (shown as a quiet scope chip) */
+  scope?: string | null
+  /** deterministic workspace commands for what was typed */
+  extraResults?: (query: string) => CommandResult[]
+  onWorkspaceCommand?: (cmd: WorkspaceCommand) => void
 }
 
-export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose, onExecute }: DesktopCommandBarProps) {
+export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose, onExecute, placeholder, scope, extraResults, onWorkspaceCommand }: DesktopCommandBarProps) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -60,7 +69,8 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
       .map((g) => ({ ...g, items: g.items.filter((r) => !best.has(r.id)) }))
       .filter((g) => g.items.length > 0)
   }, [groupedResults])
-  const ordered = useMemo(() => [...groupedResults.bestMatches, ...groups.flatMap((g) => g.items)], [groupedResults.bestMatches, groups])
+  const workspace = useMemo(() => (open && extraResults ? extraResults(query) : []), [open, extraResults, query])
+  const ordered = useMemo(() => [...workspace, ...groupedResults.bestMatches, ...groups.flatMap((g) => g.items)], [workspace, groupedResults.bestMatches, groups])
   const active = ordered[activeIndex] ?? null
 
   useEffect(() => {
@@ -70,8 +80,17 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
 
   const run = (r: CommandResult | null, split = false) => {
     if (!r || r.meta?.disabled) return
+    const wsCmd = (r.payload as { __workspace?: WorkspaceCommand } | undefined)?.__workspace
+    if (wsCmd) {
+      onWorkspaceCommand?.(wsCmd)
+      setQuery('')
+      onClose()
+      inputRef.current?.blur()
+      return
+    }
+    sound.command.execute()
     // ⌥↵ / ⌥-click: open a routed result BESIDE what is on screen (split pane).
-    if (split && r.route) openInSplit(canonicalizeRoutePath(r.route))
+    if (split && r.route) openApp(canonicalizeRoutePath(r.route), 'beside')
     else onExecute(r)
     setQuery('')
     onClose()
@@ -113,13 +132,14 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
     <div className={cls('dsk-cmd', open && 'is-open')} ref={rootRef}>
       <label className="dsk-cmd__field">
         <Icon name="search" size={16} strokeWidth={1.8} />
+        {scope ? <span className="dsk-cmd__scope" title={`Searching ${scope} first, then everything`}>{scope}</span> : null}
         <input
           ref={inputRef}
           value={query}
           onChange={(e) => { setQuery(e.target.value); if (!open) onOpen() }}
           onFocus={() => { if (!open) onOpen() }}
           onKeyDown={onKeyDown}
-          placeholder="Search sellers, properties, buyers, campaigns, markets, actions…"
+          placeholder={placeholder ?? 'Search sellers, properties, buyers, campaigns, markets, actions…'}
           autoComplete="off"
           spellCheck={false}
           aria-label="Search everything"
@@ -133,6 +153,12 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
       {open ? (
         <div className="dsk-cmd__panel" role="listbox" id="dsk-cmd-results">
           <div className="dsk-cmd__results" ref={listRef}>
+            {workspace.length > 0 ? (
+              <section className="dsk-cmd__group">
+                <header>Workspace</header>
+                {workspace.map(row)}
+              </section>
+            ) : null}
             {groupedResults.bestMatches.length > 0 ? (
               <section className="dsk-cmd__group">
                 <header>{query.trim() ? 'Best matches' : 'Jump back in'}</header>
@@ -145,7 +171,7 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
                 {g.items.map(row)}
               </section>
             ))}
-            {!loading && results.length === 0 ? (
+            {!loading && results.length === 0 && workspace.length === 0 ? (
               <div className="dsk-cmd__empty">
                 <strong>{query.trim() ? 'Nothing matches that yet' : 'Search the whole command center'}</strong>
                 <span>Sellers, properties, buyers, markets, campaigns, workflows, map themes and actions.</span>
