@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { LCEmpty, LCError, LCFilterInspector, LCSkeleton, LCTabs, cx, useLcReducedMotion } from '../../../shared/lc'
 import { useClaimedKeys } from '../../../shared/lc/keys'
 import { pushRoutePath } from '../../../app/router'
+import { useAppInstance } from '../../../modules/desktop/workspace/instance-context'
+import { openApp } from '../../../modules/desktop/workspace/workspace-store'
 import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import {
@@ -130,8 +132,11 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
   const exclude = useCallback((c: EvidenceComp) => { opExclude(c); setLens('operator') }, [opExclude])
 
   const pid = subject.propertyId
-  const openDeal = useCallback(() => { if (pid) pushRoutePath(`/deal-intelligence?property_id=${encodeURIComponent(pid)}`) }, [pid])
-  const openGraph = useCallback((id?: string | null) => { const target = id ?? pid; if (target) pushRoutePath(`/entity-graph/property/${encodeURIComponent(target)}`) }, [pid])
+  // inside a workspace pane the hand-off opens BESIDE (Comps keeps its place); elsewhere it navigates
+  const inPane = useAppInstance().instanceId !== null
+  const handOff = useCallback((path: string) => { if (!inPane || openApp(path, 'beside') === 'refused') pushRoutePath(path) }, [inPane])
+  const openDeal = useCallback(() => { if (pid) handOff(`/deal-intelligence?property_id=${encodeURIComponent(pid)}`) }, [pid, handOff])
+  const openGraph = useCallback((id?: string | null) => { const target = id ?? pid; if (target) handOff(`/entity-graph/property/${encodeURIComponent(target)}`) }, [pid, handOff])
   const openMap = useCallback(() => {
     if (!m) return
     const s = m.w.subject
