@@ -24,7 +24,7 @@ export interface CampaignDetail {
     health_status?: string | null
     next_send_window?: SendWindow | null
     schedule_missed_for?: string | null
-    feeder_last?: { stalled?: boolean | null; reason?: string | null; at?: string | null } | null
+    feeder_last?: { stalled?: boolean | null; reason?: string | null; at?: string | null; progress_state?: string | null } | null
   } | null
   command_summary?: {
     state?: string | null
@@ -71,7 +71,12 @@ export function shapeCampaign(d: CampaignDetail, ref: EntityRef, now = Date.now(
   const passed = end && Date.parse(end) < now
   const held = Object.entries(s.held_by_reason ?? {}).sort((a, b) => b[1] - a[1])
   const heldText = held.length ? held.slice(0, 3).map(([k, n]) => `${heldReason(k)} (${n})`).join('; ') : null
-  const feeder = s.feeder_last?.stalled ? `Stalled — ${FEEDER[s.feeder_last.reason ?? ''] ?? words(s.feeder_last.reason) ?? 'no progress'}` : null
+  // The feeder's deterministic verdict (progress_state, RC 7.1) wins. Older
+  // heartbeats only carry the loose `stalled` flag: never call a campaign
+  // stalled when it already shows a stated block — the block IS the reason.
+  const fl = s.feeder_last
+  const stalled = fl?.progress_state ? fl.progress_state === 'stalled' : Boolean(fl?.stalled) && !cs.blockers?.length
+  const feeder = stalled ? `Stalled — ${FEEDER[fl?.reason ?? ''] ?? words(fl?.reason) ?? 'no progress'}` : null
 
   // consecutive repeats of the same event read once
   const activity: NonNullable<InspectorModel['activity']> = []

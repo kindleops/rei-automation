@@ -102,7 +102,8 @@ describe('campaign inspector (campaigns/:id)', () => {
     expect(fact(m, 'Sent')).toBe('55 · 50 delivered')
     expect(fact(m, 'Remaining')).toBe('14')
     expect(fact(m, 'Next window')).toMatch(/passed$/)
-    expect(fact(m, 'Feeder')).toBe('Stalled — nothing placed on the queue')
+    // a stated block explains the empty queue: an old loose `stalled` heartbeat is not repeated as a stall
+    expect(fact(m, 'Feeder')).toBeNull()
     expect(fact(m, 'Health')).toBe('Healthy · 90/100')
     noEmpty(m)
   })

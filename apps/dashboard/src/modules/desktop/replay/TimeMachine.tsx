@@ -53,6 +53,12 @@ async function loadHistory(subject: FeedSubject, from: number, to: number, signa
 const fmt = (t: number) => new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const fmtLong = (iso: string) => new Date(iso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })
 const toLocalInput = (t: number) => { const d = new Date(t - new Date(t).getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16) }
+/** Ledger codes ("inbox_needs_call", "decision_engine_failed") read as words, never as identifiers. */
+const plainValue = (v: unknown): string => {
+  const text = String(v)
+  return /^[a-z][a-z0-9]*(?:[_.][a-z0-9]+)+$/.test(text) ? (text.charAt(0).toUpperCase() + text.slice(1)).replace(/[_.]+/g, ' ') : text
+}
+
 const detailRows = (d: Record<string, unknown> | null | undefined) => Object.entries(d ?? {}).filter(([k, v]) => v !== null && v !== '' && !['preview', 'facts'].includes(k) && (typeof v !== 'object')).slice(0, 10)
 
 export function TimeMachine() {
@@ -218,7 +224,7 @@ function TimeMachinePlane({ subject }: { subject: FeedSubject }) {
                   <p className="tm-detail__at">{fmtLong(e.occurred_at)} · {e.actor.kind === 'operator' ? 'You' : e.actor.label || e.actor.kind}</p>
                   {typeof e.details?.preview === 'string' ? <blockquote className="tm-detail__quote">{e.details.preview}</blockquote> : null}
                   {detailRows(e.details).length ? (
-                    <dl className="tm-facts">{detailRows(e.details).map(([k, v]) => <div key={k}><dt>{k.replace(/_/g, ' ')}</dt><dd>{String(v)}</dd></div>)}</dl>
+                    <dl className="tm-facts">{detailRows(e.details).map(([k, v]) => <div key={k}><dt>{k.replace(/_/g, ' ')}</dt><dd>{plainValue(v)}</dd></div>)}</dl>
                   ) : null}
                   {related.length ? (
                     <div className="tm-causal">
