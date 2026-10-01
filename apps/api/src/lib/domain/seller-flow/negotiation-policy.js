@@ -257,6 +257,19 @@ const VALUE_BAND_ADJUSTMENTS = Object.freeze({
 const MIN_CONFIDENCE_FOR_OFFER = 0.45;
 
 /**
+ * Valuation confidence on the 0–1 scale the policy thresholds use. The
+ * Acquisition Decision Engine persists 0–100 (property_acquisition_scores.
+ * valuation_confidence: median 62, max 86 in prod 2026-10-01), so comparing
+ * that raw number with 0.45 let every non-zero valuation pass the gate.
+ * Values above 1 are percentages; 0–1 values are already fractions.
+ */
+export function toConfidenceFraction(value) {
+  const v = num(value);
+  if (v === null || v < 0) return null;
+  return v > 1 ? v / 100 : v;
+}
+
+/**
  * Resolve the deterministic negotiation policy for one deal.
  * `overrides` allows market-level configuration without code changes
  * (persisted config may be layered in by callers).
@@ -413,7 +426,7 @@ export function classifyNegotiationZone({
   const recommended = num(recommended_offer);
   // A recommendation may NEVER serve as its own ceiling (self-validation).
   const ceiling = num(authorized_offer_ceiling);
-  const confidence = num(valuation_confidence);
+  const confidence = toConfidenceFraction(valuation_confidence);
   const askConfidence = num(asking_price_confidence);
 
   if (
@@ -643,7 +656,7 @@ export function evaluateUnderwritingSufficiency({
     missing.push("asking_price");
   }
 
-  const valuationConfidence = num(ade_snapshot?.valuation_confidence);
+  const valuationConfidence = toConfidenceFraction(ade_snapshot?.valuation_confidence);
   const compCount = num(ade_snapshot?.comp_count) ?? 0;
   const valuationReliable =
     valuationConfidence !== null && valuationConfidence >= p.min_valuation_confidence && compCount >= 3;

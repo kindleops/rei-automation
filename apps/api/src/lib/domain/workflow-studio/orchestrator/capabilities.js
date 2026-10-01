@@ -44,6 +44,19 @@ export function mapResult(r, { blockedCodes = [], waitingCodes = [] } = {}) {
 
 const T = { entity: (kind) => ({ type: 'entity', kind }), string: { type: 'string' }, text: { type: 'text' }, enum: (values) => ({ type: 'enum', values }), duration: { type: 'duration' }, bool: { type: 'boolean' }, money: { type: 'money' }, date: { type: 'datetime' } }
 
+/**
+ * ensurePropertyAcquisitionDecision reports failure as
+ * DECISION_STATUS.ENGINE_FAILED === 'decision_engine_failed' (decisionAuthority.js).
+ * The step used to compare against the constant's NAME ('ENGINE_FAILED'), so a
+ * failed engine run was recorded as a successful refresh.
+ */
+const DECISION_ENGINE_FAILED = 'decision_engine_failed'
+export function decisionRefreshResult(r) {
+  const status = r?.status || null
+  if (status === DECISION_ENGINE_FAILED || status === 'ENGINE_FAILED') return { status: STATUS.RETRYABLE, reason: 'engine_failed' }
+  return { status: STATUS.SUCCESS, outputs: { decision_state: status } }
+}
+
 export const CAPABILITIES = Object.freeze({
   'notify.operator': {
     domain: 'notifications', label: 'Notify operator', description: 'Create a canonical LeadCommand notification (deduplicated, rate limited).',
@@ -82,14 +95,14 @@ export const CAPABILITIES = Object.freeze({
 
   'seller.cancel_follow_ups': {
     domain: 'seller', label: 'Cancel pending seller follow-ups', description: 'Withdraw pending follow-ups and auto-replies on the seller conversation (canonical inbound-takeover policy).',
-    inputs: { seller: { ...T.entity('seller_thread'), required: true }, reason: { ...T.string, required: true } },
+    inputs: { seller: { ...T.entity('seller_thread'), required: true }, reason: { ...T.string, required: true }, keep_nurture_follow_ups: T.bool },
     outputs: { cancelled: { type: 'number' } },
     policy: POLICY.AUTO, retry: RETRY_TRANSIENT, skippable: true,
     idempotencyKey: (i, ctx) => `wf:${ctx.runId}:${ctx.nodeId}:cancel`,
     availability: () => ({ state: 'AVAILABLE' }),
     async invoke(i, ctx) {
       const { cancelPendingFollowUpsForThread } = await import('@/lib/domain/seller-flow/seller-followup-scheduler.js')
-      const r = await cancelPendingFollowUpsForThread({ thread_key: i.seller?.thread_key, reason: i.reason, supabase: ctx.deps?.supabase })
+      const r = await cancelPendingFollowUpsForThread({ thread_key: i.seller?.thread_key, reason: i.reason, keep_nurture_follow_ups: i.keep_nurture_follow_ups === true, supabase: ctx.deps?.supabase })
       return mapResult(r)
     },
     simulate: () => ({ status: STATUS.SUCCESS, outputs: { cancelled: 0 }, preview: 'Pending follow-ups on this conversation withdrawn' }),
@@ -214,7 +227,7 @@ export const CAPABILITIES = Object.freeze({
     async invoke(i) {
       const { ensurePropertyAcquisitionDecision } = await import('@/lib/acquisition/decisionAuthority.js')
       const r = await ensurePropertyAcquisitionDecision(i.property?.id, { maxAgeDays: i.max_age_days || 14 })
-      return r?.status === 'ENGINE_FAILED' ? { status: STATUS.RETRYABLE, reason: 'engine_failed' } : { status: STATUS.SUCCESS, outputs: { decision_state: r?.status || null } }
+      return decisionRefreshResult(r)
     },
     simulate: () => ({ status: STATUS.SUCCESS, outputs: { decision_state: 'CURRENT' }, preview: 'Deal decision refreshed if stale' }),
   },

@@ -51,6 +51,14 @@ async function readWindow(supabase, table, build) {
  * captured (never thrown) so a single unavailable table degrades the report
  * rather than hiding every other invariant.
  */
+/**
+ * Every spelling the writers actually use for a follow-up row. Production
+ * (2026-10-01) holds 'followup' (seller/no-reply schedulers) and 'Follow-Up'
+ * (queue_message MESSAGE_TYPES) — and zero 'follow_up', which is what this
+ * scan used to filter on, so the follow-up invariants never saw a row.
+ */
+export const FOLLOWUP_MESSAGE_TYPES = Object.freeze(["followup", "Follow-Up", "follow_up"]);
+
 export async function loadInvariantWindows(supabase, { window_hours, row_limit, now_ms }) {
   const since = hoursAgoIso(window_hours, now_ms);
   const [offers, closing_cases, queue_rows, opportunities, followups, thread_states] = await Promise.all([
@@ -58,7 +66,7 @@ export async function loadInvariantWindows(supabase, { window_hours, row_limit, 
     readWindow(supabase, "closing_cases", (q) => q.order("created_at", { ascending: false }).limit(row_limit)),
     readWindow(supabase, "send_queue", (q) => q.gte("created_at", since).order("created_at", { ascending: false }).limit(row_limit)),
     readWindow(supabase, "acquisition_opportunities", (q) => q.order("updated_at", { ascending: false }).limit(row_limit)),
-    readWindow(supabase, "send_queue", (q) => q.in("queue_status", ["scheduled", "queued", "pending"]).eq("message_type", "follow_up").limit(row_limit)),
+    readWindow(supabase, "send_queue", (q) => q.in("queue_status", ["scheduled", "queued", "pending"]).in("message_type", FOLLOWUP_MESSAGE_TYPES).limit(row_limit)),
     readWindow(supabase, "inbox_thread_state", (q) => q.or("is_suppressed.eq.true,is_archived.eq.true").limit(row_limit)),
   ]);
   return {
