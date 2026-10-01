@@ -1,5 +1,6 @@
 import type { IconName } from '../../../shared/icons'
 import type { MissionSubject } from '../workspace/missions'
+import type { FeedSubject } from '../feed/feed-model'
 import type { EntityRef, EntityType } from './inspector-store'
 
 /**
@@ -32,6 +33,8 @@ export interface InspectorModel {
   open?: Array<{ label: string; path: string }>
   /** what a mission can carry from this object */
   mission?: MissionSubject | null
+  /** what the Time Machine can replay for this object (null = not replayable; absent = derived from the ref) */
+  replay?: FeedSubject | null
   /** "as of" for the read, when the source says */
   freshness?: string | null
 }

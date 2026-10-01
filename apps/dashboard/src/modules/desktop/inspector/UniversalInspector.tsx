@@ -6,6 +6,8 @@ import { pushRoutePath } from '../../../app/router'
 import { sound } from '../../../shared/sound'
 import { openApp, startMission } from '../workspace/workspace-store'
 import { missionsFor, planMission } from '../workspace/missions'
+import { replaySubjectOf } from '../feed/feed-model'
+import { openReplay } from '../replay/replay-store'
 import { inspectorFor, type InspectorModel, type InspectorTone } from './inspector-registry'
 import { closeInspector, inspectorBack, openInspector, refKey, setInspectorPinned, useInspector, type EntityRef } from './inspector-store'
 import './register-inspectors'
@@ -77,6 +79,8 @@ export function UniversalInspector() {
   const primary = model?.open?.[0] ?? null
   const mission = model?.mission ?? null
   const missions = mission ? missionsFor(mission) : []
+  // Replay appears only when the event envelope can resolve this subject
+  const replay = model?.replay !== undefined ? model.replay : replaySubjectOf(current)
 
   const open = () => { if (!primary) return; pushRoutePath(primary.path); if (!pinned) closeInspector() }
   const beside = () => {
@@ -107,6 +111,7 @@ export function UniversalInspector() {
       {missions.map((m) => (
         <LCButton key={m.kind} variant="ghost" size="sm" icon="target" onClick={() => start(m.kind)}>{m.verb}</LCButton>
       ))}
+      {replay ? <LCButton variant="ghost" size="sm" icon="clock" onClick={() => openReplay(replay)}>Replay</LCButton> : null}
     </div>
   ) : null
 

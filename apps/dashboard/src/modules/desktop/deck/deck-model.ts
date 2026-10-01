@@ -5,6 +5,7 @@ import { appName } from '../rail/rail-store'
 import * as L from '../workspace/layout'
 import { WORKSPACE_TEMPLATES, type SavedWorkspace } from '../workspace/workspace-store'
 import { missionsFor, type MissionKind, type MissionSubject } from '../workspace/missions'
+import type { FeedSubject } from '../feed/feed-model'
 
 /**
  * The Command Deck's reading of the shell — pure, so it can be tested.
@@ -77,6 +78,8 @@ export type WorkspaceCommand =
   | { kind: 'link'; linked: boolean }
   | { kind: 'mission'; mission: MissionKind; subject: MissionSubject }
   | { kind: 'exit-mission' }
+  | { kind: 'machine-feed' }
+  | { kind: 'replay'; subject: FeedSubject }
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 const DESKTOP_APPS = NEXUS_APPS.filter((a) => a.desktop && !a.route.startsWith('__') && a.action !== 'notifications' && a.action !== 'settings')
@@ -186,4 +189,38 @@ export function workspaceCommands(query: string, ctx: { saved: SavedWorkspace[];
 /** How many apps a saved layout holds and its abstract shape. */
 export function workspaceShape(w: { layout: L.Layout }) {
   return { apps: Object.keys(w.layout.instances).length, rects: L.miniature(w.layout.root) }
+}
+
+/* ── machine activity + replay (Platform 7 · Machine Feed / Time Machine) ── */
+
+/** What can be replayed from the focused subject — seller first, then campaign, closing, property. */
+export function replaySubjects(s: MissionSubject | null): FeedSubject[] {
+  if (!s) return []
+  const out: FeedSubject[] = []
+  if (s.threadKey) out.push({ type: 'seller', id: s.threadKey, label: s.address ?? s.label })
+  if (s.campaignId) out.push({ type: 'campaign', id: s.campaignId, label: s.label })
+  if (s.closingId) out.push({ type: 'closing', id: s.closingId, label: s.label })
+  if (s.propertyId && !s.threadKey) out.push({ type: 'property', id: s.propertyId, label: s.address ?? s.label })
+  return out
+}
+
+const REPLAY_NOUN: Record<FeedSubject['type'], string> = { seller: 'seller', property: 'property', campaign: 'campaign', closing: 'closing', workflow: 'workflow run' }
+
+/** "machine activity" / "show machine activity" opens the feed; "replay …" replays the focused subject. */
+export function machineCommands(query: string, ctx: { subject: MissionSubject | null }): CommandResult[] {
+  const q = norm(query)
+  if (q.length < 3) return []
+  const out: CommandResult[] = []
+  if (/^(?:show |open )?(?:the )?machine(?: activity| feed)?$|^(?:show |open )?(?:machine )?activity$|^what(?:'s| is) the machine doing/.test(q)) {
+    out.push(result('machine-feed', 'Show machine activity', 'What LeadCommand is doing and did — live', { kind: 'machine-feed' }, 'activity'))
+  }
+  const m = /^(?:replay|time machine|rewind)(?: (.*))?$/.exec(q)
+  if (m) {
+    const want = (m[1] ?? '').replace(/^(?:this|the) /, '')
+    for (const subject of replaySubjects(ctx.subject)) {
+      if (want && !REPLAY_NOUN[subject.type].startsWith(want) && !String(subject.label ?? '').toLowerCase().includes(want)) continue
+      out.push(result(`replay-${subject.type}`, `Replay ${REPLAY_NOUN[subject.type]} — ${subject.label ?? subject.id}`, 'Time Machine · read-only history', { kind: 'replay', subject }, 'clock'))
+    }
+  }
+  return out
 }

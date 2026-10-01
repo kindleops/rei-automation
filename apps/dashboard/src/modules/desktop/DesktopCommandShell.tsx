@@ -19,6 +19,7 @@ import './desktop-calm.css'
 import './desktop-backdrop.css'
 import { DesktopBackdrop } from './DesktopBackdrop'
 import { UniversalInspector } from './inspector/UniversalInspector'
+import { TimeMachine } from './replay/TimeMachine'
 import { openInspector } from './inspector/inspector-store'
 
 // DEV: inspect any object from the console — window.__lcInspect({ type: 'property', id: '…' })
@@ -143,6 +144,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
       ) : null}
       <LeadCommandNotificationCenter open={panel === 'notifications'} onClose={() => setPanel(null)} anchorTop={84} />
       <UniversalInspector />
+      <TimeMachine />
       {panel === 'profile' ? <button type="button" className="dsk-scrim" aria-label="Close" onClick={() => setPanel(null)} /> : null}
     </>
   )

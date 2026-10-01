@@ -8,13 +8,14 @@ import { PROPERTY_LOCATOR_EVENT, readPropertyLocator } from '../../../domain/loc
 import { appHue } from '../../mobile/app-hues'
 import { sound } from '../../../shared/sound'
 import { DesktopCommandBar } from '../DesktopCommandBar'
-import { MachinePlane } from '../rail/MachinePlane'
+import { MachineFeed } from '../feed/MachineFeed'
+import { openReplay } from '../replay/replay-store'
 import { machineState, restingFor } from '../rail/rail-model'
 import { useRail } from '../rail/rail-store'
 import * as L from '../workspace/layout'
 import { closeApp, exitMission, getWorkspace, openApp, resetWorkspace, saveWorkspace, selectionInSession, setLinked, startMission, switchWorkspace, newWorkspaceFrom, toggleMaximize, useWorkspace, WORKSPACE_TEMPLATES } from '../workspace/workspace-store'
 import { planMission } from '../workspace/missions'
-import { deckLine, missionCommands, missionSubject, placeholderFor, workspaceCommands, type DeckGlyph, type WorkspaceCommand } from './deck-model'
+import { deckLine, machineCommands, missionCommands, missionSubject, placeholderFor, workspaceCommands, type DeckGlyph, type WorkspaceCommand } from './deck-model'
 import { useFocusedDeckSubject } from '../workspace/deck-subject'
 import { WorkspaceSelector } from './WorkspaceSelector'
 import './command-deck.css'
@@ -112,7 +113,7 @@ export function CommandDeck(p: CommandDeckProps) {
   // recomputed per keystroke inside the bar's own memo — cheap, so no manual memo here
   const extra = (q: string) => {
     const subject = missionSubject({ locator: hasSelection ? readPropertyLocator() : null, focusedPath, focusedTitle })
-    return [...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
+    return [...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
   }
 
   const runWorkspace = (cmd: WorkspaceCommand) => {
@@ -129,6 +130,8 @@ export function CommandDeck(p: CommandDeckProps) {
       case 'link': setLinked(cmd.linked); break
       case 'mission': { const plan = planMission(cmd.mission, cmd.subject); if (plan) startMission(plan); break }
       case 'exit-mission': exitMission(); break
+      case 'machine-feed': setMachineOpen(true); sound.panel.open(); break
+      case 'replay': openReplay(cmd.subject); break
     }
   }
 
@@ -139,6 +142,8 @@ export function CommandDeck(p: CommandDeckProps) {
     return () => document.documentElement.classList.remove('lc-commanding')
   }, [p.searchOpen])
 
+  const loc = machineOpen && hasSelection ? readPropertyLocator() : null
+  const linked = loc ? { threadKey: loc.threadKey, propertyId: loc.propertyId, address: loc.address } : null
   const machineLabel = machine.state === 'live' ? 'Live' : machine.state === 'degraded' ? 'Degraded' : machine.state === 'idle' ? 'Idle' : 'Machine'
   const fade = reduced ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } } : { initial: { opacity: 0, y: 5, filter: 'blur(2px)' }, animate: { opacity: 1, y: 0, filter: 'blur(0px)' }, exit: { opacity: 0, y: -5, filter: 'blur(2px)' } }
 
@@ -187,8 +192,8 @@ export function CommandDeck(p: CommandDeckProps) {
             onOpenChange={(o) => { setMachineOpen(o); if (o) sound.panel.open() }}
             side="bottom"
             align="end"
-            width={380}
-            label="Live machine"
+            width={640}
+            label="Machine activity"
             trigger={
               <button type="button" className={cx('cd-machine', `is-${machine.state}`, line && `has-line tone-${line.tone}`)} aria-label={line ? `${line.text}` : `Machine ${machineLabel}${machine.reason ? ` — ${machine.reason}` : ''}`}>
                 <AnimatePresence mode="wait" initial={false}>
@@ -207,7 +212,7 @@ export function CommandDeck(p: CommandDeckProps) {
               </button>
             }
           >
-            <MachinePlane rail={rail} />
+            <MachineFeed rail={rail} linked={linked} onLeave={() => setMachineOpen(false)} />
           </LCPopover>
 
           <LCTooltip content="Notifications" side="bottom">
