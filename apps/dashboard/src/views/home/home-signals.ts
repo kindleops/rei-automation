@@ -16,7 +16,7 @@
  * Everything below the loaders is pure, so the Focus ranking and the pipeline
  * grouping are testable without a network.
  */
-import { callBackend, getCockpitOpsMetrics } from '../../lib/api/backendClient'
+import { callBackend, fetchInboxCounts, getCockpitOpsMetrics } from '../../lib/api/backendClient'
 import { fetchLiveInbox } from '../../lib/data/inboxData'
 import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 import { fetchCampaignsSurface } from '../campaign-command/campaigns.adapter'
@@ -113,7 +113,14 @@ export async function loadHomeInbox(signal?: AbortSignal): Promise<HomeLoad<Home
       refreshReason: 'home_snapshot',
       signal,
     })
-    const counts = response.counts ?? {}
+    let counts: Record<string, unknown> = response.counts ?? {}
+    // The live list skips its bucket counts on an auto-refresh (they come back
+    // null, flagged degraded); the canonical counts endpoint has them.
+    if (num(counts.new_replies ?? counts.needs_reply) === null) {
+      const canonical = await fetchInboxCounts(signal).catch(() => null)
+      const body = canonical && canonical.ok ? (canonical.data as { counts?: Record<string, unknown> } | null) : null
+      if (body?.counts) counts = body.counts
+    }
     return ready({
       newReplies: num(counts.new_replies ?? counts.needs_reply),
       priority: num(counts.priority ?? counts.hot_leads),

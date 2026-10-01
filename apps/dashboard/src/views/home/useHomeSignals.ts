@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   dataOf,
   loadHomeCalendar,
@@ -34,7 +34,7 @@ export interface HomeSignals {
   calendar: HomeLoad<HomeCalendar>
 }
 
-type SourceKey = keyof HomeSignals
+export type SourceKey = keyof HomeSignals
 
 const LOADING: HomeSignals = {
   inbox: { status: 'loading' },
@@ -84,8 +84,17 @@ const SLOW: SourceKey[] = ['campaigns', 'pipeline', 'closings', 'markets', 'pins
  * Polling pauses while the tab is hidden and catches up the moment it returns,
  * so a phone left on Home overnight is current the second it is picked up.
  */
-export function useHomeSignals() {
-  const [signals, setSignals] = useState<HomeSignals>(LOADING)
+export function useHomeSignals(only?: readonly SourceKey[]) {
+  // A surface that reads only some sources loads only those; the rest are
+  // reported as not loaded here rather than spinning forever.
+  const wanted = only ? only.join(',') : ''
+  const fastKeys = useMemo(() => (wanted ? FAST.filter((k) => wanted.split(',').includes(k)) : FAST), [wanted])
+  const slowKeys = useMemo(() => (wanted ? SLOW.filter((k) => wanted.split(',').includes(k)) : SLOW), [wanted])
+  const [signals, setSignals] = useState<HomeSignals>(() => {
+    if (!wanted) return LOADING
+    const keep = new Set(wanted.split(','))
+    return Object.fromEntries((Object.keys(LOADING) as SourceKey[]).map((k) => [k, keep.has(k) ? LOADING[k] : { status: 'unavailable', reason: 'Not loaded on this surface' }])) as unknown as HomeSignals
+  })
   const [refreshing, setRefreshing] = useState(false)
   const inflight = useRef(new Map<SourceKey, AbortController>())
 
@@ -101,7 +110,9 @@ export function useHomeSignals() {
     await Promise.all(keys.map((key) => load(key)))
 
     async function load<K extends SourceKey>(key: K) {
-      inflight.current.get(key)?.abort()
+      // A poll never cancels a read still in flight: on a slow connection a
+      // source that outlasts its poll interval would otherwise never settle.
+      if (inflight.current.has(key)) return
       const controller = new AbortController()
       inflight.current.set(key, controller)
       let result: HomeSignals[K]
@@ -118,8 +129,8 @@ export function useHomeSignals() {
       } catch (error) {
         result = { status: 'unavailable', reason: error instanceof Error ? error.message : 'Unavailable' }
       }
-      if (controller.signal.aborted) return
       inflight.current.delete(key)
+      if (controller.signal.aborted) return
       settle(key, result)
     }
   }, [settle])
@@ -127,20 +138,20 @@ export function useHomeSignals() {
   const refresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await run([...FAST, ...SLOW])
+      await run([...fastKeys, ...slowKeys])
     } finally {
       setRefreshing(false)
     }
-  }, [run])
+  }, [run, fastKeys, slowKeys])
 
   useEffect(() => {
     const controllers = inflight.current
-    void run([...FAST, ...SLOW])
+    void run([...fastKeys, ...slowKeys])
 
     const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible'
-    const fast = window.setInterval(() => { if (visible()) void run(FAST) }, FAST_POLL_MS)
-    const slow = window.setInterval(() => { if (visible()) void run(SLOW) }, SLOW_POLL_MS)
-    const onVisible = () => { if (visible()) void run([...FAST, ...SLOW]) }
+    const fast = window.setInterval(() => { if (visible()) void run(fastKeys) }, FAST_POLL_MS)
+    const slow = window.setInterval(() => { if (visible()) void run(slowKeys) }, SLOW_POLL_MS)
+    const onVisible = () => { if (visible()) void run([...fastKeys, ...slowKeys]) }
     document.addEventListener('visibilitychange', onVisible)
 
     return () => {
@@ -150,7 +161,7 @@ export function useHomeSignals() {
       controllers.forEach((controller) => controller.abort())
       controllers.clear()
     }
-  }, [run])
+  }, [run, fastKeys, slowKeys])
 
   return { signals, refresh, refreshing }
 }
@@ -162,7 +173,7 @@ export function resolveSystemState(signals: HomeSignals): { tone: SystemTone; la
   if (signals.queue.status === 'loading') return { tone: 'unknown', label: 'Checking systems' }
   if (!queue) return { tone: 'unknown', label: 'Engine status unavailable' }
   if (queue.status === 'critical') return { tone: 'bad', label: 'Needs intervention' }
-  if (queue.status === 'warning' || queue.failedToday > 0 || queue.lagging > 0) {
+  if (queue.status === 'warning' || queue.failedToday > 0 || queue.lagging > 0 || queue.stale > 0) {
     return { tone: 'warn', label: 'Running with issues' }
   }
   return { tone: 'good', label: 'All systems operational' }

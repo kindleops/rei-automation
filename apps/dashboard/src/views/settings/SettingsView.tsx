@@ -26,7 +26,6 @@ import { clearSplit, useSplitWorkspace } from '../../modules/desktop/split-works
 import { operatorInitials } from '../../modules/desktop/DesktopProfilePanel'
 import { setClassicDesktop } from '../../modules/mobile/product-platform'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
-import { isDesktopHomeLayoutDefault, resetDesktopHomeLayout, subscribeDesktopHomeLayout } from '../home/desktop/desktop-home-layout'
 import './settings.css'
 
 /**
@@ -263,7 +262,6 @@ function WorkspaceSection() {
   const [prefs, setPrefs] = useDesktopShellPrefs()
   const { mode, ultrawide } = useDisplayMode()
   const split = useSplitWorkspace()
-  const homeDefault = useSyncExternalStore(subscribeDesktopHomeLayout, isDesktopHomeLayoutDefault, () => true)
   const [size, setSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
   useEffect(() => {
     const on = () => setSize({ w: window.innerWidth, h: window.innerHeight })
@@ -294,12 +292,6 @@ function WorkspaceSection() {
       <Group title="Split screen">
         <Row title="Open apps" hint={open > 1 ? `${open} apps side by side. Up to 4, each at least a quarter of the width.` : 'One app on screen. Open more beside it from the sidebar, or ⌥↵ in search.'}>
           {open > 1 ? <button type="button" className="st-btn" onClick={clearSplit}>Close split panes</button> : null}
-        </Row>
-      </Group>
-
-      <Group title="Home">
-        <Row title="Dashboard layout" hint={homeDefault ? 'Home shows the default widgets.' : 'Home has your own widget arrangement.'}>
-          <button type="button" className="st-btn" disabled={homeDefault} onClick={resetDesktopHomeLayout}>Reset to default</button>
         </Row>
       </Group>
 
