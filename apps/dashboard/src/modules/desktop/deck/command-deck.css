@@ -63,6 +63,32 @@ html.is-desktop-modern .cd {
 .cd-ws b { font-weight: 640; letter-spacing: 0.01em; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cd-ws__count { font: 650 10px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-3); }
 .cd-ws.is-dirty b::after { content: ''; display: inline-block; width: 4px; height: 4px; margin-left: 5px; border-radius: 50%; vertical-align: middle; background: rgb(var(--lc-select-rgb)); }
+/* a mission in progress: one quiet capsule beside the workspace — tap to end and go home */
+.cd-mission {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0 7px 0 8px;
+  border-radius: 999px;
+  font: 680 9.5px/1 var(--lc-font-ui);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--lc-select-rgb));
+  background: rgba(var(--lc-select-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.28);
+  cursor: pointer;
+  flex: none;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cd-mission svg { opacity: 0.7; transition: opacity 0.15s ease; }
+.cd-mission:hover { background: rgba(var(--lc-select-rgb), 0.16); box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.42); }
+.cd-mission:hover svg { opacity: 1; }
+.cd-mission:focus-visible { box-shadow: var(--lc-focus-ring); }
+@container deck (max-width: 1180px) { .cd-mission__k { display: none; } }
 .cdw-mini { width: 22px; height: 15px; flex: none; }
 .cdw-mini rect { fill: rgba(255, 255, 255, 0.06); stroke: rgba(255, 255, 255, 0.28); stroke-width: 0.9; }
 .cdw-mini.is-active rect { stroke: rgba(var(--lc-select-rgb), 0.75); fill: rgba(var(--lc-select-rgb), 0.08); }

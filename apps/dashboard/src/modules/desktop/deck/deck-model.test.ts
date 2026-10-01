@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ShownTransient } from '../rail/rail-model'
-import { deckLine, placeholderFor, workspaceCommands } from './deck-model'
+import { deckLine, missionCommands, missionSubject, placeholderFor, workspaceCommands } from './deck-model'
 
 const t = (over: Partial<ShownTransient>): ShownTransient => ({
   key: 'k', app: '/queue', transient: 'processing', display: null, tone: 'exec', text: 'Dispatching', count: 1, durationMs: 1000, ...over,
@@ -57,5 +57,25 @@ describe('workspace commands are deterministic', () => {
   it('pane commands only exist when there are panes', () => {
     expect(workspaceCommands('close pane', { ...ctx, multi: false })).toEqual([])
     expect(workspaceCommands('close pane', ctx)).toHaveLength(1)
+  })
+})
+
+describe('mission commands', () => {
+  const loc = { propertyId: 'P1', threadKey: 'T1', prospectId: null, masterOwnerId: null, opportunityId: null, address: '3025 Sunbeam Ave' }
+
+  it('the subject joins only identifiers the focused app actually reads', () => {
+    expect(missionSubject({ locator: null, focusedPath: '/campaign-command?campaign=C1', focusedTitle: 'Probate MN' })).toMatchObject({ campaignId: 'C1', label: 'Probate MN' })
+    expect(missionSubject({ locator: null, focusedPath: '/queue?campaign=C1', focusedTitle: null })).toBeNull()
+    expect(missionSubject({ locator: loc, focusedPath: '/inbox', focusedTitle: null })).toMatchObject({ propertyId: 'P1', threadKey: 'T1', label: '3025 Sunbeam Ave' })
+    expect(missionSubject({ locator: null, focusedPath: '/closing-desk?case=K1', focusedTitle: '3025 Sunbeam' })).toMatchObject({ closingId: 'K1' })
+  })
+
+  it('offers the missions a subject supports, by verb or all at once', () => {
+    const subject = missionSubject({ locator: loc, focusedPath: '/inbox', focusedTitle: null })
+    expect(missionCommands('work this seller', { subject, active: null }).map((r) => r.id)).toEqual(['ws:mission-work_seller'])
+    expect(missionCommands('start mission', { subject, active: null }).map((r) => r.id)).toEqual(['ws:mission-work_seller', 'ws:mission-move_deal'])
+    expect(missionCommands('run campaign', { subject, active: null })).toEqual([])
+    expect(missionCommands('end mission', { subject: null, active: { title: 'Work seller' } }).map((r) => r.id)).toEqual(['ws:exit-mission'])
+    expect(missionCommands('end mission', { subject: null, active: null })).toEqual([])
   })
 })

@@ -143,3 +143,15 @@ describe('workspace store', () => {
     deep.stop()
   })
 })
+
+describe('workspace store · replace safety', () => {
+  it('a late replace for an app no pane shows never hijacks a pane or the address bar', async () => {
+    const { store, router, w, stop } = await load('/inbox')
+    store.openApp('/map', 'beside')
+    const before = JSON.stringify(Object.values(store.getWorkspace().layout.instances).map((i) => [i.app, i.path]))
+    router.replaceRoutePath('/deal-intelligence?property_id=P9')
+    expect(JSON.stringify(Object.values(store.getWorkspace().layout.instances).map((i) => [i.app, i.path]))).toBe(before)
+    expect(w.location.pathname).toBe('/inbox')
+    stop()
+  })
+})

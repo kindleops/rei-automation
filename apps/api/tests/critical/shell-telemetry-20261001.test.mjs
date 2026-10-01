@@ -67,3 +67,14 @@ test('a cold read and a stale cursor return no events (no replay storm)', async 
   assert.equal(stale.events.length, 0)
   assert.equal(stale.replay_suppressed, true)
 })
+
+test('pipeline movement uses the canonical S1–S10 order and never announces a bare close as a win', () => {
+  const mv = (fromStage, toStage) => mapMovement({ id: `${fromStage}-${toStage}`, at: '2026-10-01T15:00:00.000Z', kind: 'advance', fromStage, toStage, title: 'Stage moved', opportunityId: 'o1' })
+  assert.equal(mv('offer', 'formal_contract').display, 'S5→S6')
+  assert.equal(mv('disposition', 'under_contract').display, 'S7→S8')
+  assert.equal(mv('under_contract', 'prepared_to_close').display, 'S8→S9')
+  const closed = mv('offer', 'closed')
+  assert.equal(closed.display, 'S5→S10')
+  assert.equal(closed.transient, 'stage')
+  assert.equal(closed.kind, 'deal_closed_out')
+})

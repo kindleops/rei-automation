@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Icon } from '../../../shared/icons'
 import { LCPopover, LCTooltip, cx, useLcReducedMotion } from '../../../shared/lc'
@@ -12,8 +12,9 @@ import { MachinePlane } from '../rail/MachinePlane'
 import { machineState, restingFor } from '../rail/rail-model'
 import { useRail } from '../rail/rail-store'
 import * as L from '../workspace/layout'
-import { closeApp, getWorkspace, openApp, resetWorkspace, saveWorkspace, selectionInSession, setLinked, switchWorkspace, newWorkspaceFrom, toggleMaximize, useWorkspace, WORKSPACE_TEMPLATES } from '../workspace/workspace-store'
-import { deckLine, placeholderFor, workspaceCommands, type DeckGlyph, type WorkspaceCommand } from './deck-model'
+import { closeApp, exitMission, getWorkspace, openApp, resetWorkspace, saveWorkspace, selectionInSession, setLinked, startMission, switchWorkspace, newWorkspaceFrom, toggleMaximize, useWorkspace, WORKSPACE_TEMPLATES } from '../workspace/workspace-store'
+import { planMission } from '../workspace/missions'
+import { deckLine, missionCommands, missionSubject, placeholderFor, workspaceCommands, type DeckGlyph, type WorkspaceCommand } from './deck-model'
 import { useFocusedDeckSubject } from '../workspace/deck-subject'
 import { WorkspaceSelector } from './WorkspaceSelector'
 import './command-deck.css'
@@ -102,7 +103,17 @@ export function CommandDeck(p: CommandDeckProps) {
     return { ...commandContext, routePath: f ? f.path.split('?')[0] : commandContext.routePath }
   }, [commandContext, layout])
   const saved = ws.saved
-  const extra = useCallback((q: string) => workspaceCommands(q, { saved, multi, hasFocus }), [saved, multi, hasFocus])
+  // a mission starts from what the operator is looking at: the linked selection
+  // (only one made in this session) and the focused app's own open subject
+  const focusedPath = focused?.path ?? null
+  const focusedTitle = described?.title ?? null
+  const missionTitle = ws.mission?.title ?? null
+  const hasSelection = address !== null
+  // recomputed per keystroke inside the bar's own memo — cheap, so no manual memo here
+  const extra = (q: string) => {
+    const subject = missionSubject({ locator: hasSelection ? readPropertyLocator() : null, focusedPath, focusedTitle })
+    return [...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
+  }
 
   const runWorkspace = (cmd: WorkspaceCommand) => {
     const s = getWorkspace().layout
@@ -116,6 +127,8 @@ export function CommandDeck(p: CommandDeckProps) {
       case 'maximize': toggleMaximize(s.focus); break
       case 'reset': resetWorkspace(); break
       case 'link': setLinked(cmd.linked); break
+      case 'mission': { const plan = planMission(cmd.mission, cmd.subject); if (plan) startMission(plan); break }
+      case 'exit-mission': exitMission(); break
     }
   }
 
@@ -134,6 +147,14 @@ export function CommandDeck(p: CommandDeckProps) {
       <div className="cd__glass">
         <div className="cd__ctx">
           <WorkspaceSelector />
+          {ws.mission ? (
+            <LCTooltip content="End mission · restores the workspace you had before" side="bottom">
+              <button type="button" className="cd-mission" onClick={() => exitMission()} aria-label={`End ${ws.mission.title} mission and restore the previous workspace`}>
+                <span className="cd-mission__k">Mission</span>
+                <Icon name="x" size={10} />
+              </button>
+            </LCTooltip>
+          ) : null}
           {app ? (
             <div className="cd-app" style={{ ['--app' as string]: appHue(app.id) }}>
               <span className="cd-app__glyph" aria-hidden="true"><Icon name={app.icon} size={14} strokeWidth={1.7} /></span>

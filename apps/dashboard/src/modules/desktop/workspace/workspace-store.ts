@@ -2,8 +2,9 @@ import { useSyncExternalStore } from 'react'
 import { normalizeRoutePath, setRouteNavigationInterceptor } from '../../../app/router'
 import { NEXUS_APPS, getApp, resolveAppForRoute, type AppId } from '../../../domain/app-registry/app-registry'
 import { resolveAppDestination } from '../../../domain/app-registry/contextual-navigation'
-import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
+import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
 import * as L from './layout'
+import type { MissionKind, MissionPlan, MissionSubject } from './missions'
 
 /**
  * THE WORKSPACE STORE — one per shell.
@@ -26,6 +27,12 @@ import * as L from './layout'
 
 export interface SavedWorkspace { id: string; name: string; layout: L.Layout; linked: boolean; savedAt: number }
 
+/** The workspace a mission replaced — restored exactly when the mission ends. */
+interface MissionReturn { layout: L.Layout; linked: boolean; name: string | null; savedId: string | null; dirty: boolean }
+
+/** A mission in progress: a composed workspace around one subject (see ./missions). */
+export interface ActiveMission { kind: MissionKind; title: string; subject: MissionSubject; startedAt: number; returnTo: MissionReturn }
+
 export interface WorkspaceSnapshot {
   layout: L.Layout
   /** panes follow the workspace selection */
@@ -41,6 +48,8 @@ export interface WorkspaceSnapshot {
   announce: string | null
   /** bumps when a workspace switch replaces the whole arrangement */
   generation: number
+  /** the mission this workspace was composed for, if any */
+  mission: ActiveMission | null
 }
 
 export type WorkspaceEvent =
@@ -50,6 +59,8 @@ export type WorkspaceEvent =
   | { type: 'maximized' | 'restored'; pane: string }
   | { type: 'switched'; name: string }
   | { type: 'pinned' | 'unpinned'; app: string }
+  | { type: 'mission-started'; kind: MissionKind; title: string }
+  | { type: 'mission-ended'; kind: MissionKind }
 
 const SESSION_KEY = 'lc.workspace.session.v1'
 const SAVED_KEY = 'lc.workspaces.v1'
@@ -90,8 +101,8 @@ function boot(): WorkspaceSnapshot {
   const url = urlPath()
   const urlApp = appOfPath(url)
   const saved = readSaved()
-  const base = { closing: {}, entering: {}, saved, announce: null, generation: 0 }
-  const stored = readJSON<{ layout: unknown; linked?: boolean; name?: string | null; savedId?: string | null; dirty?: boolean }>(session(), SESSION_KEY)
+  const base = { closing: {}, entering: {}, saved, announce: null, generation: 0, mission: null }
+  const stored = readJSON<{ layout: unknown; linked?: boolean; name?: string | null; savedId?: string | null; dirty?: boolean; mission?: unknown }>(session(), SESSION_KEY)
   const layout = stored ? L.reviveLayout(stored.layout, appExists) : null
   if (layout && stored) {
     // A reload of this tab: the arrangement returns. The address bar still wins
@@ -102,11 +113,25 @@ function boot(): WorkspaceSnapshot {
       const pane = L.paneOf(layout, holder.id)!
       let next = L.updateInstance(layout, holder.id, { path: url })
       next = { ...L.activate(next, pane.id, holder.id), primary: holder.id }
-      return { ...base, layout: next, linked: stored.linked !== false, name: stored.name ?? null, savedId: stored.savedId ?? null, dirty: Boolean(stored.dirty) }
+      return { ...base, layout: next, linked: stored.linked !== false, name: stored.name ?? null, savedId: stored.savedId ?? null, dirty: Boolean(stored.dirty), mission: reviveMission(stored.mission) }
     }
   }
   // An explicit address (or a fresh tab) opens exactly that, alone.
   return { ...base, layout: L.singleLayout(newInstance(url)), linked: true, name: null, savedId: null, dirty: false }
+}
+
+function reviveMission(raw: unknown): ActiveMission | null {
+  const m = raw as Partial<ActiveMission> | null
+  if (!m || typeof m !== 'object' || typeof m.kind !== 'string' || typeof m.title !== 'string' || !m.subject || !m.returnTo) return null
+  const layout = L.reviveLayout(m.returnTo.layout, appExists)
+  if (!layout) return null
+  return {
+    kind: m.kind as MissionKind,
+    title: m.title,
+    subject: m.subject as MissionSubject,
+    startedAt: Number(m.startedAt) || 0,
+    returnTo: { layout, linked: m.returnTo.linked !== false, name: m.returnTo.name ?? null, savedId: m.returnTo.savedId ?? null, dirty: Boolean(m.returnTo.dirty) },
+  }
 }
 
 /* ── store ────────────────────────────────────────────────────────────── */
@@ -124,11 +149,13 @@ function get(): WorkspaceSnapshot {
 
 function writeSession() {
   const s = get()
-  writeJSON(session(), SESSION_KEY, { layout: s.layout, linked: s.linked, name: s.name, savedId: s.savedId, dirty: s.dirty })
+  writeJSON(session(), SESSION_KEY, { layout: s.layout, linked: s.linked, name: s.name, savedId: s.savedId, dirty: s.dirty, mission: s.mission })
 }
 
 function persist() {
-  if (typeof window === 'undefined') return
+  // only a running shell persists: a late animation timer from a torn-down
+  // shell must never write its arrangement over whoever owns the tab now
+  if (typeof window === 'undefined' || !started) return
   window.clearTimeout(persistTimer)
   persistTimer = window.setTimeout(writeSession, 200)
 }
@@ -222,8 +249,16 @@ function intercept(path: string, mode: 'push' | 'replace'): boolean {
     }
     return holder.id !== s.layout.primary
   }
+  // A REPLACE is an app correcting its own address. When no pane holds that app
+  // it is a late write from a surface the operator already moved away from —
+  // it must never change which app a pane shows (it used to hijack the focused
+  // pane, or the address bar). Dropped, quietly; DEV says so.
+  if (mode === 'replace') {
+    if (import.meta.env.DEV) console.debug(`[workspace] dropped a replace to ${path}: no pane shows ${app}`)
+    return true
+  }
   // the app is not open: it replaces the active app of the pane being acted in
-  const paneId = mode === 'push' ? actingPane() : (L.findPane(s.layout.root, s.layout.focus)?.id ?? s.layout.focus)
+  const paneId = actingPane()
   const pane = L.findPane(s.layout.root, paneId)
   if (!pane) return false
   const target = s.layout.instances[pane.active]
@@ -291,6 +326,9 @@ export function startWorkspace(): () => void {
   window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
   return () => {
     started = false
+    // the arrangement is saved now, not by a timer that outlives this shell
+    window.clearTimeout(persistTimer)
+    if (snap) writeSession()
     setRouteNavigationInterceptor(null)
     window.removeEventListener('popstate', onPop)
     window.removeEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
@@ -478,6 +516,7 @@ function adopt(layout: L.Layout, meta: { name: string | null; savedId: string | 
 export function switchWorkspace(id: string) {
   const w = get().saved.find((x) => x.id === id)
   if (!w) return
+  endMissionQuietly()
   adopt(w.layout, { name: w.name, savedId: w.id, linked: w.linked })
   emit({ type: 'switched', name: w.name })
   say(`${w.name} workspace.`)
@@ -488,6 +527,7 @@ export function resetWorkspace() {
   const s = get()
   const keep = L.focusedInstance(s.layout) ?? s.layout.instances[s.layout.primary]
   if (!keep) return
+  endMissionQuietly()
   adopt(L.singleLayout({ ...keep, pinned: false, pinLabel: null }), { name: null, savedId: null, linked: true })
   say('Workspace reset to one application.')
 }
@@ -517,9 +557,67 @@ export function newWorkspaceFrom(template: { name: string; paths: string[]; arra
     if (d) layout = L.place(layout, newInstance(d), { pane: right, zone: 'bottom' }).layout
   }
   layout = { ...layout, focus: anchor, primary: Object.values(layout.instances).find((i) => i.path === first)?.id ?? layout.primary }
+  endMissionQuietly()
   adopt(layout, { name: template.name, savedId: null, linked: true })
   emit({ type: 'switched', name: template.name })
   say(`${template.name} workspace.`)
+}
+
+/* ── missions ─────────────────────────────────────────────────────────── */
+
+function endMissionQuietly() {
+  const m = get().mission
+  if (!m) return
+  set({ mission: null })
+  emit({ type: 'mission-ended', kind: m.kind })
+}
+
+/**
+ * Compose the workspace a mission needs around its subject. The workspace it
+ * replaces is kept and comes back exactly on exit; starting a second mission
+ * keeps the ORIGINAL workspace as the way home. Nothing here performs work:
+ * the subject is published as the linked context and each app opens on it.
+ */
+export function startMission(plan: MissionPlan): boolean {
+  const [first, ...rest] = plan.panes
+  if (!first) return false
+  const s = get()
+  let layout = L.singleLayout(newInstance(first.path))
+  const anchor = layout.focus
+  const paneOfStep: string[] = [anchor]
+  const firstInPane = new Map<string, string>([[anchor, layout.instances[layout.primary].id]])
+  for (const step of rest) {
+    const target = step.at ? paneOfStep[step.at.of] : anchor
+    const inst = newInstance(step.path)
+    let r = L.place(layout, inst, { pane: target ?? anchor, zone: step.at?.zone ?? 'right' })
+    // a split that cannot happen still joins the plan: as a tab of its target
+    if (r.layout === layout) r = L.place(layout, inst, { pane: target ?? anchor, zone: 'stack' })
+    layout = r.layout
+    paneOfStep.push(r.pane)
+    if (!firstInPane.has(r.pane)) firstInPane.set(r.pane, inst.id)
+  }
+  // a stack shows the app the plan named first in it (Deal Intelligence before Comps)
+  for (const [pane, inst] of firstInPane) if (L.findPane(layout.root, pane)) layout = L.activate(layout, pane, inst)
+  const primary = firstInPane.get(anchor) ?? layout.primary
+  layout = { ...layout, focus: anchor, primary }
+  const returnTo: MissionReturn = s.mission?.returnTo ?? { layout: { ...s.layout, maximized: null }, linked: s.linked, name: s.name, savedId: s.savedId, dirty: s.dirty }
+  adopt(layout, { name: `${plan.title} · ${plan.subject.label}`, savedId: null, linked: true })
+  set({ mission: { kind: plan.kind, title: plan.title, subject: plan.subject, startedAt: Date.now(), returnTo } })
+  // the subject becomes the linked context the composed apps open on
+  if (plan.locator) setPropertyLocator(plan.locator)
+  emit({ type: 'mission-started', kind: plan.kind, title: plan.title })
+  say(`${plan.title}: ${plan.subject.label}.`)
+  return true
+}
+
+/** End the mission and put back exactly the workspace that was there before it. */
+export function exitMission() {
+  const m = get().mission
+  if (!m) return
+  adopt(m.returnTo.layout, { name: m.returnTo.name, savedId: m.returnTo.savedId, linked: m.returnTo.linked })
+  set({ mission: null, dirty: m.returnTo.dirty })
+  emit({ type: 'mission-ended', kind: m.kind })
+  say(`${m.title} ended. Workspace restored.`)
 }
 
 export const WORKSPACE_TEMPLATES = [

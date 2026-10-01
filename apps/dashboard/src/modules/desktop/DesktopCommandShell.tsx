@@ -18,6 +18,11 @@ import './desktop-shell.css'
 import './desktop-calm.css'
 import './desktop-backdrop.css'
 import { DesktopBackdrop } from './DesktopBackdrop'
+import { UniversalInspector } from './inspector/UniversalInspector'
+import { openInspector } from './inspector/inspector-store'
+
+// DEV: inspect any object from the console — window.__lcInspect({ type: 'property', id: '…' })
+if (import.meta.env.DEV && typeof window !== 'undefined') (window as unknown as { __lcInspect?: typeof openInspector }).__lcInspect = openInspector
 
 /**
  * THE DESKTOP SHELL — three surfaces frame the OS: the Command Rail (what
@@ -137,6 +142,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
         </div>
       ) : null}
       <LeadCommandNotificationCenter open={panel === 'notifications'} onClose={() => setPanel(null)} anchorTop={84} />
+      <UniversalInspector />
       {panel === 'profile' ? <button type="button" className="dsk-scrim" aria-label="Close" onClick={() => setPanel(null)} /> : null}
     </>
   )

@@ -4,6 +4,7 @@ import type { ShownTransient } from '../rail/rail-model'
 import { appName } from '../rail/rail-store'
 import * as L from '../workspace/layout'
 import { WORKSPACE_TEMPLATES, type SavedWorkspace } from '../workspace/workspace-store'
+import { missionsFor, type MissionKind, type MissionSubject } from '../workspace/missions'
 
 /**
  * The Command Deck's reading of the shell — pure, so it can be tested.
@@ -74,6 +75,8 @@ export type WorkspaceCommand =
   | { kind: 'maximize' }
   | { kind: 'reset' }
   | { kind: 'link'; linked: boolean }
+  | { kind: 'mission'; mission: MissionKind; subject: MissionSubject }
+  | { kind: 'exit-mission' }
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 const DESKTOP_APPS = NEXUS_APPS.filter((a) => a.desktop && !a.route.startsWith('__') && a.action !== 'notifications' && a.action !== 'settings')
@@ -94,6 +97,61 @@ function result(id: string, title: string, subtitle: string, cmd: WorkspaceComma
  * Commands the workspace can run, matched from what was typed. Nothing fuzzy
  * or "agentic": each phrase maps to one deterministic handler.
  */
+/**
+ * The subject a mission could start from, in what the operator is looking at
+ * right now: the linked selection (seller/property) merged with the focused
+ * app's own subject (a campaign or closing it has open). Nothing is guessed:
+ * an identifier only joins when its app actually reads it.
+ */
+export function missionSubject(opts: {
+  locator: { propertyId: string | null; threadKey: string | null; prospectId: string | null; masterOwnerId: string | null; opportunityId: string | null; address: string | null } | null
+  focusedPath: string | null
+  focusedTitle: string | null
+}): MissionSubject | null {
+  const q = new URLSearchParams((opts.focusedPath ?? '').split('?')[1] ?? '')
+  const path = (opts.focusedPath ?? '').split('?')[0]
+  const campaignId = path === '/campaign-command' ? q.get('campaign') : null
+  const closingId = path === '/closing-desk' ? (q.get('case') || q.get('closing') || q.get('closing_id')) : null
+  const loc = opts.locator
+  const s: MissionSubject = {
+    label: (campaignId || closingId ? opts.focusedTitle : null) ?? loc?.address ?? opts.focusedTitle ?? 'This subject',
+    propertyId: loc?.propertyId ?? null,
+    threadKey: loc?.threadKey ?? null,
+    prospectId: loc?.prospectId ?? null,
+    masterOwnerId: loc?.masterOwnerId ?? null,
+    opportunityId: (path === '/pipeline' ? q.get('opp') : null) ?? loc?.opportunityId ?? null,
+    campaignId,
+    closingId,
+    address: loc?.address ?? null,
+  }
+  return missionsFor(s).length ? s : null
+}
+
+const MISSION_WORDS: Record<MissionKind, RegExp> = {
+  work_seller: /^(?:work(?: this)?(?: seller)?|seller mission)/,
+  move_deal: /^(?:move(?: this)?(?: deal)?|deal mission)/,
+  run_campaign: /^(?:run(?: this)?(?: campaign)?|campaign mission)/,
+  close_deal: /^(?:close(?: this)? deal|closing mission)/,
+}
+
+/** Mission commands for the Command Deck: start one around the subject, or end the one in progress. */
+export function missionCommands(query: string, ctx: { subject: MissionSubject | null; active: { title: string } | null }): CommandResult[] {
+  const q = norm(query)
+  if (q.length < 3) return []
+  const out: CommandResult[] = []
+  if (ctx.active && /^(?:exit|end|leave|stop|finish)(?: the| this)? mission/.test(q)) {
+    out.push(result('exit-mission', `End ${ctx.active.title}`, 'Restores the workspace you had before', { kind: 'exit-mission' }, 'arrow-down-left'))
+  }
+  if (ctx.subject) {
+    const listAll = /^(?:start )?missions?$|^start mission/.test(q)
+    for (const def of missionsFor(ctx.subject)) {
+      if (!listAll && !MISSION_WORDS[def.kind].test(q)) continue
+      out.push(result(`mission-${def.kind}`, `${def.verb} — ${ctx.subject.label}`, def.description, { kind: 'mission', mission: def.kind, subject: ctx.subject }, 'target'))
+    }
+  }
+  return out
+}
+
 export function workspaceCommands(query: string, ctx: { saved: SavedWorkspace[]; multi: boolean; hasFocus: boolean }): CommandResult[] {
   const q = norm(query)
   if (q.length < 3) return []

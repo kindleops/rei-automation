@@ -28,6 +28,7 @@ import { fetchQueueProcessorHealth } from '@/lib/cockpit/queue-processor-health-
 import { getPipelineCommandOverview } from '@/lib/domain/opportunity/pipeline-command-service.js'
 import { getRegistry, getLive } from '@/lib/domain/workflow-studio/observatory/service.js'
 import { getClosingPortfolio } from '@/lib/domain/closings/closing-execution-service.js'
+import { STAGE_ORDER } from '@/lib/domain/closings/closing-authority.js'
 import { getEmailCommandHome } from '@/lib/domain/email/email-command-service.js'
 
 const OPERATOR_TZ = 'America/Chicago'
@@ -114,7 +115,9 @@ async function readCampaigns(db) {
 
 /* ── events: ledger nodes with runtime evidence → rail transients ─────── */
 
-const STAGE_INDEX = { ownership_confirmation: 1, offer_interest: 2, asking_price: 3, property_condition: 4, offer: 5, negotiation: 6, contract: 7, title: 8, closing: 9, closed: 10 }
+// The canonical S1–S10 order is closing-authority's STAGE_ORDER (it guards S10);
+// a hand-written table here had drifted (S6–S9 resolved to nothing).
+const STAGE_INDEX = Object.fromEntries(STAGE_ORDER.map((code, i) => [code, i + 1]))
 
 /**
  * transient ∈ typing · processing · success · failure · retry · attention ·
@@ -178,7 +181,10 @@ export function mapMovement(m) {
     const a = STAGE_INDEX[m.fromStage]
     const b = STAGE_INDEX[m.toStage]
     const display = a && b ? `S${a}→S${b}` : m.title
-    return { ...base, app: '/pipeline', kind: b === 10 ? 'deal_closed' : 'stage_advanced', transient: b === 10 ? 'complete' : 'stage', priority: 3, display, from: m.fromStage, to: m.toStage, text: `${m.title}${m.detail ? ` · ${m.detail}` : ''}` }
+    // A pipeline move into `closed` is NOT a won deal: a win is finalized by the
+    // Closing Desk (finalize_closing_case) and announced from its own ledger; a
+    // bare stage=closed reads closed-lost. So this is a neutral stage move.
+    return { ...base, app: '/pipeline', kind: b === 10 ? 'deal_closed_out' : 'stage_advanced', transient: 'stage', priority: 3, display, from: m.fromStage, to: m.toStage, text: `${m.title}${m.detail ? ` · ${m.detail}` : ''}` }
   }
   if (m.kind === 'created') return { ...base, app: '/pipeline', kind: 'deal_opened', transient: 'add', priority: 3, display: '+1', text: 'Opportunity opened' }
   return null

@@ -417,6 +417,9 @@ export function WorkspaceView() {
     else if (e.type === 'maximized') sound.workspace.maximize()
     else if (e.type === 'restored') sound.workspace.restore()
     else if (e.type === 'switched') sound.workspace.switch()
+    // a mission opens once as it composes and closes once as it ends — the settle is silent
+    else if (e.type === 'mission-started') sound.panel.open()
+    else if (e.type === 'mission-ended') sound.panel.close()
   }), [])
 
   // a workspace switch recedes and resolves as one surface, not six flying apps
