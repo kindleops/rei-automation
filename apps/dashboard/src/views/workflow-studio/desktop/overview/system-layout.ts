@@ -123,7 +123,7 @@ export function layoutSystemMap(nodes: SystemNode[], edges: SystemEdge[]): Syste
       case 'campaign__notifications': { const s = bottom(a, 0); const t = bottom(b, -0.1); return ortho([s, [s[0], floor], [t[0], floor], t], 0.14) }
       case 'closing__notifications': { const s = bottom(a, 0.3); const t = bottom(b, -0.4); return ortho([s, [s[0], floor - 10], [t[0], floor - 10], t]) }
       // closing authority moves the opportunity's stage: under the floor and up the east side (one line jump)
-      case 'closing__pipeline': { const s = bottom(a, -0.3); const t = right(b, 0.4); return ortho([s, [s[0], floor + 14], [eastX, floor + 14], [eastX, t[1]], t], 0.84) }
+      case 'closing__pipeline': { const s = bottom(a, -0.3); const t = right(b, 0.4); return ortho([s, [s[0], floor + 14], [eastX, floor + 14], [eastX, t[1]], t], 0.62) }
       default: {
         const dx = b.x - a.x
         const dy = b.y - a.y
