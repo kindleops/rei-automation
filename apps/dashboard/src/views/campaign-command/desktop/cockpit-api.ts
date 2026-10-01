@@ -240,6 +240,7 @@ export type CockpitTargetPage = {
   total_pages: number
   status: string
   search: string | null
+  reason?: string | null
   truncated: { queue: boolean; replies: boolean }
   targets: CockpitTargetRow[]
 }
@@ -283,11 +284,12 @@ export function fetchCampaignCockpit(campaignId: string, signal?: AbortSignal): 
 
 export function fetchCockpitTargets(
   campaignId: string,
-  params: { page: number; pageSize: number; status: string; search: string },
+  params: { page: number; pageSize: number; status: string; search: string; reason?: string | null },
   signal?: AbortSignal,
 ): Promise<CockpitTargetPage> {
   const q = new URLSearchParams({ page: String(params.page), page_size: String(params.pageSize), status: params.status })
   if (params.search.trim()) q.set('search', params.search.trim())
+  if (params.reason) q.set('reason', params.reason)
   return read<CockpitTargetPage>(`/api/cockpit/campaigns/${encodeURIComponent(campaignId)}/cockpit/targets?${q.toString()}`, signal, 45_000)
 }
 

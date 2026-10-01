@@ -20,7 +20,7 @@ export async function OPTIONS(request) {
  * GET — one page of a campaign's targets with what the queue did with each
  * (latest live row, send/delivery times, release reason) and whether the
  * seller replied. Read-only; the page is capped at 100 targets.
- *   ?page=1&page_size=50&status=all|ready|planned|blocked|held&search=
+ *   ?page=1&page_size=50&status=all|ready|planned|blocked|held&search=&reason=<block_reason>
  */
 export async function GET(request, { params }) {
   const auth = ensureMutationAuth(request)
@@ -39,6 +39,7 @@ export async function GET(request, { params }) {
       pageSize: url.searchParams.get('page_size'),
       status: url.searchParams.get('status'),
       search: url.searchParams.get('search'),
+      reason: url.searchParams.get('reason'),
     })
     return withCors(request, result, 200)
   } catch (error) {

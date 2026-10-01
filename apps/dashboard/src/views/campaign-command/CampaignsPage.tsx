@@ -53,8 +53,9 @@ import { CampaignStatusBadge } from './components/CampaignStatusBadge'
 import { CampaignListCard } from './components/CampaignListCard'
 import { CampaignCommandReadout } from './components/CampaignCommandReadout'
 import { CampaignCommandMobile } from './mobile/CampaignCommandMobile'
-// Desktop 2.0 — the live execution cockpit (modern product on a wide screen only).
-import { CampaignCockpit } from './desktop/CampaignCockpit'
+// Desktop 3.0 — the outbound execution war room (modern product on a wide screen only).
+import { CampaignWarRoom } from './desktop/CampaignWarRoom'
+import { sound } from '../../shared/sound'
 import { CampaignDetailBar, CampaignDetailHero } from './mobile/CampaignDetailMobile'
 import { CampaignSectionTabs } from './mobile/CampaignSectionTabs'
 import { CampaignExecutionMobile } from './mobile/CampaignExecutionMobile'
@@ -1794,14 +1795,15 @@ export const CampaignsPage = () => {
       ? ''
       : `${model.kpis.activeCampaigns} active · ${model.campaigns.filter((c) => c.status === 'scheduled').length} scheduled`
 
-  // DESKTOP 2.0 — the modern product on a wide screen gets the live execution
-  // cockpit: navigation, operating room, inspector. The phone never reaches
-  // this branch (isModernDesktop is false on every phone), so its index and
-  // detail below are untouched. Actions and modals are the same ones.
+  // DESKTOP 3.0 — the modern product on a wide screen gets the outbound
+  // execution war room: mission rail, execution room, intelligence inspector.
+  // The phone never reaches this branch (isModernDesktop is false on every
+  // phone), so its index and detail below are untouched. Actions and modals
+  // are the same ones.
   if (isModernDesktop) {
     return (
       <>
-        <CampaignCockpit
+        <CampaignWarRoom
           model={model}
           loading={loading}
           failed={loadFailed}
@@ -1843,6 +1845,8 @@ export const CampaignsPage = () => {
             onClose={() => setActivationCampaign(null)}
             onSuccess={(result) => {
               const isProof = result.proofHydration || result.activationMode === 'test'
+              // the activation the operator launched was confirmed by the API
+              if (!isProof) sound.outcome.success('strong')
               emitNotification({
                 title: result.idempotent
                   ? (isProof ? 'Test hydration replay' : 'Already activated')

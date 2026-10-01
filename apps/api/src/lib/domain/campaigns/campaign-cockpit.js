@@ -87,7 +87,7 @@ const CAMPAIGN_COLUMNS = [
 ].join(',')
 
 const ACTIVE_ROW_SELECT = [
-  'id', 'queue_status', 'scheduled_for', 'from_phone_number', 'updated_at',
+  'id', 'queue_status', 'scheduled_for', 'scheduled_for_utc', 'from_phone_number', 'updated_at',
   'skip_reason:metadata->>skip_reason',
   'no_send:metadata->>no_send',
   'proof_no_send:metadata->>proof_no_send',
@@ -377,7 +377,11 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
   if (failures && failures.ok !== true) unavailable.push('exceptions')
 
   const controls = controlMap(controlRows || [])
-  const queue = activeScan ? { ...summarizeActiveQueue(activeScan.rows, nowMs), truncated: activeScan.truncated } : null
+  // Due-ness is the processor's: scheduled_for_utc, falling back to
+  // scheduled_for (shouldRunSendQueueRow). The two drift apart when rows are
+  // re-spaced, and reading the wrong one invents (or hides) overdue work.
+  const dueRows = activeScan ? activeScan.rows.map((row) => ({ ...row, scheduled_for: row.scheduled_for_utc || row.scheduled_for })) : null
+  const queue = activeScan ? { ...summarizeActiveQueue(dueRows, nowMs), truncated: activeScan.truncated } : null
 
   // ── pacing: the feeder's own arithmetic, with today's real inputs ────────
   const statuses = targetCounts?.statuses || {}
@@ -644,6 +648,12 @@ export function sanitizeTargetSearch(value) {
   return clean(value).replace(/[,()*%\\"'`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
 }
 
+/** A held reason is a canonical code (`entity_contact_requires_review`, `insufficient_template_rotation_pool:auto:0<2`) — nothing else passes. */
+export function sanitizeBlockReason(value) {
+  const v = clean(value)
+  return /^[A-Za-z0-9_:.<>=-]{1,120}$/.test(v) ? v : null
+}
+
 export function clampTargetPage({ page, pageSize } = {}) {
   const p = Math.max(1, Math.trunc(Number(page)) || 1)
   const size = Math.min(TARGET_PAGE_MAX, Math.max(10, Math.trunc(Number(pageSize)) || 50))
@@ -660,11 +670,13 @@ export async function buildCampaignTargetPage(campaignId, params = {}, deps = {}
   const { page, pageSize } = clampTargetPage(params)
   const status = TARGET_STATUS_FILTERS.get(clean(params.status).toLowerCase()) || null
   const search = sanitizeTargetSearch(params.search)
+  const reason = sanitizeBlockReason(params.reason)
 
   let query = supabase.from('campaign_targets')
     .select(TARGET_SELECT, { count: 'exact' })
     .eq('campaign_id', campaignId)
   if (status) query = query.eq('target_status', status)
+  if (reason) query = query.eq('block_reason', reason)
   if (search) {
     const like = `%${search}%`
     query = query.or(`owner_name.ilike.${like},property_address.ilike.${like},to_phone_number.ilike.${like},market.ilike.${like}`)
@@ -798,6 +810,7 @@ export async function buildCampaignTargetPage(campaignId, params = {}, deps = {}
     total_pages: total ? Math.ceil(total / pageSize) : 0,
     status: status || 'all',
     search: search || null,
+    reason: reason || null,
     truncated: { queue: queueTruncated, replies: repliesTruncated },
     targets: out,
   }

@@ -86,7 +86,7 @@ export async function fetchCampaignResponses(campaignId, deps = {}) {
     intents: {},
     latest: [],
   }
-  if (sellers.size === 0) return empty
+  if (sellers.size === 0) return deps.includeSellers ? { ...empty, sellers: [] } : empty
 
   const earliest = [...firstSent.values()].reduce((min, at) => (Date.parse(at) < Date.parse(min) ? at : min))
   const phones = [...sellers]
@@ -114,8 +114,10 @@ export async function fetchCampaignResponses(campaignId, deps = {}) {
       if (!first || Date.parse(msg.created_at) <= Date.parse(first)) continue
       replyMessages += 1
       const seller = clean(msg.from_phone_number)
-      const entry = bySeller.get(seller) || { latest: null, askedToStop: false }
+      const entry = bySeller.get(seller) || { latest: null, earliest: null, askedToStop: false, messages: 0 }
       if (!entry.latest || Date.parse(msg.created_at) > Date.parse(entry.latest.created_at)) entry.latest = msg
+      if (!entry.earliest || Date.parse(msg.created_at) < Date.parse(entry.earliest.created_at)) entry.earliest = msg
+      entry.messages += 1
       if (msg.is_opt_out === true || STOP_INTENTS.has(clean(msg.detected_intent).toLowerCase())) entry.askedToStop = true
       bySeller.set(seller, entry)
     }
@@ -154,5 +156,24 @@ export async function fetchCampaignResponses(campaignId, deps = {}) {
     truncated,
     intents,
     latest,
+    // Opt-in (Campaign Command's outcome attribution): every replying seller,
+    // once — when they first answered, which of our numbers they answered,
+    // and what they said most recently. Not part of the default payload.
+    ...(deps.includeSellers
+      ? {
+        sellers: [...bySeller.entries()].map(([seller, entry]) => ({
+          seller_phone: seller,
+          seller_name: clean(entry.latest.seller_display_name) || null,
+          sender_phone: clean(entry.earliest.to_phone_number) || null,
+          first_reply_at: entry.earliest.created_at,
+          latest_reply_at: entry.latest.created_at,
+          intent: clean(entry.latest.detected_intent).toLowerCase() || 'unclassified',
+          asked_to_stop: entry.askedToStop,
+          thread_key: clean(entry.latest.thread_key) || null,
+          message: clean(entry.latest.message_body) || null,
+          messages: entry.messages,
+        })),
+      }
+      : {}),
   }
 }
