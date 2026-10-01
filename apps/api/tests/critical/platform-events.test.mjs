@@ -328,3 +328,29 @@ test('workflow runs: status decides the type; the handled inbound message is the
   assert.equal(done.thread_key, 't1')
   assert.equal(workflowRunEvent(o('failed'), { workflowKey: 'email_dispatch', workflowName: 'Email' }).event_type, 'email.failed')
 })
+test('a source that keeps none of its row budget never hides real events behind an empty page', async () => {
+  const NOW = Date.parse('2026-10-01T20:00:00Z')
+  const iso = (m) => canonicalTime(NOW - m * 60_000)
+  // "noisy" reads its whole budget of recent rows and keeps none (bookkeeping it owns)
+  // until the cursor walks past them; "real" has one real event an hour earlier.
+  const noisy = {
+    name: 'noisy', table: 't1', systems: ['inbox'], types: ['seller.replied'], supports: () => true,
+    async read(scope) {
+      const below = scope.cursor ? Date.parse(scope.cursor.t) : NOW
+      const budget = scope.limit + 1
+      const rows = []
+      for (let i = 1; i <= budget; i++) { const t = below - i * 60_000; if (t >= NOW - 30 * 60_000) rows.push(t) }
+      return { events: [], complete_above: rows.length >= budget ? { t: canonicalTime(rows[rows.length - 1]), id: `n:${rows.length}` } : null }
+    },
+  }
+  const real = {
+    name: 'real', table: 't2', systems: ['inbox'], types: ['seller.replied'], supports: () => true,
+    async read(scope) {
+      const e = { event_id: 'me:1', occurred_at: iso(60), source_system: 'inbox', event_type: 'seller.replied', severity: 'info', summary: 'Seller replied', entity_refs: [], actor: { kind: 'seller' }, provenance: { table: 't2', row_id: '1', adapter: 'real' }, deep_link: null }
+      const inScope = (!scope.cursor || cmpKey({ t: e.occurred_at, id: e.event_id }, scope.cursor) < 0) && e.occurred_at >= scope.since
+      return { events: inScope ? [e] : [], complete_above: null }
+    },
+  }
+  const r = await listPlatformEvents({ limit: '5', since: new Date(NOW - 6 * 3_600_000).toISOString() }, { supabase: {}, now: () => NOW, adapters: [noisy, real], quiet: true })
+  assert.deepEqual(r.events.map((e) => e.event_id), ['me:1'])
+})

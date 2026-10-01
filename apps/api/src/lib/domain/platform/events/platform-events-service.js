@@ -11,7 +11,7 @@
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { canonicalTime, SEVERITIES, SOURCE_SYSTEMS, SUBJECT_TYPES, EVENT_TYPES } from './envelope.js'
-import { decodeCursor, mergePage } from './keyset.js'
+import { decodeCursor, encodeCursor, keyOf, mergePage } from './keyset.js'
 import { messagesAdapter } from './adapters/messages.js'
 import { campaignSendsAdapter } from './adapters/campaign-sends.js'
 import { workflowAdapter } from './adapters/workflow.js'
@@ -25,6 +25,8 @@ export const ADAPTERS = Object.freeze([messagesAdapter, campaignSendsAdapter, wo
 const DAY = 864e5
 const MAX_WINDOW_MS = 90 * DAY
 const DEFAULT_WINDOW_MS = 7 * DAY
+/** extra reads a short page may make to get past noise-only horizons */
+const MAX_EMPTY_HOPS = 6
 /** a live-tail cursor older than this is a reconnect (laptop waking up): never replayed as live */
 export const TAIL_REPLAY_GUARD_MS = 15 * 60e3
 const ADAPTER_TIMEOUT_MS = 12_000
@@ -120,8 +122,9 @@ export async function listPlatformEvents(query = {}, deps = {}) {
   }
 
   const subject = await resolveSubject(db, p.subjectType, p.subjectId)
-  const scope = { since: p.since, until: p.until || (p.cursor ? null : canonicalTime(now + 1000)), cursor: p.cursor, limit: p.limit, subject, systems: p.systems, types: p.types }
   const degraded = []
+  const readPage = async (cursor) => {
+  const scope = { since: p.since, until: p.until || (cursor ? null : canonicalTime(now + 1000)), cursor, limit: p.limit, subject, systems: p.systems, types: p.types }
   const results = await Promise.all(adapters.map(async (a) => {
     if (!a.supports(subject) || !wants(a, p)) return null
     sources[a.name].read = true
@@ -133,7 +136,7 @@ export async function listPlatformEvents(query = {}, deps = {}) {
       if (p.severity) events = events.filter((e) => p.severity.has(e.severity))
       if (p.market) events = events.filter((e) => String(e.market || '').toLowerCase() === p.market)
       if (r.degraded_parts?.length) degraded.push(...r.degraded_parts.map((x) => `${a.name}:${x}`))
-      if (!p.cursor) sources[a.name].freshness_at = (r.events || []).reduce((m, e) => (!m || e.occurred_at > m ? e.occurred_at : m), null)
+      if (!cursor) sources[a.name].freshness_at = (r.events || []).reduce((m, e) => (!m || e.occurred_at > m ? e.occurred_at : m), null)
       return { events, complete_above: r.complete_above || null }
     } catch (error) {
       sources[a.name].ok = false
@@ -142,7 +145,24 @@ export async function listPlatformEvents(query = {}, deps = {}) {
       return null
     }
   }))
-  const page = mergePage(results.filter(Boolean), { limit: p.limit, cursor: p.cursor })
+  return mergePage(results.filter(Boolean), { limit: p.limit, cursor })
+  }
+  // A source can read its whole row budget and keep none of it (noise it owns,
+  // e.g. send-success bookkeeping), which raises the page horizon above every
+  // real event: an empty page that still has a cursor. Keep walking — bounded —
+  // until the page has events or the window is exhausted, so "nothing recorded"
+  // is only ever said when it is true.
+  let page = await readPage(p.cursor)
+  const seen = new Set(page.events.map((e) => e.event_id))
+  for (let hops = 0; page.next_cursor && page.events.length < p.limit && hops < MAX_EMPTY_HOPS; hops++) {
+    const next = await readPage(decodeCursor(page.next_cursor))
+    const fresh = next.events.filter((e) => !seen.has(e.event_id))
+    for (const e of fresh) seen.add(e.event_id)
+    const combined = [...page.events, ...fresh]
+    page = combined.length > p.limit
+      ? { events: combined.slice(0, p.limit), next_cursor: encodeCursor(keyOf(combined[p.limit - 1])) }
+      : { events: combined, next_cursor: next.next_cursor }
+  }
   return {
     ok: true,
     events: page.events,
