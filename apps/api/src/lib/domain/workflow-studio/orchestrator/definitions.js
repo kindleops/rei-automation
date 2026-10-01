@@ -137,13 +137,15 @@ export const BLUEPRINTS = Object.freeze({
     domain: 'seller',
     reach: 'internal',
     icon: 'shield',
-    summary: 'When a seller says they are not interested, withdraw every pending follow-up on that conversation.',
+    // Owner rule (2026-09-30): "A not interested is a 30 day follow up." The
+    // nurture follow-up the seller flow schedules for this reply is kept.
+    summary: 'When a seller says they are not interested, withdraw the other pending follow-ups on that conversation. The 30-day check-back stays scheduled.',
     params: {},
     build: () => ({
       schema: 'lc.workflow/v1',
       trigger: { type: 'seller_not_interested' },
       nodes: [
-        n('stop', 'action', 'Cancel pending follow-ups', { capability: 'seller.cancel_follow_ups', inputs: { seller: { var: 'trigger' }, reason: 'seller_not_interested' } }),
+        n('stop', 'action', 'Cancel pending follow-ups', { capability: 'seller.cancel_follow_ups', inputs: { seller: { var: 'trigger' }, reason: 'seller_not_interested', keep_nurture_follow_ups: true } }),
         n('done', 'terminate', 'Follow-ups withdrawn', { outcome: 'stopped' }),
       ],
       edges: [{ from: 'trigger', to: 'stop' }, { from: 'stop', to: 'done' }],

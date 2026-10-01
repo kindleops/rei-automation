@@ -163,6 +163,9 @@ export async function cancelSupabasePendingOutbound(
     cancelled_by = "compliance_guard",
     now = new Date().toISOString(),
     dry_run = false,
+    /** Owner rule (2026-09-30): "A not interested is a 30 day follow up."
+     *  When true, a scheduled nurture follow-up survives a follow-up sweep. */
+    keep_nurture_follow_ups = false,
   } = {},
   deps = {}
 ) {
@@ -247,6 +250,14 @@ export async function cancelSupabasePendingOutbound(
     }
 
     const meta = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    if (
+      keep_nurture_follow_ups &&
+      policy !== CANCELLATION_POLICIES.COMPLIANCE_TERMINAL &&
+      row_type === "followup" &&
+      lower(meta.followup_reason).startsWith("nurture_followup:")
+    ) {
+      return false;
+    }
     const row_inbound =
       clean(meta.inbound_message_event_id) ||
       clean(meta.source_inbound_event_id) ||

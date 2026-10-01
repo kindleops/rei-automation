@@ -83,6 +83,53 @@ function buildFollowupDedupeKey(thread_key, intent) {
   return `seller_followup:${clean(thread_key)}:${clean(intent)}`;
 }
 
+// Mirrors uq_send_queue_active_dedupe_key: a row in one of these statuses
+// (and not yet sent) is a LIVE follow-up; anything else is a finished cycle.
+const LIVE_FOLLOWUP_STATUSES = new Set([
+  "queued", "ready", "runnable", "scheduled", "pending", "paused",
+  "paused_after_hours", "processing", "approved", "approval", "held", "sending",
+]);
+
+function isLiveFollowUpRow(row) {
+  if (!row || typeof row !== "object") return true; // unknown ⇒ treat as live (never double-schedule)
+  if (row.sent_at) return false;
+  const status = clean(row.queue_status).toLowerCase();
+  if (!status) return true;
+  return LIVE_FOLLOWUP_STATUSES.has(status);
+}
+
+/**
+ * The cycle discriminator for a follow-up whose base key already belongs to a
+ * finished cycle: the inbound that asked for it, else the UTC day. Same inbound
+ * (or same day) replays stay idempotent.
+ */
+function followUpCycleId(context = {}, now = new Date()) {
+  return (
+    clean(context.inbound_message_event_id) ||
+    clean(context.source_inbound_event_id) ||
+    clean(context.inbound_event_id) ||
+    now.toISOString().slice(0, 10)
+  );
+}
+
+async function findLiveFollowUpRow(supabase, to_phone_number, use_case_template) {
+  try {
+    let query = supabase
+      .from("send_queue")
+      .select("id,queue_status,sent_at,dedupe_key")
+      .eq("thread_key", to_phone_number)
+      .eq("use_case_template", use_case_template)
+      .in("queue_status", [...LIVE_FOLLOWUP_STATUSES]);
+    if (typeof query.limit === "function") query = query.limit(5);
+    const { data, error } = await query;
+    if (error) return { error };
+    const live = (Array.isArray(data) ? data : []).find((row) => !row.sent_at) || null;
+    return { row: live };
+  } catch (error) {
+    return { error };
+  }
+}
+
 function buildFollowupQueueKey(dedupe_key) {
   return `followup:${crypto.createHash("sha1").update(clean(dedupe_key)).digest("hex")}`;
 }
@@ -292,11 +339,16 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
     return { ok: false, skipped: true, reason: "invalid_thread_key_phone" };
   }
 
-  const dedupe_key = buildFollowupDedupeKey(normalized_thread_key, intent);
-  const queue_key = buildFollowupQueueKey(dedupe_key);
+  const base_dedupe_key = buildFollowupDedupeKey(normalized_thread_key, intent);
   const scheduled_for = plan.scheduled_for;
+  const use_case_template =
+    intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
+      ? clean(context.followup_use_case) || "stage_no_reply"
+      : `nurture_${intent}`;
 
-  const result = await enqueueSendQueueItem(
+  const enqueueWithKey = (dedupe_key) => {
+    const queue_key = buildFollowupQueueKey(dedupe_key);
+    return enqueueSendQueueItem(
     {
       queue_key,
       queue_id: queue_key,
@@ -312,10 +364,7 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
       // Stage-layer no-reply follow-ups are attributed to the OUTBOUND's real
       // use case (e.g. ownership_check) so KPI/template rollups never see a
       // fabricated nurture bucket for a seller who simply hasn't replied yet.
-      use_case_template:
-        intent === STAGE_NO_REPLY_FOLLOWUP_INTENT
-          ? clean(context.followup_use_case) || "stage_no_reply"
-          : `nurture_${intent}`,
+      use_case_template,
       master_owner_id: clean(context.master_owner_id) || null,
       property_id: clean(context.property_id) || null,
       // Agent identity so deferred resolution can render agent-identifying
@@ -331,7 +380,42 @@ export async function scheduleFollowUp(intent, thread_key, context = {}, supabas
       },
     },
     { supabase }
-  );
+    );
+  };
+
+  let dedupe_key = base_dedupe_key;
+  let queue_key = buildFollowupQueueKey(dedupe_key);
+  let result = await enqueueWithKey(dedupe_key);
+
+  // The base key is permanent (send_queue.queue_key is unique across ALL
+  // statuses), so once a thread's first "not interested" follow-up was sent
+  // or cancelled, every later "not interested" replayed onto that dead row
+  // and was reported as duplicate_followup_exists: no thread in production
+  // ever got a second nurture follow-up. A finished cycle is not a duplicate;
+  // only a LIVE follow-up of the same kind is.
+  if (result?.idempotent_replay && !isLiveFollowUpRow(result.raw)) {
+    const live = await findLiveFollowUpRow(supabase, to_phone_number, use_case_template);
+    if (live.error) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "followup_live_check_failed",
+        thread_key: normalized_thread_key,
+      };
+    }
+    if (live.row) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "duplicate_followup_exists",
+        thread_key: normalized_thread_key,
+        queue_row_id: live.row.id || null,
+      };
+    }
+    dedupe_key = `${base_dedupe_key}:cycle:${followUpCycleId(context)}`;
+    queue_key = buildFollowupQueueKey(dedupe_key);
+    result = await enqueueWithKey(dedupe_key);
+  }
 
   if (result?.reason === "phone_suppressed_21610") {
     return {
@@ -389,6 +473,7 @@ export async function cancelPendingFollowUpsForThread({
   inbound_received_at = null,
   reason = "cancelled_followup_on_inbound_reply",
   now = new Date().toISOString(),
+  keep_nurture_follow_ups = false,
   supabase = defaultSupabase,
 } = {}) {
   const normalized_thread_key = normalizePhone(thread_key) || clean(thread_key);
@@ -409,6 +494,7 @@ export async function cancelPendingFollowUpsForThread({
       inbound_received_at,
       cancelled_by: "inbound_takeover",
       now,
+      keep_nurture_follow_ups: keep_nurture_follow_ups === true,
     },
     { supabase }
   );
