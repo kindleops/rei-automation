@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useClaimedKeys } from '../../../../shared/lc/keys'
 import { Icon } from '../../../../shared/icons'
 import { fetchRun, fetchWorkflow } from '../observatory-api'
 import type { Period, RegistryEntry, RunDetailResponse } from '../observatory-types'
@@ -85,6 +86,8 @@ export function CanvasMode({ workflows, wfKey, onWorkflow, period, onPeriod, nod
   const toggleGroup = useCallback((g: string) => setExpanded((cur) => { const n = new Set(cur); if (n.has(g)) n.delete(g); else n.add(g); return n }), [])
 
   // keyboard: / search · f fit · + − zoom · b focus branch · esc clear
+  // (claimed while the canvas is mounted so global single-key jumps yield)
+  useClaimedKeys(['/', 'f', '0', '+', '=', '-', 'b'])
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement

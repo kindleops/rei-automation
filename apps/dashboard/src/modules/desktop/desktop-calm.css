@@ -386,3 +386,96 @@ html.is-desktop-modern:not([data-nexus-theme='light']) .dsk-top__glass {
 html.is-desktop-modern .dsk-side__glide { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
 html.is-desktop-modern .dsk-side__item.is-active .dsk-side__glyph { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
 html.is-desktop-modern .dsk-cmd__field { background: var(--dsk-chip-bg); box-shadow: var(--dsk-chip-shadow); }
+
+/* ══ EXPERIENCE SYSTEM 4.0 · COMMAND RAIL ═════════════════════════════════
+   Live is a state, not an animation: the shell's dots are static and calm.
+   A real arrival may ring once (LCLive); nothing loops forever. */
+.dsk-side__status.is-live i::after,
+.dsk-top__live::after,
+.dsk-top__btn--queue.is-live .dsk-top__q::after { animation: none !important; opacity: 0 !important; }
+.dsk-q-orb.is-live i { animation: none !important; }
+.dsk-side__status.is-live i { box-shadow: 0 0 6px rgba(61, 220, 151, 0.55); }
+.dsk-side__status.is-warn i { box-shadow: 0 0 6px rgba(245, 180, 81, 0.5); }
+.dsk-side__status.is-down i { box-shadow: 0 0 6px rgba(255, 93, 108, 0.5); }
+
+/* the footer status is the System tray's trigger */
+button.dsk-side__status {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 6px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--dsk-ink);
+  transition: background-color 0.15s ease;
+}
+button.dsk-side__status:hover,
+button.dsk-side__status[data-state='open'] { background: var(--dsk-hover); }
+button.dsk-side__status:focus-visible { box-shadow: var(--lc-focus-ring); }
+
+/* the System plane */
+.dsk-sys { display: flex; flex-direction: column; gap: 8px; }
+.dsk-sys__head { display: flex; align-items: center; justify-content: space-between; }
+.dsk-sys__tel { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-2); }
+.dsk-sys__tel b { color: var(--lc-ink-1); font-weight: 650; }
+.dsk-sys__sub { margin-top: 4px; }
+.dsk-sys__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.dsk-sys__row {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.dsk-sys__row:hover { background: var(--lc-inner-bg-hover); }
+.dsk-sys__row:focus-visible { box-shadow: var(--lc-focus-ring); }
+.dsk-sys__name { font: var(--lc-t-row); font-weight: 520; color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsk-sys__meta { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.dsk-sys__need {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font: 650 10.5px/18px var(--lc-font-ui);
+  text-align: center;
+  color: var(--lc-attn);
+  background: rgba(var(--lc-attn-rgb), 0.12);
+  font-variant-numeric: tabular-nums;
+}
+.dsk-sys__open { align-self: flex-start; margin-top: 4px; }
+
+/* ══ THEMES: the environment itself ═══════════════════════════════════════ */
+/* TRUE BLACK — OLED: the room is black; depth comes from edges, not grey */
+html.is-desktop-modern[data-nexus-theme='true_black'] {
+  --dsk-bg: #000;
+  --dsk-fill: var(--lg-fill, 0 0 0);
+  --dsk-glass: rgb(var(--dsk-fill) / calc(0.86 * var(--lg-alpha, 1)));
+  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.96 * var(--lg-alpha, 1)));
+  --dsk-edge: rgba(255, 255, 255, 0.09);
+  --dsk-edge-hi: rgba(255, 255, 255, 0.14);
+  --dsk-tile: rgba(255, 255, 255, 0.04);
+  --dsk-tile-hi: rgba(255, 255, 255, 0.075);
+  --dsk-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 18px 44px -26px rgba(0, 0, 0, 1);
+}
+/* RED OPS — an environment: a low red field under the room; semantics untouched */
+html.is-desktop-modern[data-nexus-theme='red_ops'] {
+  --dsk-bg: #0b0606;
+  --dsk-fill: var(--lg-fill, 18 12 12);
+  --dsk-edge: rgba(255, 120, 120, 0.08);
+  --dsk-edge-hi: rgba(255, 120, 120, 0.13);
+}
+html.is-desktop-modern[data-nexus-theme='red_ops'] body {
+  background:
+    radial-gradient(1200px 520px at 12% -10%, rgba(255, 40, 40, 0.07), transparent 60%),
+    radial-gradient(900px 480px at 100% 110%, rgba(255, 40, 40, 0.05), transparent 60%),
+    var(--dsk-bg) !important;
+}

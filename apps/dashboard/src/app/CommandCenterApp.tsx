@@ -2,6 +2,7 @@ import { startTransition, Suspense, useCallback, useEffect, useMemo, useRef, use
 import { pushRoutePath, replaceRoutePath, useRoutePath } from './router'
 import { resolveRoute } from './routes'
 import { useCommandGrammar, type CommandBinding } from '../shared/command-grammar'
+import { isKeyClaimed } from '../shared/lc/keys'
 import { CopilotShell, type CopilotContext, type ResolvedIntent } from '../shared/copilot'
 import { isCopilotSurfaceEnabled } from '../shared/copilot/copilot-availability'
 import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shared/BriefingPanel'
@@ -498,7 +499,7 @@ export const CommandCenterApp = () => {
         return
       }
 
-      if (event.key === '/' && !cmdOpen && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+      if (event.key === '/' && !cmdOpen && !event.defaultPrevented && !isKeyClaimed('/') && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
         event.preventDefault()
         openCmd()
       }

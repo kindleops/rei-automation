@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isKeyClaimed } from './lc/keys'
 
 // ── Command Grammar Engine ─────────────────────────────────────────────────
 // Vim-inspired multi-key command sequences for NEXUS.
@@ -45,6 +46,10 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
 
   const onKeyDown = useCallback((event: KeyboardEvent) => {
     const activeBindings = bindingsRef.current
+
+    // The surface the operator is in owns its keys: a handler that already
+    // consumed the key, or a surface that claimed it, wins over an app jump.
+    if (event.defaultPrevented || isKeyClaimed(event.key)) return
 
     // Skip when user is in an input field
     const target = event.target
@@ -115,9 +120,10 @@ export const useCommandGrammar = (bindings: CommandBinding[]) => {
       onKeyDown(event)
     }
 
-    window.addEventListener('keydown', handler, true)
+    // Bubble phase: React surface handlers run first and can claim the key.
+    window.addEventListener('keydown', handler)
     return () => {
-      window.removeEventListener('keydown', handler, true)
+      window.removeEventListener('keydown', handler)
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }

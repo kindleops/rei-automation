@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Icon } from '../../shared/icons'
+import { LCTooltip } from '../../shared/lc'
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { useAuth } from '../../components/auth/AuthProvider'
@@ -120,6 +121,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
       <DesktopSidebar
         routePath={routePath}
         status={{ tone, label: queueLabel(queue), detail: queue.health ? `${(queue.health.sentTodayCount ?? 0).toLocaleString()} sent today` : undefined }}
+        queueFailedToday={queue.health ? failed : null}
         onOpenSettings={openSettings}
       />
 
@@ -135,52 +137,56 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
             onExecute={onExecute}
           />
           <div className="dsk-top__actions">
-            <button
+            <LCTooltip content="Split screen" side="bottom">
+              <button
               type="button"
               className={cls('dsk-top__btn dsk-top__btn--layout', panel === 'layout' && 'is-active', split.panes.length > 0 && 'is-split')}
               onClick={() => toggle('layout')}
               aria-label={`Split screen — ${split.panes.length + 1} open`}
               aria-expanded={panel === 'layout'}
-              data-tip="Split screen"
             >
               <span className={cls('dsk-top__panes', `is-${split.panes.length + 1}`)} aria-hidden>{Array.from({ length: split.panes.length + 1 }, (_, k) => <i key={k} />)}</span>
             </button>
+            </LCTooltip>
             <span className="dsk-top__sep" aria-hidden />
             <div className="dsk-top__kpi" title="Performance KPI"><InboxKpiOrb /></div>
-            <button
+            <LCTooltip content="Notifications" side="bottom">
+              <button
               type="button"
               className={cls('dsk-top__btn', panel === 'notifications' && 'is-active')}
               onClick={() => toggle('notifications')}
               aria-label={unreadCount ? `Notifications — ${unreadCount} unread` : 'Notifications'}
               aria-expanded={panel === 'notifications'}
-              data-tip="Notifications"
             >
               <Icon name="bell" size={17} strokeWidth={1.7} />
               {unreadCount > 0 ? <span className="dsk-top__badge">{unreadCount > 99 ? '99+' : unreadCount}</span> : null}
             </button>
-            <button
+            </LCTooltip>
+            <LCTooltip content="Live activity" side="bottom">
+              <button
               type="button"
               className={cls('dsk-top__btn dsk-top__btn--live', panel === 'activity' && 'is-active')}
               onClick={() => toggle('activity')}
               aria-label="Live activity"
               aria-expanded={panel === 'activity'}
-              data-tip="Live activity"
             >
               <Icon name="activity" size={17} strokeWidth={1.7} />
               <span className="dsk-top__live" aria-hidden />
             </button>
-            <button
+            </LCTooltip>
+            <LCTooltip content={queueLabel(queue)} side="bottom">
+              <button
               type="button"
               className={cls('dsk-top__btn dsk-top__btn--queue', `is-${tone}`, panel === 'queue' && 'is-active')}
               onClick={() => toggle('queue')}
               aria-label={`Queue — ${queueLabel(queue)}`}
               aria-expanded={panel === 'queue'}
-              data-tip={queueLabel(queue)}
             >
               <Icon name="send" size={16} strokeWidth={1.7} />
               <span className="dsk-top__qdot" aria-hidden />
               {failed > 0 ? <span className="dsk-top__badge is-warn">{failed > 99 ? '99+' : failed}</span> : null}
             </button>
+            </LCTooltip>
             <span className="dsk-top__sep" aria-hidden />
             <button
               type="button"

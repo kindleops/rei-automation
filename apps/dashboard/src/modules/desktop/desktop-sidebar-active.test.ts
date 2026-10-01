@@ -5,7 +5,7 @@ import {
   publishInboxDealIntelligenceShowing,
   subscribeInboxDealIntelligenceShowing,
 } from '../mobile/mobile-inbox-bridge'
-import { activeFor } from './DesktopSidebar'
+import { activeFor } from './rail/rail-nav'
 
 const inbox = NEXUS_APPS.find((app) => app.id === 'inbox')!
 const intel = NEXUS_APPS.find((app) => app.id === 'deal-intelligence')!
