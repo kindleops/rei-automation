@@ -51,7 +51,8 @@ import {
   resolveGraphFilterPlan,
 } from "@/lib/domain/campaigns/campaign-graph-filter-plan.js";
 import { collapsePropertyTypeOptions } from "@/lib/domain/campaigns/campaign-property-type-families.js";
-import { getCampaignFieldDefinition } from "@/lib/domain/campaigns/campaign-field-catalog.js";
+import { CAMPAIGN_FIELD_CATALOG, getCampaignFieldDefinition } from "@/lib/domain/campaigns/campaign-field-catalog.js";
+import { DRAWN_AREA_FIELD_KEY, normalizeDrawnArea } from "@/lib/domain/campaigns/campaign-drawn-area.js";
 
 import { makeCampaignQueuePlanStore, makeCampaignQueuePlanDeps } from "../helpers/campaign-queue-plan-store.mjs";
 
@@ -787,4 +788,159 @@ test("router: a number at today's cap can't take a message now, but readiness do
     { textgridNumberRows: capped },
   );
   assert.equal(readinessView.ok, true);
+});
+
+// ── Drawn map area → exact cohort (owner, 2026-09-30: "no arbitrary ordering,
+// no silent truncation") ─────────────────────────────────────────────────────
+
+const AREA_POLYGON = { type: "Polygon", coordinates: [[[-80.45, 25.55], [-80.10, 25.55], [-80.10, 25.98], [-80.45, 25.98], [-80.45, 25.55]]] };
+
+/**
+ * The database resolves the polygon (campaign_target_graph_in_area, proven on
+ * production: 7,273 rows for a Miami polygon, equal to a direct join). Here the
+ * fake returns a known "inside" set so the test checks the plumbing: the
+ * planner reads ONLY through the area, with its own filters, order and paging
+ * on top, and counts the area's rows exactly.
+ */
+function areaStore(insideIds) {
+  const store = makeCampaignQueuePlanStore();
+  const calls = [];
+  const base = store.supabase;
+  const rpcResult = (result) => ({
+    maybeSingle: async () => result,
+    single: async () => result,
+    then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
+  });
+  const supabase = {
+    from: (table) => base.from(table),
+    rpc(name, params, opts) {
+      calls.push({ name, params, opts });
+      if (name === "campaign_target_graph_in_area") {
+        for (const row of store.table("campaign_target_graph").rows) {
+          if (insideIds.has(row.property_id) && !store.table("__graph_in_area").rows.some((r) => r.graph_id === row.graph_id)) {
+            store.table("__graph_in_area").rows.push(row);
+          }
+        }
+        return {
+          select(columns) {
+            const chain = base.from("__graph_in_area").select(columns, opts?.count ? { count: opts.count } : undefined);
+            // PostgREST reports the exact total alongside a limited page.
+            const proxy = new Proxy(chain, {
+              get(target, prop) {
+                if (prop === "limit") return () => proxy;
+                const value = target[prop];
+                return typeof value === "function" ? (...args) => { const out = value.apply(target, args); return out === target ? proxy : out; } : value;
+              },
+            });
+            return proxy;
+          },
+        };
+      }
+      if (name === "map_area_property_count") return rpcResult({ data: insideIds.size, error: null });
+      if (name === "campaign_entity_contact_review_flags") return rpcResult({ data: [], error: null });
+      return base.rpc(name, params);
+    },
+  };
+  return { store, supabase, calls };
+}
+
+test("drawn area: a polygon is validated and closed; a bad or degenerate one never passes", () => {
+  const open = normalizeDrawnArea([[-80.45, 25.55], [-80.10, 25.55], [-80.10, 25.98]]);
+  assert.equal(open.ok, true);
+  assert.deepEqual(open.area.coordinates[0].at(-1), [-80.45, 25.55], "ring closed");
+  assert.equal(normalizeDrawnArea(AREA_POLYGON).ok, true);
+  assert.equal(normalizeDrawnArea([[1, 2], [1, 2], [1, 2]]).ok, false);
+  assert.equal(normalizeDrawnArea([[200, 0], [1, 0], [1, 1]]).ok, false);
+  assert.equal(normalizeDrawnArea([[0, 0], [1, 1], [2, 2]]).ok, false, "points on one line enclose nothing");
+  // Not exactly collinear in floating point: a sliver, still not an area.
+  assert.equal(normalizeDrawnArea([[-95.6, 29.6], [-95.5, 29.7], [-95.4, 29.8]]).ok, false);
+  // A self-crossing lasso is an area (the database counts its two lobes), even
+  // though its signed area cancels to zero.
+  assert.equal(normalizeDrawnArea([[-95.6, 29.6], [-95.2, 30.0], [-95.2, 29.6], [-95.6, 30.0]]).ok, true);
+  assert.equal(normalizeDrawnArea("nope").ok, false);
+  assert.equal(normalizeDrawnArea(null).ok, false);
+});
+
+test("drawn area: recognised by key, applicable, and never offered in the builder's field list", () => {
+  assert.equal(getCampaignFieldDefinition(DRAWN_AREA_FIELD_KEY)?.type, "geo_area");
+  assert.equal(CAMPAIGN_FIELD_CATALOG.some((field) => field.key === DRAWN_AREA_FIELD_KEY), false);
+  const verdict = graphFieldApplicability(DRAWN_AREA_FIELD_KEY);
+  assert.equal(verdict.applicable, true);
+  assert.equal(verdict.column, null);
+});
+
+test("drawn area: Reach and Build read the exact area cohort through the database, never the whole graph", async () => {
+  const inside = new Set(["prop_1", "prop_2", "prop_3", "prop_4"]);
+  const { store, supabase, calls } = areaStore(inside);
+  store.seedRow("campaigns", makeCampaign("camp_area", {
+    market: null,
+    total_cap: 1000,
+    metadata: { stage_code: "S1", template_use_case: "ownership_check", target_filters: { properties: [{ field_key: DRAWN_AREA_FIELD_KEY, operator: "within", value: AREA_POLYGON }] } },
+  }));
+  for (const row of MIAMI_FLEET) store.seedRow("textgrid_numbers", row);
+  for (let i = 1; i <= 7; i += 1) store.seedRow("campaign_target_graph", graphRow(i));
+  const deps = { supabase, loadDispatchBlockedSets: blockedSets };
+
+  const preview = await previewCampaignTargets({
+    source: "campaign_target_graph",
+    filters: { properties: [{ field_key: DRAWN_AREA_FIELD_KEY, operator: "within", value: AREA_POLYGON }] },
+    build_limit: 1000,
+  }, deps);
+  assert.equal(preview.build_simulation.ok, true, preview.build_simulation.error);
+
+  const built = await buildCampaignTargets("camp_area", {}, deps);
+  assert.equal(built.ok, true, built.message);
+  const targets = store.rows("campaign_targets").filter((row) => row.campaign_id === "camp_area");
+  assert.deepEqual([...new Set(targets.map((row) => row.property_id))].sort(), ["prop_1", "prop_2", "prop_3", "prop_4"], "only the area, all of it");
+  assert.equal(preview.build_simulation.built, targets.length, "Reach builds what Build builds");
+
+  const areaCalls = calls.filter((call) => call.name === "campaign_target_graph_in_area");
+  assert.ok(areaCalls.length >= 2, "both Reach and Build read through the area");
+  for (const call of areaCalls) assert.deepEqual(call.params.p_area, AREA_POLYGON, "the polygon travels in the body, never as an id list");
+});
+
+test("drawn area: other filters still narrow inside it", async () => {
+  const inside = new Set(["prop_1", "prop_2", "prop_3"]);
+  const { store, supabase } = areaStore(inside);
+  store.seedRow("campaigns", makeCampaign("camp_area_type", {
+    market: null,
+    metadata: {
+      stage_code: "S1",
+      template_use_case: "ownership_check",
+      target_filters: {
+        properties: [
+          { field_key: DRAWN_AREA_FIELD_KEY, operator: "within", value: AREA_POLYGON },
+          { field_key: "properties.property_type", operator: "is_any_of", value: ["Single Family"] },
+        ],
+      },
+    },
+  }));
+  store.seedRow("campaign_target_graph", graphRow(1, { property_type: "Single Family" }));
+  store.seedRow("campaign_target_graph", graphRow(2));
+  store.seedRow("campaign_target_graph", graphRow(3, { property_type: "Single Family" }));
+  store.seedRow("campaign_target_graph", graphRow(9, { property_type: "Single Family" })); // outside the area
+  const built = await buildCampaignTargets("camp_area_type", {}, { supabase, loadDispatchBlockedSets: blockedSets });
+  assert.equal(built.ok, true, built.message);
+  const ids = [...new Set(store.rows("campaign_targets").filter((row) => row.campaign_id === "camp_area_type").map((row) => row.property_id))].sort();
+  assert.deepEqual(ids, ["prop_1", "prop_3"]);
+});
+
+test("drawn area: a broken polygon or a second area is refused by name, never widened", async () => {
+  for (const [label, filters] of [
+    ["broken", [{ field_key: DRAWN_AREA_FIELD_KEY, operator: "within", value: [[1, 2], [1, 2], [1, 2]] }]],
+    ["two areas", [
+      { field_key: DRAWN_AREA_FIELD_KEY, operator: "within", value: AREA_POLYGON },
+      { field_key: DRAWN_AREA_FIELD_KEY, operator: "within", value: AREA_POLYGON },
+    ]],
+  ]) {
+    const { store, supabase } = areaStore(new Set(["prop_1"]));
+    store.seedRow("campaigns", makeCampaign(`camp_bad_${label}`, { market: null, metadata: { stage_code: "S1", target_filters: { properties: filters } } }));
+    store.seedRow("campaign_target_graph", graphRow(1));
+    store.seedRow("campaign_target_graph", graphRow(2));
+    const refused = await buildCampaignTargets(`camp_bad_${label}`, {}, { supabase });
+    assert.equal(refused.ok, false, label);
+    assert.equal(refused.status, 422, label);
+    assert.match(refused.message, /Drawn map area/, label);
+    assert.equal(store.rows("campaign_targets").length, 0, label);
+  }
 });

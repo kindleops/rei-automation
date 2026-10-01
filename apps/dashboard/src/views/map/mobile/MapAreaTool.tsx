@@ -39,7 +39,10 @@ export interface AreaSummary {
   contacted: number
   types: Array<{ type: string; n: number }>
   markets: Array<{ market: string; n: number }>
-  property_ids: string[]
+  /** First 5,000 ids by property_id: a labelled sample (`property_ids_sampled`),
+   *  never the cohort. Campaign drafts target the polygon, not this list. */
+  property_ids?: string[]
+  property_ids_sampled?: boolean
 }
 
 const SRC = 'nx-draw'
@@ -336,12 +339,12 @@ export function MapAreaTool({ map, epoch, drawing, onDrawingChange, reducedMotio
                   <div className="mx-area__actions">
                     {s.count > 0 && draft === 'idle' && (
                       <button type="button" className="mx-act is-primary" data-area-action="draft" onClick={() => setDraft('confirm')}>
-                        Build campaign draft · {s.property_ids.length.toLocaleString()}
+                        Build campaign draft · {s.count.toLocaleString()}
                       </button>
                     )}
                     {draft === 'confirm' && (
                       <div className="mx-area__confirm">
-                        <p>Create a <strong>draft</strong> campaign targeting these {s.property_ids.length.toLocaleString()} properties{s.count > s.property_ids.length ? ` (first ${s.property_ids.length.toLocaleString()} of ${s.count.toLocaleString()})` : ''}? It opens in the builder; nothing is queued or sent.</p>
+                        <p>Create a <strong>draft</strong> campaign for this drawn area: all {s.count.toLocaleString()} properties inside it, resolved exactly when the campaign reads its audience. It opens in the builder; nothing is queued or sent.</p>
                         <div className="mx-area__row is-two">
                           <button type="button" className="mx-act" onClick={() => setDraft('idle')}>Cancel</button>
                           <button

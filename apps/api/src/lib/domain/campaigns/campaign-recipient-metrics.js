@@ -4,6 +4,7 @@
  */
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { campaignGraphQuery, drawnAreaFromFilters } from '@/lib/domain/campaigns/campaign-drawn-area.js'
 
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 
@@ -145,7 +146,13 @@ async function countGraphMatchesForCampaign(supabase, campaign, fallback) {
   try {
     const filters = campaign.metadata?.target_filters || {}
     const propertyFilters = Array.isArray(filters.properties) ? filters.properties : []
-    let query = supabase.from('campaign_target_graph').select('graph_id', { count: 'exact', head: true })
+    // A drawn-area campaign matches the rows inside its polygon, not the graph.
+    let query = campaignGraphQuery(supabase, {
+      area: drawnAreaFromFilters(propertyFilters),
+      table: 'campaign_target_graph',
+      columns: 'graph_id',
+      selectOptions: { count: 'exact', head: true },
+    })
     for (const filter of propertyFilters) {
       const key = clean(filter.field_key)
       const values = Array.isArray(filter.value) ? filter.value : [filter.value]

@@ -157,10 +157,23 @@ describe('draw an area', () => {
     expect(circleMiles([-95.4, 29.75], [-95.38, 29.75])).toBeGreaterThan(1.1)
     expect(circleMiles([-95.4, 29.75], [-95.38, 29.75])).toBeLessThan(1.3)
   })
-  it('the handoff is a draft targeting exactly the ids inside the shape', () => {
-    const summary = { count: 32, property_ids: ['a', 'b'], markets: [{ market: 'Houston, TX', n: 32 }] } as any
-    expect(areaTargetFilters(summary)).toEqual({ properties: [{ field_key: 'properties.property_id', operator: 'in', value: ['a', 'b'] }] })
-    expect(areaCampaignName(summary, '1.2 mi radius')).toBe('Map area · Houston, TX · 32 properties · 1.2 mi radius')
+  it('the handoff is the drawn polygon itself, never the sampled id list', () => {
+    // 18,400 properties in the shape, 5,000 sampled ids: the campaign must not
+    // see the sample. It gets the closed polygon and resolves the exact cohort.
+    const summary = { count: 18_400, property_ids: ['a', 'b'], markets: [{ market: 'Houston, TX', n: 18_400 }] } as any
+    const ring: Array<[number, number]> = [[-95.40, 29.70], [-95.30, 29.70], [-95.30, 29.80]]
+    const filters = areaTargetFilters(ring)
+    expect(filters).toEqual({
+      properties: [{
+        field_key: 'properties.drawn_area',
+        operator: 'within',
+        value: { type: 'Polygon', coordinates: [[[-95.40, 29.70], [-95.30, 29.70], [-95.30, 29.80], [-95.40, 29.70]]] },
+        domain: 'properties',
+        category: 'Location & Market',
+      }],
+    })
+    expect(JSON.stringify(filters)).not.toContain('property_id')
+    expect(areaCampaignName(summary, '1.2 mi radius')).toBe('Map area · Houston, TX · 18,400 properties · 1.2 mi radius')
   })
 })
 

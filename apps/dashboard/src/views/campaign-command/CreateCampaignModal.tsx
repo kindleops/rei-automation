@@ -41,6 +41,9 @@ import {
   CAMPAIGN_FIELD_KEY_ALIASES,
   createEmptyFilterGroups,
   defaultOperatorForField,
+  DRAWN_AREA_FIELD,
+  DRAWN_AREA_FIELD_KEY,
+  drawnAreaValueLabel,
   defaultValueForField,
   getFieldCatalog,
   isFieldCampaignInapplicable,
@@ -147,6 +150,7 @@ const FRIENDLY_OPERATORS: Record<string, string> = {
   is_false: 'is false',
   on_or_after: 'on or after',
   on_or_before: 'on or before',
+  within: 'is inside',
 }
 
 const SUGGESTED_FIELD_KEYS: Record<string, string[]> = {
@@ -663,6 +667,7 @@ const buildActiveFilterDraft = (
 const isFilterValid = (filter: CampaignFilterCondition, field: CampaignFieldDefinition): boolean => {
   const op = filter.operator
   if (!filter.fieldKey || !op) return false
+  if (field.type === 'geo_area') return drawnAreaValueLabel(filter.value) !== null
   if (EMPTY_VALUE_OPERATORS.has(op) || op === 'is_true' || op === 'is_false') return true
   if (field.type === 'boolean') return true
   if (op === 'between') {
@@ -1060,6 +1065,9 @@ export const CreateCampaignModal = ({
       const canonicalField = map.get(canonicalKey)
       if (canonicalField && !map.has(legacyKey)) map.set(legacyKey, canonicalField)
     }
+    // A drawn map area is never offered in the picker, but a campaign that
+    // carries one must render it (and keep it on save) rather than hide it.
+    if (!map.has(DRAWN_AREA_FIELD_KEY)) map.set(DRAWN_AREA_FIELD_KEY, DRAWN_AREA_FIELD)
     return map
   }, [catalog])
 
@@ -1222,6 +1230,7 @@ export const CreateCampaignModal = ({
   }
 
   const getValueLabel = (filter: CampaignFilterCondition, field: CampaignFieldDefinition): string => {
+    if (field.type === 'geo_area') return drawnAreaValueLabel(filter.value) ?? 'Drawn area (not a valid polygon)'
     const op = filter.operator
     if (EMPTY_VALUE_OPERATORS.has(op)) return '(no value required)'
     // The friendly operator label already reads "is true" / "is false", so
@@ -1669,7 +1678,9 @@ export const CreateCampaignModal = ({
           )}
 
           <div className="cmp-active-filter-actions">
-            <button type="button" onClick={() => editFilter(filter.id)}>Edit</button>
+            {field.type !== 'geo_area' && (
+              <button type="button" onClick={() => editFilter(filter.id)}>Edit</button>
+            )}
             <button type="button" onClick={() => removeFilter(filter)}>Remove</button>
           </div>
         </div>

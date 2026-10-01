@@ -1,4 +1,5 @@
 import { collapsePropertyTypeOptions } from '@/lib/domain/campaigns/campaign-property-type-families.js'
+import { DRAWN_AREA_FIELD_KEY } from '@/lib/domain/campaigns/campaign-drawn-area.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
   loadCanonicalMarketDirectory,
@@ -940,6 +941,30 @@ function buildFieldCatalog() {
 
 export const CAMPAIGN_FIELD_CATALOG = Object.freeze(buildFieldCatalog())
 export const CAMPAIGN_FIELD_BY_KEY = new Map(CAMPAIGN_FIELD_CATALOG.map((field) => [field.key, field]))
+
+/**
+ * A polygon drawn on the Map (see campaign-drawn-area.js). Not a column: the
+ * audience is resolved inside the database. Recognised by key so Reach and
+ * Build apply it, and deliberately absent from CAMPAIGN_FIELD_CATALOG, the list
+ * the builder offers: an area is drawn on the Map, not typed into a filter row.
+ */
+const DRAWN_AREA_FIELD = Object.freeze({
+  key: DRAWN_AREA_FIELD_KEY,
+  domain: 'properties',
+  category: 'Location & Market',
+  label: 'Drawn map area',
+  source_table_or_view: SOURCE_BY_DOMAIN.properties,
+  source_column: null,
+  type: 'geo_area',
+  operators: ['within'],
+  filterable: true,
+  searchable: false,
+  supports_options: false,
+  supports_counts: false,
+  supported_in_preview: true,
+  description: 'Every property inside an area drawn on the Map, resolved exactly when the campaign reads its audience.',
+})
+CAMPAIGN_FIELD_BY_KEY.set(DRAWN_AREA_FIELD_KEY, DRAWN_AREA_FIELD)
 
 export function normalizeCampaignFieldKey(value) {
   const normalized = clean(value)

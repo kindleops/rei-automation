@@ -151,6 +151,10 @@ export function graphColumnForField(filterOrKey) {
 export function graphFieldApplicability(fieldKey, { population = null } = {}) {
   const field = getCampaignFieldDefinition(fieldKey)
   if (!field) return { applicable: false, column: null, reason: 'unknown_field', message: INAPPLICABLE_REASONS.unknown_field }
+  // A drawn area is not a column filter: it chooses the audience read itself
+  // (campaign_target_graph_in_area), so it always applies and never narrows a
+  // column (applyGraphFilter leaves the query alone when there is no column).
+  if (field.type === 'geo_area') return { applicable: true, column: null, reason: null, message: null, source: 'drawn_area' }
   const column = graphColumnForField(field.key)
   if (!column) return { applicable: false, column: null, reason: 'not_in_audience', message: INAPPLICABLE_REASONS.not_in_audience }
   if (population instanceof Map && population.get(column) === false) {

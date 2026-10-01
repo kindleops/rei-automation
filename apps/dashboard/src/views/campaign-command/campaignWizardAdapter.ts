@@ -15,6 +15,7 @@ export type CampaignFieldType =
   | 'json'
   | 'number'
   | 'text'
+  | 'geo_area'
 
 export interface CampaignOperator {
   key: string
@@ -58,6 +59,44 @@ export interface CampaignFieldDefinition {
 /** A field the campaign audience can't filter on, per the backend catalog. */
 export function isFieldCampaignInapplicable(field: Pick<CampaignFieldDefinition, 'campaign_applicable'> | null | undefined): boolean {
   return field?.campaign_applicable === false
+}
+
+/**
+ * A polygon drawn on the Map (`properties.drawn_area`, a GeoJSON Polygon). The
+ * backend resolves it to the exact cohort inside the database. It is never in
+ * the field picker (an area is drawn, not typed), but a campaign that carries
+ * one must show it, keep it on save and let the operator remove it — a hidden
+ * row that silently fell away on save would widen the campaign.
+ */
+export const DRAWN_AREA_FIELD_KEY = 'properties.drawn_area'
+
+export const DRAWN_AREA_FIELD: CampaignFieldDefinition = {
+  key: DRAWN_AREA_FIELD_KEY,
+  domain: 'properties',
+  category: 'Location & Market',
+  label: 'Drawn map area',
+  source_table_or_view: 'properties',
+  source_column: '',
+  type: 'geo_area',
+  operators: [{ key: 'within', label: 'inside' }],
+  filterable: true,
+  searchable: false,
+  supports_options: false,
+  supports_counts: false,
+  supported_in_preview: true,
+  description: 'Every property inside an area drawn on the Map, resolved exactly when the campaign reads its audience.',
+  campaign_applicable: true,
+}
+
+/** "Drawn on the map · 14 corners" for a stored polygon; null when it isn't one. */
+export function drawnAreaValueLabel(value: unknown): string | null {
+  const polygon = value as { type?: string; coordinates?: unknown } | null
+  const ring = polygon && polygon.type === 'Polygon' && Array.isArray(polygon.coordinates)
+    ? (polygon.coordinates[0] as unknown)
+    : Array.isArray(value) ? value : null
+  if (!Array.isArray(ring) || ring.length < 3) return null
+  const corners = Math.max(3, ring.length - 1)
+  return `Drawn on the map · ${corners} corners`
 }
 
 export interface CampaignFieldCatalog {

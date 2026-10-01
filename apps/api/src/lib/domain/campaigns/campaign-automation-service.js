@@ -37,6 +37,14 @@ import {
   loadGraphColumnPopulation,
   resolveGraphFilterPlan,
 } from '@/lib/domain/campaigns/campaign-graph-filter-plan.js'
+import {
+  campaignGraphQuery,
+  drawnAreaFromFilters,
+  drawnAreaReasonMessage,
+  DRAWN_AREA_FIELD_KEY,
+  DRAWN_AREA_PROPERTY_COUNT_RPC,
+  normalizeDrawnArea,
+} from '@/lib/domain/campaigns/campaign-drawn-area.js'
 import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
 import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
@@ -612,6 +620,7 @@ function normalizeCatalogPreviewFilters(input = {}, campaign = null) {
   const unsupported = []
   const unknown = []
   const dropped = []
+  let drawnAreaSeen = false
 
   for (const domain of getCampaignDomainKeys()) {
     for (const filter of Array.isArray(groups[domain]) ? groups[domain] : []) {
@@ -637,6 +646,41 @@ function normalizeCatalogPreviewFilters(input = {}, campaign = null) {
           value: filter.value ?? filter.values ?? null,
           reason: 'unknown_campaign_field',
         })
+        continue
+      }
+      // A drawn map area is a polygon, not a value list: validate it as one,
+      // and never let a broken or second area pass silently (dropped with a
+      // reason other than empty_filter_value, so Build refuses it by name).
+      if (field.type === 'geo_area') {
+        const area = normalizeDrawnArea(filter.value ?? filter.values ?? null)
+        const reason = !area.ok ? area.reason : drawnAreaSeen ? 'multiple_drawn_areas' : null
+        if (reason) {
+          dropped.push({
+            domain,
+            field_key: field.key,
+            fieldKey: field.key,
+            label: field.label,
+            operator: 'within',
+            value: null,
+            reason,
+            message: `Not applied: ${drawnAreaReasonMessage(reason)}`,
+          })
+          continue
+        }
+        drawnAreaSeen = true
+        const normalizedArea = {
+          field_key: field.key,
+          field: 'drawn_area',
+          domain: field.domain,
+          category: field.category,
+          label: field.label,
+          operator: 'within',
+          value: area.area,
+          source_column: null,
+          supported_in_preview: true,
+        }
+        applied.push(normalizedArea)
+        supported.push({ ...normalizedArea, fieldDefinition: field })
         continue
       }
       const operator = normalizePreviewOperator(filter.operator, field)
@@ -3712,9 +3756,12 @@ function missingOptionalGraphColumn(error) {
 
 async function countCampaignGraphRows({ supabase, options, extra = null, requireQueueEligible = false }) {
   const warnings = []
-  let query = supabase
-    .from(CAMPAIGN_TARGET_GRAPH_TABLE)
-    .select('graph_id', { count: 'exact', head: true })
+  let query = campaignGraphQuery(supabase, {
+    area: drawnAreaFromFilters(options.catalog_filters?.supported),
+    table: CAMPAIGN_TARGET_GRAPH_TABLE,
+    columns: 'graph_id',
+    selectOptions: { count: 'exact', head: true },
+  })
   query = applyCampaignGraphFilters(query, options, warnings, { requireQueueEligible })
   if (typeof extra === 'function') query = extra(query)
   const { count, error } = await query
@@ -3732,10 +3779,11 @@ async function fetchCampaignGraphRows({ supabase, options, limit, requireQueueEl
   const rows = []
   const warnings = []
   const cappedLimit = Math.max(1, Math.min(Number(limit || CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT), CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT))
+  // With a drawn area the audience is the exact polygon cohort, resolved in the
+  // database; the same order and paging apply on top, so Reach and Build agree.
+  const area = drawnAreaFromFilters(options.catalog_filters?.supported)
   for (let offset = 0; offset < cappedLimit; offset += CAMPAIGN_TARGET_GRAPH_PAGE_SIZE) {
-    let query = supabase
-      .from(CAMPAIGN_TARGET_GRAPH_TABLE)
-      .select(selectColumns)
+    let query = campaignGraphQuery(supabase, { area, table: CAMPAIGN_TARGET_GRAPH_TABLE, columns: selectColumns })
       .order('queue_eligible', { ascending: false, nullsFirst: false })
       .order('acquisition_score', { ascending: false, nullsFirst: false })
       .order('best_phone_score', { ascending: false, nullsFirst: false })
@@ -3806,6 +3854,19 @@ const PROPERTY_UNIVERSE_FILTER_COLUMNS = Object.freeze({
 // approximate rather than silently overcounting. Failures are non-fatal (count=null)
 // so a universe hiccup never degrades the rest of the preview.
 async function countAddressableProperties({ supabase, options }) {
+  // A drawn area's universe is every property inside it. Other property
+  // filters would narrow it further, which this count can't apply on top of
+  // the area, so it is then an upper bound and says so.
+  const area = drawnAreaFromFilters(options.catalog_filters?.supported)
+  if (area) {
+    const otherPropertyFilters = (options.catalog_filters?.supported || [])
+      .filter((filter) => clean(filter.field_key || filter.fieldKey).startsWith('properties.') && clean(filter.field_key || filter.fieldKey) !== DRAWN_AREA_FIELD_KEY)
+    const { data, error } = await supabase.rpc(DRAWN_AREA_PROPERTY_COUNT_RPC, { p_area: area })
+    if (error) {
+      return { ok: false, count: null, approximate: true, warnings: [`addressable_universe_unavailable:${errorMessage(error)}`] }
+    }
+    return { ok: true, count: Number(data || 0), approximate: otherPropertyFilters.length > 0, warnings: [] }
+  }
   let query = supabase
     .from('properties')
     .select('property_id', { count: 'exact', head: true })
