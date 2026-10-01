@@ -23,7 +23,7 @@ html.is-desktop-modern .cd {
   isolation: isolate;
   height: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 600px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 600px) minmax(232px, 1fr);
   align-items: center;
   gap: 14px;
   padding: 0 8px 0 8px;

@@ -187,3 +187,20 @@ describe('persistence', () => {
     expect(area).toBeCloseTo(1)
   })
 })
+
+describe('splits that fit', () => {
+  it('moves the preferred ratio just enough for both apps to stay usable', () => {
+    // inbox (min 460) + deal intelligence (min 500) in a 1010px pane: 40/60 would crush inbox
+    const t = dropTargetAt({ x: 0, y: 0, w: 1010, h: 800 }, { x: 1000, y: 400 }, { paneId: 'p', targetApp: 'inbox', newApp: 'deal-intelligence', visiblePanes: 1, maxPanes: 2 })
+    expect(t.blocked).toBeNull()
+    expect(1010 * (1 - t.share)).toBeGreaterThanOrEqual(459.99)
+    expect(1010 * t.share).toBeGreaterThanOrEqual(499.99)
+  })
+  it('the drop lands exactly where the preview said', () => {
+    const inbox: Instance = { id: 'a', app: 'inbox', path: '/inbox', pinned: false }
+    const deal: Instance = { id: 'b', app: 'deal-intelligence', path: '/deal-intelligence', pinned: false }
+    const start = singleLayout(inbox)
+    const next = place(start, deal, { pane: start.focus, zone: 'right', share: 0.52 }).layout
+    expect((next.root as SplitNode).sizes[1]).toBeCloseTo(0.52)
+  })
+})

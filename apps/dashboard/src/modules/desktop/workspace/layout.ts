@@ -246,7 +246,7 @@ export function singleLayout(inst: Instance): Layout {
   return { root: pane, instances: { [inst.id]: inst }, focus: pane.id, primary: inst.id, maximized: null }
 }
 
-export interface Placement { pane: string; zone: Zone }
+export interface Placement { pane: string; zone: Zone; /** the new pane's share, as previewed */ share?: number }
 
 /**
  * Place an instance. A new instance is added; an instance already in the
@@ -287,7 +287,7 @@ export function place(layout: Layout, inst: Instance, at: Placement): { layout: 
   // split: a new pane beside the target
   const pane: PaneNode = { kind: 'pane', id: newId('p'), tabs: [inst.id], active: inst.id }
   const targetApp = layout.instances[target.active]?.app ?? ''
-  const share = preferredShare(targetApp, inst.app)
+  const share = at.share ?? preferredShare(targetApp, inst.app)
   let root = exists ? removeTab(layout.root, inst.id) : layout.root
   // the source pane may have vanished — that is fine, normalize() drops it
   root = normalize(root) ?? root
@@ -420,16 +420,19 @@ export function dropTargetAt(
   if (inCentre) return stack
   const d = { left: u, right: 1 - u, top: v, bottom: 1 - v }
   const side = (Object.entries(d).sort((a, b) => a[1] - b[1])[0][0]) as Side
-  const share = preferredShare(ctx.targetApp, ctx.newApp)
   const g1 = geometryFor(ctx.targetApp)
   const g2 = geometryFor(ctx.newApp)
   const horizontal = side === 'left' || side === 'right'
   const span = horizontal ? rect.w : rect.h
   const needA = horizontal ? g1.minW : g1.minH
   const needB = horizontal ? g2.minW : g2.minH
+  // the pair's preferred ratio, moved only as far as both apps need to stay usable
+  const lo = needB / span
+  const hi = 1 - needA / span
+  const share = Math.min(hi, Math.max(lo, preferredShare(ctx.targetApp, ctx.newApp)))
   let blocked: string | null = null
   if (ctx.visiblePanes >= ctx.maxPanes) blocked = 'The workspace is full — add it to a stack instead'
-  else if (span * (1 - share) < needA || span * share < needB) blocked = 'Not enough room to split here — add it to the stack'
+  else if (lo > hi) blocked = 'Not enough room to split here — add it to the stack'
   if (blocked) return { ...stack, blocked }
   const preview: Rect = side === 'left' ? { x: rect.x, y: rect.y, w: rect.w * share, h: rect.h }
     : side === 'right' ? { x: rect.x + rect.w * (1 - share), y: rect.y, w: rect.w * share, h: rect.h }

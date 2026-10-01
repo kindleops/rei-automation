@@ -133,7 +133,7 @@ export function beginDrag(e: { clientX: number; clientY: number; pointerId: numb
     set(IDLE)
     if (!commit || !target || target.blocked) { sound.workspace.cancel(); return }
     const path = src.kind === 'instance' ? (getWorkspace().layout.instances[src.instanceId!]?.path ?? src.path) : src.path
-    const result = openApp(path, { pane: target.pane, zone: target.zone })
+    const result = openApp(path, { pane: target.pane, zone: target.zone, share: target.share })
     if (result === 'refused') sound.workspace.cancel()
     else sound.workspace.drop(target.zone === 'stack' || target.zone === 'replace' ? 'stack' : 'split')
   }
