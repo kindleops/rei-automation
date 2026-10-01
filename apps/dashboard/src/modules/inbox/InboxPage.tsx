@@ -1,5 +1,5 @@
 import { uniqueChannelName } from '../../lib/data/realtime-channel'
-import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, useContext, lazy, Suspense, type ReactNode } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, useContext, lazy, Suspense, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
 import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
 import { createPortal } from 'react-dom'
@@ -142,7 +142,18 @@ import {
   OPEN_INBOX_THREAD_EVENT,
   peekPendingInboxThread,
   clearPendingInboxThread,
+  openInboxThread,
 } from '../mobile/mobile-inbox-bridge'
+import { useDeckSubject } from '../desktop/workspace/deck-subject'
+import { openApp } from '../desktop/workspace/workspace-store'
+import { useLcReducedMotion } from '../../shared/lc'
+import { InboxDeskLedger, type BesideApp } from './desk/InboxDeskLedger'
+import { DeskComposer } from './desk/DeskComposer'
+import { lensDef, resolveDeskLens, splitAddress, type DeskLens } from './desk/ledger-model'
+import { mergeQueueBubbles, queueRowToBubble, readReplyMarker, QUEUE_COLUMNS } from './desk/composer-phase'
+import { clearRowArrival } from './desk/live-row-signals'
+import { resolveInboxStageBadge } from './inbox-card-signals'
+import ScheduledFollowupsPanel from './components/ScheduledFollowupsPanel'
 
 import { EmailCommandCenter } from '../../views/email-command/EmailCommandCenter'
 import WorkflowStudioV2 from '../../views/workflow-studio/v2/WorkflowStudioV2'
@@ -214,6 +225,7 @@ import {
 import type { PipelineOpportunity } from '../../domain/pipeline/pipeline-opportunity.types'
 import {
   applyInboxFilters,
+  resolveThreadAddressLine,
   getAdvancedFilterOptions,
   getInboxViewCounts,
   getSavedPresetConfig,
@@ -315,6 +327,9 @@ const CalendarSurface = lazy(() => import('../../views/calendar/timeline/Calenda
 const InboxCommandMap = lazy(() => import('../../views/map/InboxCommandMap').then((m) => ({ default: m.InboxCommandMap })))
 const InboxCampaignView = lazy(() => import('../../views/campaign-command/InboxCampaignView').then((m) => ({ default: m.InboxCampaignView })))
 const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskView').then((m) => ({ default: m.ClosingDeskView })))
+
+const EMPTY_DESK_MESSAGES: ThreadMessage[] = []
+const EMPTY_DESK_STATUSES: Record<string, string> = {}
 
 const WorkspaceSuspense = ({ children }: { children: ReactNode }) => (
   <Suspense fallback={<div className="nx-workspace-surface__loading">Loading workspace…</div>}>
@@ -886,6 +901,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   /** Portrait mobile: thread pane only after explicit row tap — not auto-select. */
   const [mobileThreadOpen, setMobileThreadOpen] = useState(false)
   const isMobileInboxShell = isMobile && routeMode === 'workspace'
+  /**
+   * INBOX DESKTOP 4.0 — the desktop Inbox app (not the phone, and not the Map /
+   * Pipeline / Calendar / Analytics hosts of this component). Every desk
+   * behaviour below is gated on this.
+   */
+  const isDeskInbox = isModernDesktop && routeMode === 'workspace'
+  const deskModeRef = useRef(isDeskInbox)
 
   const [queueModel, setQueueModel] = useState<QueueModel | null>(null)
   const [templateInventory, setTemplateInventory] = useState<SmsTemplate[]>([])
@@ -1251,6 +1273,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
    */
   useLayoutEffect(() => {
     selectedRef.current = selected
+    deskModeRef.current = isDeskInbox
     draftThreadKeyRef.current = canonicalSelectionKey
     // Values the hydration effect reads but cannot list as dependencies without
     // re-running on every list reconcile. Refreshed every render, before the passive
@@ -1565,6 +1588,27 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     return dedupeMessages([...selectedMessages, ...uniquePending])
   }, [selectedMessages, selectedPendingMessages])
+
+  /*
+   * DESK: the automation's own queued reply is shown as a scheduled bubble the
+   * moment it exists (send_queue, read-only) — never hidden behind a typing
+   * animation and never invisible until sent. Fed by the selected-thread
+   * channel's send_queue events and, when the seller's latest message names a
+   * queue row the room has not seen, by one read of that row.
+   */
+  const [deskQueue, setDeskQueue] = useState<{ key: string | null; items: ThreadMessage[]; statuses: Record<string, string> }>({ key: null, items: [], statuses: {} })
+  const upsertDeskQueueRow = useCallback((selectionKey: string, row: Record<string, unknown>) => {
+    const queueId = String(row.id ?? '').trim()
+    if (!queueId) return
+    const bubble = queueRowToBubble(row)
+    const status = String(row.queue_status ?? '').trim().toLowerCase()
+    setDeskQueue((current) => {
+      const sameThread = current.key === selectionKey
+      const items = (sameThread ? current.items : []).filter((item) => item.developerMeta?.queue_id !== queueId)
+      const statuses = { ...(sameThread ? current.statuses : {}), ...(status ? { [queueId]: status } : {}) }
+      return { key: selectionKey, items: bubble ? [...items, bubble] : items, statuses }
+    })
+  }, [])
 
   const commandIntel = useMemo(
     () => buildThreadCommandIntel(selected, displayedMessages, threadContext, threadIntelligence),
@@ -2871,6 +2915,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         const queueId = String(row.id ?? row.queue_id ?? '').trim()
         const nextStatus = String(row.queue_status ?? row.status ?? 'pending').trim().toLowerCase()
         const rowCsid = String((row.metadata as Record<string, unknown> | null)?.client_send_id ?? '').trim()
+        if (deskModeRef.current && payload.new) upsertDeskQueueRow(selectedKey, row)
 
         setPendingMessagesByThread((current) => {
           const currentThreadPending = current[selected.id] ?? []
@@ -2989,7 +3034,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       void supabase.removeChannel(channel)
       inboxSubs.forEach((s) => { try { s.unsubscribe() } catch {} })
     }
-  }, [DEV, data.connectionState, data.dataMode, refreshInbox, selectedKeyForEffect])
+  }, [DEV, data.connectionState, data.dataMode, refreshInbox, selectedKeyForEffect, upsertDeskQueueRow])
 
   const handleTranslateThread = useCallback(async () => {
     if (!threadHasInboundMessages) return
@@ -3595,6 +3640,20 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       const tag = target?.tagName
       const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable
 
+      if (isDeskInbox) {
+        // INBOX DESKTOP 4.0: the shell owns ⌘K and "/", the ledger owns ↑/↓/Enter
+        // (only while it has focus), Esc closes the room from the Inbox pane's own
+        // handler, and the legacy single keys ([ ] / \ ⌥1–7 ⌘M) are retired —
+        // "/" here blocked global search and "\" fired on ⌘\. Only the Inbox's
+        // own overlays still close here, and only when one is open.
+        if (event.key === 'Escape' && (layoutState.activeOverlay != null || schedulePanelOpen || commandOpen)) {
+          setCommandOpen(false)
+          setSchedulePanelOpen(false)
+          setLayoutState((current) => (current.activeOverlay == null ? current : { ...current, activeOverlay: null }))
+        }
+        return
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         openGlobalCommand()
@@ -3691,7 +3750,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [announceLayout, applySavedPreset, filtered, layoutState.activeOverlay, layoutState.inboxMode, layoutState.leftPanelMode, layoutState.mapMode, openGlobalCommand, selected, selectThread, setActiveOverlay])
+  }, [announceLayout, applySavedPreset, commandOpen, filtered, isDeskInbox, layoutState.activeOverlay, layoutState.inboxMode, layoutState.leftPanelMode, layoutState.mapMode, openGlobalCommand, schedulePanelOpen, selected, selectThread, setActiveOverlay])
 
   const handleWorkflowMutation = useCallback(async (label: string, mutation: () => Promise<any>, options?: { action?: { label: string, onClick: () => void }, skipRefresh?: boolean, skipCountRefresh?: boolean }) => {
     try {
@@ -3730,7 +3789,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [refreshInbox, refreshInboxCounts, currentInboxQuery, DEV])
 
   const handleThreadAction = useCallback(async (target: string | InboxWorkflowThread, action: string) => {
-    const thread = typeof target === 'string' ? threads.find((t) => t.id === target) : target
+    // The open conversation is often not in the loaded page (opened from search,
+    // a deep link, or a lens switch): resolve it from the selection, or the
+    // action silently did nothing.
+    const thread = typeof target === 'string'
+      ? (threads.find((t) => t.id === target) ?? (selectedRef.current?.id === target ? selectedRef.current : undefined))
+      : target
     if (!thread) return
 
     let label = ''
@@ -4052,6 +4116,34 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setMobileIntelOpen(false)
     setMobileSidebarOpen(false)
   }, [clearThreadSelection])
+
+  /*
+   * DESK: closing the conversation is spatial — the ledger widens back over the
+   * room while the room keeps its content, then the selection clears. Under
+   * reduced motion it is an immediate change.
+   */
+  const deskReducedMotion = useLcReducedMotion()
+  const [deskRoomClosing, setDeskRoomClosing] = useState(false)
+  const deskCloseTimerRef = useRef<number | null>(null)
+  const cancelDeskRoomClose = useCallback(() => {
+    if (deskCloseTimerRef.current === null) return
+    window.clearTimeout(deskCloseTimerRef.current)
+    deskCloseTimerRef.current = null
+    setDeskRoomClosing(false)
+  }, [])
+  const closeDeskRoom = useCallback(() => {
+    if (!isDeskInbox || deskReducedMotion) { handleMobileBack(); return }
+    if (deskCloseTimerRef.current !== null) return
+    setDeskRoomClosing(true)
+    deskCloseTimerRef.current = window.setTimeout(() => {
+      deskCloseTimerRef.current = null
+      setDeskRoomClosing(false)
+      handleMobileBack()
+    }, 360)
+  }, [deskReducedMotion, handleMobileBack, isDeskInbox])
+  useEffect(() => () => {
+    if (deskCloseTimerRef.current !== null) window.clearTimeout(deskCloseTimerRef.current)
+  }, [])
 
   /*
    * §3 — REGISTER THE CANONICAL BACK.
@@ -4767,7 +4859,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [setActiveContext])
 
   const handleOperatorAction = useCallback(async (id: string, action: string, payload?: Record<string, unknown>) => {
-    const thread = threads.find((t) => t.id === id)
+    const thread = threads.find((t) => t.id === id) ?? (selectedRef.current?.id === id ? selectedRef.current : undefined)
     if (!thread) return
 
     if (DEV) console.log(`[OperatorAction] ${action} on ${id.slice(-8)}`)
@@ -4857,6 +4949,159 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         console.warn('[OperatorAction] Unknown action', action)
     }
   }, [DEV, handleOpenDealIntelligence, handleThreadAction, handleWorkflowMutation, setActiveOverlay, setDraftText, threads])
+
+  /* ── INBOX DESKTOP 4.0 — the ledger, the room, and what they publish ───── */
+
+  /** The conversation room is open (desk only): a thread was explicitly opened. */
+  const deskRoomOpen = isDeskInbox && mobileThreadOpen && Boolean(selected)
+  const deskLens = resolveDeskLens(viewFilter, hasActiveAdvancedFilters(advancedFilters) || stageFilter !== 'all_stages')
+
+  /** Open a row with the same side effects as a click: locator, read mark, the room. */
+  const handleDeskOpen = useCallback((threadId: string) => {
+    cancelDeskRoomClose()
+    const thread = findThreadByRef(threads, threadId)
+    if (thread) clearRowArrival(thread.threadKey || thread.id)
+    handleSelect(threadId)
+  }, [cancelDeskRoomClose, handleSelect, threads])
+
+  const handleDeskSnooze = useCallback((threadId: string) => { void handleOperatorAction(threadId, 'snooze') }, [handleOperatorAction])
+  const handleDeskMarkRead = useCallback((threadId: string) => { void handleThreadAction(threadId, 'read') }, [handleThreadAction])
+
+  /** Context menu / hover: open another app on THIS seller's property, beside the Inbox. */
+  const handleDeskOpenBeside = useCallback((thread: InboxWorkflowThread, app: BesideApp) => {
+    const row = thread as unknown as Record<string, unknown>
+    const propertyId = String(thread.propertyId ?? row.property_id ?? '').trim() || null
+    const threadKey = String(thread.threadKey ?? row.thread_key ?? '').trim() || null
+    if (!propertyId && !threadKey) return
+    // Linked panes follow the property locator; the Inbox selection is left alone.
+    setPropertyLocator({
+      propertyId,
+      threadKey,
+      masterOwnerId: thread.ownerId ?? null,
+      prospectId: thread.prospectId ?? null,
+      opportunityId: null,
+      address: resolveThreadAddressLine(thread) || null,
+    })
+    const path = app === 'deal-intelligence'
+      ? (propertyId ? `/deal-intelligence?property_id=${encodeURIComponent(propertyId)}` : `/deal-intelligence?thread_key=${encodeURIComponent(threadKey ?? '')}`)
+      : app === 'map'
+        ? '/map'
+        : propertyId ? `/entity-graph/property/${encodeURIComponent(propertyId)}` : null
+    if (path) openApp(path, 'beside')
+  }, [])
+
+  /**
+   * A lens is the canonical bucket predicate — rows and count from the same
+   * SQL. Choosing one leaves the filtered lens (filters never borrow a bucket's
+   * name or count).
+   */
+  const handleDeskLens = useCallback((lens: DeskLens) => {
+    const view = lensDef(lens).view
+    const cleared = hasActiveAdvancedFilters(advancedFilters) ? clearAllAdvancedFilters() : advancedFilters
+    if (cleared !== advancedFilters) setAdvancedFilters(cleared)
+    setStageFilter('all_stages')
+    setViewFilter(view)
+    try { window.sessionStorage.setItem('nx.inbox.desk-lens', lens) } catch { /* private mode */ }
+    // Scheduled is send_queue (its own panel), not a thread list.
+    if (lens === 'scheduled') return
+    requestBucket(String(view))
+    void refreshInbox({
+      filters: { view, stage: 'all_stages', query: '', advanced: serializeAdvancedFiltersForServer(cleared, { stage: 'all_stages', view }) },
+      cursor: null,
+      limit: 30,
+      _force: true,
+      _timeoutMode: 'manual_bucket_switch',
+      _refreshReason: 'desk_lens',
+    })
+  }, [advancedFilters, refreshInbox, requestBucket])
+
+  // The desk opens on a triage lens (the operator's last one this session, else Priority).
+  const deskBootRef = useRef(false)
+  useEffect(() => {
+    if (!isDeskInbox || deskBootRef.current) return
+    if (viewFilter !== 'all_messages' || hasActiveAdvancedFilters(advancedFilters)) { deskBootRef.current = true; return }
+    const timer = window.setTimeout(() => {
+      deskBootRef.current = true
+      let stored: string | null = null
+      try { stored = window.sessionStorage.getItem('nx.inbox.desk-lens') } catch { /* private mode */ }
+      const lens = stored && stored !== 'filtered' ? resolveDeskLens(stored) : 'priority'
+      handleDeskLens(lens === 'filtered' ? 'priority' : lens)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [advancedFilters, handleDeskLens, isDeskInbox, viewFilter])
+
+  /* the automation's queued reply: read the one row the seller's message names */
+  const deskPendingQueueId = useMemo(() => {
+    if (!isDeskInbox || !selectedKeyForEffect) return null
+    let latest: ThreadMessage | null = null
+    let latestMs = Number.NEGATIVE_INFINITY
+    for (const message of displayedMessages) {
+      if (message.direction !== 'inbound') continue
+      const ms = Date.parse(message.createdAt || message.timelineAt || '')
+      if (Number.isFinite(ms) && ms >= latestMs) { latest = message; latestMs = ms }
+    }
+    const queueId = latest ? readReplyMarker(latest).queueId : null
+    if (!queueId) return null
+    if (displayedMessages.some((message) => message.developerMeta?.queue_id === queueId)) return null
+    if (deskQueue.key === selectedKeyForEffect && deskQueue.statuses[queueId]) return null
+    return queueId
+  }, [deskQueue, displayedMessages, isDeskInbox, selectedKeyForEffect])
+
+  useEffect(() => {
+    if (!deskPendingQueueId || !selectedKeyForEffect || !hasSupabaseEnv) return
+    let cancelled = false
+    const key = selectedKeyForEffect
+    void getSupabaseClient()
+      .from('send_queue')
+      .select(QUEUE_COLUMNS)
+      .eq('id', deskPendingQueueId)
+      .maybeSingle()
+      .then(({ data: row }) => {
+        if (cancelled || !row) return
+        upsertDeskQueueRow(key, row as Record<string, unknown>)
+      })
+    return () => { cancelled = true }
+  }, [deskPendingQueueId, selectedKeyForEffect, upsertDeskQueueRow])
+
+  const deskQueueItems = deskQueue.key === selectedKeyForEffect ? deskQueue.items : EMPTY_DESK_MESSAGES
+  const deskQueueStatuses = deskQueue.key === selectedKeyForEffect ? deskQueue.statuses : EMPTY_DESK_STATUSES
+  const deskMessages = useMemo(
+    () => (isDeskInbox ? mergeQueueBubbles(displayedMessagesWithTranslation, deskQueueItems) : displayedMessagesWithTranslation),
+    [deskQueueItems, displayedMessagesWithTranslation, isDeskInbox],
+  )
+  const deskQueueStatus = useCallback((queueId: string) => deskQueueStatuses[queueId] ?? null, [deskQueueStatuses])
+
+  /* the Command Deck names what this pane is looking at */
+  const deskSubject = useMemo(() => {
+    if (!deskRoomOpen || !selected) return null
+    const title = resolveThreadPrimaryName(selected) || String(selected.canonicalE164 || selected.threadKey || '').trim()
+    if (!title) return null
+    const street = splitAddress(resolveThreadAddressLine(selected)).street
+    const stage = resolveInboxStageBadge(selected as unknown as Record<string, unknown>)
+    return { title, subtitle: [street, stage?.short].filter(Boolean).join(' · ') || null }
+  }, [deskRoomOpen, selected])
+  useDeckSubject(deskSubject)
+
+  /** Esc (desk): blur a field first, then close the room — only when focus is in this pane and nothing is open over it. */
+  const deskRootRef = useRef<HTMLDivElement | null>(null)
+  const handleDeskKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !deskRoomOpen) return
+    if (layoutState.activeOverlay != null || schedulePanelOpen || commandOpen || debugModalOpen) return
+    const root = deskRootRef.current
+    const target = event.target as HTMLElement | null
+    // a portaled menu / popover owns its Esc; so does an inline menu that is open
+    if (!root || !target || !root.contains(target)) return
+    if (root.querySelector('.is-desk-room [aria-expanded="true"]')) return
+    event.preventDefault()
+    const tag = target.tagName
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || target.isContentEditable) {
+      target.blur()
+      root.querySelector<HTMLElement>('.nx-workspace-pane.is-desk-room')?.focus({ preventScroll: true })
+      return
+    }
+    closeDeskRoom()
+    window.setTimeout(() => root.querySelector<HTMLElement>('.ixl-list')?.focus({ preventScroll: true }), 400)
+  }, [closeDeskRoom, commandOpen, debugModalOpen, deskRoomOpen, layoutState.activeOverlay, schedulePanelOpen])
 
 
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {
@@ -5340,15 +5585,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const keysOpen = activeOverlay === 'keys'
 
   const renderViews: InboxWorkspaceView[] = selectedWorkspaceViews
-  const workspaceBlocked = selectedWorkspacePreset.status !== 'ready'
+  // The desk is one app with two spatial states; workspace presets do not apply to it.
+  const workspaceBlocked = !isDeskInbox && selectedWorkspacePreset.status !== 'ready'
 
   const isMultiView = renderViews.length > 1
-  const useFullscreenShell = !workspaceBlocked && !isMultiView
+  const useFullscreenShell = !workspaceBlocked && !isMultiView && !isDeskInbox
   const useMobileInboxFlow = isMobile && !useFullscreenShell
 
   /** Mount only the active mobile pane — hidden CSS panes were crashing mobile browsers. */
   const mobilePaneViews = useMemo((): InboxWorkspaceView[] | null => {
     if (!useMobileInboxFlow) return null
+    // INBOX DESKTOP 4.0: triage is the whole pane; an opened conversation splits it.
+    if (isDeskInbox) {
+      if (mobileIntelOpen) return ['thread', 'deal_intelligence']
+      return deskRoomOpen ? ['thread', 'sms_thread'] : ['thread']
+    }
     // A desk keeps the list beside the conversation (a mail client, not a phone
     // flow). Both stay mounted; inbox-desktop.css places them side by side on a
     // wide pane and falls back to the phone's one-at-a-time flow in a narrow one.
@@ -5356,7 +5607,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (mobileIntelOpen) return ['deal_intelligence']
     if (mobileThreadOpen) return ['sms_thread']
     return ['thread']
-  }, [useMobileInboxFlow, isModernDesktop, mobileIntelOpen, mobileThreadOpen])
+  }, [useMobileInboxFlow, isDeskInbox, deskRoomOpen, isModernDesktop, mobileIntelOpen, mobileThreadOpen])
 
   const viewsToRender = mobilePaneViews ?? renderViews
   const isDealDeskLayout = selectedWorkspacePreset.key === 'deal_desk'
@@ -5477,8 +5728,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     >
       <ChatThread
         thread={selected}
-        onBack={isMobile ? handleMobileBack : undefined}
-        messages={displayedMessagesWithTranslation}
+        onBack={isDeskInbox ? closeDeskRoom : isMobile ? handleMobileBack : undefined}
+        messages={isDeskInbox ? deskMessages : displayedMessagesWithTranslation}
+        deskMode={isDeskInbox}
         loading={messagesLoading}
         isSuppressed={selectedSuppressed}
         isStarred={selected?.isStarred ?? false}
@@ -5513,31 +5765,43 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         compact={keyboardOpen}
       />
 
-      <Composer
-        selectedParticipant={selectedParticipant}
-        draftText={draftText}
-        onSend={handleSend}
-        isSending={isSending}
-        onOpenSchedule={(currentDraft) => {
-          setScheduledTemplatePayload({ text: currentDraft, template: null })
-          setSchedulePanelOpen(true)
-        }}
-        thread={selected}
-        threadContext={threadContext}
-        onSendTemplate={handleSendTemplate}
-        onQueueTemplate={handleQueueTemplate}
-        onScheduleTemplate={handleScheduleTemplate}
-        onQuickAction={(action) => handleOperatorAction(selected?.id ?? '', action)}
-        disabled={!selected || selectedSuppressed}
-        disabledReason={!selected ? 'Select a thread to compose' : 'Messaging disabled for suppressed thread'}
-        aiSuggestions={adaptiveSuggestions.length > 0 ? adaptiveSuggestions : (commandIntel?.suggestions ?? [])}
-        sellerLanguageLabel={sellerLanguageLabel}
-        isSellerLanguageEnglish={isEnglishLanguage(sellerLanguageCode)}
-        isTranslatingDraft={draftTranslationLoading}
-        onTranslateDraft={handleTranslateDraft}
-        autoTranslateDraft={!!sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode)}
-        layoutMode={layoutMode}
-      />
+      {(() => {
+        const composerProps = {
+          selectedParticipant,
+          draftText,
+          onSend: handleSend,
+          isSending,
+          onOpenSchedule: (currentDraft: string) => {
+            setScheduledTemplatePayload({ text: currentDraft, template: null })
+            setSchedulePanelOpen(true)
+          },
+          thread: selected,
+          threadContext,
+          onSendTemplate: handleSendTemplate,
+          onQueueTemplate: handleQueueTemplate,
+          onScheduleTemplate: handleScheduleTemplate,
+          onQuickAction: (action: string) => { void handleOperatorAction(selected?.id ?? '', action) },
+          disabled: !selected || selectedSuppressed,
+          disabledReason: !selected ? 'Select a thread to compose' : 'Messaging disabled for suppressed thread',
+          aiSuggestions: adaptiveSuggestions.length > 0 ? adaptiveSuggestions : (commandIntel?.suggestions ?? []),
+          sellerLanguageLabel,
+          isSellerLanguageEnglish: isEnglishLanguage(sellerLanguageCode),
+          isTranslatingDraft: draftTranslationLoading,
+          onTranslateDraft: handleTranslateDraft,
+          autoTranslateDraft: !!sellerLanguageCode && !isEnglishLanguage(sellerLanguageCode),
+          layoutMode,
+        }
+        // Desk: the composer owns the one automation signal, read from this conversation.
+        return isDeskInbox ? (
+          <DeskComposer
+            {...composerProps}
+            messages={deskMessages}
+            queueStatus={deskQueueStatus}
+            threadId={selected?.id ?? null}
+            onRetryPhase={() => { if (selected) void handleOperatorAction(selected.id, 'retry_send') }}
+          />
+        ) : <Composer {...composerProps} />
+      })()}
     </section>
   )
 
@@ -5588,6 +5852,37 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     </section>
   )
 
+  /** INBOX DESKTOP 4.0 — the triage ledger (desk only; the rail above stays for everything else). */
+  const renderDeskLedgerPane = () => (
+    <section className="nx-workspace-pane-surface nx-workspace-pane-surface--desk-ledger">
+      <InboxDeskLedger
+        threads={threads}
+        hiddenIds={recentlyUpdatedThreadIds}
+        lens={deskLens}
+        counts={(data.counts ?? {}) as Record<string, unknown>}
+        loading={_dataLoading}
+        error={data.liveFetchError ? String(data.liveFetchError) : null}
+        canLoadMore={Boolean(data.pagination?.hasMore)}
+        filteredTotal={typeof (data.pagination as { total?: unknown } | undefined)?.total === 'number' ? (data.pagination as { total: number }).total : null}
+        filterChips={activeAdvancedFilterChips}
+        selectedId={deskRoomOpen ? (selected?.id ?? null) : null}
+        onLens={handleDeskLens}
+        onOpenFilters={() => setActiveOverlay('filters')}
+        onRemoveFilterChip={handleRemoveAdvancedFilterChip}
+        onClearFilters={() => handleDeskLens('priority')}
+        onOpen={handleDeskOpen}
+        onLoadMore={handleLoadMore}
+        onRetry={handleRetryInboxLoad}
+        onSnooze={handleDeskSnooze}
+        onMarkRead={handleDeskMarkRead}
+        onOpenBeside={handleDeskOpenBeside}
+        scheduledPanel={deskLens === 'scheduled'
+          ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => openInboxThread({ threadKey })} />
+          : undefined}
+      />
+    </section>
+  )
+
   const wrapWorkspaceSurface = (
     view: InboxWorkspaceView,
     paneWidth: ViewWidthPercent,
@@ -5622,7 +5917,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     )
 
     if (view === 'thread') {
-      return renderInboxRailPane(paneMode, paneWidth)
+      return isDeskInbox ? renderDeskLedgerPane() : renderInboxRailPane(paneMode, paneWidth)
     }
 
     if (view === 'sms_thread') {
@@ -6003,10 +6298,13 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     <WatchlistProvider>
     <div
       id="nx-inbox-root"
+      ref={deskRootRef}
+      onKeyDown={isDeskInbox ? handleDeskKeyDown : undefined}
       data-nexus-theme={activeNexusThemeId}
       data-nexus-accent={activeAccentPalette}
       className={cls(
         'nx-premium-inbox nx-inbox',
+        isDeskInbox && 'is-desk-inbox',
         ...layoutClasses,
         isRouteFullscreen && 'is-route-fullscreen',
         useFullscreenShell && 'is-workspace-fullscreen',
@@ -6230,8 +6528,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             />
           )}
 
-          {isMultiView ? (
-            <section className="nx-workspace-split-grid">
+          {isMultiView || isDeskInbox ? (
+            <section
+              className={cls('nx-workspace-split-grid', isDeskInbox && 'ixd-split')}
+              data-room={isDeskInbox ? (deskRoomOpen && !deskRoomClosing ? 'open' : 'closed') : undefined}
+            >
               {viewsToRender.map((view) => {
                 const paneWidth = workspaceWidths[view] ?? '25'
                 const flexBasis = workspaceFlexBases[view] ?? Number(paneWidth)
@@ -6253,8 +6554,10 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
                       `is-width-${paneWidth}`,
                       `is-layout-${layoutMode}`,
                       view === activeWorkspaceView && 'is-primary',
+                      isDeskInbox && view === 'sms_thread' && 'is-desk-room',
                     )}
                     style={mobilePaneStyle}
+                    tabIndex={isDeskInbox && view === 'sms_thread' ? -1 : undefined}
                   >
                     {renderWorkspacePane(view, 'multi', paneWidth)}
                   </div>
@@ -6333,13 +6636,17 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       <AdvancedFiltersModal
         open={activeOverlay === 'filters'}
         stageFilter={stageFilter}
-        viewFilter={viewFilter}
-        inboxBucket={viewFilter === 'all_conversations' ? 'all' : viewFilter}
+        viewFilter={isDeskInbox ? 'all_conversations' : viewFilter}
+        inboxBucket={isDeskInbox ? 'all' : viewFilter === 'all_conversations' ? 'all' : viewFilter}
         advancedFilters={advancedFilters}
         onAdvancedFiltersChange={setAdvancedFilters}
-        onReset={handleResetFilters}
+        onReset={isDeskInbox ? () => handleDeskLens('priority') : handleResetFilters}
         onClose={() => setActiveOverlay(null)}
-        onApply={handleApplyAdvancedFilters}
+        // Desk: filters are their own lens over ALL conversations, with their own
+        // count — never a canonical bucket re-read through the legacy category.
+        onApply={isDeskInbox
+          ? (payload) => handleApplyAdvancedFilters({ ...payload, view: 'all_conversations' })
+          : handleApplyAdvancedFilters}
       />
 
       {activeOverlay === 'activity' && (

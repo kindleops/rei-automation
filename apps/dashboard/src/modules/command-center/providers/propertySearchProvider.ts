@@ -1,59 +1,43 @@
-import type { CommandResult, GlobalCommandProvider } from '../../../domain/command-center/command.types'
-import { canUseSupabaseSearch, getSupabaseSearchClient, limitResults, sanitizeIlike, withScoredResult } from './providerUtils'
+import type { CommandResult, GlobalCommandProvider, GlobalCommandSearchContext } from '../../../domain/command-center/command.types'
+import { limitResults, withScoredResult } from './providerUtils'
+import { searchInboxDeck, type InboxDeckHit } from './inboxDeckSearch'
 
-type PropertyRow = Record<string, unknown>
+/**
+ * PROPERTIES — the properties behind the Inbox's conversations, from the same
+ * server search as Sellers (one request serves both).
+ *
+ * Choosing one opens Deal Intelligence on THAT property (`?property_id=`, which
+ * the desktop surface reads from its pane location); ⌥↵ opens it beside the
+ * focused pane. A conversation without a linked property is not a property
+ * result — it is still found under Sellers.
+ */
 
-const asText = (value: unknown): string => String(value ?? '').trim()
-const asNumber = (value: unknown): number | null => {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-const mapPropertyRow = (row: PropertyRow): CommandResult => {
-  const address = asText(row.property_address_full || row.property_address || row.address) || 'Address not resolved'
-  const city = asText(row.property_address_city)
-  const state = asText(row.property_address_state)
-  const zip = asText(row.property_address_zip)
-  const market = asText(row.market)
-  const propertyType = asText(row.property_type)
-  const beds = asNumber(row.total_bedrooms ?? row.bedrooms)
-  const baths = asNumber(row.total_baths ?? row.bathrooms)
-  const sqft = asNumber(row.building_square_feet)
-  const value = asNumber(row.estimated_value)
-  const threadId = asText(row.thread_key || row.thread_id || row.id)
-  const location = [city, state, zip].filter(Boolean).join(', ')
-
+export function toPropertyResult(hit: InboxDeckHit, context: GlobalCommandSearchContext): CommandResult | null {
+  if (!hit.propertyId || !hit.street) return null
+  const inboxFocused = context.routePath === '/inbox' || context.routePath === '/conversation'
   return {
-    id: `property-${asText(row.property_id || row.id || address)}`,
+    id: `property-${hit.propertyId}`,
     type: 'property',
-    title: address,
-    subtitle: [market, propertyType || 'Property'].filter(Boolean).join(' · '),
-    description: location || 'Property record',
-    badge: 'Property',
+    title: hit.street,
+    subtitle: [hit.locality ?? hit.market, `Owner: ${hit.name}`].filter(Boolean).join(' · '),
     icon: 'home',
-    route: '/inbox',
-    score: 24,
-    payload: {
-      kind: 'focus_thread',
-      threadId,
-      view: 'command_map',
-      propertyId: asText(row.property_id),
-    },
+    route: `/deal-intelligence?property_id=${encodeURIComponent(hit.propertyId)}`,
+    score: inboxFocused ? 34 : 24,
+    payload: { propertyId: hit.propertyId, threadKey: hit.threadKey },
     preview: {
       eyebrow: 'Property',
-      title: address,
-      summary: [location, propertyType].filter(Boolean).join(' · '),
+      title: hit.street,
+      summary: [hit.locality, hit.market].filter(Boolean).join(' · '),
       details: [
-        { label: 'Market', value: market || '—' },
-        { label: 'Beds / Baths', value: [beds ?? '—', baths ?? '—'].join(' / ') },
-        { label: 'Sq Ft', value: sqft ? sqft.toLocaleString() : '—' },
-        { label: 'Value', value: value ? `$${Math.round(value).toLocaleString()}` : '—' },
+        { label: 'Owner', value: hit.name },
+        { label: 'Market', value: hit.market ?? '—' },
       ],
     },
     meta: {
       provider: 'property',
       groupLabel: 'Properties',
-      keywords: [address, location, market, propertyType].filter(Boolean),
+      hint: 'Open Deal Intelligence · ⌥↵ beside',
+      keywords: [hit.street, hit.locality, hit.market, hit.name].filter(Boolean) as string[],
     },
   }
 }
@@ -61,35 +45,15 @@ const mapPropertyRow = (row: PropertyRow): CommandResult => {
 export const propertySearchProvider: GlobalCommandProvider = {
   id: 'property',
   search: async (query, context) => {
-    if (!canUseSupabaseSearch(query)) return []
-    const supabase = getSupabaseSearchClient()
-    const safe = sanitizeIlike(query)
-    const term = `%${safe}%`
-    const { data, error } = await supabase
-      .from('v_operator_inbox_threads')
-      .select('id,thread_key,property_id,property_address_full,property_address,property_address_city,property_address_state,property_address_zip,market,property_type,total_bedrooms,total_baths,building_square_feet,estimated_value')
-      .or([
-        `property_address_full.ilike.${term}`,
-        `property_address.ilike.${term}`,
-        `property_address_city.ilike.${term}`,
-        `property_address_state.ilike.${term}`,
-        `property_address_zip.ilike.${term}`,
-        `market.ilike.${term}`,
-        `property_type.ilike.${term}`,
-      ].join(','))
-      .limit(8)
-
-    if (error || !data) return []
-    return limitResults(
-      (data as PropertyRow[]).map((row) => withScoredResult(
-        mapPropertyRow(row),
-        query,
-        context,
-        asText(row.property_address_full || row.property_address),
-        asText(row.market),
-        asText(row.property_type),
-      )),
-      8,
-    )
+    const hits = await searchInboxDeck(query)
+    const seen = new Set<string>()
+    const results: CommandResult[] = []
+    for (const hit of hits) {
+      const result = toPropertyResult(hit, context)
+      if (!result || seen.has(result.id)) continue
+      seen.add(result.id)
+      results.push(withScoredResult(result, query, context))
+    }
+    return limitResults(results, 6)
   },
 }

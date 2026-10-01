@@ -124,6 +124,12 @@ interface ChatThreadProps {
   selectedParticipant?: PropertyParticipant | null
   masterOwnerHouseholdLabel?: string | null
   onBack?: () => void
+  /**
+   * Inbox Desktop 4.0 (desktop workspace only): the composer owns the
+   * automation state, so the conversation draws no typing lane of its own,
+   * never holds back a reply bubble, and leaves Retry to the composer.
+   */
+  deskMode?: boolean
 }
 
 const fallback = (value: unknown, placeholder = '') => {
@@ -205,10 +211,15 @@ const normalizeDeliveryBadge = (message: ThreadMessage): DeliveryBadge => {
   ))
   if (isActivelySending) return 'sending'
 
-  if (message.sentAt) return 'delivered'
-  if (statusEvidence.some((value) => value === 'sent' || value === 'success' || value === 'accepted')) return 'delivered'
+  // DELIVERED NEEDS DELIVERY EVIDENCE (delivered_at, or a delivered status —
+  // both checked above). A send the provider accepted, or a row with no status
+  // at all, is "Sent": it left us, and nobody has confirmed it arrived.
+  // Measured 2026-10-01: 6 of 849 outbound messages in 14 days are `sent`
+  // without delivery evidence, and every one of them read "✓✓ Delivered".
+  if (message.sentAt) return 'sent'
+  if (statusEvidence.some((value) => value === 'sent' || value === 'success' || value === 'accepted')) return 'sent'
 
-  return 'delivered'
+  return 'sent'
 }
 
 const deliveryBadgeMeta = (badge: DeliveryBadge): { icon: string; label: string } => {
@@ -482,6 +493,7 @@ export const ChatThread = ({
   selectedParticipant = null,
   masterOwnerHouseholdLabel = null,
   onBack,
+  deskMode = false,
 }: ChatThreadProps) => {
   // Remount counter for the N.1 performance guardrails (silent, dev/harness only).
   useEffect(() => {
@@ -974,7 +986,7 @@ export const ChatThread = ({
     return -1
   }, [timelineMessages])
   useEffect(() => {
-    if (latestInboundIndex < 0) return
+    if (deskMode || latestInboundIndex < 0) return
     const inbound = timelineMessages[latestInboundIndex]
     if (typedInboundRef.current.has(inbound.id)) return
     const age = Date.now() - messageTimestampMs(inbound)
@@ -986,7 +998,7 @@ export const ChatThread = ({
     if (!queueId && !['queued', 'processing', 'sending'].includes(status)) return
     typedInboundRef.current.add(inbound.id)
     setAutoTyping({ inboundId: inbound.id, queueId, startedAt: Date.now() })
-  }, [latestInboundIndex, timelineMessages])
+  }, [deskMode, latestInboundIndex, timelineMessages])
   useEffect(() => {
     if (!autoTyping) return
     const reveal = window.setTimeout(() => setTypingTick((n) => n + 1), TYPING_MIN_MS + 30)
@@ -1471,7 +1483,7 @@ export const ChatThread = ({
                           <span>{receiptMeta.label}</span>
                         </span>
 
-                        {isScheduled && queueId && (
+                        {isScheduled && queueId && msg.developerMeta?.origin !== 'automation_queue' && (
                           <div className="nx-msg__scheduled-actions">
                             <button
                               type="button"
@@ -1488,7 +1500,7 @@ export const ChatThread = ({
                           </div>
                         )}
 
-                        {deliveryBadge === 'failed' && (
+                        {deliveryBadge === 'failed' && !deskMode && (
                           <button type="button" className="nx-retry-btn" onClick={() => onThreadAction?.(thread.id, 'retry_send')} title="Retry send">
                             <Icon name="refresh-cw" />
                           </button>
@@ -1528,7 +1540,7 @@ export const ChatThread = ({
                   )}
 
                   <div className="nx-bubble-hover-actions">
-                    {isFailed && isOutbound && (
+                    {isFailed && isOutbound && !deskMode && (
                       <button type="button" title="Retry send" className="nx-bubble-action" onClick={() => onThreadAction?.(thread.id, 'retry_send')}>
                         <Icon name="refresh-cw" />
                       </button>

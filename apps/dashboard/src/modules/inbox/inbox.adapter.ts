@@ -34,6 +34,7 @@ import {
   markInboxLiveRequest,
   publishInboxProof,
 } from '../../domain/inbox/inbox-proof-bridge'
+import { ingestInboxRealtimeSignal } from './desk/live-row-signals'
 import {
   applyInboxCountsFetchResult,
   classifyInboxBackendFailure,
@@ -82,6 +83,24 @@ const writeCachedViewCounts = (counts: Record<string, number>) => {
 const DEFAULT_BOOT_BUCKET_KEY = 'all_messages'
 const COUNTS_REFRESH_DEBOUNCE_MS = 350
 
+/**
+ * Snoozed and Scheduled are returned by /api/cockpit/inbox/counts (snoozed:
+ * thread-state count; scheduled: pending send_queue messages) but the shared
+ * mapper drops both, so their chips read "—" ("not measured") beside a figure
+ * the server had already counted. Carried through verbatim; never estimated.
+ */
+const withParkedCounts = (counts: Record<string, number>, payload: unknown): Record<string, number> => {
+  const record = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>
+  const raw = ((record.counts ?? (record.data as Record<string, unknown> | undefined)?.counts) ?? {}) as Record<string, unknown>
+  const next = { ...counts }
+  for (const key of ['snoozed', 'scheduled']) {
+    const value = raw[key]
+    const num = typeof value === 'number' ? value : value === null || value === undefined || value === '' ? NaN : Number(value)
+    if (Number.isFinite(num) && num >= 0) next[key] = num
+  }
+  return next
+}
+
 export const refreshAuthoritativeViewCounts = (
   dispatch: React.Dispatch<InboxStoreAction>,
   onWarning?: (warning: string | null) => void,
@@ -116,8 +135,9 @@ export const refreshAuthoritativeViewCounts = (
       isDev,
     })
     if (applied.counts && Object.keys(applied.counts).length > 0) {
-      dispatch({ type: 'SET_VIEW_COUNTS', counts: applied.counts })
-      writeCachedViewCounts(applied.counts)
+      const counts = withParkedCounts(applied.counts, res.ok ? res.data : null)
+      dispatch({ type: 'SET_VIEW_COUNTS', counts })
+      writeCachedViewCounts(counts)
       onWarning?.(null)
       return
     }
@@ -1315,7 +1335,7 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
           const payload = (res.data ?? {}) as Record<string, unknown>
           const rawCounts = (payload.counts ?? (payload.data as Record<string, unknown> | undefined)?.counts) as Record<string, number> | undefined
           if (!rawCounts || Object.keys(rawCounts).length === 0) return
-          const counts = mapAuthoritativeCounts(rawCounts as Record<string, unknown>)
+          const counts = withParkedCounts(mapAuthoritativeCounts(rawCounts as Record<string, unknown>), payload)
           dispatch({ type: 'SET_VIEW_COUNTS', counts })
           writeCachedViewCounts(counts)
         }).catch(() => {})
@@ -1656,6 +1676,9 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
         const row = (payload?.new ?? payload?.old ?? {}) as Record<string, unknown>
         const threadKey = resolveRealtimeThreadKey(row, table)
         let patchApplied = false
+        // Inbox Desktop 4.0 live rows read the same event (inert unless a desk
+        // ledger is mounted): replying → queued, held, failed, stage moves.
+        if (threadKey) ingestInboxRealtimeSignal({ table, eventType: payload.eventType ?? null, row, threadKey })
 
         if (threadKey) {
           markRecentlyUpdated(threadKey)

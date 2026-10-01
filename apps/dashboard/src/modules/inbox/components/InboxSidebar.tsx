@@ -604,15 +604,17 @@ const resolveDeliveryReceipt = (
     return { type: 'failed', label: 'Failed', icon: 'x' }
   }
 
+  // Delivered needs delivery evidence; "sent" / "accepted" / a sent_at is Sent;
+  // no evidence at all is no claim (the outbound arrow already says direction).
   const hasDelivered = Boolean(deliveredAt)
-    || statusEvidence.some((status) => (
-      (status.includes('deliver') && !status.includes('undeliv'))
-      || status === 'sent'
-      || status === 'success'
-      || status === 'accepted'
-    ))
-  if (hasDelivered || Boolean(sentAt) || latestDirection === 'outbound') {
+    || statusEvidence.some((status) => status.includes('deliver') && !status.includes('undeliv'))
+  if (hasDelivered) {
     return { type: 'delivered', label: 'Delivered', icon: 'check-double' }
+  }
+  const hasSent = Boolean(sentAt)
+    || statusEvidence.some((status) => status === 'sent' || status === 'success' || status === 'accepted')
+  if (hasSent) {
+    return { type: 'sent', label: 'Sent', icon: 'check' }
   }
 
   return null

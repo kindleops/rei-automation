@@ -24,6 +24,7 @@ import {
   type GlobalCommandSearchContext,
 } from '../domain/command-center/command.types'
 import { useBreakpoint } from '../modules/mobile/useBreakpoint'
+import { openInboxThread } from '../modules/mobile/mobile-inbox-bridge'
 import { DesktopCommandShell } from '../modules/desktop/DesktopCommandShell'
 import { DesktopWorkspace } from '../modules/desktop/DesktopWorkspace'
 import { PortableCommandShell } from '../modules/mobile/PortableCommandShell'
@@ -301,6 +302,26 @@ export const CommandCenterApp = () => {
     // Recents are the operator's own history: only ever written from a result the
     // providers actually returned and the operator actually chose.
     recordRecentCommandResult(result)
+
+    /*
+     * A seller / conversation result OPENS THAT CONVERSATION. Before this, a
+     * result carrying { kind: 'focus_thread', threadId } only navigated to
+     * /inbox (and did nothing at all when the Inbox was already showing), so
+     * choosing "Wendy B Stuhr" landed on the list. openInboxThread routes to the
+     * Inbox and hands it the key; the Inbox fetches the thread by key when it is
+     * not in the loaded page.
+     */
+    const focusThreadKey = result.payload?.kind === 'focus_thread' && typeof result.payload.threadId === 'string'
+      ? result.payload.threadId.trim()
+      : ''
+    if (focusThreadKey) {
+      openInboxThread({
+        threadKey: focusThreadKey,
+        propertyId: typeof result.payload?.propertyId === 'string' ? result.payload.propertyId : null,
+      })
+      closeCmd()
+      return
+    }
 
     const targetRoute = canonicalizeRoutePath(result.route)
     const shouldNavigate = Boolean(targetRoute && targetRoute !== route.path)

@@ -19,6 +19,8 @@ import './voice-stage.css'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { useMobileKeyboardInset, isKeyboardInsetOpen } from '../../mobile/useMobileKeyboardInset'
+import { ComposerPhaseLine } from '../desk/ComposerPhaseLine'
+import type { ComposerPhase } from '../desk/composer-phase'
 
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -46,6 +48,14 @@ interface ComposerProps {
   onTranslateDraft?: (text: string) => void
   autoTranslateDraft?: boolean
   layoutMode?: ViewLayoutMode
+  /**
+   * Inbox Desktop 4.0: the conversation's automation phase, derived from its
+   * messages (desk/composer-phase.ts). When given, the composer owns the one
+   * automation signal and the conversation's typing mirror is not used.
+   */
+  phase?: ComposerPhase | null
+  /** the existing retry path, for a failed send */
+  onRetryPhase?: () => void
 }
 
 type SpeechRecognitionResultLike = {
@@ -111,6 +121,8 @@ export const Composer = ({
   onTranslateDraft,
   autoTranslateDraft = false,
   layoutMode = 'full',
+  phase,
+  onRetryPhase,
 }: ComposerProps) => {
   // Every use below is a DEVICE decision (soft keyboard inset, auto-focus,
   // sheet vs popover, tools in the field): a phone, not "the modern product" —
@@ -794,6 +806,7 @@ export const Composer = ({
   return (
     <div
       className={cls('nx-composer', `is-layout-${layoutMode}`, isListening && 'is-listening', isTranslatingDraft && 'is-translating-draft', isMobile && isKeyboardInsetOpen(keyboardInset) && 'is-keyboard-open')}
+      data-phase={phase?.kind}
       /**
        * NO inline paddingBottom.
        *
@@ -859,7 +872,11 @@ export const Composer = ({
           </div>
         </div>
       )}
-      {autoReplyTyping && !isListening && !voiceStage ? (
+      {phase !== undefined ? (
+        phase && phase.kind !== 'resting' && !isListening && !voiceStage
+          ? <ComposerPhaseLine phase={phase} onRetry={onRetryPhase} />
+          : null
+      ) : autoReplyTyping && !isListening && !voiceStage ? (
         <div className="nx-voice-status is-auto-reply" role="status" aria-live="polite">
           <span className="nx-voice-status__dot" aria-hidden="true" />
           Automation is replying…

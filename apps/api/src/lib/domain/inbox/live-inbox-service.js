@@ -873,6 +873,61 @@ function threadMatchesSearch(thread = {}, query = "") {
   ].some((value) => lower(value).includes(q));
 }
 
+/**
+ * COMMAND DECK SEARCH (opt-in: `search_scope=deck`).
+ *
+ * The desktop Command Deck searches the Inbox as you type, so it asks for the
+ * identity columns an operator actually types — names, phone, street, city,
+ * ZIP, market — plus the latest reply, and it skips the message-history corpus
+ * scan. That scan is what made common phrases ("not interested", "Minneapolis")
+ * take 20s+ locally: the trigram match fans out to hundreds of threads. The
+ * Inbox's own search box keeps its corpus behaviour; nothing changes for it.
+ *
+ * Every column here exists on canonical_inbox_threads (information_schema,
+ * 2026-10-01) — PostgREST fails the whole query on one unknown column.
+ */
+export const DECK_SEARCH_COLUMNS = Object.freeze([
+  "thread_key",
+  "canonical_e164",
+  "seller_phone",
+  "owner_name",
+  "seller_display_name",
+  "prospect_name",
+  "property_address_full",
+  "property_address_city",
+  "property_zip",
+  "market",
+  "latest_message_body",
+]);
+
+export function isDeckSearchScope(params = {}) {
+  return lower(params.search_scope || params.searchScope) === "deck";
+}
+
+/** The in-memory net for deck search: the same fields the SQL matched on. */
+export function threadMatchesDeckSearch(thread = {}, query = "") {
+  const q = lower(query);
+  if (!q) return true;
+  return [
+    thread.thread_key,
+    thread.canonical_thread_key,
+    thread.canonical_e164,
+    thread.seller_phone,
+    thread.best_phone,
+    thread.owner_name,
+    thread.seller_display_name,
+    thread.prospect_name,
+    thread.prospect_full_name,
+    thread.property_address_full,
+    thread.property_address_city,
+    thread.city,
+    thread.property_zip,
+    thread.zip,
+    thread.market,
+    thread.latest_message_body,
+  ].some((value) => lower(value).includes(q));
+}
+
 function sortThreads(rows = []) {
   return [...rows].sort((left, right) => (
     asTime(latestAt(right)) - asTime(latestAt(left)) ||
@@ -2315,8 +2370,10 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
 
   // Resolved once per request, for whichever source answers, and returned to the
   // caller so its in-memory search net does not throw away the corpus matches
-  // the SQL just went and found.
-  const corpusSearchKeys = params.q ? await resolveCorpusSearchThreadKeys(supabase, params.q) : [];
+  // the SQL just went and found. Command Deck search (search_scope=deck) skips
+  // the corpus scan by design — see DECK_SEARCH_COLUMNS.
+  const deckSearch = isDeckSearchScope(params);
+  const corpusSearchKeys = params.q && !deckSearch ? await resolveCorpusSearchThreadKeys(supabase, params.q) : [];
 
   if (advancedActive) {
     const hydrated = await queryHydratedInboxThreads(
@@ -2425,8 +2482,11 @@ async function queryThreadSource(params = {}, { supabase = defaultSupabase, limi
 
     if (params.q && typeof query.or === "function") {
       const qStr = `%${clean(params.q)}%`;
+      const searchColumns = deckSearch && sourceConfig.key === "primary"
+        ? DECK_SEARCH_COLUMNS
+        : sourceConfig.searchColumns;
       query = query.or(appendCorpusKeysToSearchClause(
-        sourceConfig.searchColumns.map((column) => `${column}.ilike.${qStr}`).join(","),
+        searchColumns.map((column) => `${column}.ilike.${qStr}`).join(","),
         corpusSearchKeys,
       ));
     }
@@ -2955,6 +3015,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     return Number.isFinite(ts) && ts > postFilterNowMs;
   };
   const corpusMatchedKeys = new Set((corpusSearchKeys || []).map((key) => clean(key)));
+  const matchesSearchNet = isDeckSearchScope(params) ? threadMatchesDeckSearch : threadMatchesSearch;
   const postFiltered = sortThreads(rows)
     .filter((row) => !HIDES_ARCHIVED || row.is_archived !== true)
     .filter((row) => !HIDES_SNOOZED || !isActivelySnoozed(row))
@@ -2962,7 +3023,7 @@ export async function getLiveInbox(params = {}, optionsOrDeps = {}, maybeDeps = 
     // A corpus hit is a real hit -- the phrase is in this conversation, just not
     // in its latest message. Without this the in-memory net would silently undo
     // the message-body search the SQL just performed.
-    .filter((row) => corpusMatchedKeys.has(clean(row.thread_key)) || threadMatchesSearch(row, params.q));
+    .filter((row) => corpusMatchedKeys.has(clean(row.thread_key)) || matchesSearchNet(row, params.q));
 
   /**
    * `postFiltered.length > limit` alone can NEVER be true on the authoritative
