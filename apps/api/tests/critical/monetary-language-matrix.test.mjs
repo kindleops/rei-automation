@@ -142,7 +142,7 @@ test("a bare 'more than' is still a FLOOR — only negation makes a ceiling", ()
  * or valuation). There is no global 400 -> 400000 rule; without an anchor the
  * number stays literal and low-confidence so the turn goes to review.
  */
-const anchored = (text) => resolveAskingPriceSignal(text, { reference: 200_000 })?.asking_price ?? null;
+const anchored = (text) => resolveAskingPriceSignal(text, { shorthandConvention: true, reference: 200_000 })?.asking_price ?? null;
 
 test("bare hundreds scale only against a contextual anchor", () => {
   for (const [text, expected] of [

@@ -38,8 +38,11 @@ for (const c of PRICE_CASES) {
   });
 }
 
-test("§3: 'around 100' with a same-magnitude reference scales to thousands", () => {
-  const signal = resolveAskingPriceSignal("around 100", { reference: 120000 });
+// RC 7.1: thousands shorthand needs an ESTABLISHED convention (the seller
+// already wrote "110k"); a reference alone no longer scales (see
+// ambiguous-asking-price-rc71.test.mjs).
+test("§3: 'around 100' with a same-magnitude reference and an established shorthand convention scales to thousands", () => {
+  const signal = resolveAskingPriceSignal("around 100", { shorthandConvention: true, reference: 120000 });
   assert.ok(signal.asking_price);
   assert.equal(signal.asking_price.value, 100000);
   assert.equal(signal.asking_price.price_type, "approximate");
@@ -106,6 +109,7 @@ test("§3: conflicting asking prices in one message force clarification", () => 
 test("§3: counters at S5 are marked is_counter", () => {
   const signal = resolveAskingPriceSignal("how about 160", {
     reference: 150000,
+    shorthandConvention: true,
     negotiationActive: true,
   });
   assert.ok(signal.asking_price);

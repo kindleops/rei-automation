@@ -439,7 +439,7 @@ test("a directional phrase after a scaled price is preserved", () => {
     "I want 300 west of here",
   ]) {
     assert.equal(
-      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
+      resolveAskingPriceSignal(message, { shorthandConvention: true, reference: 200000 })?.asking_price?.value ?? null,
       300000,
       `${JSON.stringify(message)} is a price with a direction phrase after it`
     );
@@ -497,7 +497,7 @@ test("a price ending in ANY capitalized token is preserved, across all five voca
     ["I want 300 Broadway", 300000],
   ]) {
     assert.equal(
-      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
+      resolveAskingPriceSignal(message, { shorthandConvention: true, reference: 200000 })?.asking_price?.value ?? null,
       expected,
       `${JSON.stringify(message)} is a price, not an address`
     );
@@ -512,7 +512,7 @@ test("a price ending in ANY capitalized token is preserved, across all five voca
     ["I want 300 East side", 300000],
   ]) {
     assert.equal(
-      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price?.value ?? null,
+      resolveAskingPriceSignal(message, { shorthandConvention: true, reference: 200000 })?.asking_price?.value ?? null,
       expected,
       `${JSON.stringify(message)} must keep extracting`
     );
@@ -532,7 +532,7 @@ test("a price ending in ANY capitalized token is preserved, across all five voca
     "331 Oak Street",
   ]) {
     assert.equal(
-      resolveAskingPriceSignal(message, { reference: 200000 })?.asking_price ?? null,
+      resolveAskingPriceSignal(message, { shorthandConvention: true, reference: 200000 })?.asking_price ?? null,
       null,
       `${JSON.stringify(message)} is an address, not a price`
     );
@@ -564,7 +564,7 @@ test("ACCEPTED TRADEOFF: a bare 'NNN Streetname' returns to baseline behaviour, 
     assert.equal(without?.asking_price ?? null, null, "no reference: no price is asserted");
     assert.equal(without?.needs_clarification, true, "no reference: we ask instead of guessing");
 
-    const with_reference = resolveAskingPriceSignal(message, { reference: 200000 });
+    const with_reference = resolveAskingPriceSignal(message, { shorthandConvention: true, reference: 200000 });
     assert.equal(
       with_reference?.asking_price?.value ?? null,
       scaled,
@@ -575,7 +575,7 @@ test("ACCEPTED TRADEOFF: a bare 'NNN Streetname' returns to baseline behaviour, 
   // What the PR still buys over baseline, in the same options form: the
   // direction-prefixed address that production reads as $4,157 stays suppressed.
   assert.equal(
-    resolveAskingPriceSignal("4157 S Main St", { reference: 200000 })?.asking_price ?? null,
+    resolveAskingPriceSignal("4157 S Main St", { shorthandConvention: true, reference: 200000 })?.asking_price ?? null,
     null,
     "eeee5bd8 returned 4157 here; that improvement is kept"
   );

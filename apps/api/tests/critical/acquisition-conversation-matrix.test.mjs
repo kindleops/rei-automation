@@ -28,7 +28,7 @@ const intentOf = async (m) => {
   const r = await classify(m, null, { heuristicOnly: true });
   return r?.primary_intent ?? r?.intent ?? "unclear";
 };
-const priceOf = (m) => resolveAskingPriceSignal(m, { reference: 200_000 })?.asking_price ?? null;
+const priceOf = (m) => resolveAskingPriceSignal(m, { shorthandConvention: true, reference: 200_000 })?.asking_price ?? null;
 
 /** One inbound turn against fixed prior state. */
 function turn({ stage = null, facts = {}, message = "", intent = "unclear", ade = null, ns = null } = {}) {

@@ -139,8 +139,8 @@ test("legitimate asking prices are untouched", () => {
 
 test("a direction word in prose does not suppress a price", () => {
   // "south"/"north" outside an address position must not eat the number.
-  assert.equal(signalPrice("I'd take 250 south of that", { reference: 200000 }), 250000);
-  assert.equal(signalPrice("I want 150 in the court settlement", { reference: 200000 }), 150000);
+  assert.equal(signalPrice("I'd take 250 south of that", { shorthandConvention: true, reference: 200000 }), 250000);
+  assert.equal(signalPrice("I want 150 in the court settlement", { shorthandConvention: true, reference: 200000 }), 150000);
 });
 
 test("REGRESSION: the function-word guard applies AFTER the direction skip", () => {
@@ -165,7 +165,7 @@ test("REGRESSION: the function-word guard applies AFTER the direction skip", () 
     // the un-skipped control that always worked
     "I want 300 of the drive",
   ]) {
-    assert.equal(signalPrice(message, { reference: 200000 }), 300000, message);
+    assert.equal(signalPrice(message, { shorthandConvention: true, reference: 200000 }), 300000, message);
   }
 });
 
@@ -186,16 +186,16 @@ test("the direction skip still recognises genuine directional addresses", () => 
 // outright. Values below are the production-baseline (eeee5bd8) results.
 
 test("REGRESSION: per-unit prices are not swallowed by the address guard", () => {
-  assert.equal(signalPrice("I want 300 per unit", { reference: 200000 }), 300000);
-  assert.equal(signalPrice("I'd do 300 a unit", { reference: 200000 }), 300000);
-  assert.equal(signalPrice("asking 95 per unit for all 4", { reference: 380000 }), 95000);
+  assert.equal(signalPrice("I want 300 per unit", { shorthandConvention: true, reference: 200000 }), 300000);
+  assert.equal(signalPrice("I'd do 300 a unit", { shorthandConvention: true, reference: 200000 }), 300000);
+  assert.equal(signalPrice("asking 95 per unit for all 4", { shorthandConvention: true, reference: 380000 }), 95000);
   // These two were never broken; they pin the surrounding behaviour.
   assert.equal(signalPrice("$80K per unit"), 80000);
-  assert.equal(signalPrice("I'd take 250 for the unit", { reference: 200000 }), 250000);
+  assert.equal(signalPrice("I'd take 250 for the unit", { shorthandConvention: true, reference: 200000 }), 250000);
 });
 
 test("REGRESSION: a per-unit number survives tokenization, not just resolution", () => {
-  const mentions = extractMonetaryMentions("I want 300 per unit", { reference: 200000 });
+  const mentions = extractMonetaryMentions("I want 300 per unit", { shorthandConvention: true, reference: 200000 });
   assert.equal(mentions.length, 1, "the number must not be discarded");
   assert.equal(mentions[0].value, 300000);
 });
@@ -208,9 +208,13 @@ test("REGRESSION: a per-unit number survives tokenization, not just resolution",
 // 38 of 40 lost the number entirely versus production baseline eeee5bd8.
 
 test("REGRESSION: a capitalized monetary qualifier is not a street name", () => {
-  // The two cases surfaced by the baseline differential.
-  assert.equal(signalPrice("I need 300 Net"), 300);
-  assert.equal(signalPrice("my net is 300 Net"), 300);
+  // The two cases surfaced by the baseline differential. The amount must
+  // survive tokenization; RC 7.1: a bare sub-$1,000 literal is never promoted
+  // to a canonical price (no convention ⇒ it asks instead).
+  assert.equal(extractMonetaryMentions("I need 300 Net")[0]?.value, 300);
+  assert.equal(extractMonetaryMentions("my net is 300 Net")[0]?.value, 300);
+  assert.equal(signalPrice("I need 300 Net"), null);
+  assert.equal(signalPrice("my net is 300 Net"), null);
   assert.equal(
     extractMonetaryMentions("I need 300 Net")[0]?.kind,
     "net_requirement",
@@ -236,7 +240,7 @@ const CAPITALIZED_FOLLOWERS = [
 for (const word of CAPITALIZED_FOLLOWERS) {
   test(`REGRESSION: "I want 300 ${word}" keeps its number`, () => {
     const message = `I want 300 ${word}`;
-    const mentions = extractMonetaryMentions(message, { reference: 200000 });
+    const mentions = extractMonetaryMentions(message, { shorthandConvention: true, reference: 200000 });
     assert.equal(mentions.length, 1, `${message} — the number must survive`);
     assert.equal(mentions[0].value, 300000, `${message} — and keep its value`);
   });
@@ -248,7 +252,7 @@ test("the two survivors of that differential are unchanged", () => {
   // narrowing of the qualifier set cannot quietly change them either.
   for (const message of ["I want 300 Each", "I want 300 OBO"]) {
     assert.equal(
-      extractMonetaryMentions(message, { reference: 200000 })[0]?.value,
+      extractMonetaryMentions(message, { shorthandConvention: true, reference: 200000 })[0]?.value,
       300000,
       message
     );
@@ -325,7 +329,7 @@ const TRAILING_TOKENS = [
 for (const word of TRAILING_TOKENS) {
   test(`REGRESSION: a trailing "${word}" does not delete the price`, () => {
     const message = `I want 300 ${word}`;
-    assert.equal(signalPrice(message, { reference: 200000 }), 300000, message);
+    assert.equal(signalPrice(message, { shorthandConvention: true, reference: 200000 }), 300000, message);
   });
 }
 

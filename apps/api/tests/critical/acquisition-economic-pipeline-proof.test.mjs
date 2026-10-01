@@ -397,7 +397,7 @@ test("a workable price presents our number and never probes vacancy", async () =
 
 /** Same call shape process-seller-inbound-message uses: an anchored reference. */
 async function anchoredTurn(message, ade, opts = {}) {
-  return pricedTurn(message, ade, { ...opts, priceOptions: { reference: ade.recommended_cash_offer } });
+  return pricedTurn(message, ade, { ...opts, priceOptions: { shorthandConvention: true, reference: ade.recommended_cash_offer } });
 }
 
 test("bare shorthand '220' routes on real economics, not on a literal $220", async () => {

@@ -7,7 +7,10 @@
 //
 // This module has zero I/O and is safe for unit tests with injected `now`.
 
-import { resolveAskingPriceSignal } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import {
+  resolveAskingPriceSignal,
+  establishesThousandsShorthand,
+} from "@/lib/domain/seller-flow/monetary-understanding.js";
 
 /**
  * Fixed trailing-edge quiet window.
@@ -534,8 +537,8 @@ export function aggregateBurstMessage(constituents = []) {
  *  - A low-confidence/ambiguous mention ("Actually maybe 325") NEVER
  *    overrides an earlier canonical price — mirroring single-message policy,
  *    where low-confidence mentions are excluded from canonical resolution.
- *    (If the caller supplies a deal-level `reference`, bare-number scaling is
- *    whatever resolveAskingPriceSignal already permits — existing policy.)
+ *    (A deal-level `reference` alone never scales a bare number; thousands
+ *    shorthand needs `shorthandConvention` or an earlier "110k" fragment.)
  *  - A constituent with no promotable price ("Actually ignore that") never
  *    fabricates or clears a replacement amount.
  *
@@ -544,8 +547,12 @@ export function aggregateBurstMessage(constituents = []) {
 export function resolveBurstAskingPriceSignal(constituents = [], {
   reference = null,
   negotiationActive = false,
+  shorthandConvention = false,
   now = null,
 } = {}) {
+  // A fragment that states its price as "110k" establishes the thousands
+  // convention for the fragments after it in the same burst.
+  let convention = shorthandConvention === true;
   const ordered = orderBurstConstituents(constituents);
   let canonical = null;
   let clarification = null;
@@ -559,9 +566,11 @@ export function resolveBurstAskingPriceSignal(constituents = [], {
     const signal = resolveAskingPriceSignal(body, {
       reference,
       negotiationActive,
+      shorthandConvention: convention,
       sourceMessageId: constituentKey(fragment),
       now,
     });
+    if (!convention && establishesThousandsShorthand([signal.asking_price])) convention = true;
     informational_mentions.push(...(signal.informational_mentions || []));
     all_mentions.push(...(signal.all_mentions || []));
 

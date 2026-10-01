@@ -31,7 +31,10 @@ import {
   persistSellerTransitionArtifacts,
   loadSellerDealState,
 } from "@/lib/domain/seller-flow/persist-seller-transition.js";
-import { resolveAskingPriceSignal } from "@/lib/domain/seller-flow/monetary-understanding.js";
+import {
+  resolveAskingPriceSignal,
+  establishesThousandsShorthand,
+} from "@/lib/domain/seller-flow/monetary-understanding.js";
 import { resolveBurstAskingPriceSignal } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
 import {
   extractSellerFacts,
@@ -1024,6 +1027,14 @@ export async function processSellerInboundMessage({
       underwriting.valuation_mid ??
       null,
     negotiationActive: negotiation_active,
+    // Bare "65" is thousands ONLY if this seller already wrote a price in
+    // thousands shorthand ("110k"). A $110,000 anchor alone never makes it so.
+    shorthandConvention: establishesThousandsShorthand([
+      ...(Array.isArray(prior_negotiation_state?.asking_price_history)
+        ? prior_negotiation_state.asking_price_history
+        : []),
+      deal_state?.known_facts?.asking_price || null,
+    ]),
     sourceMessageId: providerMessageId || inboundEventId,
   };
   // Finalized-burst turns carry their raw constituents: the burst-aware
@@ -1344,11 +1355,21 @@ export async function processSellerInboundMessage({
   // evidence on the extraction record. No "assume thousands" rule exists.
   const price_clarification_required =
     price_signal.needs_clarification === true && price_signal.asking_price == null;
+  // The fallbacks below (stage engine / classifier) never carry scale
+  // provenance: the classifier qualifies a bare "65" as 65. A sub-$1,000
+  // figure is never a property price, so it can never become the canonical
+  // ask through a fallback (it would persist as a $65 asking price).
+  const plausibleFallbackPrice = (value) => {
+    const amount = Number(
+      value && typeof value === "object" ? value.value ?? value.amount : value
+    );
+    return Number.isFinite(amount) && amount >= 1000 ? value : null;
+  };
   const resolved_asking_price = price_clarification_required
     ? null
     : price_signal.asking_price ??
-      stage_engine_decision?.seller_asking_price ??
-      extracted.asking_price ??
+      plausibleFallbackPrice(stage_engine_decision?.seller_asking_price) ??
+      plausibleFallbackPrice(extracted.asking_price) ??
       null;
 
   const canonical_new_facts = {

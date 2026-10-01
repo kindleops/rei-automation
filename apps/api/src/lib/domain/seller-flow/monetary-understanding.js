@@ -805,11 +805,16 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
  *        numbers lean counter_offer instead of asking_price.
  * @returns {Array<object>} mentions
  */
-export function extractMonetaryMentions(message, { reference = null, negotiationActive = false } = {}) {
+export function extractMonetaryMentions(message, {
+  reference = null,
+  negotiationActive = false,
+  shorthandConvention = false,
+} = {}) {
   const text = clean(message);
   if (!text) return [];
 
   const ref = num(reference);
+  const priceContext = ref !== null && ref >= 20_000;
   const mentions = [];
 
   for (const amount of tokenizeAmounts(text)) {
@@ -818,22 +823,36 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
     const window = windowFor(text, amount);
     const before = precedingWindow(text, amount);
 
-    // Bare small number ("160", "around 100"): thousands shorthand only when a
-    // same-magnitude reference exists; otherwise it stays low-confidence.
+    // Bare small number ("65", "160", "2.5"): a price conversation alone does
+    // NOT make it thousands. Property 273312064 (2026-10-01): the seller wrote
+    // "$110,000", then "$40,000", then "65" - and a $110,000 anchor turned
+    // "65" into a $65,000 counter at 0.65, over the 0.5 acceptance gate. The
+    // anchor says how big the deal is, not which unit the seller is typing in;
+    // "65" could be 65k, 650k or a typo. Thousands shorthand applies only when
+    // the conversation itself established it (shorthandConvention: the seller
+    // has already written their price as "110k" / "110 thousand"). Otherwise a
+    // bare number in a price conversation is SCALE-AMBIGUOUS: it is surfaced
+    // (so the caller asks instead of guessing, and nothing downstream promotes
+    // a raw classifier "65") but never accepted as a price.
     let scaled_from_reference = false;
-    if (!amount.has_currency && !amount.has_scale && value >= 20 && value < 1000) {
-      if (ref !== null && ref >= 20_000) {
+    let scale_ambiguous = false;
+    const decimal_bare = /^\d+\.\d+$/.test(clean(amount.raw));
+    if (!amount.has_currency && !amount.has_scale && amount.value < 1000) {
+      if (value >= 20 && priceContext && shorthandConvention === true) {
         value *= 1000;
         confidence = 0.65;
         scaled_from_reference = true;
-      } else {
+      } else if (priceContext && (value >= 20 || decimal_bare)) {
+        scale_ambiguous = true;
+        confidence = 0.3;
+      } else if (value >= 20) {
         confidence = 0.3;
       }
     }
 
     // Implausible as any transaction amount.
     if (value < 1000 && !scaled_from_reference) {
-      if (value < 100) continue;
+      if (value < 100 && !scale_ambiguous) continue;
       confidence = Math.min(confidence, 0.3);
     }
 
@@ -911,7 +930,7 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       } else if (amount.has_currency || amount.has_scale || scaled_from_reference) {
         kind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
         confidence = Math.min(confidence, scaled_from_reference ? confidence : 0.75);
-      } else if (value >= 1000 || (value >= 20 && value < 1000)) {
+      } else if (value >= 1000 || (value >= 20 && value < 1000) || scale_ambiguous) {
         kind = negotiationActive ? MONETARY_KINDS.COUNTER_OFFER : MONETARY_KINDS.ASKING_PRICE;
         confidence = Math.min(confidence, 0.3);
       }
@@ -930,18 +949,23 @@ export function extractMonetaryMentions(message, { reference = null, negotiation
       // These are all price-type statements — they set/refine the ask. But a
       // bare mid-range integer that only caught a distant cue must not be
       // lifted back over the acceptance gate.
-      if (!bare_midrange_integer) confidence = Math.max(confidence, 0.7);
+      // Nor may a sub-$1,000 literal ("at least 65") be lifted into a price.
+      if (!bare_midrange_integer && !scale_ambiguous && value >= 1000) {
+        confidence = Math.max(confidence, 0.7);
+      }
     }
 
     if (qualifiers.approximate) confidence = Math.min(confidence, 0.75);
 
     mentions.push({
       kind,
-      value: Math.round(value),
+      // A scale-ambiguous mention keeps the literal the seller typed ("2.5").
+      value: scale_ambiguous ? Number(clean(amount.raw).replace(/[^\d.]/g, "")) || value : Math.round(value),
       raw: amount.raw,
       confidence: Math.round(confidence * 100) / 100,
       qualifiers,
       scaled_from_reference,
+      ...(scale_ambiguous ? { scale_ambiguous: true } : {}),
     });
   }
 
@@ -1076,13 +1100,31 @@ export function resolveDigitAnchoredFloor(message) {
   };
 }
 
+/**
+ * Has THIS conversation established that the seller types prices in
+ * thousands? True only when a prior seller price was written as a short
+ * number with an explicit thousands marker ("110k", "$95K", "110 thousand",
+ * "110 grand"). A full figure ("$110,000"), an underwriting value or our own
+ * offer never establishes it.
+ *
+ * @param {Array<string|{extracted_text?: string}>} priorPrices
+ */
+export function establishesThousandsShorthand(priorPrices = []) {
+  const list = Array.isArray(priorPrices) ? priorPrices : [];
+  return list.some((entry) => {
+    const text = clean(typeof entry === "string" ? entry : entry?.extracted_text);
+    return /^\$?\s*\d{1,3}(?:\.\d+)?\s*(?:k|thousand|grand)$/i.test(text);
+  });
+}
+
 export function resolveAskingPriceSignal(message, {
   reference = null,
   negotiationActive = false,
+  shorthandConvention = false,
   sourceMessageId = null,
   now = null,
 } = {}) {
-  const mentions = extractMonetaryMentions(message, { reference, negotiationActive });
+  const mentions = extractMonetaryMentions(message, { reference, negotiationActive, shorthandConvention });
 
   // A digit-anchored floor ("has to start with a 4") carries no parseable
   // amount, so the tokenizer finds nothing. Consulted ONLY when no real
@@ -1124,7 +1166,9 @@ export function resolveAskingPriceSignal(message, {
       asking_price: null,
       is_counter: false,
       needs_clarification: true,
-      clarification_reason: "low_confidence_monetary_extraction",
+      clarification_reason: priceMentions.some((m) => m.scale_ambiguous)
+        ? "ambiguous_price_scale"
+        : "low_confidence_monetary_extraction",
       informational_mentions: informational,
       all_mentions: mentions,
     };
@@ -1190,5 +1234,6 @@ export function resolveAskingPriceSignal(message, {
 export default {
   MONETARY_KINDS,
   extractMonetaryMentions,
+  establishesThousandsShorthand,
   resolveAskingPriceSignal,
 };

@@ -86,7 +86,7 @@ test("the address guard never eats a per-unit price", async () => {
     "@/lib/domain/seller-flow/monetary-understanding.js"
   );
   assert.equal(
-    resolveAskingPriceSignal("I want 300 per unit", { reference: 200000, now: NOW })
+    resolveAskingPriceSignal("I want 300 per unit", { shorthandConvention: true, reference: 200000, now: NOW })
       .asking_price?.value,
     300000
   );
