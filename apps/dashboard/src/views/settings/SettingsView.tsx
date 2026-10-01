@@ -19,11 +19,11 @@ import { useNotificationIntelligence } from '../../domain/notifications/useNotif
 import { useAuth } from '../../components/auth/AuthProvider'
 import { resolveBuildIdentity } from '../../lib/build-identity'
 import { NEXUS_APPS } from '../../domain/app-registry/app-registry'
-import { useBackdropColors, useBackdropSettings, type BackdropStyle } from '../../modules/desktop/backdrop-settings'
+import { EnvironmentStudio } from '../../modules/desktop/appearance/EnvironmentStudio'
 import { useDesktopShellPrefs } from '../../modules/desktop/desktop-shell-prefs'
 import { setDisplayMode, useDisplayMode, type DisplayMode } from '../../modules/desktop/display-mode'
 import { clearSplit, useSplitWorkspace } from '../../modules/desktop/split-workspace'
-import { operatorInitials } from '../../modules/desktop/DesktopProfilePanel'
+import { operatorInitials } from '../../modules/desktop/operator-initials'
 import { setClassicDesktop } from '../../modules/mobile/product-platform'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import './settings.css'
@@ -39,11 +39,10 @@ import './settings.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
-type SectionId = 'appearance' | 'background' | 'alerts' | 'workspace' | 'keyboard' | 'account' | 'about'
+type SectionId = 'appearance' | 'alerts' | 'workspace' | 'keyboard' | 'account' | 'about'
 
 const SECTIONS: Array<{ id: SectionId; label: string; icon: IconName; blurb: string }> = [
-  { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'Theme, accent colour and Liquid Glass, applied across every app.' },
-  { id: 'background', label: 'Background', icon: 'layers', blurb: 'The colour that flows under the glass on this desktop.' },
+  { id: 'appearance', label: 'Appearance', icon: 'palette', blurb: 'Theme, environment, colour, glass and motion — previewed live and applied across every app.' },
   { id: 'alerts', label: 'Notifications & sound', icon: 'bell', blurb: 'What interrupts you, how it sounds, and when it stays quiet.' },
   { id: 'workspace', label: 'Workspace', icon: 'layout-split', blurb: 'Sidebar, display, split screen and the Home board.' },
   { id: 'keyboard', label: 'Keyboard', icon: 'command', blurb: 'The shortcuts that work on this desktop.' },
@@ -96,7 +95,12 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
 
 // ── Appearance ───────────────────────────────────────────────────────────
 
-function AppearanceSection() {
+/** Desktop: the Environment Studio. The phone keeps its own appearance controls. */
+function AppearanceSection({ phone }: { phone: boolean }) {
+  return phone ? <PhoneAppearanceSection /> : <EnvironmentStudio variant="page" />
+}
+
+function PhoneAppearanceSection() {
   const settings = useSettings()
   const themeId = settings.nexusTheme as NexusGlobalThemeId
   const isLight = settings.nexusTheme === 'light'
@@ -168,50 +172,6 @@ function AppearanceSection() {
         <div className="st-lgc">
           <LiquidGlassControls />
         </div>
-      </Group>
-    </>
-  )
-}
-
-// ── Background ───────────────────────────────────────────────────────────
-
-const BACKDROP_STYLES: Array<{ id: BackdropStyle; label: string; hint: string }> = [
-  { id: 'liquid', label: 'Liquid', hint: 'Slow, soft fields of colour' },
-  { id: 'waves', label: 'Waves', hint: 'Layered bands along the bottom' },
-  { id: 'aurora', label: 'Aurora', hint: 'Light drifting across the top' },
-  { id: 'still', label: 'Still', hint: 'The same colour, no motion' },
-]
-
-function BackgroundSection() {
-  const [bd, setBd] = useBackdropSettings()
-  const colors = useBackdropColors(bd.palette)
-  const swatch = { ['--pa' as string]: colors[0], ['--pb' as string]: colors[1 % colors.length], ['--pc' as string]: colors[2 % colors.length] }
-  return (
-    <>
-      <Group title="Style">
-        <div className="st-bdstyles" role="radiogroup" aria-label="Background style">
-          {BACKDROP_STYLES.map((st) => (
-            <button key={st.id} type="button" role="radio" aria-checked={bd.style === st.id} className={cls('st-bdstyle', `is-${st.id}`, bd.style === st.id && 'is-active')} style={swatch} onClick={() => setBd({ style: st.id })}>
-              <span className="st-bdstyle__preview" aria-hidden><i /><i /><i /></span>
-              <b>{st.label}</b>
-              <small>{st.hint}</small>
-            </button>
-          ))}
-        </div>
-      </Group>
-      <Group title="Colour and motion">
-        <Row title="Colours" hint={bd.palette === 'accent' ? 'Shades of your accent colour.' : 'Every accent colour, flowing together.'}>
-          <Segmented value={bd.palette} label="Background colours" options={[{ id: 'accent', label: 'Accent' }, { id: 'spectrum', label: 'Spectrum' }]} onChange={(palette) => setBd({ palette })} />
-        </Row>
-        <Row title="Intensity" hint="How much colour shows through the glass.">
-          <label className="st-range">
-            <input type="range" min={0} max={100} step={1} value={bd.intensity} onChange={(e) => setBd({ intensity: Number(e.target.value) })} aria-label="Background intensity" style={{ ['--pct' as string]: `${bd.intensity}%` }} />
-            <em>{bd.intensity}%</em>
-          </label>
-        </Row>
-        <Row title="Motion" hint="Off holds the colour still (also honoured when the system asks for reduced motion).">
-          <Switch on={bd.motion} label="Background motion" onChange={(motion) => setBd({ motion })} />
-        </Row>
       </Group>
     </>
   )
@@ -404,10 +364,11 @@ export function SettingsView() {
   const { isPhone } = useBreakpoint()
   const [section, setSection] = useState<SectionId>(() => {
     const want = new URLSearchParams(window.location.search).get('section')
+    // "background" now lives inside Appearance (the Environment Studio)
     return (SECTIONS.some((s) => s.id === want) ? want : 'appearance') as SectionId
   })
   const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]
-  const visible = isPhone ? SECTIONS.filter((s) => s.id !== 'workspace' && s.id !== 'background' && s.id !== 'keyboard') : SECTIONS
+  const visible = isPhone ? SECTIONS.filter((s) => s.id !== 'workspace' && s.id !== 'keyboard') : SECTIONS
 
   return (
     <div className="st" data-section={section}>
@@ -426,8 +387,7 @@ export function SettingsView() {
           <p>{current.blurb}</p>
         </header>
         <div className="st-body" key={section}>
-          {section === 'appearance' ? <AppearanceSection /> : null}
-          {section === 'background' ? <BackgroundSection /> : null}
+          {section === 'appearance' ? <AppearanceSection phone={isPhone} /> : null}
           {section === 'alerts' ? <AlertsSection /> : null}
           {section === 'workspace' ? <WorkspaceSection /> : null}
           {section === 'keyboard' ? <KeyboardSection /> : null}

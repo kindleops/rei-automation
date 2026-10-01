@@ -27,13 +27,66 @@
   --lc-ink-4: rgba(226, 232, 244, 0.3);
   --lc-ink-inverse: #05080d;
 
-  /* ── theme accent (identity, never semantics) ─────────────────────────── */
+  /* ── theme accent (identity, never semantics) ─────────────────────────────
+     On the desktop the Environment Studio derives this whole family from
+     the operator's one colour (shared/color — OKLCH, contrast-corrected per
+     theme) and publishes it in <style id="lc-appearance">. These are the
+     static fallbacks for every other surface and for the first frame. */
   --lc-accent-rgb: var(--nexus-accent-rgb, 94, 234, 212);
   --lc-accent: rgb(var(--lc-accent-rgb));
+  --lc-accent-base: var(--lc-accent);
+  --lc-accent-hover: color-mix(in srgb, var(--lc-accent) 88%, #fff);
+  --lc-accent-pressed: color-mix(in srgb, var(--lc-accent) 84%, #000);
+  --lc-accent-text: var(--lc-accent);
+  --lc-accent-text-rgb: var(--lc-accent-rgb);
+  --lc-accent-on: #05080d;
+  --lc-accent-muted: color-mix(in srgb, var(--lc-accent) 42%, rgb(148, 160, 180));
   --lc-accent-soft: rgba(var(--lc-accent-rgb), 0.14);
+  --lc-accent-border: rgba(var(--lc-accent-rgb), 0.42);
   --lc-accent-edge: rgba(var(--lc-accent-rgb), 0.42);
-  /* selection is the accent EXCEPT where the accent is a semantic colour */
+  --lc-accent-focus: var(--lc-accent);
+  --lc-accent-underlight: rgba(var(--lc-accent-rgb), 0.2);
+  --lc-accent-glow-low: rgba(var(--lc-accent-rgb), 0.1);
+  --lc-accent-energy: 1;
+  /* selection is the accent EXCEPT where the accent is a semantic colour
+     (a red-family accent never paints selection — the engine swaps in a
+     neutral, as Red Ops always has) */
   --lc-select-rgb: var(--lc-accent-rgb);
+
+  /* ── charts: harmonised with the accent, never monochrome ────────────────
+     primary = accent · secondary = a muted complement · semantic series stay
+     semantic · categorical is a stable accessible set (the engine moves the
+     accent to the front and drops near-duplicates of it). */
+  --lc-chart-primary: var(--lc-accent);
+  --lc-chart-primary-rgb: var(--lc-accent-rgb);
+  --lc-chart-secondary: rgb(148, 160, 180);
+  --lc-chart-neutral: rgb(148, 160, 180);
+  --lc-chart-positive: rgb(61, 220, 151);
+  --lc-chart-negative: rgb(255, 91, 108);
+  --lc-chart-attention: rgb(240, 182, 74);
+  --lc-chart-1: var(--lc-accent);
+  --lc-chart-2: #a9a6f9;
+  --lc-chart-3: #ef8bc5;
+  --lc-chart-4: #8ab4ff;
+  --lc-chart-5: #5fd3c4;
+  --lc-chart-6: #f49752;
+  --lc-chart-7: #d294ee;
+  --lc-chart-8: #a6be4e;
+
+  /* ── environment: the field behind the glass ("r g b" + composer) ──────── */
+  --lc-env-base: 11 12 14;
+  --lc-env-a: 6 182 212;
+  --lc-env-b: 47 176 155;
+  --lc-env-c: 112 179 236;
+  --lc-env-d: 66 117 73;
+  --lc-env-o: 0.47;
+  --lc-env-blend: 0.5;
+  --lc-env-spread: 0.55;
+  --lc-env-depth: 0.5;
+  --lc-env-fx: 28%;
+  --lc-env-fy: 22%;
+  --lc-env-tempo: 1;
+  --lc-env-amp: 1;
 
   /* ── semantic roles ───────────────────────────────────────────────────── */
   --lc-exec-rgb: 76, 201, 240;      /* cyan / cobalt — the machine executing */
@@ -60,27 +113,30 @@
   --lc-sheen: var(--lg-sheen, 1);
   --lc-edge-rgb: 255, 255, 255;
   --lc-shade-rgb: 0, 0, 0;
+  /* the operator's Edge (Soft 0.6 · Balanced 1 · Crisp 1.65) scales every
+     material's border light; written by the Environment Studio */
+  --lc-glass-edge: 1;
 
   /* ── materials: CLEAR · CRYSTAL · FROSTED · SMOKE · SOLID ─────────────── */
   --lc-mat-clear-bg: rgb(var(--lc-fill) / calc(0.26 * var(--lc-alpha)));
   --lc-mat-clear-filter: blur(calc(var(--lc-blur) * 0.5)) saturate(var(--lc-sat));
-  --lc-mat-clear-edge: rgba(var(--lc-edge-rgb), 0.07);
+  --lc-mat-clear-edge: rgba(var(--lc-edge-rgb), calc(0.07 * var(--lc-glass-edge)));
 
   --lc-mat-crystal-bg: rgb(var(--lc-fill) / calc(0.46 * var(--lc-alpha)));
   --lc-mat-crystal-filter: blur(var(--lc-blur)) saturate(calc(var(--lc-sat) * 1.12));
-  --lc-mat-crystal-edge: rgba(var(--lc-edge-rgb), 0.1);
+  --lc-mat-crystal-edge: rgba(var(--lc-edge-rgb), calc(0.1 * var(--lc-glass-edge)));
 
   --lc-mat-frosted-bg: rgb(var(--lc-fill) / calc(0.62 * var(--lc-alpha)));
   --lc-mat-frosted-filter: blur(calc(var(--lc-blur) * 1.35)) saturate(var(--lc-sat));
-  --lc-mat-frosted-edge: rgba(var(--lc-edge-rgb), 0.085);
+  --lc-mat-frosted-edge: rgba(var(--lc-edge-rgb), calc(0.085 * var(--lc-glass-edge)));
 
   --lc-mat-smoke-bg: rgb(var(--lc-fill) / calc(0.84 * var(--lc-alpha)));
   --lc-mat-smoke-filter: blur(var(--lc-blur)) saturate(calc(var(--lc-sat) * 0.9));
-  --lc-mat-smoke-edge: rgba(var(--lc-edge-rgb), 0.075);
+  --lc-mat-smoke-edge: rgba(var(--lc-edge-rgb), calc(0.075 * var(--lc-glass-edge)));
 
   --lc-mat-solid-bg: rgb(var(--lc-fill) / 0.97);
   --lc-mat-solid-filter: none;
-  --lc-mat-solid-edge: rgba(var(--lc-edge-rgb), 0.08);
+  --lc-mat-solid-edge: rgba(var(--lc-edge-rgb), calc(0.08 * var(--lc-glass-edge)));
 
   /* FLOAT — a surface floating over app content INSIDE a desktop pane
      (inspector, sticky bar, grid header). The pane body owns a backdrop
@@ -268,11 +324,25 @@
   --lc-fill: var(--dsk-fill, var(--lg-fill, 250 251 253));
   --lc-edge-rgb: 255, 255, 255;
   --lc-shade-rgb: 24, 36, 60;
-  --lc-mat-clear-edge: rgba(11, 18, 32, 0.07);
-  --lc-mat-crystal-edge: rgba(11, 18, 32, 0.08);
-  --lc-mat-frosted-edge: rgba(11, 18, 32, 0.08);
-  --lc-mat-smoke-edge: rgba(11, 18, 32, 0.1);
-  --lc-mat-solid-edge: rgba(11, 18, 32, 0.1);
+  --lc-mat-clear-edge: rgba(11, 18, 32, calc(0.07 * var(--lc-glass-edge)));
+  --lc-mat-crystal-edge: rgba(11, 18, 32, calc(0.08 * var(--lc-glass-edge)));
+  --lc-mat-frosted-edge: rgba(11, 18, 32, calc(0.08 * var(--lc-glass-edge)));
+  --lc-mat-smoke-edge: rgba(11, 18, 32, calc(0.1 * var(--lc-glass-edge)));
+  --lc-mat-solid-edge: rgba(11, 18, 32, calc(0.1 * var(--lc-glass-edge)));
+  --lc-accent-on: #ffffff;
+  --lc-chart-secondary: rgb(92, 102, 120);
+  --lc-chart-neutral: rgb(92, 102, 120);
+  --lc-chart-positive: rgb(12, 140, 92);
+  --lc-chart-negative: rgb(214, 40, 62);
+  --lc-chart-attention: rgb(176, 112, 18);
+  --lc-chart-2: #6d5fd6;
+  --lc-chart-3: #c2408a;
+  --lc-chart-4: #3f6fd8;
+  --lc-chart-5: #0f8a7e;
+  --lc-chart-6: #c25a1c;
+  --lc-chart-7: #a14dc4;
+  --lc-chart-8: #5f7a12;
+  --lc-env-base: 244 244 245;
   --lc-mat-crystal-bg: rgb(var(--lc-fill) / calc(0.58 * var(--lc-alpha)));
   --lc-mat-frosted-bg: rgb(var(--lc-fill) / calc(0.72 * var(--lc-alpha)));
   --lc-mat-smoke-bg: rgb(var(--lc-fill) / calc(0.9 * var(--lc-alpha)));
@@ -299,10 +369,11 @@
   --lc-mat-smoke-bg: rgb(var(--lc-fill) / calc(0.9 * var(--lc-alpha)));
   --lc-mat-solid-bg: rgb(0 0 0 / 0.98);
   --lc-mat-float-bg: rgb(4 4 6 / 0.98);
-  --lc-mat-crystal-edge: rgba(255, 255, 255, 0.12);
-  --lc-mat-frosted-edge: rgba(255, 255, 255, 0.1);
-  --lc-mat-smoke-edge: rgba(255, 255, 255, 0.09);
-  --lc-mat-solid-edge: rgba(255, 255, 255, 0.1);
+  --lc-mat-crystal-edge: rgba(255, 255, 255, calc(0.12 * var(--lc-glass-edge)));
+  --lc-mat-frosted-edge: rgba(255, 255, 255, calc(0.1 * var(--lc-glass-edge)));
+  --lc-mat-smoke-edge: rgba(255, 255, 255, calc(0.09 * var(--lc-glass-edge)));
+  --lc-mat-solid-edge: rgba(255, 255, 255, calc(0.1 * var(--lc-glass-edge)));
+  --lc-env-base: 0 0 0;
   --lc-inner-bg: rgba(255, 255, 255, 0.022);
   --lc-hairline: rgba(255, 255, 255, 0.08);
   --lc-sheen-top: inset 0 1px 0 rgba(255, 255, 255, calc(0.11 * var(--lc-sheen)));
@@ -310,8 +381,11 @@
 }
 
 /* RED OPS — an environment, not a semantic. Red keeps meaning "blocked";
-   selection, activity and success stay cool or green. */
+   selection, activity and success stay cool or green. (On the desktop the
+   Environment Studio separates theme from accent: selection follows the
+   chosen accent and turns neutral only when that accent is red-family.) */
 :root[data-nexus-theme='red_ops'] {
+  --lc-env-base: 11 6 6;
   --lc-select-rgb: 226, 232, 240;
   --lc-focus-rgb: 226, 232, 240;
   --lc-exec-rgb: 125, 211, 252;

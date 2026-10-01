@@ -1,87 +1,93 @@
-import { useEffect, useState } from 'react'
-import { ACCENT_PALETTE_IDS, ACCENT_PALETTES, LIGHT_ACCENT_PALETTES, loadSettings, subscribeSettings } from '../../shared/settings'
+import { useSyncExternalStore } from 'react'
+import { useReducedMotion } from 'framer-motion'
+import { loadSettings, saveSettings, subscribeSettings } from '../../shared/settings'
+import { getAppearanceDraft, subscribeAppearanceDraft } from '../../shared/color/runtime'
+import type { EnvironmentType, MotionLevel } from '../../shared/color/appearance'
 
 /**
- * THE DESKTOP BACKDROP — flowing colour underneath the Liquid Glass.
+ * THE DESKTOP ENVIRONMENT — the colour that lives under the glass.
  *
- *   style      liquid (soft drifting colour) · waves (layered flowing bands)
- *              · aurora (a slow sweep) · still (a quiet static mesh)
- *   palette    accent (the chosen accent and two companions) · spectrum (every accent)
- *   intensity  0–100, how much colour reaches the glass
- *   motion     the flow can be stilled without changing the look
+ * Since Environment Studio 3.0 this is part of the one appearance store
+ * (`nexus-settings.appearance`, versioned and migrated from the old
+ * `nexus.desktop.backdrop` key). This module keeps the small read API other
+ * surfaces already use (style · intensity · motion) and adds the live view
+ * the backdrop renders from, draft included, so a drag repaints instantly.
  */
-export type BackdropStyle = 'liquid' | 'waves' | 'aurora' | 'still'
+export type BackdropStyle = EnvironmentType
+/** Legacy: "accent" = Auto Harmony on, "spectrum" = the operator's own anchors. */
 export type BackdropPalette = 'accent' | 'spectrum'
 export interface BackdropSettings { style: BackdropStyle; palette: BackdropPalette; intensity: number; motion: boolean }
 
-const KEY = 'nexus.desktop.backdrop'
-const EVT = 'nexus:desktop-backdrop'
 export const BACKDROP_DEFAULTS: BackdropSettings = { style: 'liquid', palette: 'accent', intensity: 55, motion: true }
 
+let cacheKey = ''
+let cacheValue: BackdropSettings = BACKDROP_DEFAULTS
+
 export function readBackdrop(): BackdropSettings {
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '{}') as Partial<BackdropSettings>
-    const style = (['liquid', 'waves', 'aurora', 'still'] as const).includes(raw.style as BackdropStyle) ? raw.style as BackdropStyle : BACKDROP_DEFAULTS.style
-    const palette = raw.palette === 'spectrum' ? 'spectrum' : 'accent'
-    const intensity = Number.isFinite(Number(raw.intensity)) ? Math.max(0, Math.min(100, Number(raw.intensity))) : BACKDROP_DEFAULTS.intensity
-    return { style, palette, intensity, motion: raw.motion !== false }
-  } catch {
-    return BACKDROP_DEFAULTS
+  const s = loadSettings()
+  const draft = getAppearanceDraft()
+  const ap = draft?.appearance ?? s.appearance
+  const env = ap.environment
+  const motion = ap.motion !== 'still' && s.animationsEnabled !== false
+  const key = `${env.type}|${env.autoHarmony}|${env.intensity}|${motion}`
+  if (key !== cacheKey) {
+    cacheKey = key
+    cacheValue = { style: env.type, palette: env.autoHarmony ? 'accent' : 'spectrum', intensity: env.intensity, motion }
   }
+  return cacheValue
 }
 
-export function writeBackdrop(patch: Partial<BackdropSettings>) {
-  const next = { ...readBackdrop(), ...patch }
-  try { localStorage.setItem(KEY, JSON.stringify(next)) } catch { /* private mode */ }
-  window.dispatchEvent(new CustomEvent(EVT))
-  return next
+/** Writes through the appearance store (one save, one broadcast). */
+export function writeBackdrop(patch: Partial<BackdropSettings>): BackdropSettings {
+  const s = loadSettings()
+  const env = { ...s.appearance.environment }
+  if (patch.style) env.type = patch.style
+  if (typeof patch.intensity === 'number') env.intensity = Math.round(Math.max(0, Math.min(100, patch.intensity)))
+  if (patch.palette) env.autoHarmony = patch.palette === 'accent'
+  const motion: MotionLevel = patch.motion === undefined ? s.appearance.motion : patch.motion ? (s.appearance.motion === 'still' ? 'calm' : s.appearance.motion) : 'still'
+  saveSettings({ ...s, appearance: { ...s.appearance, environment: env, motion } })
+  return readBackdrop()
+}
+
+const subscribe = (fn: () => void) => {
+  const a = subscribeSettings(fn)
+  const b = subscribeAppearanceDraft(fn)
+  return () => { a(); b() }
 }
 
 export function useBackdropSettings(): [BackdropSettings, (patch: Partial<BackdropSettings>) => void] {
-  const [s, set] = useState(readBackdrop)
-  useEffect(() => {
-    const sync = () => set(readBackdrop())
-    window.addEventListener(EVT, sync)
-    window.addEventListener('storage', sync)
-    return () => { window.removeEventListener(EVT, sync); window.removeEventListener('storage', sync) }
-  }, [])
-  return [s, (patch) => set(writeBackdrop(patch))]
+  const value = useSyncExternalStore(subscribe, readBackdrop, () => BACKDROP_DEFAULTS)
+  return [value, writeBackdrop]
 }
 
-/* ── colour ─────────────────────────────────────────────────────────────── */
-
-function hexToHsl(hex: string): [number, number, number] {
-  const n = parseInt(hex.replace('#', ''), 16)
-  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255
-  const max = Math.max(r, g, b), min = Math.min(r, g, b)
-  const l = (max + min) / 2
-  if (max === min) return [0, 0, l * 100]
-  const d = max - min
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
-  const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4
-  return [h * 60, s * 100, l * 100]
+export interface EnvironmentShape {
+  type: EnvironmentType
+  level: MotionLevel
+  /** the environment is actually moving (level, LeadCommand's Animations switch, the OS) */
+  moving: boolean
 }
-const hsl = (h: number, s: number, l: number) => `hsl(${Math.round(((h % 360) + 360) % 360)} ${Math.round(s)}% ${Math.round(l)}%)`
 
-/** Four colours for the backdrop: the accent family, or the whole accent spectrum. */
-export function backdropColors(palette: BackdropPalette): string[] {
-  const settings = loadSettings()
-  const light = settings.nexusTheme === 'light'
-  const table = light ? LIGHT_ACCENT_PALETTES : ACCENT_PALETTES
-  if (palette === 'spectrum') {
-    const pick: Array<keyof typeof ACCENT_PALETTES> = ['violet', 'blue', 'cyan', 'emerald', 'amber', 'rose']
-    return pick.filter((k) => ACCENT_PALETTE_IDS.includes(k)).map((k) => table[k].primary)
+let shapeKey = ''
+let shapeValue: EnvironmentShape = { type: 'liquid', level: 'calm', moving: true }
+
+function readShape(): EnvironmentShape {
+  const s = loadSettings()
+  const ap = getAppearanceDraft()?.appearance ?? s.appearance
+  const moving = ap.motion !== 'still' && s.animationsEnabled !== false
+  const key = `${ap.environment.type}|${ap.motion}|${moving}`
+  if (key !== shapeKey) {
+    shapeKey = key
+    shapeValue = { type: ap.environment.type, level: ap.motion, moving }
   }
-  const [h, s, l] = hexToHsl(table[settings.accentPalette]?.primary ?? '#06b6d4')
-  // The accent, a cooler and a warmer companion, and a deep anchor — one family.
-  return [hsl(h, s, l), hsl(h - 38, s * 0.9, l * 0.95), hsl(h + 32, s * 0.85, l * 1.05), hsl(h - 70, s * 0.7, l * 0.7)]
+  return shapeValue
 }
 
-export function useBackdropColors(palette: BackdropPalette): string[] {
-  const [colors, setColors] = useState(() => backdropColors(palette))
-  useEffect(() => {
-    setColors(backdropColors(palette))
-    return subscribeSettings(() => setColors(backdropColors(palette)))
-  }, [palette])
-  return colors
+/**
+ * What the backdrop needs to re-render for: its type and whether it moves.
+ * Colours, intensity and the composer are CSS variables — they never re-render it.
+ */
+export function useEnvironmentShape(): EnvironmentShape {
+  const shape = useSyncExternalStore(subscribe, readShape, () => shapeValue)
+  const osReduced = useReducedMotion()
+  return osReduced && shape.moving ? { ...shape, moving: false } : shape
 }

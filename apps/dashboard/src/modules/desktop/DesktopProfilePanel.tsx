@@ -1,81 +1,43 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Icon } from '../../shared/icons'
 import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
-import { MobileAppearanceControls } from '../mobile/MobileAppearanceControls'
 import { AlertSettings } from '../notifications/AlertSettings'
 import { formatBuildIdentityLine } from '../../lib/build-identity'
 import { setClassicDesktop } from '../mobile/product-platform'
-import { useBackdropColors, useBackdropSettings, type BackdropStyle } from './backdrop-settings'
-
-const STYLES: Array<{ id: BackdropStyle; label: string }> = [
-  { id: 'liquid', label: 'Liquid' },
-  { id: 'waves', label: 'Waves' },
-  { id: 'aurora', label: 'Aurora' },
-  { id: 'still', label: 'Still' },
-]
-
-/** The flowing colour under the glass: style, colours, strength, motion. */
-function BackdropControls() {
-  const [bd, setBd] = useBackdropSettings()
-  const colors = useBackdropColors(bd.palette)
-  const swatch = { ['--pa' as string]: colors[0], ['--pb' as string]: colors[1], ['--pc' as string]: colors[2 % colors.length] }
-  return (
-    <section className="dsk-bdc">
-      <p className="dsk-pop__eyebrow">Background</p>
-      <div className="dsk-bdc__styles" role="radiogroup" aria-label="Background style">
-        {STYLES.map((st) => (
-          <button key={st.id} type="button" role="radio" aria-checked={bd.style === st.id} className={cls('dsk-bdc__style', `is-${st.id}`, bd.style === st.id && 'is-active')} style={swatch} onClick={() => setBd({ style: st.id })}>
-            <span className="dsk-bdc__preview" aria-hidden><i /><i /><i /></span>
-            <b>{st.label}</b>
-          </button>
-        ))}
-      </div>
-      <div className="dsk-bdc__row">
-        <span>Colours</span>
-        <div className="dsk-seg dsk-seg--inline" role="radiogroup" aria-label="Background colours">
-          <button type="button" role="radio" aria-checked={bd.palette === 'accent'} className={cls('dsk-seg__tab', bd.palette === 'accent' && 'is-active')} onClick={() => setBd({ palette: 'accent' })}>Accent</button>
-          <button type="button" role="radio" aria-checked={bd.palette === 'spectrum'} className={cls('dsk-seg__tab', bd.palette === 'spectrum' && 'is-active')} onClick={() => setBd({ palette: 'spectrum' })}>Spectrum</button>
-        </div>
-      </div>
-      <label className="dsk-bdc__row">
-        <span>Intensity</span>
-        <input type="range" min={0} max={100} step={1} value={bd.intensity} onChange={(e) => setBd({ intensity: Number(e.target.value) })} aria-label="Background intensity" />
-        <em>{bd.intensity}%</em>
-      </label>
-      <label className="dsk-bdc__row">
-        <span>Motion</span>
-        <button type="button" role="switch" aria-checked={bd.motion} className={cls('dsk-switch', bd.motion && 'is-on')} onClick={() => setBd({ motion: !bd.motion })}><i /></button>
-      </label>
-    </section>
-  )
-}
+import { EnvironmentStudio } from './appearance/EnvironmentStudio'
+import { operatorInitials } from './operator-initials'
 
 /**
  * PROFILE — the operator, and the whole system's look and sound.
- * Theme, accent and Liquid Glass are the same store every surface reads
- * (updateSetting + applyThemeToDOM broadcast), so a change lands everywhere
- * at once; sound and alert behaviour likewise.
+ *
+ * Appearance is the Environment Studio (modules/desktop/appearance): theme,
+ * environment, colour, material, motion and saved environments, all writing
+ * the one settings store every surface reads, previewed live against the
+ * real product behind this panel. Sound and alert behaviour likewise.
+ *
+ * Export name and props are stable: the shell (and its Command Deck) render
+ * this panel as-is.
  */
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
 type Tab = 'appearance' | 'sound' | 'system'
 
-export function operatorInitials(email?: string | null, name?: string | null): string {
-  const src = (name || '').trim() || (email || '').split('@')[0]
-  const parts = src.split(/[\s._-]+/).filter(Boolean)
-  const letters = parts.length >= 2 ? parts[0][0] + parts[1][0] : (parts[0] || 'LC').slice(0, 2)
-  return letters.toUpperCase()
-}
+// Stable API: the shell imports operatorInitials from this module.
+// eslint-disable-next-line react-refresh/only-export-components
+export { operatorInitials }
 
 export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSettings }: { email?: string | null; name?: string | null; onSignOut?: () => void; onClose: () => void; onOpenSettings?: () => void }) {
   const [tab, setTab] = useState<Tab>('appearance')
   const [settings, setSettings] = useState(() => loadSettings())
+  // the colour editor asks for room: the panel widens while it is open
+  const [wide, setWide] = useState(false)
   useEffect(() => subscribeSettings(() => setSettings(loadSettings())), [])
   const initials = operatorInitials(email, name)
+  const openSound = useCallback(() => setTab('sound'), [])
 
   return (
-    <div className="dsk-pop dsk-pop--profile" role="dialog" aria-label="Profile and system settings">
+    <div className={cls('dsk-pop dsk-pop--profile', tab === 'appearance' && 'dsk-pop--studio', tab === 'appearance' && wide && 'is-wide')} role="dialog" aria-label="Profile and system settings">
       <header className="dsk-prof__head">
         <span className="dsk-prof__avatar" aria-hidden>{initials}</span>
         <div>
@@ -96,8 +58,7 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSet
       <div className="dsk-prof__body">
         {tab === 'appearance' ? (
           <div className="dsk-prof__appearance">
-            <BackdropControls />
-            <MobileAppearanceControls />
+            <EnvironmentStudio variant="panel" onOpenSound={openSound} onExpandChange={setWide} />
           </div>
         ) : null}
 

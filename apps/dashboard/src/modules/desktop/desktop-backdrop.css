@@ -1,174 +1,252 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   DESKTOP BACKDROP — flowing colour under the glass.
-   Cheap by construction: soft gradients (no filter) moved by transform, a
-   pre-blurred aurora rotated as a cached texture, SVG waves translated.
+   THE ENVIRONMENT — colour living beneath the glass (Environment Studio 3.0).
+   Cheap by construction: soft radial gradients (no filter, no canvas) moved
+   by transform; colours, opacity and the composer are CSS variables the
+   appearance engine publishes (--lc-env-*), so dragging a colour repaints
+   without re-rendering anything.
+
+     --lc-env-base     the room ("r g b")       --lc-env-o       layer opacity
+     --lc-env-a … d    the four anchors          --lc-env-blend   soft 0 → deep 1
+     --lc-env-spread   focused 0 → ambient 1     --lc-env-depth   flat 0 → spatial 1
+     --lc-env-fx / fy  Custom focal point        --lc-env-tempo / amp  motion
    ══════════════════════════════════════════════════════════════════════════ */
 html.is-desktop-modern .nx-os.is-desktop-os { background: transparent !important; }
 html.is-desktop-modern .nx-os.is-desktop-os > .nx-stage { position: relative; z-index: 1; }
 
+.dsk-bd,
+.lc-env-stage {
+  /* one bloom unit: aspect-aware, so a 32:9 desk gets more, rounder blooms
+     instead of one bloom stretched into a smear */
+  --bd-unit: calc(min(62cqmax, 128cqh) * (0.7 + 0.62 * var(--lc-env-spread, 0.55)));
+  --bd-core: calc(var(--lc-env-blend, 0.5) * 34%);
+  --bd-core-a: calc(0.7 + 0.3 * var(--lc-env-blend, 0.5));
+  --bd-amp: var(--lc-env-amp, 1);
+  --bd-tempo: var(--lc-env-tempo, 1);
+  overflow: hidden;
+  /* a size container: blooms are sized and moved in container units, so the
+     Studio's live previews render this very field at thumbnail scale */
+  container-type: size;
+  background: rgb(var(--lc-env-base, 11 12 14));
+}
 .dsk-bd {
-  --bd-o: calc(0.16 + 0.56 * var(--bd-i, 0.55));
   position: fixed;
   inset: 0;
   z-index: 0;
-  overflow: hidden;
   pointer-events: none;
-  background: var(--dsk-bg);
+  contain: strict;
 }
-html[data-nexus-theme='light'] .dsk-bd { --bd-o: calc(0.3 + 0.55 * var(--bd-i, 0.55)); }
+.lc-env-stage { position: relative; isolation: isolate; }
+/* True Black: colour is a local underlight, never a navy wash */
+html[data-nexus-theme='true_black'] .dsk-bd,
+html[data-nexus-theme='true_black'] .lc-env-stage { --bd-unit: calc(min(54cqmax, 112cqh) * (0.62 + 0.5 * var(--lc-env-spread, 0.55))); }
 
-/* liquid: four soft pools of colour drifting */
-.dsk-bd__liquid { position: absolute; inset: -12%; opacity: var(--bd-o); }
-.dsk-bd__liquid i {
+.dsk-env-layer { position: absolute; inset: 0; }
+.dsk-env { position: absolute; inset: 0; opacity: var(--lc-env-o, 0.47); }
+
+.dsk-env i {
+  --c: var(--lc-env-a);
+  --k: 1;
+  --size: calc(var(--bd-unit) * var(--k));
   position: absolute;
-  width: 62vmax;
-  height: 62vmax;
+  left: calc(var(--x, 50%) - var(--size) / 2);
+  top: calc(var(--y, 50%) - var(--size) / 2);
+  width: var(--size);
+  height: var(--size);
   border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(var(--c) / var(--bd-core-a)) var(--bd-core), rgb(var(--c) / 0) 100%);
   will-change: transform;
-  animation: dsk-bd-drift-a 54s ease-in-out infinite alternate;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
 }
-.dsk-bd__liquid i:nth-child(1) { left: -14%; top: -22%; background: radial-gradient(closest-side, var(--bd-a), transparent); }
-.dsk-bd__liquid i:nth-child(2) { right: -18%; top: 4%; background: radial-gradient(closest-side, var(--bd-b), transparent); animation-name: dsk-bd-drift-b; animation-duration: 63s; }
-.dsk-bd__liquid i:nth-child(3) { left: 16%; bottom: -34%; background: radial-gradient(closest-side, var(--bd-c), transparent); animation-name: dsk-bd-drift-c; animation-duration: 71s; }
-.dsk-bd__liquid i:nth-child(4) { right: 6%; bottom: -30%; width: 46vmax; height: 46vmax; background: radial-gradient(closest-side, var(--bd-d), transparent); animation-duration: 80s; animation-direction: alternate-reverse; opacity: 0.8; }
-@keyframes dsk-bd-drift-a { 0% { transform: translate3d(0, 0, 0) scale(1); } 50% { transform: translate3d(9vw, 6vh, 0) scale(1.1); } 100% { transform: translate3d(-4vw, 12vh, 0) scale(0.95); } }
-@keyframes dsk-bd-drift-b { 0% { transform: translate3d(0, 0, 0) scale(1.05); } 50% { transform: translate3d(-10vw, 9vh, 0) scale(0.92); } 100% { transform: translate3d(-3vw, -6vh, 0) scale(1.08); } }
-@keyframes dsk-bd-drift-c { 0% { transform: translate3d(0, 0, 0) scale(0.95); } 50% { transform: translate3d(7vw, -8vh, 0) scale(1.12); } 100% { transform: translate3d(-8vw, -3vh, 0) scale(1); } }
+.dsk-env i.is-wide { display: none; }
+@container (min-aspect-ratio: 21/9) {
+  .dsk-env i.is-wide { display: block; }
+}
 
-/* waves: three bands flowing at different speeds */
-.dsk-bd__waves { position: absolute; left: 0; right: 0; bottom: -4vh; width: 100%; height: 58vh; opacity: calc(var(--bd-o) * 0.75); }
-.dsk-bd__wave { will-change: transform; animation: dsk-bd-wave 46s linear infinite; }
-.dsk-bd__wave.is-2 { animation-duration: 34s; opacity: 0.7; }
-.dsk-bd__wave.is-3 { animation-duration: 25s; opacity: 0.55; }
-@keyframes dsk-bd-wave { from { transform: translateX(0); } to { transform: translateX(-1000px); } }
-.dsk-bd.is-waves::after {
-  content: '';
+/* ── LIQUID: slow living colour field ─────────────────────────────────── */
+.dsk-env.is-liquid .l1 { --c: var(--lc-env-a); --x: 14%; --y: 10%; --k: 1.02; animation-name: dsk-env-drift-a; animation-duration: calc(54s * var(--bd-tempo)); }
+.dsk-env.is-liquid .l2 { --c: var(--lc-env-b); --x: 88%; --y: 26%; --k: 0.94; animation-name: dsk-env-drift-b; animation-duration: calc(63s * var(--bd-tempo)); }
+.dsk-env.is-liquid .l3 { --c: var(--lc-env-c); --x: 40%; --y: 98%; --k: 1.06; animation-name: dsk-env-drift-c; animation-duration: calc(71s * var(--bd-tempo)); }
+.dsk-env.is-liquid .l4 { --c: var(--lc-env-d); --x: 82%; --y: 94%; --k: 0.76; animation-name: dsk-env-drift-a; animation-duration: calc(80s * var(--bd-tempo)); animation-direction: alternate-reverse; }
+.dsk-env.is-liquid .l5 { --c: var(--lc-env-c); --x: 56%; --y: 14%; --k: 0.82; animation-name: dsk-env-drift-b; animation-duration: calc(68s * var(--bd-tempo)); }
+.dsk-env.is-liquid .l6 { --c: var(--lc-env-b); --x: 24%; --y: 70%; --k: 0.7; animation-name: dsk-env-drift-c; animation-duration: calc(76s * var(--bd-tempo)); animation-direction: alternate-reverse; }
+
+/* ── WAVES: soft directional energy — long luminous ribbons, no hard edge ─ */
+.dsk-env.is-waves i { border-radius: 50%; }
+.dsk-env.is-waves .w1, .dsk-env.is-waves .w2, .dsk-env.is-waves .w3 {
+  --h: calc(var(--bd-unit) * 0.46);
+  left: -40%;
+  width: 180%;
+  height: var(--h);
+  top: calc(var(--y) - var(--h) / 2);
+  background: radial-gradient(50% 50% at 50% 50%, rgb(var(--c) / var(--bd-core-a)) var(--bd-core), rgb(var(--c) / 0) 100%);
+  transform-origin: 50% 50%;
+}
+.dsk-env.is-waves .w1 { --c: var(--lc-env-a); --y: 30%; rotate: -10deg; animation-name: dsk-env-ribbon; animation-duration: calc(46s * var(--bd-tempo)); }
+.dsk-env.is-waves .w2 { --c: var(--lc-env-b); --y: 56%; rotate: -7deg; animation-name: dsk-env-ribbon; animation-duration: calc(34s * var(--bd-tempo)); animation-direction: alternate-reverse; opacity: 0.9; }
+.dsk-env.is-waves .w3 { --c: var(--lc-env-c); --y: 82%; rotate: -4deg; animation-name: dsk-env-ribbon; animation-duration: calc(27s * var(--bd-tempo)); opacity: 0.8; }
+.dsk-env.is-waves .w4 { --c: var(--lc-env-d); --x: 50%; --y: 106%; --k: 1.5; animation-name: dsk-env-drift-a; animation-duration: calc(70s * var(--bd-tempo)); }
+
+/* ── AURORA: multi-anchor atmospheric curtains, lit from their crowns ──── */
+.dsk-env.is-aurora i {
+  --w: calc(var(--bd-unit) * 0.46);
+  --h: calc(var(--bd-unit) * 1.3);
+  left: calc(var(--x) - var(--w) / 2);
+  top: calc(var(--y) - var(--h) / 2);
+  width: var(--w);
+  height: var(--h);
+  background: radial-gradient(50% 50% at 50% 40%, rgb(var(--c) / var(--bd-core-a)) var(--bd-core), rgb(var(--c) / 0) 100%);
+  transform-origin: 50% 0%;
+}
+.dsk-env.is-aurora .a1 { --c: var(--lc-env-a); --x: 14%; --y: 34%; rotate: 14deg; animation-name: dsk-env-curtain; animation-duration: calc(38s * var(--bd-tempo)); }
+.dsk-env.is-aurora .a2 { --c: var(--lc-env-b); --x: 36%; --y: 26%; rotate: 8deg; animation-name: dsk-env-curtain; animation-duration: calc(47s * var(--bd-tempo)); animation-direction: alternate-reverse; }
+.dsk-env.is-aurora .a3 { --c: var(--lc-env-c); --x: 62%; --y: 32%; rotate: -7deg; animation-name: dsk-env-curtain; animation-duration: calc(42s * var(--bd-tempo)); }
+.dsk-env.is-aurora .a4 { --c: var(--lc-env-d); --x: 86%; --y: 28%; rotate: -13deg; animation-name: dsk-env-curtain; animation-duration: calc(52s * var(--bd-tempo)); animation-direction: alternate-reverse; }
+.dsk-env.is-aurora .a5 { --c: var(--lc-env-b); --x: 50%; --y: 30%; rotate: 2deg; animation-name: dsk-env-curtain; animation-duration: calc(58s * var(--bd-tempo)); }
+.dsk-env.is-aurora .a6 {
+  /* the low horizon glow the curtains rise from */
+  --c: var(--lc-env-a);
+  --w: 140%;
+  --h: calc(var(--bd-unit) * 0.5);
+  --x: 50%;
+  --y: 104%;
+  opacity: 0.55;
+  animation-name: dsk-env-drift-b;
+  animation-duration: calc(90s * var(--bd-tempo));
+}
+
+/* ── STILL: a stationary cinematic mesh — key light, counter light, floor ─ */
+.dsk-env.is-still i { animation: none !important; }
+.dsk-env.is-still .s1 { --c: var(--lc-env-a); --x: 10%; --y: 4%; --k: 1.18; }
+.dsk-env.is-still .s2 { --c: var(--lc-env-b); --x: 94%; --y: 92%; --k: 1.02; }
+.dsk-env.is-still .s3 { --c: var(--lc-env-c); --x: 52%; --y: 116%; --k: 1.3; opacity: 0.75; }
+.dsk-env.is-still .s4 { --c: var(--lc-env-d); --x: 88%; --y: 6%; --k: 0.6; opacity: 0.85; }
+.dsk-env.is-still .s5 { --c: var(--lc-env-c); --x: 46%; --y: 2%; --k: 0.8; opacity: 0.7; }
+
+/* ── CUSTOM: the operator's composition around a focal point ──────────── */
+.dsk-env.is-custom .c1 { --c: var(--lc-env-a); --x: var(--lc-env-fx, 28%); --y: var(--lc-env-fy, 22%); --k: 1.08; animation-name: dsk-env-drift-a; animation-duration: calc(60s * var(--bd-tempo)); }
+.dsk-env.is-custom .c2 { --c: var(--lc-env-b); --x: calc(var(--lc-env-fx, 28%) + 38%); --y: calc(var(--lc-env-fy, 22%) + 26%); --k: 0.86; animation-name: dsk-env-drift-b; animation-duration: calc(66s * var(--bd-tempo)); }
+.dsk-env.is-custom .c3 { --c: var(--lc-env-c); --x: calc(100% - var(--lc-env-fx, 28%)); --y: calc(100% - var(--lc-env-fy, 22%) + 12%); --k: 0.98; animation-name: dsk-env-drift-c; animation-duration: calc(74s * var(--bd-tempo)); }
+.dsk-env.is-custom .c4 { --c: var(--lc-env-d); --x: calc(var(--lc-env-fx, 28%) - 14%); --y: calc(var(--lc-env-fy, 22%) + 64%); --k: 0.74; animation-name: dsk-env-drift-a; animation-duration: calc(82s * var(--bd-tempo)); animation-direction: alternate-reverse; }
+.dsk-env.is-custom .c5 { --c: var(--lc-env-b); --x: calc(var(--lc-env-fx, 28%) + 62%); --y: calc(var(--lc-env-fy, 22%) - 8%); --k: 0.78; animation-name: dsk-env-drift-b; animation-duration: calc(70s * var(--bd-tempo)); }
+
+/* drift: amplitude follows the motion level (Calm 1 · Fluid 1.35) */
+@keyframes dsk-env-drift-a {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(calc(9cqw * var(--bd-amp)), calc(6cqh * var(--bd-amp)), 0) scale(calc(1 + 0.1 * var(--bd-amp))); }
+  100% { transform: translate3d(calc(-4cqw * var(--bd-amp)), calc(12cqh * var(--bd-amp)), 0) scale(calc(1 - 0.05 * var(--bd-amp))); }
+}
+@keyframes dsk-env-drift-b {
+  0% { transform: translate3d(0, 0, 0) scale(calc(1 + 0.05 * var(--bd-amp))); }
+  50% { transform: translate3d(calc(-10cqw * var(--bd-amp)), calc(9cqh * var(--bd-amp)), 0) scale(calc(1 - 0.08 * var(--bd-amp))); }
+  100% { transform: translate3d(calc(-3cqw * var(--bd-amp)), calc(-6cqh * var(--bd-amp)), 0) scale(calc(1 + 0.08 * var(--bd-amp))); }
+}
+@keyframes dsk-env-drift-c {
+  0% { transform: translate3d(0, 0, 0) scale(calc(1 - 0.05 * var(--bd-amp))); }
+  50% { transform: translate3d(calc(7cqw * var(--bd-amp)), calc(-8cqh * var(--bd-amp)), 0) scale(calc(1 + 0.12 * var(--bd-amp))); }
+  100% { transform: translate3d(calc(-8cqw * var(--bd-amp)), calc(-3cqh * var(--bd-amp)), 0) scale(1); }
+}
+@keyframes dsk-env-ribbon {
+  0% { transform: translate3d(calc(-6cqw * var(--bd-amp)), 0, 0) scaleY(1); }
+  50% { transform: translate3d(calc(4cqw * var(--bd-amp)), calc(-3cqh * var(--bd-amp)), 0) scaleY(calc(1 + 0.18 * var(--bd-amp))); }
+  100% { transform: translate3d(calc(8cqw * var(--bd-amp)), calc(2cqh * var(--bd-amp)), 0) scaleY(calc(1 - 0.08 * var(--bd-amp))); }
+}
+@keyframes dsk-env-curtain {
+  0% { transform: translate3d(0, 0, 0) scaleY(1) skewX(0deg); }
+  50% { transform: translate3d(calc(4cqw * var(--bd-amp)), 0, 0) scaleY(calc(1 + 0.12 * var(--bd-amp))) skewX(calc(4deg * var(--bd-amp))); }
+  100% { transform: translate3d(calc(-3cqw * var(--bd-amp)), calc(2cqh * var(--bd-amp)), 0) scaleY(calc(1 - 0.06 * var(--bd-amp))) skewX(calc(-3deg * var(--bd-amp))); }
+}
+
+/* ── depth: the separation behind the glass (vignette + floor), not saturation ─ */
+.dsk-bd__depth {
   position: absolute;
   inset: 0;
-  background: radial-gradient(90% 60% at 50% 110%, color-mix(in srgb, var(--bd-a) 40%, transparent), transparent 70%);
-  opacity: calc(var(--bd-o) * 0.8);
+  background:
+    radial-gradient(125% 95% at 50% 36%, transparent calc(64% - 22% * var(--lc-env-depth, 0.5)), rgb(0 0 0 / calc(0.12 + 0.46 * var(--lc-env-depth, 0.5)))),
+    linear-gradient(180deg, rgb(0 0 0 / 0) 58%, rgb(0 0 0 / calc(0.24 * var(--lc-env-depth, 0.5))));
+}
+html[data-nexus-theme='true_black'] .dsk-bd__depth {
+  /* OLED: black stays black around the edges, colour lives as underlight */
+  background:
+    radial-gradient(118% 92% at 50% 42%, transparent calc(58% - 16% * var(--lc-env-depth, 0.5)), rgb(0 0 0 / calc(0.3 + 0.42 * var(--lc-env-depth, 0.5)))),
+    linear-gradient(180deg, rgb(0 0 0 / 0.2) 0%, rgb(0 0 0 / 0) 26%, rgb(0 0 0 / 0) 66%, rgb(0 0 0 / calc(0.22 * var(--lc-env-depth, 0.5))));
+}
+html[data-nexus-theme='light'] .dsk-bd__depth {
+  background:
+    radial-gradient(125% 95% at 50% 34%, transparent calc(62% - 18% * var(--lc-env-depth, 0.5)), rgb(250 250 248 / calc(0.1 + 0.4 * var(--lc-env-depth, 0.5)))),
+    linear-gradient(180deg, rgb(255 255 255 / calc(0.14 * var(--lc-env-depth, 0.5))) 0%, rgb(255 255 255 / 0) 40%);
 }
 
-/* aurora: a slow conic sweep, blurred once and rotated as a texture */
-.dsk-bd__aurora { position: absolute; inset: -35%; opacity: calc(var(--bd-o) * 0.9); }
-.dsk-bd__aurora i {
-  position: absolute;
-  inset: 0;
-  background: conic-gradient(from 0deg at 50% 50%, var(--bd-a), var(--bd-b), var(--bd-c), var(--bd-d), var(--bd-a));
-  filter: blur(110px);
-  -webkit-mask-image: radial-gradient(closest-side, #000 18%, transparent 72%);
-  mask-image: radial-gradient(closest-side, #000 18%, transparent 72%);
-  will-change: transform;
-  animation: dsk-bd-spin 110s linear infinite;
-}
-.dsk-bd__aurora i:nth-child(2) { animation-duration: 170s; animation-direction: reverse; opacity: 0.55; transform: scale(0.75); }
-@keyframes dsk-bd-spin { to { transform: rotate(360deg); } }
-
-/* grain keeps gradients from banding; vignette keeps the eye in the middle */
+/* grain keeps gradients from banding — felt, never seen */
 .dsk-bd__grain {
   position: absolute;
   inset: 0;
-  opacity: 0.05;
+  opacity: 0.045;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   mix-blend-mode: overlay;
 }
-.dsk-bd__vignette { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 35%, transparent 55%, rgba(0, 0, 0, 0.42)); }
-html[data-nexus-theme='light'] .dsk-bd__vignette { background: radial-gradient(120% 90% at 50% 35%, transparent 62%, rgba(255, 255, 255, 0.28)); }
+html[data-nexus-theme='light'] .dsk-bd__grain { opacity: 0.03; }
 
-.dsk-bd.is-still *,
-.dsk-bd.is-still::after,
-.dsk-bd.is-still .dsk-bd__liquid i { animation-play-state: paused !important; }
-.dsk-bd.is-still .dsk-bd__liquid i { animation: none !important; }
+/* ── the swap: current refracts outward and dissolves, new resolves under the
+      glass (LC_MOTION.environment.swap: 0.9s glide, out ×1.06, in ×0.975) ── */
+.dsk-env-layer.is-entering { animation: dsk-env-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.dsk-env-layer.is-leaving { animation: dsk-env-out 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+@keyframes dsk-env-in { from { opacity: 0; transform: scale(0.975); } to { opacity: 1; transform: none; } }
+@keyframes dsk-env-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(1.06); } }
+
+/* ── held still: Motion Still, the Animations switch, or the OS asking ─── */
+.dsk-bd.is-held .dsk-env i { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) {
-  .dsk-bd * { animation: none !important; }
+  .dsk-env i { animation-play-state: paused !important; }
+  .dsk-env-layer.is-entering { animation: dsk-env-fade-in 0.24s linear both; }
+  .dsk-env-layer.is-leaving { animation: dsk-env-fade-out 0.24s linear forwards; }
 }
+@keyframes dsk-env-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dsk-env-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
-/* ── glass over the flow ────────────────────────────────────────────────
-   Panes are a translucent tint (no live blur — the flow is already soft);
-   inside a pane, cards tint rather than re-blur every frame. The sidebar,
-   bar and popovers keep true backdrop blur. */
-/* Each pane is one sheet of real liquid glass (one blur per pane, not per
-   card): the flowing colour behind reads through as depth, lit from above. */
+/* ── one coherent crossfade for discrete changes (theme, preset, saved
+      environment, material) — durations from LC_MOTION, set per change ─── */
+html[data-lc-vt]::view-transition-old(root),
+html[data-lc-vt]::view-transition-new(root) {
+  animation-duration: var(--lc-vt-duration, 300ms);
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* the crossfade is visual only — the product stays clickable underneath it */
+html[data-lc-vt]::view-transition { pointer-events: none; }
+
+/* ── glass over the environment ─────────────────────────────────────────
+   Each pane is ONE sheet of liquid glass (one blur per pane, never per
+   card), driven by the operator's material: blur, saturation, opacity,
+   sheen and edge. The environment reads through as depth, lit from above. */
 html.is-desktop-modern .dsk-pane__body {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.025), rgb(255 255 255 / 0) 34%),
+    linear-gradient(180deg, rgb(255 255 255 / calc(0.025 * var(--lg-sheen, 1))), rgb(255 255 255 / 0) 34%),
     rgb(var(--dsk-fill) / calc(0.54 * var(--lg-alpha, 1))) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.35);
-  backdrop-filter: blur(30px) saturate(1.35);
+  -webkit-backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(var(--lg-sat, 1.35));
+  backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(var(--lg-sat, 1.35));
   --dsk-blur: none;
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.5 * var(--lg-alpha, 1)));
 }
-html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body {
-  -webkit-backdrop-filter: blur(30px) saturate(1.6);
-  backdrop-filter: blur(30px) saturate(1.6);
-}
 /* Light: real liquid glass — the colour flowing underneath must read through,
-   so the pane is a thin frost (not 70% white) with a bright specular edge. */
+   so the pane is a thin frost with a bright specular edge. */
 html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane__body {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0) 42%),
-    rgb(255 255 255 / calc(0.44 * var(--lg-alpha, 1))) !important;
-  --dsk-glass: rgb(255 255 255 / calc(0.5 * var(--lg-alpha, 1)));
+    linear-gradient(180deg, rgb(255 255 255 / calc(0.34 * var(--lg-sheen, 1))), rgb(255 255 255 / 0) 42%),
+    rgb(var(--dsk-fill) / calc(0.44 * var(--lg-alpha, 1))) !important;
+  -webkit-backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(calc(var(--lg-sat, 1.35) * 1.15));
+  backdrop-filter: blur(calc(var(--lg-blur, 24px) + 6px)) saturate(calc(var(--lg-sat, 1.35) * 1.15));
+  --dsk-glass: rgb(var(--dsk-fill) / calc(0.5 * var(--lg-alpha, 1)));
 }
 html.is-desktop-modern[data-nexus-theme='light'] .dsk-pane {
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), inset 0 0 0 1px rgb(255 255 255 / 0.6), 0 0 0 1px rgb(15 17 22 / 0.05), 0 30px 80px -42px rgb(30 40 90 / 0.3);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / calc(0.9 * var(--lg-sheen, 1))), inset 0 0 0 1px rgb(255 255 255 / 0.6), 0 0 0 1px rgb(15 17 22 / calc(0.05 * var(--lc-glass-edge, 1))), 0 30px 80px -42px rgb(30 40 90 / 0.3);
 }
-html.is-desktop-modern .dsk-pane { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), inset 0 0 0 1px var(--dsk-edge), 0 30px 80px -46px rgba(0, 0, 0, 0.95); }
+html.is-desktop-modern .dsk-pane { box-shadow: inset 0 1px 0 rgb(255 255 255 / calc(0.07 * var(--lg-sheen, 1))), inset 0 0 0 1px var(--dsk-edge), 0 30px 80px -46px rgba(0, 0, 0, 0.95); }
 html.is-desktop-modern .dh-w { -webkit-backdrop-filter: none; backdrop-filter: none; }
 
-/* ── profile › background controls ─────────────────────────────────── */
-.dsk-bdc { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--dsk-edge); }
-.dsk-bdc__styles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.dsk-bdc__style { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 6px 8px; border-radius: 10px; cursor: pointer; background: var(--dsk-tile); box-shadow: inset 0 0 0 1px var(--dsk-edge); transition: box-shadow 0.15s ease, background 0.15s ease; }
-.dsk-bdc__style:hover { background: var(--dsk-tile-hi); }
-.dsk-bdc__style.is-active { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dsk-accent) 70%, transparent); }
-.dsk-bdc__style b { font-size: 11.5px; font-weight: 550; color: var(--dsk-ink-2); }
-.dsk-bdc__style.is-active b { color: var(--dsk-ink); }
-.dsk-bdc__preview { position: relative; width: 100%; height: 44px; border-radius: 7px; overflow: hidden; background: var(--dsk-bg); box-shadow: inset 0 0 0 1px var(--dsk-edge); }
-.dsk-bdc__preview i { position: absolute; border-radius: 50%; opacity: 0.8; }
-.dsk-bdc__style.is-liquid .dsk-bdc__preview i,
-.dsk-bdc__style.is-still .dsk-bdc__preview i { width: 70%; height: 150%; }
-.dsk-bdc__style.is-liquid .dsk-bdc__preview i:nth-child(1), .dsk-bdc__style.is-still .dsk-bdc__preview i:nth-child(1) { left: -25%; top: -60%; background: radial-gradient(closest-side, var(--pa), transparent); }
-.dsk-bdc__style.is-liquid .dsk-bdc__preview i:nth-child(2), .dsk-bdc__style.is-still .dsk-bdc__preview i:nth-child(2) { right: -25%; top: -30%; background: radial-gradient(closest-side, var(--pb), transparent); }
-.dsk-bdc__style.is-liquid .dsk-bdc__preview i:nth-child(3), .dsk-bdc__style.is-still .dsk-bdc__preview i:nth-child(3) { left: 20%; bottom: -90%; background: radial-gradient(closest-side, var(--pc), transparent); }
-.dsk-bdc__style.is-liquid .dsk-bdc__preview i { animation: dsk-bd-drift-a 9s ease-in-out infinite alternate; }
-.dsk-bdc__style.is-waves .dsk-bdc__preview i { left: -10%; width: 240%; height: 60%; border-radius: 45%; animation: dsk-bdc-wave 7s linear infinite; }
-.dsk-bdc__style.is-waves .dsk-bdc__preview i:nth-child(1) { bottom: -30%; background: linear-gradient(90deg, var(--pa), var(--pb)); opacity: 0.5; }
-.dsk-bdc__style.is-waves .dsk-bdc__preview i:nth-child(2) { bottom: -40%; background: linear-gradient(90deg, var(--pb), var(--pc)); opacity: 0.45; animation-duration: 5s; }
-.dsk-bdc__style.is-waves .dsk-bdc__preview i:nth-child(3) { bottom: -48%; background: linear-gradient(90deg, var(--pc), var(--pa)); opacity: 0.4; animation-duration: 3.8s; }
-@keyframes dsk-bdc-wave { from { transform: translateX(0) rotate(0.5deg); } to { transform: translateX(-50%) rotate(-0.5deg); } }
-.dsk-bdc__style.is-aurora .dsk-bdc__preview i:nth-child(1) { inset: -60%; border-radius: 0; background: conic-gradient(var(--pa), var(--pb), var(--pc), var(--pa)); filter: blur(14px); opacity: 0.6; animation: dsk-bd-spin 8s linear infinite; }
-.dsk-bdc__style.is-aurora .dsk-bdc__preview i:nth-child(n+2) { display: none; }
-.dsk-bdc__row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--dsk-ink-2); }
-.dsk-bdc__row > span { width: 72px; flex: none; }
-.dsk-bdc__row input[type='range'] { flex: 1; accent-color: var(--dsk-accent); }
-.dsk-bdc__row em { width: 34px; text-align: right; font-style: normal; font-variant-numeric: tabular-nums; color: var(--dsk-ink-3); }
-.dsk-seg--inline { display: inline-grid; grid-template-columns: repeat(2, auto); margin: 0; }
-.dsk-seg--inline .dsk-seg__tab { padding: 0 12px; }
+/* the profile panel's switch (Alerts tab) */
 .dsk-switch { all: unset; box-sizing: border-box; position: relative; width: 34px; height: 20px; border-radius: 999px; cursor: pointer; background: var(--dsk-tile-hi); box-shadow: inset 0 0 0 1px var(--dsk-edge-hi); transition: background 0.2s ease; }
 .dsk-switch i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--dsk-ink-2); transition: transform 0.2s var(--dsk-spring), background 0.2s ease; }
 .dsk-switch.is-on { background: color-mix(in srgb, var(--dsk-accent) 55%, transparent); }
 .dsk-switch.is-on i { transform: translateX(14px); background: #fff; }
-
-/* ── profile › liquid glass presets, in the desk's language ─────────────
-   The phone's preview stage paints magenta/cyan blobs; on a desk the
-   preview shows the operator's own backdrop colours under each glass. */
-.dsk-prof__appearance .lgc-presets { gap: 6px !important; }
-.dsk-prof__appearance .lgc-preset { border-radius: 10px !important; background: var(--dsk-tile) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge) !important; padding: 5px 5px 7px !important; }
-.dsk-prof__appearance .lgc-preset.is-active { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dsk-accent) 70%, transparent) !important; }
-.dsk-prof__appearance .lgc-preset__stage { border-radius: 7px !important; background: var(--dsk-bg) !important; }
-.dsk-prof__appearance .lgc-preset__blob { filter: blur(6px) saturate(0.9) !important; opacity: 0.55 !important; }
-.dsk-prof__appearance .lgc-preset__blob.a { background: var(--dsk-accent) !important; }
-.dsk-prof__appearance .lgc-preset__blob.b { background: color-mix(in srgb, var(--dsk-accent) 50%, #6a7cff) !important; }
-.dsk-prof__appearance .lgc-preset__blob.c { background: color-mix(in srgb, var(--dsk-accent) 40%, #0b0c0e) !important; }
-.dsk-prof__appearance .lgc-preset span:not([class]),
-.dsk-prof__appearance .lgc-preset b,
-.dsk-prof__appearance .lgc-preset__label { font-size: 11px !important; font-weight: 550 !important; color: var(--dsk-ink-2) !important; }
-.dsk-prof__appearance .lgc-sliders { border-radius: 10px !important; background: var(--dsk-tile) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge) !important; }
-.dsk-prof__appearance .lgc-slider__head { font-size: 12px !important; color: var(--dsk-ink-2) !important; }
-.dsk-prof__appearance .lgc-slider input[type='range'] { accent-color: var(--dsk-accent); }
-.dsk-prof__appearance .nx-mobile-appearance__subhead,
-.dsk-prof__appearance h4 { font-size: 11px !important; font-weight: 550 !important; letter-spacing: 0.02em !important; text-transform: none !important; color: var(--dsk-ink-3) !important; }
-.dsk-prof__appearance .nx-mobile-appearance__theme { border-radius: 8px !important; background: var(--dsk-tile) !important; box-shadow: inset 0 0 0 1px var(--dsk-edge) !important; min-height: 32px !important; font-size: 12px !important; }
-.dsk-prof__appearance .nx-mobile-appearance__theme.is-active { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--dsk-accent) 70%, transparent) !important; }
-.dsk-prof__appearance .nx-mobile-appearance__accents { gap: 4px !important; }
+.dsk-switch:focus-visible { box-shadow: var(--lc-focus-ring); }

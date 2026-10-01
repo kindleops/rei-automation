@@ -5,6 +5,13 @@
  * Provides map, sound, and UI customization for the entire app.
  */
 
+import type { AccentPresetId } from './color/accents'
+import {
+  defaultAppearance, defaultLibrary, migrateAppearance,
+  type AppearanceLibrary, type AppearanceState, type LegacyBackdrop, type MaterialState,
+} from './color/appearance'
+import { getAppearanceDraft, publishAppearance, subscribeAppearanceDraft } from './color/runtime'
+
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export type MapTheme = 'dark-matter' | 'dark-matter-nolabels' | 'voyager-nolabels' | 'positron-nolabels'
@@ -23,21 +30,15 @@ export type NexusTheme =
   | 'dark' | 'satellite' | 'terrain' | 'red_ops' | 'matrix' | 'blueprint' | 'executive' | 'night_vision' | 'monochrome' | 'true_black' | 'light'
   // Legacy themes kept for localStorage backward compatibility
   | 'dark-matter' | 'midnight-glass' | 'tactical-blue' | 'carbon-gold' | 'monochrome-ops' | 'infrared' | 'arctic-signal' | 'operator-black'
-export type AccentPalette =
-  | 'cyan'
-  | 'emerald'
-  | 'amber'
-  | 'violet'
-  | 'rose'
-  | 'ice'
-  | 'blue'
-  | 'teal'
-  | 'lime'
-  | 'orange'
-  | 'pink'
-  | 'gold'
+/**
+ * A curated preset id, or 'custom' — the operator's own colour, stored in
+ * `appearance.accent.custom` (Environment Studio). Theme and accent are
+ * separate choices: every theme takes every accent.
+ */
+export type AccentPalette = AccentPresetId | 'custom'
 
-export const ACCENT_PALETTE_IDS: AccentPalette[] = [
+/** The curated presets, in the order the phone's picker has always shown them. */
+export const ACCENT_PALETTE_IDS: AccentPresetId[] = [
   'cyan', 'emerald', 'amber', 'violet', 'rose', 'ice',
   'blue', 'teal', 'lime', 'orange', 'pink', 'gold',
 ]
@@ -170,8 +171,14 @@ export interface NexusSettings {
   glowIntensity: number           // 0–1
   labelDensity: number            // 0–1
 
-  /** Liquid glass — see shared/liquid-glass.ts (optional: absent = theme default). */
-  liquidGlass?: { preset: 'theme' | 'clear' | 'frosted' | 'crystal' | 'smoke' | 'custom'; blur: number; transparency: number; sheen: number }
+  /** Liquid glass — see shared/liquid-glass.ts (optional: absent = theme default). The
+   *  Environment Studio's material: + edge, + the family a 'custom' glass was tuned from. */
+  liquidGlass?: MaterialState
+
+  /** Environment Studio — custom accent + intensity, environment, motion (versioned; see shared/color/appearance.ts). */
+  appearance: AppearanceState
+  /** Saved environments, recent and saved colours. UI preference only. */
+  appearanceLibrary: AppearanceLibrary
 
   /** Mobile pinned app dock — same layout on every app/route */
   pinnedAppDock: {
@@ -286,6 +293,10 @@ export const DEFAULT_SETTINGS: NexusSettings = {
   glowIntensity: 0.6,
   labelDensity: 0.5,
 
+  // Environment Studio
+  appearance: defaultAppearance(),
+  appearanceLibrary: defaultLibrary(),
+
   /**
    * Intentionally EMPTY.
    *
@@ -312,21 +323,56 @@ const STORAGE_KEY = 'nexus-settings'
 let _cache: NexusSettings | null = null
 const _listeners = new Set<() => void>()
 
+/** The pre-Studio desktop backdrop lived under its own key; read once, as migration input only. */
+const LEGACY_BACKDROP_KEY = 'nexus.desktop.backdrop'
+
+function readLegacyBackdrop(): LegacyBackdrop | null {
+  try {
+    const raw = localStorage.getItem(LEGACY_BACKDROP_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as LegacyBackdrop) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Parse + repair + migrate. Appearance fields are validated one by one (a
+ * corrupt colour, palette, material or theme falls back on its own and never
+ * takes the rest of the settings with it) and brought to the current
+ * appearance version — the operator's look stays what it was.
+ */
+function hydrate(raw: string | null): { settings: NexusSettings; migrated: boolean } {
+  let parsed: Partial<NexusSettings> = {}
+  try {
+    const value: unknown = raw ? JSON.parse(raw) : {}
+    if (value && typeof value === 'object' && !Array.isArray(value)) parsed = value as Partial<NexusSettings>
+  } catch {
+    parsed = {}
+  }
+  const theme = typeof parsed.nexusTheme === 'string' && parsed.nexusTheme in THEME_PRESETS ? parsed.nexusTheme : DEFAULT_SETTINGS.nexusTheme
+  const mig = migrateAppearance(parsed, raw ? readLegacyBackdrop() : null)
+  const settings: NexusSettings = {
+    ...DEFAULT_SETTINGS,
+    ...parsed,
+    nexusTheme: theme,
+    accentPalette: mig.accentPalette,
+    appearance: mig.appearance,
+    appearanceLibrary: mig.appearanceLibrary,
+  }
+  if (mig.liquidGlass) settings.liquidGlass = mig.liquidGlass
+  return { settings, migrated: Boolean(raw) && (mig.changed || theme !== parsed.nexusTheme) }
+}
+
 export function loadSettings(): NexusSettings {
   if (_cache) return _cache
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<NexusSettings>
-      if (parsed.accentPalette && !ACCENT_PALETTE_IDS.includes(parsed.accentPalette)) {
-        parsed.accentPalette = DEFAULT_SETTINGS.accentPalette
-      }
-      _cache = { ...DEFAULT_SETTINGS, ...parsed }
-    } else {
-      _cache = { ...DEFAULT_SETTINGS }
-    }
-  } catch {
-    _cache = { ...DEFAULT_SETTINGS }
+  let raw: string | null = null
+  try { raw = localStorage.getItem(STORAGE_KEY) } catch { raw = null }
+  const { settings, migrated } = hydrate(raw)
+  _cache = settings
+  if (migrated) {
+    // Persist the migrated shape once, so every tab and every later read agree.
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)) } catch { /* private mode */ }
   }
   return _cache
 }
@@ -352,6 +398,17 @@ export function updateSetting<K extends keyof NexusSettings>(
 export function subscribeSettings(fn: () => void): () => void {
   _listeners.add(fn)
   return () => { _listeners.delete(fn) }
+}
+
+// Another tab saved: adopt its settings instead of overwriting them with a
+// stale copy on our next save, and let every subscriber (theme, glass,
+// environment, sound) follow — open tabs never drift apart.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== STORAGE_KEY || event.storageArea !== window.localStorage) return
+    _cache = hydrate(event.newValue).settings
+    for (const fn of _listeners) fn()
+  })
 }
 
 export function resetSettings(): void {
@@ -510,7 +567,7 @@ export const THEME_PRESETS: Record<NexusTheme, ThemeTokens> = {
 }
 
 /** Canonical dark-mode accent values — mirrored in nexus-theme.css [data-nexus-accent] */
-export const ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: string; soft: string }> = {
+export const ACCENT_PALETTES: Record<AccentPresetId, { primary: string; glow: string; soft: string }> = {
   cyan:    { primary: '#06b6d4', glow: 'rgba(6, 182, 212, 0.26)',   soft: 'rgba(6, 182, 212, 0.14)'   },
   emerald: { primary: '#10b981', glow: 'rgba(16, 185, 129, 0.26)',  soft: 'rgba(16, 185, 129, 0.14)'  },
   amber:   { primary: '#f59e0b', glow: 'rgba(245, 158, 11, 0.26)',  soft: 'rgba(245, 158, 11, 0.14)'  },
@@ -526,7 +583,7 @@ export const ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: str
 }
 
 /** Higher-contrast accent values for light-mode backgrounds */
-export const LIGHT_ACCENT_PALETTES: Record<AccentPalette, { primary: string; glow: string; soft: string }> = {
+export const LIGHT_ACCENT_PALETTES: Record<AccentPresetId, { primary: string; glow: string; soft: string }> = {
   cyan:    { primary: '#06b6d4', glow: 'rgba(6, 182, 212, 0.22)',   soft: 'rgba(6, 182, 212, 0.13)'   },
   emerald: { primary: '#10b981', glow: 'rgba(16, 185, 129, 0.22)',  soft: 'rgba(16, 185, 129, 0.13)'  },
   amber:   { primary: '#f59e0b', glow: 'rgba(245, 158, 11, 0.24)',  soft: 'rgba(245, 158, 11, 0.15)'  },
@@ -585,9 +642,13 @@ const INLINE_ACCENT_PROPS = [
 ] as const
 
 export function applyThemeToDOM(): void {
-  const settings = loadSettings()
+  const stored = loadSettings()
+  // While the operator drags a colour or slider, the Studio's draft overlays
+  // the stored values (live preview; persisted once the gesture settles).
+  const draft = getAppearanceDraft()
+  const settings: NexusSettings = draft ? { ...stored, ...draft } : stored
   const root = document.documentElement
-  const accentId = ACCENT_PALETTE_IDS.includes(settings.accentPalette)
+  const accentId: AccentPalette = settings.accentPalette === 'custom' || ACCENT_PALETTE_IDS.includes(settings.accentPalette)
     ? settings.accentPalette
     : DEFAULT_SETTINGS.accentPalette
 
@@ -603,11 +664,19 @@ export function applyThemeToDOM(): void {
   // Liquid glass follows the theme (its fill colour differs in Light).
   applyLiquidGlassVars(root, settings.liquidGlass)
 
+  // Environment Studio: the derived Experience Tokens (accent family,
+  // selection, charts, environment, desktop glass) — one generated sheet,
+  // rewritten only when the appearance actually changed.
+  publishAppearance({ nexusTheme: settings.nexusTheme, accentPalette: accentId, appearance: settings.appearance, liquidGlass: settings.liquidGlass })
+
   // Experience System: density and motion are read by every LC component
   // (shared/lc/lc-tokens.css) — written once here, never per app.
   root.setAttribute('data-lc-density', settings.densityMode === 'compact' ? 'dense' : settings.densityMode === 'spacious' ? 'comfortable' : 'standard')
   root.setAttribute('data-lc-motion', settings.animationsEnabled === false ? 'off' : 'on')
 }
+
+// A live-preview draft repaints through the same path (no storage write).
+if (typeof document !== 'undefined') subscribeAppearanceDraft(() => applyThemeToDOM())
 
 /** Kept here (not imported) so settings stays dependency-free; mirrors shared/liquid-glass.ts. */
 function applyLiquidGlassVars(root: HTMLElement, lg: NexusSettings['liquidGlass']): void {

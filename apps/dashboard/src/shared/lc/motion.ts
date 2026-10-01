@@ -60,3 +60,44 @@ export const LC_FADE: Transition = { duration: LC_DUR.fast, ease: [...LC_EASE.st
 
 /** A mutable copy of an LC easing, for framer-motion's `ease`. */
 export const lcEase = (name: keyof typeof LC_EASE): [number, number, number, number] => [...LC_EASE[name]] as [number, number, number, number]
+
+/**
+ * Named motion primitives — the reasons the Environment Studio (and anything
+ * after it) moves, defined once instead of as one-off animation code.
+ *
+ *   environment.swap      the field behind the glass changes: the current one
+ *                         refracts outward and dissolves, the new one resolves
+ *                         underneath the glass (opacity + scale only — cheap)
+ *   surface.material      glass physically changing (crossfade of the system)
+ *   theme.crossfade       a theme / saved environment change: one short fade
+ *   color.swatchExpand    a swatch morphs into the colour editor
+ *   color.swatchCollapse  … and contracts back into the swatch
+ *   color.interpolate     preset → preset: a small, fast colour change
+ *   segment.slide         a segmented lens gliding to its new option
+ *   state.swap            a text / state label replaced in place
+ *
+ * Durations in seconds; under reduced motion every one becomes an immediate
+ * change (or an opacity-only fade for surfaces) via lcTransition().
+ */
+export const LC_MOTION = {
+  environment: {
+    swap: { duration: 0.9, ease: LC_EASE.glide, outScale: 1.06, inScale: 0.975 },
+  },
+  surface: {
+    material: { duration: 0.34, ease: LC_EASE.standard },
+  },
+  theme: {
+    crossfade: { duration: 0.3, ease: LC_EASE.standard },
+  },
+  color: {
+    swatchExpand: { type: 'spring', stiffness: 380, damping: 36, mass: 0.85 },
+    swatchCollapse: { type: 'spring', stiffness: 460, damping: 40, mass: 0.8 },
+    interpolate: { duration: 0.18, ease: LC_EASE.standard },
+  },
+  segment: {
+    slide: LC_SPRING.snappy,
+  },
+  state: {
+    swap: { duration: 0.16, ease: LC_EASE.standard, offset: 6 },
+  },
+} as const
