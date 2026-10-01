@@ -389,6 +389,9 @@ export function groupRail(rows: RailRow[]): Array<{ key: GroupKey; label: string
 
 /** "3 live · 4 need attention · 1 scheduled · 6 drafts" */
 export function bookLine(rows: RailRow[]): Array<{ key: string; text: string; tone: Tone }> {
+  // nothing read yet (or nothing exists): say nothing — the header shows its own
+  // "Reading campaigns…" / "No campaigns" instead of a fabricated "0 live"
+  if (!rows.length) return []
   const n = (g: GroupKey) => rows.filter((r) => r.mission.group === g).length
   const live = rows.filter((r) => r.mission.live).length
   const out: Array<{ key: string; text: string; tone: Tone }> = []

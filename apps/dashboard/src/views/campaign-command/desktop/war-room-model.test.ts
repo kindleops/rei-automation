@@ -124,6 +124,8 @@ describe('rail', () => {
     const rows = [minneapolis, missed, healthy, empty].map((b) => railRowOf({ book: b, system }, NOW))
     expect(groupRail(rows).map((g) => g.key)).toEqual(['attention', 'waiting'])
     expect(bookLine(rows).map((x) => x.text)).toEqual(['1 live', '3 need attention'])
+    // before the book has loaded there is no '0 live' — the header says it is reading
+    expect(bookLine([])).toEqual([])
   })
   it('names: generated names split into place + source; free names stay whole', () => {
     expect(nameParts('Entity Graph · 186 properties', 'entity_graph', 186)).toEqual({ title: 'Entity Graph · 186', eyebrow: 'Entity Graph · 186 selected' })
