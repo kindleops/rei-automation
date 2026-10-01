@@ -81,7 +81,7 @@ export function workflowStepEvent(e, { workflowKey, runId, workflowName, subject
     workflow_run_id: runId,
     summary: `${capFirst(humanize(e.node_key || e.event_type))}${e.label ? ` · ${e.label}` : ''}${e.reason_code ? ` · ${humanize(e.reason_code)}` : ''}`,
     details: { node_key: e.node_key || null, status: e.status || null, step_type: e.event_type || null, duration_ms: e.duration_ms ?? null, source_ref: e.source_ref || null },
-    deep_link: `/workflow-studio?studio=${encodeURIComponent(workflowKey)}&run=${encodeURIComponent(runId)}${e.node_key ? `&node=${encodeURIComponent(e.node_key)}` : ''}`,
+    deep_link: `/workflow-studio?wf=${encodeURIComponent(workflowKey)}&run=${encodeURIComponent(runId)}${e.node_key ? `&node=${encodeURIComponent(e.node_key)}` : ''}`,
     provenance: { table: 'observatory_timeline', row_id: e.event_id, adapter: 'workflow', ledger: `observatory:${workflowKey}` },
   })
 }
