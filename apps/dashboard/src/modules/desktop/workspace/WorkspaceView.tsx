@@ -411,7 +411,8 @@ export function WorkspaceView() {
 
   // sounds and the rail's resolve highlight follow workspace events
   useEffect(() => onWorkspaceEvent((e) => {
-    if (e.type === 'closed') sound.workspace.close()
+    if (e.type === 'opened' && e.how === 'navigate') sound.navigation.change()
+    else if (e.type === 'closed') sound.workspace.close()
     else if (e.type === 'maximized') sound.workspace.maximize()
     else if (e.type === 'restored') sound.workspace.restore()
     else if (e.type === 'switched') sound.workspace.switch()

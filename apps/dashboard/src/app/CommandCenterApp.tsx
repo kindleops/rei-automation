@@ -212,10 +212,12 @@ export const CommandCenterApp = () => {
 
   useEffect(() => {
     if (prevPathRef.current !== route.path) {
-      playSound('room-enter')
+      // the desktop workspace speaks through the Sound System (navigation is a
+      // Full-mode cue there); the phone keeps its own room sound
+      if (!isModernDesktop) playSound('room-enter')
       prevPathRef.current = route.path
     }
-  }, [route.path])
+  }, [route.path, isModernDesktop])
 
   // Command grammar bindings — single-key navigation
   const bindings = useMemo<CommandBinding[]>(() => [

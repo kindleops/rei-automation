@@ -122,13 +122,15 @@ function get(): WorkspaceSnapshot {
   return snap
 }
 
+function writeSession() {
+  const s = get()
+  writeJSON(session(), SESSION_KEY, { layout: s.layout, linked: s.linked, name: s.name, savedId: s.savedId, dirty: s.dirty })
+}
+
 function persist() {
   if (typeof window === 'undefined') return
   window.clearTimeout(persistTimer)
-  persistTimer = window.setTimeout(() => {
-    const s = get()
-    writeJSON(session(), SESSION_KEY, { layout: s.layout, linked: s.linked, name: s.name, savedId: s.savedId, dirty: s.dirty })
-  }, 200)
+  persistTimer = window.setTimeout(writeSession, 200)
 }
 
 function set(patch: Partial<WorkspaceSnapshot>, opts: { layoutChange?: boolean } = {}) {
@@ -187,6 +189,8 @@ function onUrl() {
   }
   // the primary instance's pane navigates to another application
   set({ layout: L.updateInstance(s.layout, prim.id, { app, path: url }) }, { layoutChange: true })
+  const pane = L.paneOf(get().layout, prim.id)
+  if (pane) emit({ type: 'opened', app, pane: pane.id, how: 'navigate' })
 }
 
 /* ── which pane the operator is acting in ─────────────────────────────── */
@@ -526,4 +530,4 @@ export const WORKSPACE_TEMPLATES = [
 ]
 
 /** Test seam. */
-export const __workspaceTest = { reset: () => { snap = null; lastInteraction = null }, intercept, onUrl, followSelection }
+export const __workspaceTest = { reset: () => { snap = null; lastInteraction = null }, flush: () => { window.clearTimeout(persistTimer); writeSession() }, intercept, onUrl, followSelection }

@@ -125,7 +125,7 @@ describe('workspace store', () => {
   it('a reload restores the arrangement; a different explicit address opens alone', async () => {
     const first = await load('/inbox')
     first.store.openApp('/map', 'beside')
-    await new Promise((r) => setTimeout(r, 260)) // persistence is debounced
+    first.store.__workspaceTest.flush() // persistence is debounced; flush it
     const saved = first.w.sessionStorage.getItem('lc.workspace.session.v1')
     first.stop()
     expect(saved).toBeTruthy()
