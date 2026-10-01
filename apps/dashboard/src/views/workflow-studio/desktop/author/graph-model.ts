@@ -1,4 +1,5 @@
-import type { NodeFamily, Topology } from '../observatory-types'
+import type { NodeFamily, Topology } from '../lib/types'
+import type { StudioCatalog } from '../lib/api'
 
 /**
  * lc.workflow/v1 on the client — the draft a Studio workflow is edited as.
@@ -9,12 +10,8 @@ import type { NodeFamily, Topology } from '../observatory-types'
 export type Kind = 'action' | 'condition' | 'wait' | 'approval' | 'follow_up_loop' | 'terminate'
 export interface GNode { id: string; kind: Kind; label: string; config: Record<string, unknown> }
 export interface GEdge { from: string; to: string; exit?: string }
-export interface Graph { schema: 'lc.workflow/v1'; trigger: { type: string }; nodes: GNode[]; edges: GEdge[]; key?: string; name?: string; domain?: string | null }
-
-export interface CatalogCapability { key: string; domain: string; label: string; description: string; policy: string; inputs: Record<string, { type: string; required?: boolean; values?: string[] }>; availability: { state: string; reason?: string } }
-export interface CatalogCondition { key: string; label: string; reads: string; exits: string[] }
-export interface CatalogTrigger { key: string; label: string; when: string; source: string; volume30d: number | null }
-export interface Catalog { capabilities: CatalogCapability[]; conditions: CatalogCondition[]; triggers: CatalogTrigger[] }
+export interface Graph { schema?: 'lc.workflow/v1'; trigger: { type: string }; nodes: GNode[]; edges: GEdge[]; key?: string; name?: string; domain?: string | null }
+export type Catalog = Pick<StudioCatalog, 'capabilities' | 'conditions' | 'triggers'>
 
 export function exitsOf(n: GNode, cat: Catalog | null): string[] {
   const c = n.config || {}
@@ -48,7 +45,7 @@ export function draftTopology(key: string, g: Graph, cat: Catalog | null): Topol
     workflow_key: key,
     topology_version: 'draft',
     direction: 'LR',
-    badge: 'DRAFT · not published · runs stay on the published version',
+    badge: 'DRAFT · not published · runs stay on their pinned version',
     groups: [],
     nodes: [
       { key: 'trigger', family: 'TRIGGER', label: trig?.label || g.trigger.type || 'Choose a trigger', summary: trig?.source || null },

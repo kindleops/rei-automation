@@ -1,205 +1,196 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { Icon } from '../../../shared/icons'
-import { pushRoutePath } from '../../../app/router'
-import { fetchActivity, fetchNeedsYou, fetchRegistry, fetchWorkflow } from './observatory-api'
-import type { ActivityGroup, NeedsYouItem, Period, RegistryEntry } from './observatory-types'
-import type { Drill } from './runs/RunsMode'
-import { CanvasMode } from './canvas/CanvasMode'
-import { LibraryRail } from './overview/LibraryRail'
-import { MiniLiveGraph } from './overview/MiniLiveGraph'
-import { LiveActivity, NeedsYouRail } from './overview/NeedsYouRail'
-import { readParam, usePoll, useReducedMotion } from './use-studio-data'
-import { ago } from '../mobile/workflow-format'
-import './canvas/canvas.css'
-import './studio3.css'
+import { LCHoverCard, LCIconButton, LCLive, LCSkeleton, LCTabs, useLcReducedMotion } from '../../../shared/lc'
+import { useClaimedKeys } from '../../../shared/lc/keys'
+import { fetchExceptions, fetchRegistry } from './lib/api'
+import { count } from './lib/format'
+import { useResource } from './lib/resource'
+import type { ExceptionsResponse, Period, RegistryResponse, RunsDrill } from './lib/types'
+import { pref, readParam, savePref, writeParams } from './lib/url'
+import { AutomationRail } from './overview/AutomationRail'
+import { OverviewMode } from './overview/OverviewMode'
+import { MODES, StudioContext, type Mode, type Studio } from './studio-context'
+import './studio4.css'
+import './canvas4.css'
 
+const CanvasMode = lazy(() => import('./canvas-mode/CanvasMode').then((m) => ({ default: m.CanvasMode })))
 const LiveMode = lazy(() => import('./live/LiveMode').then((m) => ({ default: m.LiveMode })))
 const RunsMode = lazy(() => import('./runs/RunsMode').then((m) => ({ default: m.RunsMode })))
 const ActivityMode = lazy(() => import('./activity/ActivityMode').then((m) => ({ default: m.ActivityMode })))
 const AnalyticsMode = lazy(() => import('./analytics/AnalyticsMode').then((m) => ({ default: m.AnalyticsMode })))
-const DesignMode = lazy(() => import('./design/DesignMode').then((m) => ({ default: m.DesignMode })))
+const CreateWorkflow = lazy(() => import('./author/CreateWorkflow').then((m) => ({ default: m.CreateWorkflow })))
 
-export type Mode = 'overview' | 'canvas' | 'live' | 'runs' | 'activity' | 'analytics' | 'design'
-const MODES: Array<{ id: Mode; label: string }> = [
-  { id: 'overview', label: 'Overview' }, { id: 'canvas', label: 'Canvas' }, { id: 'live', label: 'Live' },
-  { id: 'runs', label: 'Runs' }, { id: 'activity', label: 'Activity' }, { id: 'analytics', label: 'Analytics' },
-]
-
-const isMode = (v: string | null): v is Mode => Boolean(v && [...MODES.map((m) => m.id), 'design'].includes(v as Mode))
-
-/** Write the studio's own URL state — only while the studio owns the window URL (never another pane's). */
-function writeParams(patch: Record<string, string | null>) {
-  try {
-    if (!window.location.pathname.startsWith('/workflow-studio')) return
-    const url = new URL(window.location.href)
-    for (const [k, v] of Object.entries(patch)) { if (v) url.searchParams.set(k, v); else url.searchParams.delete(k) }
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`)
-  } catch { /* best effort */ }
-}
+const isMode = (v: string | null): v is Mode => Boolean(v && MODES.some((m) => m.id === v))
+const isPeriod = (v: string | null): v is Period => v === '24h' || v === '7d' || v === '30d'
 
 /**
- * WORKFLOW STUDIO 3.0 — DESKTOP. The visual nervous system of LeadCommand.
- *   Overview   the first frame says THIS IS AUTOMATION: library, a live
- *              pipeline, what needs you, what just happened
- *   Canvas     the crown jewel — a spatial board of any workflow
- *   Live       real execution overlaid on the board
- *   Runs       the run ledger + inspector + replay
- *   Activity   domain events grouped per run
- *   Analytics  runs, resolution, bottlenecks, versions — every chart drills to runs
- *   Design     studio workflows only (system workflows stay read-only)
- * Every figure is read from the owning runtime's ledger; nothing is simulated
- * unless it says SIMULATION.
+ * WORKFLOW STUDIO 4.0 — DESKTOP. The automation nervous system of LeadCommand.
+ *
+ *   Overview   the automation architecture: real system topology, exceptions, runtime health
+ *   Canvas     one workflow as a spatial board — sections, semantic zoom, inspector, run focus + replay
+ *   Live       the board animating REAL execution (one pulse per recorded traversal) + running now
+ *   Runs       the run ledger (grid) → run inspector + path preview
+ *   Activity   system-wide event history, grouped (never 100 rows for one burst)
+ *   Analytics  how well automation runs — defined automation rate, interventions, latency, branches
+ *
+ * Studio workflows are authored on their canvas (validate · simulate · version
+ * · publish · arm · pause); system workflows are read-only topology. Every
+ * figure is read from the owning runtime's ledger.
  */
 export function WorkflowStudioDesktop() {
+  const still = useLcReducedMotion()
+  const root = useRef<HTMLDivElement | null>(null)
   const [mode, setModeState] = useState<Mode>(() => (isMode(readParam('mode')) ? (readParam('mode') as Mode) : 'overview'))
   const [wfKey, setWfKey] = useState<string>(() => readParam('wf') || 'seller_inbound')
   const [runId, setRunId] = useState<string | null>(() => readParam('run'))
   const [nodeKey, setNodeKey] = useState<string | null>(() => readParam('node'))
-  const [period, setPeriod] = useState<Period>(() => (['24h', '7d', '30d'].includes(readParam('period') || '') ? (readParam('period') as Period) : '7d'))
-  const still = useReducedMotion()
-  const [drill, setDrill] = useState<Drill | null>(null)
+  const [period, setPeriodState] = useState<Period>(() => (isPeriod(readParam('period')) ? (readParam('period') as Period) : '7d'))
+  const [drill, setDrill] = useState<RunsDrill | null>(null)
+  const [width, setWidth] = useState(0)
+  const [focused, setFocused] = useState(false)
+  const [railPref, setRailPref] = useState<boolean | null>(() => pref<boolean | null>('rail.open', null))
+  const [railW, setRailW] = useState<number>(() => pref('rail.w', 272))
 
-  const registry = usePoll((s) => fetchRegistry(s), [], 30_000)
-  const needs = usePoll((s) => fetchNeedsYou(s), [], 30_000)
+  const registry = useResource<RegistryResponse>('registry', (s) => fetchRegistry(s), { interval: 30_000 })
+  const exceptions = useResource<ExceptionsResponse>('exceptions', (s) => fetchExceptions(s), { interval: 30_000 })
+
+  useEffect(() => {
+    const el = root.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const narrow = width > 0 && width < 1180
+  // the rail yields first: shown by default only on a wide pane; an explicit choice is remembered
+  const railShown = width >= 900 && (railPref ?? width >= 1600)
 
   const setMode = useCallback((m: Mode) => { setModeState(m); writeParams({ mode: m === 'overview' ? null : m }) }, [])
   const setWorkflow = useCallback((k: string) => { setWfKey(k); setRunId(null); setNodeKey(null); writeParams({ wf: k, run: null, node: null }) }, [])
   const setRun = useCallback((id: string | null) => { setRunId(id); writeParams({ run: id }) }, [])
   const setNode = useCallback((k: string | null) => { setNodeKey(k); writeParams({ node: k }) }, [])
-  const setPer = useCallback((p: Period) => { setPeriod(p); writeParams({ period: p === '7d' ? null : p }) }, [])
-
-  /** Open a run anywhere: the canvas, centred on the node that holds it. */
-  const openRun = useCallback((wf: string, run: string, node: string | null) => {
-    setWfKey(wf); setRunId(run); setNodeKey(node); setModeState('canvas')
-    writeParams({ mode: 'canvas', wf, run, node })
+  const setPeriod = useCallback((p: Period) => { setPeriodState(p); writeParams({ period: p === '7d' ? null : p }) }, [])
+  const openRun = useCallback((wf: string, run: string, node?: string | null) => {
+    setWfKey(wf); setRunId(run); setNodeKey(node ?? null); setModeState('canvas')
+    writeParams({ mode: 'canvas', wf, run, node: node ?? null })
+  }, [])
+  const openRuns = useCallback((wf: string, d: RunsDrill | null) => {
+    setWfKey(wf); setRunId(null); setNodeKey(null); setDrill(d); if (d?.period) setPeriodState(d.period); setModeState('runs')
+    writeParams({ mode: 'runs', wf, run: null, node: null, period: d?.period && d.period !== '7d' ? d.period : null })
   }, [])
 
-  const workflows = registry.data?.workflows || []
-  const t = registry.data?.telemetry
-  const selected = workflows.find((w) => w.workflow_key === wfKey) || null
-  const canDesign = selected?.kind === 'studio' && selected.status !== 'not_running'
+  const workflows = useMemo(() => registry.data?.workflows ?? [], [registry.data])
+  const studio: Studio = useMemo(() => ({
+    mode, setMode, workflows, registry: { ...registry }, exceptions: { ...exceptions }, wfKey, setWorkflow, runId, nodeKey, setRun, setNode,
+    period, setPeriod, openRun, openRuns, drill, setDrill, still, narrow, width,
+  }), [mode, setMode, workflows, registry, exceptions, wfKey, setWorkflow, runId, nodeKey, setRun, setNode, period, setPeriod, openRun, openRuns, drill, still, narrow, width])
 
-  useEffect(() => {
-    if (mode === 'design' && selected && !canDesign) setMode('canvas')
-  }, [canDesign, mode, selected, setMode])
+  // keys are claimed only while the studio has focus, so other panes keep theirs
+  useClaimedKeys(['1', '2', '3', '4', '5', '6'], focused)
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+    if (t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]')) return
+    const m = MODES.find((x) => x.key === e.key)
+    if (m) { e.preventDefault(); setMode(m.id) }
+  }
+
+  // rail resize (pointer + keyboard), remembered locally
+  const drag = useRef<{ x: number; w: number } | null>(null)
+  const onGripDown = (e: ReactPointerEvent<HTMLDivElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, w: railW } }
+  const onGripMove = (e: ReactPointerEvent<HTMLDivElement>) => { if (drag.current) setRailW(Math.round(Math.min(380, Math.max(220, drag.current.w + e.clientX - drag.current.x)))) }
+  const onGripUp = () => { if (drag.current) { drag.current = null; savePref('rail.w', railW) } }
+  const onGripKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 48 : 16
+    const next = e.key === 'ArrowLeft' ? railW - step : e.key === 'ArrowRight' ? railW + step : null
+    if (next !== null) { e.preventDefault(); const v = Math.min(380, Math.max(220, next)); setRailW(v); savePref('rail.w', v) }
+  }
+  const [creating, setCreating] = useState(false)
+  const toggleRail = () => { const next = !railShown; setRailPref(next); savePref('rail.open', next) }
+
+  const excByWf = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const it of exceptions.data?.items || []) m[it.workflow_key] = (m[it.workflow_key] || 0) + 1
+    return m
+  }, [exceptions.data])
+  const t = registry.data?.telemetry
+  const modeItems = MODES.map((m) => ({ id: m.id, label: m.label, count: m.id === 'live' && t?.executing_now ? t.executing_now : null, tone: m.id === 'live' ? ('exec' as const) : undefined }))
 
   return (
-    <div className={`ws3${still ? ' is-still' : ''}`} data-mode={mode} data-testid="workflow-studio-desktop">
-      <header className="ws3-head">
-        <div className="ws3-head__title">
-          <h1>Workflow Studio</h1>
-          <p className="ws3-spec" aria-live="polite">
-            {t ? (
-              <>
-                <span><b>{t.in_flight}</b> in flight</span>
-                <span className={t.needs_you ? 'is-needs' : ''}><b>{t.needs_you}</b> need you</span>
-                <span><b>{t.live_automations}</b> live automations</span>
-                <span><b>{t.events_today}</b> runs today</span>
-              </>
-            ) : registry.error ? <span className="is-error">Runtimes could not be read — {registry.error}</span> : <span className="ws3-skel-text" />}
-          </p>
+    <StudioContext.Provider value={studio}>
+      <div
+        ref={root}
+        className={`ws4${still ? ' is-still' : ''}${railShown ? ' has-rail' : ''}`}
+        data-mode={mode}
+        data-testid="workflow-studio-desktop"
+        style={{ ['--ws4-rail-w' as string]: `${railW}px` }}
+        onKeyDown={onKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false) }}
+      >
+        <header className="ws4-head">
+          <div className="ws4-head__id">
+            <LCIconButton icon="layout-split" label={railShown ? 'Hide the automation rail' : 'Show the automation rail'} size="sm" selected={railShown} onClick={toggleRail} disabled={width > 0 && width < 900} />
+            <h1>Workflow Studio</h1>
+          </div>
+          <Telemetry registry={registry.data} exceptions={exceptions.data} at={registry.at} error={registry.error} stale={registry.stale} onMode={setMode} />
+          <LCTabs items={modeItems} value={mode} onChange={setMode} label="Studio mode" className="ws4-modes" />
+        </header>
+        <div className="ws4-body">
+          {railShown ? (
+            <div className="ws4-railwrap">
+              {registry.data ? <AutomationRail workflows={workflows} selected={wfKey} onSelect={(k) => { setWorkflow(k); if (mode === 'overview') return }} exceptionsByWorkflow={excByWf} onCollapse={toggleRail} onCreate={() => setCreating(true)} /> : registry.error ? <p className="ws4-quiet is-error">The workflow registry could not be read — {registry.error}</p> : <LCSkeleton shape="rows" count={9} label="Reading the automation registry" />}
+              <div className="ws4-railwrap__grip lc-resize-x" role="separator" aria-orientation="vertical" aria-label="Resize the automation rail" aria-valuenow={railW} aria-valuemin={220} aria-valuemax={380} tabIndex={0} onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp} onPointerCancel={onGripUp} onKeyDown={onGripKey} onDoubleClick={() => { setRailW(272); savePref('rail.w', 272) }} />
+            </div>
+          ) : null}
+          {creating ? <Suspense fallback={null}><CreateWorkflow open={creating} onOpenChange={setCreating} onCreated={(k) => { registry.reload(); setWorkflow(k); setMode('canvas') }} /></Suspense> : null}
+          <main className="ws4-main" id="ws4-main">
+            {mode === 'overview' ? <OverviewMode /> : null}
+            <Suspense fallback={<div className="ws4-loading"><LCSkeleton shape="chart" height={320} label="Opening" /></div>}>
+              {mode === 'canvas' ? <CanvasMode /> : null}
+              {mode === 'live' ? <LiveMode /> : null}
+              {mode === 'runs' ? <RunsMode /> : null}
+              {mode === 'activity' ? <ActivityMode /> : null}
+              {mode === 'analytics' ? <AnalyticsMode /> : null}
+            </Suspense>
+          </main>
         </div>
-        <nav className="ws3-modes" role="tablist" aria-label="Studio mode">
-          {MODES.map((m) => (
-            <button key={m.id} type="button" role="tab" aria-selected={mode === m.id} className={mode === m.id ? 'is-on' : ''} onClick={() => setMode(m.id)}>
-              {m.label}{m.id === 'live' ? <i className="ws3-livedot" aria-hidden /> : null}
-            </button>
-          ))}
-          {canDesign ? <button type="button" role="tab" aria-selected={mode === 'design'} className={`is-design${mode === 'design' ? ' is-on' : ''}`} onClick={() => setMode('design')}><Icon name="spark" />Design</button> : null}
-        </nav>
-        <div className="ws3-head__side">
-          <span className="ws3-fresh" title="Read from each runtime's own ledger">{registry.at ? `Updated ${ago(new Date(registry.at).toISOString())}` : 'Reading…'}</span>
-        </div>
-      </header>
-
-      <main className="ws3-main">
-        {mode === 'overview' ? (
-          <OverviewMode
-            workflows={workflows}
-            loading={registry.loading}
-            error={registry.error}
-            selected={wfKey}
-            onSelect={setWorkflow}
-            needs={needs.data?.items || []}
-            needsTotal={needs.data?.total || 0}
-            needsLoading={needs.loading}
-            needsError={needs.error}
-            still={still}
-            onOpenCanvas={(node) => { if (node) setNode(node); setMode('canvas') }}
-            onOpenRun={openRun}
-          />
-        ) : null}
-        {mode === 'canvas' ? (
-          <CanvasMode workflows={workflows} wfKey={wfKey} onWorkflow={setWorkflow} period={period} onPeriod={setPer} nodeKey={nodeKey} onNode={setNode} runId={runId} onRun={setRun} still={still} onOpenRun={openRun} onRunsThrough={(node, label) => { setDrill({ node, label: `Through ${label}` }); setMode('runs') }} />
-        ) : null}
-        <Suspense fallback={<div className="ws3-loading"><i className="ws3-spin" />Opening…</div>}>
-          {mode === 'live' ? <LiveMode workflows={workflows} wfKey={wfKey} onWorkflow={setWorkflow} still={still} onOpenRun={openRun} /> : null}
-          {mode === 'runs' ? <RunsMode workflows={workflows} wfKey={wfKey} onWorkflow={setWorkflow} period={period} onPeriod={setPer} still={still} onOpenRun={openRun} drill={drill} onDrill={setDrill} /> : null}
-          {mode === 'activity' ? <ActivityMode workflows={workflows} onOpenRun={openRun} /> : null}
-          {mode === 'analytics' ? <AnalyticsMode workflows={workflows} wfKey={wfKey} onWorkflow={setWorkflow} period={period} onPeriod={setPer} onOpenRun={openRun} onDrill={(f) => { setDrill(f); setMode('runs') }} /> : null}
-          {mode === 'design' && canDesign ? <DesignMode workflow={selected!} onDone={() => { void registry.reload(); setMode('canvas') }} /> : null}
-        </Suspense>
-      </main>
-    </div>
+      </div>
+    </StudioContext.Provider>
   )
 }
 
-/* ── OVERVIEW ─────────────────────────────────────────────────────────────── */
-
-function OverviewMode({ workflows, loading, error, selected, onSelect, needs, needsTotal, needsLoading, needsError, still, onOpenCanvas, onOpenRun }: {
-  workflows: RegistryEntry[]
-  loading: boolean
-  error: string | null
-  selected: string
-  onSelect: (k: string) => void
-  needs: NeedsYouItem[]
-  needsTotal: number
-  needsLoading: boolean
-  needsError: string | null
-  still: boolean
-  onOpenCanvas: (node: string | null) => void
-  onOpenRun: (wf: string, run: string, node: string | null) => void
-}) {
-  const detail = usePoll((s) => fetchWorkflow(selected, '24h', s), [selected], 30_000)
-  const activity = usePoll((s) => fetchActivity({ hours: 24, limit: 40 }, s), [], 20_000)
-  const wf = workflows.find((w) => w.workflow_key === selected) || null
-  const arrivals = useMemo(() => (activity.data?.groups || []).filter((g) => g.workflow_key === selected).slice(0, 6).map((g) => ({ run_id: g.run_id, node_key: g.focus_node })), [activity.data, selected])
-  const openActivity = (g: ActivityGroup) => onOpenRun(g.workflow_key, g.run_id, g.focus_node)
-  // an ultrawide desk shows the whole real topology on the first frame
-  const shell = useRef<HTMLDivElement | null>(null)
-  const [wide, setWide] = useState(false)
-  useEffect(() => {
-    const el = shell.current
-    if (!el) return
-    const ro = new ResizeObserver(([e]) => setWide(e.contentRect.width >= 2600))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-  const openNeed = (it: NeedsYouItem) => (it.run_id.startsWith('queue:') ? (it.href ? pushRoutePath(it.href) : undefined) : onOpenRun(it.workflow_key, it.run_id, it.node_key))
+/** LIVE HEADER — the first-frame answers: what is live, what runs now, what needs a person, are the runtimes healthy. */
+function Telemetry({ registry, exceptions, at, error, stale, onMode }: { registry: RegistryResponse | null; exceptions: ExceptionsResponse | null; at: number | null; error: string | null; stale: boolean; onMode: (m: Mode) => void }) {
+  if (!registry) return <div className="ws4-telemetry">{error ? <span className="is-error"><Icon name="alert" size={12} />Runtimes could not be read — {error}</span> : <span className="ws4-telemetry__skel" />}</div>
+  const t = registry.telemetry
+  const beats = registry.runtimes || []
+  const degraded = beats.filter((b) => b.state === 'stale' && !b.switched_off).length
+  const current = beats.filter((b) => !b.external && b.state === 'current' && !b.switched_off).length
+  const off = beats.filter((b) => b.switched_off).length
+  const needs = exceptions ? exceptions.total : t.needs_you
+  const byWf = Object.entries(t.by_workflow_today || {}).sort((a, b) => b[1] - a[1])
+  const names = new Map(registry.workflows.map((w) => [w.workflow_key, w.short_name]))
   return (
-    <div className={`ws3-overview${wide ? ' is-wide' : ''}`} ref={shell}>
-      <aside className="ws3-overview__lib">
-        {loading && !workflows.length ? <div className="ws3-skel-rows is-lib" aria-busy="true">{[0, 1, 2, 3, 4, 5, 6].map((i) => <span key={i} />)}</div> : null}
-        {error && !workflows.length ? <p className="ws3-quiet is-error">The workflow registry could not be read — {error}.</p> : null}
-        {workflows.length ? <LibraryRail workflows={workflows} selected={selected} onSelect={onSelect} /> : null}
-      </aside>
-      <div className="ws3-overview__mini">
-        <MiniLiveGraph
-          workflow={detail.data?.workflow || wf}
-          topology={detail.data?.topology || null}
-          telemetry={detail.data?.telemetry || null}
-          arrivals={arrivals}
-          still={still}
-          onOpenCanvas={() => onOpenCanvas(null)}
-          onOpenNode={(k) => onOpenCanvas(k)}
-          wide={wide}
-        />
-        {detail.error && !detail.data ? <p className="ws3-quiet is-error">{wf?.name || 'This workflow'} could not be read — {detail.error}.</p> : null}
-      </div>
-      <div className="ws3-overview__act"><LiveActivity groups={activity.data?.groups || []} loading={activity.loading} error={activity.error} onOpen={openActivity} limit={30} /></div>
-      <aside className="ws3-overview__needs">
-        <NeedsYouRail items={needs} total={needsTotal} loading={needsLoading} error={needsError} onOpen={openNeed} />
-      </aside>
+    <div className="ws4-telemetry" aria-live="polite">
+      <LCLive live={!error || Boolean(registry)} stale={stale} updatedAt={at} />
+      <button type="button" className="ws4-tm" onClick={() => onMode('overview')}><b className="lc-num">{count(t.live_automations)}</b><span>automations live</span></button>
+      <button type="button" className={`ws4-tm${t.executing_now ? ' is-exec' : ''}`} onClick={() => onMode('live')} title="Runs with runtime evidence of work in progress right now"><b className="lc-num">{count(t.executing_now ?? 0)}</b><span>executing now</span></button>
+      <button type="button" className="ws4-tm" onClick={() => onMode('live')} title="Scheduled, healthy waits (queued sends, studio waits)"><b className="lc-num">{count(t.waiting_now ?? 0)}</b><span>waiting</span></button>
+      <button type="button" className={`ws4-tm${needs ? ' is-needs' : ''}`} onClick={() => onMode('overview')}><b className="lc-num">{count(needs)}</b><span>need you</span></button>
+      <button type="button" className={`ws4-tm${degraded ? ' is-crit' : ''}`} onClick={() => onMode('overview')} title="Each runtime’s own heartbeat">
+        <b className="lc-num">{degraded ? count(degraded) : count(current)}</b><span>{degraded ? 'runtimes degraded' : `runtimes current${off ? ` · ${off} off` : ''}`}</span>
+      </button>
+      <LCHoverCard side="bottom" align="end" width={300} trigger={
+        <button type="button" className="ws4-tm" onClick={() => onMode('activity')}><b className="lc-num">{count(t.runs_today ?? t.events_today)}</b><span>runs today</span></button>
+      }>
+        <div className="ws4-hover">
+          <p className="lc-eyebrow">Runs today · by workflow</p>
+          <ul>{byWf.map(([k, n]) => <li key={k}><span>{names.get(k) || k}</span><b className="lc-num">{count(n)}</b></li>)}</ul>
+          {t.campaign_passes_today ? <p className="ws4-note">{count(t.campaign_passes_today)} are campaign scheduler passes — {count(t.campaign_passes_placed_today ?? 0)} placed rows; the rest found their targets blocked.</p> : null}
+          <p className="ws4-note">Local day. Test fixtures never count.</p>
+        </div>
+      </LCHoverCard>
     </div>
   )
 }

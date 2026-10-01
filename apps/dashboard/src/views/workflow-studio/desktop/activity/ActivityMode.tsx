@@ -1,79 +1,106 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Icon } from '../../../../shared/icons'
-import { fetchActivity } from '../observatory-api'
-import type { ActivityGroup, RegistryEntry, WorkflowFamily } from '../observatory-types'
-import { WORKFLOW_FAMILY_LABEL } from '../families'
-import { usePoll } from '../use-studio-data'
-import { ago, clock } from '../../mobile/workflow-format'
+import { useMemo, useState } from 'react'
+import { LCActivityFeed, LCError, LCSearch, LCSegmented, LCSelect, LCToolbar, type LCActivityEvent } from '../../../../shared/lc'
+import { fetchActivity, fetchRuns } from '../lib/api'
+import { WORKFLOW_FAMILY } from '../lib/families'
+import { words } from '../lib/format'
+import { useResource } from '../lib/resource'
+import type { ActivityGroup, ActivityResponse, RunsResponse, WorkflowFamily } from '../lib/types'
+import { useStudio } from '../studio-context'
 
-const FAMILIES: Array<WorkflowFamily | 'ALL'> = ['ALL', 'SELLER', 'DELIVERY', 'CAMPAIGN', 'ACQUISITION', 'COMMUNICATION', 'CLOSING', 'EMAIL', 'BUYER', 'SYSTEM']
-const WINDOWS = [{ h: 24, l: '24h' }, { h: 72, l: '3d' }, { h: 168, l: '7d' }]
-const STATUS_WORD: Record<string, string> = { completed: 'Handled', waiting: 'Waiting', running: 'Running', held: 'Held', needs_you: 'Needs you', failed: 'Failed', cancelled: 'Stopped' }
-
-function dayOf(at: string) {
-  const d = new Date(at); const now = new Date()
-  if (d.toDateString() === now.toDateString()) return 'Today'
-  if (d.toDateString() === new Date(Date.now() - 86400e3).toDateString()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
-}
+type Kind = 'all' | 'human' | 'held' | 'failed' | 'waiting' | 'approvals' | 'domain'
+const KINDS: Array<{ value: Kind; label: string }> = [
+  { value: 'all', label: 'All runs' }, { value: 'human', label: 'Needs a person' }, { value: 'approvals', label: 'Approvals' },
+  { value: 'waiting', label: 'Waits' }, { value: 'held', label: 'Holds' }, { value: 'failed', label: 'Failures' }, { value: 'domain', label: 'Domain events' },
+]
+const WINDOWS = [{ value: '24', label: '24h' }, { value: '72', label: '3d' }, { value: '168', label: '7d' }] as const
+const TONE: Record<string, 'ok' | 'exec' | 'attn' | 'crit' | 'neutral' | 'flow'> = { completed: 'ok', running: 'exec', waiting: 'exec', held: 'attn', needs_you: 'attn', failed: 'crit', cancelled: 'neutral' }
+const WORD: Record<string, string> = { completed: 'Handled', running: 'Running', waiting: 'Waiting', held: 'Held', needs_you: 'Needs you', failed: 'Failed', cancelled: 'Withdrawn' }
 
 /**
- * ACTIVITY — meaningful domain events, grouped per run: one line per run with
- * the facts that matter ("Intent not interested 92% · Stage Ownership
- * confirmation → Offer interest · Follow-up Oct 30"). Filter by family or
- * "needs a person", search anything; a click opens the canvas at that run.
+ * ACTIVITY — what automation did, system-wide, as meaning: one entry per run,
+ * repetition collapsed ("287 campaign passes · nothing placed"), expandable to
+ * the exact entries. A click opens the run where it lives — on its canvas.
  */
-export function ActivityMode({ workflows, onOpenRun }: { workflows: RegistryEntry[]; onOpenRun: (wf: string, run: string, node: string | null) => void }) {
+export function ActivityMode() {
+  const s = useStudio()
+  const [kind, setKind] = useState<Kind>('all')
+  const [hours, setHours] = useState<'24' | '72' | '168'>('24')
   const [family, setFamily] = useState<WorkflowFamily | 'ALL'>('ALL')
-  const [human, setHuman] = useState(false)
-  const [hours, setHours] = useState(24)
   const [q, setQ] = useState('')
-  const [debounced, setDebounced] = useState('')
-  useEffect(() => { const t = window.setTimeout(() => setDebounced(q), 280); return () => window.clearTimeout(t) }, [q])
-  const act = usePoll((s) => fetchActivity({ hours, family: family === 'ALL' ? null : family, human, q: debounced, limit: 200 }, s), [hours, family, human, debounced], 20_000)
-  const groups = act.data?.groups || []
-  const byDay = useMemo(() => {
-    const out: Array<[string, ActivityGroup[]]> = []
-    for (const g of groups) { const d = dayOf(g.at); const last = out[out.length - 1]; if (last && last[0] === d) last[1].push(g); else out.push([d, [g]]) }
-    return out
-  }, [groups])
-  const counts = useMemo(() => { const m: Record<string, number> = {}; for (const w of workflows) if (w.stats.runs_today) m[w.family] = (m[w.family] || 0) + (w.stats.runs_today || 0); return m }, [workflows])
+  const act = useResource<ActivityResponse>(`activity:${hours}:${family}:${kind === 'human'}`, (sig) => fetchActivity({ hours: Number(hours), family: family === 'ALL' ? null : family, human: kind === 'human', limit: 300 }, sig), { interval: 30_000 })
+  const domain = useResource<RunsResponse>(kind === 'domain' ? `runs:event_bridge:${hours}` : null, (sig) => fetchRuns('event_bridge', { period: hours === '24' ? '24h' : '7d', limit: 200 }, sig), { interval: 60_000 })
+
+  const needle = q.trim().toLowerCase()
+  const events: LCActivityEvent[] = useMemo(() => {
+    if (kind === 'domain') {
+      return (domain.data?.runs || []).filter((r) => !needle || `${r.trigger} ${r.subject.id || ''}`.toLowerCase().includes(needle)).map((r) => ({
+        id: r.run_id,
+        at: Date.parse(r.started_at || ''),
+        title: words(r.trigger || 'event'),
+        subject: r.subject.id ? `${words(r.subject.kind)} ${r.subject.id}` : undefined,
+        source: 'Canonical event bridge → workflow inbox',
+        icon: 'activity' as const,
+        tone: 'flow' as const,
+        groupKey: `domain:${r.trigger}`,
+        groupNoun: `${words(r.trigger || 'events').toLowerCase()} events bridged`,
+        onOpen: () => s.openRun('event_bridge', r.run_id, null),
+      }))
+    }
+    const groups: ActivityGroup[] = (act.data?.groups || []).filter((g) => {
+      if (kind === 'held' && g.status !== 'held') return false
+      if (kind === 'failed' && g.status !== 'failed') return false
+      if (kind === 'waiting' && !['waiting', 'running'].includes(g.status)) return false
+      if (kind === 'approvals' && !g.events.some((e) => /approval/.test(e.event_type))) return false
+      if (needle && !`${g.workflow_name} ${g.headline} ${g.subject?.name || ''} ${g.subject?.address || ''} ${g.facts.join(' ')} ${g.run_id}`.toLowerCase().includes(needle)) return false
+      return true
+    })
+    return groups.map((g) => {
+      // repetition collapses: scheduler passes and transport failures by their reason, never by the run
+      const burst = g.workflow_key === 'campaign_execution' ? `${g.workflow_key}:${g.status}:${g.facts[0] || ''}` : g.workflow_key === 'queue_dispatch' ? `${g.workflow_key}:${g.status}:${g.facts[1] || g.facts[0] || ''}` : undefined
+      return {
+        id: g.group_id,
+        at: Date.parse(g.at),
+        title: <><b>{g.subject?.name || g.subject?.address || g.subject?.id || g.workflow_name}</b><span className="ws4-feed__status" data-tone={TONE[g.status]}>{WORD[g.status] || words(g.status)}{g.human ? ' · person' : ''}</span></>,
+        subject: undefined,
+        source: <span className="ws4-feed__src">{g.workflow_name}{g.facts.filter(Boolean).slice(0, 4).map((f, i) => <span key={i}>{f}</span>)}</span>,
+        icon: WORKFLOW_FAMILY[g.family]?.icon || 'cpu',
+        tone: TONE[g.status] || 'neutral',
+        groupKey: burst,
+        groupNoun: burst ? `${g.workflow_key === 'campaign_execution' ? 'campaign passes' : 'sends'} · ${(g.facts[0] || WORD[g.status] || '').toLowerCase()}` : undefined,
+        onOpen: () => s.openRun(g.workflow_key, g.run_id, g.focus_node),
+      }
+    })
+  }, [act.data, domain.data, kind, needle, s])
+
+  const fams = useMemo(() => {
+    const m = new Map<WorkflowFamily, number>()
+    for (const g of act.data?.groups || []) m.set(g.family, (m.get(g.family) || 0) + 1)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [act.data])
+  const read = kind === 'domain' ? domain : act
   return (
-    <div className="ws3-activity">
-      <div className="ws3-bar">
-        <div className="ws3-find is-inline is-wide"><Icon name="search" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search seller, property, workflow, campaign, run id…" aria-label="Search activity" /></div>
-        <div className="ws3-seg" role="tablist" aria-label="Window">{WINDOWS.map((w) => <button key={w.h} type="button" role="tab" aria-selected={hours === w.h} className={hours === w.h ? 'is-on' : ''} onClick={() => setHours(w.h)}>{w.l}</button>)}</div>
-        <button type="button" className={`ws3-btn${human ? ' is-on' : ''}`} aria-pressed={human} onClick={() => setHuman((v) => !v)}><Icon name="user" />Needs a person</button>
-      </div>
-      <div className="ws3-chips" role="tablist" aria-label="Family">
-        {FAMILIES.map((f) => <button key={f} type="button" role="tab" aria-selected={family === f} className={`ws3-chip${family === f ? ' is-on' : ''}`} onClick={() => setFamily(f)}>{f === 'ALL' ? 'Everything' : WORKFLOW_FAMILY_LABEL[f]}{f !== 'ALL' && counts[f] ? <b>{counts[f]}</b> : null}</button>)}
-      </div>
-      <div className="ws3-activity__feed">
-        {act.loading && !groups.length ? <div className="ws3-skel-rows" aria-busy="true">{Array.from({ length: 8 }, (_, i) => <span key={i} />)}</div> : null}
-        {act.error && !groups.length ? <p className="ws3-quiet is-error">Activity could not be read — {act.error}.</p> : null}
-        {!act.loading && !act.error && !groups.length ? <p className="ws3-quiet">Nothing matches in the last {WINDOWS.find((w) => w.h === hours)?.l}.</p> : null}
-        {byDay.map(([day, list]) => (
-          <section key={day} className="ws3-daygroup">
-            <h4>{day}<em>{list.length}</em></h4>
-            <ol>
-              {list.map((g) => (
-                <li key={g.group_id}>
-                  <button type="button" className={`ws3-actrow is-${g.status}`} onClick={() => onOpenRun(g.workflow_key, g.run_id, g.focus_node)}>
-                    <time title={clock(g.at)}>{new Date(g.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</time>
-                    <i className={`ws3-dot is-${g.status}`} aria-hidden />
-                    <span className="ws3-actrow__main">
-                      <span className="ws3-actrow__wf">{g.workflow_name}{g.subject?.name || g.subject?.address ? <b> · {g.subject.name || g.subject.address}</b> : null}</span>
-                      <span className="ws3-actrow__facts">{g.facts.filter(Boolean).slice(0, 5).map((f, i) => <span key={i}>{f}</span>)}</span>
-                    </span>
-                    <span className={`ws3-actrow__status is-${g.status}`}>{STATUS_WORD[g.status] || g.status}{g.human ? ' · person' : ''}</span>
-                    <small>{ago(g.at)}</small>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </section>
-        ))}
-        {act.data?.degraded?.length ? <p className="ws3-quiet is-error">Could not read: {act.data.degraded.join(', ')} — those runtimes are missing here, not quiet.</p> : null}
+    <div className="ws4-activity">
+      <LCToolbar
+        search={<LCSearch value={q} onChange={setQ} label="Search activity" placeholder="Seller, property, workflow, campaign, run id…" />}
+        filters={<LCSegmented size="sm" label="What happened" value={kind} onChange={setKind} options={KINDS} />}
+        controls={<>
+          {kind !== 'domain' ? <LCSelect size="sm" variant="chip" label="Family" prefix="Family" value={family} onChange={setFamily} options={[{ value: 'ALL', label: 'Everything' }, ...fams.map(([f, n]) => ({ value: f, label: `${WORKFLOW_FAMILY[f].label} · ${n}` }))]} /> : null}
+          <LCSegmented size="sm" label="Window" value={hours} onChange={setHours} options={WINDOWS.map((w) => ({ value: w.value, label: w.label }))} />
+        </>}
+      />
+      <div className="ws4-activity__feed lc-scroll">
+        {read.error && !read.data ? <LCError what="Activity could not be read" detail={read.error} onRetry={read.reload} /> : (
+          <LCActivityFeed
+            events={events}
+            loading={read.loading}
+            max={240}
+            tz="America/Chicago"
+            label="Automation activity"
+            empty={{ title: kind === 'approvals' ? 'No approvals in the window' : kind === 'failed' ? 'No failures in the window' : 'Nothing in the window', body: kind === 'approvals' ? 'No approval was requested or resolved — the one armed Studio workflow has no approval node.' : undefined }}
+          />
+        )}
+        {act.data?.degraded?.length && kind !== 'domain' ? <p className="ws4-note">Could not read: {act.data.degraded.join(', ')} — those runtimes are missing here, not quiet.</p> : null}
+        <p className="ws4-note">Notifications and bridged events restate the run that raised them, so they are not repeated here — “Domain events” lists what crossed the canonical bus into the workflow inbox.</p>
       </div>
     </div>
   )
