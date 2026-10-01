@@ -10,6 +10,8 @@ import {
   type SoundAssetId,
 } from '../../shared/sound-assets'
 import { playSoundAsset, previewSoundAsset } from '../../shared/sounds'
+import { isWithinQuietHours } from '../../shared/quiet-hours'
+import { desktopSoundOwnsSurface } from '../../shared/sound/surface'
 import { alertTypeFor, DEFAULT_ALERT_SOUND, type AlertType } from './alert-types'
 import type { NotificationEvent, NotificationPreferences, SoundCategory } from './notification-contract'
 
@@ -41,32 +43,8 @@ const SEVERITY_PRIORITY: Record<NotificationEvent['severity'], number> = {
 const DEDUP_WINDOW_MS = 4_500
 const recentPlays = new Map<string, number>()
 
-function parseTimeToMinutes(value: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim())
-  if (!match) return null
-  const hours = Number(match[1])
-  const minutes = Number(match[2])
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null
-  return hours * 60 + minutes
-}
-
-export function isWithinQuietHours(
-  now = new Date(),
-  prefs?: Pick<NotificationPreferences, 'quietHoursEnabled' | 'quietHoursStart' | 'quietHoursEnd'>,
-): boolean {
-  const settings = loadSettings()
-  const enabled = prefs?.quietHoursEnabled ?? settings.notificationQuietHoursEnabled
-  if (!enabled) return false
-
-  const start = parseTimeToMinutes(prefs?.quietHoursStart ?? settings.notificationQuietHoursStart)
-  const end = parseTimeToMinutes(prefs?.quietHoursEnd ?? settings.notificationQuietHoursEnd)
-  if (start == null || end == null) return false
-
-  const current = now.getHours() * 60 + now.getMinutes()
-  if (start === end) return true
-  if (start < end) return current >= start && current < end
-  return current >= start || current < end
-}
+// Quiet hours live in shared/ so every sound system asks the same function.
+export { isWithinQuietHours }
 
 export function resolveNotificationVolume(category: SoundCategory): number {
   const settings = loadSettings()
@@ -95,6 +73,9 @@ export function shouldPlayNotificationSound(
   event: Pick<NotificationEvent, 'domain' | 'soundCategory'> & Partial<Pick<NotificationEvent, 'type' | 'severity'>>,
   prefs?: Partial<NotificationPreferences>,
 ): boolean {
+  // On the modern desktop the Sound System speaks for alerts (one event, one
+  // sound) — this legacy path stays silent there.
+  if (desktopSoundOwnsSurface()) return false
   const settings = loadSettings()
   // Alert sounds have their own switch (default ON). They used to hang off the
   // general UI-sound switch, which defaults OFF and had no control anywhere —

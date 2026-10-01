@@ -407,7 +407,8 @@ export function WorkspaceView() {
 
   useEffect(() => startWorkspace(), [])
   useWorkspaceKeys()
-  useEffect(() => { setSoundSurface('desktop'); return () => setSoundSurface('other') }, [])
+  // claimed before paint, so settings that depend on who speaks never flash the legacy controls
+  useLayoutEffect(() => { setSoundSurface('desktop'); return () => setSoundSurface('other') }, [])
 
   // sounds and the rail's resolve highlight follow workspace events
   useEffect(() => onWorkspaceEvent((e) => {

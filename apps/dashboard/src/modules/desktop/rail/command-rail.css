@@ -142,15 +142,18 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
     0 8px 18px -12px rgba(0, 0, 0, 0.9);
   transition: transform 0.34s cubic-bezier(0.22, 1.12, 0.36, 1), height 0.2s ease;
 }
-/* local refraction: the glass beneath brightens, it is not painted over */
+/* local refraction: the glass beneath brightens, it is not painted over —
+   lit by the operator's accent (its underlight scales with intensity) */
 .cr__lens::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(120% 140% at 15% 110%, rgba(var(--lc-exec-rgb), 0.22), transparent 55%), linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent);
+  background: radial-gradient(120% 140% at 15% 110%, var(--lc-accent-underlight), transparent 55%), linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent);
   mix-blend-mode: plus-lighter;
 }
+/* a failure-red accent never lights the open app: the glow goes silver */
+:root[data-lc-accent-reserved='crit'] .cr__lens::before { background: radial-gradient(120% 140% at 15% 110%, rgba(var(--lc-select-rgb), 0.16), transparent 55%), linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent); }
 /* the light edge: thin, in the selection colour (silver in Red Ops — never the alarm red) */
 .cr__lens i {
   position: absolute;
@@ -425,7 +428,7 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 }
 :root[data-nexus-theme='light'] .cr.is-floating.is-peeking .cr__glass { background: rgb(var(--dsk-fill) / 0.94); }
 :root[data-nexus-theme='light'] .cr__lens { background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.7)); box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), 0 4px 12px -6px rgba(24, 36, 60, 0.3); }
-:root[data-nexus-theme='light'] .cr__lens::before { mix-blend-mode: normal; background: radial-gradient(120% 140% at 15% 110%, rgba(var(--lc-exec-rgb), 0.12), transparent 55%); }
+:root[data-nexus-theme='light'] .cr__lens::before { mix-blend-mode: normal; background: radial-gradient(120% 140% at 15% 110%, rgba(var(--lc-select-rgb), 0.12), transparent 55%); }
 :root[data-nexus-theme='light'] .cr-row:hover { background: rgba(11, 18, 32, 0.04); }
 :root[data-nexus-theme='light'] .cr-sec__rule { background: linear-gradient(90deg, rgba(11, 18, 32, 0.1), transparent); }
 :root[data-nexus-theme='light'] .crt { color: rgba(11, 18, 32, 0.78); }

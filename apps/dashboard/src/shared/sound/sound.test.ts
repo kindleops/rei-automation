@@ -76,6 +76,34 @@ describe('the sound arbiter', () => {
     expect(played).toHaveLength(1)
   })
 
+  it('"Pause all alerts" holds operational sound — and unpausing never replays it', async () => {
+    const { sound } = await fresh()
+    const { updateSetting } = await import('../settings')
+    const t = Date.now() + 10
+    updateSetting('notificationMasterMuted', true)
+    sound.machine.event({ id: 'held', category: 'needsAttention', priority: 1, cue: 'attention', at: t })
+    vi.advanceTimersByTime(800)
+    expect(played).toHaveLength(0)
+    updateSetting('notificationMasterMuted', false)
+    sound.machine.event({ id: 'held', category: 'needsAttention', priority: 1, cue: 'attention', at: t })
+    vi.advanceTimersByTime(800)
+    expect(played).toHaveLength(0)
+    sound.machine.event({ id: 'fresh', category: 'needsAttention', priority: 1, cue: 'attention', at: t + 5 })
+    vi.advanceTimersByTime(800)
+    expect(played.map((p) => p.cue)).toEqual(['attention'])
+  })
+
+  it('quiet hours hold operational sound', async () => {
+    const { sound } = await fresh()
+    const { updateSetting } = await import('../settings')
+    updateSetting('notificationQuietHoursEnabled', true)
+    updateSetting('notificationQuietHoursStart', '00:00')
+    updateSetting('notificationQuietHoursEnd', '00:00') // start === end: quiet all day
+    sound.machine.event({ id: 'q', category: 'needsAttention', priority: 1, cue: 'attention', at: Date.now() + 10 })
+    vi.advanceTimersByTime(800)
+    expect(played).toHaveLength(0)
+  })
+
   it('stays silent off the desktop surface', async () => {
     const { sound, setSoundSurface } = await fresh()
     setSoundSurface('other')

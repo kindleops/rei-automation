@@ -44,15 +44,17 @@
 
 /* primary — the one action a surface is for */
 .lc-btn.is-primary {
-  color: var(--lc-ink-inverse);
+  color: var(--lc-accent-on);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 60%), rgb(var(--lc-select-rgb));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 8px 20px -12px rgba(var(--lc-select-rgb), 0.8);
 }
 @media (hover: hover) and (pointer: fine) {
   .lc-btn.is-primary:hover:not(:disabled) { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28), 0 10px 24px -12px rgba(var(--lc-select-rgb), 0.95); filter: brightness(1.05); }
 }
-:root[data-nexus-theme='light'] .lc-btn.is-primary { color: #fff; }
-:root[data-nexus-theme='red_ops'] .lc-btn.is-primary { color: #0b0d10; background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0) 60%), #e2e8f0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4); }
+/* A failure-red accent (Red Ops, or any red the operator picks) never paints
+   the one action: selection is already neutral (--lc-select-rgb), so the
+   button only needs a firmer edge to read as a fill. */
+:root[data-lc-accent-reserved='crit'] .lc-btn.is-primary { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4); }
 
 /* secondary — glass */
 .lc-btn.is-secondary {

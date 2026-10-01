@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Icon } from '../../shared/icons'
-import { loadSettings, subscribeSettings, updateSetting } from '../../shared/settings'
 import { AlertSettings } from '../notifications/AlertSettings'
+import { SoundSettings } from '../../shared/sound/SoundSettings'
 import { formatBuildIdentityLine } from '../../lib/build-identity'
 import { setClassicDesktop } from '../mobile/product-platform'
 import { EnvironmentStudio } from './appearance/EnvironmentStudio'
@@ -29,10 +29,8 @@ export { operatorInitials }
 
 export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSettings }: { email?: string | null; name?: string | null; onSignOut?: () => void; onClose: () => void; onOpenSettings?: () => void }) {
   const [tab, setTab] = useState<Tab>('appearance')
-  const [settings, setSettings] = useState(() => loadSettings())
   // the colour editor asks for room: the panel widens while it is open
   const [wide, setWide] = useState(false)
-  useEffect(() => subscribeSettings(() => setSettings(loadSettings())), [])
   const initials = operatorInitials(email, name)
   const openSound = useCallback(() => setTab('sound'), [])
 
@@ -50,7 +48,7 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSet
       <div className="dsk-seg" role="tablist" aria-label="Settings">
         {(['appearance', 'sound', 'system'] as Tab[]).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} className={cls('dsk-seg__tab', tab === t && 'is-active')} onClick={() => setTab(t)}>
-            {t === 'appearance' ? 'Appearance' : t === 'sound' ? 'Alerts' : 'System'}
+            {t === 'appearance' ? 'Appearance' : t === 'sound' ? 'Sound' : 'System'}
           </button>
         ))}
       </div>
@@ -64,12 +62,9 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSet
 
         {tab === 'sound' ? (
           <div className="dsk-prof__sound">
-            {/* The UI-sound switch playSound() actually reads. (A "sound profile"
-                picker used to sit here; nothing ever read its value.) */}
-            <label className="dsk-prof__toggle">
-              <span><b>Interface sounds</b><small>Confirmations when you move between apps</small></span>
-              <button type="button" role="switch" aria-checked={Boolean(settings.soundEnabled)} className={cls('dsk-switch', settings.soundEnabled && 'is-on')} onClick={() => updateSetting('soundEnabled', !settings.soundEnabled)}><i /></button>
-            </label>
+            {/* Sound & Alerts: the desktop Sound System (interface sounds and
+                operational alerts), then which notifications appear at all. */}
+            <SoundSettings />
             <div className="dsk-prof__alerts"><AlertSettings /></div>
           </div>
         ) : null}

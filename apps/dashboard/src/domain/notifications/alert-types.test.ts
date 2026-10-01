@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { alertTypeFor, ALERT_TYPES, DEFAULT_ALERT_SOUND, PUSH_DEFAULTS } from './alert-types'
 import { alertSoundFor, shouldPlayNotificationSound } from './notification-sound-bridge'
 import { resetSettings, updateSetting } from '../../shared/settings'
+import { claimSoundSurface } from '../../shared/sound/surface'
 
 // The server decides which phones a push reaches with its own copy of this
 // mapping; if the two drift, the settings screen lies about what buzzes.
@@ -43,6 +44,16 @@ describe('alert sounds', () => {
   it('play by default — no longer gated on the UI-sound switch that defaulted off', () => {
     expect(shouldPlayNotificationSound(reply)).toBe(true)
     expect(alertSoundFor('seller_reply')).toBe(DEFAULT_ALERT_SOUND.seller_reply)
+  })
+
+  it('stay silent where the desktop Sound System speaks — one event, one sound', () => {
+    claimSoundSurface(true)
+    try {
+      expect(shouldPlayNotificationSound(reply)).toBe(false)
+    } finally {
+      claimSoundSurface(false)
+    }
+    expect(shouldPlayNotificationSound(reply)).toBe(true)
   })
 
   it('follow the operator: sounds off, type off, or sound "None" silences', () => {

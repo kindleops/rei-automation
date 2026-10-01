@@ -15,6 +15,8 @@ import {
 import { NEXUS_GLOBAL_THEME_OPTIONS, type NexusGlobalThemeId } from '../../domain/theme/nexusThemes'
 import { LiquidGlassControls } from '../../shared/LiquidGlassControls'
 import { AlertSettings } from '../../modules/notifications/AlertSettings'
+import { SoundSettings } from '../../shared/sound/SoundSettings'
+import { desktopSoundOwnsSurface, subscribeSoundSurface } from '../../shared/sound/surface'
 import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { resolveBuildIdentity } from '../../lib/build-identity'
@@ -181,6 +183,8 @@ function PhoneAppearanceSection() {
 
 function AlertsSection() {
   const settings = useSettings()
+  // the modern desktop's Sound System replaces the legacy interface-sound switch
+  const desktopSound = useSyncExternalStore(subscribeSoundSurface, desktopSoundOwnsSurface, desktopSoundOwnsSurface)
   const { preferences, savePrefs, setMasterMuted } = useNotificationIntelligence()
   const [start, setStart] = useState(preferences.quietHoursStart || '21:00')
   const [end, setEnd] = useState(preferences.quietHoursEnd || '08:00')
@@ -193,9 +197,11 @@ function AlertsSection() {
         <Row title="Pause all alerts" hint="No pop-ups and no alert sounds until you turn this back off.">
           <Switch on={Boolean(preferences.masterMuted)} label="Pause all alerts" onChange={setMasterMuted} />
         </Row>
-        <Row title="Interface sounds" hint="Small confirmations when you move between apps and run actions.">
-          <Switch on={Boolean(settings.soundEnabled)} label="Interface sounds" onChange={(v) => updateSetting('soundEnabled', v)} />
-        </Row>
+        {!desktopSound ? (
+          <Row title="Interface sounds" hint="Small confirmations when you move between apps and run actions.">
+            <Switch on={Boolean(settings.soundEnabled)} label="Interface sounds" onChange={(v) => updateSetting('soundEnabled', v)} />
+          </Row>
+        ) : null}
         <Row title="Quiet hours" hint="Alerts still arrive in the notification centre, silently.">
           <div className="st-quiet">
             {preferences.quietHoursEnabled ? (
@@ -209,6 +215,11 @@ function AlertsSection() {
           </div>
         </Row>
       </Group>
+      {desktopSound ? (
+        <Group title="Sound">
+          <div className="st-sound"><SoundSettings /></div>
+        </Group>
+      ) : null}
       <Group title="Alerts">
         <div className="st-alerts"><AlertSettings /></div>
       </Group>

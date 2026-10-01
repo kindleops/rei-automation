@@ -17,6 +17,11 @@
   --ch-edge: var(--dsk-edge, rgba(255, 255, 255, 0.08));
   --ch-edge-hi: var(--dsk-edge-hi, rgba(255, 255, 255, 0.14));
   --ch-accent: var(--dsk-accent, #5eead4);
+  /* selection and data take the Environment Studio's roles, not the raw
+     accent: a failure-red accent turns both neutral (red means failure) */
+  --ch-select: rgb(var(--lc-select-rgb, 94, 234, 212));
+  --ch-chart: var(--lc-chart-primary, var(--ch-accent));
+  --ch-chart-2: var(--lc-chart-2, #a78bfa);
   --ch-good: #3ddc97;
   --ch-warn: #f0b64a;
   --ch-bad: #ff5b6c;
@@ -230,7 +235,7 @@ html[data-nexus-theme='red_ops'] .ch .ch-stream::before { background: linear-gra
 
 .ch-link { all: unset; display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--ch-ink-2); cursor: pointer; border-radius: 8px; padding: 4px 6px; margin: -4px -6px; transition: color 0.15s ease, background 0.15s ease; white-space: nowrap; }
 .ch-link:hover { color: var(--ch-ink); background: var(--ch-hover); }
-.ch :focus-visible { outline: 2px solid color-mix(in srgb, var(--ch-accent) 70%, transparent); outline-offset: 2px; }
+.ch :focus-visible { outline: 2px solid color-mix(in srgb, var(--ch-select) 70%, transparent); outline-offset: 2px; }
 
 .ch-chip {
   all: unset;
@@ -250,10 +255,10 @@ html[data-nexus-theme='red_ops'] .ch .ch-stream::before { background: linear-gra
   white-space: nowrap;
   transition: background 0.16s ease, color 0.16s ease, box-shadow 0.2s ease;
 }
-.ch-chip i { width: 7px; height: 7px; border-radius: 2px; background: var(--chip, var(--ch-accent)); opacity: 0.65; }
+.ch-chip i { width: 7px; height: 7px; border-radius: 2px; background: var(--chip, var(--ch-select)); opacity: 0.65; }
 .ch-chip:hover { color: var(--ch-ink); background: color-mix(in srgb, var(--ch-ink) 7%, transparent); }
-.ch-chip.is-on { color: var(--ch-ink); background: color-mix(in srgb, var(--chip, var(--ch-accent)) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip, var(--ch-accent)) 48%, transparent), 0 0 18px -8px var(--chip, var(--ch-accent)); }
-.ch-chip.is-on i { opacity: 1; box-shadow: 0 0 8px var(--chip, var(--ch-accent)); }
+.ch-chip.is-on { color: var(--ch-ink); background: color-mix(in srgb, var(--chip, var(--ch-select)) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip, var(--ch-select)) 48%, transparent), 0 0 18px -8px var(--chip, var(--ch-select)); }
+.ch-chip.is-on i { opacity: 1; box-shadow: 0 0 8px var(--chip, var(--ch-select)); }
 .ch-chip.is-small { height: 26px; padding: 0 10px; font-size: 11.5px; }
 
 .ch-skel { display: grid; gap: 10px; padding: 6px 20px 20px; }
@@ -284,9 +289,9 @@ html[data-nexus-theme='red_ops'] .ch .ch-stream::before { background: linear-gra
 .ch-wave { position: absolute; right: 0; top: 64px; width: min(46%, 620px); height: 128px; z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%); mask-image: linear-gradient(90deg, transparent, #000 30%); }
 .ch-wave svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .ch-wave__label { position: absolute; right: 0; top: -16px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ch-ink-3); }
-.ch-wave__line { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--ch-accent) 55%, transparent)); }
+.ch-wave__line { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--ch-chart) 55%, transparent)); }
 .ch-wave svg.is-drawn .ch-wave__line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ch-draw 1.8s var(--ch-ease) 0.3s forwards; }
-.ch-wave__now { fill: var(--ch-violet); filter: drop-shadow(0 0 8px var(--ch-violet)); }
+.ch-wave__now { fill: var(--ch-chart-2); filter: drop-shadow(0 0 8px var(--ch-chart-2)); }
 .ch-hero__top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .ch-hero__status { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 12.5px; font-weight: 550; color: var(--ch-ink-2); flex-wrap: wrap; }
 .ch-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ch-ink-3); }
@@ -544,7 +549,7 @@ html[data-nexus-theme='light'] .ch-map__stage { background: radial-gradient(60% 
 .ch-dial { display: flex; align-items: center; gap: 12px; }
 .ch-dial svg { width: 64px; height: 64px; flex-shrink: 0; }
 .ch-dial__track { fill: none; stroke: color-mix(in srgb, var(--ch-ink) 9%, transparent); stroke-width: 6; }
-.ch-dial__value { fill: none; stroke: var(--ch-accent); stroke-width: 6; stroke-linecap: round; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ch-accent) 60%, transparent)); transition: stroke-dasharray 0.9s var(--ch-ease); }
+.ch-dial__value { fill: none; stroke: var(--ch-chart); stroke-width: 6; stroke-linecap: round; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ch-chart) 60%, transparent)); transition: stroke-dasharray 0.9s var(--ch-ease); }
 .ch-dial__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ch-dial__copy b { font-size: 22px; font-weight: 350; letter-spacing: -0.03em; }
 .ch-dial__copy span { font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ch-ink-3); }

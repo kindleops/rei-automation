@@ -39,21 +39,25 @@
   --border-strong: var(--dsk-edge-hi, rgba(255, 255, 255, 0.14));
   --border-subtle: rgba(255, 255, 255, 0.05);
 
-  /* accent and semantics — LeadCommand's, never Arc's violet */
-  --accent: var(--dsk-accent, #5eead4);
-  --accent-strong: color-mix(in srgb, var(--dsk-accent, #5eead4) 82%, #fff);
-  --accent-subtle: color-mix(in srgb, var(--dsk-accent, #5eead4) 18%, transparent);
-  --accent-foreground: #04110f;
+  /* accent and semantics — LeadCommand's, never Arc's violet. Arc's accent
+     paints data (bars, the first line), so it is the Environment Studio's
+     chart primary: the operator's accent, or a neutral when that accent is
+     failure-red (red keeps meaning failure). */
+  --accent: var(--lc-chart-primary, var(--dsk-accent, #5eead4));
+  --accent-strong: color-mix(in srgb, var(--accent) 82%, #fff);
+  --accent-subtle: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accent-foreground: var(--lc-accent-on, #04110f);
   --success: #3ddc97;
   --warning: #f0b64a;
   --danger: #ff5b6c;
-  --focus-ring: color-mix(in srgb, var(--dsk-accent, #5eead4) 70%, transparent);
+  --focus-ring: color-mix(in srgb, var(--lc-accent-focus, var(--dsk-accent, #5eead4)) 70%, transparent);
 
-  /* data series: machine (cyan), automation (violet), value (green), attention (gold) */
-  --series-1: var(--dsk-accent, #5eead4);
-  --series-2: #a78bfa;
-  --series-3: #3ddc97;
-  --series-4: #f0b64a;
+  /* data series — the engine's categorical set: the chart primary first, then
+     hues chosen to stay apart, near-duplicates of the accent and reds removed */
+  --series-1: var(--lc-chart-1);
+  --series-2: var(--lc-chart-2);
+  --series-3: var(--lc-chart-3);
+  --series-4: var(--lc-chart-4);
 
   /* rhythm and physics — Arc's, kept */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
@@ -87,13 +91,9 @@
 
 html[data-nexus-theme='light'] .lc-arc {
   --border-subtle: rgba(13, 21, 36, 0.06);
-  --accent-foreground: #ffffff;
   --success: #0f9d6b;
   --warning: #b7791f;
   --danger: #d92d45;
-  --series-2: #7c5cf0;
-  --series-3: #0f9d6b;
-  --series-4: #b7791f;
   --shadow-raised: 0 12px 30px -18px rgba(24, 36, 60, 0.35);
   --shadow-floating: 0 24px 60px -30px rgba(24, 36, 60, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px var(--dsk-edge-hi, rgba(13, 21, 36, 0.14));
 }
@@ -104,12 +104,9 @@ html[data-nexus-theme='true_black'] .lc-arc {
   --surface-raised: rgb(10 11 13 / 0.96);
 }
 
-/* RedOps: the accent is red, so red must still mean failure. Series and
-   semantics stay cool / green; only the chrome takes the theme. */
+/* RedOps: red must still mean failure. Series already step around red (the
+   engine drops crit-like hues); the semantics stay cool / green. */
 html[data-nexus-theme='red_ops'] .lc-arc {
-  --series-1: #e2e8f0;
-  --series-2: #c4b5fd;
-  --series-3: #4ade80;
   --success: #4ade80;
   --danger: #ff3b3b;
 }

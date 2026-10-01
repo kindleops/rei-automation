@@ -305,6 +305,7 @@ html[data-nexus-theme='light'] .st-quiet input[type='time'] { color-scheme: ligh
 }
 
 /* ── alerts (the shared AlertSettings, restated calm) ─────────────────── */
+.st-sound { padding: 12px 16px 14px; }
 .st-alerts { padding: 6px 16px 12px; }
 .st-alerts .nx-alerts { --nx-alerts-line: var(--st-edge); --nx-alerts-accent: var(--st-accent); gap: 8px; margin: 0; }
 .st-alerts .nx-alerts__master,

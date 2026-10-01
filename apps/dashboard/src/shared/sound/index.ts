@@ -1,5 +1,8 @@
 import { play as cuePlay, setEnabled, setTheme, setVolume, type PlayOptions, type SoundName } from 'cuelume'
 import { readSoundPrefs, subscribeSoundPrefs, type ExperienceSoundPrefs } from './prefs'
+import { claimSoundSurface, desktopSoundOwnsSurface } from './surface'
+import { loadSettings } from '../settings'
+import { isWithinQuietHours } from '../quiet-hours'
 
 /**
  * THE LEADCOMMAND SOUND SYSTEM.
@@ -31,21 +34,26 @@ const GAIN: Record<SoundName, number> = {
 }
 
 let prefs: ExperienceSoundPrefs = readSoundPrefs()
-let surface: 'desktop' | 'other' = 'other'
 const startedAt = Date.now()
 
 function apply() {
   try {
     setTheme(prefs.material)
     setVolume(prefs.volume)
-    setEnabled(surface === 'desktop' && (prefs.interface !== 'off' || prefs.alerts))
+    setEnabled(desktopSoundOwnsSurface() && (prefs.interface !== 'off' || prefs.alerts))
   } catch { /* audio unavailable — stay silent */ }
 }
 apply()
 subscribeSoundPrefs(() => { prefs = readSoundPrefs(); apply() })
 
-/** The desktop shell turns sound on for its surface; phones stay silent in this pass. */
-export function setSoundSurface(next: 'desktop' | 'other') { surface = next; apply() }
+/** The desktop shell turns sound on for its surface (and the legacy sounds
+ *  off — see ./surface); phones stay silent in this pass. */
+export function setSoundSurface(next: 'desktop' | 'other') { claimSoundSurface(next === 'desktop'); apply() }
+
+/** "Pause all alerts" and quiet hours hold every operational sound. */
+function alertsHeld(): boolean {
+  try { return Boolean(loadSettings().notificationMasterMuted) || isWithinQuietHours() } catch { return false }
+}
 
 const debug: Array<{ at: number; event: string; cue: SoundName | null; why: string }> = []
 function note(event: string, cue: SoundName | null, why: string) {
@@ -60,7 +68,7 @@ function raw(cue: SoundName, opts: PlayOptions = {}) {
 
 /** Interface sound: gated by mode tier. */
 function ui(event: string, cue: SoundName, tier: Tier, emphasis: Emphasis = 'normal', extra: PlayOptions = {}) {
-  if (surface !== 'desktop') return note(event, cue, 'not desktop')
+  if (!desktopSoundOwnsSurface()) return note(event, cue, 'not desktop')
   if (prefs.interface === 'off') return note(event, cue, 'interface off')
   if (tier === 'full' && prefs.interface !== 'full') return note(event, cue, 'subtle mode')
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return note(event, cue, 'hidden')
@@ -130,8 +138,10 @@ function flush() {
 
 /** Offer an operational event. Most will stay silent — by design. */
 function operational(e: OperationalCue) {
-  if (surface !== 'desktop' || !prefs.alerts || !prefs.alertTypes[e.category]) return note(e.id, e.cue, 'alerts off')
+  if (!desktopSoundOwnsSurface() || !prefs.alerts || !prefs.alertTypes[e.category]) return note(e.id, e.cue, 'alerts off')
   if (seen.has(e.id)) return note(e.id, e.cue, 'duplicate')
+  // held events never sound later: unpausing does not replay what arrived meanwhile
+  if (alertsHeld()) { remember(e.id); return note(e.id, e.cue, 'paused or quiet hours') }
   if (e.at < startedAt) { remember(e.id); return note(e.id, e.cue, 'history') }
   pending.push(e)
   if (!flushTimer) flushTimer = window.setTimeout(flush, WINDOW_MS)

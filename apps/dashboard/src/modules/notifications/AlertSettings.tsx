@@ -12,6 +12,7 @@ import {
 import { alertSoundFor, previewAlertSound } from '../../domain/notifications/notification-sound-bridge'
 import { readDevicePushAlertTypes, saveDevicePushAlertTypes } from '../../domain/notifications/push-subscription'
 import { MobileNotificationPermission } from './MobileNotificationPermission'
+import { desktopSoundOwnsSurface, subscribeSoundSurface } from '../../shared/sound/surface'
 import './alert-settings.css'
 
 /**
@@ -25,11 +26,16 @@ import './alert-settings.css'
  * which phones a push goes to. A web app cannot choose the lock-screen sound
  * on iPhone — iOS plays its own — so the picker governs in-app sound only,
  * and the copy says so.
+ *
+ * On the modern desktop the Sound System speaks for alerts (shared/sound), so
+ * the legacy sound switch, volume and per-alert sound pickers are not shown
+ * there — they would be controls that do nothing.
  */
 
 const SOUND_IDS = Object.keys(SOUND_ASSET_URLS) as SoundAssetId[]
 
 const useSettingsSnapshot = () => useSyncExternalStore(subscribeSettings, loadSettings, loadSettings)
+const useDesktopSound = () => useSyncExternalStore(subscribeSoundSurface, desktopSoundOwnsSurface, desktopSoundOwnsSurface)
 
 function Switch({ on, label, onChange, disabled }: { on: boolean; label: string; onChange: (next: boolean) => void; disabled?: boolean }) {
   return (
@@ -49,6 +55,7 @@ function Switch({ on, label, onChange, disabled }: { on: boolean; label: string;
 
 export function AlertSettings() {
   const settings = useSettingsSnapshot()
+  const desktopSound = useDesktopSound()
   const [phone, setPhone] = useState<Record<AlertType, boolean> | null>(null)
   const [phoneSaving, setPhoneSaving] = useState<AlertType | null>(null)
   const [phoneError, setPhoneError] = useState(false)
@@ -88,14 +95,16 @@ export function AlertSettings() {
           </div>
           <Switch on={popups} label="Pop-up alerts" onChange={(v) => updateSetting('notificationsEnabled', v)} />
         </div>
-        <div className="nx-alerts__row">
-          <div className="nx-alerts__copy">
-            <strong>Alert sounds</strong>
-            <small>Plays while LeadCommand is open</small>
+        {!desktopSound ? (
+          <div className="nx-alerts__row">
+            <div className="nx-alerts__copy">
+              <strong>Alert sounds</strong>
+              <small>Plays while LeadCommand is open</small>
+            </div>
+            <Switch on={sounds} label="Alert sounds" onChange={(v) => updateSetting('notificationSoundEnabled', v)} />
           </div>
-          <Switch on={sounds} label="Alert sounds" onChange={(v) => updateSetting('notificationSoundEnabled', v)} />
-        </div>
-        {sounds ? (
+        ) : null}
+        {sounds && !desktopSound ? (
           <label className="nx-alerts__volume">
             <Icon name="volume" size={14} />
             <input
@@ -127,29 +136,33 @@ export function AlertSettings() {
                 </div>
                 <Switch on={enabled} label={`${ALERT_TYPE_LABEL[type]} alerts`} onChange={(v) => setTypeEnabled(type, v)} />
               </div>
-              {enabled ? (
+              {enabled && (!desktopSound || phone) ? (
                 <div className="nx-alerts__controls">
-                  <label className="nx-alerts__sound">
-                    <Icon name="volume" size={13} />
-                    <select
-                      value={chosen}
-                      aria-label={`${ALERT_TYPE_LABEL[type]} sound`}
-                      disabled={!sounds}
-                      onChange={(e) => setTypeSound(type, e.target.value)}
-                    >
-                      {SOUND_IDS.map((id) => <option key={id} value={id}>{SOUND_ASSET_LABELS[id]}</option>)}
-                      <option value="none">None</option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="nx-alerts__play"
-                    aria-label={`Play ${ALERT_TYPE_LABEL[type]} sound`}
-                    disabled={chosen === 'none'}
-                    onClick={() => chosen !== 'none' && previewAlertSound(chosen as SoundAssetId)}
-                  >
-                    <Icon name="play" size={12} />
-                  </button>
+                  {!desktopSound ? (
+                    <>
+                      <label className="nx-alerts__sound">
+                        <Icon name="volume" size={13} />
+                        <select
+                          value={chosen}
+                          aria-label={`${ALERT_TYPE_LABEL[type]} sound`}
+                          disabled={!sounds}
+                          onChange={(e) => setTypeSound(type, e.target.value)}
+                        >
+                          {SOUND_IDS.map((id) => <option key={id} value={id}>{SOUND_ASSET_LABELS[id]}</option>)}
+                          <option value="none">None</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="nx-alerts__play"
+                        aria-label={`Play ${ALERT_TYPE_LABEL[type]} sound`}
+                        disabled={chosen === 'none'}
+                        onClick={() => chosen !== 'none' && previewAlertSound(chosen as SoundAssetId)}
+                      >
+                        <Icon name="play" size={12} />
+                      </button>
+                    </>
+                  ) : null}
                   {phone ? (
                     <span className="nx-alerts__phone">
                       <Icon name="phone" size={13} />

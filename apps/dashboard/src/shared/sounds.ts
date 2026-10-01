@@ -6,6 +6,7 @@
  */
 
 import { loadSettings } from './settings'
+import { desktopSoundOwnsSurface } from './sound/surface'
 import {
   SOUND_EVENT_ASSET_MAP,
   SOUND_ASSET_URLS,
@@ -402,6 +403,8 @@ export function previewSoundAsset(assetId: SoundAssetId, volume = 0.6): void {
 // ── Public API ────────────────────────────────────────────────────────────
 
 function shouldPlaySoundEvent(event: SoundEvent): boolean {
+  // the modern desktop has its own Sound System; legacy sounds stay off there
+  if (desktopSoundOwnsSurface()) return false
   const settings = loadSettings()
   if (!settings.soundEnabled) return false
 

@@ -189,13 +189,13 @@ export function HeroWave({ series, label, still }: { series: Series; label: stri
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={cls(!still && 'is-drawn')}>
         <defs>
           <linearGradient id={`wf${gid}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor="var(--ch-accent)" stopOpacity="0.28" />
-            <stop offset="1" stopColor="var(--ch-accent)" stopOpacity="0" />
+            <stop offset="0" stopColor="var(--ch-chart)" stopOpacity="0.28" />
+            <stop offset="1" stopColor="var(--ch-chart)" stopOpacity="0" />
           </linearGradient>
           <linearGradient id={`ws${gid}`} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0" stopColor="var(--ch-accent)" stopOpacity="0.15" />
-            <stop offset="0.6" stopColor="var(--ch-accent)" stopOpacity="0.9" />
-            <stop offset="1" stopColor="var(--ch-violet)" stopOpacity="1" />
+            <stop offset="0" stopColor="var(--ch-chart)" stopOpacity="0.15" />
+            <stop offset="0.6" stopColor="var(--ch-chart)" stopOpacity="0.9" />
+            <stop offset="1" stopColor="var(--ch-chart-2)" stopOpacity="1" />
           </linearGradient>
         </defs>
         <path d={area} fill={`url(#wf${gid})`} />
