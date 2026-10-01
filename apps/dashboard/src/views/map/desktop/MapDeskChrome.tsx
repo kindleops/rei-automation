@@ -10,9 +10,13 @@
  *   L4  transient popovers   Color by, Appearance, tooltips
  *   L5  toasts               live events as they land
  *
- * Top-left: search → the lens pill (the lens, and LIVE only while the stream is
- * actually flowing) → the time/world capsule. Beside it, the icon rail: Layers,
- * Filters, Draw, Live, Appearance (no Measure — the Map has no such tool).
+ * Top-left: search, then one row of one-line pills — the lens (and LIVE only
+ * while the stream is actually flowing), the local time, the applied filter and
+ * sold comps. Beside it, the icon rail: Layers, Filters, Draw, Live, Appearance
+ * (no Measure — the Map has no such tool). The map is the hero: in a compact
+ * pane (map-desk.css container queries) the search folds to an icon, the pills
+ * shorten and the legend becomes a chip; the basemap's own labels are toned to
+ * context (map-desk-labels).
  *
  * All state is the Map's own (MapMobileChrome passes it in); this file only
  * decides which tool is open and lays the instruments out. The phone never
@@ -47,6 +51,7 @@ import { DESK_TOOLS, filterCapsuleLabel, fmtCount, lensPillSub, liveSignal, clam
 import { DeskSeg, DeskSwitch, MapDeskLayers } from './MapDeskLayers'
 import { LensPicker, MapDeskLegend, lensSwatchStyle } from './MapDeskLegend'
 import { DESK_CARD_PRESENCE_EVENT, type DeskCardPresence } from '../seller-card/desk-card-presence'
+import { useDeskLabelTone } from './map-desk-labels'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 /** Below this pane width a left inspector and a docked card can't share the map (keep in step with map-desk.css). */
@@ -318,6 +323,8 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
   const [picker, setPicker] = useState<Picker>(null)
   const [appearanceTop, setAppearanceTop] = useState(14)
   const railRef = useRef<HTMLElement | null>(null)
+  // The basemap's own labels read as context on the desk (never on a phone: this chrome is desk-only).
+  useDeskLabelTone(map, mapEpoch, p.styleMode)
 
   // One left surface at a time: Filters (owned by the Command Map) closes ours.
   useEffect(() => { if (filtersOpen) setTool((t) => (t === 'appearance' ? t : null)) }, [filtersOpen, setTool])
@@ -513,47 +520,46 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
           <div className="mxd-stack__search">
             <MapSearch map={map} epoch={mapEpoch} reducedMotion={reducedMotion} onProperty={p.onSearchProperty} onActiveChange={p.onSearchActive} />
           </div>
-          <div className="mxd-stack__lens">
-            <button
-              type="button"
-              className={cls('mxd-lens', 'mxd-l2', picker === 'pill' && 'is-open', signal === 'live' && 'is-live')}
-              data-map-control="mode"
-              data-lens-trigger
-              aria-haspopup="dialog"
-              aria-expanded={picker === 'pill'}
-              onClick={() => setPicker((v) => (v === 'pill' ? null : 'pill'))}
-            >
-              <span className="mxd-lens__swatch" style={lensSwatchStyle(lens)} aria-hidden="true" />
-              <span className="mxd-lens__copy">
-                <span className="mxd-lens__title">
-                  <b>{lens.label}</b>
-                  {signal === 'live' ? <em className="mxd-livebadge" title="Live Activity is streaming from the database"><i aria-hidden="true" />Live</em> : null}
+          <div className="mxd-stack__row">
+            <div className="mxd-stack__lens">
+              <button
+                type="button"
+                className={cls('mxd-lens', 'mxd-l2', picker === 'pill' && 'is-open', signal === 'live' && 'is-live')}
+                data-map-control="mode"
+                data-lens-trigger
+                aria-haspopup="dialog"
+                aria-expanded={picker === 'pill'}
+                title={pillSub}
+                onClick={() => setPicker((v) => (v === 'pill' ? null : 'pill'))}
+              >
+                <span className="mxd-lens__swatch" style={lensSwatchStyle(lens)} aria-hidden="true" />
+                <span className="mxd-lens__copy">
+                  <span className="mxd-lens__title">
+                    <b>{lens.label}</b>
+                    {signal === 'live' ? <em className="mxd-livebadge" title="Live Activity is streaming from the database"><i aria-hidden="true" />Live</em> : null}
+                  </span>
+                  <span className="mxd-lens__sub">{pillSub}</span>
                 </span>
-                <span className="mxd-lens__sub">{pillSub}</span>
-              </span>
-              <Icon name="chevron-down" size={13} />
-            </button>
-            {picker === 'pill' ? <LensPicker active={lens} placement="down" onPick={onPick} onClose={() => setPicker(null)} /> : null}
-          </div>
-          <div className="mxd-worldslot" ref={setWorldSlot} />
-          {p.filterCount > 0 || p.prefs.comps ? (
-            <div className="mxd-stack__capsules">
-              {p.filterCount > 0 ? (
-                <button type="button" className="mxd-capsule mxd-l2 is-filter" data-map-control="filter-summary" onClick={p.onOpenFilters}>
-                  <Icon name="filter" size={12} />
-                  <span>{filterCapsuleLabel(p.filterCount, p.filterMatching)}</span>
-                  <b>Edit</b>
-                </button>
-              ) : null}
-              {p.prefs.comps ? (
-                <button type="button" className="mxd-capsule mxd-l2 is-comps" data-map-control="comps" onClick={p.onOpenCompFilters}>
-                  <i aria-hidden="true" />
-                  <span>{p.comps.loading && !p.comps.total ? 'Reading sales…' : `${fmtCount(p.comps.total) ?? '0'} sold`}</span>
-                  <b>Filters</b>
-                </button>
-              ) : null}
+                <Icon name="chevron-down" size={13} />
+              </button>
+              {picker === 'pill' ? <LensPicker active={lens} placement="down" onPick={onPick} onClose={() => setPicker(null)} /> : null}
             </div>
-          ) : null}
+            <div className="mxd-worldslot" ref={setWorldSlot} />
+            {p.filterCount > 0 ? (
+              <button type="button" className="mxd-capsule mxd-l2 is-filter" data-map-control="filter-summary" onClick={p.onOpenFilters}>
+                <Icon name="filter" size={12} />
+                <span>{filterCapsuleLabel(p.filterCount, p.filterMatching)}</span>
+                <b>Edit</b>
+              </button>
+            ) : null}
+            {p.prefs.comps ? (
+              <button type="button" className="mxd-capsule mxd-l2 is-comps" data-map-control="comps" onClick={p.onOpenCompFilters}>
+                <i aria-hidden="true" />
+                <span>{p.comps.loading && !p.comps.total ? 'Reading sales…' : `${fmtCount(p.comps.total) ?? '0'} sold`}</span>
+                <b>Filters</b>
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

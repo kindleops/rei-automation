@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import maplibregl from 'maplibre-gl'
 import { Icon } from '../../../shared/icons'
+import { useBreakpoint } from '../../../modules/mobile/useBreakpoint'
 import { useLivingSettings, living } from './living-settings'
 import { useWorldLight } from './useWorldLight'
 import { useBuildings3D } from './useBuildings3D'
@@ -49,6 +50,8 @@ function PhaseGlyph({ ls }: { ls: LightState | null }) {
 export function LivingMap({ map, mapEpoch, theme, tilted, selected, reducedMotion, isMobile, cardOpen }: LivingMapProps) {
   const [settings] = useLivingSettings()
   const on = living(settings)
+  /** [desk] the chip is a one-line local-time pill in the Map's command row. */
+  const { isModernDesktop: desk } = useBreakpoint()
   const light = useWorldLight(map, mapEpoch, { enabled: on.daylight, theme, tilted, reducedMotion })
   useBuildings3D(map, mapEpoch, { enabled: on.buildings, tilted, theme, night: Boolean(light && (light.phase === 'night' || light.phase === 'twilight')), selected })
 
@@ -234,8 +237,40 @@ export function LivingMap({ map, mapEpoch, theme, tilted, selected, reducedMotio
   const place = world?.place
   const placeLabel = national ? 'United States' : place?.city || place?.market?.replace(/,\s*[A-Z]{2}$/, '') || (place?.state ? place.state : null)
 
+  /**
+   * [desk] Only what is known earns space: a place and its local time (with the
+   * seller window when there is one), or the country's zone tally. While the
+   * time is resolving, uncertain or unavailable there is no pill at all — the
+   * Appearance popover still holds the light and the Living Map settings.
+   */
+  const deskPill = !desk ? null
+    : on.localTime && national
+      ? (openZones !== null ? { place: 'United States', time: null as string | null, window: `${openZones} of ${zones!.zones.length} zones in window`, tone: openZones > 0 ? 'open' : 'quiet' } : null)
+      : on.localTime && placeLabel && tz
+        ? {
+          place: placeLabel,
+          time: `${localClock(tz, new Date(now))} ${world?.timezone.abbr ?? ''}`.trim() as string | null,
+          window: cw ? (tone === 'closing' ? `Closes in ${untilLabel(cw.closes_at, now)}` : cw.open ? 'Open' : 'Quiet hours') : null,
+          tone,
+        }
+        : null
+  if (desk && !deskPill) return null
+  const deskTitle = deskPill
+    ? [deskPill.place, deskPill.time, cw && !national ? (cw.open ? `Open · closes in ${untilLabel(cw.closes_at, now)} · ${cw.window} local` : `Quiet hours · opens ${localClock(tz!, new Date(cw.next_open_at || now))} · ${cw.window} local`) : deskPill.window].filter(Boolean).join(' · ')
+    : undefined
+
   const content = (
     <div className={cls('nxw', isMobile ? 'is-mobile' : 'is-desktop', cardOpen && 'is-aside', open && 'is-open')} data-testid="living-map">
+      {deskPill ? (
+        <button type="button" className={cls('nxw-chip', 'is-desk', `is-${deskPill.tone}`, deskPill.time && 'has-time')} onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={`Local time and seller contact window: ${deskTitle}`} title={deskTitle}>
+          <PhaseGlyph ls={light} />
+          <span className="nxw-chip__line">
+            <b className="nxw-chip__place">{deskPill.place}</b>
+            {deskPill.time ? <span className="nxw-chip__time">{deskPill.time}</span> : null}
+            {deskPill.window ? <em className="nxw-chip__window"><i className="nxw-dot" /><span>{deskPill.window}</span></em> : null}
+          </span>
+        </button>
+      ) : (
       <button type="button" className={cls('nxw-chip', `is-${tone}`)} onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label="Local time and seller contact window">
         <PhaseGlyph ls={light} />
         {on.localTime && national ? (
@@ -252,6 +287,7 @@ export function LivingMap({ map, mapEpoch, theme, tilted, selected, reducedMotio
           </span>
         )}
       </button>
+      )}
       {open ? (
         <div className="nxw-pop" role="dialog" aria-label="Local context">
           {national ? (

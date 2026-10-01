@@ -172,7 +172,9 @@ describe('desk render contract (map desktop 2.0)', () => {
   const render = () => { screen.desk = true; try { return renderToStaticMarkup(<MapMobileChrome {...props} />) } finally { screen.desk = false } }
   it('renders the rail, the command stack, the legend and the zoom capsule — not the phone chrome', () => {
     const html = render()
-    for (const c of ['layers', 'filters', 'draw', 'activity', 'appearance', 'recenter', 'mode', 'filter-summary', 'color-by', 'zoom-in', 'zoom-out', 'dimension', 'north']) expect(html).toContain(`data-map-control="${c}"`)
+    for (const c of ['layers', 'filters', 'draw', 'activity', 'appearance', 'recenter', 'mode', 'filter-summary', 'color-by', 'legend', 'zoom-in', 'zoom-out', 'dimension', 'north']) expect(html).toContain(`data-map-control="${c}"`)
+    // quiet chrome: no shouted eyebrow on the legend (the lens names itself)
+    expect(html).not.toMatch(/>Color by</)
     expect(html).toContain('mxd-rail')
     expect(html).not.toContain('mx-searchrow')
     expect(html).not.toContain('class="mx-stack"')

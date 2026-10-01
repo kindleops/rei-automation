@@ -13,38 +13,47 @@
  * The glass refracts the map beneath it (backdrop blur + saturation, a top
  * specular, an edge that catches light top-left) and follows the operator's
  * Liquid Glass setting (--lg-*). Themes: dark · light · true_black · red_ops.
- * Scoped to html.is-desktop-modern: nothing here reaches a phone. Panes are
- * container queries (@container pane) — the Map works at 25/50/75/100%.
+ * Scoped to html.is-desktop-modern: nothing here reaches a phone. The map root
+ * is its own size container (@container mxd): below ~900px wide or ~600px tall
+ * the instruments fold to compact chips (search → icon, lens and local time →
+ * one-line pills, legend → a chip that opens on demand, a smaller zoom stack).
+ *
+ * Material: the pane body owns a backdrop-filter, and Chromium does not run a
+ * nested one inside it (shared/lc/DECISIONS.md) — so in-pane "glass" cannot
+ * frost the map. Instruments are near-opaque glass with a hairline edge: the
+ * map never shows crisp lines through their text.
  */
 
 /* ── tokens ─────────────────────────────────────────────────────────────── */
 html.is-desktop-modern .mx.is-desk {
-  --mxd-gap: 14px;
-  --mxd-rail-w: 46px;
-  --mxd-col-x: calc(var(--mxd-gap) + var(--mxd-rail-w) + 10px);
-  --mxd-col-w: min(372px, calc(100% - var(--mxd-col-x) - 78px));
-  --mxd-insp-w: min(392px, calc(100% - var(--mxd-col-x) - var(--mxd-gap)));
+  container: mxd / size;
+  --mxd-gap: 12px;
+  --mxd-rail-w: 40px;
+  --mxd-chip-h: 32px;
+  --mxd-col-x: calc(var(--mxd-gap) + var(--mxd-rail-w) + 8px);
+  --mxd-col-w: min(340px, calc(100cqw - var(--mxd-col-x) - 70px));
+  --mxd-insp-w: min(380px, calc(100% - var(--mxd-col-x) - var(--mxd-gap)));
   --mxd-font: var(--dsk-font, 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif);
 
   --mxg-ink: #eef1f6;
   --mxg-ink-2: rgba(238, 241, 246, 0.76);
   --mxg-ink-3: rgba(238, 241, 246, 0.52);
   --mxg-ink-4: rgba(238, 241, 246, 0.28);
-  --mxg-l1: rgb(5 7 11 / clamp(0.3, calc(0.5 * var(--lg-alpha, 1)), 0.92));
-  --mxg-l2: rgb(15 18 26 / clamp(0.34, calc(0.56 * var(--lg-alpha, 1)), 0.94));
-  --mxg-l3: rgb(12 15 22 / clamp(0.55, calc(0.8 * var(--lg-alpha, 1)), 0.97));
-  --mxg-l4: rgb(17 20 28 / clamp(0.7, calc(0.9 * var(--lg-alpha, 1)), 0.98));
-  --mxg-sheen: rgb(255 255 255 / calc(0.075 * var(--lg-sheen, 1)));
-  --mxg-spec: rgb(255 255 255 / calc(0.12 * var(--lg-sheen, 1)));
-  --mxg-edge: rgb(255 255 255 / 0.09);
-  --mxg-edge-hi: rgb(255 255 255 / calc(0.34 * var(--lg-sheen, 1)));
-  --mxg-edge-lo: rgb(255 255 255 / 0.045);
+  --mxg-l1: rgb(11 14 20 / clamp(0.8, calc(0.88 * var(--lg-alpha, 1)), 0.96));
+  --mxg-l2: rgb(13 16 23 / clamp(0.82, calc(0.9 * var(--lg-alpha, 1)), 0.96));
+  --mxg-l3: rgb(12 15 21 / clamp(0.9, calc(0.95 * var(--lg-alpha, 1)), 0.98));
+  --mxg-l4: rgb(16 19 26 / clamp(0.92, calc(0.96 * var(--lg-alpha, 1)), 0.985));
+  --mxg-sheen: rgb(255 255 255 / calc(0.04 * var(--lg-sheen, 1)));
+  --mxg-spec: rgb(255 255 255 / calc(0.07 * var(--lg-sheen, 1)));
+  --mxg-edge: rgb(255 255 255 / 0.08);
+  --mxg-edge-hi: rgb(255 255 255 / calc(0.16 * var(--lg-sheen, 1)));
+  --mxg-edge-lo: rgb(255 255 255 / 0.05);
   --mxg-well: rgb(255 255 255 / 0.045);
   --mxg-well-2: rgb(255 255 255 / 0.075);
   --mxg-hover: rgb(255 255 255 / 0.065);
   --mxg-rule: rgb(255 255 255 / 0.07);
   --mxg-recess: inset 0 1px 2px rgb(0 0 0 / 0.55), inset 0 0 0 1px rgb(0 0 0 / 0.32), inset 0 -1px 0 rgb(255 255 255 / 0.06);
-  --mxg-shadow-2: 0 16px 36px -20px rgb(0 0 0 / 0.9), 0 2px 6px -3px rgb(0 0 0 / 0.5);
+  --mxg-shadow-2: 0 10px 24px -16px rgb(0 0 0 / 0.8), 0 1px 2px rgb(0 0 0 / 0.3);
   --mxg-shadow-3: 0 36px 84px -36px rgb(0 0 0 / 0.95), 0 12px 28px -18px rgb(0 0 0 / 0.62);
   --mxg-shadow-4: 0 26px 60px -24px rgb(0 0 0 / 0.9), 0 4px 12px -6px rgb(0 0 0 / 0.55);
   --mxg-blur: blur(var(--lg-blur, 26px)) saturate(var(--lg-sat, 1.85)) brightness(0.94);
@@ -61,11 +70,11 @@ html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk {
   --mxg-ink-2: rgba(18, 21, 27, 0.74);
   --mxg-ink-3: rgba(18, 21, 27, 0.54);
   --mxg-ink-4: rgba(18, 21, 27, 0.3);
-  --mxg-l1: rgb(236 240 246 / clamp(0.45, calc(0.74 * var(--lg-alpha, 1)), 0.96));
-  --mxg-l2: rgb(252 253 255 / clamp(0.55, calc(0.8 * var(--lg-alpha, 1)), 0.98));
-  --mxg-l3: rgb(250 251 253 / clamp(0.7, calc(0.91 * var(--lg-alpha, 1)), 0.985));
-  --mxg-l4: rgb(253 253 255 / clamp(0.8, calc(0.95 * var(--lg-alpha, 1)), 0.99));
-  --mxg-sheen: rgb(255 255 255 / calc(0.75 * var(--lg-sheen, 1)));
+  --mxg-l1: rgb(250 251 253 / clamp(0.86, calc(0.93 * var(--lg-alpha, 1)), 0.98));
+  --mxg-l2: rgb(252 253 255 / clamp(0.88, calc(0.94 * var(--lg-alpha, 1)), 0.985));
+  --mxg-l3: rgb(250 251 253 / clamp(0.93, calc(0.97 * var(--lg-alpha, 1)), 0.99));
+  --mxg-l4: rgb(253 253 255 / clamp(0.95, calc(0.98 * var(--lg-alpha, 1)), 0.995));
+  --mxg-sheen: rgb(255 255 255 / calc(0.5 * var(--lg-sheen, 1)));
   --mxg-spec: rgb(255 255 255 / 1);
   --mxg-edge: rgb(15 22 36 / 0.085);
   --mxg-edge-hi: rgb(255 255 255 / 1);
@@ -75,7 +84,7 @@ html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk {
   --mxg-hover: rgb(15 22 36 / 0.055);
   --mxg-rule: rgb(15 22 36 / 0.08);
   --mxg-recess: inset 0 1px 2px rgb(20 30 50 / 0.18), inset 0 0 0 1px rgb(15 22 36 / 0.08), inset 0 -1px 0 rgb(255 255 255 / 0.9);
-  --mxg-shadow-2: 0 14px 32px -20px rgb(22 34 60 / 0.42), 0 1px 3px rgb(15 22 36 / 0.08);
+  --mxg-shadow-2: 0 10px 24px -16px rgb(22 34 60 / 0.34), 0 1px 2px rgb(15 22 36 / 0.08);
   --mxg-shadow-3: 0 34px 76px -38px rgb(22 34 60 / 0.5), 0 10px 26px -18px rgb(22 34 60 / 0.24);
   --mxg-shadow-4: 0 24px 54px -26px rgb(22 34 60 / 0.46), 0 3px 10px -6px rgb(22 34 60 / 0.2);
   --mxg-blur: blur(var(--lg-blur, 26px)) saturate(var(--lg-sat, 1.9)) brightness(1.04);
@@ -85,21 +94,21 @@ html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk {
   --mxg-bad: #c8283c;
 }
 html.is-desktop-modern[data-nexus-theme='true_black'] .mx.is-desk {
-  --mxg-l1: rgb(0 0 0 / clamp(0.4, calc(0.62 * var(--lg-alpha, 1)), 0.95));
-  --mxg-l2: rgb(0 0 0 / clamp(0.4, calc(0.6 * var(--lg-alpha, 1)), 0.95));
-  --mxg-l3: rgb(0 0 0 / clamp(0.6, calc(0.84 * var(--lg-alpha, 1)), 0.98));
+  --mxg-l1: rgb(4 4 6 / clamp(0.84, calc(0.9 * var(--lg-alpha, 1)), 0.97));
+  --mxg-l2: rgb(4 4 6 / clamp(0.84, calc(0.9 * var(--lg-alpha, 1)), 0.97));
+  --mxg-l3: rgb(2 2 3 / clamp(0.92, calc(0.96 * var(--lg-alpha, 1)), 0.985));
   --mxg-l4: rgb(4 4 6 / 0.94);
-  --mxg-edge: rgb(255 255 255 / 0.13);
+  --mxg-edge: rgb(255 255 255 / 0.11);
   --mxg-edge-lo: rgb(255 255 255 / 0.06);
 }
 /* Red Ops: red marks the accent — the selection, the primary, LIVE — never the room. */
 html.is-desktop-modern[data-nexus-theme='red_ops'] .mx.is-desk {
-  --mxg-l1: rgb(8 4 4 / clamp(0.34, calc(0.54 * var(--lg-alpha, 1)), 0.93));
-  --mxg-l2: rgb(20 11 11 / clamp(0.36, calc(0.6 * var(--lg-alpha, 1)), 0.95));
-  --mxg-l3: rgb(15 8 8 / clamp(0.58, calc(0.84 * var(--lg-alpha, 1)), 0.97));
+  --mxg-l1: rgb(16 10 10 / clamp(0.82, calc(0.9 * var(--lg-alpha, 1)), 0.96));
+  --mxg-l2: rgb(18 11 11 / clamp(0.82, calc(0.9 * var(--lg-alpha, 1)), 0.96));
+  --mxg-l3: rgb(14 8 8 / clamp(0.9, calc(0.95 * var(--lg-alpha, 1)), 0.98));
   --mxg-l4: rgb(20 10 10 / 0.93);
   --mxg-edge: rgb(255 140 128 / 0.11);
-  --mxg-edge-hi: rgb(255 176 166 / calc(0.3 * var(--lg-sheen, 1)));
+  --mxg-edge-hi: rgb(255 176 166 / calc(0.16 * var(--lg-sheen, 1)));
   --mxg-rule: rgb(255 140 128 / 0.08);
   --mxg-accent: #ff3b30;
   --mxg-good: #ff6a5c;
@@ -141,14 +150,6 @@ html.is-desktop-modern .mx.is-desk .mxd-rail::before {
   mask-composite: exclude;
   pointer-events: none;
 }
-html.is-desktop-modern .mx.is-desk .mxd-rail::before {
-  background: linear-gradient(180deg, rgb(0 0 0 / 0.28), transparent 30%, transparent 78%, var(--mxg-edge-hi));
-  opacity: 0.55;
-}
-html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk .mxd-rail::before {
-  background: linear-gradient(180deg, rgb(15 22 36 / 0.14), transparent 30%, transparent 78%, rgb(255 255 255 / 1));
-  opacity: 0.8;
-}
 html.is-desktop-modern .mx.is-desk :is(.mxd-rail, .mxd-stack, .mxd-cards, .mxd-zoom, .mxd-insp, .mxd-pop, .mxd-toasts) :focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px var(--mxg-accent), 0 0 0 4px color-mix(in srgb, var(--mxg-accent) 22%, transparent) !important;
@@ -170,56 +171,50 @@ html.is-desktop-modern .mx.is-desk .mxd-rail {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   width: var(--mxd-rail-w);
-  padding: 5px 0;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.02) 40%), var(--mxg-l1);
-  -webkit-backdrop-filter: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.6)) brightness(0.86);
-  backdrop-filter: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.6)) brightness(0.86);
-  box-shadow: var(--mxg-recess), 0 10px 26px -18px rgb(0 0 0 / 0.7);
+  padding: 4px 0;
+  border-radius: 13px;
+  background: linear-gradient(180deg, var(--mxg-sheen), transparent 60%), var(--mxg-l1);
+  -webkit-backdrop-filter: var(--mxg-blur);
+  backdrop-filter: var(--mxg-blur);
+  box-shadow: inset 0 1px 0 var(--mxg-spec), var(--mxg-shadow-2);
   font-family: var(--mxd-font);
   animation: mxd-in-left 0.42s var(--mxg-ease) both;
 }
-html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk .mxd-rail {
-  background: linear-gradient(180deg, rgb(15 22 36 / 0.05), transparent 40%), var(--mxg-l1);
-  -webkit-backdrop-filter: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.7)) brightness(0.98);
-  backdrop-filter: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.7)) brightness(0.98);
-  box-shadow: var(--mxg-recess), 0 10px 24px -18px rgb(22 34 60 / 0.35);
-}
 html.is-desktop-modern .mx.is-desk .mxd-rail__rule {
   display: block;
-  width: 22px;
+  width: 18px;
   height: 1px;
   margin: 3px 0;
   background: var(--mxg-rule);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 0.04);
 }
 html.is-desktop-modern .mx.is-desk .mxd-tool {
   position: relative;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: calc(var(--mxd-rail-w) - 8px);
+  height: calc(var(--mxd-rail-w) - 8px);
   padding: 0;
   border: 0;
-  border-radius: 11px;
+  border-radius: 9px;
   background: transparent;
   color: var(--mxg-ink-2);
   cursor: pointer;
   transition: background 0.16s ease, color 0.16s ease, box-shadow 0.2s ease, transform 0.2s var(--mxg-spring);
 }
+html.is-desktop-modern .mx.is-desk .mxd-tool > svg { width: 16px; height: 16px; }
 html.is-desktop-modern .mx.is-desk .mxd-tool:hover { background: var(--mxg-hover); color: var(--mxg-ink); }
-html.is-desktop-modern .mx.is-desk .mxd-tool:active { transform: scale(0.93); }
-/* an active tool rises out of the recess: a lit key */
+html.is-desktop-modern .mx.is-desk .mxd-tool:active { transform: scale(0.94); }
+/* the open tool: a quiet key, lit by its edge — never a slab */
 html.is-desktop-modern .mx.is-desk .mxd-tool.is-active {
   color: var(--mxg-ink);
-  background: linear-gradient(180deg, var(--mxg-sheen), transparent 70%), var(--mxg-l2);
-  box-shadow: inset 0 0 0 1px var(--mxg-edge), inset 0 1px 0 var(--mxg-spec), 0 6px 14px -8px rgb(0 0 0 / 0.75);
+  background: var(--mxg-well-2);
+  box-shadow: inset 0 0 0 1px var(--mxg-edge);
 }
 html.is-desktop-modern .mx.is-desk .mxd-tool.is-lit { color: var(--mxg-accent); }
-html.is-desktop-modern .mx.is-desk .mxd-tool.is-active.is-lit { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 45%, transparent), inset 0 1px 0 var(--mxg-spec), 0 6px 16px -8px color-mix(in srgb, var(--mxg-accent) 55%, transparent); }
-html.is-desktop-modern .mx.is-desk .mxd-tool.is-text { font-size: 11.5px; font-weight: 720; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .mx.is-desk .mxd-tool.is-active.is-lit { background: color-mix(in srgb, var(--mxg-accent) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 34%, transparent); }
+html.is-desktop-modern .mx.is-desk .mxd-tool.is-text { font-size: 11px; font-weight: 650; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
 html.is-desktop-modern .mx.is-desk .mxd-tool.is-quiet { color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-tool__badge {
   position: absolute;
@@ -257,10 +252,10 @@ html.is-desktop-modern .mx.is-desk .mxd-tool[data-tip]::after {
   top: 50%;
   left: calc(100% + 12px);
   z-index: 5;
-  padding: 6px 10px;
-  border-radius: 9px;
+  padding: 5px 9px;
+  border-radius: 8px;
   white-space: nowrap;
-  font: 560 12px/1.2 var(--mxd-font);
+  font: 540 11.5px/1.2 var(--mxd-font);
   letter-spacing: -0.005em;
   color: var(--mxg-ink);
   background: var(--mxg-l4);
@@ -289,8 +284,9 @@ html.is-desktop-modern .mx.is-desk .mxd-stack {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  width: var(--mxd-col-w);
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100% - var(--mxd-col-x) - 64px);
   pointer-events: none;
   transition: opacity 0.24s var(--mxg-ease), transform 0.3s var(--mxg-ease);
 }
@@ -300,11 +296,12 @@ html.is-desktop-modern .mx.is-desk .mxd-stack.is-covered,
 html.is-desktop-modern .mx.is-desk .mxd-stack.is-covered * { pointer-events: none !important; }
 /* each row paints above the rows after it, so its own dropdown (results, the lens
    picker, the world popover) is never buried under the next capsule */
-html.is-desktop-modern .mx.is-desk .mxd-stack__search { position: relative; z-index: 5; width: 100%; animation: mxd-drop 0.45s var(--mxg-ease) both; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__search { position: relative; z-index: 5; width: var(--mxd-col-w); animation: mxd-drop 0.45s var(--mxg-ease) both; }
 html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search {
-  height: 40px;
-  padding: 0 8px 0 13px;
-  border-radius: 12px;
+  gap: 8px;
+  height: var(--mxd-chip-h);
+  padding: 0 6px 0 11px;
+  border-radius: 10px;
   color: var(--mxg-ink-3);
   background: linear-gradient(180deg, var(--mxg-sheen), transparent 70%), var(--mxg-l2);
   -webkit-backdrop-filter: var(--mxg-blur);
@@ -312,81 +309,87 @@ html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search {
   box-shadow: inset 0 0 0 1px var(--mxg-edge), inset 0 1px 0 var(--mxg-spec), var(--mxg-shadow-2);
   transition: box-shadow 0.2s ease;
 }
+/* the field carries the focus ring; its input never draws a second one */
+html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search input:focus-visible { box-shadow: none !important; outline: none !important; }
 html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search:focus-within {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 62%, transparent), 0 0 0 4px color-mix(in srgb, var(--mxg-accent) 15%, transparent), var(--mxg-shadow-2);
 }
-html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search input { font: 520 13px/1 var(--mxd-font); color: var(--mxg-ink); letter-spacing: -0.005em; background: transparent; border: 0; box-shadow: none; outline: none; min-height: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search > svg { flex: none; width: 14px; height: 14px; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search input { font: 480 12.5px/1 var(--mxd-font); color: var(--mxg-ink); letter-spacing: -0.003em; background: transparent; border: 0; box-shadow: none; outline: none; min-height: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__clear { width: 22px; height: 22px; border-radius: 6px; }
 html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search input::placeholder { color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results {
   right: 0;
-  top: 48px;
+  top: calc(var(--mxd-chip-h) + 6px);
+  max-height: min(440px, calc(100cqh - var(--mxd-chip-h) - var(--mxd-gap) * 3));
   z-index: 8;
   border-radius: 14px;
   background: linear-gradient(180deg, var(--mxg-sheen), transparent 40%), var(--mxg-l4);
   box-shadow: inset 0 0 0 1px var(--mxg-edge), var(--mxg-shadow-4);
 }
-html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results button { min-height: 46px; border-radius: 10px; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results button { min-height: 42px; border-radius: 10px; }
 html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results button:hover { background: var(--mxg-hover); }
-html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results .mx-row__copy strong { font-size: 13px; font-weight: 600; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results .mx-row__copy strong { font-size: 12.5px; font-weight: 600; }
 html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search__results .mx-row__copy span { font-size: 11.5px; }
 
+/* the pills row: the lens, the local time, the applied filter, sold comps */
+html.is-desktop-modern .mx.is-desk .mxd-stack__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
+
 /* the lens pill: ACQUISITION RADAR · LIVE */
-html.is-desktop-modern .mx.is-desk .mxd-stack__lens { position: relative; z-index: 4; width: 100%; animation: mxd-drop 0.45s var(--mxg-ease) 40ms both; }
+html.is-desktop-modern .mx.is-desk .mxd-stack__lens { position: relative; z-index: 4; max-width: 100%; animation: mxd-drop 0.45s var(--mxg-ease) 40ms both; }
 html.is-desktop-modern .mx.is-desk .mxd-lens {
   display: flex;
   align-items: center;
-  gap: 11px;
-  width: 100%;
-  min-height: 50px;
-  padding: 7px 12px 7px 10px;
+  gap: 8px;
+  max-width: 100%;
+  height: var(--mxd-chip-h);
+  padding: 0 8px 0 10px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 10px;
   text-align: left;
   cursor: pointer;
   transition: box-shadow 0.2s ease, transform 0.2s var(--mxg-spring);
 }
 html.is-desktop-modern .mx.is-desk .mxd-lens:hover { box-shadow: inset 0 1px 0 var(--mxg-spec), inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 30%, transparent), var(--mxg-shadow-2); }
 html.is-desktop-modern .mx.is-desk .mxd-lens.is-open { box-shadow: inset 0 1px 0 var(--mxg-spec), inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 50%, transparent), var(--mxg-shadow-2); }
-html.is-desktop-modern .mx.is-desk .mxd-lens > svg { flex: none; margin-left: auto; color: var(--mxg-ink-3); transition: transform 0.25s var(--mxg-ease); }
+html.is-desktop-modern .mx.is-desk .mxd-lens > svg { flex: none; width: 12px; height: 12px; color: var(--mxg-ink-3); transition: transform 0.25s var(--mxg-ease); }
 html.is-desktop-modern .mx.is-desk .mxd-lens.is-open > svg { transform: rotate(180deg); }
-html.is-desktop-modern .mx.is-desk .mxd-lens__swatch { flex: none; width: 5px; height: 30px; border-radius: 4px; box-shadow: 0 0 12px -2px rgb(255 255 255 / 0.18); }
-html.is-desktop-modern .mx.is-desk .mxd-lens__copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-html.is-desktop-modern .mx.is-desk .mxd-lens__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-lens__swatch { flex: none; width: 12px; height: 6px; border-radius: 3px; }
+html.is-desktop-modern .mx.is-desk .mxd-lens__copy { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-lens__title { display: flex; align-items: center; gap: 7px; min-width: 0; }
 html.is-desktop-modern .mx.is-desk .mxd-lens__title b {
-  font-size: 11.5px;
-  font-weight: 720;
-  letter-spacing: 0.085em;
-  text-transform: uppercase;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-html.is-desktop-modern .mx.is-desk .mxd-lens__sub { font-size: 12px; font-weight: 500; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .mxd-lens__sub { font-size: 12px; font-weight: 450; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.is-desktop-modern .mx.is-desk .mxd-livebadge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   flex: none;
-  padding-left: 8px;
-  border-left: 1px solid var(--mxg-rule);
   font-style: normal;
-  font-size: 10.5px;
-  font-weight: 760;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--mxg-good);
 }
-html.is-desktop-modern .mx.is-desk .mxd-livebadge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; animation: mxd-breathe 2.4s ease-in-out infinite; }
+html.is-desktop-modern .mx.is-desk .mxd-livebadge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; animation: mxd-breathe 2.4s ease-in-out infinite; }
 
 /* the world capsule (LivingMap's chip, portaled into the stack) */
 html.is-desktop-modern .mx.is-desk .mxd-worldslot { position: relative; z-index: 3; display: flex; max-width: 100%; animation: mxd-drop 0.45s var(--mxg-ease) 80ms both; }
-html.is-desktop-modern .mx.is-desk .mxd-worldslot:empty { display: none; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot:empty,
+html.is-desktop-modern .mx.is-desk .mxd-worldslot:not(:has(.nxw-chip)) { display: none; }
 html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw { width: auto; max-width: 100%; }
 html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw.is-aside { opacity: 1; transform: none; pointer-events: auto; }
 html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip {
-  min-height: 40px !important;
-  padding: 6px 13px 6px 9px;
-  border-radius: 12px;
+  gap: 7px;
+  height: var(--mxd-chip-h);
+  min-height: 0 !important;
+  padding: 0 11px 0 7px;
+  border-radius: 10px;
   color: var(--mxg-ink);
   background: linear-gradient(180deg, var(--mxg-sheen), transparent 70%), var(--mxg-l2);
   -webkit-backdrop-filter: var(--mxg-blur);
@@ -394,11 +397,20 @@ html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip {
   box-shadow: inset 0 0 0 1px var(--mxg-edge), inset 0 1px 0 var(--mxg-spec), var(--mxg-shadow-2);
   font-family: var(--mxd-font);
 }
-html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__main b { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; }
-html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__main em { font-size: 11.5px; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip::after { inset: -2px 0; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 30%, var(--mxg-edge)), inset 0 1px 0 var(--mxg-spec), var(--mxg-shadow-2); }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-glyph { width: 18px; height: 18px; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-glyph i { width: 8px; height: 8px; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-glyph svg { width: 12px !important; height: 12px !important; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__line { display: flex; align-items: baseline; gap: 7px; min-width: 0; white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__place { font-size: 12.5px; font-weight: 600; letter-spacing: -0.005em; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__time { font-size: 12px; font-weight: 500; color: var(--mxg-ink-2); font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__window { display: inline-flex; align-items: center; gap: 5px; font-style: normal; font-size: 11.5px; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__window .nxw-dot { align-self: center; }
 html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-pop {
   z-index: 40;
-  width: min(320px, calc(100vw - 20px));
+  top: calc(100% + 6px);
+  width: min(300px, calc(100cqw - var(--mxd-col-x) - var(--mxd-gap)));
   border-radius: 14px;
   background: linear-gradient(180deg, var(--mxg-sheen), transparent 36%), var(--mxg-l4);
   box-shadow: inset 0 0 0 1px var(--mxg-edge), var(--mxg-shadow-4);
@@ -406,18 +418,20 @@ html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-pop {
 }
 
 /* capsules: the applied filter, sold comps */
-html.is-desktop-modern .mx.is-desk .mxd-stack__capsules { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; animation: mxd-drop 0.45s var(--mxg-ease) 120ms both; }
 html.is-desktop-modern .mx.is-desk .mxd-capsule {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   max-width: 100%;
-  height: 34px;
-  padding: 0 6px 0 11px;
+  height: var(--mxd-chip-h);
+  padding: 0 5px 0 10px;
   border: 0;
-  border-radius: 11px;
-  font-size: 12.5px;
-  font-weight: 560;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 540;
+  animation: mxd-drop 0.45s var(--mxg-ease) 120ms both;
   font-variant-numeric: tabular-nums;
   color: var(--mxg-ink);
   cursor: pointer;
@@ -426,28 +440,30 @@ html.is-desktop-modern .mx.is-desk .mxd-capsule > span { white-space: nowrap; ov
 html.is-desktop-modern .mx.is-desk .mxd-capsule > svg { flex: none; color: var(--mxg-accent); }
 html.is-desktop-modern .mx.is-desk .mxd-capsule > b {
   flex: none;
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: 3px 7px;
+  border-radius: 7px;
   font-size: 11.5px;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--mxg-accent);
   background: color-mix(in srgb, var(--mxg-accent) 12%, transparent);
   transition: background 0.16s ease;
 }
 html.is-desktop-modern .mx.is-desk .mxd-capsule:hover > b { background: color-mix(in srgb, var(--mxg-accent) 20%, transparent); }
-html.is-desktop-modern .mx.is-desk .mxd-capsule.is-comps > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ff3b4f; box-shadow: 0 0 10px #ff3b4f; }
+html.is-desktop-modern .mx.is-desk .mxd-capsule.is-comps > i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #ff3b4f; box-shadow: 0 0 6px #ff3b4f; }
 html.is-desktop-modern .mx.is-desk .mxd-capsule.is-comps > b { color: var(--mxg-ink-2); background: var(--mxg-well); }
 
 /* ── L2 · legend + market panel (bottom-left) ───────────────────────────── */
 html.is-desktop-modern .mx.is-desk .mxd-cards {
   position: absolute;
   left: var(--mxd-col-x);
-  bottom: calc(var(--mxd-gap) + 10px);
+  bottom: var(--mxd-gap);
   z-index: 30;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
-  width: min(330px, calc(100% - var(--mxd-col-x) - var(--mxd-gap) - 60px));
+  width: max-content;
+  max-width: calc(100% - var(--mxd-col-x) - var(--mxd-gap) - 56px);
   pointer-events: none;
   transition: opacity 0.22s var(--mxg-ease), transform 0.3s var(--mxg-ease);
 }
@@ -464,63 +480,75 @@ html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-areacard) .mxd-c
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-area-sheet) .mxd-cards *,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .smcd.is-full) .mxd-cards * { pointer-events: none !important; }
 
-html.is-desktop-modern .mx.is-desk .mxd-legend {
-  padding: 10px 12px 11px;
-  border-radius: 14px;
-  animation: mxd-rise 0.45s var(--mxg-ease) 60ms both;
+/* the legend: one slim strip — the lens (Color by), its key, a fold */
+html.is-desktop-modern .mx.is-desk .mxd-legend { position: relative; max-width: 100%; animation: mxd-rise 0.45s var(--mxg-ease) 60ms both; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__chip { display: none; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-width: min(760px, 100%);
+  min-height: var(--mxd-chip-h);
+  padding: 4px 4px 4px 4px;
+  border-radius: 10px;
 }
-html.is-desktop-modern .mx.is-desk .mxd-legend.is-collapsed { padding-bottom: 10px; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__eyebrow { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-legend__pick {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px 0 7px;
+  height: 24px;
+  padding: 0 7px;
   border: 0;
-  border-radius: 8px;
-  background: var(--mxg-well);
-  box-shadow: inset 0 0 0 1px var(--mxg-edge);
+  border-radius: 7px;
+  background: transparent;
   color: var(--mxg-ink);
   cursor: pointer;
   transition: background 0.16s ease, box-shadow 0.16s ease;
 }
 html.is-desktop-modern .mx.is-desk .mxd-legend__pick:hover,
-html.is-desktop-modern .mx.is-desk .mxd-legend__pick.is-open { background: var(--mxg-well-2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 40%, var(--mxg-edge)); }
-html.is-desktop-modern .mx.is-desk .mxd-legend__pick strong { font-size: 12.5px; font-weight: 620; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__pick.is-open { background: var(--mxg-hover); box-shadow: inset 0 0 0 1px var(--mxg-edge); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__pick strong { font-size: 12px; font-weight: 600; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.is-desktop-modern .mx.is-desk .mxd-legend__pick svg { flex: none; color: var(--mxg-ink-3); }
-html.is-desktop-modern .mx.is-desk .mxd-legend__swatch { flex: none; width: 14px; height: 8px; border-radius: 3px; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__head .mxd-icon-btn { margin-left: auto; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__body { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__stages { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__swatch { flex: none; width: 12px; height: 6px; border-radius: 3px; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__body { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; min-width: 0; padding-left: 12px; box-shadow: inset 1px 0 0 var(--mxg-rule); }
+html.is-desktop-modern .mx.is-desk .mxd-legend.is-collapsed .mxd-legend__body { display: none; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__fold { margin-left: auto; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__stages { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 html.is-desktop-modern .mx.is-desk .mxd-legend__stages span { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--mxg-ink-2); white-space: nowrap; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__stages i { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 2px solid; box-sizing: border-box; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__bar { position: relative; height: 8px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08); }
-html.is-desktop-modern .mx.is-desk .mxd-legend__ends { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--mxg-ink-3); }
-html.is-desktop-modern .mx.is-desk .mxd-legend__ends em { font-style: normal; font-weight: 600; color: var(--mxg-ink-2); white-space: nowrap; }
-html.is-desktop-modern .mx.is-desk .mxd-legend__src { display: flex; flex-wrap: wrap; gap: 0 10px; margin: 0; font-size: 10.5px; color: var(--mxg-ink-3); }
-html.is-desktop-modern .mx.is-desk .mxd-legend__src span + span::before { content: '·'; margin-right: 10px; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__stages i { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid; box-sizing: border-box; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__ramp { display: flex; align-items: center; gap: 8px; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bar { position: relative; width: 120px; height: 6px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__end { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--mxg-ink-3); white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__src { display: flex; flex-wrap: wrap; gap: 0 8px; margin: 0; font-size: 11px; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__src span + span::before { content: '·'; margin-right: 8px; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-legend.is-value .mxd-legend__src { flex-basis: 100%; }
+/* the stage key explains itself; its footnote reads on hover until there is room */
+html.is-desktop-modern .mx.is-desk .mxd-legend.is-stage .mxd-legend__src { display: none; }
+@container mxd (min-width: 1240px) {
+  html.is-desktop-modern .mx.is-desk .mxd-legend.is-stage .mxd-legend__src { display: flex; }
+}
 html.is-desktop-modern .mx.is-desk .mxd-cards .mx-market { border-radius: 14px; font-family: var(--mxd-font); }
 
 /* ── L2 · zoom · perspective · north (bottom-right) ─────────────────────── */
 html.is-desktop-modern .mx.is-desk .mxd-zoom {
   position: absolute;
   right: var(--mxd-gap);
-  bottom: calc(var(--mxd-gap) + 16px);
+  bottom: var(--mxd-gap);
   z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 4px;
-  border-radius: 15px;
+  gap: 1px;
+  padding: 3px;
+  border-radius: 12px;
   transition: right 0.34s var(--mxg-ease);
   animation: mxd-rise 0.45s var(--mxg-ease) 90ms both;
 }
-html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-rail__rule { width: 20px; margin: 2px 0; }
-html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool { width: 34px; height: 34px; border-radius: 10px; }
+html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-rail__rule { width: 16px; margin: 2px 0; }
+html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool { width: 30px; height: 30px; border-radius: 9px; }
+html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool > svg { width: 14px; height: 14px; }
 html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool svg { transition: transform 0.35s var(--mxg-ease); }
 html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool.is-text.is-lit { color: var(--mxg-accent); background: color-mix(in srgb, var(--mxg-accent) 12%, transparent); }
 /* a docked right inspector owns the right edge — the capsule steps left of it */
@@ -538,10 +566,10 @@ html.is-desktop-modern .mx.is-desk .mxd-insp {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-radius: 18px;
+  border-radius: 16px;
   overflow: hidden;
   background:
-    radial-gradient(120% 50% at 0% 0%, color-mix(in srgb, var(--mxg-accent) 7%, transparent), transparent 60%),
+    radial-gradient(120% 40% at 0% 0%, color-mix(in srgb, var(--mxg-accent) 4%, transparent), transparent 60%),
     linear-gradient(180deg, var(--mxg-sheen), transparent 26%),
     var(--mxg-l3);
   -webkit-backdrop-filter: var(--mxg-blur-3);
@@ -558,26 +586,26 @@ html.is-desktop-modern .mx.is-desk .mx-overlay-host > .mxd-insp { z-index: 7; }
 html.is-desktop-modern .mx.is-desk .mxd-insp__head {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   flex: none;
-  padding: 14px 12px 12px 16px;
+  padding: 12px 10px 11px 14px;
   box-shadow: inset 0 -1px 0 var(--mxg-rule);
 }
 html.is-desktop-modern .mx.is-desk .mxd-insp__glyph {
   display: grid;
   place-items: center;
   flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   color: var(--mxg-ink-2);
   background: linear-gradient(180deg, var(--mxg-sheen), transparent), var(--mxg-well);
   box-shadow: inset 0 0 0 1px var(--mxg-edge), inset 0 1px 0 var(--mxg-spec);
 }
 html.is-desktop-modern .mx.is-desk .mxd-insp__glyph.is-live { color: var(--mxg-good); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-good) 40%, transparent), 0 0 18px -6px var(--mxg-good); }
 html.is-desktop-modern .mx.is-desk .mxd-insp__title { flex: 1; min-width: 0; }
-html.is-desktop-modern .mx.is-desk .mxd-insp__title h2 { margin: 0; font-size: 15px; font-weight: 640; letter-spacing: -0.018em; color: var(--mxg-ink); }
-html.is-desktop-modern .mx.is-desk .mxd-insp__title p { margin: 2px 0 0; font-size: 11.5px; line-height: 1.35; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+html.is-desktop-modern .mx.is-desk .mxd-insp__title h2 { margin: 0; font-size: 13.5px; font-weight: 620; letter-spacing: -0.012em; color: var(--mxg-ink); }
+html.is-desktop-modern .mx.is-desk .mxd-insp__title p { margin: 1px 0 0; font-size: 11.5px; line-height: 1.35; color: var(--mxg-ink-3); font-variant-numeric: tabular-nums; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 html.is-desktop-modern .mx.is-desk .mxd-insp__body {
   flex: 1;
   min-height: 0;
@@ -747,7 +775,7 @@ html.is-desktop-modern .mx.is-desk .mxd-chip em { font-style: normal; font-size:
 
 html.is-desktop-modern .mx.is-desk .mxd-block { display: flex; flex-direction: column; gap: 8px; }
 html.is-desktop-modern .mx.is-desk .mxd-block__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 2px; }
-html.is-desktop-modern .mx.is-desk .mxd-block__head h3 { margin: 0; font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-block__head h3 { margin: 0; font-size: 11.5px; font-weight: 600; letter-spacing: -0.003em; color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-block__head em { font-style: normal; font-size: 11px; color: var(--mxg-ink-4); font-variant-numeric: tabular-nums; }
 html.is-desktop-modern .mx.is-desk .mxd-tag { font-style: normal; margin-left: auto; padding: 3px 7px; border-radius: 6px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.02em; text-transform: none; }
 html.is-desktop-modern .mx.is-desk .mxd-tag.is-accent { color: var(--mxg-accent); background: color-mix(in srgb, var(--mxg-accent) 13%, transparent); }
@@ -768,7 +796,7 @@ html.is-desktop-modern .mx.is-desk .mxd-cohort {
     var(--mxg-well);
   box-shadow: inset 0 0 0 1px var(--mxg-edge), inset 0 1px 0 var(--mxg-spec);
 }
-html.is-desktop-modern .mx.is-desk .mxd-cohort__eyebrow { display: flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-cohort__eyebrow { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-cohort__figure { display: flex; align-items: baseline; gap: 8px; }
 html.is-desktop-modern .mx.is-desk .mxd-cohort__figure strong {
   font-size: 32px;
@@ -787,8 +815,8 @@ html.is-desktop-modern .mx.is-desk .mxd-cohort__note.is-bad { color: var(--mxg-b
 html.is-desktop-modern .mx.is-desk .mxd-spec { display: flex; flex-wrap: wrap; gap: 0 10px; margin: 0; font-size: 12px; color: var(--mxg-ink-2); font-variant-numeric: tabular-nums; }
 html.is-desktop-modern .mx.is-desk .mxd-spec span + span::before { content: '·'; margin-right: 10px; color: var(--mxg-ink-4); }
 html.is-desktop-modern .mx.is-desk .mxd-markets { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--mxg-rule); }
-html.is-desktop-modern .mx.is-desk .mxd-markets__head { display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mxg-ink-3); }
-html.is-desktop-modern .mx.is-desk .mxd-markets__head em { font-style: normal; font-weight: 550; letter-spacing: 0.02em; text-transform: none; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-markets__head { display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-markets__head em { font-style: normal; font-weight: 500; color: var(--mxg-ink-4); }
 html.is-desktop-modern .mx.is-desk .mxd-markets__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
 html.is-desktop-modern .mx.is-desk .mxd-markets__list li { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 12px; }
 html.is-desktop-modern .mx.is-desk .mxd-markets__name { color: var(--mxg-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -839,7 +867,7 @@ html.is-desktop-modern .mx.is-desk .mxd-group__head svg { color: var(--mxg-ink-3
 html.is-desktop-modern .mx.is-desk .mxd-group.is-open .mxd-group__head svg { transform: none; }
 html.is-desktop-modern .mx.is-desk .mxd-group__fields { display: flex; flex-direction: column; gap: 12px; padding: 4px 12px 14px; }
 html.is-desktop-modern .mx.is-desk .mxd-hit { display: flex; flex-direction: column; gap: 4px; }
-html.is-desktop-modern .mx.is-desk .mxd-hit__group { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-hit__group { font-size: 11px; font-weight: 600; color: var(--mxg-ink-4); }
 html.is-desktop-modern .mx.is-desk .mxd-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 html.is-desktop-modern .mx.is-desk .mxd-field.is-inline { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
 html.is-desktop-modern .mx.is-desk .mxd-field.is-inline .mxd-seg { flex: none; }
@@ -1027,7 +1055,7 @@ html.is-desktop-modern .mx.is-desk .mxd-pop {
   animation: mxd-pop 0.22s var(--mxg-ease) both;
 }
 html.is-desktop-modern .mx.is-desk .mxd-pop__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex: none; padding: 12px 14px 9px; box-shadow: inset 0 -1px 0 var(--mxg-rule); }
-html.is-desktop-modern .mx.is-desk .mxd-pop__head strong { font-size: 13px; font-weight: 640; letter-spacing: -0.01em; }
+html.is-desktop-modern .mx.is-desk .mxd-pop__head strong { font-size: 12.5px; font-weight: 620; letter-spacing: -0.01em; }
 html.is-desktop-modern .mx.is-desk .mxd-pop__head span { font-size: 11px; color: var(--mxg-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 html.is-desktop-modern .mx.is-desk .mxd-pop__body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 12px 12px 14px; scrollbar-width: thin; scrollbar-color: var(--mxg-ink-4) transparent; }
 
@@ -1063,12 +1091,12 @@ html.is-desktop-modern .mx.is-desk .mxd-tile:hover { color: var(--mxg-ink); back
 html.is-desktop-modern .mx.is-desk .mxd-tile.is-on { color: var(--mxg-ink); background: color-mix(in srgb, var(--mxg-accent) 13%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 50%, transparent); }
 
 /* Color by — the lens picker */
-html.is-desktop-modern .mx.is-desk .mxd-lenspick { width: min(360px, calc(100cqw - 40px), 360px); max-height: min(520px, 70vh); }
-html.is-desktop-modern .mx.is-desk .mxd-lenspick.is-down { top: calc(100% + 8px); left: 0; }
-html.is-desktop-modern .mx.is-desk .mxd-lenspick.is-up { bottom: calc(100% + 8px); left: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-lenspick { width: min(340px, calc(100cqw - 40px)); max-height: min(500px, calc(100cqh - var(--mxd-chip-h) * 2 - var(--mxd-gap) * 3)); }
+html.is-desktop-modern .mx.is-desk .mxd-lenspick.is-down { top: calc(100% + 6px); left: 0; }
+html.is-desktop-modern .mx.is-desk .mxd-lenspick.is-up { bottom: calc(100% + 6px); left: 0; }
 html.is-desktop-modern .mx.is-desk .mxd-lenspick.is-side { position: absolute; top: var(--mxd-gap); left: calc(var(--mxd-col-x) + var(--mxd-insp-w) + 10px); }
 html.is-desktop-modern .mx.is-desk .mxd-lenspick__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 6px 8px; scrollbar-width: thin; scrollbar-color: var(--mxg-ink-4) transparent; }
-html.is-desktop-modern .mx.is-desk .mxd-lenspick__family h4 { margin: 8px 8px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-lenspick__family h4 { margin: 10px 8px 4px; font-size: 11px; font-weight: 600; color: var(--mxg-ink-4); }
 html.is-desktop-modern .mx.is-desk .mxd-lenspick__item {
   display: flex;
   align-items: center;
@@ -1129,7 +1157,7 @@ html.is-desktop-modern .mx.is-desk .mxd-toast.tier-important .mxd-toast__dot { b
 html.is-desktop-modern .mx.is-desk .mxd-toast__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 html.is-desktop-modern .mx.is-desk .mxd-toast__copy strong { font-size: 12.5px; font-weight: 620; }
 html.is-desktop-modern .mx.is-desk .mxd-toast__copy span { font-size: 11.5px; color: var(--mxg-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-html.is-desktop-modern .mx.is-desk .mxd-toast > em { flex: none; font-style: normal; font-size: 10px; font-weight: 760; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mxg-good); }
+html.is-desktop-modern .mx.is-desk .mxd-toast > em { flex: none; font-style: normal; font-size: 11px; font-weight: 600; color: var(--mxg-good); }
 
 /* ── right inspector contexts (L3) ──────────────────────────────────────── */
 /* a Live Activity event docks top-right, like the comp card */
@@ -1272,9 +1300,6 @@ html.is-desktop-modern .mx.is-desk > .mx-draw-bar {
   html.is-desktop-modern .mx.is-desk.has-left > .mx-evt { visibility: hidden; pointer-events: none !important; }
 }
 @container pane (max-width: 640px) {
-  html.is-desktop-modern .mx.is-desk { --mxd-col-w: calc(100% - var(--mxd-col-x) - var(--mxd-gap)); }
-  html.is-desktop-modern .mx.is-desk .mxd-toasts { left: var(--mxd-col-x); right: var(--mxd-gap); top: auto; bottom: calc(var(--mxd-gap) + 60px); }
-  html.is-desktop-modern .mx.is-desk .mxd-cards { width: calc(100% - var(--mxd-col-x) - var(--mxd-gap) - 54px); }
   html.is-desktop-modern .mx.is-desk .mx-overlay-host > :is(.mx-areacard, .mx-sheet.mx-area-sheet) { --mxd-shelf-r: var(--mxd-gap); }
   html.is-desktop-modern .mx.is-desk .mx-overlay-host > .mx-areacard .mx-areacard__body,
   html.is-desktop-modern .mx.is-desk .mx-overlay-host > .mx-sheet.mx-area-sheet .mx-sheet__body { grid-template-columns: minmax(0, 1fr); }
@@ -1291,11 +1316,75 @@ html.is-desktop-modern .mx.is-desk > .mx-draw-bar {
   html.is-desktop-modern .mx.is-desk.has-dock .mxd-zoom { opacity: 0; pointer-events: none; }
 }
 @container pane (max-width: 460px) {
-  html.is-desktop-modern .mx.is-desk { --mxd-gap: 10px; --mxd-rail-w: 42px; }
-  html.is-desktop-modern .mx.is-desk .mxd-tool { width: 32px; height: 32px; }
-  html.is-desktop-modern .mx.is-desk .mxd-lens { min-height: 44px; }
-  html.is-desktop-modern .mx.is-desk .mxd-lens__sub { font-size: 11px; }
   html.is-desktop-modern .mx.is-desk .mxd-lenspick.is-side { left: var(--mxd-col-x); top: auto; bottom: var(--mxd-gap); }
+}
+
+/* ── compact: a pane under ~900px wide or ~600px tall ─────────────────────
+   The map root is the container (it cannot query itself), so the sizes are
+   re-declared on its children, where they compute. */
+@container mxd ((max-width: 899px) or (max-height: 599px)) {
+  html.is-desktop-modern .mx.is-desk > * {
+    --mxd-gap: 10px;
+    --mxd-rail-w: 36px;
+    --mxd-chip-h: 30px;
+    --mxd-col-x: calc(var(--mxd-gap) + var(--mxd-rail-w) + 6px);
+    --mxd-col-w: min(320px, calc(100cqw - var(--mxd-col-x) - 56px));
+    --mxd-insp-w: min(340px, calc(100% - var(--mxd-col-x) - var(--mxd-gap)));
+  }
+  /* one row: search as an icon, then the pills */
+  html.is-desktop-modern .mx.is-desk .mxd-stack { flex-direction: row; flex-wrap: wrap; align-items: center; max-width: calc(100% - var(--mxd-col-x) - 52px); }
+  html.is-desktop-modern .mx.is-desk .mxd-stack__row { display: contents; }
+  html.is-desktop-modern .mx.is-desk .mxd-stack__search { flex: none; width: var(--mxd-chip-h); transition: width 0.22s var(--mxg-ease); }
+  html.is-desktop-modern .mx.is-desk .mxd-stack__search:focus-within,
+  html.is-desktop-modern .mx.is-desk .mxd-stack__search:has(.mx-search.has-value) { width: min(320px, calc(100cqw - var(--mxd-col-x) - 60px)); }
+  html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search:not(.is-focused):not(.has-value):not(:focus-within) { justify-content: center; padding: 0; cursor: pointer; }
+  html.is-desktop-modern .mx.is-desk .mxd-stack__search .mx-search:not(.is-focused):not(.has-value):not(:focus-within) input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+  /* the lens: its name and the live dot (the count reads on hover) */
+  html.is-desktop-modern .mx.is-desk .mxd-lens__sub { display: none; }
+  html.is-desktop-modern .mx.is-desk .mxd-lens__title b { max-width: 150px; }
+  html.is-desktop-modern .mx.is-desk .mxd-livebadge { gap: 0; font-size: 0; }
+  /* local time: a tiny pill — the time and the window dot */
+  html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip.has-time .nxw-chip__place,
+  html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip__window > span { display: none; }
+  html.is-desktop-modern .mx.is-desk .mxd-worldslot .nxw-chip { padding-right: 10px; }
+  /* capsules: the label alone */
+  html.is-desktop-modern .mx.is-desk .mxd-capsule { padding-right: 10px; }
+  html.is-desktop-modern .mx.is-desk .mxd-capsule > b { display: none; }
+  html.is-desktop-modern .mx.is-desk .mxd-capsule > span { max-width: 180px; }
+  /* the legend folds to a chip under the rail; its key opens above it */
+  html.is-desktop-modern .mx.is-desk .mxd-cards { left: var(--mxd-gap); }
+  html.is-desktop-modern .mx.is-desk .mxd-legend__chip { display: inline-flex; align-items: center; gap: 7px; height: var(--mxd-chip-h); padding: 0 11px 0 9px; border: 0; border-radius: 10px; font: 560 12px/1 var(--mxd-font); color: var(--mxg-ink-2); cursor: pointer; }
+  html.is-desktop-modern .mx.is-desk .mxd-legend__chip:hover,
+  html.is-desktop-modern .mx.is-desk .mxd-legend.is-peek .mxd-legend__chip { color: var(--mxg-ink); }
+  html.is-desktop-modern .mx.is-desk .mxd-legend__panel { display: none; }
+  html.is-desktop-modern .mx.is-desk .mxd-legend.is-peek .mxd-legend__panel {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: max-content;
+    max-width: min(340px, calc(100cqw - var(--mxd-gap) * 2 - 52px));
+    padding: 6px 10px 10px 6px;
+    background: linear-gradient(180deg, var(--mxg-sheen), transparent 30%), var(--mxg-l4);
+    box-shadow: inset 0 1px 0 var(--mxg-spec), var(--mxg-shadow-4);
+    animation: mxd-pop 0.2s var(--mxg-ease) both;
+  }
+  html.is-desktop-modern .mx.is-desk .mxd-legend.is-peek .mxd-legend__body { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-left: 7px; box-shadow: none; }
+  html.is-desktop-modern .mx.is-desk .mxd-legend.is-peek .mxd-legend__src { display: flex; }
+  html.is-desktop-modern .mx.is-desk .mxd-legend.is-peek .mxd-legend__fold { display: none; }
+  /* zoom: smaller keys; north only while the map is turned */
+  html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool { width: 28px; height: 28px; }
+  html.is-desktop-modern .mx.is-desk .mxd-zoom .mxd-tool[data-map-control="north"]:not(.is-turned) { display: none; }
+  /* live toasts land along the bottom, clear of the pills row */
+  html.is-desktop-modern .mx.is-desk .mxd-toasts { top: auto; bottom: var(--mxd-gap); left: calc(var(--mxd-gap) + 100px); right: calc(var(--mxd-gap) + 44px); }
+}
+@container mxd ((max-width: 540px) or (max-height: 380px)) {
+  html.is-desktop-modern .mx.is-desk .mxd-lens__title b { max-width: 110px; }
+  html.is-desktop-modern .mx.is-desk .mxd-capsule > span { max-width: 120px; }
 }
 
 /* ── motion ─────────────────────────────────────────────────────────────── */
@@ -1310,8 +1399,13 @@ html.is-desktop-modern .mx.is-desk > .mx-draw-bar {
 @keyframes mxd-drop-centered { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes mxd-breathe { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) {
-  html.is-desktop-modern .mx.is-desk :is(.mxd-rail, .mxd-stack__search, .mxd-stack__lens, .mxd-worldslot, .mxd-stack__capsules, .mxd-legend, .mxd-zoom, .mxd-insp, .mxd-pop, .mxd-toast, .mx-evt, .mxd-markets__bar i),
+  html.is-desktop-modern .mx.is-desk :is(.mxd-rail, .mxd-stack__search, .mxd-stack__lens, .mxd-worldslot, .mxd-capsule, .mxd-legend, .mxd-legend__panel, .mxd-zoom, .mxd-insp, .mxd-pop, .mxd-toast, .mx-evt, .mxd-markets__bar i),
   html.is-desktop-modern .mx.is-desk .mx-overlay-host > .mx-areacard,
   html.is-desktop-modern .mx.is-desk :is(.mxd-livebadge i, .mxd-tool__live, .mxd-light, .mxd-dot) { animation: none !important; }
   html.is-desktop-modern .mx.is-desk .mxd-tool[data-tip]::after { transition: none; }
+  html.is-desktop-modern .mx.is-desk .mxd-stack__search { transition: none; }
 }
+/* the operator's Animations-off setting: the instruments arrive still */
+html.is-desktop-modern[data-lc-motion='off'] .mx.is-desk :is(.mxd-rail, .mxd-stack__search, .mxd-stack__lens, .mxd-worldslot, .mxd-capsule, .mxd-legend, .mxd-legend__panel, .mxd-zoom, .mxd-insp, .mxd-pop, .mxd-toast, .mx-evt),
+html.is-desktop-modern[data-lc-motion='off'] .mx.is-desk :is(.mxd-livebadge i, .mxd-tool__live) { animation: none !important; }
+html.is-desktop-modern[data-lc-motion='off'] .mx.is-desk .mxd-stack__search { transition: none; }

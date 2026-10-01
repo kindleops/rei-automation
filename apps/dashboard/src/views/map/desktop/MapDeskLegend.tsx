@@ -7,8 +7,12 @@
  * value lens its ramp with the lens's fixed domain printed at each end and the
  * real range in view, its source, and — where the lens has one — its style.
  * Nothing is drawn here that the lens state doesn't carry.
+ *
+ * At full size it is one slim strip (the lens, its key, a fold); in a compact
+ * pane (map-desk.css container queries) it folds to a "Legend" chip that opens
+ * the same key on demand.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { UNIVERSAL_STAGE_RING_COLORS } from '../universal-stage-colors'
 import { LENS_FAMILIES, MAP_LENSES, formatLensValue, type LensStyle, type MapLens } from '../mobile/map-lenses'
@@ -98,36 +102,50 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
   const areas = look.style === 'areas'
   const unit = areas ? (zoom >= 7 ? 'ZIPs' : zoom >= 4.6 ? 'counties' : 'states') : lens.areal ? 'areas' : zoom >= 13 ? 'properties' : 'cells'
   const status = !valueLens ? 'Ring = stage' : state.error ? state.error : state.loading && !state.count ? 'Reading…' : `${state.count.toLocaleString('en-US')} ${unit}`
+  const note = [status, !valueLens && lens.ambient ? 'worked and hot properties glow' : null].filter(Boolean).join(' · ')
+
+  // [compact pane] the key folds to a "Legend" chip; it opens on demand and
+  // closes on Escape or a press anywhere else (listeners only while open).
+  const [peek, setPeek] = useState(false)
+  const ref = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!peek) return undefined
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setPeek(false) } }
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null
+      if (ref.current && t && !ref.current.contains(t) && !t.closest?.('.mxd-lenspick')) setPeek(false)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onDown, true)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', onDown, true) }
+  }, [peek])
 
   return (
-    <section className={cls('mxd-legend', 'mxd-l2', collapsed && 'is-collapsed', state.loading && valueLens && 'is-loading')} data-map-card="legend" aria-label="Map legend">
-      <header className="mxd-legend__head">
-        <span className="mxd-legend__eyebrow">Color by</span>
-        <button type="button" className={cls('mxd-legend__pick', pickerOpen && 'is-open')} onClick={onColorBy} aria-expanded={pickerOpen} aria-haspopup="dialog" data-lens-trigger data-map-control="color-by">
+    <section ref={ref} className={cls('mxd-legend', collapsed && 'is-collapsed', peek && 'is-peek', valueLens ? 'is-value' : 'is-stage', state.loading && valueLens && 'is-loading')} data-map-card="legend" aria-label="Map legend">
+      <button type="button" className="mxd-legend__chip mxd-l2" aria-expanded={peek} onClick={() => setPeek((v) => !v)} data-map-control="legend">
+        <span className="mxd-legend__swatch" style={lensSwatchStyle(lens)} aria-hidden="true" />
+        <span>Legend</span>
+      </button>
+      <div className="mxd-legend__panel mxd-l2">
+        <button type="button" className={cls('mxd-legend__pick', pickerOpen && 'is-open')} onClick={onColorBy} aria-expanded={pickerOpen} aria-haspopup="dialog" aria-label={`Color by: ${lens.label}`} data-lens-trigger data-map-control="color-by">
           <span className="mxd-legend__swatch" style={lensSwatchStyle(lens)} aria-hidden="true" />
           <strong>{lens.label}</strong>
-          <Icon name="chevron-down" size={12} />
+          <Icon name="chevron-down" size={11} />
         </button>
-        <button type="button" className="mxd-icon-btn is-xs" aria-label={collapsed ? 'Show the key' : 'Hide the key'} aria-expanded={!collapsed} onClick={() => onCollapse(!collapsed)}>
-          <Icon name={collapsed ? 'chevron-up' : 'chevron-down'} size={12} />
-        </button>
-      </header>
-      {collapsed ? null : (
-        <div className="mxd-legend__body">
+        <div className="mxd-legend__body" title={note}>
           {!valueLens ? (
             <>
               <div className="mxd-legend__stages">
                 {STAGE_KEY.map(([label, c]) => <span key={label}><i style={{ borderColor: c }} />{label}</span>)}
               </div>
-              <p className="mxd-legend__src"><span>{status}</span>{lens.ambient ? <span>worked and hot properties glow</span> : null}</p>
+              <p className="mxd-legend__src"><span>{note}</span></p>
             </>
           ) : (
             <>
-              <div className="mxd-legend__bar" style={{ backgroundImage: rampGradient(lens) }}><i /></div>
-              <div className="mxd-legend__ends">
-                <span>{isCount ? 'Sparse' : coldLabel}</span>
-                {range && !isCount ? <em>here {formatLensValue(lens, range[0])} – {formatLensValue(lens, range[1])}</em> : null}
-                <span>{isCount ? 'Dense' : hotLabel}</span>
+              <div className="mxd-legend__ramp">
+                <span className="mxd-legend__end">{isCount ? 'Sparse' : coldLabel}</span>
+                <div className="mxd-legend__bar" style={{ backgroundImage: rampGradient(lens) }}><i /></div>
+                <span className="mxd-legend__end">{isCount ? 'Dense' : hotLabel}</span>
               </div>
               <div className="mxd-legend__look">
                 <div className="mxd-seg is-xs" role="radiogroup" aria-label="Heat style">
@@ -138,11 +156,19 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
                   ))}
                 </div>
               </div>
-              <p className="mxd-legend__src"><span>{status}</span>{lens.attribution ? <span>{lens.attribution}</span> : null}<span>click the colour to read it</span></p>
+              <p className="mxd-legend__src">
+                <span>{status}</span>
+                {range && !isCount ? <span>here {formatLensValue(lens, range[0])} – {formatLensValue(lens, range[1])}</span> : null}
+                {lens.attribution ? <span>{lens.attribution}</span> : null}
+                <span>click the colour to read it</span>
+              </p>
             </>
           )}
         </div>
-      )}
+        <button type="button" className="mxd-icon-btn is-xs mxd-legend__fold" aria-label={collapsed ? 'Show the key' : 'Hide the key'} aria-expanded={!collapsed} onClick={() => onCollapse(!collapsed)}>
+          <Icon name={collapsed ? 'chevron-up' : 'chevron-down'} size={12} />
+        </button>
+      </div>
     </section>
   )
 }
