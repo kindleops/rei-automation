@@ -86,18 +86,19 @@ test('filterEvidenceByMapMode keeps pricing and demand evidence separate', () =>
   assert.equal(filterEvidenceByMapMode(rows, 'RISK').length, 1)
 })
 
-test('workspace preserves property-first split classes', async () => {
+test('workspace routes phones to the evidence surface and every desktop to the workstation', async () => {
+  // Comp Intelligence 5.0 (0ba5d675) replaced the legacy split desktop with the
+  // spatial workstation; the phone surface is unchanged. Guard the routing contract.
   const fs = await import('node:fs')
   const path = await import('node:path')
   const source = fs.readFileSync(
     path.join(process.cwd(), 'src/views/comp-intelligence/CompIntelligenceWorkspace.tsx'),
     'utf8',
   )
-  assert.match(source, /ci-workspace__map-col/)
-  assert.match(source, /className="ci-panel"/)
-  assert.match(source, /SubjectPropertyCard/)
-  assert.match(source, /PropertyCompCard/)
-  assert.equal(source.includes('ci-tabs--secondary'), false)
+  assert.match(source, /if \(props\.isMobile && isPhone\) return <CompsMobileEntry/)
+  assert.match(source, /return <CompsDesktopEntry/)
+  assert.match(source, /import\('\.\/desktop\/CompsWorkstation'\)/)
+  assert.match(source, /import\('\.\/evidence\/CompsEvidenceSurface'\)/)
   assert.equal(source.includes('Overview'), false)
   assert.equal(source.includes('Strategies'), false)
 })

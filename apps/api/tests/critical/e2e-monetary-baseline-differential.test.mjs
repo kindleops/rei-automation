@@ -41,8 +41,8 @@ const askingPrice = (message) => resolveAskingPriceSignal(message, {})?.asking_p
  * so the delta only appears once the option is supplied. Vary the options
  * matrix, not just the input string.
  */
-const askingPriceWithReference = (message, reference) =>
-  resolveAskingPriceSignal(message, { reference })?.asking_price?.value ?? null;
+const askingPriceWithReference = (message, reference, shorthandConvention = false) =>
+  resolveAskingPriceSignal(message, { reference, shorthandConvention })?.asking_price?.value ?? null;
 const factPrice = (message) =>
   extractSellerFacts({ message })?.facts?.asking_price?.value?.amount ?? null;
 const kindsOf = (message) =>
@@ -52,41 +52,40 @@ const kindsOf = (message) =>
 // "unit" is in STREET_TYPE_TOKENS, so the bare-number address guard deleted
 // real per-unit money. Baseline extracted these; HEAD must not lose them.
 
+// RC 7.1 policy (owner): a bare number is never silently a price in thousands,
+// and a sub-$1,000 figure is never a canonical asking price. The address guard
+// must still KEEP the money mention (so the clarifier can ask) — that is what
+// these tests now protect; the canonical ask stays empty until the seller has
+// established the "k/thousand" convention.
 test("per-unit prices survive the address guard", () => {
-  for (const [message, expected] of [
-    ["300 per unit", 300],
-    ["300 a unit", 300],
-    ["I'd do 300 a unit", 300],
-    ["300 per unit is my number", 300],
-  ]) {
-    assert.equal(
-      askingPrice(message),
-      expected,
-      `${JSON.stringify(message)} is a price, not 300 Unit Street`
+  for (const message of ["300 per unit", "300 a unit", "I'd do 300 a unit", "300 per unit is my number"]) {
+    assert.ok(
+      kindsOf(message).includes("per_unit_price:300"),
+      `${JSON.stringify(message)} is a price mention, not 300 Unit Street`
     );
+    assert.equal(askingPrice(message), null, `${JSON.stringify(message)} is not a canonical $300 ask`);
   }
 });
 
-test("per-unit prices scale against a reference — the form the negotiation path uses", () => {
-  // These are the cases the no-reference probe could not see: null on BOTH
-  // trees without a reference, but 300000/95000 on eeee5bd8 and null on
-  // 127c829b once one is supplied. The regression is only visible here.
+test("per-unit prices scale only once the seller established the shorthand", () => {
   for (const [message, reference, expected] of [
     ["I want 300 per unit", 200000, 300000],
     ["I'd do 300 a unit", 200000, 300000],
     ["asking 95 per unit for all 4", 380000, 95000],
   ]) {
+    // a deal-size reference alone no longer scales a bare number
+    assert.equal(askingPriceWithReference(message, reference), null, `${JSON.stringify(message)} stays unconfirmed without a convention`)
     assert.equal(
-      askingPriceWithReference(message, reference),
+      askingPriceWithReference(message, reference, true),
       expected,
-      `${JSON.stringify(message)} must scale against its reference`
+      `${JSON.stringify(message)} scales once the seller wrote prices as "k"`
     );
   }
 });
 
-test("per-unit prices reach the fact extractor, not just the signal", () => {
-  assert.equal(factPrice("300 per unit"), 300);
-  assert.equal(factPrice("I'd do 300 a unit"), 300);
+test("an ambiguous per-unit figure never becomes a persisted asking-price fact", () => {
+  assert.equal(factPrice("300 per unit"), null);
+  assert.equal(factPrice("I'd do 300 a unit"), null);
 });
 
 // ── FAMILY 2: capitalized monetary qualifiers ───────────────────────────────
@@ -96,16 +95,18 @@ test("per-unit prices reach the fact extractor, not just the signal", () => {
 // not reach it.
 
 test("a capitalized monetary qualifier does not make the number an address", () => {
-  assert.equal(askingPrice("I need 300 Net"), 300, '"Net" is a price qualifier, not a street name');
-  assert.equal(askingPrice("my net is 300 Net"), 300);
-  // Same family, scaled form: 300000 on eeee5bd8, null at 127c829b.
-  assert.equal(askingPriceWithReference("I need 300 Net", 200000), 300000);
-  assert.equal(askingPriceWithReference("my net is 300 Net", 200000), 300000);
+  assert.ok(kindsOf("I need 300 Net").includes("net_requirement:300"), '"Net" is a price qualifier, not a street name');
+  assert.ok(kindsOf("my net is 300 Net").includes("net_requirement:300"));
+  assert.equal(askingPrice("I need 300 Net"), null);
+  // scaled form only with an established convention
+  assert.equal(askingPriceWithReference("I need 300 Net", 200000), null);
+  assert.equal(askingPriceWithReference("I need 300 Net", 200000, true), 300000);
+  assert.equal(askingPriceWithReference("my net is 300 Net", 200000, true), 300000);
 });
 
-test("the lowercase form was never affected — the bug is capitalization-specific", () => {
-  // Control: proves the assertions above isolate the proper-noun branch.
-  assert.equal(askingPrice("I need 300 net"), 300);
+test("the lowercase form behaves the same — the guard is case-insensitive", () => {
+  assert.ok(kindsOf("I need 300 net").includes("net_requirement:300"));
+  assert.equal(askingPrice("I need 300 net"), null);
 });
 
 // ── FAMILY 3: /month rent reclassified as an asking price ───────────────────

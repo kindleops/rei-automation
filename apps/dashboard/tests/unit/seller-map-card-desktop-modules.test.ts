@@ -31,13 +31,15 @@ describe('desktop map card enriched dossier', () => {
       resolve(process.cwd(), 'src/views/map/seller-card/SellerMapCard.tsx'),
       'utf8',
     )
-    const peekBodyStart = source.indexOf('const peekBody = (')
-    const peekBody = source.slice(peekBodyStart, peekBodyStart + 500)
+    // Map Desktop 2.0 (048c9fd0): the dense peek is headline-only; the Street View
+    // image leads the focus (half/full) card, with the badge rail directly below it.
+    const focusBodyStart = source.indexOf('const focusBody = (')
+    const focusBody = source.slice(focusBodyStart, focusBodyStart + 500)
     const stickySummaryStart = source.indexOf('const stickySummary = (')
     const stickySummary = source.slice(stickySummaryStart, stickySummaryStart + 400)
-    expect(peekBody.indexOf('{imageBlock}')).toBeGreaterThan(-1)
-    expect(peekBody.indexOf('{stickySummary}')).toBeGreaterThan(-1)
-    expect(peekBody.indexOf('{imageBlock}')).toBeLessThan(peekBody.indexOf('{stickySummary}'))
+    expect(focusBody.indexOf('{imageBlock}')).toBeGreaterThan(-1)
+    expect(focusBody.indexOf('{stickySummary}')).toBeGreaterThan(-1)
+    expect(focusBody.indexOf('{imageBlock}')).toBeLessThan(focusBody.indexOf('{stickySummary}'))
     expect(stickySummary).toContain('SellerMapCardBadgeRail')
     const sections = readFileSync(
       resolve(process.cwd(), 'src/views/map/seller-card/SellerMapCardDesktopSections.tsx'),
@@ -73,7 +75,7 @@ describe('desktop map card enriched dossier', () => {
     const vm = buildSellerMapCardViewModel(hydratedRecord({ owner_priority_score: 56 }))
     const scoreBadges = vm.headerBadges.filter((badge) => badge.tone === 'score')
     expect(scoreBadges).toHaveLength(1)
-    expect(scoreBadges[0]?.label).toBe('Score 56')
+    expect(scoreBadges[0]?.label).toBe('Priority 56')
   })
 
   it('5. contact state appears once in the summary badges', () => {

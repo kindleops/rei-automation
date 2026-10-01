@@ -21,6 +21,8 @@ import { getSupabaseClient } from '../../src/lib/supabaseClient'
 
 vi.mock('../../src/lib/supabaseClient', () => ({
   getSupabaseClient: vi.fn(),
+  // backendClient reads this since the session became the credential (934821bd)
+  hasSupabaseEnv: false,
 }))
 
 vi.mock('../../src/lib/data/commandMapData', async (importOriginal) => {
@@ -369,7 +371,8 @@ describe('map ownership check send regression', () => {
       makeTemplate('en-1', 'Hi {{seller_first_name}}, question about {{property_address}}.', { language: 'English' }),
       makeTemplate('es-1', 'Hola {{seller_first_name}}, pregunta sobre {{property_address}}.', { language: 'Spanish' }),
     ]
-    vi.spyOn(templateData, 'fetchTemplatesByUseCase').mockResolvedValue(catalog)
+    // the picker asks the server for the use case AND language (templates/list?language=)
+    vi.spyOn(templateData, 'fetchTemplatesByUseCaseAndLanguage').mockImplementation(async (_useCase, language) => catalog.filter((t) => t.language === language))
     vi.spyOn(picker, 'resolveMapOwnerLanguage').mockResolvedValue('Spanish')
 
     const selection = await picker.pickOwnershipCheckTemplateForMap(
