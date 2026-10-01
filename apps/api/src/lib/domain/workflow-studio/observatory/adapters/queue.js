@@ -9,13 +9,18 @@
  */
 import { QUEUE_DISPATCH as T } from '../topologies/queue.js'
 import { human, DAY, iso } from '../core.js'
-import { clean, lower, nodeEvents, paged, runRow, safe, subject } from './shared.js'
+import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
+import { clean, lower, nodeEvents, paged, runRow, safe, subject, TEST_QUEUE_SOURCES } from './shared.js'
 
 const KEY = 'queue_dispatch'
 const RT = 'queue runner'
 const inbox = (tk) => (tk ? `/inbox?thread=${encodeURIComponent(tk)}` : null)
 const WAITING = ['queued', 'scheduled', 'pending', 'retry', 'locked']
 const MOVING = ['processing', 'sending', 'claimed']
+/** proof lanes and internal handsets are test traffic, never operations */
+export const isTestRow = (r) => TEST_QUEUE_SOURCES.has(lower(r?.source)) || isInternalTestPhone(r?.thread_key)
+/** when a row became due — the runner cannot be slower than a schedule it was asked to keep */
+export const dueAt = (r) => { const c = Date.parse(r.created_at); const d = Date.parse(r.scheduled_for_utc || r.scheduled_for || r.created_at); return Number.isFinite(d) && Number.isFinite(c) ? Math.max(c, d) : Number.isFinite(c) ? c : null }
 const SPINE = ['row_due', 'send_authority', 'campaign_authority', 'claim_once', 'contact_window', 'select_sender', 'resolve_body', 'name_guard', 'duplicate_lock', 'greeting_guard', 'asset_guard', 'stale_reply_guard', 'health_guard', 'compliance', 'provider_dispatch', 'provider_accepted', 'delivery_result']
 
 /** Where a row's own status says it stopped: [deciding node, its status, terminal node | null]. */
@@ -45,6 +50,7 @@ export function projectQueueRow(row, { attempts = [] } = {}) {
   const [gate, gateStatus, terminal] = decidingGate(row)
   const s = lower(row.queue_status)
   const t0 = row.created_at
+  const due = dueAt(row)
   const tSent = row.sent_at || null
   const tEnd = row.delivered_at || row.updated_at || tSent || t0
   const reason = row.failed_reason || row.paused_reason || row.guard_reason || row.blocked_reason || null
@@ -58,10 +64,10 @@ export function projectQueueRow(row, { attempts = [] } = {}) {
       if (k === 'resolve_body' && gate !== 'resolve_body') continue
       const at = ['provider_accepted'].includes(k) ? tSent || tEnd : ['delivery_result'].includes(k) ? tEnd : k === 'row_due' ? t0 : tSent || tEnd
       if (k === gate) {
-        push(k, gateStatus, at, { reason: gateStatus === 'succeeded' ? null : reason || human(s), label: human(s), duration_ms: k === 'provider_accepted' && tSent ? Date.parse(tSent) - Date.parse(t0) : k === 'delivery_result' && tSent && row.delivered_at ? Date.parse(row.delivered_at) - Date.parse(tSent) : null })
+        push(k, gateStatus, at, { reason: gateStatus === 'succeeded' ? null : reason || human(s), label: human(s), duration_ms: k === 'provider_accepted' && tSent && due !== null ? Math.max(0, Date.parse(tSent) - due) : k === 'delivery_result' && tSent && row.delivered_at ? Date.parse(row.delivered_at) - Date.parse(tSent) : null })
         break
       }
-      push(k, 'succeeded', at, { duration_ms: k === 'provider_accepted' && tSent ? Date.parse(tSent) - Date.parse(t0) : null })
+      push(k, 'succeeded', at, { duration_ms: k === 'provider_accepted' && tSent && due !== null ? Math.max(0, Date.parse(tSent) - due) : null })
     }
     if (terminal) push(terminal, terminal === 'delivered' ? 'succeeded' : gateStatus === 'failed' ? 'failed' : gateStatus === 'human' ? 'human' : 'succeeded', tEnd, { reason: terminal === 'delivered' ? null : reason || human(s) })
   }
@@ -85,21 +91,22 @@ export function projectQueueRow(row, { attempts = [] } = {}) {
   }
 }
 
-const COLS = 'id, queue_status, source, campaign_id, thread_key, seller_display_name, property_address, created_at, updated_at, scheduled_for, sent_at, delivered_at, failed_reason, paused_reason, guard_reason, blocked_reason, held_at, approved_at, execution_policy_version'
+const COLS = 'id, queue_status, source, campaign_id, thread_key, seller_display_name, property_address, created_at, updated_at, scheduled_for, scheduled_for_utc, sent_at, delivered_at, failed_reason, paused_reason, guard_reason, blocked_reason, held_at, approved_at, execution_policy_version'
 
 export const queueAdapter = {
   key: KEY,
   topology: T,
   source_runtime: RT,
+  timing: { quality: 'inferred', note: 'The runner keeps one row per message: gates before the deciding one are inferred from its final status. Due, sent and delivered times are real.' },
   notes: ['The runner keeps no per-guard ledger: a row’s path is read from its own terminal status (gates before the deciding gate passed).'],
 
   async load(db, { since, until = null, limit = 2000, degraded = [] }) {
     const rows = await paged(() => { let q = db.from('send_queue').select(COLS).gte('created_at', since).order('created_at', { ascending: false }); if (until) q = q.lt('created_at', until); return q }, { limit: Math.min(limit, 4000), degraded, source: 'send_queue' })
-    return rows.map((r) => projectQueueRow(r))
+    return rows.filter((r) => !isTestRow(r)).map((r) => projectQueueRow(r))
   },
 
   async summary(db, { now, dayStart, degraded = [] }) {
-    const rows = await paged(() => db.from('send_queue').select('id, queue_status, created_at').gte('created_at', iso(now - 7 * DAY)).order('created_at', { ascending: false }), { limit: 6000, degraded, source: 'send_queue' })
+    const rows = (await paged(() => db.from('send_queue').select('id, queue_status, source, thread_key, created_at').gte('created_at', iso(now - 7 * DAY)).order('created_at', { ascending: false }), { limit: 6000, degraded, source: 'send_queue' })).filter((r) => !isTestRow(r))
     return {
       runs_today: rows.filter((r) => String(r.created_at) >= dayStart).length,
       runs_24h: rows.filter((r) => Date.parse(r.created_at) > now - DAY).length,
@@ -150,14 +157,22 @@ export const queueAdapter = {
   },
 
   async current(db, { now = Date.now(), degraded = [] } = {}) {
-    const [waiting, holds] = await Promise.all([
-      safe(db.from('send_queue').select('id, queue_status, thread_key, seller_display_name, campaign_id, scheduled_for, created_at, source').in('queue_status', [...WAITING, ...MOVING]).limit(600), degraded, 'send_queue'),
-      safe(db.from('send_queue').select('id, queue_status, thread_key, seller_display_name, property_address, paused_reason, updated_at').in('queue_status', ['paused_name_missing', 'paused_deferred_unresolved', 'paused_invalid_queue_row']).gte('updated_at', iso(now - 7 * DAY)).limit(100), degraded, 'send_queue'),
+    const [waitingAll, holdsAll] = await Promise.all([
+      safe(db.from('send_queue').select('id, queue_status, thread_key, seller_display_name, campaign_id, scheduled_for, scheduled_for_utc, created_at, source').in('queue_status', [...WAITING, ...MOVING]).limit(600), degraded, 'send_queue'),
+      safe(db.from('send_queue').select('id, queue_status, thread_key, seller_display_name, property_address, paused_reason, source, updated_at').in('queue_status', ['paused_name_missing', 'paused_deferred_unresolved', 'paused_invalid_queue_row']).gte('updated_at', iso(now - 7 * DAY)).limit(100), degraded, 'send_queue'),
     ])
+    const waiting = waitingAll.filter((r) => !isTestRow(r))
+    const holds = holdsAll.filter((r) => !isTestRow(r))
+    const moving = waiting.filter((w) => MOVING.includes(lower(w.queue_status)))
+    // due and still unclaimed 30 minutes later (the runner claims every minute) — a stale wait, reported as a fact
+    const overdue = waiting.filter((w) => !MOVING.includes(lower(w.queue_status)) && dueAt(w) !== null && now - dueAt(w) > 30 * 60e3)
     return {
       in_flight: waiting.length,
-      needs_you: holds.map((h) => ({ run_id: h.id, node_key: 'content_hold', subject: subject('seller_message', h.thread_key, h.seller_display_name, h.property_address, inbox(h.thread_key)), reason: `${human(h.queue_status)}${h.paused_reason ? ` · ${human(h.paused_reason)}` : ''}`, since: h.updated_at, href: `/queue?row=${encodeURIComponent(h.id)}` })),
-      live: waiting.slice(0, 200).map((w) => ({ run_id: w.id, node_key: MOVING.includes(lower(w.queue_status)) ? 'provider_dispatch' : 'row_due', status: MOVING.includes(lower(w.queue_status)) ? 'running' : 'waiting', subject: subject(w.campaign_id ? 'campaign_message' : 'seller_message', w.thread_key, w.seller_display_name, null, inbox(w.thread_key)), since: w.scheduled_for || w.created_at, detail: human(w.queue_status) })),
+      executing: moving.length,
+      waiting: waiting.length - moving.length,
+      overdue: overdue.map((w) => ({ run_id: w.id, due_at: new Date(dueAt(w)).toISOString(), status: lower(w.queue_status), campaign_id: w.campaign_id || null })),
+      needs_you: holds.map((h) => ({ run_id: h.id, node_key: 'content_hold', category: 'missing_data', reason_code: lower(h.queue_status), subject: subject('seller_message', h.thread_key, h.seller_display_name, h.property_address, inbox(h.thread_key)), reason: `${human(h.queue_status)}${h.paused_reason ? ` · ${human(h.paused_reason)}` : ''}`, since: h.updated_at, href: `/queue?row=${encodeURIComponent(h.id)}` })),
+      live: waiting.slice(0, 200).map((w) => ({ run_id: w.id, node_key: MOVING.includes(lower(w.queue_status)) ? 'provider_dispatch' : 'row_due', status: MOVING.includes(lower(w.queue_status)) ? 'running' : 'waiting', subject: subject(w.campaign_id ? 'campaign_message' : 'seller_message', w.thread_key, w.seller_display_name, null, inbox(w.thread_key)), since: w.scheduled_for_utc || w.scheduled_for || w.created_at, due_at: dueAt(w) !== null ? new Date(dueAt(w)).toISOString() : null, detail: human(w.queue_status) })),
     }
   },
 

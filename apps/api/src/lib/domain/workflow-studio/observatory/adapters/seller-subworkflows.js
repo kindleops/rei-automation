@@ -67,6 +67,7 @@ export const dncAdapter = {
   key: 'dnc_opt_out',
   topology: DNC_OPT_OUT,
   source_runtime: 'seller-flow orchestrator',
+  timing: { quality: 'single', note: 'Joined from the seller run, the suppression row and the bus event by conversation and time — each step carries its own row’s timestamp.' },
   load: (db, opts) => loadDnc(db, opts),
   summary: (db, o) => timestampSummary(() => db.from('seller_automation_execution_steps').select('created_at').eq('action_key', 'automation_blocked').eq('block_reason', 'opt_out').gte('created_at', iso(o.now - 7 * DAY)).order('created_at', { ascending: false }), { ...o, source: 'seller_automation_execution_steps' }),
   async detail(db, id, { degraded = [] } = {}) {

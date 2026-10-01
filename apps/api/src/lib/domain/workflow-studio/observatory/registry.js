@@ -170,7 +170,11 @@ const beat = (at, now, staleMs) => {
   return now - t > staleMs ? 'stale' : 'current'
 }
 
-const EMPTY_STATS = { runs_today: null, runs_24h: null, runs_7d: null, needs_you: null, in_flight: null, failed_24h: null, last_run_at: null }
+const EMPTY_STATS = { runs_today: null, runs_24h: null, runs_7d: null, needs_you: null, in_flight: null, executing: null, waiting: null, failed_24h: null, last_run_at: null }
+
+/** The Studio orchestrator's own heartbeat (Cloudflare, every 5 min) — read, never assumed. */
+export const ORCHESTRATOR_HEARTBEAT = 'workflow_orchestrator_heartbeat_at'
+export const ORCHESTRATOR_SWITCH = 'workflow_orchestrator_enabled'
 
 export function resolveSystemStatus(r, { ctl = {}, now = Date.now(), stats = null, current = null } = {}) {
   const hbAt = r.heartbeat_key ? ctl[r.heartbeat_key] || null : null
@@ -199,12 +203,24 @@ export function resolveSystemStatus(r, { ctl = {}, now = Date.now(), stats = nul
     heartbeat: { key: r.heartbeat_key || null, at: hbAt, state: hb, cadence: r.schedule === 'event' ? 'event-driven' : r.schedule === 'on_demand' ? 'on demand' : r.schedule === '* * * * *' ? 'every minute' : r.schedule === '*/5 * * * *' ? 'every 5 min' : r.schedule },
     schedule: r.schedule, ledger: r.ledger, parent: r.parent || null,
     policy: Object.fromEntries((r.policy_keys || []).map((k) => [k, ctl[k] ?? null])),
-    stats: { ...EMPTY_STATS, ...(stats || {}), needs_you: current?.needs_you ? current.needs_you.length : stats?.needs_you ?? 0, in_flight: current?.in_flight ?? stats?.in_flight ?? 0 },
+    stats: {
+      ...EMPTY_STATS, ...(stats || {}),
+      needs_you: current?.needs_you ? current.needs_you.length : stats?.needs_you ?? 0,
+      in_flight: current?.in_flight ?? stats?.in_flight ?? 0,
+      // executing = runtime evidence of work in progress right now; waiting = scheduled, healthy waits
+      executing: current ? current.executing ?? 0 : null,
+      waiting: current ? current.waiting ?? 0 : null,
+      ...(current?.follow_ups_scheduled !== undefined ? { follow_ups_scheduled: current.follow_ups_scheduled } : {}),
+      ...(current?.feeding !== undefined ? { feeding: current.feeding } : {}),
+    },
   }
 }
 
-export function studioEntry(w, observed = [], current = null, { now = Date.now(), dayStart } = {}) {
+export function studioEntry(w, observed = [], current = null, { now = Date.now(), dayStart, ctl = null } = {}) {
   const v = w.live || w.latest
+  const hbAt = ctl ? ctl[ORCHESTRATOR_HEARTBEAT] || null : null
+  const hbState = ctl ? beat(hbAt, now, 15 * 60e3) : 'never'
+  const switchedOff = ctl ? String(ctl[ORCHESTRATOR_SWITCH] ?? '').toLowerCase() === 'false' : false
   const runs = observed.map((o) => o.run)
   const day0 = dayStart || iso(Math.floor(now / DAY) * DAY)
   const test = /^test[_ ]/i.test(w.workflow_key) || /^test\b/i.test(w.name || '')
@@ -215,15 +231,16 @@ export function studioEntry(w, observed = [], current = null, { now = Date.now()
   return {
     workflow_key: w.workflow_key, name: w.name, short_name: w.name, description: v?.description || '', family: String(w.domain || 'seller').toUpperCase() === 'SELLER' ? 'SELLER' : String(w.domain || '').toUpperCase() || 'SYSTEM', kind: 'studio',
     owner_app: 'Workflow Studio', owner_href: '/workflow-studio', runtime: 'wf orchestrator', runtime_version: v ? `v${v.version}` : '—',
-    status, status_note: w.status === 'armed' ? `Armed · v${w.live_version}` : w.status === 'draft' ? 'Draft — nothing runs' : null, group,
+    status, status_note: w.status === 'armed' ? (switchedOff ? `Armed · v${w.live_version} · orchestrator switched off` : hbState === 'stale' ? `Armed · v${w.live_version} · orchestrator heartbeat stale` : `Armed · v${w.live_version}`) : w.status === 'draft' ? 'Draft — nothing runs' : w.status === 'paused' ? 'Paused — no new runs; runs in flight do not advance' : null, group,
     trigger: { type: v?.graph?.trigger?.type || null, label: v?.graph?.trigger?.type ? v.graph.trigger.type.replace(/_/g, ' ') : '—', source: 'workflow_events (canonical bridge)' },
     subject_type: 'seller_thread', supports: { live: true, runs: true, replay: true, edit: true, simulation: true },
     topology_version: v ? `${w.workflow_key}@v${v.version}` : null,
-    heartbeat: { key: 'workflow_orchestrator_heartbeat_at', at: null, state: 'current', cadence: 'every 5 min' },
+    heartbeat: { key: ORCHESTRATOR_HEARTBEAT, at: hbAt, state: hbState, cadence: 'every 5 min' },
     schedule: '*/5 * * * *', ledger: ['wf_runs', 'wf_run_steps', 'wf_waits'], parent: null, policy: {}, test,
     stats: {
       runs_today: runs.filter((r) => r.started_at >= day0).length, runs_24h: runs.filter((r) => Date.parse(r.started_at) > now - DAY).length, runs_7d: runs.length,
       needs_you: needs.length, in_flight: mine.length, failed_24h: runs.filter((r) => r.status === 'failed' && Date.parse(r.started_at) > now - DAY).length,
+      executing: mine.filter((x) => x.status === 'running').length, waiting: mine.filter((x) => x.status === 'waiting').length,
       last_run_at: runs[0]?.started_at || null,
     },
   }

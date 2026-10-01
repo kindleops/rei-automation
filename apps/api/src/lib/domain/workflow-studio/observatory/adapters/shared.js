@@ -108,6 +108,37 @@ export async function paged(build, { limit = 1000, page = 1000, degraded = [], s
 }
 
 /**
+ * `.in(col, ids)` over many ids, chunked AND paged. A chunk of executions can
+ * own more child rows than PostgREST's max-rows (1000): a single `.limit()`
+ * would silently drop the rest (40% of 7-day seller steps were lost that way),
+ * so every chunk is read page by page in a stable order.
+ */
+export async function inChunksPaged(db, table, cols, col, ids, degraded = [], { chunk = 40, extra = (q) => q, order = 'id', perChunk = 5000 } = {}) {
+  const list = [...new Set((ids || []).filter(Boolean).map(String))]
+  const out = []
+  for (let i = 0; i < list.length; i += chunk) {
+    const part = list.slice(i, i + chunk)
+    out.push(...await paged(() => extra(db.from(table).select(cols).in(col, part)).order(order, { ascending: true }), { limit: perChunk, degraded, source: table }))
+  }
+  return out
+}
+
+/**
+ * Test traffic never counts as operations: internal test / canary handsets
+ * (lib/config/internal-phones.js) and the queue's proof lanes are excluded
+ * from every operational read here.
+ */
+export const TEST_QUEUE_SOURCES = Object.freeze(new Set(['internal_canary', 'inbox_lock_certification', 'queue_limited_cap_proof']))
+export const testPhoneList = (set) => `(${[...set].map((p) => `"${p}"`).join(',')})`
+
+/** A count that tolerates both PostgREST (count, head) and plain row reads; null when the read failed. */
+export async function countOf(q, degraded = [], source = 'count') {
+  const { count, data, error } = await q
+  if (error) { degraded.push(source); return null }
+  return Number.isFinite(count) ? count : (data || []).length
+}
+
+/**
  * Cheap registry stats from timestamps only (one narrow column, paged) — the
  * registry must not hydrate every run of every runtime just to count them.
  */

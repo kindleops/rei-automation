@@ -14,7 +14,8 @@
 import { SELLER_INBOUND as T } from '../topologies/seller.js'
 import { evidenceIndex, human, cap, DAY, iso } from '../core.js'
 import { HELD_REASON, openThreads, sendOutcome } from '../../observatory-service.js'
-import { clean, lower, nodeEvents, runRow, safe, sellerNames, subject } from './shared.js'
+import { INTERNAL_TEST_PHONE_SET, isInternalTestPhone } from '@/lib/config/internal-phones.js'
+import { clean, inChunksPaged, lower, nodeEvents, paged, runRow, safe, sellerNames, subject, testPhoneList } from './shared.js'
 
 const KEY = 'seller_inbound'
 const RT = 'seller-flow orchestrator'
@@ -24,6 +25,8 @@ const inbox = (tk) => (tk ? `/inbox?thread=${encodeURIComponent(tk)}` : null)
 const reasonText = (r) => HELD_REASON[lower(r)] || (r ? cap(lab(r)) : null)
 const chunk = (arr, n = 150) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out }
 const WAITING_Q = ['queued', 'scheduled', 'processing', 'sending', 'claimed', 'pending', 'retry', 'locked']
+/** internal test / canary handsets never count as seller operations */
+const NOT_TEST = testPhoneList(INTERNAL_TEST_PHONE_SET)
 
 async function inChunks(db, table, cols, col, ids, degraded, extra = (q) => q) {
   const out = []
@@ -34,12 +37,16 @@ async function inChunks(db, table, cols, col, ids, degraded, extra = (q) => q) {
 const DATE = (v) => { const t = Date.parse(v); return Number.isFinite(t) ? new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Chicago' }) : null }
 
 /** Pure: one execution + its steps (+ owners' facts) → observed run. */
-export function projectSellerRun(ex, steps, { queue = null, open = false, negotiation = [], name = null, address = null, intel = null } = {}) {
+export function projectSellerRun(ex, steps, { queue = null, open = false, negotiation = [], name = null, address = null, intel = null, ingress = null } = {}) {
   const { push, events } = nodeEvents(KEY, ex.id, RT)
   const st = [...steps].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)))
   const has = (k) => st.find((s) => s.action_key === k)
   const decisionAt = has('decision_intelligence_evaluated')?.created_at || ex.started_at
-  const hasQueueRow = st.some((s) => s.action_key === 'message_queued' && s.queue_id)
+  // "queued" is only true when the queue row itself was read (PRECEDENCE.send_result):
+  // a ledger step naming a queue id is a claim, the row is the evidence
+  const queuedStep = st.find((s) => s.action_key === 'message_queued' && s.queue_id)
+  const hasQueueRow = Boolean(queue)
+  const missingRow = Boolean(queuedStep && !queue)
   for (const s of st) {
     // legacy ledger rows claimed "queued/sent" without a queue row — not a send
     if (!hasQueueRow && ['message_queued', 'duplicate_send_check', 'message_sent'].includes(s.action_key)) continue
@@ -60,11 +67,16 @@ export function projectSellerRun(ex, steps, { queue = null, open = false, negoti
     }
     if (s.action_key === 'automation_blocked' && lower(s.block_reason) === 'opt_out') push('opt_out_dnc', 'succeeded', s.created_at, { id: `${ex.id}:opt_out`, label: 'suppression applied', ref: 'opt_out' })
   }
+  if (missingRow) push('queue_reply', 'held', queuedStep.created_at, { id: `${ex.id}:queue_missing`, reason: 'queue row not found — the send is not evidenced', ref: 'send_queue:missing' })
   let send = null
   if (queue) {
     send = sendOutcome(queue)
     const s = lower(queue.queue_status)
     const hand = queue.created_at || decisionAt
+    // dispatch latency is measured from when the row was DUE (scheduled_for_utc), so a
+    // reply deliberately scheduled into the contact window does not read as slowness
+    const due = Math.max(Date.parse(queue.created_at) || 0, Date.parse(queue.scheduled_for_utc || queue.scheduled_for || queue.created_at) || 0)
+    const dispatchMs = queue.delivered_at && due && Date.parse(queue.delivered_at) >= due ? Date.parse(queue.delivered_at) - due : null
     if (s === 'paused_operator_review') {
       push('dispatch_handoff', 'succeeded', hand, { label: 'review hold', ref: 'send_queue:review_hold' })
       push('approval_hold', 'human', queue.held_at || hand, { reason: 'reply drafted — awaiting operator approval', ref: 'send_queue:review_hold' })
@@ -75,7 +87,7 @@ export function projectSellerRun(ex, steps, { queue = null, open = false, negoti
       else if (send.state === 'waiting') push('dispatch_handoff', 'waiting', hand, { label: send.label })
       else if (send.state === 'superseded') push('dispatch_handoff', 'succeeded', queue.updated_at || hand, { label: `withdrawn · ${lab(s)}` })
       else {
-        push('dispatch_handoff', 'succeeded', hand, { label: send.label, duration_ms: queue.delivered_at && queue.created_at ? Date.parse(queue.delivered_at) - Date.parse(queue.created_at) : null })
+        push('dispatch_handoff', 'succeeded', hand, { label: send.label, duration_ms: dispatchMs })
         if (released) push('approval_hold', 'succeeded', queue.approved_at || queue.held_at, { label: 'released by operator' })
         push('reply_delivered', 'succeeded', queue.delivered_at || queue.sent_at || hand, { label: send.label })
       }
@@ -100,6 +112,7 @@ export function projectSellerRun(ex, steps, { queue = null, open = false, negoti
   else if (send?.state === 'waiting') { status = 'waiting'; result = send.label; current = 'dispatch_handoff' }
   else if (send?.state === 'superseded') { status = 'cancelled'; result = 'Reply withdrawn'; reason = lab(queue.failed_reason || qs) }
   else if (send) { status = 'completed'; result = send.label }
+  else if (missingRow) { status = 'held'; result = 'Queue step recorded · no queue row'; reason = 'The ledger names a queue row that could not be read — no send is claimed' }
   else if (failedStep) { status = 'failed'; result = 'Reply could not be queued'; reason = lab(failedStep.error_details?.reason || 'enqueue failed') }
   else if (block) { status = review ? 'completed' : 'held'; result = review ? 'Held, then handled by a person' : 'Held by policy — no reply sent'; reason = reasonText(block.block_reason) }
   else if (fu && Date.parse(fu) > Date.now()) { status = 'waiting'; result = `Follow-up scheduled ${DATE(fu)}`; current = 'schedule_follow_up' }
@@ -111,22 +124,40 @@ export function projectSellerRun(ex, steps, { queue = null, open = false, negoti
   if (fu) facts.push(`Follow-up ${DATE(fu)}`)
   if (review) facts.push(open ? 'Needs review' : 'Reviewed')
   return {
-    run: runRow({
-      run_id: ex.id, workflow_key: KEY, version: ex.workflow_id || null, started_at: ex.started_at, finished_at: ex.completed_at || lastStep?.created_at || null,
-      subject: subject('seller', ex.thread_id, name, address, inbox(ex.thread_id)), trigger: 'Seller replied', status, human: human_,
-      current_node: ['needs_you', 'waiting', 'held', 'running'].includes(status) ? current : null,
-      final_node: queue ? (send?.state === 'failed' ? 'reply_failed' : send?.state === 'waiting' || send?.state === 'held' ? 'dispatch_handoff' : 'reply_delivered') : 'run_recorded',
-      result, reason,
-    }),
+    run: {
+      ...runRow({
+        run_id: ex.id, workflow_key: KEY, version: ex.workflow_id || null, started_at: ex.started_at, finished_at: ex.completed_at || lastStep?.created_at || null,
+        subject: subject('seller', ex.thread_id, name, address, inbox(ex.thread_id)), trigger: 'Seller replied', status, human: human_,
+        current_node: ['needs_you', 'waiting', 'held', 'running'].includes(status) ? current : null,
+        final_node: queue ? (send?.state === 'failed' ? 'reply_failed' : send?.state === 'waiting' || send?.state === 'held' ? 'dispatch_handoff' : 'reply_delivered') : 'run_recorded',
+        result, reason,
+      }),
+      // real inbound latency (provider receipt → processed) from the inbound ledger, when matched
+      ingress: ingress ? { received_at: ingress.received_at, latency_ms: Number.isFinite(Number(ingress.latency_ms)) ? Number(ingress.latency_ms) : null, status: ingress.status || null, matched_by: 'conversation + arrival time (the ledger records no run id)' } : null,
+    },
     events,
     facts,
     raw: ex,
   }
 }
 
+/** The inbound ledger row that started a run: same conversation, received ≤ 10 min before it began. */
+export function matchIngress(ex, rows = []) {
+  const start = Date.parse(ex.started_at)
+  if (!Number.isFinite(start)) return null
+  let best = null
+  for (const r of rows) {
+    if (r.thread_key !== ex.thread_id) continue
+    const t = Date.parse(r.received_at)
+    if (!Number.isFinite(t) || t > start + 5e3 || t < start - 10 * 60e3) continue
+    if (!best || t > Date.parse(best.received_at)) best = r
+  }
+  return best
+}
+
 async function context(db, execs, steps, degraded, { since = null } = {}) {
   const qids = [...new Set(steps.filter((s) => s.action_key === 'message_queued' && s.queue_id).map((s) => String(s.queue_id)))]
-  const queue = qids.length ? await inChunks(db, 'send_queue', 'id, queue_status, created_at, updated_at, sent_at, delivered_at, scheduled_for, failed_reason, held_at, approved_at, message_body, template_id', 'id', qids, degraded) : []
+  const queue = qids.length ? await inChunks(db, 'send_queue', 'id, queue_status, source, created_at, updated_at, sent_at, delivered_at, scheduled_for, scheduled_for_utc, failed_reason, held_at, approved_at, message_body, template_id', 'id', qids, degraded) : []
   const reviewThreads = [...new Set(execs.filter((e) => steps.some((s) => s.execution_id === e.id && (s.action_key === 'needs_review_created')) || queue.some((q) => lower(q.queue_status) === 'paused_operator_review')).map((e) => e.thread_id))]
   const open = reviewThreads.length ? await openThreads(db, reviewThreads) : new Set()
   const threads = [...new Set(execs.map((e) => e.thread_id).filter(Boolean))]
@@ -135,7 +166,9 @@ async function context(db, execs, steps, degraded, { since = null } = {}) {
   const neg = threads.length ? await inChunks(db, 'automation_events', 'id, event_type, conversation_thread_id, created_at, status', 'conversation_thread_id', threads, degraded, (q) => q.eq('source', 'seller_negotiation_engine').gte('created_at', from).limit(600)) : []
   const inbound = [...new Set(execs.map((e) => e.source_message_id).filter(Boolean))]
   const intel = inbound.length ? await inChunks(db, 'message_events', 'id, intent:metadata->>detected_intent, confidence:metadata->>classification_confidence, emotion:metadata->payload->metadata->>emotion, language:metadata->>language, next_action:metadata->automation_decision->>next_action, reply_mode:metadata->automation_decision->>reply_mode, message_body', 'id', inbound, degraded) : []
-  return { queue: new Map(queue.map((q) => [String(q.id), q])), open, nm, neg, intel: new Map(intel.map((m) => [String(m.id), m])) }
+  // real end-to-end inbound latency lives in the inbound ledger (the step recorder's timings are not runtime timings)
+  const ingress = threads.length ? await inChunksPaged(db, 'inbound_processing_ledger', 'id, thread_key, received_at, latency_ms, status, completed_at', 'thread_key', threads, degraded, { chunk: 150, extra: (q) => q.gte('received_at', iso(Date.parse(from) - 10 * 60e3)), perChunk: 3000 }) : []
+  return { queue: new Map(queue.map((q) => [String(q.id), q])), open, nm, neg, intel: new Map(intel.map((m) => [String(m.id), m])), ingress }
 }
 
 function assemble(execs, steps, ctx) {
@@ -150,7 +183,7 @@ function assemble(execs, steps, ctx) {
     const t0 = Date.parse(ex.started_at)
     const t1 = Date.parse(ex.completed_at || st[st.length - 1]?.created_at || ex.started_at)
     const negotiation = ctx.neg.filter((n) => n.conversation_thread_id === ex.thread_id && Date.parse(n.created_at) >= t0 - 90e3 && Date.parse(n.created_at) <= t1 + 90e3)
-    return projectSellerRun(ex, st, { queue: qid ? ctx.queue.get(String(qid)) || null : null, open: ctx.open.has(ex.thread_id) && latest.get(ex.thread_id)?.id === ex.id, negotiation, name: ctx.nm.name(ex.thread_id), address: ctx.nm.address(ex.thread_id, ex.property_id), intel: ctx.intel.get(String(ex.source_message_id)) || null })
+    return projectSellerRun(ex, st, { queue: qid ? ctx.queue.get(String(qid)) || null : null, open: ctx.open.has(ex.thread_id) && latest.get(ex.thread_id)?.id === ex.id, negotiation, name: ctx.nm.name(ex.thread_id), address: ctx.nm.address(ex.thread_id, ex.property_id), intel: ctx.intel.get(String(ex.source_message_id)) || null, ingress: matchIngress(ex, ctx.ingress || []) })
   })
 }
 
@@ -161,20 +194,20 @@ export const sellerAdapter = {
   key: KEY,
   topology: T,
   source_runtime: RT,
+  timing: { quality: 'recorder', note: 'Steps are written by the seller-flow recorder in one burst after the run finishes: their order is causal, their spacing is the recorder’s, not the runtime’s. The real inbound latency comes from the inbound ledger.' },
   notes: ['Seller steps are written by a recorder after each run, so per-step latency is not measured; the reply’s time to delivery is (send_queue).'],
 
   async load(db, { since, until = null, limit = 400, degraded = [] }) {
-    let q = db.from('seller_automation_executions').select(EXEC_COLS).gte('started_at', since).order('started_at', { ascending: false }).limit(Math.min(limit, 1500))
-    if (until) q = q.lt('started_at', until)
-    const execs = await safe(q, degraded, 'seller_automation_executions')
+    const execs = await paged(() => { let q = db.from('seller_automation_executions').select(EXEC_COLS).gte('started_at', since).not('thread_id', 'in', NOT_TEST).order('started_at', { ascending: false }); if (until) q = q.lt('started_at', until); return q }, { limit: Math.min(limit, 3000), degraded, source: 'seller_automation_executions' })
     if (!execs.length) return []
-    const steps = await inChunks(db, 'seller_automation_execution_steps', STEP_COLS, 'execution_id', execs.map((e) => e.id), degraded, (x) => x.limit(6000))
+    // chunked + paged: a 150-execution chunk owns ~2,500 steps, far past PostgREST's 1,000-row cap
+    const steps = await inChunksPaged(db, 'seller_automation_execution_steps', STEP_COLS, 'execution_id', execs.map((e) => e.id), degraded)
     const ctx = await context(db, execs, steps, degraded, { since })
     return assemble(execs, steps, ctx)
   },
 
   async summary(db, { now, dayStart, degraded = [] }) {
-    const rows = await safe(db.from('seller_automation_executions').select('id, status, started_at').gte('started_at', iso(now - 7 * DAY)).order('started_at', { ascending: false }).limit(3000), degraded, 'seller_automation_executions')
+    const rows = await paged(() => db.from('seller_automation_executions').select('id, status, started_at').gte('started_at', iso(now - 7 * DAY)).not('thread_id', 'in', NOT_TEST).order('started_at', { ascending: false }), { limit: 6000, degraded, source: 'seller_automation_executions' })
     return {
       runs_today: rows.filter((r) => String(r.started_at) >= dayStart).length,
       runs_24h: rows.filter((r) => Date.parse(r.started_at) > now - DAY).length,
@@ -260,16 +293,22 @@ export const sellerAdapter = {
   /** Right now: open reviews and review-held replies need a person; queued replies are in flight. */
   async current(db, { now = Date.now(), degraded = [] } = {}) {
     const since = iso(now - 7 * DAY)
-    const [rev, holds, pending] = await Promise.all([
-      safe(db.from('seller_automation_execution_steps').select('execution_id, block_reason, created_at').eq('action_key', 'needs_review_created').gte('created_at', since).order('created_at', { ascending: false }).limit(200), degraded, 'seller_automation_execution_steps'),
+    const [revAll, holdsAll, pendingAll, runningAll] = await Promise.all([
+      safe(db.from('seller_automation_execution_steps').select('execution_id, block_reason, thread_id, created_at').eq('action_key', 'needs_review_created').gte('created_at', since).order('created_at', { ascending: false }).limit(200), degraded, 'seller_automation_execution_steps'),
       safe(db.from('send_queue').select('id, thread_key, created_at, held_at, seller_display_name, property_address').eq('queue_status', 'paused_operator_review').gte('created_at', since).limit(200), degraded, 'send_queue'),
-      safe(db.from('send_queue').select('id, thread_key, queue_status, scheduled_for, created_at, source, seller_display_name').in('source', ['auto_reply', 'seller_inbound_orchestrator']).in('queue_status', WAITING_Q).limit(300), degraded, 'send_queue'),
+      safe(db.from('send_queue').select('id, thread_key, queue_status, scheduled_for, scheduled_for_utc, created_at, source, seller_display_name').in('source', ['auto_reply', 'seller_inbound_orchestrator']).in('queue_status', WAITING_Q).limit(300), degraded, 'send_queue'),
+      // a run is executing only while its execution row is open (steps are recorded when it finishes)
+      safe(db.from('seller_automation_executions').select('id, thread_id, property_id, started_at').is('completed_at', null).gte('started_at', iso(now - 10 * 60e3)).limit(50), degraded, 'seller_automation_executions'),
     ])
+    const rev = revAll.filter((r) => !isInternalTestPhone(r.thread_id))
+    const holds = holdsAll.filter((h) => !isInternalTestPhone(h.thread_key))
+    const pending = pendingAll.filter((p) => !isInternalTestPhone(p.thread_key))
+    const running = runningAll.filter((r) => !isInternalTestPhone(r.thread_id))
     const execIds = [...new Set(rev.map((r) => r.execution_id))]
-    const execs = execIds.length ? await inChunks(db, 'seller_automation_executions', 'id, thread_id, property_id, started_at', 'id', execIds, degraded) : []
+    const execs = (execIds.length ? await inChunks(db, 'seller_automation_executions', 'id, thread_id, property_id, started_at', 'id', execIds, degraded) : []).filter((e) => !isInternalTestPhone(e.thread_id))
     const threads = [...new Set([...execs.map((e) => e.thread_id), ...holds.map((h) => h.thread_key)].filter(Boolean))]
     const open = threads.length ? await openThreads(db, threads) : new Set()
-    const nm = await sellerNames(db, [...threads, ...pending.map((p) => p.thread_key)], execs.map((e) => e.property_id), degraded)
+    const nm = await sellerNames(db, [...threads, ...pending.map((p) => p.thread_key), ...running.map((r) => r.thread_id)], [...execs.map((e) => e.property_id), ...running.map((r) => r.property_id)], degraded)
     // a conversation needs a person when its LATEST run asked for review and it is still open —
     // exactly the rule the runs ledger applies, so the rail and the run never disagree
     const openThreadsList = [...new Set(execs.map((e) => e.thread_id).filter((t) => open.has(t)))]
@@ -282,15 +321,21 @@ export const sellerAdapter = {
     const reason = new Map(rev.map((r) => [r.execution_id, r.block_reason]))
     const blockRows = latest.size ? await inChunks(db, 'seller_automation_execution_steps', 'execution_id, block_reason', 'execution_id', [...latest.values()].map((e) => e.id), degraded, (q) => q.eq('action_key', 'automation_blocked')) : []
     const blockBy = new Map(blockRows.map((b) => [b.execution_id, b.block_reason]))
-    const needs = [...latest.values()].map((e) => ({ run_id: e.id, node_key: 'human_review', subject: subject('seller', e.thread_id, nm.name(e.thread_id), nm.address(e.thread_id, e.property_id), inbox(e.thread_id)), reason: reasonText(blockBy.get(e.id)) || reasonText(reason.get(e.id)) || 'Automation flagged it for review', since: e.started_at, href: inbox(e.thread_id) }))
-    for (const h of holds) if (open.has(h.thread_key) && !latest.has(h.thread_key)) needs.push({ run_id: `queue:${h.id}`, node_key: 'approval_hold', subject: subject('seller', h.thread_key, h.seller_display_name || nm.name(h.thread_key), h.property_address || nm.address(h.thread_key), inbox(h.thread_key)), reason: 'Reply drafted — awaiting your approval', since: h.held_at || h.created_at, href: inbox(h.thread_key) })
+    const needs = [...latest.values()].map((e) => ({ run_id: e.id, node_key: 'human_review', category: 'human_review', reason_code: blockBy.get(e.id) || reason.get(e.id) || null, subject: subject('seller', e.thread_id, nm.name(e.thread_id), nm.address(e.thread_id, e.property_id), inbox(e.thread_id)), reason: reasonText(blockBy.get(e.id)) || reasonText(reason.get(e.id)) || 'Automation flagged it for review', since: e.started_at, href: inbox(e.thread_id) }))
+    for (const h of holds) if (open.has(h.thread_key) && !latest.has(h.thread_key)) needs.push({ run_id: `queue:${h.id}`, open: { workflow_key: 'queue_dispatch', run_id: h.id }, node_key: 'approval_hold', category: 'approval', reason_code: 'review_hold', subject: subject('seller', h.thread_key, h.seller_display_name || nm.name(h.thread_key), h.property_address || nm.address(h.thread_key), inbox(h.thread_key)), reason: 'Reply drafted — awaiting your approval', since: h.held_at || h.created_at, href: inbox(h.thread_key) })
+    const followUps = pending.filter((p) => p.source === 'seller_inbound_orchestrator')
     return {
-      // pending replies/follow-ups are queue rows — the queue owns messages in flight; the seller flow owns its open reviews
-      in_flight: needs.length,
+      // pending replies/follow-ups are queue rows: the QUEUE owns messages in flight (counted
+      // there once); the seller flow owns its open reviews and the runs executing right now
+      in_flight: running.length,
+      executing: running.length,
+      waiting: 0,
+      follow_ups_scheduled: followUps.length,
       needs_you: needs,
       live: [
-        ...pending.map((p) => ({ run_id: `queue:${p.id}`, node_key: p.source === 'seller_inbound_orchestrator' ? 'schedule_follow_up' : 'dispatch_handoff', status: 'waiting', subject: subject('seller', p.thread_key, p.seller_display_name || nm.name(p.thread_key), null, inbox(p.thread_key)), since: p.created_at, detail: p.source === 'seller_inbound_orchestrator' ? `follow-up due ${DATE(p.scheduled_for) || '—'}` : lab(p.queue_status) })),
-        ...needs.map((n) => ({ run_id: n.run_id, node_key: n.node_key, status: 'needs_you', subject: n.subject, since: n.since, detail: n.reason })),
+        ...running.map((r) => ({ run_id: r.id, node_key: 'reply_received', status: 'running', subject: subject('seller', r.thread_id, nm.name(r.thread_id), nm.address(r.thread_id, r.property_id), inbox(r.thread_id)), since: r.started_at, detail: 'processing — steps are recorded when the run finishes' })),
+        ...pending.map((p) => ({ run_id: `queue:${p.id}`, open: { workflow_key: 'queue_dispatch', run_id: p.id }, node_key: p.source === 'seller_inbound_orchestrator' ? 'schedule_follow_up' : 'dispatch_handoff', status: 'waiting', subject: subject('seller', p.thread_key, p.seller_display_name || nm.name(p.thread_key), null, inbox(p.thread_key)), since: p.created_at, due_at: p.scheduled_for_utc || p.scheduled_for || null, detail: p.source === 'seller_inbound_orchestrator' ? `follow-up due ${DATE(p.scheduled_for_utc || p.scheduled_for) || '—'}` : lab(p.queue_status) })),
+        ...needs.map((n) => ({ run_id: n.run_id, open: n.open, node_key: n.node_key, status: 'needs_you', subject: n.subject, since: n.since, detail: n.reason })),
       ],
     }
   },

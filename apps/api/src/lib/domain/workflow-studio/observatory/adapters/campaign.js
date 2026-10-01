@@ -15,6 +15,9 @@ import { DAY, iso } from '../core.js'
 const KEY = 'campaign_execution'
 const RT = 'campaign activate-due + feeder'
 const href = (id) => `/campaigns?campaign=${encodeURIComponent(id)}`
+/** test campaigns ("Miami - Test Campaign", "DALLAS - Test") are fixtures, never operations */
+export const isTestCampaign = (c) => /\btest\b/i.test(String(c?.name || ''))
+const blockerLine = (counts, n = 2) => topCounts(counts, n).map(([k, v]) => `${Number(v).toLocaleString('en-US')} ${human(k).toLowerCase()}`).join(' · ')
 
 function passToRun(r, camp) {
   const { push, events } = nodeEvents(KEY, r.id, RT)
@@ -102,8 +105,9 @@ export const campaignAdapter = {
     const acts = await safe(db.from('campaign_events').select('id, campaign_id, run_id, event_type, title, created_at').eq('event_type', 'campaign.activated').gte('created_at', since).limit(200), degraded, 'campaign_events')
     const lifecycle = await safe(db.from('campaigns').select('id, name, status, completed_at, metadata').or(`completed_at.gte.${since},status.eq.scheduled`).limit(200), degraded, 'campaigns')
     const camps = await campaignsById(db, [...runs.map((r) => r.campaign_id), ...acts.map((a) => a.campaign_id)], degraded)
-    const out = [...runs.map((r) => passToRun(r, camps.get(r.campaign_id))), ...acts.filter((a) => !until || a.created_at < until).map((a) => activationRun(a, camps.get(a.campaign_id)))]
-    for (const c of lifecycle) {
+    const real = (id) => !isTestCampaign(camps.get(id))
+    const out = [...runs.filter((r) => real(r.campaign_id)).map((r) => passToRun(r, camps.get(r.campaign_id))), ...acts.filter((a) => (!until || a.created_at < until) && real(a.campaign_id)).map((a) => activationRun(a, camps.get(a.campaign_id)))]
+    for (const c of lifecycle.filter((x) => !isTestCampaign(x))) {
       if (c.completed_at && c.completed_at >= since) out.push(completionRun(c))
       if (c.metadata?.schedule_missed_for && (c.metadata?.schedule_missed_at || c.metadata.schedule_missed_for) >= since) out.push(missedRun(c))
     }
@@ -150,24 +154,63 @@ export const campaignAdapter = {
     }
   },
 
-  summary: (db, o) => timestampSummary(() => db.from('campaign_runs').select('created_at, status').eq('run_type', 'launch_queue_plan').gte('created_at', iso(o.now - 7 * DAY)).order('created_at', { ascending: false }), { ...o, source: 'campaign_runs', failed: (r) => r.status === 'failed' }),
+  /** Passes are runs; the ones that placed rows are counted apart so "runs today" never reads as work done. */
+  async summary(db, { now, dayStart, degraded = [] }) {
+    const rows = await paged(() => db.from('campaign_runs').select('created_at, status, queue_rows_created').eq('run_type', 'launch_queue_plan').gte('created_at', iso(now - 7 * DAY)).order('created_at', { ascending: false }), { limit: 6000, degraded, source: 'campaign_runs' })
+    const today = rows.filter((r) => String(r.created_at) >= dayStart)
+    const day = rows.filter((r) => Date.parse(r.created_at) > now - DAY)
+    return {
+      runs_today: today.length,
+      runs_24h: day.length,
+      runs_7d: rows.length,
+      failed_24h: day.filter((r) => r.status === 'failed').length,
+      last_run_at: rows[0]?.created_at || null,
+      placed_today: today.filter((r) => Number(r.queue_rows_created || 0) > 0).length,
+      placed_24h: day.filter((r) => Number(r.queue_rows_created || 0) > 0).length,
+      held_24h: day.filter((r) => !Number(r.queue_rows_created || 0) && r.status !== 'failed').length,
+      rows_placed_24h: day.reduce((a, r) => a + Number(r.queue_rows_created || 0), 0),
+    }
+  },
 
   /** Activity: a refill pass that placed nothing for the same reasons as the last one is not an event. */
   activityFilter: (o) => !(o.run.status === 'held' && /^Nothing placed/.test(o.run.result || '')),
 
   /** Right now: campaigns being fed are in flight; a stalled feeder or a missed start needs a person. */
-  async current(db, { degraded = [] } = {}) {
-    const rows = await safe(db.from('campaigns').select('id, name, status, auto_queue_enabled, emergency_stop_at, execution_heartbeat_at, metadata').in('status', ['active', 'activating', 'scheduled', 'paused']).limit(200), degraded, 'campaigns')
+  async current(db, { now = Date.now(), degraded = [] } = {}) {
+    const rows = (await safe(db.from('campaigns').select('id, name, status, auto_queue_enabled, emergency_stop_at, execution_heartbeat_at, metadata').in('status', ['active', 'activating', 'scheduled', 'paused']).limit(200), degraded, 'campaigns')).filter((c) => !isTestCampaign(c))
     const live = rows.filter((c) => ['active', 'activating'].includes(lower(c.status)) && c.auto_queue_enabled && !c.emergency_stop_at)
+    const stalled = rows.filter((c) => c.metadata?.feeder_last?.stalled)
+    // the exact pass behind each live / stalled campaign (its latest), so a click opens a real run
+    const tracked = [...new Set([...live, ...stalled].map((c) => c.id))]
+    const passes = tracked.length ? await paged(() => db.from('campaign_runs').select('id, campaign_id, status, queue_rows_created, ready_to_queue, blocked_counts, created_at').eq('run_type', 'launch_queue_plan').in('campaign_id', tracked).gte('created_at', iso(now - DAY)).order('created_at', { ascending: false }), { limit: 3000, degraded, source: 'campaign_runs' }) : []
+    const running = await safe(db.from('campaign_runs').select('id, campaign_id, created_at').eq('run_type', 'launch_queue_plan').eq('status', 'started').gte('created_at', iso(now - 10 * 60e3)).limit(20), degraded, 'campaign_runs')
     const needs = []
+    for (const c of stalled) {
+      const mine = passes.filter((p) => p.campaign_id === c.id)
+      const last = mine[0] || null
+      const placed = mine.filter((p) => Number(p.queue_rows_created || 0) > 0).length
+      const why = last ? blockerLine(last.blocked_counts) : ''
+      needs.push({
+        run_id: last ? last.id : null, node_key: last ? 'queue_plan' : 'stalled', category: 'stalled', reason_code: 'feeder_stalled',
+        subject: subject('campaign', c.id, c.name, null, href(c.id)),
+        reason: `Feeder stalled — ${Number(last?.ready_to_queue || 0).toLocaleString('en-US')} sendable targets, none placed${why ? ` · ${why}` : ''}`,
+        detail: mine.length ? `${mine.length} pass${mine.length === 1 ? '' : 'es'} in 24h · ${placed} placed rows` : null,
+        since: c.metadata.feeder_last.at || last?.created_at || null, href: href(c.id),
+      })
+    }
     for (const c of rows) {
-      if (c.metadata?.feeder_last?.stalled) needs.push({ run_id: c.id, node_key: 'stalled', subject: subject('campaign', c.id, c.name, null, href(c.id)), reason: 'Feeder stalled — sendable targets remain but none could be placed', since: c.metadata.feeder_last.at || null, href: href(c.id) })
-      if (lower(c.status) === 'scheduled' && c.metadata?.schedule_missed_for) needs.push({ run_id: `missed:${c.id}`, node_key: 'marked_missed', subject: subject('campaign', c.id, c.name, null, href(c.id)), reason: `Scheduled start missed (${String(c.metadata.schedule_missed_for).slice(0, 16).replace('T', ' ')}) — never fired late`, since: c.metadata.schedule_missed_at || c.metadata.schedule_missed_for, href: href(c.id) })
+      if (lower(c.status) === 'scheduled' && c.metadata?.schedule_missed_for) needs.push({ run_id: `missed:${c.id}`, node_key: 'marked_missed', category: 'human_review', reason_code: 'schedule_missed', subject: subject('campaign', c.id, c.name, null, href(c.id)), reason: `Scheduled start missed (${String(c.metadata.schedule_missed_for).slice(0, 16).replace('T', ' ')}) — never fired late`, since: c.metadata.schedule_missed_at || c.metadata.schedule_missed_for, href: href(c.id) })
     }
     return {
       in_flight: live.length,
+      executing: running.length,
+      waiting: 0,
+      feeding: live.length,
       needs_you: needs,
-      live: live.map((c) => ({ run_id: c.id, node_key: c.metadata?.feeder_last?.inserted ? 'queue_plan' : c.metadata?.feeder_last?.bound && c.metadata.feeder_last.bound !== 'buffer' ? 'capacity_hold' : 'feed_room', status: 'running', subject: subject('campaign', c.id, c.name, null, href(c.id)), since: c.execution_heartbeat_at || null, detail: c.metadata?.feeder_last ? `${human(c.metadata.feeder_last.reason || c.metadata.feeder_last.bound || '')} · ${c.metadata.feeder_last.active_live_rows ?? 0} in queue` : null })),
+      live: [
+        ...running.map((r) => ({ run_id: r.id, node_key: 'queue_plan', status: 'running', subject: subject('campaign', r.campaign_id, rows.find((c) => c.id === r.campaign_id)?.name || 'Campaign', null, href(r.campaign_id)), since: r.created_at, detail: 'pass in progress' })),
+        ...live.map((c) => ({ run_id: passes.find((p) => p.campaign_id === c.id)?.id || null, campaign_id: c.id, node_key: c.metadata?.feeder_last?.inserted ? 'queue_plan' : c.metadata?.feeder_last?.bound && c.metadata.feeder_last.bound !== 'buffer' ? 'capacity_hold' : 'feed_room', status: c.metadata?.feeder_last?.stalled ? 'held' : 'waiting', subject: subject('campaign', c.id, c.name, null, href(c.id)), since: c.execution_heartbeat_at || null, detail: c.metadata?.feeder_last ? `${human(c.metadata.feeder_last.reason || c.metadata.feeder_last.bound || '')} · ${c.metadata.feeder_last.active_live_rows ?? 0} in queue` : null })),
+      ],
     }
   },
 

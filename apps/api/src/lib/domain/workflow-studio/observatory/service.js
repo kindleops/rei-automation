@@ -14,7 +14,7 @@
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { DAY, H, foldTelemetry, human, iso, pathOf, periodOf, PERIODS, validateTopology } from './core.js'
-import { REGISTRY, SYSTEM_ADAPTERS, resolveSystemStatus, studioEntry, v2Entries, notRunningEntries } from './registry.js'
+import { REGISTRY, SYSTEM_ADAPTERS, resolveSystemStatus, studioEntry, v2Entries, notRunningEntries, ORCHESTRATOR_HEARTBEAT, ORCHESTRATOR_SWITCH } from './registry.js'
 import { studioAdapter } from './adapters/studio.js'
 import { publicEvents } from './adapters/shared.js'
 import { whyOf } from './why.js'
@@ -61,21 +61,55 @@ export async function summaryFromLoad(adapter, db, { now, dayStart, degraded = [
   }
 }
 
+/**
+ * Runtime health: each runtime's OWN heartbeat (system_control), never a
+ * cached count. Event-driven runtimes have no clock — their evidence is the
+ * last run; external providers are evidenced by the last webhook they sent.
+ */
+export const RUNTIME_BEATS = Object.freeze([
+  { key: 'queue_runner', label: 'Queue runner', heartbeat_key: 'queue_processor_heartbeat_at', stale_ms: 5 * 60e3, cadence: 'every minute', workflows: ['queue_dispatch'] },
+  { key: 'campaign_feeder', label: 'Campaign execution', heartbeat_key: 'campaign_feeder_heartbeat_at', stale_ms: 15 * 60e3, cadence: 'every 5 min', workflows: ['campaign_execution'] },
+  { key: 'delivery_recovery', label: 'Delivery reconciliation', heartbeat_key: 'webhook_delivery_recovery_last_at', stale_ms: 15 * 60e3, cadence: 'every 5 min', workflows: ['delivery_reconcile'] },
+  { key: 'seller_reconcile', label: 'Lead-state reconcile', heartbeat_key: 'seller_state_reconcile_heartbeat_at', stale_ms: 15 * 60e3, cadence: 'every 5 min', workflows: ['lead_state_reconcile'] },
+  { key: 'orchestrator', label: 'Studio orchestrator', heartbeat_key: ORCHESTRATOR_HEARTBEAT, stale_ms: 15 * 60e3, cadence: 'every 5 min', switch_key: ORCHESTRATOR_SWITCH, workflows: ['event_bridge'] },
+  { key: 'closing', label: 'Closing execution', heartbeat_key: 'closing_automation_heartbeat_at', stale_ms: 15 * 60e3, cadence: 'every 5 min', switch_key: 'closing_automation_enabled', workflows: ['closing_execution'] },
+  { key: 'email', label: 'Email dispatch', heartbeat_key: 'email_dispatch_heartbeat_at', stale_ms: 5 * 60e3, cadence: 'every minute', switch_key: 'email_enabled', off_unless_true: true, workflows: ['email_dispatch'] },
+  { key: 'textgrid_inbound', label: 'TextGrid inbound webhook', heartbeat_key: 'webhook_live_inbound_last_at', stale_ms: null, cadence: 'on provider delivery', external: true, workflows: ['seller_inbound'] },
+  { key: 'textgrid_delivery', label: 'TextGrid delivery callbacks', heartbeat_key: 'webhook_live_delivery_last_at', stale_ms: null, cadence: 'on provider callback', external: true, workflows: ['queue_dispatch'] },
+])
+
+export function runtimeHealth(ctl = {}, now = Date.now()) {
+  return RUNTIME_BEATS.map((b) => {
+    const at = ctl[b.heartbeat_key] || null
+    const t = at ? Date.parse(at) : NaN
+    const sw = b.switch_key ? String(ctl[b.switch_key] ?? '').toLowerCase() : null
+    let state = !Number.isFinite(t) ? 'never' : b.stale_ms && now - t > b.stale_ms ? 'stale' : 'current'
+    // an external provider has no schedule: silence is "last seen", not degradation
+    if (b.external && state !== 'never') state = 'seen'
+    const off = b.off_unless_true ? sw !== 'true' : sw === 'false'
+    return { key: b.key, label: b.label, heartbeat_key: b.heartbeat_key, at, age_ms: Number.isFinite(t) ? Math.max(0, now - t) : null, state, cadence: b.cadence, switched_off: Boolean(b.switch_key && off), switch_key: b.switch_key || null, external: Boolean(b.external), workflows: b.workflows }
+  })
+}
+
 export async function getRegistry({ dayStart = null } = {}, deps = {}) {
   const db = dbOf(deps)
   const now = nowOf(deps)
   const degraded = []
   const day0 = dayStart && Number.isFinite(Date.parse(dayStart)) ? dayStart : iso(Math.floor(now / DAY) * DAY)
-  const heartbeatKeys = [...new Set(REGISTRY.flatMap((r) => [r.heartbeat_key, r.kill_switch, ...(r.policy_keys || [])]).filter(Boolean))]
+  const heartbeatKeys = [...new Set([...REGISTRY.flatMap((r) => [r.heartbeat_key, r.kill_switch, ...(r.policy_keys || [])]), ...RUNTIME_BEATS.flatMap((b) => [b.heartbeat_key, b.switch_key])].filter(Boolean))]
   const ctl = await controls(db, heartbeatKeys)
+  const currents = {}
   const system = await Promise.all(REGISTRY.map(async (r) => {
     const adapter = SYSTEM_ADAPTERS[r.workflow_key]
     let stats = null
     let cur = null
     try {
-      stats = adapter?.summary ? await adapter.summary(db, { now, dayStart: day0, degraded }) : adapter ? await summaryFromLoad(adapter, db, { now, dayStart: day0, degraded }) : null
-      cur = adapter?.current ? await adapter.current(db, { now, degraded }) : null
+      ;[stats, cur] = await Promise.all([
+        adapter?.summary ? adapter.summary(db, { now, dayStart: day0, degraded }) : adapter ? summaryFromLoad(adapter, db, { now, dayStart: day0, degraded }) : null,
+        adapter?.current ? adapter.current(db, { now, degraded }) : null,
+      ])
     } catch { degraded.push(r.workflow_key) }
+    currents[r.workflow_key] = cur
     return resolveSystemStatus(r, { ctl, now, stats, current: cur })
   }))
   let studio = []
@@ -83,24 +117,35 @@ export async function getRegistry({ dayStart = null } = {}, deps = {}) {
     const wfs = await studioAdapter.workflows(db, { degraded })
     const cur = await studioAdapter.current(db, { degraded })
     const runs = wfs.length ? await Promise.all(wfs.map((w) => studioAdapter.load(db, w.workflow_key, { since: iso(now - 7 * DAY), limit: 500, degraded }))) : []
-    studio = wfs.map((w, i) => studioEntry(w, runs[i] || [], cur, { now, dayStart: day0 }))
+    studio = wfs.map((w, i) => studioEntry(w, runs[i] || [], cur, { now, dayStart: day0, ctl }))
   } catch { degraded.push('wf_workflows') }
   let v2 = []
   try { v2 = await v2Entries(db, { degraded }) } catch { degraded.push('workflow_definitions') }
   const workflows = [...system, ...studio, ...notRunningEntries(), ...v2]
   const visible = workflows.filter((w) => !w.test)
   const liveKinds = ['live', 'armed']
+  const sum = (k) => visible.reduce((a, w) => a + (Number(w.stats[k]) || 0), 0)
+  const campaign = visible.find((w) => w.workflow_key === 'campaign_execution')
   return {
     ok: true,
     generated_at: iso(now),
     day_start: day0,
     workflows,
     telemetry: {
-      in_flight: visible.reduce((a, w) => a + (w.stats.in_flight || 0), 0),
-      needs_you: visible.reduce((a, w) => a + (w.stats.needs_you || 0), 0),
+      in_flight: sum('in_flight'),
+      needs_you: sum('needs_you'),
       live_automations: visible.filter((w) => liveKinds.includes(w.status)).length,
-      events_today: visible.reduce((a, w) => a + (w.stats.runs_today || 0), 0),
+      events_today: sum('runs_today'),
+      // honest "now": executing needs runtime evidence of work in progress; waiting is a healthy schedule
+      executing_now: sum('executing'),
+      waiting_now: sum('waiting'),
+      runs_today: sum('runs_today'),
+      // a campaign scheduler pass is a run — but most place nothing; say so instead of letting them pass as work
+      campaign_passes_today: campaign?.stats.runs_today ?? null,
+      campaign_passes_placed_today: campaign?.stats.placed_today ?? null,
+      by_workflow_today: Object.fromEntries(visible.filter((w) => w.stats.runs_today).map((w) => [w.workflow_key, w.stats.runs_today])),
     },
+    runtimes: runtimeHealth(ctl, now),
     degraded: [...new Set(degraded)],
   }
 }
@@ -151,7 +196,7 @@ export async function getWorkflow(key, { period = '24h' } = {}, deps = {}) {
   }
   const entry = wf.kind === 'system'
     ? await systemEntry(db, wf.entry, { now, current, degraded })
-    : studioEntry(wf.workflow, observed, current, { now, dayStart: iso(Math.floor(now / DAY) * DAY) })
+    : studioEntry(wf.workflow, observed, current, { now, dayStart: iso(Math.floor(now / DAY) * DAY), ctl: await controls(db, [ORCHESTRATOR_HEARTBEAT, ORCHESTRATOR_SWITCH]) })
   return {
     ok: true,
     workflow: entry,
@@ -163,7 +208,7 @@ export async function getWorkflow(key, { period = '24h' } = {}, deps = {}) {
 
 /* ── runs ledger ───────────────────────────────────────────────────────── */
 
-export async function listRuns(key, { period = '7d', status = null, q = '', cursor = null, limit = 60, node = null, reason = null, version = null, from = null, to = null, human: onlyHuman = false } = {}, deps = {}) {
+export async function listRuns(key, { period = '7d', status = null, q = '', cursor = null, limit = 60, node = null, reason = null, version = null, from = null, to = null, human: onlyHuman = false, edge = null } = {}, deps = {}) {
   const db = dbOf(deps)
   const now = nowOf(deps)
   const degraded = []
@@ -174,15 +219,17 @@ export async function listRuns(key, { period = '7d', status = null, q = '', curs
   const needle = String(q || '').trim().toLowerCase()
   // drill-down filters (analytics → runs): a node the run passed, a recorded reason, a version, a time bucket
   const drilled = observed.filter((o) => {
-    if (node || reason) {
+    if (node || reason || edge) {
       const p = pathOf(wf.topology, o.events)
       if (node && (!p.nodes[node] || p.nodes[node].status === 'skipped')) return false
+      // a branch cohort: the runs that actually traversed this edge
+      if (edge && !p.edges.includes(edge)) return false
       if (reason && !Object.values(p.nodes).some((v) => String(v.reason || '').toLowerCase() === String(reason).toLowerCase()) && String(o.run.reason || '').toLowerCase() !== String(reason).toLowerCase()) return false
     }
     if (version && String(o.run.version || '') !== String(version)) return false
     if (from && String(o.run.started_at) < String(from)) return false
     if (to && String(o.run.started_at) >= String(to)) return false
-    if (onlyHuman && !o.run.human) return false
+    if (onlyHuman && !o.run.human && o.run.status !== 'needs_you') return false
     return true
   })
   const all = drilled.map((o) => o.run).filter((r) => !cursor || String(r.started_at) < String(cursor))
@@ -220,8 +267,20 @@ export async function getRun(key, runId, deps = {}) {
     links: d.links || [],
     technical: { ...(d.technical || {}), topology_version: topology.topology_version, source_runtime: wf.adapter?.source_runtime || studioAdapter.source_runtime, degraded },
     topology_version: topology.topology_version,
+    timing: wf.kind === 'studio' ? TIMING.measured : wf.adapter?.timing || TIMING.single,
   }
 }
+
+/**
+ * How much a run's step timestamps can be trusted for replay. Replay plays the
+ * recorded granularity honestly — it never spaces steps out to look alive.
+ */
+export const TIMING = Object.freeze({
+  measured: { quality: 'measured', note: 'Each step is stamped by the orchestrator when it executes (one tick every 5 minutes) — replay follows those times.' },
+  recorder: { quality: 'recorder', note: 'Steps are written by the seller-flow recorder in one burst after the run finishes: their order is causal, their spacing is the recorder’s, not the runtime’s.' },
+  inferred: { quality: 'inferred', note: 'The runner keeps one row per message: gates before the deciding one are inferred from its final status. Due, sent and delivered times are real.' },
+  single: { quality: 'single', note: 'This runtime records one row per run — every step shares that row’s timestamp, so replay shows order only.' },
+})
 
 /* ── activity (grouped per run) ────────────────────────────────────────── */
 
@@ -295,29 +354,68 @@ export async function getNeedsYou(deps = {}) {
 
 export const LIVE_CADENCE_MS = 15_000
 
-export async function getLive({ since = null } = {}, deps = {}) {
+/**
+ * The edges a run traversed AFTER `from`: each path edge whose target node was
+ * reached by an event newer than the cursor. One traversal → one pulse on the
+ * canvas, at the time the runtime recorded it; nothing is animated without one.
+ */
+export function traversalsOf(topology, observed, from) {
+  const out = []
+  for (const o of observed) {
+    const fresh = o.events.filter((e) => e.occurred_at && e.occurred_at > from)
+    if (!fresh.length) continue
+    const p = pathOf(topology, o.events)
+    const byTo = new Map(topology.edges.map((e) => [e.id, e]))
+    for (const id of p.edges) {
+      const e = byTo.get(id)
+      if (!e) continue
+      const hit = fresh.find((x) => x.node_key === e.to)
+      if (!hit) continue
+      out.push({ workflow_key: o.run.workflow_key, run_id: o.run.run_id, edge_id: id, from: e.from, to: e.to, at: hit.occurred_at, status: p.nodes[e.to]?.status || hit.status })
+    }
+  }
+  return out.sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
+
+export async function getLive({ since = null, key = null } = {}, deps = {}) {
   const db = dbOf(deps)
   const now = nowOf(deps)
   const degraded = []
   const from = since && Number.isFinite(Date.parse(since)) && now - Date.parse(since) < 6 * H ? since : iso(now - 15 * 60e3)
   const active = []
   const recent = []
-  await Promise.all(REGISTRY.map(async (r) => {
+  const traversals = []
+  const regs = key ? REGISTRY.filter((r) => r.workflow_key === key) : REGISTRY
+  await Promise.all(regs.map(async (r) => {
     const a = SYSTEM_ADAPTERS[r.workflow_key]
     if (!a || a.live === false) return
     try {
-      const c = a.current ? await a.current(db, { now, degraded }) : null
+      const [c, observed] = await Promise.all([a.current ? a.current(db, { now, degraded }) : null, a.load(db, { since: from, limit: 120, degraded })])
       for (const x of c?.live || []) active.push({ ...x, workflow_key: x.workflow_key || r.workflow_key })
-      const observed = await a.load(db, { since: from, limit: 120, degraded })
       for (const o of observed) for (const e of o.events) if (e.occurred_at && e.occurred_at > from) recent.push(e)
+      traversals.push(...traversalsOf(a.topology, observed, from))
     } catch { degraded.push(r.workflow_key) }
   }))
-  try {
-    const c = await studioAdapter.current(db, { degraded })
-    for (const x of c.live || []) active.push(x)
-  } catch { degraded.push('wf_runs') }
+  if (!key || !SYSTEM_ADAPTERS[key]) {
+    try {
+      const c = await studioAdapter.current(db, { degraded })
+      for (const x of c.live || []) if (!key || x.workflow_key === key) active.push(x)
+      if (key) {
+        const wf = await resolveWorkflow(db, key, degraded)
+        if (wf?.kind === 'studio') {
+          const observed = await studioAdapter.load(db, key, { since: from, limit: 120, degraded })
+          for (const o of observed) for (const e of o.events) if (e.occurred_at && e.occurred_at > from) recent.push(e)
+          traversals.push(...traversalsOf(wf.topology, observed, from))
+        }
+      }
+    } catch { degraded.push('wf_runs') }
+  }
   recent.sort((a, b) => String(a.occurred_at).localeCompare(String(b.occurred_at)))
-  return { ok: true, now: iso(now), cadence_ms: LIVE_CADENCE_MS, source: 'Read from every runtime’s own ledger every 15 s — one cadence for all runtimes (only the seller ledger could stream; the others have no push channel)', active: active.slice(0, 400), recent: publicEvents(recent.slice(-300)), degraded: [...new Set(degraded)] }
+  return {
+    ok: true, now: iso(now), from, cadence_ms: LIVE_CADENCE_MS,
+    source: 'Read from each runtime’s own ledger every 15 s (no runtime here has a push channel). Steps appear when the runtime records them — the seller flow records a run when it finishes.',
+    active: active.slice(0, 400), recent: publicEvents(recent.slice(-300)), traversals: traversals.slice(-400), degraded: [...new Set(degraded)],
+  }
 }
 
 /* ── drift (internal) ──────────────────────────────────────────────────── */
