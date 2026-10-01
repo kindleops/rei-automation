@@ -29,7 +29,14 @@
  *
  * S10: `acquisition_stage='closed'` in production is overwhelmingly closed-LOST
  * (347 dead, 127 suppressed). A closing is only "Closed" with closing evidence;
- * dead/suppressed terminal rows are reported as "closed out", never as won.
+ * dead/suppressed terminal rows are reported as "closed out", never as won —
+ * and so is an "active" row parked at stage closed with no closing record.
+ *
+ * QUEUE EVIDENCE (2026-10-01 audit). `next_action` is the last turn's intent and
+ * nothing clears it after the send; nothing executes from `next_action_due`.
+ * So "the machine owns it" and "the machine failed" are proven from the
+ * thread's own send_queue rows (see pipeline-ownership.js), never from the
+ * intent: 10 of 16 "Automation overdue" deals had in fact been answered.
  */
 import { latestRunCandidates } from '@/lib/domain/buyer-match/buyer-identity-rules.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
@@ -37,6 +44,22 @@ import { applyFilters, normalizeOpportunityRow } from './opportunity-service.js'
 import { batchHydrateOpportunityProperties } from './opportunity-property-hydration.js'
 import { UNIVERSAL_STAGE_ORDER, UNIVERSAL_STAGE_LABELS } from './universal-pipeline-registry.js'
 import { NON_SPENDABLE_REASONS, resolveValuationSpendability } from '../seller-flow/valuation-offer-authority.js'
+import {
+  AUTONOMY_ORDER,
+  OWNER_ORDER,
+  SEND_HELD,
+  SEND_IN_FLIGHT,
+  STEP_GRACE_MS,
+  deriveOfferAutonomy,
+  holdClassOf,
+  isConversationSend,
+  isSyntheticOpportunity,
+  offerPlausibility,
+  ownerOfLane,
+  resolveQueuedStep,
+  summarizeThreadQueue,
+  useCaseLabel,
+} from './pipeline-ownership.js'
 
 const clean = (v) => String(v ?? '').trim()
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
@@ -80,9 +103,15 @@ export const DORMANT_DAYS = 30
 const SYSTEM_OVERDUE_HOURS = 2
 
 const SYSTEM_ACTIONS = new Set(['send_message_now', 'schedule_follow_up', 'future_seller_followup', 'future_seller_followup_tenant_timing'])
-const SYSTEM_GATE_REASONS = new Set(['execution_gated'])
+/** Execution-mode holds are send gates (configuration), not a decision about this seller. */
+const SYSTEM_GATE_REASONS = new Set(['execution_gated', 'auto_reply_mode_disabled', 'review_only', 'shadow', 'disabled', 'live_limited'])
 const HOLD_REASON_LABEL = {
   execution_gated: 'Held by send gates',
+  auto_reply_mode_disabled: 'Held — auto replies are off',
+  review_only: 'Held — autopilot is in review-only mode',
+  shadow: 'Held — autopilot is in shadow mode',
+  disabled: 'Held — autopilot is disabled',
+  live_limited: 'Held — outside the live-limited scope',
   unclear_low_confidence: 'Reply unclear — autopilot held',
   hostile_or_legal_intent: 'Hostile / legal language',
   opt_out_intent_no_marketing: 'Seller opted out',
@@ -146,8 +175,13 @@ async function inChunks(ids, fn) {
 /**
  * Whose move is it? Pure — every input is evidence already on the row.
  * Exported for tests.
+ *
+ * `queue` is the thread's non-campaign send_queue rows. When it is given
+ * (every production read), "the machine owns it" needs a live or scheduled
+ * row and "the machine failed" needs the turn's step to have gone nowhere;
+ * when it is absent (legacy callers), the stated intent is read as before.
  */
-export function deriveLane(opp, { thread = null, execution = null, closing = null, now = Date.now() } = {}) {
+export function deriveLane(opp, { thread = null, execution = null, closing = null, queue = null, trigger = null, now = Date.now() } = {}) {
   const stage = opp.acquisition_stage
   const idx = STAGE_INDEX[stage] ?? 0
   const status = clean(opp.opportunity_status).toLowerCase()
@@ -159,6 +193,10 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
   const lastOutbound = thread?.last_outbound_at ? Date.parse(thread.last_outbound_at) : null
   const latestDirection = clean(thread?.latest_direction).toLowerCase()
   const closingStatus = clean(closing?.closing_status).toLowerCase()
+  const rows = Array.isArray(queue) ? queue : null
+  const q = rows ? summarizeThreadQueue(rows, { lastOutboundAt: thread?.last_outbound_at || null, now }) : null
+  const noun = next === 'send_message_now' ? 'reply' : 'follow-up'
+  const Noun = noun === 'reply' ? 'Reply' : 'Follow-up'
 
   if (['closed', 'funded', 'recorded'].includes(closingStatus) || closing?.revenue_confirmed_date) {
     return { key: 'complete', label: 'Closed', detail: 'Closing recorded', since: closing?.revenue_confirmed_date || closing?.updated_at || null }
@@ -166,13 +204,24 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
   if (['dead', 'suppressed', 'lost', 'archived'].includes(status)) {
     return { key: 'closed_out', label: status === 'suppressed' ? 'Suppressed' : 'Closed out', detail: INTENT_LABEL[intent] || null, since: opp.last_activity_at }
   }
+  // S10 is reached only through the closing finalize path. A row parked at
+  // stage "closed" without a closing record is closed-lost, whatever its status.
+  if (stage === 'closed') {
+    return { key: 'closed_out', label: 'Closed (lost)', detail: 'Stage is Closed with no closing record', since: opp.last_activity_at, reason: 'closed_without_closing' }
+  }
   const lastTouch = Math.max(
     opp.last_activity_at ? Date.parse(opp.last_activity_at) : 0,
     lastInbound || 0,
     lastOutbound || 0,
     execution?.created_at ? Date.parse(execution.created_at) : 0,
+    q?.lastTouchAt ? Date.parse(q.lastTouchAt) : 0,
   )
-  const scheduledAhead = SYSTEM_ACTIONS.has(next) && due && due > now
+  // Only a real queue row is a machine schedule; a date on the opportunity is
+  // intent nobody executes. Legacy callers (no queue evidence) read the intent.
+  const scheduledAhead = rows ? Boolean(q?.next?.future) : Boolean(SYSTEM_ACTIONS.has(next) && due && due > now)
+  const notedFollowUp = rows && !q?.next && SYSTEM_ACTIONS.has(next) && next !== 'send_message_now' && due && due > now
+    ? `Follow-up noted for ${new Date(due).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: /T00:00:00(\.0+)?(Z|\+00:00?)$/.test(String(opp.next_action_due)) || new Date(due).toISOString().endsWith('T00:00:00.000Z') ? 'UTC' : 'America/Chicago' })} — nothing is queued to send it`
+    : null
   if (!scheduledAhead && idx < 6 && lastTouch && now - lastTouch > DORMANT_DAYS * DAY) {
     const days = Math.floor((now - lastTouch) / DAY)
     return {
@@ -181,6 +230,7 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
       detail: next === 'human_review' ? `Untouched ${days}d · last flagged for review` : `Untouched ${days}d · not in an automation lane`,
       since: new Date(lastTouch).toISOString(),
       reason: 'dormant',
+      ...(notedFollowUp ? { evidence: notedFollowUp } : {}),
     }
   }
   if (thread?.is_suppressed || clean(thread?.inbox_bucket) === 'suppressed') {
@@ -192,8 +242,47 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
   if (clean(opp.blocker)) {
     return { key: 'blocked', label: 'Blocked', detail: clean(opp.blocker), since: opp.last_activity_at, reason: 'blocker' }
   }
+
+  // The turn's queued step, proven from the queue (never from the intent).
+  let nextLive = next
+  let evidence = notedFollowUp
   if (SYSTEM_ACTIONS.has(next) && due && now - due > SYSTEM_OVERDUE_HOURS * HOUR) {
-    return { key: 'blocked', label: 'Automation overdue', detail: next === 'send_message_now' ? 'Queued reply never went out' : 'Scheduled follow-up never ran', since: opp.next_action_due, reason: 'automation_overdue' }
+    if (!rows) {
+      return { key: 'blocked', label: 'Automation overdue', detail: next === 'send_message_now' ? 'Queued reply never went out' : 'Scheduled follow-up never ran', since: opp.next_action_due, reason: 'automation_overdue' }
+    }
+    const step = resolveQueuedStep({ due: opp.next_action_due, anchor: trigger, rows, now })
+    const what = useCaseLabel(step.row?.use_case_template)
+    switch (step.outcome) {
+      case 'sent':
+        nextLive = null
+        evidence = `Autopilot ${noun} ${clean(step.row?.queue_status) === 'delivered' ? 'delivered' : 'sent'}${what ? ` (${what})` : ''}`
+        break
+      case 'sent_by_you':
+        nextLive = null
+        evidence = `You replied — the autopilot’s own ${noun} never went out`
+        break
+      case 'scheduled':
+        return { key: 'system', label: 'Next action scheduled', detail: `${Noun}${what ? ` · ${what}` : ''} scheduled`, since: step.at, at: step.at, reason: 'scheduled' }
+      case 'in_flight':
+        return { key: 'system', label: 'Automation active', detail: `${Noun} sending${what ? ` · ${what}` : ''}`, since: step.at }
+      case 'held':
+        return { key: 'operator', label: 'Needs you', detail: `${Noun} drafted${what ? ` (${what})` : ''} — held for your review`, since: step.at, reason: 'review_draft' }
+      case 'stuck':
+        return { key: 'blocked', label: 'Queued reply not sent', detail: `In the queue since ${relDays(step.at, now)} — the send runner hasn’t taken it`, since: step.at, reason: 'automation_overdue', cause: 'stuck' }
+      case 'health_guard':
+        return { key: 'blocked', label: `${Noun} blocked`, detail: `The send health guard blocked the autopilot’s ${noun}${what ? ` (${what})` : ''}`, since: step.at, reason: 'automation_overdue', cause: 'health_guard' }
+      case 'failed':
+        return { key: 'blocked', label: `${Noun} failed to send`, detail: `The carrier/transport failed the autopilot’s ${noun}${what ? ` (${what})` : ''}`, since: step.at, reason: 'automation_overdue', cause: 'failed' }
+      case 'cancelled':
+        return { key: 'blocked', label: `${Noun} cancelled`, detail: `The autopilot’s ${noun} was cancelled in the queue and nothing replaced it`, since: step.at, reason: 'automation_overdue', cause: 'cancelled' }
+      default:
+        return { key: 'blocked', label: `${Noun} never queued`, detail: `The autopilot decided to ${noun === 'reply' ? 'reply' : 'follow up'} but no message was ever queued`, since: opp.next_action_due, reason: 'automation_overdue', cause: 'never_queued' }
+    }
+  }
+  // A drafted message held for review that nothing has gone out after.
+  if (q?.held) {
+    const what = useCaseLabel(q.held.useCase)
+    return { key: 'operator', label: 'Needs you', detail: `${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)}` : 'Message'} drafted — held for your review`, since: q.held.at, reason: 'review_draft' }
   }
   // A review flag the automation has since acted past (it messaged the seller
   // AFTER the flag was set) is superseded — the ball is with the seller now.
@@ -201,12 +290,13 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
   const reviewSuperseded = Boolean(lastOutbound && flaggedAt && lastOutbound > flaggedAt + HOUR && latestDirection === 'outbound')
   const execHold = execution?.status === 'blocked' && execReason && !SYSTEM_GATE_REASONS.has(execReason)
     && !(lastOutbound && Date.parse(execution.created_at) < lastOutbound)
-  if (((next === 'human_review' || clean(thread?.operational_status) === 'needs_review' || clean(opp.conversation_state) === 'needs_review') && !reviewSuperseded)
+  if (((nextLive === 'human_review' || clean(thread?.operational_status) === 'needs_review' || clean(opp.conversation_state) === 'needs_review') && !reviewSuperseded)
     || execHold) {
+    const sweep = !execHold && nextLive === 'human_review' && clean(opp.last_updated_source) === 'seller_execution_gap_recovery'
     return {
       key: 'operator',
       label: 'Needs you',
-      detail: (execHold && HOLD_REASON_LABEL[execReason]) || INTENT_LABEL[intent] || 'Review requested by the autopilot',
+      detail: (execHold && HOLD_REASON_LABEL[execReason]) || (sweep ? 'Flagged by the recovery sweep — no next step was recorded' : null) || INTENT_LABEL[intent] || 'Review requested by the autopilot',
       since: execHold ? execution.created_at : (opp.last_activity_at || execution?.created_at),
       reason: execHold ? execReason : 'human_review',
     }
@@ -215,10 +305,21 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
     const title = clean(closing?.title_status)
     return { key: 'external', label: idx >= 8 ? 'Title / closing' : idx === 7 ? 'Buyer side' : 'Contract', detail: title ? `Title ${title.replace(/_/g, ' ')}` : SELLER_WAIT_LABEL[stage], since: opp.stage_entered_at }
   }
-  if (SYSTEM_ACTIONS.has(next) || (thread?.pending_queue_count ?? 0) > 0) {
+  if (q?.next) {
+    const what = useCaseLabel(q.next.useCase)
+    const kind = q.next.kind === 'follow_up' ? 'Follow-up' : 'Reply'
+    return q.next.future
+      ? { key: 'system', label: 'Next action scheduled', detail: `${kind}${what ? ` · ${what}` : ''} scheduled`, since: q.next.at, at: q.next.at, reason: 'scheduled' }
+      : { key: 'system', label: 'Automation active', detail: `${kind} sending${what ? ` · ${what}` : ''}`, since: q.next.at }
+  }
+  if (!rows && (SYSTEM_ACTIONS.has(next) || (thread?.pending_queue_count ?? 0) > 0)) {
     return { key: 'system', label: 'Automation active', detail: next === 'send_message_now' ? 'Reply queued by the autopilot' : 'Follow-up scheduled', since: opp.next_action_due || opp.last_activity_at }
   }
-  if (execution?.status === 'blocked' && SYSTEM_GATE_REASONS.has(execReason)) {
+  if (rows && nextLive === 'send_message_now' && due && now - due <= STEP_GRACE_MS) {
+    return { key: 'system', label: 'Automation active', detail: 'Reply being prepared by the autopilot', since: opp.next_action_due }
+  }
+  // A gate that held an earlier turn is history once anyone has written to the seller since.
+  if (execution?.status === 'blocked' && SYSTEM_GATE_REASONS.has(execReason) && !(lastOutbound && Date.parse(execution.created_at) < lastOutbound)) {
     return { key: 'system', label: 'Automation gated', detail: HOLD_REASON_LABEL[execReason], since: execution.created_at, reason: 'gated' }
   }
   if (latestDirection === 'inbound' && (!lastOutbound || (lastInbound && lastInbound > lastOutbound))) {
@@ -226,14 +327,29 @@ export function deriveLane(opp, { thread = null, execution = null, closing = nul
     // automation gap, surfaced as an exception rather than a chore.
     return { key: 'operator', label: 'Reply not handled', detail: 'Seller replied and the autopilot scheduled nothing', since: thread?.last_inbound_at || opp.last_activity_at, reason: 'unanswered_reply' }
   }
-  return { key: 'seller', label: 'Waiting on seller', detail: SELLER_WAIT_LABEL[stage] || 'Waiting on seller', since: thread?.last_outbound_at || opp.last_contact_at || opp.last_activity_at }
+  return {
+    key: 'seller',
+    label: 'Waiting on seller',
+    detail: SELLER_WAIT_LABEL[stage] || 'Waiting on seller',
+    since: thread?.last_outbound_at || opp.last_contact_at || opp.last_activity_at,
+    ...(evidence ? { evidence } : {}),
+  }
+}
+
+function relDays(iso, now = Date.now()) {
+  const t = iso ? Date.parse(iso) : NaN
+  if (!Number.isFinite(t)) return 'earlier'
+  const d = Math.floor((now - t) / DAY)
+  return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`
 }
 
 /** Stalled against the stage's own clock. Returns null when moving. Exported for tests. */
 export function deriveStall(opp, lane, { thread = null, now = Date.now() } = {}) {
   if (['complete', 'closed_out', 'dormant'].includes(lane.key)) return null
   const stage = opp.acquisition_stage
-  if (lane.reason === 'automation_overdue') return { key: 'automation', label: 'Automation overdue' }
+  if (lane.reason === 'automation_overdue') return { key: 'automation', label: lane.label === 'Automation overdue' ? 'Automation overdue' : lane.label }
+  // A machine step in flight or on the calendar is movement, not a stall.
+  if (lane.key === 'system' && lane.reason !== 'gated') return null
   if (lane.key === 'operator') {
     const since = lane.since ? Date.parse(lane.since) : null
     if (since && now - since > OPERATOR_WAIT_HOURS * HOUR) return { key: 'operator', label: `Waiting on operator ${Math.floor((now - since) / DAY) || 1}d` }
@@ -308,11 +424,38 @@ async function loadScope(client, params) {
   return (data || []).map(normalizeOpportunityRow).filter(Boolean)
 }
 
+/** Fixtures (canary properties) never count as deals. Returns [kept, excludedCount]. */
+export function withoutSyntheticOpportunities(rows) {
+  const kept = []
+  let excluded = 0
+  for (const r of rows || []) {
+    if (isSyntheticOpportunity(r)) excluded += 1
+    else kept.push(r)
+  }
+  return [kept, excluded]
+}
+
+const QUEUE_COLUMNS = 'id, thread_key, queue_status, scheduled_for_utc, created_at, sent_at, delivered_at, source, use_case_template, message_type, type'
+const QUEUE_LOOKBACK_DAYS = 90
+
+/** Deals whose stated system step is past due — the only ones that need a trigger time. */
+function overdueStepRows(rows, now = Date.now()) {
+  return rows.filter((r) => {
+    const due = r.next_action_due ? Date.parse(r.next_action_due) : null
+    return SYSTEM_ACTIONS.has(clean(r.next_action).toLowerCase()) && due && now - due > SYSTEM_OVERDUE_HOURS * HOUR && clean(r.primary_thread_key)
+  })
+}
+
 async function loadEvidence(client, rows) {
   const threadKeys = [...new Set(rows.map((r) => clean(r.primary_thread_key)).filter(Boolean))]
   const oppIds = rows.map((r) => r.id)
+  const overdue = overdueStepRows(rows)
+  const overdueKeys = [...new Set(overdue.map((r) => clean(r.primary_thread_key)))]
+  const earliestDue = overdue.reduce((m, r) => Math.min(m, Date.parse(r.next_action_due)), Date.now())
   const since = new Date(Date.now() - 120 * DAY).toISOString()
-  const [threads, executions, closings] = await Promise.all([
+  const queueSince = new Date(Date.now() - QUEUE_LOOKBACK_DAYS * DAY).toISOString()
+  const liveStatuses = [...SEND_IN_FLIGHT, ...SEND_HELD]
+  const [threads, executions, closings, recentQueue, liveQueue, triggers] = await Promise.all([
     inChunks(threadKeys, async (keys) => (await client.from('inbox_thread_state')
       .select('thread_key, inbox_bucket, is_suppressed, suppressed_at, operational_status, latest_direction, last_inbound_at, last_outbound_at, latest_message_body, latest_message_at, pending_queue_count, is_hot_lead, automation_lane')
       .in('thread_key', keys)).data),
@@ -323,6 +466,23 @@ async function loadEvidence(client, rows) {
     inChunks(oppIds, async (ids) => (await client.from('closing_cases')
       .select('opportunity_id, closing_status, contract_status, title_status, escrow_status, disposition_status, scheduled_closing_date, revenue_confirmed_date, buyer_id, buyer_price, seller_contract_price, earnest_money, updated_at, provenance')
       .in('opportunity_id', ids)).data),
+    // The thread's own (non-campaign) queue rows: what really happened to the
+    // autopilot's steps. Recent rows, plus any row still live or held, any age.
+    inChunks(threadKeys, async (keys) => (await client.from('send_queue')
+      .select(QUEUE_COLUMNS)
+      .in('thread_key', keys).gte('created_at', queueSince)
+      .order('created_at', { ascending: false }).limit(4000)).data),
+    inChunks(threadKeys, async (keys) => (await client.from('send_queue')
+      .select(QUEUE_COLUMNS)
+      .in('thread_key', keys).in('queue_status', liveStatuses)
+      .order('created_at', { ascending: false }).limit(1000)).data),
+    // The seller message each overdue step answered (only those threads).
+    overdueKeys.length
+      ? inChunks(overdueKeys, async (keys) => (await client.from('message_events')
+        .select('thread_key, created_at')
+        .in('thread_key', keys).ilike('direction', 'in%').gte('created_at', new Date(earliestDue - 3 * DAY).toISOString())
+        .order('created_at', { ascending: false }).limit(2000)).data)
+      : Promise.resolve([]),
   ])
   const threadBy = new Map(threads.map((t) => [clean(t.thread_key), t]))
   const execBy = new Map()
@@ -332,15 +492,39 @@ async function loadEvidence(client, rows) {
   }
   // A voided closing case (provenance.voided) is not closing evidence.
   const closingBy = new Map(closings.filter((c) => !c.provenance?.voided).map((c) => [clean(c.opportunity_id), c]))
-  return { threadBy, execBy, closingBy }
+  const queueBy = new Map()
+  const seenRow = new Set()
+  for (const r of [...(recentQueue || []), ...(liveQueue || [])]) {
+    if (!r || seenRow.has(r.id) || !isConversationSend(r)) continue
+    seenRow.add(r.id)
+    const key = clean(r.thread_key)
+    if (!queueBy.has(key)) queueBy.set(key, [])
+    queueBy.get(key).push(r)
+  }
+  const inboundBy = new Map()
+  for (const m of triggers || []) {
+    const key = clean(m.thread_key)
+    if (!inboundBy.has(key)) inboundBy.set(key, [])
+    inboundBy.get(key).push(Date.parse(m.created_at))
+  }
+  const triggerBy = new Map()
+  for (const r of overdue) {
+    const due = Date.parse(r.next_action_due)
+    const times = (inboundBy.get(clean(r.primary_thread_key)) || []).filter((t) => Number.isFinite(t) && t <= due + 60_000)
+    if (times.length) triggerBy.set(clean(r.id), new Date(Math.max(...times)).toISOString())
+  }
+  return { threadBy, execBy, closingBy, queueBy, triggerBy }
 }
 
 function shapeCard(opp, ev, now) {
   const thread = ev.threadBy.get(clean(opp.primary_thread_key)) || null
   const execution = ev.execBy.get(clean(opp.primary_thread_key)) || null
   const closing = ev.closingBy.get(clean(opp.id)) || null
-  const lane = deriveLane(opp, { thread, execution, closing, now })
+  const queue = ev.queueBy ? (ev.queueBy.get(clean(opp.primary_thread_key)) || []) : null
+  const trigger = ev.triggerBy ? (ev.triggerBy.get(clean(opp.id)) || null) : null
+  const lane = deriveLane(opp, { thread, execution, closing, queue, trigger, now })
   const stall = deriveStall(opp, lane, { thread, now })
+  const qs = queue ? summarizeThreadQueue(queue, { lastOutboundAt: thread?.last_outbound_at || null, now }) : null
   const stage = opp.acquisition_stage
   const entered = opp.stage_entered_at ? Date.parse(opp.stage_entered_at) : null
   return {
@@ -351,6 +535,11 @@ function shapeCard(opp, ev, now) {
     group: GROUP_OF[stage] ?? null,
     status: opp.opportunity_status,
     lane,
+    owner: ownerOfLane(lane),
+    hold: holdClassOf(lane, { intent: opp.latest_intent, updatedSource: opp.last_updated_source }),
+    // What the last turn intended — shown beside the evidence, never as truth.
+    intent_next: clean(opp.next_action) ? { action: clean(opp.next_action), due: opp.next_action_due || null, source: clean(opp.last_updated_source) || null } : null,
+    queue: qs ? { next: qs.next, held: qs.held } : null,
     stall,
     urgency: urgencyScore(opp, lane, stall, now),
     daysInStage: entered ? Math.floor((now - entered) / DAY) : null,
@@ -382,6 +571,9 @@ function shapeCard(opp, ev, now) {
       equity: num(opp.equity_amount) || null,
       contractPrice: num(closing?.seller_contract_price) || null,
       buyerPrice: num(closing?.buyer_price) || null,
+      // a seller number the conversation captured wrongly (same rule as Offers / Deal Intelligence)
+      askImplausible: isImplausibleSellerNumber(opp.asking_price, opp.estimated_value),
+      counterImplausible: isImplausibleSellerNumber(opp.seller_counter, opp.estimated_value),
     },
     closing: closing ? {
       status: closing.closing_status || null,
@@ -434,10 +626,16 @@ const money = (v) => {
   return n >= 1e6 ? `$${(n / 1e6).toFixed(n >= 1e7 ? 0 : 2).replace(/\.?0+$/, '')}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${n}`
 }
 
+/** Who moved it: an operator's hand, or the machine (autopilot, sweeps, workflows). */
+export function movementBy(row) {
+  const who = `${clean(row?.source)} ${clean(row?.actor)}`.toLowerCase()
+  return /\b(operator|dashboard|manual|inbox)\b/.test(who) ? 'human' : 'system'
+}
+
 /** One movement line from a history row, or null when it is noise. Exported for tests. */
 export function movementFromHistory(row) {
   if (!row || isSyntheticHistory(row) || !MOVEMENT_TYPES.has(row.event_type)) return null
-  const base = { id: row.id, opportunityId: row.opportunity_id, at: row.created_at, source: row.source || null }
+  const base = { id: row.id, opportunityId: row.opportunity_id, at: row.created_at, source: row.source || null, actor: row.actor || null, by: movementBy(row) }
   if (row.event_type === 'stage_transition') {
     const from = stageShort(row.previous_value)
     const to = stageShort(row.new_value)
@@ -457,11 +655,17 @@ export function movementFromHistory(row) {
     const v = money(row.new_value)
     return v ? { ...base, kind: 'counter', title: 'Seller countered', detail: v } : null
   }
-  if (row.event_type === 'opportunity_created') return { ...base, kind: 'created', title: 'Opportunity opened', detail: reasonLabel(row.reason) }
+  if (row.event_type === 'opportunity_created') {
+    const at = stageShort(row.new_value)
+    return { ...base, kind: 'created', title: at ? `Opened at ${at}` : 'Opportunity opened', detail: reasonLabel(row.reason), toStage: STAGE_INDEX[row.new_value] ? row.new_value : undefined }
+  }
   if (row.event_type === 'opportunity_status_changed') {
     const to = clean(row.new_value)
-    const label = { dead: 'Closed out', suppressed: 'Suppressed', active: 'Reactivated', nurture: 'Moved to nurture' }[to]
-    return label ? { ...base, kind: to === 'active' ? 'advance' : 'exit', title: label, detail: reasonLabel(row.reason) } : null
+    // "Not interested" is a 30-day nurture, not a suppression — the engine
+    // writes status 'suppressed' with a *_NURTURE_30D reason; say what it is.
+    const nurture = to === 'suppressed' && /NURTURE/i.test(clean(row.reason))
+    const label = nurture ? 'Moved to nurture' : { dead: 'Closed out', suppressed: 'Suppressed', active: 'Reactivated', nurture: 'Moved to nurture' }[to]
+    return label ? { ...base, kind: to === 'active' ? 'advance' : 'exit', title: label, detail: nurture ? '30-day follow-up' : reasonLabel(row.reason), status: to } : null
   }
   return null
 }
@@ -478,7 +682,7 @@ async function loadMovement(client, cards, { days = 7, limit = 40 } = {}) {
   // Seller replies are movement too — the live pulse of the machine.
   for (const card of cards) {
     if (card.lastInboundAt && Date.parse(card.lastInboundAt) > Date.now() - days * DAY && card.lastDirection === 'inbound') {
-      events.push({ id: `reply:${card.id}:${card.lastInboundAt}`, opportunityId: card.id, at: card.lastInboundAt, kind: 'reply', title: 'Seller replied', detail: card.lastMessage })
+      events.push({ id: `reply:${card.id}:${card.lastInboundAt}`, opportunityId: card.id, at: card.lastInboundAt, kind: 'reply', title: 'Seller replied', detail: card.lastMessage, by: 'seller' })
     }
   }
   return events
@@ -491,6 +695,31 @@ async function loadMovement(client, cards, { days = 7, limit = 40 } = {}) {
     })
 }
 
+/** Live deals by who holds the next action (dormant and closed kept apart). */
+export function countOwners(cards) {
+  const out = { autopilot: 0, scheduled: 0, seller: 0, external: 0, needs_you: 0, blocked: 0, dormant: 0, complete: 0 }
+  for (const c of cards || []) {
+    const k = c.owner || ownerOfLane(c.lane)
+    if (k in out) out[k] += 1
+  }
+  return out
+}
+
+/** Days in stage across the stage's working deals, against the stage's own clock. */
+export function stageAging(cards, stage) {
+  const days = (cards || []).map((c) => c.daysInStage).filter((d) => typeof d === 'number' && d >= 0).sort((a, b) => a - b)
+  if (!days.length) return { median: null, max: null, overClock: 0, clockDays: STAGE_MAX_DAYS[stage] ?? null, buckets: { fresh: 0, aging: 0, over: 0 } }
+  const clock = STAGE_MAX_DAYS[stage] ?? null
+  const buckets = { fresh: 0, aging: 0, over: 0 }
+  for (const d of days) {
+    if (!clock) buckets.fresh += 1
+    else if (d > clock) buckets.over += 1
+    else if (d > clock / 2) buckets.aging += 1
+    else buckets.fresh += 1
+  }
+  return { median: days[Math.floor((days.length - 1) / 2)], max: days[days.length - 1], overClock: buckets.over, clockDays: clock, buckets }
+}
+
 /** Short-lived memo so the overview and the first feed page share one scope load. */
 const memo = new Map()
 async function scopeCards(client, params) {
@@ -498,12 +727,13 @@ async function scopeCards(client, params) {
   const hit = memo.get(key)
   if (hit && Date.now() - hit.at < 45_000) return hit.value
   const now = Date.now()
-  const raw = await loadScope(client, params)
-  const rows = await batchHydrateOpportunityProperties(client, raw)
+  const loaded = await loadScope(client, params)
+  // Hydrate first: a fixture's address can live only on the property row.
+  const [rows, synthetic] = withoutSyntheticOpportunities(await batchHydrateOpportunityProperties(client, loaded))
   const ev = await loadEvidence(client, rows)
   let cards = rows.map((r) => shapeCard(r, ev, now))
   if (clean(params.temperature)) cards = cards.filter((c) => c.temperature === clean(params.temperature))
-  const value = { cards, capped: raw.length >= SCOPE_CAP }
+  const value = { cards, capped: loaded.length >= SCOPE_CAP, excluded: { synthetic } }
   memo.set(key, { at: Date.now(), value })
   if (memo.size > 40) memo.delete(memo.keys().next().value)
   return value
@@ -511,7 +741,7 @@ async function scopeCards(client, params) {
 
 export async function getPipelineCommandOverview(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
-  const { cards, capped } = await scopeCards(client, params)
+  const { cards, capped, excluded } = await scopeCards(client, params)
   const movement = await loadMovement(client, cards, { days: 7, limit: 40 })
   const dayAgo = Date.now() - DAY
   const movedToday = new Set(movement.filter((m) => Date.parse(m.at) > dayAgo).map((m) => m.opportunityId))
@@ -532,6 +762,10 @@ export async function getPipelineCommandOverview(params = {}, deps = {}) {
       stalled: liveInStage.filter((c) => c.stall).length,
       movedToday: liveInStage.filter((c) => movedToday.has(c.id)).length,
       value: liveInStage.reduce((s, c) => s + (c.money.value || 0), 0) || null,
+      valued: liveInStage.filter((c) => c.money.value).length,
+      asking: liveInStage.reduce((s, c) => s + (c.money.asking || 0), 0) || null,
+      owners: countOwners(liveInStage),
+      aging: stageAging(liveInStage.filter((c) => !['dormant', 'complete'].includes(c.lane.key)), code),
     }
   })
   const lanes = {}
@@ -542,11 +776,14 @@ export async function getPipelineCommandOverview(params = {}, deps = {}) {
   const live = cards.filter((c) => !['closed_out'].includes(c.lane.key))
   const working = live.filter((c) => !['dormant', 'complete'].includes(c.lane.key))
   const attention = cards.filter((c) => matchesView(c, 'attention', movedToday)).sort(SORTS.urgent)
+  const ownership = countOwners(live)
 
   return {
     scope: clean(params.scope) || 'active',
     generatedAt: new Date().toISOString(),
     capped,
+    excluded: excluded || { synthetic: 0 },
+    ownership,
     totals: {
       opportunities: live.length,
       working: working.length,
@@ -561,6 +798,11 @@ export async function getPipelineCommandOverview(params = {}, deps = {}) {
       attention: attention.length,
       stalled: live.filter((c) => c.stall).length,
       closed: cards.filter((c) => c.lane.key === 'complete').length,
+      // machine-held = the next action is the autopilot's, the seller's or an
+      // outside party's; nobody inside has to do anything
+      machine: OWNER_ORDER.filter((k) => !['needs_you', 'blocked'].includes(k)).reduce((n, k) => n + (ownership[k] || 0), 0),
+      needsYou: ownership.needs_you || 0,
+      blocked: ownership.blocked || 0,
     },
     stages,
     groups: STAGE_GROUPS.map((g) => ({ ...g, count: stages.filter((s) => g.stages.includes(s.code)).reduce((n, s) => n + s.count, 0) })),
@@ -610,6 +852,173 @@ export async function getPipelineCommandPoints(params = {}, deps = {}) {
   return {
     total: feed.total,
     points: props.filter((p) => Number(p.latitude) && Number(p.longitude)).map((p) => ({ id: p.property_id, lat: Number(p.latitude), lng: Number(p.longitude), label: p.property_address_full })),
+  }
+}
+
+/* ══ FLOW ════════════════════════════════════════════════════════════════════
+ * The river over a period: what entered and left each stage, by whom (the
+ * machine or an operator), what is in flight in the queue right now, and the
+ * period's real movement. Same sources as the overview's movement (history,
+ * test/certification rows excluded) — never a second movement model.
+ *
+ *   entered   stage transitions into the stage + opportunities opened at it
+ *   left      stage transitions out of it + deals that exited the pipeline
+ *             from it (dead / suppressed / nurture — they are no longer in the
+ *             live scope, so they are read from history and filtered by the
+ *             same market / type / search filters)
+ *   replies   inbound seller messages on the scope's threads (message_events)
+ */
+export const FLOW_PERIODS = Object.freeze({ '24h': 1, '7d': 7, '30d': 30 })
+const EXIT_STATUSES = ['dead', 'suppressed', 'lost', 'archived']
+const OPERATOR_TZ = 'America/Chicago'
+
+function bucketKey(iso, hourly) {
+  const d = new Date(iso)
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: OPERATOR_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+    .formatToParts(d).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]))
+  return hourly ? `${parts.year}-${parts.month}-${parts.day}T${parts.hour}` : `${parts.year}-${parts.month}-${parts.day}`
+}
+
+/** Empty, ordered buckets for the period (operator time zone). Exported for tests. */
+export function flowBuckets(days, now = Date.now()) {
+  const hourly = days === 1
+  const step = hourly ? HOUR : DAY
+  const count = hourly ? 24 : days
+  const keys = []
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const k = bucketKey(new Date(now - i * step).toISOString(), hourly)
+    if (!keys.includes(k)) keys.push(k)
+  }
+  return { hourly, keys }
+}
+
+/** Per-stage period flows from movement lines. Pure; exported for tests. */
+export function aggregateStageFlows(moves) {
+  const flows = Object.fromEntries(UNIVERSAL_STAGE_ORDER.map((code) => [code, { entered: 0, left: 0, advanced: 0, regressed: 0, created: 0, exited: 0, system: 0, human: 0 }]))
+  for (const m of moves) {
+    if (m.kind === 'reply') continue
+    const by = m.by === 'human' ? 'human' : 'system'
+    if (m.fromStage && flows[m.fromStage] && m.toStage && m.fromStage !== m.toStage) flows[m.fromStage].left += 1
+    if ((m.kind === 'advance' || m.kind === 'regress') && m.toStage && flows[m.toStage] && m.fromStage !== m.toStage) {
+      flows[m.toStage].entered += 1
+      flows[m.toStage][m.kind === 'advance' ? 'advanced' : 'regressed'] += 1
+      flows[m.toStage][by] += 1
+    } else if (m.kind === 'created' && m.toStage && flows[m.toStage]) {
+      flows[m.toStage].entered += 1
+      flows[m.toStage].created += 1
+      flows[m.toStage][by] += 1
+    } else if (m.kind === 'exit' && m.stage && flows[m.stage]) {
+      flows[m.stage].left += 1
+      flows[m.stage].exited += 1
+      flows[m.stage][by] += 1
+    }
+  }
+  return flows
+}
+
+export async function getPipelineCommandFlow(params = {}, deps = {}) {
+  const client = deps.supabase || defaultSupabase
+  const now = deps.now ? deps.now() : Date.now()
+  const period = FLOW_PERIODS[clean(params.period)] ? clean(params.period) : '7d'
+  const days = FLOW_PERIODS[period]
+  const since = new Date(now - days * DAY).toISOString()
+  const { cards, capped, excluded } = await scopeCards(client, params)
+  const byId = new Map(cards.map((c) => [c.id, c]))
+  const threadKeys = [...new Set(cards.map((c) => c.threadKey).filter(Boolean))]
+  const HISTORY_COLS = 'id, opportunity_id, event_type, previous_value, new_value, reason, actor, source, created_at'
+
+  const [history, exitsRaw, replies] = await Promise.all([
+    inChunks(cards.map((c) => c.id), async (part) => (await client.from('acquisition_opportunity_history')
+      .select(HISTORY_COLS).in('opportunity_id', part).gte('created_at', since).in('event_type', [...MOVEMENT_TYPES])
+      .order('created_at', { ascending: false }).limit(1500)).data),
+    (clean(params.scope) || 'active') === 'active'
+      ? client.from('acquisition_opportunity_history').select(HISTORY_COLS)
+        .eq('event_type', 'opportunity_status_changed').in('new_value', EXIT_STATUSES).gte('created_at', since)
+        .order('created_at', { ascending: false }).limit(800).then((r) => r.data || [])
+      : Promise.resolve([]),
+    inChunks(threadKeys, async (keys) => (await client.from('message_events')
+      .select('id, thread_key, created_at, message_body, detected_intent')
+      .in('thread_key', keys).ilike('direction', 'in%').gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(1500)).data),
+  ])
+
+  // Deals that left the live scope in the period: read them back through the
+  // same filters, so an exit belongs to this view only if the deal would have.
+  const exitIds = [...new Set((exitsRaw || []).filter((r) => !isSyntheticHistory(r)).map((r) => r.opportunity_id).filter((id) => id && !byId.has(id)))]
+  const exitedRows = exitIds.length ? await inChunks(exitIds, async (part) => {
+    let q = client.from('acquisition_opportunities').select('id, acquisition_stage, primary_property_id, property_address_full, seller_display_name, market, property_type, opportunity_status')
+    q = applyFilters(q, { ...params, scope: 'all' })
+    return (await q.in('id', part)).data
+  }) : []
+  const exitedHydrated = exitedRows?.length ? await batchHydrateOpportunityProperties(client, exitedRows.map(normalizeOpportunityRow).filter(Boolean)) : []
+  const exitedBy = new Map(exitedHydrated.filter((r) => !isSyntheticOpportunity(r)).map((r) => [r.id, r]))
+
+  const moves = []
+  for (const h of history || []) {
+    const mv = movementFromHistory(h)
+    const c = mv && byId.get(mv.opportunityId)
+    if (!c) continue
+    moves.push({ ...mv, address: c.address, seller: c.seller, stage: c.stage, stageIndex: c.stageIndex })
+  }
+  for (const h of exitsRaw || []) {
+    const r = exitedBy.get(h.opportunity_id)
+    const mv = r && movementFromHistory(h)
+    if (!mv) continue
+    moves.push({ ...mv, address: clean(r.property_address_full) || null, seller: clean(r.seller_display_name) || null, stage: r.acquisition_stage, stageIndex: STAGE_INDEX[r.acquisition_stage] ?? null, left: true })
+  }
+  const replyByThread = new Map()
+  for (const c of cards) if (c.threadKey) replyByThread.set(c.threadKey, c)
+  for (const m of replies || []) {
+    const c = replyByThread.get(clean(m.thread_key))
+    if (!c) continue
+    moves.push({ id: `reply:${m.id}`, opportunityId: c.id, at: m.created_at, kind: 'reply', title: 'Seller replied', detail: clean(m.message_body).slice(0, 140) || null, intent: clean(m.detected_intent) || null, by: 'seller', address: c.address, seller: c.seller, stage: c.stage, stageIndex: c.stageIndex })
+  }
+  moves.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+
+  const flows = aggregateStageFlows(moves)
+  const { hourly, keys } = flowBuckets(days, now)
+  const series = new Map(keys.map((k) => [k, { key: k, moves: 0, replies: 0 }]))
+  for (const m of moves) {
+    const b = series.get(bucketKey(m.at, hourly))
+    if (!b) continue
+    if (m.kind === 'reply') b.replies += 1
+    else b.moves += 1
+  }
+  const nonReply = moves.filter((m) => m.kind !== 'reply')
+  const inFlight = cards
+    .filter((c) => c.queue?.next && !['closed_out', 'complete'].includes(c.lane.key))
+    .map((c) => ({ opportunityId: c.id, address: c.address, seller: c.seller, stage: c.stage, stageIndex: c.stageIndex, ...c.queue.next }))
+    .sort((a, b) => (Date.parse(a.at || 0) || 0) - (Date.parse(b.at || 0) || 0))
+  const held = cards
+    .filter((c) => c.queue?.held && !['closed_out', 'complete'].includes(c.lane.key))
+    .map((c) => ({ opportunityId: c.id, address: c.address, seller: c.seller, stage: c.stage, stageIndex: c.stageIndex, ...c.queue.held }))
+    .sort((a, b) => (Date.parse(b.at || 0) || 0) - (Date.parse(a.at || 0) || 0))
+
+  return {
+    scope: clean(params.scope) || 'active',
+    period,
+    since,
+    generatedAt: new Date(now).toISOString(),
+    capped,
+    excluded: excluded || { synthetic: 0 },
+    totals: {
+      moved: new Set(nonReply.map((m) => m.opportunityId)).size,
+      events: nonReply.length,
+      advanced: nonReply.filter((m) => m.kind === 'advance').length,
+      regressed: nonReply.filter((m) => m.kind === 'regress').length,
+      created: nonReply.filter((m) => m.kind === 'created').length,
+      exited: nonReply.filter((m) => m.kind === 'exit').length,
+      nurtured: nonReply.filter((m) => m.kind === 'exit' && m.title === 'Moved to nurture').length,
+      priced: nonReply.filter((m) => ['price', 'offer', 'counter'].includes(m.kind)).length,
+      replies: moves.length - nonReply.length,
+      bySystem: nonReply.filter((m) => m.by !== 'human').length,
+      byHuman: nonReply.filter((m) => m.by === 'human').length,
+    },
+    stages: UNIVERSAL_STAGE_ORDER.map((code) => ({ code, index: STAGE_INDEX[code], ...flows[code] })),
+    series: { hourly, buckets: [...series.values()] },
+    movement: moves.slice(0, 160),
+    inFlight,
+    held,
   }
 }
 
@@ -736,7 +1145,7 @@ export async function getPipelineDealStory(id, deps = {}) {
  */
 const OFFER_TIER_LABEL = Object.freeze({
   AUTO_HARD_OFFER: 'Hard offer authorized', AUTO_RANGE_OFFER: 'Range offer authorized', REVIEW_REQUIRED: 'Review required',
-  CREATIVE_TERMS: 'Creative terms', NURTURE: 'Nurture', PASS: 'Pass', REJECT: 'Pass',
+  CREATIVE_TERMS: 'Creative terms', NURTURE: 'Nurture',
 })
 const OFFER_READINESS_TEXT = Object.freeze({
   [NON_SPENDABLE_REASONS.NO_VALUATION]: 'No offer-authoritative valuation yet',
@@ -767,10 +1176,22 @@ export function isImplausibleSellerNumber(value, reference) {
 }
 
 /**
- * Is this deal's offer ready to be spent, and if not, why? Pure.
- *   authorized        spendable under the canonical rule
- *   needs_validation  priced, but policy will not spend it (or coverage is thin)
+ * Is this deal's offer spendable, and if not, why? Pure.
+ *   authorized        spendable under the canonical rule (the engine's tier +
+ *                     contamination defense) — the send path's own gate
+ *   needs_validation  priced, but the canonical rule will not spend it
  *   not_priced        the Decision Engine has not priced the property
+ *
+ * The negotiation's persisted verdict is a per-turn artifact: an inbound turn
+ * that did not run the engine writes `valuation_absent` even when a score
+ * exists (persist-seller-transition), and nothing re-writes it when a newer
+ * score lands. So the persisted verdict wins only when it is a real verdict
+ * (not `valuation_absent` while a score exists) and is not older than the
+ * score. No send path reads the persisted verdict; this only decides what the
+ * read model says.
+ *
+ * Thin comp coverage is a caution the operator should see, not a gate: the
+ * engine itself spends an AUTO_RANGE_OFFER from 3 comps.
  */
 export function deriveOfferReadiness({ score = null, negotiation = null } = {}) {
   const tier = clean(score?.decision_tier).toUpperCase() || null
@@ -778,11 +1199,19 @@ export function deriveOfferReadiness({ score = null, negotiation = null } = {}) 
   const gates = Object.entries(score?.gates && typeof score.gates === 'object' ? score.gates : {})
     .map(([key, pass]) => ({ key, label: OFFER_GATE_LABELS[key] || key.replace(/_/g, ' '), pass: pass === true }))
   if (!score) {
-    return { state: 'not_priced', spendable: false, source: null, reason: NON_SPENDABLE_REASONS.NO_VALUATION, reasons: ['The Decision Engine has not priced this property'], tier: null, tierLabel: null, compCount: null, thinCoverage: false, gates: [] }
+    return { state: 'not_priced', spendable: false, source: null, reason: NON_SPENDABLE_REASONS.NO_VALUATION, reasons: ['The Decision Engine has not priced this property'], tier: null, tierLabel: null, compCount: null, thinCoverage: false, gates: [], persistedIgnored: null }
   }
   const computed = resolveValuationSpendability({ valuation: score })
-  const persisted = negotiation && typeof negotiation.valuation_spendable === 'boolean' ? negotiation.valuation_spendable : null
-  const persistedReason = clean(negotiation?.recommended_offer_withheld_reason || negotiation?.valuation_non_spendable_reason) || null
+  const rawPersisted = negotiation && typeof negotiation.valuation_spendable === 'boolean' ? negotiation.valuation_spendable : null
+  // Prefer the CURRENT reason; recommended_offer_withheld_reason is carried
+  // forward by the negotiation state and never cleared.
+  const persistedReason = clean(negotiation?.valuation_non_spendable_reason || negotiation?.recommended_offer_withheld_reason) || null
+  const verdictAt = negotiation?.updated_at ? Date.parse(negotiation.updated_at) : null
+  const scoreAt = score?.computed_at ? Date.parse(score.computed_at) : null
+  let persistedIgnored = null
+  if (rawPersisted === false && (!persistedReason || persistedReason === NON_SPENDABLE_REASONS.NO_VALUATION)) persistedIgnored = 'turn_without_engine_run'
+  else if (rawPersisted !== null && verdictAt && scoreAt && scoreAt > verdictAt) persistedIgnored = 'older_than_score'
+  const persisted = persistedIgnored ? null : rawPersisted
   const spendable = persisted ?? computed.spendable
   const reason = persisted === null ? computed.reason : (persisted ? 'valuation_offer_authoritative' : (persistedReason || computed.reason))
   const thinCoverage = compCount !== null && compCount < OFFER_COMP_COVERAGE_MIN
@@ -791,7 +1220,7 @@ export function deriveOfferReadiness({ score = null, negotiation = null } = {}) 
   if (thinCoverage) reasons.push(`Thin comp coverage — ${compCount} qualified comp${compCount === 1 ? '' : 's'}`)
   for (const g of gates) if (!g.pass && !(g.key === 'comp_count_at_least_4' && thinCoverage)) reasons.push(`Gate not met: ${g.label}`)
   return {
-    state: spendable && !thinCoverage ? 'authorized' : 'needs_validation',
+    state: spendable ? 'authorized' : 'needs_validation',
     spendable: Boolean(spendable),
     source: persisted === null ? 'engine_row' : 'negotiation',
     reason,
@@ -801,12 +1230,13 @@ export function deriveOfferReadiness({ score = null, negotiation = null } = {}) 
     compCount,
     thinCoverage,
     gates,
+    persistedIgnored,
   }
 }
 
 export async function getPipelineCommandOffers(params = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
-  const { cards, capped } = await scopeCards(client, params)
+  const { cards, capped, excluded } = await scopeCards(client, params)
   const propertyIds = [...new Set(cards.map((c) => c.propertyId).filter(Boolean))]
   const oppIds = cards.map((c) => c.id)
   const [scores, offers] = await Promise.all([
@@ -841,8 +1271,20 @@ export async function getPipelineCommandOffers(params = {}, deps = {}) {
     const last = binding || history[0] || null
     const readiness = deriveOfferReadiness({ score: s, negotiation: ns })
     const valueRef = num(s?.valuation_mid) || card.money.value
+    const engineView = s ? { mid: num(s.valuation_mid), recommended: num(s.recommended_cash_offer), computedAt: s.computed_at || null } : null
+    const plausibility = offerPlausibility({ engineMid: engineView?.mid ?? null, recommended: engineView?.recommended ?? null, recordedValue: card.money.value })
+    const autonomy = s ? deriveOfferAutonomy({ card, readiness, negotiation: ns, engine: engineView }) : null
     return {
       card,
+      autonomy,
+      plausibility: { engineValueOff: plausibility.engineValueOff, recommendedOff: plausibility.recommendedOff },
+      negotiation: ns ? {
+        zone: clean(ns.negotiation_zone) || null,
+        strategy: clean(ns.current_strategy || ns.strategy) || null,
+        nextAction: clean(ns.next_action) || null,
+        reviewReason: clean(ns.human_review_reason) || null,
+        updatedAt: ns.updated_at || null,
+      } : null,
       engine: s ? {
         tier: readiness.tier,
         tierLabel: readiness.tierLabel,
@@ -885,6 +1327,7 @@ export async function getPipelineCommandOffers(params = {}, deps = {}) {
   rows.sort((a, b) => (b.card.stageIndex ?? 0) - (a.card.stageIndex ?? 0)
     || STATE_RANK[a.readiness.state] - STATE_RANK[b.readiness.state]
     || (b.engine?.recommended ?? -1) - (a.engine?.recommended ?? -1))
+  const autonomy = Object.fromEntries(AUTONOMY_ORDER.map((k) => [k, rows.filter((r) => r.autonomy?.state === k).length]))
 
   const byMarket = new Map()
   for (const r of rows) {
@@ -907,6 +1350,7 @@ export async function getPipelineCommandOffers(params = {}, deps = {}) {
     scope: clean(params.scope) || 'active',
     generatedAt: new Date().toISOString(),
     capped,
+    excluded: excluded || { synthetic: 0 },
     totals: {
       deals: rows.length,
       atOfferStage: rows.filter((r) => r.card.stage === 'offer').length,
@@ -921,8 +1365,10 @@ export async function getPipelineCommandOffers(params = {}, deps = {}) {
       countered: rows.filter((r) => clean(r.offer?.status).toLowerCase() === 'countered' || r.card.money.counter).length,
       accepted: rows.filter((r) => clean(r.offer?.status).toLowerCase() === 'accepted' || r.offer?.acceptedAt).length,
       offerRecords: offers.length,
+      persistedVerdictsIgnored: rows.filter((r) => r.readiness.persistedIgnored).length,
     },
-    thresholds: { compCoverageMin: OFFER_COMP_COVERAGE_MIN },
+    autonomy,
+    thresholds: { compCoverageMin: OFFER_COMP_COVERAGE_MIN, highValueReview: 750_000, valuationStaleDays: 30 },
     markets,
     rows: rows.slice(0, OFFER_ROWS_CAP),
     truncated: rows.length > OFFER_ROWS_CAP,

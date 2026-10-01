@@ -5,8 +5,9 @@
  * the engine's number:
  *   - an unpriced property is "not priced", never "authorized"
  *   - only the engine's offer-authoritative tiers can read as authorized
- *   - too few comps is a validation checkpoint even when policy would spend
- *   - the verdict the negotiation already persisted wins over a recomputation
+ *   - too few comps is a caution, not a gate the engine does not have
+ *   - the verdict the negotiation persisted wins only while it is a real,
+ *     current verdict (a turn that skipped the engine writes valuation_absent)
  *   - a mis-captured seller number is flagged, not believed
  */
 import test from 'node:test'
@@ -41,11 +42,38 @@ test('a creative-terms valuation needs validation, with the engine reason', () =
   assert.match(r.reasons.join(' '), /not offer-authoritative/)
 })
 
-test('thin comp coverage is a validation checkpoint even when spendable', () => {
+test('thin comp coverage is stated as a caution; the engine (not the read model) decides spendability', () => {
   const r = deriveOfferReadiness({ score: score({ comp_count: OFFER_COMP_COVERAGE_MIN - 1 }), negotiation: { valuation_spendable: true } })
   assert.equal(r.spendable, true)
   assert.equal(r.thinCoverage, true)
-  assert.equal(r.state, 'needs_validation')
+  assert.equal(r.state, 'authorized')
+  assert.match(r.reasons.join(' '), /Thin comp coverage/)
+})
+
+test('a turn that never ran the engine does not erase an existing valuation (persisted valuation_absent is ignored)', () => {
+  // 0 Internal Canary Way / 606 S A St pattern: AUTO_HARD_OFFER score, then an
+  // "unclear" turn persisted valuation_spendable=false, reason valuation_absent.
+  const r = deriveOfferReadiness({ score: score({ decision_tier: 'AUTO_HARD_OFFER' }), negotiation: { valuation_spendable: false, valuation_non_spendable_reason: 'valuation_absent', updated_at: '2026-09-27T16:17:01Z' } })
+  assert.equal(r.persistedIgnored, 'turn_without_engine_run')
+  assert.equal(r.source, 'engine_row')
+  assert.equal(r.state, 'authorized')
+})
+
+test('a score computed after the persisted verdict wins over it', () => {
+  const r = deriveOfferReadiness({
+    score: score({ computed_at: '2026-09-30T20:20:46Z' }),
+    negotiation: { valuation_spendable: false, valuation_non_spendable_reason: 'valuation_tier_not_offer_authoritative', updated_at: '2026-09-12T18:56:40Z' },
+  })
+  assert.equal(r.persistedIgnored, 'older_than_score')
+  assert.equal(r.state, 'authorized')
+})
+
+test('the current non-spendable reason is preferred over the carried-forward withheld reason', () => {
+  const r = deriveOfferReadiness({
+    score: score({ decision_tier: 'CREATIVE_TERMS' }),
+    negotiation: { valuation_spendable: false, valuation_non_spendable_reason: 'valuation_tier_not_offer_authoritative', recommended_offer_withheld_reason: 'valuation_low_comp_count_without_contamination_defense' },
+  })
+  assert.equal(r.reason, 'valuation_tier_not_offer_authoritative')
 })
 
 test('the persisted negotiation verdict wins over the recomputation', () => {

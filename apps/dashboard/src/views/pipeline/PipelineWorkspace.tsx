@@ -19,6 +19,7 @@ import { PipelineOpportunityBoard } from './PipelineOpportunityBoard'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import { PipelineCommandCenter } from './command/PipelineCommandCenter'
+import { PipelineDesk } from './desk/PipelineDesk'
 
 const OPP_PARAM = 'opp'
 const STORAGE_KEY = 'pipeline_selected_opp_v1'
@@ -58,11 +59,21 @@ function writeOppToUrl(opportunityId: string | null) {
 
 /**
  * Phones get the Pipeline command center (lifecycle, lanes, exceptions,
- * movement, deal story); larger layouts keep the board. Deciding here keeps
- * the board's 500-row load from running at all on mobile.
+ * movement, deal story); the modern desktop gets Pipeline Desktop 2 (the
+ * river, the machine's activity, whose move, offers); Classic desktop keeps
+ * the board. Deciding here keeps each surface's loads from running on the
+ * others — the phone path is exactly what it was.
  */
 export function PipelineWorkspace(props: PipelineWorkspaceProps) {
-  const { isMobile } = useBreakpoint()
+  const { isMobile, isModernDesktop } = useBreakpoint()
+  if (isModernDesktop) {
+    return (
+      <PipelineDesk
+        onOpenCommandView={props.onOpenCommandView}
+        onOpenDealIntelligence={props.onOpenDealIntelligence}
+      />
+    )
+  }
   if (isMobile) {
     return (
       <PipelineCommandCenter
