@@ -26,9 +26,17 @@ export interface BriefProps {
   onDay: (day: string) => void
 }
 
+/** A multi-zone campaign's windows are read per recipient zone; times shown in the viewer's zone. */
+const zonesNote = (c: DeskCampaign, tz: string) => {
+  const n = c.tzs?.length ?? 0
+  if (n < 2) return zoneAbbr(c.tz)
+  const open = c.zones_today?.filter((z) => z.open).length ?? 0
+  return `${zoneAbbr(tz)} · ${open ? `${open} of ${n} zones open` : `${n} zones`}`
+}
+
 const SITUATION: Record<DeskCampaign['situation'], { word: (c: DeskCampaign, tz: string) => string; tone: string }> = {
-  sending: { word: (c, tz) => `Sending · until ${c.window_today ? clockShort(c.window_today.closes_at, c.tz || tz) : '—'} ${zoneAbbr(c.tz)}`, tone: 'exec' },
-  window_ahead: { word: (c, tz) => `Opens ${c.window_today ? clockShort(c.window_today.opens_at, c.tz || tz) : '—'} ${zoneAbbr(c.tz)}`, tone: 'exec' },
+  sending: { word: (c, tz) => `Sending · until ${c.window_today ? clockShort(c.window_today.closes_at, c.tz || tz) : '—'} ${zonesNote(c, tz)}`, tone: 'exec' },
+  window_ahead: { word: (c, tz) => `Opens ${c.window_today ? clockShort(c.window_today.opens_at, c.tz || tz) : '—'} ${zonesNote(c, tz)}`, tone: 'exec' },
   window_closed: { word: () => 'Window closed for today', tone: 'neutral' },
   scheduled: { word: (c, tz) => (c.scheduled_for ? `Starts ${monthDay(dayKey(c.scheduled_for, tz))} ${clock(c.scheduled_for, tz)}` : 'Scheduled'), tone: 'exec' },
   missed: { word: (c, tz) => (c.scheduled_for ? `Missed start · ${monthDay(dayKey(c.scheduled_for, tz))} ${clock(c.scheduled_for, tz)}` : 'Missed start'), tone: 'attn' },

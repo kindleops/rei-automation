@@ -159,9 +159,10 @@ function systemOf(controls) {
   }
 }
 
+/** A single campaign zone, or null when there is none or the cohort spans several. */
 function campaignZone(campaign) {
-  const md = obj(campaign.metadata)
-  return clean(md.timezone || md.launch_timezone) || null
+  const zones = campaignWindowZones(campaign)
+  return zones.length === 1 ? clean(zones[0]) || null : null
 }
 
 function windowOf(campaign, controls, nowMs) {
@@ -457,6 +458,7 @@ async function computeBook(deps) {
         market_values: lineage.market_values,
       },
       timezone: lineage.timezone,
+      timezones: lineage.timezones,
       window: windowOf(c, ctl, nowMs),
       schedule: {
         scheduled_for: iso(c.scheduled_for),
@@ -1115,6 +1117,7 @@ export async function buildCampaignIntel(campaignId, deps = {}) {
     campaign_id: campaign.id,
     at: now.toISOString(),
     timezone: campaignZone(campaign),
+    timezones: campaignWindowZones(campaign),
     day_start: dayStart.toISOString(),
     rows: rowScan ? { total: rowScan.total, read: rowScan.rows.length, truncated: rowScan.truncated, campaign_texts: texts.length, conversation: conversation.length, proof: (rowScan.rows.length - allRows.length) } : null,
     sellers: rowScan ? { left_us: leftUs.size, delivered: delivered.size, replied: replySellers.length } : null,

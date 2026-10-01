@@ -15,6 +15,9 @@ export type CockpitWindow = {
   closes_at?: string | null
   next_open_at?: string | null
   timezone: string | null
+  /** Every recipient zone the window was read in; open_zones = those open now. */
+  timezones?: string[]
+  open_zones?: string[]
   source: 'campaign' | 'operator'
   policy_version?: string
 }
@@ -28,6 +31,8 @@ export type CockpitLineage = {
   filters: Array<{ domain: string; field_key: string; category: string | null; operator: string | null; value: { kind: string; count?: number; sample?: string[]; value?: unknown } }>
   market_values: string[]
   timezone: string | null
+  /** Every recipient zone (timezone is null when there are several). */
+  timezones?: string[]
   stage_code: string | null
   template_use_case: string | null
   campaign_type: string | null

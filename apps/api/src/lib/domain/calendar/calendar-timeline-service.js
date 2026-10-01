@@ -52,6 +52,7 @@ import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import { isCampaignStartMissed } from '@/lib/domain/campaigns/campaign-schedule-missed.js'
+import { campaignWindowZones } from '@/lib/domain/campaigns/campaign-market-identity.js'
 import { getClosingPortfolio } from '@/lib/domain/closings/closing-execution-service.js'
 
 const DAY = 86_400_000
@@ -584,7 +585,10 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
   const out = []
   for (const c of campaigns) {
     const status = clean(c.status)
-    const tz = campaignZone(c)
+    // One zone, or every recipient zone of a multi-zone cohort (campaign-market-identity).
+    const zones = campaignZones(c)
+    const tz = zones.length === 1 ? zones[0] : null
+    const multi = zones.length > 1
     const s = stats.get(c.id) || {}
     const scheduledAt = Date.parse(c.scheduled_for || '')
     const missed = isCampaignStartMissed(c, now) // the activation worker's own rule
@@ -603,6 +607,7 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
         all_day: false,
         time_kind: 'scheduled',
         tz,
+        ...(multi ? { tzs: zones } : {}),
         actor: missed ? 'blocked' : 'system',
         status: missed ? 'missed' : scheduledAt < now ? 'starting' : 'scheduled',
         priority: missed ? 'high' : 'normal',
@@ -616,15 +621,18 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
         updated_at: c.updated_at || null,
       })
     }
-    if (!tz || missed) continue
+    if (!zones.length || missed) continue
     const live = LIVE_CAMPAIGN.has(status)
     if (!live && status !== 'scheduled') continue
     const remaining = Number(s.remaining || 0) + Number(s.scheduled || 0)
     if (remaining <= 0) continue
     const pace = dailyPace(c, s, perSenderDefault)
     const days = pace > 0 ? Math.ceil(remaining / pace) : 1
-    const firstDay = status === 'scheduled' && Number.isFinite(scheduledAt) ? localDate(scheduledAt, tz) : localDate(now, tz)
     const halted = system && (system.processor !== 'live' || system.emergency_stop)
+    // A multi-zone cohort has one real window per recipient zone; each is its
+    // own event (single-zone ids and titles are unchanged).
+    for (const tz of zones) {
+    const firstDay = status === 'scheduled' && Number.isFinite(scheduledAt) ? localDate(scheduledAt, tz) : localDate(now, tz)
     for (let i = 0; i < days; i += 1) {
       const day = addDays(firstDay, i)
       if (day < from || day > to) continue
@@ -633,12 +641,12 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
       const last = i === days - 1
       const open = now >= start && now < end && live
       out.push({
-        id: `campaign:${c.id}:window:${day}`,
+        id: multi ? `campaign:${c.id}:window:${day}:${tz}` : `campaign:${c.id}:window:${day}`,
         type: 'campaign_window',
         source: 'campaigns.contact_window',
-        source_id: `${c.id}:${day}`,
+        source_id: multi ? `${c.id}:${day}:${tz}` : `${c.id}:${day}`,
         app: 'campaigns',
-        title: 'Send window',
+        title: multi ? `Send window · ${zoneAbbr(tz)}` : 'Send window',
         subtitle: clean(c.name),
         place: null,
         start: iso(i === 0 && Number.isFinite(scheduledAt) && status === 'scheduled' ? Math.max(start, scheduledAt) : start),
@@ -656,18 +664,28 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
           : `Expected — about ${pace}/day at the campaign's real pace${last ? '; last day at this pace' : ''}`,
         count: 1,
         links: { campaign_id: c.id },
-        detail: { ...campaignDetail(c, s), day_index: i + 1, projected_days: days, daily_pace: pace, halted: halted ? (system.emergency_stop ? 'emergency_stop' : `queue_processor_${system.processor}`) : null },
+        detail: { ...campaignDetail(c, s), ...(multi ? { tz, zone_count: zones.length } : {}), day_index: i + 1, projected_days: days, daily_pace: pace, halted: halted ? (system.emergency_stop ? 'emergency_stop' : `queue_processor_${system.processor}`) : null },
         owner: 'system',
         updated_at: c.updated_at || null,
       })
+    }
     }
   }
   return out
 }
 
+/**
+ * The zones a campaign's windows are read in: its cohort's recipient zones
+ * (metadata.market_identity / recipient_timezones), else its declared zone.
+ */
+function campaignZones(c = {}) {
+  return [...new Set(campaignWindowZones(c).filter(isValidZone))]
+}
+
+/** A single zone, or null when there is none OR several (see campaignZones). */
 function campaignZone(c = {}) {
-  const tz = clean(c.metadata?.timezone || c.metadata?.launch_timezone)
-  return isValidZone(tz) ? tz : null
+  const zones = campaignZones(c)
+  return zones.length === 1 ? zones[0] : null
 }
 
 /**
@@ -683,22 +701,36 @@ export function campaignRoster(campaigns = [], { stats = new Map(), now = Date.n
   const ids = new Set(events.filter((e) => e.type === 'campaign_window').map((e) => e.id))
   return campaigns.map((c) => {
     const status = clean(c.status)
-    const tz = campaignZone(c)
+    const zones = campaignZones(c)
+    const tz = zones.length === 1 ? zones[0] : null
+    const multi = zones.length > 1
     const s = stats.get(c.id) || {}
     const scheduledAt = Date.parse(c.scheduled_for || '')
     const missed = isCampaignStartMissed(c, now) // the activation worker's own rule
     const left = Number(s.remaining || 0) + Number(s.scheduled || 0)
-    // Today's window in the CAMPAIGN's zone, from its own contact window —
-    // independent of the date range the operator happens to be viewing.
-    const today = tz ? localDate(now, tz) : null
-    const opens = tz ? zonedInstant(today, c.contact_window_start || '08:00', tz) : null
-    const closes = tz ? zonedInstant(today, c.contact_window_end || '21:00', tz) : null
+    // Today's window in EACH recipient zone, from the campaign's own contact
+    // window — independent of the date range the operator happens to be viewing.
+    const perZone = zones.map((zone) => {
+      const today = localDate(now, zone)
+      const opens = zonedInstant(today, c.contact_window_start || '08:00', zone)
+      const closes = zonedInstant(today, c.contact_window_end || '21:00', zone)
+      return { tz: zone, today, opens, closes, open: now >= opens && now < closes, ahead: now < opens }
+    })
+    const openZones = perZone.filter((z) => z.open)
+    const aheadZones = perZone.filter((z) => z.ahead)
+    // Sending while ANY recipient zone is open; otherwise the next opening.
+    const lead = openZones[0] || aheadZones.sort((a, b) => a.opens - b.opens)[0] || perZone[0] || null
+    const opens = !perZone.length ? null
+      : openZones.length ? Math.min(...openZones.map((z) => z.opens))
+        : aheadZones.length ? Math.min(...aheadZones.map((z) => z.opens)) : Math.min(...perZone.map((z) => z.opens))
+    const closes = !perZone.length ? null
+      : openZones.length ? Math.max(...openZones.map((z) => z.closes)) : Math.max(...perZone.map((z) => z.closes))
     const situation = missed ? 'missed'
-      : !tz ? 'no_timezone'
+      : !zones.length ? 'no_timezone'
         : status === 'scheduled' ? 'scheduled'
           : left <= 0 ? 'exhausted'
-            : now >= closes ? 'window_closed' : now >= opens ? 'sending' : 'window_ahead'
-    const windowId = tz ? `campaign:${c.id}:window:${today}` : null
+            : openZones.length ? 'sending' : aheadZones.length ? 'window_ahead' : 'window_closed'
+    const windowId = lead ? (multi ? `campaign:${c.id}:window:${lead.today}:${lead.tz}` : `campaign:${c.id}:window:${lead.today}`) : null
     const halted = system && (system.processor !== 'live' || system.emergency_stop) ? (system.emergency_stop ? 'emergency_stop' : `queue_processor_${system.processor}`) : null
     const f = c.metadata?.feeder_last && typeof c.metadata.feeder_last === 'object' ? c.metadata.feeder_last : null
     return {
@@ -707,8 +739,12 @@ export function campaignRoster(campaigns = [], { stats = new Map(), now = Date.n
       status: status || null,
       market: clean(c.market) || null,
       tz,
+      ...(multi ? {
+        tzs: zones,
+        zones_today: perZone.map((z) => ({ tz: z.tz, opens_at: iso(z.opens), closes_at: iso(z.closes), open: z.open })),
+      } : {}),
       window: c.contact_window_start && c.contact_window_end ? `${c.contact_window_start}–${c.contact_window_end}` : null,
-      window_today: tz && !missed && status !== 'scheduled' && left > 0 ? { opens_at: iso(opens), closes_at: iso(closes) } : null,
+      window_today: zones.length && !missed && status !== 'scheduled' && left > 0 ? { opens_at: iso(opens), closes_at: iso(closes) } : null,
       scheduled_for: Number.isFinite(scheduledAt) ? iso(scheduledAt) : null,
       situation,
       halted,
@@ -748,6 +784,7 @@ function campaignDetail(c = {}, s = {}) {
     market: clean(c.market) || null,
     window: c.contact_window_start && c.contact_window_end ? `${c.contact_window_start}–${c.contact_window_end}` : null,
     tz: campaignZone(c),
+    ...(campaignZones(c).length > 1 ? { tzs: campaignZones(c) } : {}),
     daily_cap: c.daily_cap ?? null,
     per_sender_cap: c.per_sender_cap ?? null,
     senders: s.senders ?? null,
@@ -1227,7 +1264,7 @@ function provenanceFor(e, opTz) {
   const d = e.detail || {}
   switch (e.type) {
     case 'campaign_window': case 'campaign_start': case 'campaign_sends':
-      return { scheduled_by: e.type === 'campaign_sends' ? 'Campaign feeder → send queue' : 'Campaign Command schedule', basis: e.type === 'campaign_window' ? `campaigns.contact_window ${d.window || ''}`.trim() : e.source, timezone: e.tz || d.tz || null, timezone_basis: 'Campaign market zone (campaign metadata)' }
+      return { scheduled_by: e.type === 'campaign_sends' ? 'Campaign feeder → send queue' : 'Campaign Command schedule', basis: e.type === 'campaign_window' ? `campaigns.contact_window ${d.window || ''}`.trim() : e.source, timezone: e.tz || d.tz || null, timezone_basis: d.zone_count > 1 ? `One of ${d.zone_count} recipient zones (from the campaign's targets)` : Array.isArray(d.tzs) && d.tzs.length > 1 ? `${d.tzs.length} recipient zones — each recipient's own window applies` : 'Campaign market zone (campaign metadata)' }
     case 'seller_follow_up': case 'scheduled_message': case 'scheduled_message_group': {
       const zone = d.seller_zone || null
       return { scheduled_by: d.scheduled_by || (String(e.source).startsWith('inbox_thread_state') ? 'Seller Conversation brain' : e.manual ? 'You (Inbox)' : 'Automation'), basis: d.followup_reason || e.source, policy: d.policy_version || null, timezone: zone, timezone_basis: zone ? 'Seller\'s property zone (state/ZIP) — contact window enforced at dispatch' : 'Stored as an instant (UTC); shown in your zone' }

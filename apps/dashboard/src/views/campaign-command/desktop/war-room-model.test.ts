@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BookCampaign, CampaignIntel, WarSystem } from './war-room-api'
 import {
   audienceSteps, bookLine, businessFunnel, capsTruth, counterDrift, feederBlock, gateOfReason, gatesOf, groupRail, missionOf,
-  moneyLines, nameParts, nextOf, paceOf, pct, railRowOf, relative, riverOf, stoppingGate, systemPosture, windowTrack,
+  moneyLines, nameParts, nextOf, paceOf, pct, railRowOf, relative, riverOf, stoppingGate, systemPosture, windowTrack, zonesOpenNote,
 } from './war-room-model'
 
 /**
@@ -197,6 +197,13 @@ describe('next, time, pace, caps', () => {
     expect(Math.round(w.now * 10) / 10).toBe(5.5)
     expect(w.label).toBe('8:00 AM–9:00 PM CDT')
     expect(w.operatorLabel).toBe('6:30 AM EDT your time')
+  })
+  it('a multi-zone window says how many recipient zones are open; single-zone label is unchanged (RC 7.1)', () => {
+    const multi = { ...closedWindow, timezones: ['America/New_York', 'America/Chicago', 'America/Los_Angeles'], open_zones: ['America/Chicago'] }
+    expect(zonesOpenNote(multi)).toBe(' · 1 of 3 zones open')
+    expect(zonesOpenNote(closedWindow)).toBe('')
+    expect(zonesOpenNote({ ...closedWindow, timezones: ['America/Chicago'], open_zones: [] })).toBe('')
+    expect(windowTrack(multi, NOW, 'America/New_York')!.label).toBe('8:00 AM–9:00 PM CDT · 1 of 3 zones open')
   })
   it('caps are named by what they bound: refill size is a worker chunk, total cap is scope', () => {
     const intel = { caps: { daily_cap: 750, total_cap: 1000, market_cap: 400, batch_max: 50, per_sender_cap: null, system_per_number_cap: 800, send_interval_seconds: 45 }, feeder: { buffer_target: 150, chunk: 100 } } as unknown as CampaignIntel

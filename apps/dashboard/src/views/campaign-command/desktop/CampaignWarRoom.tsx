@@ -440,6 +440,7 @@ export function CampaignWarRoom({
                     <div className="cc3-grid is-two">
                       <TimePlane
                         tz={f.tz}
+                        tzs={f.tzs}
                         track={track}
                         zones={intel.data?.audience?.zones ?? null}
                         pace={pace}

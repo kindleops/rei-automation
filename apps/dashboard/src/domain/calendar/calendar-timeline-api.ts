@@ -108,6 +108,9 @@ export interface DeskCampaign {
   status: string | null
   market: string | null
   tz: string | null
+  /** Every recipient zone, present only when the cohort spans several (tz is then null). */
+  tzs?: string[]
+  zones_today?: Array<{ tz: string; opens_at: string; closes_at: string; open: boolean }>
   window: string | null
   window_today: { opens_at: string; closes_at: string } | null
   scheduled_for: string | null

@@ -5,7 +5,7 @@ import type { CampaignIntel, FleetNumber, WarSystem } from './war-room-api'
 import { SECOND_CLOCK, useNow } from './war-room-hooks'
 import type { WarEvent } from './war-room-activity'
 import {
-  GATE_LABEL, SENDER_STATE_LABEL, SENDER_STATE_TONE, counterDrift, formatPhone, nf, pct, plural, relative, zoneFamily,
+  GATE_LABEL, SENDER_STATE_LABEL, SENDER_STATE_TONE, counterDrift, formatPhone, nf, pct, plural, relative, zoneAbbr, zoneFamily,
   type FunnelStep, type HeldReason, type MoneyLine, type Pace, type WaterStep, type WindowTrack,
 } from './war-room-model'
 import type { ReplyBucketKey } from './war-room-api'
@@ -44,9 +44,11 @@ function Heartbeat({ label, at, staleMs, cadence }: { label: string; at: string 
 }
 
 export const TimePlane = memo(function TimePlane({
-  tz, track, zones, pace, buffer, system, lastRefill, lastPass, onOpen,
+  tz, tzs = [], track, zones, pace, buffer, system, lastRefill, lastPass, onOpen,
 }: {
   tz: string | null
+  /** Every recipient zone; several means tz is null by design. */
+  tzs?: string[]
   track: WindowTrack | null
   zones: Record<string, number> | null
   pace: Pace
@@ -60,7 +62,7 @@ export const TimePlane = memo(function TimePlane({
   const zoneList = zones ? Object.entries(zones).filter(([z]) => z !== 'unknown').sort((a, b) => b[1] - a[1]) : []
   const fill = buffer.live === null ? null : Math.min(100, (buffer.live / Math.max(1, buffer.target)) * 100)
   return (
-    <Plane title="Time & runtime" meta={tz ? `${zoneFamily(tz)} time · ${tz}` : 'No time zone'} action={<LCLink icon="chevron-right" onClick={onOpen}>Execution</LCLink>} className="cc3-time" id="cc3-time">
+    <Plane title="Time & runtime" meta={tz ? `${zoneFamily(tz)} time · ${tz}` : tzs.length > 1 ? `${tzs.length} recipient zones · ${tzs.map((z) => zoneAbbr(z) ?? z).join(' · ')}` : 'No time zone'} action={<LCLink icon="chevron-right" onClick={onOpen}>Execution</LCLink>} className="cc3-time" id="cc3-time">
       {track ? (
         <div className="cc3-window">
           <div className="cc3-window__head">

@@ -13,6 +13,8 @@
  * campaign) describe lineage the same way without a query.
  */
 
+import { campaignWindowZones } from '@/lib/domain/campaigns/campaign-market-identity.js'
+
 const clean = (value) => String(value ?? '').trim()
 const obj = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {})
 const int = (value) => {
@@ -74,6 +76,7 @@ export function explicitPropertyIds(metadata = {}) {
  */
 export function describeCampaignLineage(campaign = {}) {
   const md = obj(campaign.metadata)
+  const lineageZones = [...new Set(campaignWindowZones(campaign).map(clean).filter(Boolean))]
   const filters = obj(md.target_filters)
 
   const explicitCount = explicitPropertyIds(md).length
@@ -131,7 +134,10 @@ export function describeCampaignLineage(campaign = {}) {
     handoff_mode: clean(md.handoff_mode) || null,
     filters: dimensions,
     market_values: marketValues.slice(0, VALUE_SAMPLE),
-    timezone: clean(md.timezone) || clean(md.launch_timezone) || null,
+    // One zone, or null when the cohort spans several — then `timezones` lists
+    // every recipient zone (campaign-market-identity). Never a guess.
+    timezone: lineageZones.length === 1 ? lineageZones[0] : (lineageZones.length ? null : clean(md.timezone) || clean(md.launch_timezone) || null),
+    timezones: lineageZones,
     stage_code: clean(md.stage_code) || null,
     template_use_case: clean(md.template_use_case) || null,
     campaign_type: clean(md.campaign_type) || null,

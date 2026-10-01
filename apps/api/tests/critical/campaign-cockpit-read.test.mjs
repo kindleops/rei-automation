@@ -564,6 +564,14 @@ test("cohort points: a pinned id list is the source cohort; a filter campaign fa
 // ── routes ─────────────────────────────────────────────────────────────────
 
 test("routes: authenticated, and a non-UUID id is refused before any read", async () => {
+  // The gate is only enforced when OPS_DASHBOARD_SECRET is configured (outside
+  // production an unset secret is the documented local-dev bypass; production
+  // refuses with 500). The harness resets env per file, so configure it here —
+  // otherwise the anonymous request is let through and the test times out
+  // against the blocked network instead of proving the 401.
+  const previousSecret = process.env.OPS_DASHBOARD_SECRET
+  process.env.OPS_DASHBOARD_SECRET = "test"
+  try {
   const { GET: cockpit } = await import("@/app/api/cockpit/campaigns/[id]/cockpit/route.js");
   const { GET: targets } = await import("@/app/api/cockpit/campaigns/[id]/cockpit/targets/route.js");
   const { GET: cohort } = await import("@/app/api/cockpit/campaigns/[id]/cockpit/cohort/route.js");
@@ -574,6 +582,10 @@ test("routes: authenticated, and a non-UUID id is refused before any read", asyn
     assert.equal((await res.json()).error, "invalid_campaign_id");
     const anon = await handler(new Request(`http://localhost:3000${path}`), { params: Promise.resolve({ id: CAMPAIGN_ID }) });
     assert.equal(anon.status, 401, "no dashboard credential, no campaign data");
+  }
+  } finally {
+    if (previousSecret === undefined) delete process.env.OPS_DASHBOARD_SECRET
+    else process.env.OPS_DASHBOARD_SECRET = previousSecret
   }
 });
 

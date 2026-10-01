@@ -196,7 +196,7 @@ export function EventDetail({ e, tz, now, canSplit, onClose, onOpen, onBeside, o
 }
 
 function CampaignFacts({ e, now, tz }: { e: DeskEvent; now: number; tz: string }) {
-  const d = e.detail as { audience?: number | null; eligible?: number | null; held?: number | null; committed?: number | null; sent?: number | null; remaining?: number | null; scheduled?: number | null; daily_cap?: number | null; daily_pace?: number; day_index?: number; projected_days?: number; halted?: string | null; market?: string | null; window?: string | null; feeder?: { at?: string | null; reason?: string | null; stalled?: boolean } | null; tz?: string | null }
+  const d = e.detail as { audience?: number | null; eligible?: number | null; held?: number | null; committed?: number | null; sent?: number | null; remaining?: number | null; scheduled?: number | null; daily_cap?: number | null; daily_pace?: number; day_index?: number; projected_days?: number; halted?: string | null; market?: string | null; window?: string | null; feeder?: { at?: string | null; reason?: string | null; stalled?: boolean } | null; tz?: string | null; tzs?: string[]; zone_count?: number }
   const s = Date.parse(e.start)
   const end = Date.parse(e.end || e.start)
   const elapsed = Math.min(1, Math.max(0, (now - s) / Math.max(1, end - s)))
@@ -222,7 +222,7 @@ function CampaignFacts({ e, now, tz }: { e: DeskEvent; now: number; tz: string }
         { label: 'Sent', value: num(d.sent), hint: 'Send-queue rows sent or delivered' },
         { label: 'Ready', value: num(d.remaining), hint: 'Targets ready to be queued' },
         { label: 'Queued', value: num(d.scheduled), hint: 'Rows in the queue waiting to go out' },
-        { label: 'Window', value: d.window ? `${d.window} ${zoneAbbr(d.tz)}` : null },
+        { label: 'Window', value: d.window ? `${d.window} ${zoneAbbr(d.tz)}${d.zone_count && d.zone_count > 1 ? ` · one of ${d.zone_count} recipient zones` : ''}`.trim() : null, hint: (d.tzs?.length ?? 0) > 1 || (d.zone_count ?? 0) > 1 ? 'Each recipient is texted inside their own local window' : undefined },
         ...(d.market ? [{ label: 'Market', value: d.market }] : []),
         { label: 'Day plan', value: d.daily_pace ? `Day ${d.day_index} of ${d.projected_days} · ${d.daily_pace.toLocaleString('en-US')}/day cap` : 'No cap on record — not projected', hint: 'Deterministic: ready + queued ÷ the campaign\'s daily cap (or per-sender cap × senders). Not a completion estimate.' },
       ]} />

@@ -178,12 +178,14 @@ export function facts(input: WarInput) {
   const feeder: FeederDigest | null = (book?.feeder ?? (core?.feeder.campaign_last as FeederDigest | null | undefined) ?? null) || null
   const window: (CockpitWindow & { reason?: string }) | null = core?.window ?? book?.window ?? null
   const tz = core?.lineage.timezone ?? book?.timezone ?? summary?.lineage?.timezone ?? null
+  // Every recipient zone; more than one means `tz` is null by design, not missing.
+  const tzs: string[] = core?.lineage.timezones ?? window?.timezones ?? []
   const missedFor = core?.lifecycle.schedule_missed_for ?? book?.schedule?.missed_for ?? summary?.schedule_missed_for ?? null
   const scheduledFor = core?.lifecycle.scheduled_for ?? book?.schedule?.scheduled_for ?? null
   const sourceKind = core?.lineage.kind ?? book?.source.kind ?? summary?.lineage?.kind ?? 'none'
   const explicit = core?.lineage.explicit_property_count ?? book?.source.explicit_count ?? summary?.lineage?.explicit_property_count ?? null
   const quarantined = Boolean(book?.quarantined ?? summary?.quarantined ?? core?.flags.quarantine)
-  return { status, total, held, ready, planned, heldByReason, eligible, queueLive, overdue, due, sent, delivered, replied, buckets, opportunities, feeder, window, tz, missedFor, scheduledFor, sourceKind, explicit, quarantined }
+  return { status, total, held, ready, planned, heldByReason, eligible, queueLive, overdue, due, sent, delivered, replied, buckets, opportunities, feeder, window, tz, tzs, missedFor, scheduledFor, sourceKind, explicit, quarantined }
 }
 
 /* ══ the system ═══════════════════════════════════════════════════════════ */
@@ -582,8 +584,8 @@ export function gatesOf(input: WarInput, now: number): Gate[] {
   // CONTACT WINDOW
   const w = f.window
   if (!w || w.open === null) out.push(g('window', 'unknown', w?.reason === 'campaign_timezone_unset' ? 'No time zone' : 'Unknown', 'The window could not be read in the campaign’s zone.'))
-  else if (w.open) out.push(g('window', 'pass', w.closes_at ? `Open until ${clock(w.closes_at, w.timezone ?? tz, false)}` : 'Open', `${w.window ?? ''} ${zoneAbbr(w.timezone ?? tz, now) ?? ''}`.trim()))
-  else out.push(g('window', live ? 'wait' : 'idle', `Closed · opens ${clock(w.next_open_at, w.timezone ?? tz)}`, `${w.window ?? ''} ${zoneAbbr(w.timezone ?? tz, now) ?? ''} — waiting is not failing.`.trim(), 'system'))
+  else if (w.open) out.push(g('window', 'pass', w.closes_at ? `Open until ${clock(w.closes_at, w.timezone ?? tz, false)}` : 'Open', `${w.window ?? ''} ${zoneAbbr(w.timezone ?? tz, now) ?? ''}${zonesOpenNote(w)}`.trim()))
+  else out.push(g('window', live ? 'wait' : 'idle', `Closed · opens ${clock(w.next_open_at, w.timezone ?? tz)}`, `${w.window ?? ''} ${zoneAbbr(w.timezone ?? tz, now) ?? ''}${zonesOpenNote(w)} — waiting is not failing.`.trim(), 'system'))
 
   // ELIGIBILITY
   if (f.total === null) out.push(g('eligibility', 'unknown', 'Unavailable', 'Targets could not be read.'))
@@ -705,6 +707,12 @@ export function nextOf(input: WarInput, now: number): Next {
 
 export type WindowTrack = { start: number; end: number; now: number; open: boolean | null; label: string; nowLabel: string; zone: string | null; operatorLabel: string | null }
 
+/** " · 2 of 5 zones open" for a multi-zone window; '' for a single zone (unchanged). */
+export function zonesOpenNote(w: { timezones?: string[]; open_zones?: string[] } | null | undefined): string {
+  const n = w?.timezones?.length ?? 0
+  return n > 1 ? ` · ${w?.open_zones?.length ?? 0} of ${n} zones open` : ''
+}
+
 export function windowTrack(w: (CockpitWindow & { reason?: string }) | null | undefined, now: number, operatorTz?: string | null): WindowTrack | null {
   if (!w || !w.window) return null
   const m = w.window.match(/(\d{1,2}):(\d{2})\D+(\d{1,2}):(\d{2})/)
@@ -725,7 +733,7 @@ export function windowTrack(w: (CockpitWindow & { reason?: string }) | null | un
   const operatorZone = operatorTz && tz && zoneAbbr(operatorTz, now) !== zone ? zoneAbbr(operatorTz, now) : null
   return {
     start, end, now: nowH, open: w.open,
-    label: `${fmt(start)}–${fmt(end)}${zone ? ` ${zone}` : ''}`,
+    label: `${fmt(start)}–${fmt(end)}${zone ? ` ${zone}` : ''}${zonesOpenNote(w)}`,
     nowLabel: `${nowLabel}${zone ? ` ${zone}` : ''}`,
     zone,
     operatorLabel: operatorZone ? `${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: operatorTz || undefined }).format(new Date(now))} ${operatorZone} your time` : null,

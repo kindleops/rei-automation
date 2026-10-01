@@ -264,3 +264,63 @@ test("B4: stalled only when audience, window, capacity, no progress for the inte
   assert.equal(classifyFeederProgress({ ...base, lastProgressAt: new Date(now - 60_000).toISOString() }).state, "idle_recent");
   assert.equal(classifyFeederProgress({ ...base, completed: true }).state, "completed");
 });
+
+// ── readers: multi-zone aware, single-zone identical ─────────────────────────
+import { campaignRoster } from "@/lib/domain/calendar/calendar-timeline-service.js";
+import { describeCampaignLineage } from "@/lib/domain/campaigns/campaign-lineage.js";
+
+const multiCampaign = (extra = {}) => ({
+  id: "eg", name: "Entity Graph · 186 properties", status: "active",
+  contact_window_start: "08:00", contact_window_end: "21:00", daily_cap: 100,
+  metadata: {
+    timezone: null,
+    recipient_timezones: ["America/New_York", "America/Los_Angeles"],
+    market_identity: summarizeCampaignMarketIdentity([
+      { market: "Miami, FL", timezone: "America/New_York" },
+      { market: "Los Angeles, CA", timezone: "America/Los_Angeles" },
+    ]),
+  },
+  ...extra,
+});
+
+test("readers: a multi-zone campaign is never 'no timezone' — roster reads every recipient zone", () => {
+  const late = Date.parse("2026-07-16T02:00:00Z"); // 22:00 ET closed, 19:00 PT open
+  const stats = new Map([["eg", { remaining: 10, scheduled: 0 }]]);
+  const [r] = campaignRoster([multiCampaign()], { stats, now: late });
+  assert.equal(r.situation, "sending");
+  assert.equal(r.tz, null);
+  assert.deepEqual([...r.tzs].sort(), ["America/Los_Angeles", "America/New_York"]);
+  assert.equal(r.zones_today.filter((z) => z.open).length, 1);
+  assert.equal(r.window_today.closes_at, "2026-07-16T04:00:00.000Z", "open until the Pacific window closes");
+  const night = Date.parse("2026-07-15T09:00:00Z"); // 05:00 ET, 02:00 PT
+  const [ahead] = campaignRoster([multiCampaign()], { stats, now: night });
+  assert.equal(ahead.situation, "window_ahead");
+  assert.equal(ahead.window_today.opens_at, "2026-07-15T12:00:00.000Z", "Eastern opens first");
+});
+
+test("readers: a multi-zone campaign projects one send window per recipient zone", () => {
+  const now = Date.parse("2026-07-15T15:00:00Z");
+  const stats = new Map([["eg", { remaining: 10, scheduled: 0 }]]);
+  const events = buildCampaignEvents([multiCampaign()], { from: "2026-07-15", to: "2026-07-15", now, stats });
+  const windows = events.filter((e) => e.type === "campaign_window");
+  assert.deepEqual(windows.map((e) => e.tz).sort(), ["America/Los_Angeles", "America/New_York"]);
+  assert.ok(windows.every((e) => /Send window · /.test(e.title)));
+});
+
+test("readers: single-zone roster, window events and lineage are unchanged", () => {
+  const now = Date.parse("2026-07-15T15:00:00Z");
+  const single = { id: "s", name: "Dallas", status: "active", contact_window_start: "08:00", contact_window_end: "21:00", daily_cap: 100, metadata: { timezone: "America/Chicago" } };
+  const stats = new Map([["s", { remaining: 10, scheduled: 0 }]]);
+  const [r] = campaignRoster([single], { stats, now });
+  assert.equal(r.tz, "America/Chicago");
+  assert.equal(r.tzs, undefined);
+  assert.equal(r.situation, "sending");
+  const events = buildCampaignEvents([single], { from: "2026-07-15", to: "2026-07-15", now, stats });
+  const w = events.find((e) => e.type === "campaign_window");
+  assert.equal(w.id, "campaign:s:window:2026-07-15");
+  assert.equal(w.title, "Send window");
+  assert.equal(describeCampaignLineage(single).timezone, "America/Chicago");
+  const multi = describeCampaignLineage(multiCampaign());
+  assert.equal(multi.timezone, null);
+  assert.deepEqual([...multi.timezones].sort(), ["America/Los_Angeles", "America/New_York"]);
+});
