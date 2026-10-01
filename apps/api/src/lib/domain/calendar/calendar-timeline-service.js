@@ -66,6 +66,10 @@ const DEAD_OPP = new Set(['suppressed', 'dead', 'closed', 'lost', 'archived', 'd
 const OPERATOR_ACTIONS = new Set(['human_review', 'call_seller', 'manual_review', 'operator_review', 'review', 'call'])
 const WF_LIVE = ['running', 'waiting', 'awaiting_approval', 'held']
 const EMAIL_OPEN = ['scheduled', 'queued', 'pending', 'approved', 'waiting', 'deferred', 'ready', 'pending_approval', 'retry']
+/** Campaign send density is reported per slot of this many minutes (operator zone). */
+export const SLOT_MINUTES = 30
+const THREAD_COLUMNS = 'thread_key,property_id,market,stage,status,next_action,follow_up_at,next_action_at,is_suppressed,is_archived,last_inbound_at,last_outbound_at,inbox_bucket,updated_at'
+const STALE_REVIEW_DAYS = 90
 
 const clean = (v) => String(v ?? '').trim()
 // Same minute: a campaign's start reads before its first sends.
@@ -215,10 +219,20 @@ export function buildQueueEvents(rows = [], { tz, now = Date.now(), campaigns = 
     const state = queueState(row.queue_status)
     if (row.campaign_id) {
       const key = `${row.campaign_id}:${localDate(at, tz)}`
-      const g = groups.get(key) || { campaign_id: row.campaign_id, day: localDate(at, tz), start: at, end: at, counts: { scheduled: 0, sending: 0, sent: 0, blocked: 0, cancelled: 0 }, delivered: 0, pastDue: 0, nextAt: null, reasons: {} }
+      const g = groups.get(key) || { campaign_id: row.campaign_id, day: localDate(at, tz), start: at, end: at, counts: { scheduled: 0, sending: 0, sent: 0, blocked: 0, cancelled: 0 }, delivered: 0, pastDue: 0, nextAt: null, reasons: {}, slots: new Map() }
       g.start = Math.min(g.start, at)
       g.end = Math.max(g.end, at)
       g.counts[state] += 1
+      // Where in the day the rows sit, per 30-minute slot (operator zone): the
+      // queue's own schedule, so a band can draw real send density.
+      if (state !== 'cancelled') {
+        const slot = Math.floor(localMinutes(at, tz) / SLOT_MINUTES)
+        const cell = g.slots.get(slot) || { done: 0, waiting: 0, failed: 0 }
+        if (state === 'sent') cell.done += 1
+        else if (state === 'blocked') cell.failed += 1
+        else cell.waiting += 1
+        g.slots.set(slot, cell)
+      }
       // The next row still to go out (the queue's own schedule, not a forecast).
       if ((state === 'scheduled' || state === 'sending') && at >= now && (g.nextAt === null || at < g.nextAt)) g.nextAt = at
       if (clean(row.queue_status) === 'delivered') g.delivered += 1
@@ -322,7 +336,7 @@ export function buildQueueEvents(rows = [], { tz, now = Date.now(), campaigns = 
             : allDone && failed ? `${failed} of ${total} did not go out` : null,
       count: total,
       links: { campaign_id: g.campaign_id },
-      detail: { counts: g.counts, delivered: g.delivered, failed, blocked_reasons: g.reasons, campaign_status: c.status || null, past_due: g.pastDue, next_send_at: g.nextAt !== null ? iso(g.nextAt) : null, last_send_at: iso(g.end) },
+      detail: { counts: g.counts, delivered: g.delivered, failed, blocked_reasons: g.reasons, campaign_status: c.status || null, past_due: g.pastDue, next_send_at: g.nextAt !== null ? iso(g.nextAt) : null, last_send_at: iso(g.end), slot_minutes: SLOT_MINUTES, slots: [...g.slots.entries()].sort((a, b) => a[0] - b[0]).map(([slot, v]) => [slot, v.done, v.waiting, v.failed]) },
       owner: 'system',
     })
   }
@@ -404,7 +418,15 @@ export function buildFollowUpEvents(rows = [], { now = Date.now(), people = new 
     if (row.is_suppressed || row.is_archived) continue
     const tk = normThreadKey(row.thread_key)
     const person = people.get(tk) || {}
-    if (person.opportunity_status && DEAD_OPP.has(clean(person.opportunity_status))) continue
+    if (person.opportunity_status && DEAD_OPP.has(clean(person.opportunity_status))) {
+      // The thread still names a follow-up time, but its deal is suppressed /
+      // dead / closed: nothing will act on it. The phone never sees it; the
+      // desk keeps it as HISTORY so a recorded follow-up never silently
+      // vanishes from the day it was planned for (2026-10-01: 13 thread
+      // follow-ups on Oct 11, every one on a suppressed deal).
+      if (history) out.push(...unqueuedFollowUps(row, { tk, person, now }))
+      continue
+    }
     const instants = []
     const fu = Date.parse(row.follow_up_at || '')
     const na = Date.parse(row.next_action_at || '')
@@ -470,6 +492,46 @@ export function buildFollowUpEvents(rows = [], { now = Date.now(), people = new 
     }
   }
   return out
+}
+
+const DEAD_WORDS = { suppressed: 'suppressed', dead: 'dead', closed: 'closed', lost: 'lost', archived: 'archived', do_not_contact: 'marked do-not-contact' }
+
+/**
+ * A follow-up time recorded on a thread whose deal is suppressed / dead /
+ * closed. History only (never upcoming, never attention): the record exists,
+ * and the calendar says plainly that nothing is queued to act on it.
+ */
+export function unqueuedFollowUps(row = {}, { tk = normThreadKey(row.thread_key), person = {}, now = Date.now() } = {}) {
+  const fu = Date.parse(row.follow_up_at || '')
+  if (!Number.isFinite(fu)) return []
+  const word = DEAD_WORDS[clean(person.opportunity_status)] || clean(person.opportunity_status).replace(/_/g, ' ')
+  return [{
+    id: `thread:${tk}:follow_up_at:${fu}`,
+    type: 'seller_follow_up',
+    source: 'inbox_thread_state.follow_up_at',
+    source_id: tk,
+    app: 'inbox',
+    title: 'Seller follow-up',
+    subtitle: person.seller || null,
+    place: person.address || null,
+    start: iso(fu),
+    end: null,
+    all_day: false,
+    time_kind: 'scheduled',
+    tz: null,
+    actor: 'completed',
+    status: 'cancelled',
+    priority: 'info',
+    overdue: false,
+    attention: false,
+    reason: `Not queued — the deal is ${word}, so nothing will send at this time`,
+    count: 1,
+    links: { thread_key: tk || null, property_id: row.property_id ? String(row.property_id) : null, opportunity_id: person.opportunity_id || null },
+    detail: { next_action: clean(row.next_action) || null, stage: person.stage || row.stage || null, market: row.market || null, thread_status: row.status || null, opportunity_status: person.opportunity_status || null, unqueued: true, upcoming_when_recorded: fu > now, seller_zone: person.zone || null },
+    owner: 'system',
+    history_only: true,
+    updated_at: row.updated_at || null,
+  }]
 }
 
 /** Pipeline next actions on live opportunities. */
@@ -607,6 +669,56 @@ function campaignZone(c = {}) {
   return isValidZone(tz) ? tz : null
 }
 
+/**
+ * CAMPAIGN ROSTER (desk) — every campaign the calendar read (scheduled and
+ * live), with Campaign Command's counts and WHY it does or does not have a
+ * send window today. A live campaign with nobody left to text projects no
+ * window; the roster is how the calendar says so instead of dropping it.
+ *
+ *   situation: missed | scheduled | sending | window_ahead | window_closed |
+ *              exhausted | no_timezone
+ */
+export function campaignRoster(campaigns = [], { stats = new Map(), now = Date.now(), events = [], system = null } = {}) {
+  const ids = new Set(events.filter((e) => e.type === 'campaign_window').map((e) => e.id))
+  return campaigns.map((c) => {
+    const status = clean(c.status)
+    const tz = campaignZone(c)
+    const s = stats.get(c.id) || {}
+    const scheduledAt = Date.parse(c.scheduled_for || '')
+    const missed = status === 'scheduled' && Number.isFinite(scheduledAt) && now - scheduledAt > 2 * 60 * MIN
+    const left = Number(s.remaining || 0) + Number(s.scheduled || 0)
+    // Today's window in the CAMPAIGN's zone, from its own contact window —
+    // independent of the date range the operator happens to be viewing.
+    const today = tz ? localDate(now, tz) : null
+    const opens = tz ? zonedInstant(today, c.contact_window_start || '08:00', tz) : null
+    const closes = tz ? zonedInstant(today, c.contact_window_end || '21:00', tz) : null
+    const situation = missed ? 'missed'
+      : !tz ? 'no_timezone'
+        : status === 'scheduled' ? 'scheduled'
+          : left <= 0 ? 'exhausted'
+            : now >= closes ? 'window_closed' : now >= opens ? 'sending' : 'window_ahead'
+    const windowId = tz ? `campaign:${c.id}:window:${today}` : null
+    const halted = system && (system.processor !== 'live' || system.emergency_stop) ? (system.emergency_stop ? 'emergency_stop' : `queue_processor_${system.processor}`) : null
+    const f = c.metadata?.feeder_last && typeof c.metadata.feeder_last === 'object' ? c.metadata.feeder_last : null
+    return {
+      id: c.id,
+      name: clean(c.name) || 'Campaign',
+      status: status || null,
+      market: clean(c.market) || null,
+      tz,
+      window: c.contact_window_start && c.contact_window_end ? `${c.contact_window_start}–${c.contact_window_end}` : null,
+      window_today: tz && !missed && status !== 'scheduled' && left > 0 ? { opens_at: iso(opens), closes_at: iso(closes) } : null,
+      scheduled_for: Number.isFinite(scheduledAt) ? iso(scheduledAt) : null,
+      situation,
+      halted,
+      window_event_id: windowId && ids.has(windowId) ? windowId : null,
+      counts: { audience: s.audience ?? null, eligible: s.eligible ?? null, held: s.held ?? null, committed: s.committed ?? null, sent: s.sent ?? null, remaining: s.remaining ?? null, queued: s.scheduled ?? null },
+      feeder: f ? { at: f.at || null, reason: f.reason || null, stalled: Boolean(f.stalled) } : null,
+      deep_link: { app: 'campaigns', label: 'Open in Campaign Command', path: `/campaign-command?campaign=${encodeURIComponent(c.id)}` },
+    }
+  })
+}
+
 /** Real daily pace: bounded by daily_cap and per-sender limit × senders in use.
  * The per-sender limit is the campaign override, else the configured default. */
 export function dailyPace(c = {}, s = {}, perSenderDefault = null) {
@@ -622,12 +734,17 @@ function campaignDetail(c = {}, s = {}) {
   const f = c.metadata?.feeder_last && typeof c.metadata.feeder_last === 'object' ? c.metadata.feeder_last : null
   return {
     status: c.status || null,
+    // Campaign Command's own definitions (campaign-cockpit.js): audience = all
+    // targets, held = blocked, remaining = ready, committed = the rest (already
+    // planned into the queue), sent = sent + delivered rows.
     audience: s.audience ?? null,
     eligible: s.eligible ?? null,
     held: s.held ?? null,
+    committed: s.committed ?? null,
     scheduled: s.scheduled ?? null,
     sent: s.sent ?? null,
     remaining: s.remaining ?? null,
+    market: clean(c.market) || null,
     window: c.contact_window_start && c.contact_window_end ? `${c.contact_window_start}–${c.contact_window_end}` : null,
     tz: campaignZone(c),
     daily_cap: c.daily_cap ?? null,
@@ -1171,24 +1288,68 @@ export function decorateEvent(e, { tz = 'America/Chicago', now = Date.now() } = 
   ev.editable = ev.history || (ev.type === 'scheduled_message' && !ev.manual) || (ev.type === 'campaign_start' && ev.status !== 'scheduled' && ev.status !== 'missed')
     ? { mode: 'read_only', owner_app: edit.owner_app, how: ev.history ? 'History — kept for audit.' : edit.how, effects: [] }
     : edit
+  ev.actions = writeAuthority(ev, now)
+  if (ev.actions) {
+    ev.editable = {
+      mode: 'reschedulable',
+      owner_app: 'inbox',
+      how: 'You scheduled this message. Reschedule or cancel it here — it goes through the same queue action the Queue and Inbox use.',
+      effects: ['The queue row keeps its identity — no second message is created', 'The seller\'s contact window still applies when it sends'],
+    }
+  }
+  ev.market = clean(ev.detail?.market) || null
   ev.provenance = provenanceFor(ev, tz)
   ev.why = (WHY[ev.type] || (() => null))(ev)
   ev.next = (NEXT[ev.type] || (() => null))(ev)
   ev.deep_link = deepLink(ev)
-  void now
   return ev
+}
+
+/** How far ahead a scheduled send must still be for the calendar to move or cancel it. */
+export const WRITE_MIN_LEAD_MINUTES = 10
+const MOVABLE_QUEUE = new Set(['scheduled', 'queued'])
+
+/**
+ * WRITE AUTHORITY — which canonical write path, if any, this event accepts.
+ *
+ * Only a message YOU scheduled (send_queue row, manual_scheduled_reply /
+ * manual reply) that is still waiting ('scheduled' / 'queued') and is more
+ * than WRITE_MIN_LEAD_MINUTES away. The queue's reschedule action sets the
+ * row back to 'scheduled' whatever its state, so the calendar must never
+ * offer it on a row that is sending, sent, held, blocked or cancelled — and
+ * never close to its send time, when the dispatcher may already hold it.
+ * Everything else (automation follow-ups, campaign windows, closing dates,
+ * workflow timers, email) changes only in the app that owns it.
+ */
+export function writeAuthority(ev, now = Date.now()) {
+  if (ev.type !== 'scheduled_message' || ev.source !== 'send_queue' || !ev.manual || ev.history) return null
+  const id = clean(ev.links?.queue_id || ev.source_id)
+  const qs = clean(ev.detail?.queue_status)
+  const at = Date.parse(ev.start || '')
+  if (!id || !MOVABLE_QUEUE.has(qs) || !Number.isFinite(at) || at - now <= WRITE_MIN_LEAD_MINUTES * MIN) return null
+  return {
+    reschedule: { via: 'queue.reschedule', queue_id: id, min_lead_minutes: WRITE_MIN_LEAD_MINUTES },
+    cancel: { via: 'queue.cancel', queue_id: id },
+  }
 }
 
 /** Per operator day: quiet density by lane (month aggregates, the day rail). */
 export function dayAggregates(events = [], { from, to, tz }) {
   const days = {}
-  for (let d = from; d <= to; d = addDays(d, 1)) days[d] = { total: 0, campaign: 0, windows: 0, closing: 0, attention: 0, automation: 0, manual: 0, workflow: 0, external: 0, completed: 0, sends: 0 }
+  for (let d = from; d <= to; d = addDays(d, 1)) days[d] = { total: 0, campaign: 0, windows: 0, closing: 0, attention: 0, automation: 0, manual: 0, workflow: 0, external: 0, completed: 0, sends: 0, texts: 0, follow_ups: 0, operator: 0, closings: 0 }
   for (const e of events) {
     if (e.undated) continue
     const d = e.all_day && e.date ? e.date : localDate(Date.parse(e.start), tz)
     const a = days[d]
     if (!a) continue
     a.total += 1
+    // Activity on the day whether it is still ahead or already happened (the
+    // month heatmap's volumes); a cancelled or superseded item never counts.
+    const real = e.state !== 'cancelled' && e.state !== 'superseded'
+    if (e.type === 'campaign_sends') a.texts += Math.max(0, (e.count || 0) - Number(e.detail?.counts?.cancelled || 0))
+    if (real && e.type === 'seller_follow_up') a.follow_ups += 1
+    if (real && e.owner === 'you') a.operator += 1
+    if (real && e.lane === 'closing') a.closings += 1
     if (e.history) { a.completed += 1; continue }
     if (e.attention) a.attention += 1
     if (e.lane === 'campaign') a.campaign += 1
@@ -1234,6 +1395,7 @@ export function telemetryFor(events = [], attention = [], { now, today, tz }) {
   const whenNext = (e) => (e.type === 'campaign_sends' && e.detail?.next_send_at ? Date.parse(e.detail.next_send_at) : Date.parse(e.start))
   const upcoming = events.filter((e) => !e.history && !e.all_day && !e.undated && whenNext(e) > now).sort((a, b) => whenNext(a) - whenNext(b))
   const nextSystem = upcoming.find((e) => e.owner === 'system') || null
+  const nextYou = upcoming.find((e) => e.owner === 'you') || null
   const live = events.filter((e) => e.state === 'live')
   const brief = (e) => (e ? { id: e.id, type: e.type, title: e.title, subtitle: e.subtitle, start: e.start, end: e.end, at: iso(whenNext(e)), tz: e.tz, owner: e.owner } : null)
   const attnIds = [...new Set(attention.map((e) => e.id))]
@@ -1244,12 +1406,14 @@ export function telemetryFor(events = [], attention = [], { now, today, tz }) {
     live: live.map(brief),
     next: brief(upcoming[0] || null),
     next_system: brief(nextSystem),
+    next_you: brief(nextYou),
     basis: {
       today: 'Open (not completed, cancelled or superseded) events on your calendar day; a window that spans today counts once.',
       system: 'Of today\'s open events, those the system owns (campaigns, automation, workflows).',
       needs_you: 'Attention items you own plus today\'s open items you own.',
       attention: 'Distinct attention events over the range and the 14-day lookback (the attention board).',
       next: 'The next open timed event after now.',
+      next_you: 'The next open timed event after now that you own. Absent when nothing is waiting on you.',
     },
   }
 }
@@ -1287,7 +1451,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
   const status = {}
   const prop = propertyId ? String(propertyId) : null
 
-  const [queueRows, threads, opps, campaigns, portfolio, offers, controls, wfRuns, emails] = await Promise.all([
+  const [queueRows, threadRows, opps, campaigns, portfolio, offers, controls, wfRuns, emails, staleReviews] = await Promise.all([
     source('send_queue', status, async () => {
       let q = supabase.from('send_queue')
         .select('id,campaign_id,thread_key,queue_status,scheduled_for,sent_at,message_type,source,property_id,property_address,property_address_state,property_address_zip,seller_display_name,blocked_reason,guard_reason,failed_reason,paused_reason,from_phone_number,execution_policy_version,updated_at,skip_reason:metadata->>skip_reason,cancelled_by:metadata->>cancelled_by,cancellation_reason:metadata->>cancellation_reason,followup_reason:metadata->>followup_reason')
@@ -1300,7 +1464,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
     }),
     source('inbox_thread_state', status, async () => {
       let q = supabase.from('inbox_thread_state')
-        .select('thread_key,property_id,market,stage,status,next_action,follow_up_at,next_action_at,is_suppressed,is_archived,last_inbound_at,last_outbound_at,inbox_bucket,updated_at')
+        .select(THREAD_COLUMNS)
         .or(`and(follow_up_at.gte.${iso(fromAt)},follow_up_at.lt.${iso(toAt)}),and(next_action_at.gte.${iso(fromAt)},next_action_at.lt.${iso(toAt)})`)
         .limit(2000)
       if (prop) q = q.eq('property_id', prop)
@@ -1320,7 +1484,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
     }),
     prop ? Promise.resolve([]) : source('campaigns', status, async () => {
       const { data, error } = await supabase.from('campaigns')
-        .select('id,name,status,scheduled_for,contact_window_start,contact_window_end,daily_cap,per_sender_cap,total_cap,metadata,updated_at')
+        .select('id,name,status,market,scheduled_for,contact_window_start,contact_window_end,daily_cap,per_sender_cap,total_cap,metadata,updated_at')
         .in('status', ['scheduled', 'active', 'activating', 'live_limited'])
         .limit(100)
       if (error) throw error
@@ -1369,7 +1533,23 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
       if (error) throw error
       return data || []
     }),
+    // A review that is YOURS and overdue stays attention however old it is
+    // (bounded: 90 days, 200 rows). The range read above stops at the
+    // 14-day lookback, which hid a review overdue since Sep 10.
+    !desk ? Promise.resolve([]) : source('inbox_thread_state_reviews', status, async () => {
+      let q = supabase.from('inbox_thread_state')
+        .select(THREAD_COLUMNS)
+        .in('next_action', [...OPERATOR_ACTIONS])
+        .lt('next_action_at', iso(fromAt)).gte('next_action_at', iso(now - STALE_REVIEW_DAYS * DAY))
+        .limit(200)
+      if (prop) q = q.eq('property_id', prop)
+      const { data, error } = await q
+      if (error) throw error
+      return data || []
+    }),
   ])
+  // One row per thread: the range read and the overdue-review read can overlap.
+  const threads = [...new Map([...threadRows, ...staleReviews].map((t) => [normThreadKey(t.thread_key) || t.thread_key, t])).values()]
 
   const ctl = Object.fromEntries((controls || []).map((r) => [r.key, clean(typeof r.value === 'string' ? r.value : JSON.stringify(r.value)).replace(/^"|"$/g, '')]))
   const processor = /^(live|automatic|on|enabled)$/i.test(ctl.queue_processor_mode || '') ? 'live' : /^(off|paused)$/i.test(ctl.queue_processor_mode || '') ? 'off' : ctl.queue_processor_mode ? 'safe' : 'unknown'
@@ -1421,7 +1601,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
   const missingCampaigns = campaignIds.filter((id) => !campaignMap.has(id))
   if (missingCampaigns.length) {
     const more = await source('campaigns_ref', status, async () => {
-      const { data, error } = await supabase.from('campaigns').select('id,name,status,metadata').in('id', missingCampaigns.slice(0, 200))
+      const { data, error } = await supabase.from('campaigns').select('id,name,status,market,metadata').in('id', missingCampaigns.slice(0, 200))
       if (error) throw error
       return data || []
     })
@@ -1458,7 +1638,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
       if (DONE_QUEUE.includes(q.queue_status)) s.sent += 1
       if (q.from_phone_number) s._senders.add(q.from_phone_number)
     }
-    for (const s of stats.values()) { s.eligible = s.audience - s.held; s.senders = s._senders.size; delete s._senders }
+    for (const s of stats.values()) { s.eligible = s.audience - s.held; s.committed = Math.max(0, s.audience - s.remaining - s.held); s.senders = s._senders.size; delete s._senders }
   }
 
   // Workflow runs: their pinned version graphs, open waits and last steps.
@@ -1508,7 +1688,9 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
   // Desk attention is anchored to TODAY (14 days back), never to the range the
   // operator is looking at — so the header count does not move as they navigate.
   const attnFloor = addDays(today, -LOOKBACK_DAYS)
-  const attention = events.filter((e) => e.attention && (!desk || e.undated || (e.all_day && e.date ? e.date : localDate(Date.parse(e.start), zone)) >= attnFloor))
+  // An overdue item that is YOURS is never aged out of attention (it is still
+  // waiting on you); everything else is bounded by the 14-day floor.
+  const attention = events.filter((e) => e.attention && (!desk || e.undated || (e.owner === 'you' && e.state === 'overdue') || (e.all_day && e.date ? e.date : localDate(Date.parse(e.start), zone)) >= attnFloor))
 
   const todayEvents = inRange.filter((e) => (e.all_day ? e.date === today : localDate(Date.parse(e.start), zone) === today || (e.end && Date.parse(e.start) < zonedInstant(addDays(today, 1), '00:00', zone) && Date.parse(e.end) > zonedInstant(today, '00:00', zone))))
   const next = inRange.find((e) => !e.all_day && Date.parse(e.start) > now && e.actor !== 'completed') || null
@@ -1526,11 +1708,22 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
   const tomorrow = addDays(today, 1)
   return {
     ...out,
-    contract: 'calendar.desk/v3',
+    contract: DESK_CONTRACT,
     system,
     days: dayAggregates(inRange, { from: start, to: end, tz: zone }),
     board: attentionBoard(attention, inRange, { today, tomorrow, tz: zone }),
     definitions: ATTENTION_DEFINITIONS,
     telemetry: telemetryFor(inRange, attention, { now, today, tz: zone }),
+    campaigns: campaignRoster(campaigns, { stats, now, events, system }),
+    authority: {
+      write_min_lead_minutes: WRITE_MIN_LEAD_MINUTES,
+      basis: 'Only messages you scheduled, still waiting and more than the lead time away, can be rescheduled or cancelled here (the canonical queue actions). Everything else changes in the app that owns it.',
+    },
   }
 }
+
+/** The desktop contract (CALENDAR 5.0). v5 adds: per-event `market` and `actions`
+ * (write authority), the campaign roster, day volumes (texts / follow_ups /
+ * operator / closings), telemetry.next_you, and history-only follow-ups on
+ * suppressed deals. */
+export const DESK_CONTRACT = 'calendar.desk/v5'

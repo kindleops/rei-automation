@@ -1,22 +1,32 @@
 /**
- * Writes the dashboard's ?demo=1 Calendar data by running the raw scenario
- * rows (tests/fixtures/calendar-timeline-scenarios.mjs + the closing
- * scenarios) through the REAL loader — getCalendarTimeline(view=desk) — so the
- * demo can never drift from what production projects. Demo data is never
- * served by the API and is always labelled DEMO in the UI. Re-run after
- * changing the read model:
- *   node --import ./tests/register-aliases.mjs scripts/gen-calendar-demo.mjs
+ * Writes a CAPTURE FIXTURE for the desktop Calendar: the raw scenario rows
+ * (tests/fixtures/calendar-timeline-scenarios.mjs + the closing scenarios)
+ * run through the REAL loader — getCalendarTimeline(view=desk) — so the
+ * fixture can never drift from what production projects.
+ *
+ * The fixture is never bundled into the dashboard and never served by the
+ * API: a Playwright proof script serves it for the states production does not
+ * hold today (a live closing, a running workflow timer, a message you
+ * scheduled, a follow-up cluster), and those captures are named as fixtures.
+ *
+ *   node --import ./tests/register-aliases.mjs scripts/gen-calendar-demo.mjs --out=/abs/path/calendar-fixture.json
  */
 import { writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { getCalendarTimeline } from '../src/lib/domain/calendar/calendar-timeline-service.js'
 import { DEMO_NOW, calendarScenarioClosings, calendarScenarioTables, scenarioDb } from '../tests/fixtures/calendar-timeline-scenarios.mjs'
 
+const outArg = process.argv.find((a) => a.startsWith('--out='))
+const out = outArg ? path.resolve(outArg.slice(6)) : path.join(os.tmpdir(), 'calendar-desk-fixture.json')
+const from = (process.argv.find((a) => a.startsWith('--from=')) || '--from=2026-09-20').slice(7)
+const to = (process.argv.find((a) => a.startsWith('--to=')) || '--to=2026-10-24').slice(5)
+
 const tables = calendarScenarioTables(DEMO_NOW)
 const closings = calendarScenarioClosings(DEMO_NOW)
-const out = await getCalendarTimeline(
-  { from: '2026-09-20', to: '2026-10-24', tz: 'America/Chicago', view: 'desk' },
+const data = await getCalendarTimeline(
+  { from, to, tz: 'America/Chicago', view: 'desk' },
   { supabase: scenarioDb(tables), now: DEMO_NOW, getClosingPortfolio: async () => ({ items: closings }) },
 )
-const file = { ...out, demo: true, generatedFrom: 'apps/api/tests/fixtures/calendar-timeline-scenarios.mjs' }
-writeFileSync(new URL('../../dashboard/src/views/calendar/desktop/calendar-demo.generated.json', import.meta.url), JSON.stringify(file) + '\n')
-console.log('wrote', out.events.length, 'demo events ·', out.attention.length, 'attention ·', Object.keys(out.days).length, 'days')
+writeFileSync(out, JSON.stringify({ ...data, fixture: true, generatedFrom: 'apps/api/tests/fixtures/calendar-timeline-scenarios.mjs' }) + '\n')
+console.log('wrote', out, '·', data.events.length, 'events ·', data.attention.length, 'attention ·', Object.keys(data.days).length, 'days')

@@ -56,7 +56,7 @@ export interface CalendarTimeline {
   property_scope: string | null
 }
 
-/* ── desk contract (view=desk, CALENDAR 3.0) — additive; the phone never asks for it ── */
+/* ── desk contract (view=desk, CALENDAR 5.0) — additive; the phone never asks for it ── */
 export type DeskOwner = 'you' | 'system' | 'seller' | 'buyer' | 'title' | 'external'
 export type DeskState = 'upcoming' | 'live' | 'waiting' | 'needs_you' | 'overdue' | 'completed' | 'cancelled' | 'superseded'
 export type DeskLane = 'campaign' | 'closing' | 'automation' | 'workflow' | 'manual'
@@ -87,12 +87,40 @@ export interface DeskEvent extends Omit<CalEvent, 'type' | 'app' | 'links' | 'st
   contact_window?: { tz: string; abbr: string; window: string; planned_within: boolean; earliest_at: string; deferred: boolean } | null
   updated_at?: string | null
   links: CalEvent['links'] & { run_id?: string | null; queue_id?: string | null; email_thread_id?: string | null }
+  /** canonical market where the source records one (thread, deal, campaign) */
+  market?: string | null
+  /** the canonical write path this event accepts — null: read-only here */
+  actions?: DeskActions | null
 }
-export interface DeskDay { total: number; campaign: number; windows: number; closing: number; attention: number; automation: number; manual: number; workflow: number; external: number; completed: number; sends: number }
+export interface DeskActions {
+  reschedule?: { via: 'queue.reschedule'; queue_id: string; min_lead_minutes: number }
+  cancel?: { via: 'queue.cancel'; queue_id: string }
+}
+export interface DeskDay {
+  total: number; campaign: number; windows: number; closing: number; attention: number; automation: number; manual: number; workflow: number; external: number; completed: number; sends: number
+  /** v5 volumes — what happened or is ahead on the day, cancellations excluded */
+  texts?: number; follow_ups?: number; operator?: number; closings?: number
+}
+export type CampaignSituation = 'missed' | 'scheduled' | 'sending' | 'window_ahead' | 'window_closed' | 'exhausted' | 'no_timezone'
+export interface DeskCampaign {
+  id: string
+  name: string
+  status: string | null
+  market: string | null
+  tz: string | null
+  window: string | null
+  window_today: { opens_at: string; closes_at: string } | null
+  scheduled_for: string | null
+  situation: CampaignSituation
+  halted: string | null
+  window_event_id: string | null
+  counts: { audience: number | null; eligible: number | null; held: number | null; committed: number | null; sent: number | null; remaining: number | null; queued: number | null }
+  feeder: { at: string | null; reason: string | null; stalled: boolean } | null
+  deep_link: { app: string; label: string; path: string }
+}
 export interface DeskBrief { id: string; type: DeskType; title: string; subtitle: string | null; start: string; end: string | null; at: string; tz: string | null; owner: DeskOwner }
 export interface DeskTimeline extends Omit<CalendarTimeline, 'events' | 'attention'> {
-  contract: 'calendar.desk/v3'
-  demo?: boolean
+  contract: 'calendar.desk/v5'
   events: DeskEvent[]
   attention: DeskEvent[]
   system: { processor: string; execution_mode: string | null; emergency_stop: boolean; email_sending: boolean; workflow_orchestrator: boolean; workflow_heartbeat_at: string | null; contact_window: { start: string; end: string } }
@@ -106,8 +134,11 @@ export interface DeskTimeline extends Omit<CalendarTimeline, 'events' | 'attenti
     live: DeskBrief[]
     next: DeskBrief | null
     next_system: DeskBrief | null
+    next_you?: DeskBrief | null
     basis: Record<string, string>
   }
+  campaigns?: DeskCampaign[]
+  authority?: { write_min_lead_minutes: number; basis: string }
 }
 
 export async function fetchDeskTimeline(p: { from: string; to: string; tz: string; propertyId?: string | null }, signal?: AbortSignal): Promise<DeskTimeline> {
@@ -118,7 +149,7 @@ export async function fetchDeskTimeline(p: { from: string; to: string; tz: strin
     const upstream = (res as { upstream?: { error?: string } }).upstream
     throw new Error(upstream?.error || res.error || 'calendar_failed')
   }
-  if (!res.data?.data || res.data.data.contract !== 'calendar.desk/v3') throw new Error('calendar_contract_mismatch')
+  if (!res.data?.data || res.data.data.contract !== 'calendar.desk/v5') throw new Error('calendar_contract_mismatch')
   return res.data.data
 }
 

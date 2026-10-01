@@ -335,7 +335,7 @@ test("the phone gets its old contract (no history, no desk types); the desk gets
   assert.equal(phone.contract, undefined);
   assert.deepEqual(phone.events.map((e) => e.id), ["queue:s1"]);
   const desk = await getCalendarTimeline({ from: "2026-09-27", to: "2026-10-10", tz: CT, view: "desk" }, deps);
-  assert.equal(desk.contract, "calendar.desk/v3");
+  assert.equal(desk.contract, "calendar.desk/v5");
   const ids = desk.events.map((e) => e.id);
   assert.ok(ids.includes("queue:c1"), "cancelled follow-up kept as history");
   assert.ok(ids.includes("wf:r1:wake"), "workflow timer projected");
