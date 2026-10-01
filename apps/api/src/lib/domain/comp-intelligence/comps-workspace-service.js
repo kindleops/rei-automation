@@ -23,6 +23,14 @@
  *
  * Every read is bounded (≤100 pool + ≤250 corpus rows) and spatially
  * indexed, so the shape holds when the national corpus grows by ~500K.
+ *
+ * ENGINE FIDELITY (2026-10-01). An engine-pool candidate is scored from the
+ * same row the engine builds in loadComparableProperties — the RPC row
+ * overlaid with the engine's detail columns — not from a display row. Scored
+ * that way at the engine's computed_at, all 12 stored system comps of two
+ * live subjects (SFR + 4-unit) reproduce their stored score, completeness,
+ * weight and adjusted price exactly. The display row had been scoring
+ * candidates at ~half the engine's data completeness and as non-MLS sales.
  */
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import {
@@ -34,6 +42,7 @@ import {
 import { buyerFromPurchaseInfo } from '../deal-intelligence/deal-record-sections.js'
 import { REASON_LABELS } from './comps-reason-labels.js'
 import { displayableCompanyName } from '../entity-graph/buyer-name-privacy.js'
+import { ENGINE_COMP_DETAIL_COLUMNS, engineRulesFor, engineSearchWindow } from './comps-engine-rules.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -125,15 +134,26 @@ function assetMatches(subject, comp) {
   return ratio >= 0.35 && ratio <= 2.75
 }
 
-/** Compact engine verdict — enough to answer "why is / isn't this a comp". */
-function engineVerdict(scored, origin = 'live') {
+const DIM_FEATURES = ['asset_type', 'units', 'sqft', 'beds', 'baths', 'year_built', 'lot_sqft', 'distance_miles', 'condition', 'zip', 'subdivision', 'zoning', 'garage', 'pool', 'stories']
+
+/**
+ * Compact engine verdict — enough to answer "why is / isn't this a comp" and
+ * to replay the engine's valuation formula over an operator's set.
+ *
+ * The replay inputs (score, completeness, weight, adjustedPrice, saleSource)
+ * keep the precision the engine itself carries (2 dp / 4 dp / $100), because
+ * calculateValuation averages them — a rounded copy cannot reproduce it.
+ */
+function engineVerdict(scored, origin = 'live', extra = {}) {
   if (!scored) return null
   if (!scored.eligible) return { origin, eligible: false, reasons: arr(scored.reasons) }
   const dims = []
-  for (const cat of Object.values(obj(scored.feature_match_breakdown ?? scored.match_breakdown))) {
+  const cats = []
+  for (const [name, cat] of Object.entries(obj(scored.feature_match_breakdown ?? scored.match_breakdown))) {
+    cats.push({ c: name, w: num(cat.weight), s: num(cat.score), n: num(cat.compared_features), m: num(cat.missing_features) })
     for (const f of arr(cat.features)) {
-      if (['asset_type', 'units', 'sqft', 'beds', 'baths', 'year_built', 'lot_sqft', 'distance_miles', 'condition', 'zip', 'subdivision'].includes(f.feature) && f.status !== 'missing') {
-        dims.push({ f: f.feature, c: f.comp, st: f.status })
+      if (DIM_FEATURES.includes(f.feature) && f.status !== 'missing') {
+        dims.push({ f: f.feature, s: f.subject ?? null, c: f.comp, st: f.status })
       }
     }
   }
@@ -141,13 +161,80 @@ function engineVerdict(scored, origin = 'live') {
     origin,
     eligible: true,
     reasons: [],
-    score: round(scored.comp_score, 1),
-    confidence: round(scored.comp_confidence, 1),
-    completeness: round(scored.data_completeness, 0),
+    score: round(scored.comp_score, 2),
+    confidence: round(scored.comp_confidence, 2),
+    completeness: round(scored.data_completeness, 2),
+    recency: num(scored.recency_score ?? extra.recency),
     weight: round(scored.weight, 4),
     adjustedPrice: pos(scored.adjusted_price),
+    saleSource: clean(scored.comp?.sale_source ?? scored.sale_source) || null,
     adjustments: arr(scored.price_adjustments).map((a) => ({ basis: a.basis, weight: num(a.weight), value: num(a.indicated_value), amount: num(a.amount) })),
     dims,
+    cats,
+  }
+}
+
+/** Only the columns the engine selects — a wider row would not be the engine's input. */
+function engineDetail(detail) {
+  const out = {}
+  for (const k of ENGINE_COMP_DETAIL_COLUMNS) if (detail && k in detail) out[k] = detail[k]
+  return out
+}
+
+/**
+ * The row the engine scores for an engine-pool comp, built exactly as
+ * loadComparableProperties builds it: RPC row, overlaid with the engine's
+ * detail columns, then the RPC's id / address / distance and the pool source.
+ */
+export function enginePoolInput(rpcRow, detail) {
+  const r = obj(rpcRow)
+  return {
+    ...r,
+    ...engineDetail(detail),
+    id: r.comp_id ?? detail?.id ?? null,
+    address: r.address ?? detail?.property_address_full ?? null,
+    distance_miles: r.distance_miles ?? null,
+    source: 'v_recent_sold_comps',
+  }
+}
+
+/** The stored decision's own description of how it valued the subject. */
+export function engineRunFrom(score) {
+  if (!score) return null
+  const calc = obj(score.calc)
+  const outlier = obj(score.outl)
+  const eng = obj(score.eng)
+  const components = obj(calc.components)
+  return {
+    engine: clean(eng.name) || 'acquisition_decision_engine',
+    version: clean(eng.version) || null,
+    computedAt: score.computed_at ?? eng.computed_at ?? null,
+    method: clean(calc.method) || null,
+    formula: clean(calc.formula) || null,
+    selectedCount: num(calc.selected_comp_count),
+    totalWeight: num(calc.total_weight),
+    dispersion: num(calc.dispersion_ratio),
+    sourceTypes: arr(calc.source_types).map(clean).filter(Boolean),
+    sourceValue: pos(calc.source_value),
+    components: {
+      depth: num(components.depth_score),
+      compScore: num(components.average_comp_score),
+      completeness: num(components.average_data_completeness),
+      consistency: num(components.consistency_score),
+      sourceDiversity: num(components.source_diversity_score),
+    },
+    pool: {
+      status: clean(score.cds_status) || null,
+      rawCandidates: num(score.cds_raw),
+      eligibleCandidates: num(score.cds_elig),
+      rejectionBreakdown: Object.fromEntries(Object.entries(obj(score.cds_rej)).map(([k, v]) => [k, num(v)])),
+    },
+    outlier: outlier.method ? {
+      method: clean(outlier.method),
+      median: num(outlier.median),
+      mad: num(outlier.mad),
+      allowedDeviation: num(outlier.allowed_deviation),
+    } : null,
   }
 }
 
@@ -198,6 +285,15 @@ function shapePoolRow(row, detail, subjectView) {
     cash: null,
     docType: null,
     photo: /^https:\/\//.test(clean(d.streetview_image)) ? clean(d.streetview_image) : null,
+    features: {
+      subdivision: clean(d.subdivision_name) || null,
+      zoning: clean(d.zoning) || null,
+      quality: clean(d.building_quality) || null,
+      garage: clean(d.garage) || null,
+      pool: clean(d.pool) || null,
+      stories: pos(d.stories),
+      county: clean(d.property_address_county_name) || null,
+    },
   }
   comp.assetMatch = assetMatches(subjectView, comp)
   return comp
@@ -244,6 +340,7 @@ function shapeCorpusRow(r, subjectView) {
     nominal: r.nominal_price === true,
     distressDeed: r.distress_or_transfer_deed === true,
     photo: null,
+    features: null,
   }
   comp.assetMatch = assetMatches(subjectView, comp)
   return comp
@@ -303,17 +400,20 @@ export function setStats(comps) {
   }
 }
 
-export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } = {}, deps = {}) {
+export async function getCompsWorkspace({ propertyId, radius = null, months = null } = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
   const now = new Date(deps.now ?? Date.now())
   const pid = clean(propertyId)
   if (!pid) return null
-  const radiusMiles = Math.min(10, Math.max(0.25, num(radius) ?? 1))
-  const monthsBack = Math.min(60, Math.max(3, Math.round(num(months) ?? 24)))
 
   const raw = await loadSubjectProperty(pid, { supabase: client })
   if (!raw) return null
   const subject = normalizePropertyFeatures(raw, { source: 'properties', now })
+  // No explicit window → open on the engine's own window for this asset
+  // family, so the review universe is the universe the engine priced from.
+  const engineWindow = engineSearchWindow(subject.asset_family)
+  const radiusMiles = Math.min(10, Math.max(0.25, num(radius) ?? engineWindow.radiusMiles))
+  const monthsBack = Math.min(60, Math.max(3, Math.round(num(months) ?? engineWindow.months)))
   const subjectView = {
     propertyId: pid,
     address: clean(raw.property_address_full) || null,
@@ -335,12 +435,30 @@ export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } 
     estimatedValue: pos(raw.estimated_value),
     mlsStatus: clean(raw.mls_market_status) || null,
     mlsListPrice: pos(raw.mls_current_listing_price),
+    // record facts (property record, not LeadCommand computations)
+    county: clean(raw.property_address_county_name) || null,
+    market: clean(raw.market) || null,
+    subdivision: clean(raw.subdivision_name) || null,
+    zoning: clean(raw.zoning) || null,
+    quality: clean(raw.building_quality) || null,
+    garage: clean(raw.garage) || null,
+    pool: clean(raw.pool) || null,
+    stories: pos(raw.stories),
+    assessedValue: pos(raw.assd_total_value),
+    recordStatus: clean(raw.market_status_label) || null,
+    lastSale: pos(raw.sale_price) && clean(raw.sale_date) ? { date: clean(raw.sale_date), price: pos(raw.sale_price) } : null,
   }
 
   const hasGeo = subjectView.lat !== null && subjectView.lng !== null
   const [scoreRes, poolRes, corpusRes, cellRes, oppRes] = await Promise.all([
     client.from('property_acquisition_scores')
-      .select('valuation_low, valuation_mid, valuation_high, valuation_confidence, recommended_cash_offer, minimum_acceptable_offer, decision_tier, computed_at, sel:evidence->selected_comps, rej:evidence->rejected_comps')
+      .select([
+        'valuation_low, valuation_mid, valuation_high, valuation_confidence, recommended_cash_offer, minimum_acceptable_offer, decision_tier, computed_at',
+        'sel:evidence->selected_comps, rej:evidence->rejected_comps',
+        'calc:evidence->valuation_calculation_summary, outl:evidence->outlier_method, eng:evidence->engine',
+        'cds_status:evidence->comp_data_status->status, cds_raw:evidence->comp_data_status->raw_candidate_count',
+        'cds_elig:evidence->comp_data_status->eligible_candidate_count, cds_rej:evidence->comp_data_status->rejection_breakdown',
+      ].join(', '))
       .eq('property_id', pid).order('computed_at', { ascending: false }).limit(1),
     client.rpc('get_comp_candidates_for_subject', { p_subject_property_id: pid, p_radius_miles: radiusMiles, p_months_back: monthsBack, p_limit: 100 }),
     hasGeo
@@ -352,6 +470,8 @@ export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } 
   if (poolRes.error) throw poolRes.error
 
   const score = arr(scoreRes.data)[0] || null
+  const engineRun = engineRunFrom(score)
+  const computedAt = engineRun?.computedAt ? new Date(engineRun.computedAt) : null
   const systemStored = arr(score?.sel)
   const rejectedStored = new Map(arr(score?.rej).map((r) => [clean(r.comp_id || r.id), arr(r.reasons)]))
   const systemIds = new Set(systemStored.map((c) => clean(c.comp_id || c.id)).filter(Boolean))
@@ -361,14 +481,24 @@ export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } 
   const detailRes = detailIds.length ? await client.from('v_recent_sold_comps').select('*').in('id', detailIds) : { data: [] }
   const details = new Map(arr(detailRes.data).map((d) => [clean(d.id), d]))
 
-  // Engine pool rows (live) + any stored system comp outside the current window.
-  const poolComps = pool.map((r) => shapePoolRow(r, details.get(clean(r.comp_id)), subjectView))
+  // Engine pool rows (live) + any stored system comp outside the current
+  // window; each keeps the exact row the engine would score.
+  const engineInputs = new Map()
+  const poolComps = pool.map((r) => {
+    const d = details.get(clean(r.comp_id))
+    const c = shapePoolRow(r, d, subjectView)
+    engineInputs.set(c.key, enginePoolInput(r, d))
+    return c
+  })
   const inPool = new Set(poolComps.map((c) => c.compId))
   for (const s of systemStored) {
     const id = clean(s.comp_id || s.id)
     if (!id || inPool.has(id)) continue
     const d = details.get(id) || {}
-    poolComps.push(shapePoolRow({ comp_id: id, distance_miles: s.distance_miles, sale_price: s.sale_price, sale_date: s.sale_date, address: s.address, property_id: s.property_id, latitude: d.latitude, longitude: d.longitude }, d, subjectView))
+    const c = shapePoolRow({ comp_id: id, distance_miles: s.distance_miles, sale_price: s.sale_price, sale_date: s.sale_date, address: s.address, property_id: s.property_id, latitude: d.latitude, longitude: d.longitude }, d, subjectView)
+    c.outsideSearch = true
+    if (details.has(id)) engineInputs.set(c.key, enginePoolInput({ comp_id: id, address: s.address, distance_miles: s.distance_miles }, d))
+    poolComps.push(c)
   }
 
   // Recorded transactions: fold duplicates of pool sales into the pool row.
@@ -388,19 +518,41 @@ export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } 
     corpusComps.push(c)
   }
 
-  // Judge every candidate with the engine's own scoring.
+  // Judge every candidate with the engine's own scoring, from the engine's own row.
   const all = [...poolComps, ...corpusComps]
-  const packaged = detectPackageClusters(all.map((c) => engineRow(c)))
+  const inputFor = (c) => engineInputs.get(c.key) ?? engineRow(c, { source: 'transaction_corpus' })
+  const packaged = detectPackageClusters(all.map(inputFor))
   for (const c of all) {
-    const scored = scoreComparable(subject, engineRow(c, { source: c.corpus === 'engine_pool' ? 'v_recent_sold_comps' : 'transaction_corpus' }), {
-      source: c.corpus, distance_miles: c.distanceMiles, now, packagedKeys: packaged.packagedKeys,
-    })
+    const input = inputFor(c)
+    const opts = { source: input.source, distance_miles: input.distance_miles ?? c.distanceMiles, packagedKeys: packaged.packagedKeys }
+    const scored = scoreComparable(subject, input, { ...opts, now })
     // System comps show the numbers the engine actually priced with (stored);
     // candidates show what the engine's scoring says about them today.
     const stored = c.compId && systemIds.has(c.compId) ? storedById.get(c.compId) : null
-    c.engine = stored
-      ? engineVerdict({ eligible: true, comp_score: stored.score ?? stored.comp_score, comp_confidence: stored.comp_confidence, data_completeness: stored.data_completeness, weight: stored.weight, adjusted_price: stored.adjusted_value ?? stored.adjusted_price, price_adjustments: stored.price_adjustments, match_breakdown: stored.match_breakdown ?? stored.feature_match_breakdown }, 'stored')
-      : engineVerdict(scored)
+    if (stored) {
+      // Re-scored at the engine's own computed_at, the engine row reproduces
+      // the stored verdict; that recovers the recency factor the stored row
+      // does not carry. Used only when it reproduces the stored weight.
+      const asPriced = computedAt && engineInputs.has(c.key) ? scoreComparable(subject, input, { ...opts, now: computedAt }) : null
+      const reproduced = asPriced?.eligible && asPriced.weight === num(stored.weight) && asPriced.adjusted_price === pos(stored.adjusted_value ?? stored.adjusted_price)
+      c.engine = engineVerdict({
+        eligible: true,
+        comp_score: stored.score ?? stored.comp_score,
+        comp_confidence: stored.comp_confidence,
+        data_completeness: stored.data_completeness,
+        weight: stored.weight,
+        adjusted_price: stored.adjusted_value ?? stored.adjusted_price,
+        price_adjustments: stored.price_adjustments,
+        match_breakdown: stored.match_breakdown ?? stored.feature_match_breakdown,
+        sale_source: stored.source,
+      }, 'stored', { recency: reproduced ? asPriced.recency_score : null })
+      // Today's verdict on the same sale, so drift since the engine ran is visible.
+      c.today = scored.eligible
+        ? { eligible: true, reasons: [], weight: round(scored.weight, 4), adjustedPrice: pos(scored.adjusted_price), recency: num(scored.recency_score), score: round(scored.comp_score, 2), completeness: round(scored.data_completeness, 2) }
+        : { eligible: false, reasons: arr(scored.reasons), weight: null, adjustedPrice: null, recency: null, score: null, completeness: null }
+    } else {
+      c.engine = engineVerdict(scored)
+    }
     const dataReasons = [
       c.nominal ? 'nominal_price' : null,
       c.armsLength === false ? 'non_arms_length' : null,
@@ -427,7 +579,13 @@ export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } 
 
   return {
     generatedAt: now.toISOString(),
-    query: { radiusMiles, months: monthsBack, radiusOptions: RADIUS_OPTIONS, monthOptions: MONTH_OPTIONS },
+    query: {
+      radiusMiles,
+      months: monthsBack,
+      radiusOptions: RADIUS_OPTIONS,
+      monthOptions: MONTH_OPTIONS,
+      engineWindow: { radiusMiles: engineWindow.radiusMiles, months: engineWindow.months, clamped: engineWindow.clamped },
+    },
     subject: { ...subjectView, dimensions: dimensionsFor(subject.asset_family) },
     counts: {
       system: system.length,
@@ -451,7 +609,12 @@ export async function getCompsWorkspace({ propertyId, radius = 1, months = 24 } 
       tier: clean(score.decision_tier) || null,
       computedAt: score.computed_at,
       ask: pos(ns.current_asking_price ?? ns.current_ask) ?? pos(opp?.asking_price),
+      // weighted_adjusted_comp_value is comp evidence; subject_value_fallback
+      // is the record estimate ×0.82 / ×1.15 when no comp qualified.
+      method: engineRun?.method ?? null,
     } : null,
+    engineRun,
+    engineRules: engineRulesFor(subject.asset_family),
     market: cell && cell.txn_count ? {
       zip: subjectView.zip,
       family: cellFamily(subject),

@@ -18,11 +18,52 @@ export type EngineVerdict = {
   score?: number | null
   confidence?: number | null
   completeness?: number | null
+  /** recencyScore() factor; on a stored verdict only when re-scoring reproduced it */
+  recency?: number | null
   weight?: number | null
   adjustedPrice?: number | null
+  /** engine sale source code: mls_sold | public_record_sold | investor_purchase */
+  saleSource?: string | null
   adjustments?: Array<{ basis: string; weight: number | null; value: number | null; amount: number | null }>
-  dims?: Array<{ f: string; c: unknown; st: 'exact_or_near' | 'similar' | 'mismatch' }>
+  dims?: Array<{ f: string; s?: unknown; c: unknown; st: 'exact_or_near' | 'similar' | 'mismatch' }>
+  /** feature-match categories: name, category weight, score, compared / missing feature counts */
+  cats?: Array<{ c: string; w: number | null; s: number | null; n: number | null; m: number | null }>
 } | null
+
+/** The engine's verdict on a stored system comp TODAY (calendar aging can move its weight). */
+export type TodayVerdict = { eligible: boolean; reasons: string[]; weight: number | null; adjustedPrice: number | null; recency: number | null; score?: number | null; completeness?: number | null }
+
+export type EngineRun = {
+  engine: string
+  version: string | null
+  computedAt: string | null
+  method: string | null
+  formula: string | null
+  selectedCount: number | null
+  totalWeight: number | null
+  dispersion: number | null
+  sourceTypes: string[]
+  sourceValue: number | null
+  components: { depth: number | null; compScore: number | null; completeness: number | null; consistency: number | null; sourceDiversity: number | null }
+  pool: { status: string | null; rawCandidates: number | null; eligibleCandidates: number | null; rejectionBreakdown: Record<string, number | null> }
+  outlier: { method: string; median: number | null; mad: number | null; allowedDeviation: number | null } | null
+}
+
+export type EngineRules = {
+  family: string | null
+  radiusMiles: number
+  months: number
+  size: { field: 'sqft' | 'units'; label: string; min: number; max: number; reason: string } | null
+  minSalePrice: number
+  nominalPriceToValue: number
+  minCompScore: number
+  maxSelected: number
+  pool: { source: string; limit: number }
+  outlier: { method: string; minObservations: number; madMultiple: number; floorShareOfMedian: number }
+  weight: { formula: string; mlsFactor: number; otherFactor: number }
+  recency: Array<{ maxMonths: number | null; score: number }>
+  confidence: { formula: string; depthFullAt: number; weights: { depth: number; compScore: number; completeness: number; consistency: number; sourceDiversity: number } }
+}
 
 export type EvidenceComp = {
   key: string
@@ -66,23 +107,40 @@ export type EvidenceComp = {
   reasons: Array<{ code: string; label: string }>
   engine: EngineVerdict
   compare: { sqftPct: number | null; beds: number | null; baths: number | null; years: number | null; lotPct: number | null; units: number | null; days: number | null }
+  /** stored system comps: the engine's verdict on the same sale today */
+  today?: TodayVerdict | null
+  /** a stored system comp that lies outside the current search radius / window */
+  outsideSearch?: boolean
+  /** engine-pool record features (null for recorded deeds) */
+  features?: { subdivision: string | null; zoning: string | null; quality: string | null; garage: string | null; pool: string | null; stories: number | null; county: string | null } | null
 }
 
 export type SetStats = { count: number; medianPrice: number | null; low: number | null; high: number | null; medianPpsf: number | null; medianPpu: number | null; medianAdjusted: number | null; medianDistance: number | null; medianAgeDays: number | null }
 
 export type CompsWorkspace = {
   generatedAt: string
-  query: { radiusMiles: number; months: number; radiusOptions: number[]; monthOptions: number[] }
+  query: { radiusMiles: number; months: number; radiusOptions: number[]; monthOptions: number[]; engineWindow?: { radiusMiles: number; months: number; clamped: boolean } }
   subject: {
     propertyId: string; address: string | null; city: string | null; state: string | null; zip: string | null; lat: number | null; lng: number | null
     propertyType: string | null; family: string | null; familyLabel: string | null; units: number | null; beds: number | null; baths: number | null
     sqft: number | null; lotSqft: number | null; yearBuilt: number | null; condition: string | null; estimatedValue: number | null
     mlsStatus: string | null; mlsListPrice: number | null; dimensions: string[]
+    county?: string | null; market?: string | null; subdivision?: string | null; zoning?: string | null; quality?: string | null
+    garage?: string | null; pool?: string | null; stories?: number | null; assessedValue?: number | null
+    /** the property record's market-status label — undated, not a listing feed */
+    recordStatus?: string | null
+    lastSale?: { date: string; price: number } | null
   }
   counts: { system: number; candidates: number; excluded: number; enginePool: number; transactions: number; transactionsInRadius: number | null; transactionsSameFamily: number | null; transactionsReturned: number | null }
   systemStats: SetStats
   sufficiency: { level: 'strong' | 'moderate' | 'limited' | 'thin'; usable: number; withinMile: number; withinMileLastYear: number }
-  conclusion: { valueLow: number | null; valueMid: number | null; valueHigh: number | null; valuationConfidence: number | null; recommendedOffer: number | null; floor: number | null; tier: string | null; computedAt: string | null; ask: number | null } | null
+  conclusion: {
+    valueLow: number | null; valueMid: number | null; valueHigh: number | null; valuationConfidence: number | null; recommendedOffer: number | null; floor: number | null; tier: string | null; computedAt: string | null; ask: number | null
+    /** weighted_adjusted_comp_value = comp evidence; subject_value_fallback = record estimate ± (no comp qualified) */
+    method?: string | null
+  } | null
+  engineRun?: EngineRun | null
+  engineRules?: EngineRules | null
   market: { zip: string; family: string; windowDays: number | null; asOf: string; sales: number | null; medianPrice: number | null; p25: number | null; p75: number | null; medianPpsf: number | null; medianPpu: number | null; cashShare: number | null; armsLengthShare: number | null; corporateBuyerShare: number | null; repeatBuyerShare: number | null; recencyDaysMedian: number | null; admissible: boolean } | null
   comps: EvidenceComp[]
 }
