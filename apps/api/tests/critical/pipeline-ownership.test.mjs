@@ -196,6 +196,10 @@ test('canary fixtures never count as deals', () => {
   assert.equal(isSyntheticOpportunity({ primary_property_id: 'canaryprop_offerauth_v2_75060' }), true)
   assert.equal(isSyntheticOpportunity({ primary_property_id: 'p1', property_address_full: '0 Internal Canary Way, Irving, TX' }), true)
   assert.equal(isSyntheticOpportunity({ primary_property_id: 'p1', property_address_full: '3622 Humboldt Ave N' }), false)
+  // thread-only canary: no property, owner carries the marker
+  assert.equal(isSyntheticOpportunity({ primary_property_id: null, master_owner_id: 'mo_canary_v2_3055376631' }), true)
+  assert.equal(isSyntheticOpportunity({ primary_property_id: null, master_owner_id: 'canaryowner_offerauth_v2' }), true)
+  assert.equal(isSyntheticOpportunity({ primary_property_id: null, master_owner_id: 'mo_8a4ba81354944404ebaa47a6' }), false)
   const [kept, excluded] = withoutSyntheticOpportunities([{ primary_property_id: 'canaryprop_x' }, { primary_property_id: 'p2' }])
   assert.equal(kept.length, 1)
   assert.equal(excluded, 1)

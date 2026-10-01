@@ -65,6 +65,10 @@ export function sendIsHuman(row) {
 export function isSyntheticOpportunity(opp) {
   const pid = lower(opp?.primary_property_id)
   if (pid.startsWith('canaryprop_') || pid.startsWith('canary_') || pid.startsWith('fixture_')) return true
+  // A thread-only canary has no property: its owner carries the marker
+  // (prod b228d1d0…: master_owner_id 'mo_canary_v2_…', no property id).
+  const owner = lower(opp?.master_owner_id)
+  if (owner.startsWith('mo_canary_') || owner.startsWith('canaryowner_')) return true
   return /internal canary/i.test(clean(opp?.property_address_full))
 }
 
