@@ -31,12 +31,12 @@ const STAGE_SHORT: Record<string, string> = { ownership_confirmation: 'S1', offe
 type Cohort = { title: string; eyebrow: string; items: CohortItem[]; note?: string; points?: Array<{ lat: number | null; lng: number | null; label: string | null; id?: string }> }
 
 /**
- * DESKTOP 2.0 — the modern desktop renders THE INTELLIGENCE LAB
- * (views/analytics/lab). Phones keep this surface exactly as it was. If the
- * Lab bundle fails to load or throws, the desktop falls back to this surface
- * (styled by analytics-desktop.css) rather than to a blank pane.
+ * DESKTOP 4.0 — the modern desktop renders THE INTELLIGENCE LAB
+ * (views/analytics/intelligence). Phones keep this surface exactly as it was.
+ * If the Lab bundle fails to load or throws, the desktop falls back to this
+ * surface (styled by analytics-desktop.css) rather than to a blank pane.
  */
-const AnalyticsLab = lazy(() => import('../lab/AnalyticsLab'))
+const AnalyticsLab = lazy(() => import('../intelligence/IntelligenceLab'))
 class LabBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }

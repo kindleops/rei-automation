@@ -10,16 +10,18 @@
  * Read-only. Every response carries the normalised context, the definition
  * version, the data-as-of time and the query timing.
  */
-import { publicRegistry, METRICS_BY_ID, DIMENSION_REGISTRY, FILTER_FIELDS, DEFINITION_VERSION } from './metric-registry.js'
+import { publicRegistry, METRICS_BY_ID, DIMENSION_REGISTRY, FILTER_FIELDS, DEFINITION_VERSION, COHORTS } from './metric-registry.js'
 import { cacheKey, HISTORY_START, publicContext, ContractError } from './query-contract.js'
 import { sharedFactLoader } from './fact-loader.js'
 import {
-  buildModel, breakdown, cohortOf, compare, contribution, DEF, dimValue, entityOf, evaluate, heatmap, histogram, periodFacts, series, stageMatrix, table, UNRESOLVED,
+  buildModel, breakdown, cohortOf, compare, contribution, DEF, dimValue, entityOf, evaluate, heatmap, histogram, periodFacts, scopePredicate, series, seriesBy, stageMatrix, table, UNRESOLVED,
 } from './metric-engine.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
-import { DORMANT_DAYS, STAGE_MAX_DAYS } from '@/lib/domain/opportunity/pipeline-command-service.js'
+import {
+  DORMANT_DAYS, STAGE_INDEX, STAGE_MAX_DAYS, getPipelineCommandFeed, getPipelineCommandOffers, isImplausibleSellerNumber,
+} from '@/lib/domain/opportunity/pipeline-command-service.js'
 import { canaryPhones, OPTOUT_INTENTS, POSITIVE_INTENTS } from './fact-classifiers.js'
-import { CLASS_LABELS, DISPOSITION_LABELS, RUN_CLASS_LABELS } from './fact-classifiers.js'
+import { CLASS_DISPOSITION, CLASS_LABELS, DISPOSITION_LABELS, RUN_CLASS_LABELS } from './fact-classifiers.js'
 import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipeline-registry.js'
 
 const DAY = 86_400_000
@@ -86,7 +88,12 @@ export function getRegistry(deps = {}) {
   // No database read here: the registry is static, and the send_queue replica
   // is built lazily by the first wide-window request (see fact-loader).
   const loader = deps.loader || sharedFactLoader()
-  return { ...publicRegistry(), historyStart: HISTORY_START, generatedAt: new Date().toISOString(), replica: loader.replicaState?.() || null }
+  return {
+    ...publicRegistry(),
+    // which disposition each failure / hold class sits under (the flow chart's links)
+    classDisposition: CLASS_DISPOSITION, classLabels: CLASS_LABELS, dispositionLabels: DISPOSITION_LABELS, runClassLabels: RUN_CLASS_LABELS,
+    historyStart: HISTORY_START, generatedAt: new Date().toISOString(), replica: loader.replicaState?.() || null,
+  }
 }
 
 /* ═══ OVERVIEW — THE MACHINE ═════════════════════════════════════════════ */
@@ -233,8 +240,11 @@ export async function getOverview(ctx, deps = {}) {
     }
     const geo = breakdown('reply_rate', L.cur, 'market', { limit: 12 })
     const ex = L.model.excluded
+    const cohortStep = ctx.segment.find((s) => s.dim === 'cohort')
     const cohort = {
       sellers: M.sellers_reached.cur.value, messages: L.cur.messages.length, replies: L.cur.repliers.length, transitions: L.cur.transitions.length, runs: L.cur.runs.length,
+      // an active seller cohort (a funnel stage used as a filter) and its size in each window
+      sellerCohort: cohortStep ? { key: cohortStep.value, label: COHORTS[cohortStep.value]?.label || cohortStep.value, current: L.cur.cohort, comparison: L.prev ? L.prev.cohort : null } : null,
     }
     return envelope(ctx, {
       generatedAt: new Date().toISOString(),
@@ -272,13 +282,15 @@ export async function getOverview(ctx, deps = {}) {
 
 /* ═══ QUERY ══════════════════════════════════════════════════════════════ */
 
-export const VIEWS = ['metric', 'breakdown', 'series', 'heatmap', 'histogram', 'contribution', 'table', 'stages', 'orchestrator', 'buyers']
+export const VIEWS = ['metric', 'breakdown', 'series', 'seriesBy', 'heatmap', 'histogram', 'contribution', 'table', 'stages', 'orchestrator', 'buyers', 'events', 'money']
 export async function runQuery(ctx, view = 'metric', deps = {}) {
   if (!VIEWS.includes(view)) throw new ContractError(`unknown view "${view}" (${VIEWS.join(', ')})`)
   if (view === 'orchestrator') return getOrchestrator(ctx, deps)
   if (view === 'buyers') return getBuyers(ctx, deps)
+  if (view === 'events') return getEvents(ctx, deps)
+  if (view === 'money') return getMoney(ctx, deps)
   if (view === 'table' && !ctx.metrics.length) throw new ContractError('table needs metrics[]')
-  const needsGroup = view === 'breakdown' || view === 'contribution' || view === 'table'
+  const needsGroup = view === 'breakdown' || view === 'contribution' || view === 'table' || view === 'seriesBy'
   if (needsGroup && !ctx.groupBy) throw new ContractError(`${view} needs groupBy`)
   return cached(`${cacheKey(ctx, 'query')}|${view}`, async () => {
     const L = await load(ctx, deps)
@@ -301,6 +313,8 @@ export async function runQuery(ctx, view = 'metric', deps = {}) {
       result = { ...cur, rows: cur.rows.map((r) => ({ ...r, prev: pmap.get(r.key) || null })) }
     } else if (view === 'series') {
       result = { grain: ctx.grain.grain, current: series(id, L.cur, { grain: ctx.grain.grain, tz: ctx.tz }), comparison: L.prev ? series(id, L.prev, { grain: ctx.grain.grain, tz: ctx.tz }) : null }
+    } else if (view === 'seriesBy') {
+      result = seriesBy(id, L.cur, ctx.groupBy, { grain: ctx.grain.grain, tz: ctx.tz, limit: Math.min(12, ctx.limit) })
     } else if (view === 'heatmap') result = { current: heatmap(id, L.cur), comparison: L.prev ? heatmap(id, L.prev) : null }
     else if (view === 'histogram') result = { current: histogram(id, L.cur), comparison: L.prev ? histogram(id, L.prev) : null }
     else if (view === 'contribution') result = L.prev ? contribution(id, L.cur, L.prev, ctx.groupBy, { limit: ctx.limit }) : { available: false, reason: ctx.compare.reason || 'No comparison window.' }
@@ -377,6 +391,258 @@ export async function getOrchestrator(ctx, deps = {}) {
       byKey.set(k, g)
     }
     return envelope(ctx, { generatedAt: new Date().toISOString(), view: 'orchestrator', result: { total: runs.length, workflows: [...byKey.values()], runs: runs.slice(0, 50), note: 'wf_* orchestrator runtime (live since 2026-09-29). Rates are withheld below 30 runs per workflow version.' } })
+  })
+}
+
+/* ═══ EVENTS (chart annotations) ═════════════════════════════════════════ */
+
+/**
+ * Operational events worth marking on a time series — never routine noise.
+ * Campaign lifecycle from campaign_events (the scheduler's 5-minute
+ * "launch_scheduled" ticks, target builds and edits are noise and are not
+ * read) and the LAST change of an allow-listed control setting from
+ * system_control (the table keeps no history, so only the latest change is
+ * known; other keys — including secrets — are never selected).
+ */
+export const EVENT_TYPES = Object.freeze({
+  'campaign.activated': { tone: 'exec', verb: 'Campaign activated' },
+  'campaign.converted_to_live': { tone: 'exec', verb: 'Converted to a live campaign' },
+  'campaign.launch_blocked': { tone: 'attn', verb: 'Campaign launch blocked' },
+  'campaign.quarantined_target_integrity': { tone: 'attn', verb: 'Campaign quarantined' },
+  'campaign.archived': { tone: 'neutral', verb: 'Campaign archived' },
+})
+export const CONTROL_KEYS = Object.freeze({
+  queue_processor_mode: { label: 'Send processor mode' },
+  queue_execution_mode: { label: 'Queue execution mode' },
+  queue_auto_send_enabled: { label: 'Queue auto-send' },
+  queue_auto_enqueue_enabled: { label: 'Queue auto-enqueue' },
+  followup_automation_mode: { label: 'Follow-up automation' },
+  auto_reply_mode: { label: 'Auto-reply mode' },
+  campaign_mode: { label: 'Campaign mode' },
+  queue_emergency_stop_at: { label: 'Emergency stop', tone: 'crit' },
+  sms_blocked_sender_numbers: { label: 'Sender block list', tone: 'attn', list: 'sender numbers' },
+  sms_blocked_template_ids: { label: 'Template block list', tone: 'attn', list: 'templates' },
+  queue_per_number_cap: { label: 'Per-number send cap' },
+  queue_daily_send_cap: { label: 'Daily send cap' },
+  queue_market_cap: { label: 'Per-market send cap' },
+  queue_hard_cap: { label: 'Queue hard cap' },
+  queue_contact_window_start: { label: 'Contact window start' },
+  queue_contact_window_end: { label: 'Contact window end' },
+  workflow_orchestrator_enabled: { label: 'Workflow orchestrator' },
+  feeder_enabled: { label: 'Campaign feeder' },
+  closing_automation_enabled: { label: 'Closing automation' },
+  email_automation_enabled: { label: 'Email automation' },
+})
+const controlValue = (spec, raw) => {
+  const v = String(raw ?? '').trim()
+  if (spec.list) { const n = v ? v.split(',').map((x) => x.trim()).filter(Boolean).length : 0; return `${n} ${spec.list}` }
+  if (!v) return 'cleared'
+  if (/^(true|false)$/i.test(v)) return v.toLowerCase() === 'true' ? 'on' : 'off'
+  return v.length > 40 ? `${v.slice(0, 40)}…` : v
+}
+
+/** Pure: raw rows → annotations (exported for tests). */
+export function shapeEvents({ campaignRows = [], controlRows = [], campaigns = new Map() } = {}) {
+  const out = []
+  const seen = new Map()
+  for (const r of campaignRows) {
+    const spec = EVENT_TYPES[r.event_type]
+    if (!spec) continue
+    const c = campaigns.get(String(r.campaign_id || '')) || null
+    if (c?.integrity?.test) continue // structural test / proof campaigns are not operations
+    const at = Date.parse(r.created_at)
+    if (!Number.isFinite(at)) continue
+    // the same transition repeated within an hour is one event, counted
+    const k = `${r.campaign_id}|${r.event_type}`
+    const prev = seen.get(k)
+    if (prev && at - Date.parse(prev.at) < 3_600_000) { prev.repeats += 1; continue }
+    const e = {
+      id: String(r.id), at: new Date(at).toISOString(), kind: 'campaign', tone: spec.tone, title: spec.verb,
+      subject: c?.name || 'Campaign', detail: String(r.description || r.title || '').slice(0, 220) || null,
+      campaignId: r.campaign_id ? String(r.campaign_id) : null, source: 'campaign_events', repeats: 0,
+    }
+    seen.set(k, e)
+    out.push(e)
+  }
+  // settings changed in the same instant are one change
+  const groups = new Map()
+  for (const r of controlRows) {
+    const spec = CONTROL_KEYS[r.key]
+    if (!spec) continue
+    const at = Date.parse(r.updated_at)
+    if (!Number.isFinite(at)) continue
+    const k = Math.floor(at / 1000)
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push({ key: r.key, label: spec.label, value: controlValue(spec, r.value), tone: spec.tone || 'flow', at })
+  }
+  for (const items of groups.values()) {
+    items.sort((a, b) => a.label.localeCompare(b.label))
+    const tone = items.some((i) => i.tone === 'crit') ? 'crit' : items.some((i) => i.tone === 'attn') ? 'attn' : 'flow'
+    out.push({
+      id: `control:${items[0].at}`, at: new Date(items[0].at).toISOString(), kind: 'control', tone,
+      title: items.length === 1 ? `${items[0].label} changed` : `${items.length} control settings changed`,
+      subject: items.map((i) => `${i.label} → ${i.value}`).join(' · '),
+      detail: null, items: items.map(({ key, label, value }) => ({ key, label, value })), source: 'system_control',
+      note: 'The settings table keeps only the latest change of each key; earlier changes are not recorded.',
+    })
+  }
+  return out.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+}
+
+export async function getEvents(ctx, deps = {}) {
+  const client = deps.supabase || defaultSupabase
+  return cached(`${cacheKey({ ...ctx, filters: [], segment: [], groupBy: null, metric: 'reply_rate', metrics: [] }, 'events')}`, async () => {
+    const t0 = Date.now()
+    const L = await load({ ...ctx, filters: [], segment: [] }, deps)
+    const from = new Date(ctx.period.start).toISOString()
+    const to = new Date(ctx.period.end).toISOString()
+    const [ce, sc] = await Promise.all([
+      client.from('campaign_events').select('id,campaign_id,event_type,severity,title,description,created_at')
+        .in('event_type', Object.keys(EVENT_TYPES)).gte('created_at', from).lt('created_at', to).order('created_at', { ascending: true }).limit(300),
+      client.from('system_control').select('key,value,updated_at').in('key', Object.keys(CONTROL_KEYS)).gte('updated_at', from).lt('updated_at', to),
+    ])
+    if (ce.error) throw ce.error
+    if (sc.error) throw sc.error
+    const events = shapeEvents({ campaignRows: ce.data || [], controlRows: sc.data || [], campaigns: L.model.campaigns })
+    return envelope(ctx, {
+      generatedAt: new Date().toISOString(), dataAsOf: L.facts.dataAsOf, timing: { loadMs: L.loadMs, computeMs: Date.now() - t0 }, view: 'events',
+      result: { events, sources: ['campaign_events (lifecycle only)', 'system_control (latest change of allow-listed settings)'], note: 'Routine scheduler ticks, target builds and edits are not events. Test and proof campaigns are excluded.' },
+    })
+  })
+}
+
+/* ═══ MONEY + INVENTORY (current state, by basis) ════════════════════════ */
+
+const LANES = ['system', 'operator', 'seller', 'external', 'blocked', 'dormant', 'complete']
+const emptyBasis = () => ({ n: 0, sum: 0 })
+const addTo = (b, v) => { if (Number.isFinite(v) && v > 0) { b.n += 1; b.sum += v } }
+
+/**
+ * Pure: canonical Pipeline cards + engine offer rows + closing cases →
+ * value through the stages, by basis, never summed across bases. Exported
+ * for tests.
+ *   cards     Pipeline Command feed rows (lane, stall, money.asking, propertyId, …)
+ *   offers    Pipeline Command offer rows (engine, readiness, binding offer)
+ *   closings  Lab closing cases (voided excluded) with money by basis
+ *   prop(id)  the Lab model's property (canonical market, record estimate)
+ *   pass(e)   the Lab scope predicate for opportunities (filters, breadcrumb, cohort)
+ */
+export function moneyModel({ cards = [], offers = [], closings = [], prop = () => null, marketLabel = (id) => id, pass = () => true } = {}) {
+  const offerBy = new Map(offers.map((r) => [String(r.card?.id), r]))
+  const closingBy = new Map(closings.filter((c) => c.oppId).map((c) => [String(c.oppId), c]))
+  const stages = Object.keys(STAGE_INDEX).sort((a, b) => STAGE_INDEX[a] - STAGE_INDEX[b]).map((code) => ({
+    code, index: STAGE_INDEX[code], label: code, deals: 0, stalled: 0, lanes: Object.fromEntries(LANES.map((l) => [l, 0])),
+    asking: emptyBasis(), askingImplausible: 0, record: emptyBasis(),
+    authorized: { n: 0, offer: 0, valuation: 0, fee: 0 }, needsValidation: 0, notPriced: 0,
+    presented: emptyBasis(), contract: emptyBasis(), expected: emptyBasis(), actual: emptyBasis(),
+  }))
+  const byStage = new Map(stages.map((s) => [s.code, s]))
+  const markets = new Map()
+  const deals = []
+  let scoped = 0
+  let closedWithoutEvidence = 0
+  for (const card of cards) {
+    if (card.lane?.key === 'closed_out') continue
+    const p = card.propertyId ? prop(card.propertyId) : null
+    const entity = { id: card.id, propertyId: card.propertyId || null, thread: card.threadKey || null, stage: card.stage, campaignIds: [] }
+    if (!pass(entity)) continue
+    scoped += 1
+    // S10 is a closing only with closing evidence (Pipeline Command's rule);
+    // an "active" row parked at S10 is counted apart, never as a won deal.
+    if (card.stage === 'closed' && card.lane?.key !== 'complete') { closedWithoutEvidence += 1; continue }
+    const s = byStage.get(card.stage)
+    if (!s) continue
+    const o = offerBy.get(String(card.id)) || null
+    const c = closingBy.get(String(card.id)) || null
+    const engine = o?.engine || null
+    const state = o?.readiness?.state || 'not_priced'
+    const record = p?.estimatedValue ?? null
+    const reference = engine?.mid || record || null
+    const asking = card.money?.asking ?? null
+    const askImplausible = asking ? isImplausibleSellerNumber(asking, reference) : false
+    s.deals += 1
+    if (card.stall) s.stalled += 1
+    const lane = LANES.includes(card.lane?.key) ? card.lane.key : 'seller'
+    s.lanes[lane] += 1
+    if (asking) { if (askImplausible) s.askingImplausible += 1; else addTo(s.asking, asking) }
+    addTo(s.record, record)
+    if (state === 'authorized' && engine) { s.authorized.n += 1; s.authorized.offer += engine.recommended || 0; s.authorized.valuation += engine.mid || 0; s.authorized.fee += engine.assignmentFee || 0 }
+    else if (state === 'needs_validation') s.needsValidation += 1
+    else s.notPriced += 1
+    if (o?.offer?.binding) addTo(s.presented, o.offer.price)
+    if (c) { addTo(s.contract, c.money?.contract); addTo(s.expected, c.money?.expectedGross); addTo(s.actual, c.money?.confirmedGross) }
+    const mk = p?.market || '__unresolved'
+    const m = markets.get(mk) || { key: mk, label: mk === '__unresolved' ? 'Unresolved' : marketLabel(mk), deals: 0, asking: emptyBasis(), record: emptyBasis(), authorized: { n: 0, offer: 0 }, needsValidation: 0 }
+    m.deals += 1
+    if (asking && !askImplausible) addTo(m.asking, asking)
+    addTo(m.record, record)
+    if (state === 'authorized' && engine) { m.authorized.n += 1; m.authorized.offer += engine.recommended || 0 }
+    else if (state === 'needs_validation') m.needsValidation += 1
+    markets.set(mk, m)
+    deals.push({
+      id: card.id, stage: card.stage, stageIndex: card.stageIndex ?? STAGE_INDEX[card.stage] ?? null, lane: card.lane ? { key: card.lane.key, label: card.lane.label } : null,
+      stall: card.stall ? card.stall.label : null, daysInStage: card.daysInStage ?? null, address: card.address || p?.address || null,
+      market: mk === '__unresolved' ? null : marketLabel(mk), marketKey: mk === '__unresolved' ? null : mk,
+      asking, askImplausible, record,
+      engine: engine ? { state, tier: engine.tierLabel || engine.tier || null, recommended: engine.recommended ?? null, valuation: engine.mid ?? null, fee: engine.assignmentFee ?? null, compCount: engine.compCount ?? null, reasons: (o.readiness?.reasons || []).slice(0, 4) } : { state: 'not_priced', reasons: ['The Decision Engine has not priced this property'] },
+      presented: o?.offer?.binding ? o.offer.price : null, contract: c?.money?.contract ?? null, actual: c?.money?.confirmedGross ?? null,
+      propertyId: card.propertyId || null, threadKey: card.threadKey || null,
+    })
+  }
+  const total = (key) => stages.reduce((acc, s) => ({ n: acc.n + s[key].n, sum: acc.sum + s[key].sum }), emptyBasis())
+  const totals = {
+    deals: scoped,
+    closedWithoutEvidence,
+    asking: total('asking'), askingImplausible: stages.reduce((a, s) => a + s.askingImplausible, 0),
+    record: total('record'),
+    authorized: stages.reduce((acc, s) => ({ n: acc.n + s.authorized.n, offer: acc.offer + s.authorized.offer, valuation: acc.valuation + s.authorized.valuation, fee: acc.fee + s.authorized.fee }), { n: 0, offer: 0, valuation: 0, fee: 0 }),
+    needsValidation: stages.reduce((a, s) => a + s.needsValidation, 0),
+    notPriced: stages.reduce((a, s) => a + s.notPriced, 0),
+    presented: total('presented'), contract: total('contract'), expected: total('expected'), actual: total('actual'),
+    lanes: Object.fromEntries(LANES.map((l) => [l, stages.reduce((a, s) => a + s.lanes[l], 0)])),
+    stalled: stages.reduce((a, s) => a + s.stalled, 0),
+  }
+  deals.sort((a, b) => (b.stageIndex ?? 0) - (a.stageIndex ?? 0) || (b.daysInStage ?? 0) - (a.daysInStage ?? 0))
+  return {
+    stages, totals,
+    markets: [...markets.values()].sort((a, b) => Number(a.key === '__unresolved') - Number(b.key === '__unresolved') || b.deals - a.deals),
+    deals: deals.slice(0, 400), dealsTruncated: deals.length > 400,
+  }
+}
+
+export async function getMoney(ctx, deps = {}) {
+  const pipe = deps.pipeline || { feed: getPipelineCommandFeed, offers: getPipelineCommandOffers }
+  return cached(`${cacheKey({ ...ctx, groupBy: null, metric: 'reply_rate', metrics: [] }, 'money')}`, async () => {
+    const t0 = Date.now()
+    const L = await load(ctx, deps)
+    const cards = []
+    let cursor = 0
+    // sequential pages: the first fills Pipeline Command's scope memo, the rest reuse it
+    for (let i = 0; i < 60 && cursor !== null && cursor !== undefined; i += 1) {
+      const page = await pipe.feed({ scope: 'active', view: 'all', limit: 100, cursor })
+      cards.push(...(page?.rows || []))
+      cursor = page?.nextCursor ?? null
+    }
+    const offers = await pipe.offers({ scope: 'active' })
+    const scope = scopePredicate(L.model, ctx.period, 'opportunity', { filters: ctx.filters, segment: ctx.segment })
+    const model = moneyModel({
+      cards, offers: offers?.rows || [], closings: L.model.closings, prop: (id) => L.model.prop(id),
+      marketLabel: (id) => L.model.markets.get(id)?.display_name || id, pass: scope.pass,
+    })
+    for (const s of model.stages) s.label = UNIVERSAL_STAGE_LABELS[s.code] || s.code
+    const ever = { closings: L.model.closings.length, confirmedRevenue: L.model.closings.filter((c) => (c.money?.confirmedGross || 0) > 0).length, contracts: L.model.closings.filter((c) => (c.money?.contract || 0) > 0).length }
+    return envelope(ctx, {
+      generatedAt: new Date().toISOString(), dataAsOf: new Date().toISOString(), timing: { loadMs: L.loadMs, computeMs: Date.now() - t0 }, view: 'money',
+      result: {
+        ...model,
+        asOf: 'now',
+        notApplicable: scope.notApplicable,
+        offersTruncated: Boolean(offers?.truncated),
+        ever,
+        thresholds: { stageMaxDays: STAGE_MAX_DAYS, dormantDays: DORMANT_DAYS },
+        note: 'Current state of the active pipeline (Pipeline Command scope: active, waiting, paused, nurture), as of now — the period does not apply; geography, property and cohort filters do. Each basis is its own figure; none is a sum of another.',
+      },
+    })
   })
 }
 

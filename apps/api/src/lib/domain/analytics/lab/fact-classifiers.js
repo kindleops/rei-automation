@@ -123,6 +123,21 @@ export const DISPOSITION_LABELS = {
   delivered: 'Delivered', sent: 'Sent (no receipt)', undelivered: 'Undelivered (carrier)', rejected: 'Refused (provider)', blocked: 'Blocked (guard)', held: 'Held (gate / review)',
   expired: 'Expired unsent', cancelled: 'Cancelled', waiting: 'Waiting', other: 'Other',
 }
+/**
+ * The one disposition each class belongs to (classifySend never returns a
+ * class under two dispositions). Shipped in the registry so a flow chart can
+ * draw disposition → class links without re-deriving the classifier.
+ */
+export const CLASS_DISPOSITION = Object.freeze({
+  delivered: 'delivered', awaiting_receipt: 'sent',
+  carrier_spam_filter: 'undelivered', carrier_hard_bounce: 'undelivered', carrier_soft_bounce: 'undelivered', carrier_dnc: 'undelivered', carrier_undelivered: 'undelivered',
+  provider_blacklist: 'rejected', provider_no_sid: 'rejected', provider_timeout: 'rejected', send_error: 'rejected',
+  send_gate: 'held', operator_review: 'held',
+  sender_health: 'blocked', template_health: 'blocked', content_guard: 'blocked', duplicate_guard: 'blocked', invalid_row: 'blocked', guard_other: 'blocked',
+  expired_unsent: 'expired',
+  superseded_by_conversation: 'cancelled', stale_unsent: 'cancelled', test_cleanup: 'cancelled', operator_cancelled: 'cancelled',
+  waiting: 'waiting',
+})
 
 /** Who initiated a send. Exclusive; operator sources win. Same vocabulary as v1. */
 export function sendOrigin(row) {

@@ -180,6 +180,13 @@ export const METRIC_REGISTRY = Object.freeze([
   }),
 
   /* ── delivery · message grain ─────────────────────────────────────────── */
+  m('queue_rows', {
+    family: 'delivery', entity: 'message', label: 'Queue rows', short: 'Queued',
+    description: 'Every outbound queue row whose attempt time (sent, else queued) falls in the period, whatever happened to it: sent, held, blocked, refused, expired, cancelled or still waiting. The whole of the delivery flow; each row has exactly one outcome.',
+    numerator: { label: 'send_queue rows', def: 'all send_queue rows with attempt time in period' },
+    time_basis: 'attempt', sources: [SQ], exclusions: [CANARY], polarity: 'neutral', additive_over_time: true,
+    v1: { status: 'new', note: 'v1 counted send_rows by created_at; lab-v2 places them by attempt time.' },
+  }),
   m('messages_sent', {
     family: 'delivery', entity: 'message', label: 'Messages sent', short: 'Sent',
     description: 'Outbound messages handed to the carrier in the period (sent_at recorded, or status sent/delivered).',
@@ -453,7 +460,76 @@ export const DIMENSION_REGISTRY = Object.freeze({
   block_reason: { label: 'Hold reason', family: 'WORKFLOW', kind: 'category', source: 'seller_automation_executions.metadata.block_reason' },
   workflow: { label: 'Workflow', family: 'WORKFLOW', kind: 'category', source: 'seller_automation_executions.workflow_id' },
   buyer_kind: { label: 'Buyer kind', family: 'BUYER', kind: 'category', source: 'mv_comp_market_evidence.buyer_kind' },
+  cohort: { label: 'Seller cohort', family: 'SELLER', kind: 'cohort', source: 'a funnel stage of the period (reached / replied / interested / opted out / became opportunity); every entity is narrowed to those sellers’ conversations' },
 })
+
+/**
+ * SELLER COHORTS — a funnel stage used as a filter ("the 101 sellers who
+ * replied"). Each is the exact entity set of a seller-grain registry metric in
+ * the window being measured, so the cohort, its KPI and its records are one
+ * set. Every other entity (messages, replies, stage moves, autopilot runs,
+ * offers, closings) is narrowed to those sellers' conversations.
+ */
+export const COHORTS = Object.freeze({
+  reached: { set: 'sellers_reached', label: 'Reached sellers', metric: 'sellers_reached' },
+  replied: { set: 'reached_replied', label: 'Replied sellers', metric: 'reached_replied' },
+  interested: { set: 'interested_sellers', label: 'Interested sellers', metric: 'interested_sellers' },
+  opted_out: { set: 'opted_out_sellers', label: 'Opted-out sellers', metric: 'opted_out_sellers' },
+  opportunity: { set: '__opp_repliers', label: 'Repliers who became opportunities', metric: 'opportunity_rate' },
+})
+
+/**
+ * MONEY BASES — what each financial figure IS. Never summed into one number;
+ * the client shows them side by side with their coverage. Read from the
+ * canonical Pipeline Command read models (offers, readiness, lanes), the
+ * property record and the closing desk. Current state, not the period.
+ */
+export const MONEY_BASES = Object.freeze([
+  { id: 'asking', label: 'Seller asking', kind: 'stated', source: 'acquisition_opportunities.asking_price (Pipeline Command money.asking)', note: 'What the seller said. Implausible captures (under $5K, or under 5% of the reference value) are excluded and counted.' },
+  { id: 'record', label: 'County / AVM estimate', kind: 'estimated', source: 'properties.estimated_value (the property record)', note: 'A county / automated estimate of the property, not an appraisal, not an offer and not revenue.' },
+  { id: 'authorized', label: 'Authorized engine offer', kind: 'authorized', source: 'property_acquisition_scores.recommended_cash_offer where the canonical readiness rule says authorized', note: 'Decision Engine offers the spendability rule authorizes (valuation-offer-authority + persisted negotiation verdict). Modeled, not presented.' },
+  { id: 'needs_validation', label: 'Engine offer — needs validation', kind: 'modeled', source: 'property_acquisition_scores where readiness = needs_validation', note: 'Priced by the engine but not spendable (tier, coverage or gates). Counted, never summed into value.' },
+  { id: 'fee', label: 'Modeled assignment fee', kind: 'modeled', source: 'property_acquisition_scores.expected_assignment_fee (authorized deals only)', note: 'The engine’s expected assignment fee for authorized deals. Modeled, not expected revenue on a contract.' },
+  { id: 'presented', label: 'Presented offers', kind: 'presented', source: 'seller_offers binding rows (sent / presented / pending / countered / accepted, not superseded)', note: 'Offers actually put in front of a seller.' },
+  { id: 'contract', label: 'Contract value', kind: 'contracted', source: 'closing_cases.seller_contract_price (voided cases excluded)', note: 'Signed purchase price.' },
+  { id: 'expected', label: 'Expected gross revenue', kind: 'expected', source: 'closing_cases.expected_gross_revenue', note: 'Revenue the closing desk expects on a contracted deal.' },
+  { id: 'actual', label: 'Actual settled revenue', kind: 'actual', source: 'closing_cases.confirmed_gross_revenue (revenue confirmed)', note: 'Money actually received. Never estimated.' },
+])
+
+/**
+ * EXTERNAL INTELLIGENCE — sources outside the operation (GROWTH). A source
+ * is declared here with the metrics it would supply and the semantics they
+ * carry; it reports `not_connected` until an adapter exists AND answers.
+ * Nothing about it is drawn as data until then.
+ */
+export const EXTERNAL_SOURCES = Object.freeze([
+  {
+    id: 'search_console',
+    family: 'GROWTH',
+    label: 'Google Search Console',
+    adapter: null,
+    requires: [
+      'A verified Search Console property for the LeadCommand site (domain or URL-prefix)',
+      'A Google service credential with read access to that property, configured on the API',
+      'A read adapter that answers with its own data-through date',
+    ],
+    metrics: [
+      { id: 'gsc_clicks', label: 'Clicks', unit: 'count', definition: 'Clicks from Google Search results to the site.' },
+      { id: 'gsc_impressions', label: 'Impressions', unit: 'count', definition: 'Times a site URL appeared in a search result the user saw.' },
+      { id: 'gsc_ctr', label: 'CTR', unit: 'rate', definition: 'Clicks ÷ impressions, in the same window.' },
+      { id: 'gsc_position', label: 'Average position', unit: 'position', definition: 'The mean of the topmost position the site held in results, weighted by impressions. It is not rank tracking: one query can have many positions, and fewer impressions can raise it.' },
+    ],
+    dimensions: ['query', 'page', 'country', 'device', 'date', 'search appearance'],
+    freshness: 'Search Console reports with a 2–3 day lag; a connected source shows its own data-through date.',
+  },
+])
+export function externalSources() {
+  return EXTERNAL_SOURCES.map((s) => ({
+    ...s,
+    status: s.adapter ? 'connected' : 'not_connected',
+    reason: s.adapter ? null : 'Not connected. No Search Console property or credential is configured on the API, and no read adapter exists yet — nothing is shown until the source answers.',
+  }))
+}
 
 /**
  * FILTER FIELDS. Every field here is real (populated in production, measured
@@ -536,6 +612,9 @@ export function publicRegistry() {
     filters: FILTER_FIELDS,
     nonViable: NON_VIABLE_FIELDS,
     changes: DEFINITION_CHANGES,
+    cohorts: Object.fromEntries(Object.entries(COHORTS).map(([k, v]) => [k, { label: v.label, metric: v.metric }])),
+    money: MONEY_BASES,
+    external: externalSources(),
   }
 }
 

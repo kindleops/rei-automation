@@ -272,7 +272,12 @@ export function createFactLoader({ supabase = defaultSupabase, clock = () => Dat
     (b) => b.in('event_type', ['stage_transition', 'opportunity_created']))
   const opportunities = () => wholeTable('acquisition_opportunities', 'id,acquisition_stage,opportunity_status,stage_entered_at,last_activity_at,primary_property_id,primary_thread_key,campaign_ids,created_at', LIVE_TTL)
   const offers = () => wholeTable('seller_offers', 'id,offer_id,opportunity_id,property_id,thread_key,direction,status,purchase_price,created_at,accepted_at', LIVE_TTL)
-  const closings = () => wholeTable('closing_cases', 'id,opportunity_id,property_id,thread_key,closing_status,terminal_outcome,contract_signed_date,recording_date,funding_date,created_at', LIVE_TTL)
+  const closings = () => wholeTable('closing_cases', [
+    'id', 'opportunity_id', 'property_id', 'thread_key', 'closing_status', 'terminal_outcome', 'contract_signed_date', 'recording_date', 'funding_date', 'created_at',
+    // money, kept by basis (contract / expected / confirmed); provenance.voided is the Pipeline's void rule
+    'seller_contract_price', 'buyer_price', 'assignment_fee', 'expected_gross_revenue', 'confirmed_gross_revenue', 'net_revenue', 'revenue_confirmed_date',
+    'md_voided:provenance->>voided',
+  ].join(','), LIVE_TTL)
   const campaigns = () => wholeTable('campaigns', CAMPAIGN_COLUMNS, LIVE_TTL)
   const markets = () => wholeTable('canonical_markets', 'id,display_name,state,region,is_active', DIM_TTL)
   const senders = () => wholeTable('textgrid_numbers', 'id,phone_number,friendly_name,market,status,health_state', DIM_TTL)

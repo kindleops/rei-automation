@@ -11,7 +11,7 @@
  * The client can only express what this contract accepts; there is no path
  * from a request to arbitrary SQL.
  */
-import { DEFINITION_VERSION, DIMENSION_REGISTRY, FILTER_FIELDS, METRICS_BY_ID } from './metric-registry.js'
+import { COHORTS, DEFINITION_VERSION, DIMENSION_REGISTRY, FILTER_FIELDS, METRICS_BY_ID } from './metric-registry.js'
 
 const DAY = 86_400_000
 const HOUR = 3_600_000
@@ -228,6 +228,8 @@ export function normalizeSegment(segment = []) {
     const dim = clean(s?.dim)
     if (!DIMENSION_REGISTRY[dim]) throw new ContractError(`unknown dimension "${dim}" in breadcrumb`)
     const value = s?.value === null ? null : clean(s?.value).slice(0, 120)
+    // A cohort step names a funnel stage, never a free value.
+    if (dim === 'cohort' && !COHORTS[value]) throw new ContractError(`unknown seller cohort "${value}" (${Object.keys(COHORTS).join(', ')})`)
     return { dim, value, label: clean(s?.label).slice(0, 120) || null }
   })
 }

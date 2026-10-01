@@ -18,7 +18,7 @@ import {
   isAttributableInbound, isCanaryInbound, isCanarySend, isSyntheticHistory, localClock, normalizeOwnerType,
   normalizePropertyType, propertyTimezone, runClass, sendFlags, sendOrigin, touchBucket, transitionDirection,
 } from './fact-classifiers.js'
-import { DIMENSION_REGISTRY, FILTER_FIELDS, METRICS_BY_ID } from './metric-registry.js'
+import { COHORTS, DIMENSION_REGISTRY, FILTER_FIELDS, METRICS_BY_ID } from './metric-registry.js'
 import { bucketList, nextBucket } from './query-contract.js'
 import { compareCounts, compareProportions, decomposeRateChange, distribution, mannWhitney, wilson } from './stats.js'
 import { UNIVERSAL_STAGE_LABELS } from '@/lib/domain/opportunity/universal-pipeline-registry.js'
@@ -190,9 +190,17 @@ export function buildModel(facts, { canary = canaryPhones(), basis = facts?.wind
   })).filter((o) => o.at !== null).sort(byAt)
   const closings = []
   for (const c of facts.closings || []) {
-    const voided = /void|cancel/i.test(`${clean(c.closing_status)} ${clean(c.terminal_outcome)}`)
+    // A case voided in its provenance is not closing evidence (the Pipeline
+    // Command rule), whatever its status column still says.
+    const voided = /void|cancel/i.test(`${clean(c.closing_status)} ${clean(c.terminal_outcome)}`) || bool(c.md_voided) === true
     if (voided) { excluded.voidedClosings += 1; continue }
-    closings.push({ id: String(c.id), status: clean(c.closing_status), contractAt: ms(c.contract_signed_date), closedAt: ms(c.recording_date || c.funding_date), propertyId: clean(c.property_id) || null, thread: clean(c.thread_key) || null, oppId: clean(c.opportunity_id) || null, at: ms(c.created_at) })
+    closings.push({
+      id: String(c.id), status: clean(c.closing_status), contractAt: ms(c.contract_signed_date), closedAt: ms(c.recording_date || c.funding_date), propertyId: clean(c.property_id) || null, thread: clean(c.thread_key) || null, oppId: clean(c.opportunity_id) || null, at: ms(c.created_at),
+      money: {
+        contract: num(c.seller_contract_price), buyer: num(c.buyer_price), assignmentFee: num(c.assignment_fee),
+        expectedGross: num(c.expected_gross_revenue), confirmedGross: num(c.confirmed_gross_revenue), net: num(c.net_revenue), confirmedAt: ms(c.revenue_confirmed_date),
+      },
+    })
   }
 
   /* recorded buyer purchases (comp_private corpus): only when the caller supplies them */
@@ -378,19 +386,67 @@ export function compileFilters(model, kind, filters = [], segment = [], { includ
  * delivered message in the window) so seller breakdowns are additive and a
  * breadcrumb step selects exactly the row it came from.
  */
+/** The seller conversation an entity belongs to (the key a seller cohort narrows by). */
+const THREAD_OF = {
+  message: (e) => e.thread,
+  seller: (e) => e.thread,
+  reply: (e) => e.thread,
+  transition: (e) => e.opp?.thread || null,
+  opportunity: (e) => e.thread,
+  run: (e) => e.thread,
+  offer: (e) => e.thread,
+  closing: (e) => e.thread,
+}
+const KINDS = ['message', 'seller', 'reply', 'transition', 'opportunity', 'run', 'offer', 'closing']
+
+/**
+ * A SELLER COHORT step ("the sellers who replied") is the exact entity set of
+ * a seller-grain metric in THIS window, after every other filter. It returns
+ * those sellers' conversations; null when there is no cohort step. Each
+ * window measures its own cohort, so a comparison stays like-for-like.
+ */
+export function cohortThreads(model, W, { filters = [], segment = [] } = {}) {
+  const steps = segment.filter((s) => s.dim === 'cohort')
+  if (!steps.length) return null
+  const base = periodFacts(model, W, { filters, segment: segment.filter((s) => s.dim !== 'cohort') })
+  let threads = null
+  for (const s of steps) {
+    const c = COHORTS[s.value]
+    const set = new Set((c ? DEF[c.set].set(base) : []).map((x) => x.thread).filter(Boolean))
+    threads = threads ? new Set([...threads].filter((t) => set.has(t))) : set
+  }
+  return threads
+}
+
+/**
+ * The filter + breadcrumb + cohort predicate for one entity kind, for read
+ * models that bring their own entities (the money view's Pipeline cards).
+ */
+export function scopePredicate(model, W, kind, { filters = [], segment = [] } = {}) {
+  const includeTest = filters.some((f) => f.field === 'include_test_campaigns' && f.op === 'is_true')
+  const threads = cohortThreads(model, W, { filters, segment })
+  const c = compileFilters(model, kind, filters, segment.filter((s) => s.dim !== 'cohort'), { includeTest })
+  const pass = threads ? (e) => c.pass(e) && threads.has(THREAD_OF[kind](e)) : c.pass
+  return { pass, notApplicable: c.notApplicable, cohort: threads ? threads.size : null }
+}
+
 export function periodFacts(model, W, { filters = [], segment = [] } = {}) {
   const includeTest = filters.some((f) => f.field === 'include_test_campaigns' && f.op === 'is_true')
+  const threads = cohortThreads(model, W, { filters, segment })
+  const plain = threads ? segment.filter((s) => s.dim !== 'cohort') : segment
   const F = {}
   const notApplicable = {}
-  for (const kind of ['message', 'seller', 'reply', 'transition', 'opportunity', 'run', 'offer', 'closing']) {
-    const c = compileFilters(model, kind, filters, segment, { includeTest })
-    F[kind] = c.pass
+  for (const kind of KINDS) {
+    const c = compileFilters(model, kind, filters, plain, { includeTest })
+    F[kind] = threads ? (e) => c.pass(e) && threads.has(THREAD_OF[kind](e)) : c.pass
     notApplicable[kind] = c.notApplicable
   }
   const inW = (t) => t !== null && t >= W.start && t < W.end
   let _messages; let _sellers; let _repliers; let _transitions; let _runs; let _offers; let _closings; let _opps
   const pf = {
     W, model, notApplicable,
+    /** conversations in the active seller cohort (null: no cohort step) */
+    cohort: threads ? threads.size : null,
     get messages() { return (_messages ||= model.sends.filter((s) => inW(s.at) && F.message(s))) },
     get sellers() {
       if (_sellers) return _sellers
@@ -460,6 +516,7 @@ export const DEF = {
   touches_per_reply: { kind: 'ratio', entity: 'seller', numValue: (set) => set.reduce((a, s) => a + s.deliveredInW, 0), numSet: (pf) => pf.sellers, den: 'reached_replied' },
   median_reply_latency: { kind: 'duration', entity: 'seller', set: (pf) => pf.sellers.filter((s) => s.latencyMin !== null), value: (s) => s.latencyMin },
 
+  queue_rows: cnt('message', (pf) => pf.messages),
   messages_sent: cnt('message', (pf) => pf.messages.filter((s) => SENT.has(s.disposition))),
   messages_delivered: cnt('message', (pf) => pf.messages.filter((s) => s.disposition === 'delivered')),
   delivery_rate: rate('messages_delivered', 'messages_sent'),
@@ -731,13 +788,56 @@ export function stageMatrix(pf, { now = Date.now(), maxDays = {}, dormantDays = 
   })
 }
 
+/** The instant an entity of metric `id` is placed in a bucket. */
+const momentFor = (id, kind) => (e) => (kind === 'seller' ? e.anchor.at : kind === 'closing' ? (id === 'contracts_signed' ? e.contractAt : e.closedAt) : e.at)
+/** Index of the bucket a moment falls in (binary search over bucket starts); -1 before the first. */
+const bucketIndex = (starts) => (t) => { let lo = 0; let hi = starts.length - 1; let ans = -1; while (lo <= hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= t) { ans = mid; lo = mid + 1 } else hi = mid - 1 } return ans }
+
+/**
+ * A COUNT per bucket, split by one dimension: the top `limit` groups by
+ * period total plus everything else as one remainder (never dropped), so
+ * every bucket's parts sum to the metric's own series. Rates are not
+ * stacked — a stacked rate has no meaning.
+ */
+export function seriesBy(id, pf, dim, { grain, tz, limit = 6 } = {}) {
+  const d = DEF[id]
+  if (!d || d.kind !== 'count') return { available: false, dim, reason: 'Only counts can be split over time; compare rates by breakdown.' }
+  const kind = entityOf(id)
+  const model = pf.model
+  const starts = bucketList(pf.W.start, pf.W.end, grain, tz)
+  const idx = bucketIndex(starts)
+  const moment = momentFor(id, kind)
+  const set = d.set(pf)
+  const totals = new Map()
+  for (const e of set) {
+    const v = dimValue(model, kind, e, dim)
+    const k = String(v.key)
+    const t = totals.get(k) || { key: k, label: v.label, test: Boolean(v.test), total: 0 }
+    t.total += 1
+    totals.set(k, t)
+  }
+  const ranked = [...totals.values()].sort((a, b) => Number(a.test) - Number(b.test) || Number(a.key === UNRESOLVED) - Number(b.key === UNRESOLVED) || b.total - a.total)
+  const kept = ranked.slice(0, Math.max(1, limit))
+  const keep = new Set(kept.map((r) => r.key))
+  const buckets = starts.map((s, i) => ({ start: s, end: i + 1 < starts.length ? starts[i + 1] : nextBucket(s, grain, tz), values: {}, total: 0 }))
+  for (const e of set) {
+    const i = idx(moment(e))
+    if (i < 0) continue
+    const k = String(dimValue(model, kind, e, dim).key)
+    const key = keep.has(k) ? k : '__other'
+    buckets[i].values[key] = (buckets[i].values[key] || 0) + 1
+    buckets[i].total += 1
+  }
+  return { available: true, dim, grain, total: set.length, keys: kept, other: ranked.slice(kept.length).reduce((a, r) => a + r.total, 0), otherGroups: Math.max(0, ranked.length - kept.length), buckets }
+}
+
 /** Per-bucket values. Seller metrics bucket by anchor time, so buckets sum to the period. */
 export function series(id, pf, { grain, tz }) {
   const d = DEF[id]
   const kind = entityOf(id)
   const starts = bucketList(pf.W.start, pf.W.end, grain, tz)
-  const idx = (t) => { let lo = 0; let hi = starts.length - 1; let ans = -1; while (lo <= hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= t) { ans = mid; lo = mid + 1 } else hi = mid - 1 } return ans }
-  const moment = (e) => (kind === 'seller' ? e.anchor.at : kind === 'closing' ? (id === 'contracts_signed' ? e.contractAt : e.closedAt) : e.at)
+  const idx = bucketIndex(starts)
+  const moment = momentFor(id, kind)
   const empty = () => starts.map(() => [])
   const place = (set) => { const b = empty(); for (const e of set) { const i = idx(moment(e)); if (i >= 0) b[i].push(e) } return b }
   const out = starts.map((s, i) => ({ start: s, end: i + 1 < starts.length ? starts[i + 1] : nextBucket(s, grain, tz) }))
