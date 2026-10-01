@@ -1,10 +1,10 @@
 import { uniqueChannelName } from '../../lib/data/realtime-channel'
-import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, type ReactNode } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, useContext, lazy, Suspense, type ReactNode } from 'react'
 import { useBackHandler } from '../../domain/navigation/useBackHandler'
 import { classifyInboxBucket } from '../../domain/inbox/classifyInboxBucket'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../../components/auth/AuthProvider'
-import { pushRoutePath } from '../../app/router'
+import { PaneRouteContext, pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.adapter'
 import { useDealDeskSelection } from './useDealDeskSelection'
 import {
@@ -138,6 +138,7 @@ import {
   peekPendingInboxDealIntelligenceIdentity,
   clearPendingInboxDealIntelligenceIdentity,
   publishMobileInboxBadge,
+  publishInboxDealIntelligenceShowing,
   OPEN_INBOX_THREAD_EVENT,
   peekPendingInboxThread,
   clearPendingInboxThread,
@@ -5366,6 +5367,16 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const isCustomMultiView = isMultiView && isDealDeskLayout
   const isCommandMapView = !isMultiView && activeWorkspaceView === 'command_map'
   const isDealIntelligenceView = !isMultiView && activeWorkspaceView === 'deal_intelligence'
+  // Tell the shell when the main window is showing Deal Intelligence, so the
+  // sidebar highlights it and not Inbox. A split pane's Inbox does not speak
+  // for the main window.
+  const inSplitPane = Boolean(useContext(PaneRouteContext))
+  const dealIntelShowing = mobileIntelOpen || isDealIntelligenceView
+  useEffect(() => {
+    if (inSplitPane) return
+    publishInboxDealIntelligenceShowing(dealIntelShowing)
+  }, [inSplitPane, dealIntelShowing])
+  useEffect(() => () => { if (!inSplitPane) publishInboxDealIntelligenceShowing(false) }, [inSplitPane])
   const isMobilePipelineView = isMobile && activeWorkspaceView === 'pipeline'
   const _isEntityGraphView = !isMultiView && activeWorkspaceView === 'entity_graph'
   void _isEntityGraphView

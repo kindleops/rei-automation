@@ -5,8 +5,10 @@
  * Reads the real rows behind the event (message_events + inbox_thread_state):
  * direction, body, delivery status and failure reason, stage before → after,
  * intent, the thread's stage and next action. Actions reuse existing flows only:
- *   Retry send        POST /api/cockpit/queue/retry (the queue's own authority
- *                     gates still decide) — confirmed first, failed sends only
+ *   Retry send        the queue row as it is now, plus the retry authority's
+ *                     dry-run verdict (map-retry-eligibility.ts); offered only
+ *                     when a retry is really possible, confirmed first, then
+ *                     POST /api/cockpit/queue/retry (whose gates still decide)
  *   Open conversation the Inbox thread
  *   Next step         the property card, whose stage action the operator reviews
  * Nothing on this card sends a message by itself.
@@ -15,11 +17,12 @@ import { useEffect, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { getSupabaseClient } from '../../../lib/supabaseClient'
 import { shouldUseSupabase } from '../../../lib/data/shared'
-import { retryQueueItem } from '../../../lib/api/backendClient'
+import { checkQueueRetry, retryQueueItem } from '../../../lib/api/backendClient'
 import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import type { LiveActivityEvent } from '../live-activity-engine'
 import { orbColor } from './useLiveOrbs'
 import { agoLabel } from './map-mobile-model'
+import { QUEUE_RETRY_ROW_COLUMNS, retryVerdict, type QueueRetryRow, type RetryAuthority } from './map-retry-eligibility'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const label = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '')
@@ -78,7 +81,9 @@ export function eventWhy(e: Pick<LiveActivityEvent, 'type' | 'detail'>, m: Messa
     }
     case 'message_failed': {
       const reason = m?.failure_reason || m?.error_message || m?.failure_bucket
-      return `Not delivered${reason ? `: ${reason}` : ''}.${m?.is_final_failure ? ' The carrier marked it final.' : ' It can be retried.'}`
+      // Whether it can be retried is the retry block's job: it reads the queue
+      // row as it is now, not as it was when this event fired.
+      return `Not delivered${reason ? `: ${reason}` : ''}.${m?.is_final_failure ? ' The carrier marked it final.' : ''}`
     }
     case 'opt_out':
       return 'The seller asked to stop. All outreach to this number is suppressed.'
@@ -97,6 +102,9 @@ export function MapEventCard({ event, onClose, onShowProperty }: { event: LiveAc
   const [msg, setMsg] = useState<MessageRow | null>(null)
   const [thread, setThread] = useState<ThreadRow | null>(null)
   const [retry, setRetry] = useState<'idle' | 'confirm' | 'working' | 'done' | { error: string }>('idle')
+  const [queueRow, setQueueRow] = useState<QueueRetryRow | null | undefined>(undefined)
+  const [authority, setAuthority] = useState<RetryAuthority>(undefined)
+  const [rowEpoch, setRowEpoch] = useState(0)
   const kind = KIND[event.type] ?? { eyebrow: label(event.type), icon: 'activity' }
   const color = orbColor(event.type)
 
@@ -139,6 +147,32 @@ export function MapEventCard({ event, onClose, onShowProperty }: { event: LiveAc
 
   const openConversation = () => { if (threadKey) { onClose(); openInboxThread({ threadKey }) } }
 
+  // The queue row behind a failed message, as it is now; for a row that is
+  // still failed, the retry authority's dry-run verdict (writes nothing).
+  const finalFailure = Boolean(msg?.is_final_failure)
+  const suppressed = Boolean(thread?.is_suppressed)
+  useEffect(() => {
+    if (!failed || !queueId || !shouldUseSupabase()) return
+    let alive = true
+    setQueueRow(undefined)
+    setAuthority(undefined)
+    void (async () => {
+      const { data, error } = await getSupabaseClient().from('send_queue').select(QUEUE_RETRY_ROW_COLUMNS).eq('id', queueId).maybeSingle()
+      if (!alive) return
+      const row = error ? null : ((data as QueueRetryRow | null) ?? null)
+      setQueueRow(row)
+      const status = String(row?.queue_status || '').toLowerCase()
+      const candidate = ['failed', 'failed_transport', 'retry', 'retrying', 'paused_max_retries'].includes(status)
+      if (!row || !candidate || finalFailure || suppressed) return
+      const verdict = await checkQueueRetry(queueId)
+      if (alive) setAuthority(verdict.ok ? { ok: true } : { ok: false, reason: verdict.error })
+    })()
+    return () => { alive = false }
+  }, [failed, queueId, finalFailure, suppressed, rowEpoch])
+  const retryState = failed && queueId
+    ? retryVerdict({ row: queueRow, finalFailure, suppressed, authority, now: Date.now() })
+    : null
+
   return (
     <div className="mx-evt" role="dialog" aria-label={kind.eyebrow} style={{ ['--evt' as string]: color }} data-map-card="event">
       <div className="mx-evt__head">
@@ -168,7 +202,14 @@ export function MapEventCard({ event, onClose, onShowProperty }: { event: LiveAc
       </div>
 
       <div className="mx-evt__actions">
-        {failed && queueId && retry === 'idle' && !msg?.is_final_failure && (
+        {retryState && (
+          <div className={cls('mx-evt__retry', `is-${retryState.kind}`)} data-retry-state={retryState.kind}>
+            <span className="mx-evt__retry-tag">Retry</span>
+            <p>{retryState.line}</p>
+            {retryState.meta && <span className="mx-evt__retry-meta">{retryState.meta}</span>}
+          </div>
+        )}
+        {retryState?.kind === 'eligible' && retry === 'idle' && (
           <button type="button" className="mx-act is-primary" onClick={() => setRetry('confirm')} data-evt-action="retry">Retry send</button>
         )}
         {retry === 'confirm' && queueId && (
@@ -182,15 +223,15 @@ export function MapEventCard({ event, onClose, onShowProperty }: { event: LiveAc
                 onClick={async () => {
                   setRetry('working')
                   const res = await retryQueueItem(queueId)
-                  setRetry(res.ok ? 'done' : { error: (res as { message?: string }).message || 'retry_failed' })
+                  setRetry(res.ok ? 'done' : { error: (res as { error?: string }).error || 'retry_failed' })
+                  setRowEpoch((n) => n + 1)
                 }}
               >Requeue</button>
             </div>
           </div>
         )}
         {retry === 'working' && <button type="button" className="mx-act is-primary" disabled>Requeuing…</button>}
-        {retry === 'done' && <p className="mx-note">Back in the queue — it will go out when the queue's checks allow.</p>}
-        {typeof retry === 'object' && <p className="mx-note is-error">Couldn't requeue ({retry.error}).</p>}
+        {typeof retry === 'object' && <p className="mx-note is-error">The queue refused the retry; the state above says why.</p>}
 
         <div className="mx-area__row is-two">
           {threadKey && <button type="button" className="mx-act" onClick={openConversation} data-evt-action="conversation">Open conversation</button>}

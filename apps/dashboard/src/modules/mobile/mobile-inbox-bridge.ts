@@ -123,6 +123,32 @@ export function isInboxRoute(path: string): boolean {
 }
 
 /**
+ * IS THE DEAL INTELLIGENCE PANEL SHOWING?
+ *
+ * Deal Intelligence lives at /inbox, so anything that names the current app
+ * from the route alone (the desktop sidebar) highlighted Inbox while the
+ * operator was reading Deal Intelligence. The main window's InboxPage reports
+ * whether its panel is showing; readers subscribe.
+ */
+let dealIntelShowing = false
+const dealIntelListeners = new Set<() => void>()
+
+export function publishInboxDealIntelligenceShowing(showing: boolean) {
+  if (dealIntelShowing === showing) return
+  dealIntelShowing = showing
+  dealIntelListeners.forEach((listener) => listener())
+}
+
+export function isInboxDealIntelligenceShowing(): boolean {
+  return dealIntelShowing
+}
+
+export function subscribeInboxDealIntelligenceShowing(listener: () => void): () => void {
+  dealIntelListeners.add(listener)
+  return () => { dealIntelListeners.delete(listener) }
+}
+
+/**
  * OPEN ONE CONVERSATION FROM ANOTHER APP.
  *
  * Map, Live Activity and Campaign replies used to push `/inbox?thread=<key>`,

@@ -191,7 +191,6 @@ export function MapDeskLayers(p: MapDeskLayersProps) {
           </Plate>
         )
       case 'relief': return <Plate key={row.id} row={row} onToggle={p.onRelief} />
-      case 'cameras': return <Plate key={row.id} row={row} />
       case 'activity':
         return (
           <Plate key={row.id} row={row} onToggle={p.onActivity}>

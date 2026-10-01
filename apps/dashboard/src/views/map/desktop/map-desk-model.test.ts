@@ -104,12 +104,10 @@ describe('sensor array', () => {
   it('has the four groups, in order', () => {
     expect(buildSensorArray(BASE).map((g) => g.id)).toEqual(['properties', 'market', 'world', 'operations'])
   })
-  it('cameras are shown disabled with a reason — no data source yet', () => {
-    const cams = row(buildSensorArray(BASE), 'cameras')
-    expect(cams.available).toBe(false)
-    expect(cams.on).toBe(false)
-    expect(cams.status).toBe('unavailable')
-    expect(cams.reason).toMatch(/no camera source/i)
+  it('no camera row while no camera source is connected (the Map does not advertise a dead sensor)', () => {
+    const ids = buildSensorArray(BASE).flatMap((g) => g.rows.map((r) => r.id))
+    expect(ids).not.toContain('cameras')
+    expect(JSON.stringify(buildSensorArray(BASE))).not.toMatch(/camera/i)
   })
   it('buildings are honest about imagery themes and flat views', () => {
     expect(row(buildSensorArray({ ...BASE, vectorBuildings: false }), 'buildings')).toMatchObject({ available: false, status: 'unavailable' })
@@ -143,7 +141,7 @@ describe('sensor array', () => {
   })
   it('tallies count only usable layers', () => {
     const world = buildSensorArray(BASE).find((g) => g.id === 'world')!
-    // daylight, local time, zones, buildings (on, waiting for tilt) — relief off, cameras unavailable
+    // daylight, local time, zones, buildings (on, waiting for tilt) — relief off
     expect(groupTally(world)).toBe('4 of 5 on')
   })
 })

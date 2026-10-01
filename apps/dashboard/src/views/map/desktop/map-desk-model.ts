@@ -253,10 +253,9 @@ export function buildSensorArray(s: SensorInput): SensorGroup[] {
           id: 'relief', label: 'Terrain relief', sub: 'Shaded hills from real elevation; lifted into 3D while tilted', status: s.relief ? 'on' : 'off', on: s.relief,
           available: true, supports: S(true),
         },
-        {
-          id: 'cameras', label: 'Traffic cameras', sub: 'Public DOT camera stills', status: 'unavailable', on: false, available: false,
-          reason: 'No camera source is connected yet', supports: S(false),
-        },
+        // Traffic cameras join this group when a camera source is connected
+        // (CAM-D). Until then there is no row at all: the Map does not
+        // advertise a sensor it cannot read (owner, 2026-09-30).
       ],
     },
     {

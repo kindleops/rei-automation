@@ -505,10 +505,6 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
             </button>
           )
         })}
-        <span className="mxd-rail__rule" aria-hidden="true" />
-        <button type="button" className="mxd-tool" aria-label={p.recenterLabel} data-tip={p.recenterLabel} data-map-control="recenter" onClick={p.onRecenter}>
-          <Icon name="target" size={16} />
-        </button>
       </nav>
 
       {/* L2 — the command stack */}
@@ -605,6 +601,11 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
             <path d="M12 3.5 15 12h-6z" fill="var(--mxd-north, #ff453a)" />
             <path d="M12 20.5 9 12h6z" fill="currentColor" opacity="0.5" />
           </svg>
+        </button>
+        {/* Recenter is navigation, so it lives with zoom and north, not among
+            the tools: a quiet control, not a call to action (owner, 2026-09-30). */}
+        <button type="button" className="mxd-tool is-quiet" aria-label={p.recenterLabel} data-tip={p.recenterLabel} data-map-control="recenter" onClick={p.onRecenter}>
+          <Icon name="target" size={15} />
         </button>
       </div>
 

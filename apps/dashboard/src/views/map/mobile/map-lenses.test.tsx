@@ -203,8 +203,10 @@ import { eventWhy } from './MapEventCard'
 
 describe('event card says why', () => {
   const m = (over: Record<string, unknown> = {}) => ({ direction: 'inbound', message_body: 'ok', delivery_status: null, failure_reason: null, error_message: null, failure_bucket: null, is_final_failure: null, queue_id: null, stage_before: null, stage_after: null, detected_intent: null, created_at: null, thread_key: 't', seller_display_name: null, property_address: null, ...over }) as any
-  it('a failed send gives the carrier reason and whether it can be retried', () => {
-    expect(eventWhy({ type: 'message_failed' } as any, m({ failure_reason: 'Carrier blocked', is_final_failure: false }), null)).toBe('Not delivered: Carrier blocked. It can be retried.')
+  it('a failed send gives the carrier reason; whether it can be retried is decided from the queue row as it is now', () => {
+    const why = eventWhy({ type: 'message_failed' } as any, m({ failure_reason: 'Carrier blocked', is_final_failure: false }), null)
+    expect(why).toBe('Not delivered: Carrier blocked.')
+    expect(why).not.toMatch(/can be retried/)
     expect(eventWhy({ type: 'message_failed' } as any, m({ is_final_failure: true }), null)).toContain('final')
   })
   it('a reply names the intent, the stage move and the next action', () => {

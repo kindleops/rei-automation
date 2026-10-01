@@ -220,6 +220,7 @@ html.is-desktop-modern .mx.is-desk .mxd-tool.is-active {
 html.is-desktop-modern .mx.is-desk .mxd-tool.is-lit { color: var(--mxg-accent); }
 html.is-desktop-modern .mx.is-desk .mxd-tool.is-active.is-lit { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-accent) 45%, transparent), inset 0 1px 0 var(--mxg-spec), 0 6px 16px -8px color-mix(in srgb, var(--mxg-accent) 55%, transparent); }
 html.is-desktop-modern .mx.is-desk .mxd-tool.is-text { font-size: 11.5px; font-weight: 720; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .mx.is-desk .mxd-tool.is-quiet { color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-tool__badge {
   position: absolute;
   top: 2px;

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Icon } from '../../shared/icons'
 import { MOBILE_APPS_BY_GROUP, isAppActive, type NexusApp } from '../../domain/app-registry/app-registry'
 import { navigateToApp } from '../../domain/app-registry/contextual-navigation'
 import { appHue } from '../mobile/app-hues'
 import { captureAppSession, resolveAppIdFromRoute } from '../mobile/app-session-cache'
-import { closeInboxDealIntelligence, isInboxRoute, openInboxDealIntelligence } from '../mobile/mobile-inbox-bridge'
+import { closeInboxDealIntelligence, isInboxDealIntelligenceShowing, isInboxRoute, openInboxDealIntelligence, subscribeInboxDealIntelligenceShowing } from '../mobile/mobile-inbox-bridge'
 import { requestNotificationsSurface } from '../mobile/shell-surface-bridge'
 import { usePinnedAppDockBadges } from '../mobile/usePinnedAppDockBadges'
 import type { DockAppBadge } from '../mobile/pinned-app-dock.types'
@@ -26,8 +26,11 @@ const SECTIONS = MOBILE_APPS_BY_GROUP
   .map((g) => ({ ...g, apps: g.apps.filter((a) => a.action !== 'notifications' && a.action !== 'settings' && !a.route.startsWith('__')) }))
   .filter((g) => g.apps.length > 0)
 
-function activeFor(routePath: string, app: NexusApp): boolean {
-  if (app.action === 'deal_intelligence') return routePath === '/deal-intelligence'
+/** Deal Intelligence is a panel at /inbox: while it shows, it is the active app, not Inbox. */
+export function activeFor(routePath: string, app: NexusApp, dealIntelShowing = false): boolean {
+  const intelInInbox = dealIntelShowing && isInboxRoute(routePath)
+  if (app.action === 'deal_intelligence') return routePath === '/deal-intelligence' || intelInInbox
+  if (app.id === 'inbox' && intelInInbox) return false
   return isAppActive(routePath, app)
 }
 
@@ -50,7 +53,8 @@ export function DesktopSidebar({ routePath, status, onOpenSettings }: DesktopSid
   const collapsed = prefs.collapsed
   const closed = useMemo(() => new Set(prefs.closedGroups), [prefs.closedGroups])
 
-  const activeApp = useMemo(() => SECTIONS.flatMap((s) => s.apps).find((a) => activeFor(routePath, a)) ?? null, [routePath])
+  const dealIntelShowing = useSyncExternalStore(subscribeInboxDealIntelligenceShowing, isInboxDealIntelligenceShowing, () => false)
+  const activeApp = useMemo(() => SECTIONS.flatMap((s) => s.apps).find((a) => activeFor(routePath, a, dealIntelShowing)) ?? null, [routePath, dealIntelShowing])
   const hue = appHue(activeApp?.id)
 
   const go = useCallback((app: NexusApp) => {
@@ -104,7 +108,7 @@ export function DesktopSidebar({ routePath, status, onOpenSettings }: DesktopSid
     ro?.observe(nav)
     window.addEventListener('resize', schedule)
     return () => { if (raf) cancelAnimationFrame(raf); window.clearTimeout(settle); ro?.disconnect(); window.removeEventListener('resize', schedule) }
-  }, [routePath, collapsed, prefs.closedGroups, hue])
+  }, [routePath, dealIntelShowing, collapsed, prefs.closedGroups, hue])
 
   return (
     <aside className={cls('dsk-side', collapsed && 'is-collapsed')} style={{ ['--hue' as string]: hue }} aria-label="Applications">
@@ -158,7 +162,7 @@ export function DesktopSidebar({ routePath, status, onOpenSettings }: DesktopSid
                 <div className="dsk-side__group-body">
                   <div className="dsk-side__group-inner">
                     {section.apps.map((app) => {
-                      const active = activeFor(routePath, app)
+                      const active = activeFor(routePath, app, dealIntelShowing)
                       const badge = badges[app.route as keyof typeof badges]
                       const count = badgeText(badge)
                       return (

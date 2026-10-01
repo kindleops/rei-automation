@@ -1285,6 +1285,23 @@ html[data-nexus-theme='light'] .mx-areacard__buyers li.is-gold { box-shadow: ins
 .mx-evt__chips span.is-hot { color: #ffb020; box-shadow: inset 0 0 0 1px rgb(255 176 32 / 0.5); }
 .mx-evt__chips span.is-stop { color: var(--mx-critical); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mx-critical) 50%, transparent); }
 .mx-evt__actions { display: flex; flex-direction: column; gap: 8px; }
+/* Retry as a state: what is true about the failed message now, coloured by
+   what the operator can do about it. */
+.mx-evt__retry {
+  --retry: var(--mx-ink-3);
+  display: grid; gap: 3px; padding: 10px 12px 10px 14px; border-radius: 14px;
+  background: var(--mx-well);
+  box-shadow: inset 3px 0 0 var(--retry), inset 0 0 0 1px var(--mx-rule);
+}
+.mx-evt__retry.is-eligible { --retry: var(--mx-accent); }
+.mx-evt__retry.is-in_queue { --retry: #5ac8fa; }
+.mx-evt__retry.is-went_out { --retry: var(--mx-good); }
+.mx-evt__retry.is-held { --retry: #ffb020; }
+.mx-evt__retry.is-closed { --retry: var(--mx-critical); }
+.mx-evt__retry-tag { font-size: 10.5px; font-weight: 760; letter-spacing: 0.08em; text-transform: uppercase; color: var(--retry); }
+.mx-evt__retry p { margin: 0; font-size: 13px; line-height: 1.4; color: var(--mx-ink-2); }
+.mx-evt__retry-meta { font-size: 11.5px; color: var(--mx-ink-3); font-variant-numeric: tabular-nums; }
+.mx-evt__retry.is-checking p { color: var(--mx-ink-3); }
 .mx-evt .mx-area__row.is-two .mx-act { min-height: 44px; }
 @media (prefers-reduced-motion: reduce) { .mx-evt, .mx-evt__icon, .mx-evt__bubble { animation: none; } }
 

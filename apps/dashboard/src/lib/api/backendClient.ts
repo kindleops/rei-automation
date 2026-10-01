@@ -1311,6 +1311,16 @@ export function retryQueueItem(queueId: string): Promise<BackendResult<QueueActi
   })
 }
 
+// POST /api/cockpit/queue/retry, dry run: the retry authority's verdict
+// (outbound off, runner off, a duplicate already queued or sent, paused
+// review, quarantine) without writing anything.
+export function checkQueueRetry(queueId: string): Promise<BackendResult<QueueActionResult>> {
+  return callBackend<QueueActionResult>('/api/cockpit/queue/retry', {
+    method: 'POST',
+    body: JSON.stringify({ queue_id: queueId, dry_run: true }),
+  })
+}
+
 // POST /api/cockpit/queue/hold
 // Puts a queue item into held status.
 export function holdQueueItem(queueId: string): Promise<BackendResult<QueueActionResult>> {
