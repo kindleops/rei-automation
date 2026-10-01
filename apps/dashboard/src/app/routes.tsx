@@ -311,6 +311,20 @@ const devBuyerMatchV4Route = defineRoute<null>({
   ),
 })
 
+// DEV-ONLY: the Experience System reference surface — every shared primitive
+// and state on sample data. Never registered in production builds.
+const ExperienceShowcase = lazy(() => import('../views/dev/ExperienceShowcase'))
+const devExperienceRoute = defineRoute<null>({
+  path: '/dev/experience',
+  title: 'LeadCommand | Experience System (dev)',
+  loader: async () => null,
+  render: () => (
+    <Suspense fallback={null}>
+      <ExperienceShowcase />
+    </Suspense>
+  ),
+})
+
 const entityGraphRoute = defineRoute<null>({
   path: '/entity-graph',
   title: 'LeadCommand | Entity Graph',
@@ -394,7 +408,7 @@ const routes = [
   entityGraphOrganizationRoute,
   entityGraphMarketRoute,
   entityGraphZipRoute,
-  ...(import.meta.env.DEV ? [devCompIntelligenceV4Route, devBuyerMatchV4Route] : []),
+  ...(import.meta.env.DEV ? [devCompIntelligenceV4Route, devBuyerMatchV4Route, devExperienceRoute] : []),
 ]
 
 const normalizePath = (path: string) => {

@@ -1,0 +1,280 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LEADCOMMAND EXPERIENCE SYSTEM 4.0 — BASE
+   Opt-in classes only (.lc-*), plus one zero-specificity focus default for
+   the desktop so nothing is ever left with the browser's blue ring or with
+   no ring at all. Any app rule outranks every rule in this file.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── focus: visible, theme-aware, never the browser default ───────────── */
+:where(html.is-desktop-modern) :where(button, a[href], [role='button'], [role='tab'], [role='menuitem'], [role='option'], [role='radio'], [role='switch'], [role='checkbox'], [role='separator'], input, select, textarea, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 2px solid var(--lc-focus);
+  outline-offset: 2px;
+}
+.lc-focusable:focus-visible,
+.lc-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: var(--lc-focus-ring);
+}
+
+/* ══ MATERIAL + DEPTH ══════════════════════════════════════════════════════
+   .lc-plane is a glass surface. The material picks how much of the world
+   shows through; the depth picks how far it floats. Only OUTER planes blur:
+   a plane inside a plane is .is-inner (translucent fill, no backdrop
+   filter) — nested backdrop blur is the most expensive thing in the app. */
+.lc-plane {
+  --lc-plane-bg: var(--lc-mat-crystal-bg);
+  --lc-plane-filter: var(--lc-mat-crystal-filter);
+  --lc-plane-edge: var(--lc-mat-crystal-edge);
+  --lc-plane-shadow: var(--lc-d2-shadow);
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--lc-r-plane);
+  color: var(--lc-ink-1);
+  background: var(--lc-sheen-wash), var(--lc-plane-bg);
+  -webkit-backdrop-filter: var(--lc-plane-filter);
+  backdrop-filter: var(--lc-plane-filter);
+  box-shadow: inset 0 0 0 1px var(--lc-plane-edge), var(--lc-sheen-top), var(--lc-plane-shadow);
+}
+.lc-plane.is-clear { --lc-plane-bg: var(--lc-mat-clear-bg); --lc-plane-filter: var(--lc-mat-clear-filter); --lc-plane-edge: var(--lc-mat-clear-edge); }
+.lc-plane.is-crystal { --lc-plane-bg: var(--lc-mat-crystal-bg); --lc-plane-filter: var(--lc-mat-crystal-filter); --lc-plane-edge: var(--lc-mat-crystal-edge); }
+.lc-plane.is-frosted { --lc-plane-bg: var(--lc-mat-frosted-bg); --lc-plane-filter: var(--lc-mat-frosted-filter); --lc-plane-edge: var(--lc-mat-frosted-edge); }
+.lc-plane.is-smoke { --lc-plane-bg: var(--lc-mat-smoke-bg); --lc-plane-filter: var(--lc-mat-smoke-filter); --lc-plane-edge: var(--lc-mat-smoke-edge); }
+.lc-plane.is-solid { --lc-plane-bg: var(--lc-mat-solid-bg); --lc-plane-filter: none; --lc-plane-edge: var(--lc-mat-solid-edge); }
+.lc-plane.is-inner {
+  --lc-plane-filter: none;
+  --lc-plane-shadow: none;
+  border-radius: var(--lc-r-lg);
+  background: var(--lc-inner-bg);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+}
+.lc-plane.is-d1 { --lc-plane-shadow: var(--lc-d1-shadow); }
+.lc-plane.is-d2 { --lc-plane-shadow: var(--lc-d2-shadow); }
+.lc-plane.is-d3 { --lc-plane-shadow: var(--lc-d3-shadow); }
+.lc-plane.is-d4 { --lc-plane-shadow: var(--lc-d4-shadow); }
+.lc-plane.is-d5 { --lc-plane-shadow: var(--lc-d5-shadow); }
+/* depth 3 — the selected / contextual surface: clearer edge, no glow slab */
+.lc-plane.is-selected { --lc-plane-edge: rgba(var(--lc-select-rgb), 0.36); --lc-plane-shadow: var(--lc-d3-shadow); }
+
+/* ── liquid colour lives UNDER the glass: a local field, never the surface ─ */
+.lc-plane[data-under]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120% 95% at var(--lc-under-x, 10%) var(--lc-under-y, 112%), rgba(var(--lc-under-rgb), var(--lc-under-a, 0.14)), transparent 62%);
+  transition: opacity var(--lc-dur-layout) var(--lc-ease-standard);
+}
+.lc-plane[data-under='accent'] { --lc-under-rgb: var(--lc-accent-rgb); }
+.lc-plane[data-under='exec'] { --lc-under-rgb: var(--lc-exec-rgb); }
+.lc-plane[data-under='ok'] { --lc-under-rgb: var(--lc-ok-rgb); }
+.lc-plane[data-under='attn'] { --lc-under-rgb: var(--lc-attn-rgb); }
+.lc-plane[data-under='crit'] { --lc-under-rgb: var(--lc-crit-rgb); }
+.lc-plane[data-under='flow'] { --lc-under-rgb: var(--lc-flow-rgb); }
+
+/* ══ TYPE ═══════════════════════════════════════════════════════════════════ */
+.lc-t-app { font: var(--lc-t-app); letter-spacing: var(--lc-track-tight); color: var(--lc-ink-1); }
+.lc-t-surface { font: var(--lc-t-surface); letter-spacing: -0.01em; color: var(--lc-ink-1); }
+.lc-t-section { font: var(--lc-t-section); color: var(--lc-ink-1); }
+.lc-t-row { font: var(--lc-t-row); color: var(--lc-ink-1); }
+.lc-t-body { font: var(--lc-t-body); color: var(--lc-ink-2); }
+.lc-t-meta { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.lc-t-label { font: var(--lc-t-label); letter-spacing: 0.02em; color: var(--lc-ink-2); }
+.lc-t-stamp { font: var(--lc-t-stamp); color: var(--lc-ink-3); font-variant-numeric: tabular-nums; }
+.lc-t-mono { font: var(--lc-t-mono); color: var(--lc-ink-2); }
+.lc-eyebrow {
+  font: var(--lc-t-eyebrow);
+  letter-spacing: var(--lc-track-eyebrow);
+  text-transform: uppercase;
+  color: var(--lc-ink-3);
+}
+
+/* numbers: tabular, lining, units recessed — $315K · 11.7% · 503 · 38s */
+.lc-num { font-variant-numeric: tabular-nums lining-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
+.lc-t-metric-xl { font: var(--lc-t-metric-xl); letter-spacing: var(--lc-track-display); font-variant-numeric: tabular-nums lining-nums; color: var(--lc-ink-1); }
+.lc-t-metric { font: var(--lc-t-metric); letter-spacing: var(--lc-track-tight); font-variant-numeric: tabular-nums lining-nums; color: var(--lc-ink-1); }
+.lc-t-metric-sm { font: var(--lc-t-metric-sm); letter-spacing: -0.01em; font-variant-numeric: tabular-nums lining-nums; color: var(--lc-ink-1); }
+.lc-unit { margin-left: 0.08em; font-size: 0.6em; font-weight: 600; letter-spacing: 0; color: var(--lc-ink-3); }
+
+/* ══ STATE LANGUAGE ═════════════════════════════════════════════════════════
+   One status mark for the whole product. The tone is the meaning; the
+   label is the product's own word (SYSTEM HANDLING, WAITING ON SELLER,
+   NEEDS YOU, BLOCKED…). Calm states are quiet by design. */
+.lc-status {
+  --lc-st-rgb: var(--lc-neutral-rgb);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font: var(--lc-t-eyebrow);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgb(var(--lc-st-rgb));
+}
+.lc-status__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(var(--lc-st-rgb));
+  box-shadow: 0 0 0 3px rgba(var(--lc-st-rgb), 0.14);
+}
+.lc-status.is-quiet { color: var(--lc-ink-3); }
+.lc-status.is-quiet .lc-status__dot { box-shadow: none; opacity: 0.85; }
+.lc-status.is-hollow .lc-status__dot { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(var(--lc-st-rgb)); }
+[data-tone='exec'] { --lc-st-rgb: var(--lc-exec-rgb); }
+[data-tone='ok'] { --lc-st-rgb: var(--lc-ok-rgb); }
+[data-tone='attn'] { --lc-st-rgb: var(--lc-attn-rgb); }
+[data-tone='crit'] { --lc-st-rgb: var(--lc-crit-rgb); }
+[data-tone='flow'] { --lc-st-rgb: var(--lc-flow-rgb); }
+[data-tone='neutral'] { --lc-st-rgb: var(--lc-neutral-rgb); }
+[data-tone='accent'] { --lc-st-rgb: var(--lc-accent-rgb); }
+
+/* ● LIVE — tiny, calm, no blinking. One soft ring when data actually lands. */
+.lc-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--lc-t-eyebrow);
+  letter-spacing: 0.12em;
+  color: var(--lc-ink-2);
+  white-space: nowrap;
+}
+.lc-live__dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lc-ok);
+  box-shadow: 0 0 6px rgba(var(--lc-ok-rgb), 0.55);
+}
+.lc-live.is-stale .lc-live__dot { background: var(--lc-attn); box-shadow: none; }
+.lc-live.is-off .lc-live__dot { background: var(--lc-ink-4); box-shadow: none; }
+.lc-live__dot::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--lc-ok-rgb), 0.7);
+  opacity: 0;
+}
+.lc-live.is-arrived .lc-live__dot::after { animation: lc-ring var(--lc-dur-arrival) var(--lc-ease-enter) 1; }
+@keyframes lc-ring {
+  0% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(3.2); }
+}
+
+/* realtime arrival: one localized highlight that decays, never a page flash */
+.lc-arrive { animation: lc-arrive var(--lc-dur-arrival) var(--lc-ease-standard) 1; }
+@keyframes lc-arrive {
+  0% { background-color: rgba(var(--lc-exec-rgb), 0.14); }
+  100% { background-color: transparent; }
+}
+
+/* ══ LOADING / SKELETON ═════════════════════════════════════════════════════
+   Skeletons take the real layout's shape. The light moves (transform),
+   the layout never does; under reduced motion it rests. */
+.lc-skel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--lc-r-xs);
+  background: rgba(var(--lc-edge-rgb), 0.06);
+}
+:root[data-nexus-theme='light'] .lc-skel { background: rgba(11, 18, 32, 0.06); }
+.lc-skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(var(--lc-edge-rgb), 0.07), transparent);
+  transform: translateX(-100%);
+  animation: lc-shimmer 1.6s var(--lc-ease-glide) infinite;
+}
+@keyframes lc-shimmer { to { transform: translateX(100%); } }
+:root[data-lc-motion='off'] .lc-skel::after { animation: none; }
+@media (prefers-reduced-motion: reduce) { .lc-skel::after { animation: none; } }
+
+/* ══ HIT AREA ═══════════════════════════════════════════════════════════════
+   The visual stays dense; the target grows by --lc-hit-pad on each side.
+   Pads never exceed half the gap a toolbar leaves, so neighbours never
+   steal each other's clicks. Coarse pointers get the full 44px. */
+.lc-hit { position: relative; }
+.lc-hit::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--lc-hit-pad, 4px));
+  border-radius: inherit;
+}
+@media (pointer: coarse) {
+  .lc-hit::after { inset: 50% auto auto 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+}
+
+/* ══ SCROLL + STICKY ════════════════════════════════════════════════════════ */
+.lc-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--lc-edge-rgb), 0.16) transparent;
+}
+:root[data-nexus-theme='light'] .lc-scroll { scrollbar-color: rgba(11, 18, 32, 0.18) transparent; }
+.lc-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.lc-scroll::-webkit-scrollbar-thumb { border-radius: 8px; background: rgba(var(--lc-edge-rgb), 0.14); border: 2px solid transparent; background-clip: padding-box; }
+/* sticky bars cover what passes under them — no text bleed (float material:
+   nested backdrop blur does not run inside a desktop pane) */
+.lc-sticky {
+  position: sticky;
+  top: 0;
+  z-index: var(--lc-z-sticky);
+  background: var(--lc-mat-float-bg);
+  -webkit-backdrop-filter: var(--lc-mat-smoke-filter);
+  backdrop-filter: var(--lc-mat-smoke-filter);
+}
+
+/* ══ CURSORS ════════════════════════════════════════════════════════════════ */
+.lc-grab { cursor: grab; }
+.lc-grab:active { cursor: grabbing; }
+.lc-crosshair { cursor: crosshair; }
+.lc-resize-x { cursor: col-resize; }
+.lc-resize-y { cursor: row-resize; }
+
+/* ══ KEYBOARD HINT ══════════════════════════════════════════════════════════ */
+.lc-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font: 600 10.5px/1 var(--lc-font-ui);
+  color: var(--lc-ink-3);
+  background: rgba(var(--lc-edge-rgb), 0.06);
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.09), inset 0 -1px 0 rgba(var(--lc-edge-rgb), 0.06);
+}
+:root[data-nexus-theme='light'] .lc-kbd { background: rgba(11, 18, 32, 0.05); box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.1); }
+
+.lc-sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ══ ANIMATIONS OFF (Settings) ══════════════════════════════════════════════
+   The operator's Animations switch now reaches every surface, not four of
+   them: loops stop, transitions become immediate. The OS reduce-motion
+   request is honoured by each component's own media query. */
+:root[data-lc-motion='off'] *,
+:root[data-lc-motion='off'] *::before,
+:root[data-lc-motion='off'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

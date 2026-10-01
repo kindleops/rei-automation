@@ -1,0 +1,29 @@
+/**
+ * LeadCommand Experience System 4.0 — the only UI vocabulary app code uses
+ * for shared interaction. Arc (MIT, free items) and Radix are implementation
+ * details behind these components; see DECISIONS.md.
+ */
+export { cx } from './cx'
+export { LC_DUR, LC_EASE, LC_FADE, LC_SPRING, lcEase, lcTransition, useLcReducedMotion } from './motion'
+
+export { LCButton, LCIconButton, LCLink, type LCButtonProps, type LCButtonVariant, type LCIconButtonProps } from './Button'
+export { LCTooltip, type LCTooltipProps } from './Tooltip'
+export { LCPopover, LCPopoverAnchor, LCPopoverClose, LCPopoverContent, LCPopoverRoot, LCPopoverTrigger, type LCMaterial, type LCPopoverProps } from './Popover'
+export { LCMenu, LCContextMenu, type LCMenuProps, type LCContextMenuProps } from './Menu'
+export { lcMenu, type LCMenuEntry } from './menu-model'
+export { LCSelect, type LCSelectOption, type LCSelectProps } from './Select'
+export { LCCombobox, type LCComboOption, type LCComboboxProps } from './Combobox'
+export { LCHoverCard, type LCHoverCardProps } from './HoverCard'
+export { LCDialog, LCConfirm, LCSheet, LCDialogClose, type LCEffect, type LCConfirmProps, type LCDialogProps, type LCSheetProps } from './Dialog'
+export { LCTabs, LCSegmented, type LCTabItem, type LCTabsProps, type LCSegmentOption, type LCSegmentedProps } from './Tabs'
+export { LCInspector, LCInspectorSection, LCFacts, type LCInspectorProps } from './Inspector'
+export { LCSearch, LCChip, LCFilterBar, LCFilterInspector, LCToolbar, type LCActiveFilter, type LCFilterSection, type LCSearchProps } from './Filter'
+export { LCDataGrid, type LCColumn, type LCDataGridProps, type LCSort } from './DataGrid'
+export { LCActivityFeed } from './Activity'
+export { groupActivity, type LCActivityEvent, type LCActivityEntry } from './activity-model'
+export { LCTimeline, type LCTimelineItem } from './Timeline'
+export { LCRail, LCProgress, type LCRailStep, type LCStepState } from './Rail'
+export { LCMetric, LCDelta, LCCounter, LCSparkline, type LCMetricProps } from './Metric'
+export { useSettledValue } from './hooks'
+export { LCStatus, LCLive, LCSkeleton, LCEmpty, LCError, LCKbd } from './States'
+export { LC_STATES, type LCStateKey, type LCTone } from './states-model'

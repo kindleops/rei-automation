@@ -1,0 +1,115 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   ARC → LEADCOMMAND TOKEN BRIDGE
+   Arc's foundation defines its tokens on :root with generic names (--accent,
+   --border, --text-muted, --success …) that LeadCommand already uses hundreds
+   of times. Importing it globally would repaint the whole app, so it is never
+   imported. Instead every Arc component renders inside `.lc-arc`, and this
+   file defines Arc's token names THERE, from LeadCommand's own values per
+   theme. Arc keeps its interaction physics (durations, eases, spacing rhythm);
+   LeadCommand owns colour, type, glass, radius and semantics.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.lc-arc {
+  /* type — LeadCommand's face, a tighter analytical scale */
+  --font-body: var(--dsk-font, 'Inter', -apple-system, system-ui, sans-serif);
+  --font-display: var(--dsk-font, 'Inter', -apple-system, system-ui, sans-serif);
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
+  --text-5xl: 56px;
+  --tracking-display: -0.035em;
+  --tracking-body: -0.005em;
+  --leading-display: 1.05;
+  --leading-body: 1.4;
+
+  /* ink and planes — the glass, not Arc's paper */
+  --foreground: var(--dsk-ink, #eef2f8);
+  --text-secondary: var(--dsk-ink-2, rgba(226, 232, 244, 0.72));
+  --text-muted: var(--dsk-ink-3, rgba(226, 232, 244, 0.46));
+  --background: transparent;
+  --surface: rgb(var(--dsk-fill, 9 13 21) / calc(0.5 * var(--lg-alpha, 1)));
+  --surface-muted: rgb(var(--dsk-fill, 9 13 21) / calc(0.32 * var(--lg-alpha, 1)));
+  --surface-raised: rgb(var(--dsk-fill, 9 13 21) / calc(0.9 * var(--lg-alpha, 1)));
+  --border: var(--dsk-edge, rgba(255, 255, 255, 0.08));
+  --border-strong: var(--dsk-edge-hi, rgba(255, 255, 255, 0.14));
+  --border-subtle: rgba(255, 255, 255, 0.05);
+
+  /* accent and semantics — LeadCommand's, never Arc's violet */
+  --accent: var(--dsk-accent, #5eead4);
+  --accent-strong: color-mix(in srgb, var(--dsk-accent, #5eead4) 82%, #fff);
+  --accent-subtle: color-mix(in srgb, var(--dsk-accent, #5eead4) 18%, transparent);
+  --accent-foreground: #04110f;
+  --success: #3ddc97;
+  --warning: #f0b64a;
+  --danger: #ff5b6c;
+  --focus-ring: color-mix(in srgb, var(--dsk-accent, #5eead4) 70%, transparent);
+
+  /* data series: machine (cyan), automation (violet), value (green), attention (gold) */
+  --series-1: var(--dsk-accent, #5eead4);
+  --series-2: #a78bfa;
+  --series-3: #3ddc97;
+  --series-4: #f0b64a;
+
+  /* rhythm and physics — Arc's, kept */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px; --space-20: 80px; --space-24: 96px;
+  --radius-control: 12px;
+  --radius-panel: 18px;
+  --radius-surface: 22px;
+  --radius-pill: 9999px;
+  --control-height-sm: 32px;
+  --control-height-md: 38px;
+  --control-height-lg: 44px;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-exit: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: var(--dsk-spring, cubic-bezier(0.22, 1.12, 0.36, 1));
+  --duration-instant: 120ms;
+  --duration-fast: 160ms;
+  --duration-standard: 240ms;
+  --duration-considered: 480ms;
+  --duration-spring: 580ms;
+  --shadow-resting: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-raised: 0 12px 30px -16px rgba(0, 0, 0, 0.75);
+  --shadow-floating: 0 24px 60px -28px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 0 0 1px var(--dsk-edge-hi, rgba(255, 255, 255, 0.14));
+
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-nexus-theme='light'] .lc-arc {
+  --border-subtle: rgba(13, 21, 36, 0.06);
+  --accent-foreground: #ffffff;
+  --success: #0f9d6b;
+  --warning: #b7791f;
+  --danger: #d92d45;
+  --series-2: #7c5cf0;
+  --series-3: #0f9d6b;
+  --series-4: #b7791f;
+  --shadow-raised: 0 12px 30px -18px rgba(24, 36, 60, 0.35);
+  --shadow-floating: 0 24px 60px -30px rgba(24, 36, 60, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px var(--dsk-edge-hi, rgba(13, 21, 36, 0.14));
+}
+
+html[data-nexus-theme='true_black'] .lc-arc {
+  --surface: rgb(6 7 9 / 0.66);
+  --surface-muted: rgb(6 7 9 / 0.4);
+  --surface-raised: rgb(10 11 13 / 0.96);
+}
+
+/* RedOps: the accent is red, so red must still mean failure. Series and
+   semantics stay cool / green; only the chrome takes the theme. */
+html[data-nexus-theme='red_ops'] .lc-arc {
+  --series-1: #e2e8f0;
+  --series-2: #c4b5fd;
+  --series-3: #4ade80;
+  --success: #4ade80;
+  --danger: #ff3b3b;
+}

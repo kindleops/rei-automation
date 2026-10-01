@@ -69,3 +69,23 @@ export function __awaiter<T>(
     },
   )
 }
+
+/*
+ * __assign / __spreadArray — required by the Experience System's overlay engine
+ * (react-remove-scroll, use-sidecar under Radix Dialog/Popover/Select). Same
+ * semantics as tslib's own helpers.
+ */
+export const __assign: <T extends object>(target: T, ...sources: object[]) => T = Object.assign
+
+export function __spreadArray<T>(to: T[], from: ArrayLike<T>, pack?: boolean): T[] {
+  let ar: T[] | undefined
+  if (pack || arguments.length === 2) {
+    for (let i = 0, l = from.length; i < l; i += 1) {
+      if (ar || !(i in from)) {
+        if (!ar) ar = Array.prototype.slice.call(from, 0, i) as T[]
+        ar[i] = from[i]
+      }
+    }
+  }
+  return to.concat(ar || (Array.prototype.slice.call(from) as T[]))
+}

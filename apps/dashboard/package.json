@@ -76,6 +76,13 @@
     "proof:entity-graph": "node scripts/proof/mobile/entity-graph-universe-proof.mjs"
   },
   "dependencies": {
+    "@radix-ui/react-context-menu": "^2.3.7",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-dropdown-menu": "^2.1.24",
+    "@radix-ui/react-hover-card": "^1.1.23",
+    "@radix-ui/react-popover": "^1.1.23",
+    "@radix-ui/react-select": "^2.3.7",
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/supabase-js": "^2.104.1",
     "@types/react-window": "^1.8.8",
     "dotenv": "^17.4.2",

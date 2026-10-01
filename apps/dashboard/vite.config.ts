@@ -791,6 +791,8 @@ export default defineConfig(({ mode }) => {
             }
             if (id.includes('maplibre-gl')) return 'vendor-maplibre'
             if (id.includes('framer-motion')) return 'vendor-motion'
+            // The Experience System's overlay engine (Radix primitives + floating-ui)
+            if (id.includes('@radix-ui') || id.includes('@floating-ui') || id.includes('react-remove-scroll')) return 'vendor-overlay'
             if (id.includes('@supabase')) return 'vendor-supabase'
             return undefined
           },
@@ -819,6 +821,19 @@ export default defineConfig(({ mode }) => {
         '/api/internal': createDevApiProxy(backendProxyTarget, env),
         '/api/workflows': createDevApiProxy(backendProxyTarget, env),
       },
+    },
+    // Pre-bundle the Experience System's overlay engine at server start, so the
+    // first page that opens a menu never trips Vite's lazy re-optimization (504).
+    optimizeDeps: {
+      include: [
+        '@radix-ui/react-popover',
+        '@radix-ui/react-dropdown-menu',
+        '@radix-ui/react-context-menu',
+        '@radix-ui/react-tooltip',
+        '@radix-ui/react-dialog',
+        '@radix-ui/react-select',
+        '@radix-ui/react-hover-card',
+      ],
     },
     resolve: {
       alias: {

@@ -11,8 +11,11 @@ import './modules/shell/shell-primitives.css'
 import './styles/nexus-theme-contract.css'
 import './modules/mobile/mobile-edge-chrome.css'
 import './styles/liquid-glass-controls.css'
+import './shared/lc/lc-tokens.css'
+import './shared/lc/lc-base.css'
 import { applyThemeToDOM } from './shared/settings'
 import App from './App.tsx'
+import { LcMotionRoot } from './shared/lc/MotionRoot'
 
 // Apply persisted theme+accent to <html> before React renders (prevents FOUC)
 applyThemeToDOM()
@@ -60,5 +63,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 // StrictMode intentionally double-mounts in dev, which aborts inbox fetches on
 // the first mount and causes remount churn. Disabled during inbox stabilization.
 createRoot(document.getElementById('root')!).render(
-  <App />
+  <LcMotionRoot>
+    <App />
+  </LcMotionRoot>
 )

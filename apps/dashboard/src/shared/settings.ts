@@ -602,6 +602,11 @@ export function applyThemeToDOM(): void {
 
   // Liquid glass follows the theme (its fill colour differs in Light).
   applyLiquidGlassVars(root, settings.liquidGlass)
+
+  // Experience System: density and motion are read by every LC component
+  // (shared/lc/lc-tokens.css) — written once here, never per app.
+  root.setAttribute('data-lc-density', settings.densityMode === 'compact' ? 'dense' : settings.densityMode === 'spacious' ? 'comfortable' : 'standard')
+  root.setAttribute('data-lc-motion', settings.animationsEnabled === false ? 'off' : 'on')
 }
 
 /** Kept here (not imported) so settings stays dependency-free; mirrors shared/liquid-glass.ts. */

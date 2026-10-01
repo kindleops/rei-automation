@@ -1,0 +1,320 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   LEADCOMMAND EXPERIENCE SYSTEM 4.0 — TOKENS
+   One vocabulary for every desktop surface: material, depth, semantic
+   colour, type, numbers, density, motion, layering and focus.
+
+   Rules this file keeps:
+   · Glass is the operator's. Materials are RELATIVE to the Liquid Glass
+     preference (--lg-blur / --lg-alpha / --lg-sheen / --lg-fill written by
+     shared/settings.ts); "Theme" preset writes nothing and every material
+     falls back to the theme's own values. There is no second glass system.
+   · Semantic colour is not the accent. Cyan/cobalt = the machine working,
+     green = verified, amber = attention, red = true blocker, violet =
+     workflow / reasoning, neutral = inactive. A theme accent (RedOps' red)
+     never repaints success, selection or activity.
+   · Names are --lc-* only, so nothing here can collide with the hundreds of
+     existing --nx-* / --dsk-* / --mx-* uses. Tokens live on :root so
+     portaled surfaces (popovers, sheets, toasts) inherit them too.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── ink ──────────────────────────────────────────────────────────────── */
+  /* on the desktop these follow the calm desktop's own ink (--dsk-*) so LC
+     surfaces are indistinguishable from the shell around them */
+  --lc-ink-1: var(--dsk-ink, #eef2f8);
+  --lc-ink-2: var(--dsk-ink-2, rgba(226, 232, 244, 0.74));
+  --lc-ink-3: var(--dsk-ink-3, rgba(226, 232, 244, 0.5));
+  --lc-ink-4: rgba(226, 232, 244, 0.3);
+  --lc-ink-inverse: #05080d;
+
+  /* ── theme accent (identity, never semantics) ─────────────────────────── */
+  --lc-accent-rgb: var(--nexus-accent-rgb, 94, 234, 212);
+  --lc-accent: rgb(var(--lc-accent-rgb));
+  --lc-accent-soft: rgba(var(--lc-accent-rgb), 0.14);
+  --lc-accent-edge: rgba(var(--lc-accent-rgb), 0.42);
+  /* selection is the accent EXCEPT where the accent is a semantic colour */
+  --lc-select-rgb: var(--lc-accent-rgb);
+
+  /* ── semantic roles ───────────────────────────────────────────────────── */
+  --lc-exec-rgb: 76, 201, 240;      /* cyan / cobalt — the machine executing */
+  --lc-cobalt-rgb: 99, 140, 255;
+  --lc-ok-rgb: 61, 220, 151;        /* green — verified, healthy, done */
+  --lc-attn-rgb: 240, 182, 74;      /* amber — attention, due */
+  --lc-crit-rgb: 255, 91, 108;      /* red — true blocker, failure, suppression */
+  --lc-flow-rgb: 167, 139, 250;     /* violet — workflow, reasoning, decision */
+  --lc-neutral-rgb: 148, 160, 180;  /* neutral — inactive, informational, history */
+
+  --lc-exec: rgb(var(--lc-exec-rgb));
+  --lc-cobalt: rgb(var(--lc-cobalt-rgb));
+  --lc-ok: rgb(var(--lc-ok-rgb));
+  --lc-attn: rgb(var(--lc-attn-rgb));
+  --lc-crit: rgb(var(--lc-crit-rgb));
+  --lc-flow: rgb(var(--lc-flow-rgb));
+  --lc-neutral: rgb(var(--lc-neutral-rgb));
+
+  /* ── material inputs (the operator's Liquid Glass preference) ─────────── */
+  --lc-fill: var(--dsk-fill, var(--lg-fill, 9 13 21));
+  --lc-alpha: var(--lg-alpha, 1);
+  --lc-blur: var(--lg-blur, 26px);
+  --lc-sat: var(--lg-sat, 1.6);
+  --lc-sheen: var(--lg-sheen, 1);
+  --lc-edge-rgb: 255, 255, 255;
+  --lc-shade-rgb: 0, 0, 0;
+
+  /* ── materials: CLEAR · CRYSTAL · FROSTED · SMOKE · SOLID ─────────────── */
+  --lc-mat-clear-bg: rgb(var(--lc-fill) / calc(0.26 * var(--lc-alpha)));
+  --lc-mat-clear-filter: blur(calc(var(--lc-blur) * 0.5)) saturate(var(--lc-sat));
+  --lc-mat-clear-edge: rgba(var(--lc-edge-rgb), 0.07);
+
+  --lc-mat-crystal-bg: rgb(var(--lc-fill) / calc(0.46 * var(--lc-alpha)));
+  --lc-mat-crystal-filter: blur(var(--lc-blur)) saturate(calc(var(--lc-sat) * 1.12));
+  --lc-mat-crystal-edge: rgba(var(--lc-edge-rgb), 0.1);
+
+  --lc-mat-frosted-bg: rgb(var(--lc-fill) / calc(0.62 * var(--lc-alpha)));
+  --lc-mat-frosted-filter: blur(calc(var(--lc-blur) * 1.35)) saturate(var(--lc-sat));
+  --lc-mat-frosted-edge: rgba(var(--lc-edge-rgb), 0.085);
+
+  --lc-mat-smoke-bg: rgb(var(--lc-fill) / calc(0.84 * var(--lc-alpha)));
+  --lc-mat-smoke-filter: blur(var(--lc-blur)) saturate(calc(var(--lc-sat) * 0.9));
+  --lc-mat-smoke-edge: rgba(var(--lc-edge-rgb), 0.075);
+
+  --lc-mat-solid-bg: rgb(var(--lc-fill) / 0.97);
+  --lc-mat-solid-filter: none;
+  --lc-mat-solid-edge: rgba(var(--lc-edge-rgb), 0.08);
+
+  /* FLOAT — a surface floating over app content INSIDE a desktop pane
+     (inspector, sticky bar, grid header). The pane body owns a backdrop
+     blur, and Chromium does not run a nested backdrop-filter inside one, so
+     in-pane glass cannot frost what scrolls beneath it. Float is therefore
+     near-opaque: no text ever bleeds through. Portaled surfaces (menus,
+     popovers, dialogs) live outside the pane and keep real blur. */
+  --lc-mat-float-bg: rgb(var(--lc-fill) / 0.975);
+
+  /* the inner plane of a glass plane: translucent fill, never its own blur */
+  --lc-inner-bg: rgba(var(--lc-edge-rgb), 0.028);
+  --lc-inner-bg-hover: rgba(var(--lc-edge-rgb), 0.05);
+  --lc-inner-edge: rgba(var(--lc-edge-rgb), 0.06);
+  --lc-hairline: rgba(var(--lc-edge-rgb), 0.07);
+
+  /* specular light on the top edge; scales with the operator's sheen */
+  --lc-sheen-top: inset 0 1px 0 rgba(var(--lc-edge-rgb), calc(0.085 * var(--lc-sheen)));
+  --lc-sheen-wash: linear-gradient(180deg, rgba(var(--lc-edge-rgb), calc(0.05 * var(--lc-sheen))) 0%, transparent 36%);
+
+  /* ── depth: 0 environment · 1 workspace · 2 operational plane ·
+         3 selected / contextual · 4 inspector / popover · 5 blocking ──── */
+  --lc-d1-shadow: none;
+  --lc-d2-shadow: 0 18px 44px -30px rgba(var(--lc-shade-rgb), 0.75);
+  --lc-d3-shadow: 0 22px 54px -30px rgba(var(--lc-shade-rgb), 0.85), 0 6px 18px -12px rgba(var(--lc-shade-rgb), 0.5);
+  --lc-d4-shadow: 0 30px 70px -32px rgba(var(--lc-shade-rgb), 0.9), 0 10px 26px -16px rgba(var(--lc-shade-rgb), 0.6);
+  --lc-d5-shadow: 0 40px 100px -36px rgba(var(--lc-shade-rgb), 0.95), 0 14px 34px -18px rgba(var(--lc-shade-rgb), 0.7);
+  --lc-scrim: rgba(2, 4, 8, 0.5);
+
+  /* ── radius ───────────────────────────────────────────────────────────── */
+  --lc-r-xs: 6px;
+  --lc-r-sm: 9px;
+  --lc-r-md: 12px;
+  --lc-r-lg: 16px;
+  --lc-r-xl: 20px;
+  --lc-r-plane: 22px;
+  --lc-r-pill: 999px;
+
+  /* ── space (4px rhythm) ───────────────────────────────────────────────── */
+  --lc-s-1: 4px;
+  --lc-s-2: 8px;
+  --lc-s-3: 12px;
+  --lc-s-4: 16px;
+  --lc-s-5: 20px;
+  --lc-s-6: 24px;
+  --lc-s-8: 32px;
+  --lc-s-10: 40px;
+  --lc-s-12: 48px;
+
+  /* ── density (standard by default; Settings → density, or a local
+         data-lc-density on any container) ─────────────────────────────── */
+  --lc-row-h: 36px;
+  --lc-ctl-h: 32px;
+  --lc-ctl-h-sm: 26px;
+  --lc-pad-x: 12px;
+  --lc-gap: 12px;
+  --lc-cell-pad: 8px 12px;
+  --lc-hit: 44px;
+
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lc-font-ui: var(--dsk-font, -apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif);
+  --lc-font-display: var(--dsk-font, -apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif);
+  --lc-font-mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, monospace;
+
+  --lc-t-app: 620 var(--dsk-title-size, 26px)/1.1 var(--lc-font-display); /* app title */
+  --lc-t-metric-xl: 650 40px/1 var(--lc-font-display);        /* hero number */
+  --lc-t-metric: 650 24px/1.05 var(--lc-font-display);        /* major metric */
+  --lc-t-metric-sm: 620 17px/1.1 var(--lc-font-display);      /* inline metric */
+  --lc-t-surface: 640 15px/1.25 var(--lc-font-ui);            /* surface title */
+  --lc-t-section: 620 13px/1.3 var(--lc-font-ui);             /* section title */
+  --lc-t-row: 560 13px/1.35 var(--lc-font-ui);                /* row title */
+  --lc-t-body: 450 13px/1.45 var(--lc-font-ui);
+  --lc-t-meta: 500 11.5px/1.35 var(--lc-font-ui);             /* metadata */
+  --lc-t-label: 600 11px/1.2 var(--lc-font-ui);               /* control label */
+  --lc-t-eyebrow: 700 10.5px/1.2 var(--lc-font-ui);           /* uppercase eyebrow / status */
+  --lc-t-stamp: 500 11px/1.2 var(--lc-font-ui);               /* timestamp */
+  --lc-t-mono: 500 11px/1.35 var(--lc-font-mono);             /* telemetry */
+  --lc-track-eyebrow: 0.14em;
+  --lc-track-tight: -0.02em;
+  --lc-track-display: -0.03em;
+
+  /* ── motion: why it moves, not how much ───────────────────────────────── */
+  --lc-ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --lc-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --lc-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --lc-ease-glide: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --lc-ease-spring: cubic-bezier(0.22, 1.12, 0.36, 1);
+  --lc-dur-instant: 90ms;    /* press, hover colour */
+  --lc-dur-fast: 150ms;      /* tooltip, exits, small fades */
+  --lc-dur-select: 180ms;    /* selection lens, tab indicator */
+  --lc-dur-surface: 260ms;   /* popover, menu, inspector entrance */
+  --lc-dur-layout: 380ms;    /* panes, rails, layout shifts */
+  --lc-dur-morph: 460ms;     /* data morph, chart transition */
+  --lc-dur-arrival: 1400ms;  /* a realtime arrival's one highlight */
+  --lc-dur-complete: 900ms;  /* completion settle */
+
+  /* ── layering: families, never 99999 ──────────────────────────────────────
+     In-pane families are small (they stack inside an app's own context).
+     Portaled families align with the shell's existing ladder
+     (--nx-shell-z-popover 13000 · toast 14000 · command 15000) so new and
+     legacy surfaces interleave predictably while apps migrate. Popovers sit
+     ABOVE dialogs because a select or menu can open from inside one. */
+  --lc-z-env: 0;
+  --lc-z-workspace: 1;
+  --lc-z-sticky: 20;
+  --lc-z-float: 60;          /* floating controls over a canvas */
+  --lc-z-rail: 170;          /* the command rail (the existing sidebar plane) */
+  --lc-z-inspector: 240;     /* in-pane contextual inspector */
+  --lc-z-dialog: 13500;      /* scrim + blocking dialog / modal sheet */
+  --lc-z-popover: 14500;     /* menus, selects, popovers, hover cards, tooltips */
+  --lc-z-toast: 14900;
+  --lc-z-critical: 20100;
+
+  /* ── focus ────────────────────────────────────────────────────────────── */
+  --lc-focus-rgb: var(--lc-accent-rgb);
+  --lc-focus: rgba(var(--lc-focus-rgb), 0.85);
+  --lc-focus-ring: 0 0 0 2px rgba(var(--lc-focus-rgb), 0.85), 0 0 0 5px rgba(var(--lc-focus-rgb), 0.16);
+}
+
+/* ── density ────────────────────────────────────────────────────────────── */
+:root[data-lc-density='dense'],
+[data-lc-density='dense'] {
+  --lc-row-h: 30px;
+  --lc-ctl-h: 28px;
+  --lc-ctl-h-sm: 24px;
+  --lc-pad-x: 10px;
+  --lc-gap: 8px;
+  --lc-cell-pad: 5px 10px;
+}
+:root[data-lc-density='comfortable'],
+[data-lc-density='comfortable'] {
+  --lc-row-h: 44px;
+  --lc-ctl-h: 36px;
+  --lc-ctl-h-sm: 30px;
+  --lc-pad-x: 16px;
+  --lc-gap: 16px;
+  --lc-cell-pad: 12px 16px;
+}
+[data-lc-density='standard'] {
+  --lc-row-h: 36px;
+  --lc-ctl-h: 32px;
+  --lc-ctl-h-sm: 26px;
+  --lc-pad-x: 12px;
+  --lc-gap: 12px;
+  --lc-cell-pad: 8px 12px;
+}
+
+/* ── motion off: Settings → animations, or the OS asking for less ──────── */
+:root[data-lc-motion='off'] {
+  --lc-dur-select: 1ms;
+  --lc-dur-surface: 120ms;
+  --lc-dur-layout: 1ms;
+  --lc-dur-morph: 1ms;
+  --lc-dur-arrival: 1ms;
+  --lc-dur-complete: 1ms;
+  --lc-ease-spring: linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lc-dur-select: 1ms;
+    --lc-dur-surface: 120ms;
+    --lc-dur-layout: 1ms;
+    --lc-dur-morph: 1ms;
+    --lc-dur-arrival: 1ms;
+    --lc-dur-complete: 1ms;
+    --lc-ease-spring: linear;
+  }
+}
+
+/* ══ THEMES ═════════════════════════════════════════════════════════════════ */
+
+/* LIGHT — ivory / cool neutral, crystal glass, strong black type */
+:root[data-nexus-theme='light'] {
+  --lc-ink-1: var(--dsk-ink, #0b1220);
+  --lc-ink-2: var(--dsk-ink-2, rgba(11, 18, 32, 0.74));
+  --lc-ink-3: var(--dsk-ink-3, rgba(11, 18, 32, 0.52));
+  --lc-ink-4: rgba(11, 18, 32, 0.32);
+  --lc-ink-inverse: #ffffff;
+  --lc-exec-rgb: 0, 122, 190;
+  --lc-cobalt-rgb: 46, 92, 230;
+  --lc-ok-rgb: 12, 140, 92;
+  --lc-attn-rgb: 176, 112, 18;
+  --lc-crit-rgb: 214, 40, 62;
+  --lc-flow-rgb: 112, 80, 230;
+  --lc-neutral-rgb: 92, 102, 120;
+  --lc-fill: var(--dsk-fill, var(--lg-fill, 250 251 253));
+  --lc-edge-rgb: 255, 255, 255;
+  --lc-shade-rgb: 24, 36, 60;
+  --lc-mat-clear-edge: rgba(11, 18, 32, 0.07);
+  --lc-mat-crystal-edge: rgba(11, 18, 32, 0.08);
+  --lc-mat-frosted-edge: rgba(11, 18, 32, 0.08);
+  --lc-mat-smoke-edge: rgba(11, 18, 32, 0.1);
+  --lc-mat-solid-edge: rgba(11, 18, 32, 0.1);
+  --lc-mat-crystal-bg: rgb(var(--lc-fill) / calc(0.58 * var(--lc-alpha)));
+  --lc-mat-frosted-bg: rgb(var(--lc-fill) / calc(0.72 * var(--lc-alpha)));
+  --lc-mat-smoke-bg: rgb(var(--lc-fill) / calc(0.9 * var(--lc-alpha)));
+  --lc-mat-float-bg: rgb(var(--lc-fill) / 0.985);
+  --lc-inner-bg: rgba(11, 18, 32, 0.028);
+  --lc-inner-bg-hover: rgba(11, 18, 32, 0.05);
+  --lc-inner-edge: rgba(11, 18, 32, 0.07);
+  --lc-hairline: rgba(11, 18, 32, 0.08);
+  --lc-sheen-top: inset 0 1px 0 rgba(255, 255, 255, calc(0.9 * var(--lc-sheen)));
+  --lc-sheen-wash: linear-gradient(180deg, rgba(255, 255, 255, calc(0.5 * var(--lc-sheen))) 0%, transparent 40%);
+  --lc-d2-shadow: 0 18px 40px -30px rgba(var(--lc-shade-rgb), 0.32);
+  --lc-d3-shadow: 0 22px 50px -30px rgba(var(--lc-shade-rgb), 0.38), 0 6px 16px -12px rgba(var(--lc-shade-rgb), 0.2);
+  --lc-d4-shadow: 0 30px 64px -30px rgba(var(--lc-shade-rgb), 0.42), 0 10px 24px -16px rgba(var(--lc-shade-rgb), 0.24);
+  --lc-d5-shadow: 0 40px 90px -34px rgba(var(--lc-shade-rgb), 0.48), 0 14px 30px -18px rgba(var(--lc-shade-rgb), 0.28);
+  --lc-scrim: rgba(226, 232, 242, 0.5);
+}
+
+/* TRUE BLACK — OLED black; depth comes from edges and local colour, not grey */
+:root[data-nexus-theme='true_black'] {
+  --lc-fill: var(--lg-fill, 0 0 0);
+  --lc-mat-clear-bg: rgb(var(--lc-fill) / calc(0.3 * var(--lc-alpha)));
+  --lc-mat-crystal-bg: rgb(var(--lc-fill) / calc(0.55 * var(--lc-alpha)));
+  --lc-mat-frosted-bg: rgb(var(--lc-fill) / calc(0.7 * var(--lc-alpha)));
+  --lc-mat-smoke-bg: rgb(var(--lc-fill) / calc(0.9 * var(--lc-alpha)));
+  --lc-mat-solid-bg: rgb(0 0 0 / 0.98);
+  --lc-mat-float-bg: rgb(4 4 6 / 0.98);
+  --lc-mat-crystal-edge: rgba(255, 255, 255, 0.12);
+  --lc-mat-frosted-edge: rgba(255, 255, 255, 0.1);
+  --lc-mat-smoke-edge: rgba(255, 255, 255, 0.09);
+  --lc-mat-solid-edge: rgba(255, 255, 255, 0.1);
+  --lc-inner-bg: rgba(255, 255, 255, 0.022);
+  --lc-hairline: rgba(255, 255, 255, 0.08);
+  --lc-sheen-top: inset 0 1px 0 rgba(255, 255, 255, calc(0.11 * var(--lc-sheen)));
+  --lc-scrim: rgba(0, 0, 0, 0.62);
+}
+
+/* RED OPS — an environment, not a semantic. Red keeps meaning "blocked";
+   selection, activity and success stay cool or green. */
+:root[data-nexus-theme='red_ops'] {
+  --lc-select-rgb: 226, 232, 240;
+  --lc-focus-rgb: 226, 232, 240;
+  --lc-exec-rgb: 125, 211, 252;
+  --lc-crit-rgb: 255, 59, 59;
+  --lc-ok-rgb: 74, 222, 128;
+}
