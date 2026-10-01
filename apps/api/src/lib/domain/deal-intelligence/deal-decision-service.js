@@ -31,6 +31,11 @@ import { getConversationSignal } from './conversation-signal-service.js'
 import { getMarketDemand } from './market-demand-service.js'
 import { REASON_LABELS } from '../comp-intelligence/comps-reason-labels.js'
 import { COMP_DETAIL_COLUMNS, enrichComp, ownerSections, parcelSections, prospectCards } from './deal-record-sections.js'
+import { classifyLienDocuments, classifyMortgages, summarizeLienDocuments } from './deal-record-documents.js'
+// Namespace import on purpose: "who has the move" must read exactly as the
+// Pipeline reads it, and a namespace import cannot fail at load time if that
+// module is reshaped — the lane is simply omitted until it is wired again.
+import * as pipelineCommand from '../opportunity/pipeline-command-service.js'
 
 const DAY = 86_400_000
 const clean = (v) => String(v ?? '').trim()
@@ -71,7 +76,121 @@ const GATE_LABELS = Object.freeze({
   valuation_confidence_at_least_80: 'Valuation confidence ≥ 80',
   assignment_fee_meets_minimum_economics: 'Assignment fee clears minimum',
   recommended_offer_available: 'Offer computed',
+  // Rows written before the engine split "target" from "minimum economics"
+  // (151 of 170 at 2026-10-01) carry this key; it compared the fee to the
+  // target margin. Same gate family, different rule — labelled as such.
+  assignment_fee_meets_target: 'Assignment fee meets target (earlier rule)',
 })
+
+/**
+ * The hard gates exactly as determineDecisionTier() in
+ * acquisitionDecisionEngine.js applies them, so the screen can show the
+ * threshold and the value the engine compared — not a mystery checkmark.
+ */
+const GATE_ORDER = ['comp_count_at_least_4', 'valuation_confidence_at_least_80', 'confidence_at_least_85', 'assignment_fee_meets_minimum_economics', 'assignment_fee_meets_target', 'recommended_offer_available', 'aos_at_least_780']
+
+export function decisionGates(score) {
+  if (!score) return []
+  const ev = obj(score.evidence)
+  const oc = obj(ev.offer_calculation)
+  const checks = obj(obj(ev.decision_tier_reasoning).hard_gate_checks)
+  const fee = num(score.expected_assignment_fee)
+  const minimumMargin = num(oc.assignment_margin_floor) ?? num(oc.assignment_margin_policy?.minimum_margin)
+  const target = num(oc.target_assignment_fee) ?? num(ev.engine?.target_assignment_fee)
+  const comps = num(obj(ev.comp_data_status).selected_comp_count) ?? num(score.comp_count) ?? arr(ev.selected_comps).length
+  const spec = {
+    aos_at_least_780: { metric: 'aos', current: num(score.aos_score), threshold: 780, comparator: '>=', unit: 'score', source: 'property_acquisition_scores.aos_score' },
+    comp_count_at_least_4: { metric: 'comps', current: comps, threshold: 4, comparator: '>=', unit: 'count', source: 'evidence.comp_data_status.selected_comp_count' },
+    confidence_at_least_85: { metric: 'confidence', current: num(score.confidence), threshold: 85, comparator: '>=', unit: 'score', source: 'property_acquisition_scores.confidence' },
+    valuation_confidence_at_least_80: { metric: 'valuationConfidence', current: num(score.valuation_confidence), threshold: 80, comparator: '>=', unit: 'score', source: 'property_acquisition_scores.valuation_confidence' },
+    assignment_fee_meets_minimum_economics: { metric: 'fee', current: fee, threshold: minimumMargin, comparator: '>=', unit: 'usd', source: 'expected_assignment_fee vs offer_calculation.assignment_margin_floor' },
+    assignment_fee_meets_target: { metric: 'fee', current: fee, threshold: target, comparator: '>=', unit: 'usd', source: 'expected_assignment_fee vs offer_calculation.target_assignment_fee', legacy: true, canonicalKey: 'assignment_fee_meets_minimum_economics' },
+    recommended_offer_available: { metric: 'offer', current: num(score.recommended_cash_offer), threshold: 0, comparator: '>', unit: 'usd', source: 'property_acquisition_scores.recommended_cash_offer' },
+  }
+  return Object.entries(checks)
+    .map(([key, pass]) => {
+      const s = spec[key] || {}
+      return {
+        key,
+        canonicalKey: s.canonicalKey || key,
+        label: GATE_LABELS[key] || humanize(key),
+        pass: pass === true,
+        legacy: s.legacy === true,
+        metric: s.metric || null,
+        current: s.current ?? null,
+        threshold: s.threshold ?? null,
+        comparator: s.comparator || null,
+        unit: s.unit || null,
+        source: s.source || 'evidence.decision_tier_reasoning.hard_gate_checks',
+      }
+    })
+    .sort((a, b) => (GATE_ORDER.indexOf(a.key) + 1 || 99) - (GATE_ORDER.indexOf(b.key) + 1 || 99))
+}
+
+/** AOS composition as the engine sums it (acquisitionOpportunityScore): each term's ceiling is fixed by its multiplier. */
+const AOS_COMPONENTS = Object.freeze([
+  ['assignment_margin', 'Assignment margin', 250, 'fee ÷ deal target, ×2.5'],
+  ['valuation_strength', 'Valuation strength', 150, 'valuation confidence ×1.5'],
+  ['buyer_demand', 'Buyer demand', 150, 'buyer demand score ×1.5'],
+  ['distress_motivation', 'Distress & motivation', 150, 'recorded distress factors ×1.5'],
+  ['liquidity', 'Liquidity', 100, 'liquidity score'],
+  ['equity_finance', 'Equity / finance', 100, 'equity band or creative-finance fit'],
+  ['strategy_optionality', 'Strategy optionality', 100, 'best creative strategy score'],
+])
+
+export function aosComposition(score) {
+  const b = obj(obj(score?.evidence).aos_breakdown)
+  const comps = obj(b.components)
+  if (!Object.keys(comps).length) return null
+  return {
+    score: num(b.score) ?? num(score?.aos_score),
+    max: 1000,
+    components: AOS_COMPONENTS.map(([key, label, max, basis]) => ({ key, label, points: num(comps[key]), max, basis })).filter((c) => c.points !== null),
+    motivation: b.motivation ? { score: num(b.motivation.score), reasons: arr(b.motivation.reasons).map((r) => ({ reason: humanize(r.reason), points: num(r.points) })).filter((r) => r.reason) } : null,
+  }
+}
+
+/** Observed investor purchases behind buyer-behavior confidence (counts only; sample prices stay out). */
+export function investorEvidence(score) {
+  const s = obj(obj(score?.evidence).investor_ceiling_summary)
+  if (!Object.keys(s).length) return null
+  return {
+    method: humanize(s.method),
+    eligible: num(s.eligible_purchase_count),
+    local: num(s.local_purchase_count),
+    recent: num(s.recent_purchase_count),
+    distinctBuyers: num(s.distinct_buyer_count),
+    cashProxy: num(s.cash_investor_proxy_count),
+    demandScore: num(s.buyer_demand_score),
+    liquidityScore: num(s.liquidity_score),
+    confidence: num(s.confidence),
+  }
+}
+
+/**
+ * Why the engine's best strategy is what it is — the same rule the engine
+ * runs: cash is viable when the fee reaches 75% of the minimum margin and
+ * valuation confidence is at least 60; a creative strategy wins only when
+ * cash is not viable and its score is ≥ 68.
+ */
+export function strategyBasis(score) {
+  if (!score) return null
+  const oc = obj(obj(score.evidence).offer_calculation)
+  const fee = num(score.expected_assignment_fee)
+  const minimumMargin = num(oc.assignment_margin_floor) ?? num(oc.assignment_margin_policy?.minimum_margin) ?? num(oc.target_assignment_fee)
+  const vconf = num(score.valuation_confidence)
+  const creative = [['SELLER_FINANCE', num(score.seller_finance_score)], ['SUBJECT_TO', num(score.subject_to_score)], ['LEASE_OPTION', num(score.lease_option_score)], ['NOVATION', num(score.novation_score)]]
+    .filter(([, v]) => v !== null).sort((a, b) => b[1] - a[1])[0] || null
+  const cashViable = fee !== null && minimumMargin !== null && vconf !== null ? fee >= minimumMargin * 0.75 && vconf >= 60 : null
+  return {
+    cashViable,
+    fee,
+    feeNeeded: minimumMargin !== null ? Math.round(minimumMargin * 0.75) : null,
+    valuationConfidence: vconf,
+    creativeBest: creative ? STRATEGY_LABELS[creative[0]] || humanize(creative[0]) : null,
+    creativeBestScore: creative ? creative[1] : null,
+  }
+}
 
 const STRATEGY_LABELS = Object.freeze({
   CASH_ASSIGNMENT: 'Cash assignment',
@@ -209,7 +328,27 @@ export function sellerFactsWithProvenance({ ns, sellerFacts, props, parcel, scor
     at: lastAsk?.at || sf.asking_price?.captured_at || null,
     quote: clean(lastAsk?.extracted_text || sf.asking_price?.extracted_text) || null,
     confidence: num(lastAsk?.confidence ?? n.asking_price_confidence),
+    sourceMessageId: clean(lastAsk?.source_message_id || sf.asking_price?.source_message_id || n.asking_price_source_message_id) || null,
   })
+  // What the seller-fact extractor read from the conversation. Interest and a
+  // condition disclosure are things the seller SAID; ownership is the system's
+  // inference from how they engaged, and is labelled as an inference.
+  const extractor = clean(sf.extractor_version) || null
+  const interest = clean(sf.interest)
+  push('interest_seller', 'Interest', interest || null, humanize(interest), 'seller', 'Seller message (extracted)', { extractor })
+  // 'confirmed' = the seller confirmed ownership in the conversation (28 opps);
+  // 'inferred' / 'inferred_from_seller_engagement' = the system's inference (43).
+  const ownership = clean(sf.ownership_status)
+  const ownershipSaid = /^confirmed/i.test(ownership)
+  push(ownershipSaid ? 'ownership_seller' : 'ownership_system', 'Ownership', ownership || null,
+    ownershipSaid ? 'Confirmed by seller' : humanize(ownership),
+    ownershipSaid ? 'seller' : 'system', ownershipSaid ? 'Seller message (extracted)' : 'Seller-fact extractor (inference)',
+    { extractor, basis: humanize(sf.ownership_resolution_basis) })
+  if (sf.condition_disclosed === true && !clean(n.condition_summary)) {
+    // Its own label: it says the seller talked about condition, not WHAT the
+    // condition is, so it must not read as disagreeing with the record's grade.
+    push('condition_disclosed', 'Condition disclosed', true, 'In conversation — not itemized', 'seller', 'Seller message (extracted)', { extractor })
+  }
   const initial = pos(n.initial_asking_price ?? n.initial_ask)
   if (initial && initial !== askVal) push('initial_ask', 'Opening ask', initial, money(initial), 'seller', 'Seller message', { at: history[0]?.at || null })
   push('seller_net', 'Net requirement', pos(n.seller_net_requirement), money(n.seller_net_requirement), 'seller', 'Seller message')
@@ -387,11 +526,17 @@ export function deriveDealRisks(ctx) {
       [clean(parcel?.preforeclosure_status) || null, fcl[0]?.doc_type ? clean(fcl[0].doc_type) : null, auctionAt && !future ? `auction date ${new Date(auctionAt).toISOString().slice(0, 10)} has passed — status unverified` : null].filter(Boolean).join(' · ') || null,
       'foreclosure records')
   }
-  const liens = arr(records?.liens)
+  // Only lien-type instruments count; releases, estate filings, UCC statements
+  // and agreements are recorded documents, not debt (deal-record-documents.js).
+  const docs = ctx.lienDocs || classifyLienDocuments(records?.liens)
+  const liens = docs.filter((d) => d.status === 'lien')
+  const conflicts = docs.filter((d) => d.status === 'conflict').length
   if (liens.length) {
-    const amount = liens.reduce((a, l) => a + (num(l.hoa_lien_amount ?? l.lien_amount ?? l.judgment_amount) || 0), 0)
-    const kinds = [...new Set(liens.map((l) => clean(l.doc_category || l.doc_title || l.doc_type || l.lien_type)).filter(Boolean))].slice(0, 3)
-    add('liens', 'medium', `${liens.length} recorded lien${liens.length === 1 ? '' : 's'}`, [kinds.map(humanize).join(' · '), amount ? `${money(amount)} with a stated amount` : null].filter(Boolean).join(' — '), 'lien records')
+    const amount = liens.reduce((a, l) => a + (num(l.amount) || 0), 0)
+    const kinds = [...new Set(liens.map((l) => l.kindLabel))].slice(0, 3)
+    add('liens', 'medium', `${liens.length} recorded lien${liens.length === 1 ? '' : 's'}`, [kinds.join(' · '), amount ? `${money(amount)} with a stated amount` : null, conflicts ? `${conflicts} more with conflicting descriptions` : null].filter(Boolean).join(' — '), 'lien records')
+  } else if (conflicts) {
+    add('lien_conflict', 'low', `${conflicts} recorded document${conflicts === 1 ? '' : 's'} with conflicting descriptions`, 'The record describes the same instrument both as a lien and as a release or non-lien document. Not counted as a lien.', 'lien records')
   }
   if (parcel?.tax_delinquent === true || props?.tax_delinquent === true) add('tax_delinquent', 'medium', 'Tax delinquent', props?.tax_delinquent_year ? `Delinquent since ${props.tax_delinquent_year}.` : null, 'tax record')
   if (score && obj(ev.offer_calculation).buyer_ceiling_authoritative === false) add('ceiling_not_behavioral', 'low', 'Buyer ceiling is modelled, not observed', 'Derived from the valuation — not enough defended buyer purchases nearby to confirm it.', 'offer_calculation.buyer_ceiling_reasons')
@@ -441,25 +586,123 @@ const SCORE_COLUMNS = [
   'sel:evidence->selected_comps', 'dtr:evidence->decision_tier_reasoning', 'cb:evidence->confidence_breakdown',
   'cfr:evidence->creative_finance_reasoning', 'rcs:evidence->recommended_conversation_strategy',
   're:evidence->repair_estimate', 'subj:evidence->subject', 'eng:evidence->engine', 'isid:evidence->immutable_snapshot_id',
-  'di:evidence->decision_inputs',
+  'di:evidence->decision_inputs', 'aosb:evidence->aos_breakdown', 'ics:evidence->investor_ceiling_summary',
 ].join(',')
 
 function reassembleScore(row) {
   if (!row) return null
-  const { oc, cds, vcs, sel, dtr, cb, cfr, rcs, re, subj, eng, isid, di, ...rest } = row
+  const { oc, cds, vcs, sel, dtr, cb, cfr, rcs, re, subj, eng, isid, di, aosb, ics, ...rest } = row
+  // The investor summary carries up to 20 sample purchases (incl. portfolio
+  // deals priced in the tens of millions); only its counts are ever shown.
+  const icsCounts = ics && typeof ics === 'object' ? { ...ics, sample_purchases: undefined } : ics
   return {
     ...rest,
     evidence: {
       offer_calculation: oc, comp_data_status: cds, valuation_calculation_summary: vcs, selected_comps: sel,
       decision_tier_reasoning: dtr, confidence_breakdown: cb, creative_finance_reasoning: cfr,
       recommended_conversation_strategy: rcs, repair_estimate: re, subject: subj, engine: eng,
-      immutable_snapshot_id: isid, decision_inputs: di,
+      immutable_snapshot_id: isid, decision_inputs: di, aos_breakdown: aosb, investor_ceiling_summary: icsCounts,
     },
   }
 }
 
+const THREAD_COLUMNS = [
+  'thread_key', 'canonical_e164', 'property_id', 'seller_display_name', 'is_suppressed', 'suppressed_at', 'inbox_bucket',
+  'operational_status', 'lifecycle_stage', 'lead_temperature', 'seller_stage', 'conversation_status', 'contactability_status',
+  'automation_state', 'automation_status', 'automation_lane', 'next_action', 'next_action_at', 'next_scheduled_for',
+  'follow_up_at', 'pending_queue_count', 'failed_queue_count', 'blocked_queue_count', 'paused_reason', 'snoozed_until',
+  'last_intent', 'disposition', 'latest_direction', 'last_inbound_at', 'last_outbound_at', 'message_count',
+].join(',')
+
+/** The conversation's own state — contactability, temperature, automation. */
+export function contactFromThread(thread) {
+  if (!thread) return null
+  const key = clean(thread.thread_key)
+  const phone = clean(thread.canonical_e164) || (/^\+?\d{10,15}$/.test(key) ? key : '') || null
+  return {
+    threadKey: key || null,
+    phone,
+    sellerName: clean(thread.seller_display_name) || null,
+    contactability: clean(thread.contactability_status) || null,
+    suppressed: thread.is_suppressed === true,
+    temperature: clean(thread.lead_temperature) || null,
+    lifecycleStage: clean(thread.lifecycle_stage) || null,
+    operationalStatus: clean(thread.operational_status) || null,
+    conversationStatus: clean(thread.conversation_status) || null,
+    disposition: clean(thread.disposition) || null,
+    lastIntent: clean(thread.last_intent) || null,
+    lastInboundAt: thread.last_inbound_at || null,
+    lastOutboundAt: thread.last_outbound_at || null,
+    latestDirection: clean(thread.latest_direction) || null,
+    messageCount: num(thread.message_count),
+  }
+}
+
+/**
+ * Who has the move, and what the machine will do next. The lane is the
+ * Pipeline's own derivation (deriveLane / deriveStall) over the same
+ * evidence, so Deal Intelligence and Pipeline can never disagree about it.
+ */
+export function automationState({ opp, thread, execution, closing, ns, now = Date.now() }) {
+  const n = obj(ns)
+  let lane = null
+  let stall = null
+  if (opp && typeof pipelineCommand.deriveLane === 'function') {
+    try {
+      lane = pipelineCommand.deriveLane(opp, { thread, execution, closing, now })
+      if (lane && typeof pipelineCommand.deriveStall === 'function') stall = pipelineCommand.deriveStall(opp, lane, { thread, now })
+    } catch (error) {
+      console.warn('deal_decision.lane_unavailable', error?.message)
+    }
+  }
+  const unresolved = arr(n.unresolved_contract_fields).map((f) => ({ key: clean(f), label: humanize(f) })).filter((f) => f.key)
+  return {
+    lane: lane ? { key: lane.key, label: lane.label, detail: lane.detail || null, since: lane.since || null, reason: lane.reason || null } : null,
+    stall: stall ? { key: stall.key, label: stall.label } : null,
+    thread: thread ? {
+      state: clean(thread.automation_state) || null,
+      status: clean(thread.automation_status) || null,
+      lane: clean(thread.automation_lane) || null,
+      nextAction: clean(thread.next_action) || null,
+      nextActionAt: thread.next_action_at || null,
+      nextScheduledFor: thread.next_scheduled_for || null,
+      followUpAt: thread.follow_up_at || null,
+      pendingQueue: num(thread.pending_queue_count) ?? 0,
+      failedQueue: num(thread.failed_queue_count) ?? 0,
+      blockedQueue: num(thread.blocked_queue_count) ?? 0,
+      pausedReason: clean(thread.paused_reason) || null,
+      snoozedUntil: thread.snoozed_until || null,
+    } : null,
+    execution: execution ? {
+      status: clean(execution.status) || null,
+      reason: clean(execution.reason) || null,
+      reasonLabel: humanize(execution.reason),
+      stage: clean(execution.stage) || null,
+      mode: clean(execution.mode) || null,
+      at: execution.created_at || null,
+    } : null,
+    negotiation: ns ? {
+      nextMove: clean(n.next_move) || null,
+      nextMoveLabel: humanize(n.next_move),
+      nextActionDueAt: n.next_action_due_at || null,
+      lastAction: humanize(n.last_action),
+      strategy: humanize(n.current_strategy || n.strategy),
+      humanReviewReason: humanize(n.human_review_reason),
+      contractReadiness: humanize(n.contract_readiness),
+      unresolvedContractFields: unresolved,
+      sellerSentiment: humanize(n.last_seller_sentiment || n.seller_sentiment),
+      round: num(n.negotiation_round),
+      // seller_counters / offers_made are empty on every opportunity (0 of all,
+      // 2026-10-01); counters live in seller_offers and the ask history.
+      minimumAssignmentMargin: pos(n.minimum_assignment_margin),
+    } : null,
+  }
+}
+
 async function resolveOpportunity(client, { opportunityId, propertyId, threadKey }) {
-  const cols = 'id, primary_property_id, primary_thread_key, acquisition_stage, opportunity_status, asking_price, current_offer, seller_counter, recommended_offer, last_activity_at, stage_entered_at, metadata, updated_at'
+  // The lane columns (next_action … last_contact_at) are the inputs the
+  // Pipeline's deriveLane reads; metadata carries negotiation_state.
+  const cols = 'id, primary_property_id, primary_thread_key, acquisition_stage, opportunity_status, asking_price, current_offer, seller_counter, recommended_offer, last_activity_at, stage_entered_at, metadata, updated_at, next_action, next_action_due, latest_intent, blocker, conversation_state, last_contact_at, temperature, seller_display_name'
   if (opportunityId) {
     const { data } = await client.from('acquisition_opportunities').select(cols).eq('id', opportunityId).maybeSingle()
     return data || null
@@ -483,8 +726,8 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   propertyId = propertyId || clean(opp?.primary_property_id) || null
   if (!propertyId) return null
 
-  const thread = clean(opp?.primary_thread_key) || threadKey
-  const [propRes, scoreRes, snapRes, recRes, offersRes, buyersRes, closingRes, threadRes] = await Promise.all([
+  let thread = clean(opp?.primary_thread_key) || threadKey
+  const [propRes, scoreRes, snapRes, recRes, offersRes, buyersRes, closingRes, threadRes0] = await Promise.all([
     client.from('properties').select(PROPERTY_COLUMNS).eq('property_id', propertyId).maybeSingle(),
     client.from('property_acquisition_scores').select(SCORE_COLUMNS).eq('property_id', propertyId).order('computed_at', { ascending: false }).limit(1),
     client.from('acquisition_score_snapshots').select('snapshot_id, computed_at, engine_version, policy_version, valuation_low, valuation_mid, valuation_high, recommended_cash_offer, minimum_acceptable_offer, decision_tier, confidence, selected_comp_count').eq('property_id', propertyId).order('computed_at', { ascending: false }).limit(12),
@@ -492,8 +735,15 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
     client.from('seller_offers').select('offer_id, offer_version, offer_type, direction, purchase_price, status, strategy, ade_snapshot_id, recommended_offer, authorized_ceiling, created_at, sent_at, accepted_at, accepted_price, superseded_at').eq('property_id', propertyId).order('created_at', { ascending: false }).limit(20),
     client.from('buyer_match_candidates').select('buyer_match_run_id, created_at, buyer_display_name, buyer_type, match_grade, match_score, suggested_dispo_price, buyer_response_status, package_sent_at, selected').eq('property_id', propertyId).order('created_at', { ascending: false }).limit(300),
     client.from('closing_cases').select('closing_status, contract_status, seller_contract_price, buyer_price, assignment_fee, net_revenue, confirmed_gross_revenue, revenue_status, revenue_confirmed_date, funding_date, recording_date, scheduled_closing_date, provenance').eq('property_id', propertyId).limit(5),
-    thread ? client.from('inbox_thread_state').select('thread_key, is_suppressed, operational_status').eq('thread_key', thread).maybeSingle() : Promise.resolve({ data: null }),
+    thread
+      ? client.from('inbox_thread_state').select(THREAD_COLUMNS).eq('thread_key', thread).maybeSingle()
+      // A property-only arrival still has a conversation when a thread is
+      // linked to THIS property — the same subject, never a different one.
+      : client.from('inbox_thread_state').select(THREAD_COLUMNS).eq('property_id', propertyId).order('last_inbound_at', { ascending: false, nullsFirst: false }).limit(1),
   ])
+  const threadRow = Array.isArray(threadRes0.data) ? threadRes0.data[0] || null : threadRes0.data || null
+  const threadRes = { data: threadRow }
+  if (!thread && threadRow?.thread_key) thread = clean(threadRow.thread_key)
 
   const props = propRes.data || null
   const score = reassembleScore(arr(scoreRes.data)[0])
@@ -507,13 +757,18 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const ownerId = clean(props?.master_owner_id) || null
   // Side reads never sink the decision: a failure here renders as "unavailable".
   const soft = (p) => Promise.resolve(p).catch((error) => { console.warn('deal_decision.side_read_failed', error?.message); return null })
-  const [compRes, ownerRes, prospectRes, conversation, market] = await Promise.all([
+  const [compRes, ownerRes, prospectRes, conversation, market, execRes] = await Promise.all([
     compIds.length ? client.from('v_recent_sold_comps').select(COMP_DETAIL_COLUMNS).in('id', compIds) : Promise.resolve({ data: [] }),
     ownerId ? client.from('master_owners').select('*').eq('master_owner_id', ownerId).maybeSingle() : Promise.resolve({ data: null }),
     ownerId ? client.from('prospects').select('prospect_id, full_name, first_name, gender, marital_status, education_model, occupation_group, est_household_income, net_asset_value, buying_power, language_preference, likely_owner, likely_renting, best_phone, best_email, contact_window, timezone, sms_eligible, email_eligible, contact_score_final, person_flags_text, is_primary_prospect, rank_position').eq('master_owner_id', ownerId).order('rank_position', { ascending: true }).limit(8) : Promise.resolve({ data: [] }),
     thread ? soft(getConversationSignal({ threadKey: thread, now }, { supabase: client })) : Promise.resolve(null),
     soft(getMarketDemand({ propertyId, radiusMiles: 1.5, months: 18 }, { supabase: client })),
+    // The latest seller-automation execution — the same evidence the Pipeline
+    // lane reads (status + block_reason), indexed on (thread_id, started_at).
+    thread ? soft(client.from('seller_automation_executions').select('status, lifecycle_stage, metadata, created_at, started_at').eq('thread_id', thread).order('started_at', { ascending: false }).limit(1)) : Promise.resolve(null),
   ])
+  const execRow = arr(execRes?.data)[0] || null
+  const execution = execRow ? { status: clean(execRow.status), reason: clean(execRow.metadata?.block_reason) || null, created_at: execRow.created_at || execRow.started_at, stage: execRow.lifecycle_stage || null, mode: clean(execRow.metadata?.execution_mode) || null } : null
   const compDetails = new Map(arr(compRes.data).map((r) => [clean(r.id), r]))
   const subjectForComps = { propertyType: clean(parcel.property_type || props?.property_type), units: num(parcel.units_count ?? props?.units_count) }
 
@@ -525,7 +780,7 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const quality = score ? compEvidenceQuality(score.evidence) : null
   const replay = score ? replayStoredOffer(score) : null
   const dtr = obj(score?.evidence?.decision_tier_reasoning)
-  const gates = Object.entries(obj(dtr.hard_gate_checks)).map(([key, pass]) => ({ key, label: GATE_LABELS[key] || humanize(key), pass: pass === true }))
+  const gates = decisionGates(score)
   const tierReasons = arr(dtr.reasons).map(clean).filter(Boolean)
   const tier = clean(score?.decision_tier).toUpperCase() || null
   const computedAt = score?.computed_at || null
@@ -541,14 +796,15 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   })
 
   /* economics — estimates, labelled as such; never a netted "payoff" */
-  const mortgages = arr(records.mortgages).map((m) => ({
-    position: num(m.lien_position), lender: clean(m.lender_name) || null, type: clean(m.loan_type) || null,
-    amount: num(m.loan_amount), estBalance: num(m.est_balance), rate: pos(m.interest_rate), payment: pos(m.est_payment),
-    recordedAt: clean(m.recording_date) || null, dueAt: clean(m.due_date) || null,
-  })).sort((a, b) => (a.position ?? 99) - (b.position ?? 99))
-  const liens = arr(records.liens).map((l) => ({
-    type: humanize(l.doc_category || l.doc_title || l.doc_type || l.lien_type), holder: clean(l.hoa_lien_name || l.party_2_name || l.lienholder_name) || null,
-    amount: pos(l.hoa_lien_amount ?? l.lien_amount ?? l.judgment_amount ?? l.nod_default_amount), at: clean(l.recording_date || l.filing_date) || null,
+  // Current loans only (mtg1–4, empty provider slots dropped); prior and
+  // purchase-money loans are history, not open debt.
+  const loanBook = classifyMortgages(records.mortgages)
+  const mortgages = loanBook.current
+  // Recorded instruments, classified: only lien-type rows are liens.
+  const lienDocs = classifyLienDocuments(records.liens)
+  const liens = lienDocs.filter((d) => d.status === 'lien').map((d) => ({
+    type: d.kindLabel, holder: d.claimant, amount: d.amount, at: d.at,
+    kind: d.kind, title: d.title, parties: d.parties, updatedAt: d.updatedAt,
   }))
   const estOpenBalance = pos(parcel.total_loan_balance ?? props?.total_loan_balance)
   const economics = {
@@ -562,11 +818,15 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
       monthlyPayment: pos(parcel.total_loan_payment ?? props?.total_loan_payment),
       originalTotal: pos(parcel.total_loan_amount ?? props?.total_loan_amt),
       mortgages,
+      priorMortgages: loanBook.prior,
       // A balance of 0 on a recorded modification is the provider's unknown,
-      // not a paid-off loan — say so instead of summing it as zero.
-      unknownBalances: mortgages.filter((m) => m.estBalance === 0 || m.estBalance === null).length,
+      // not a paid-off loan — say so instead of summing it as zero. Counted
+      // over REAL current loans only (empty slots used to count here).
+      unknownBalances: mortgages.filter((m) => !m.balanceKnown).length,
     },
     liens,
+    recordedDocuments: lienDocs,
+    lienSummary: summarizeLienDocuments(lienDocs),
     foreclosure: arr(records.foreclosures)[0] ? {
       status: clean(parcel.preforeclosure_status) || null,
       docType: clean(records.foreclosures[0].doc_type) || null,
@@ -586,7 +846,11 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   const history = []
   for (const s of arr(records.sales)) history.push({ at: s.event_date, kind: 'sale', title: s.slot === 'current' ? 'Last sale' : 'Prior sale', amount: pos(s.price), detail: [clean(s.doc_type), s.is_arms_length === false ? 'non-arm’s-length' : null, s.is_cash_purchase ? 'cash' : null].filter(Boolean).join(' · ') || null })
   for (const m of mortgages) if (m.recordedAt) history.push({ at: m.recordedAt, kind: 'mortgage', title: `${m.type || 'Mortgage'} recorded`, amount: m.amount, detail: m.lender })
-  for (const l of liens) if (l.at) history.push({ at: l.at, kind: 'lien', title: l.type || 'Lien', amount: l.amount, detail: l.holder })
+  for (const m of loanBook.prior) if (m.recordedAt) history.push({ at: m.recordedAt, kind: 'mortgage', title: `${m.kind === 'purchase' ? 'Purchase loan' : 'Prior loan'} recorded`, amount: m.amount, detail: [m.lender, m.type].filter(Boolean).join(' · ') || null })
+  for (const d of lienDocs) {
+    if (!d.at || d.status === 'document') continue
+    history.push({ at: d.at, kind: 'lien', title: d.status === 'release' ? `Release · ${d.title}` : d.status === 'conflict' ? `${d.title} (descriptions conflict)` : d.kindLabel, amount: d.amount, detail: d.claimant || (d.parties.length ? d.parties.join(' · ') : null) })
+  }
   if (economics.foreclosure?.recordedAt) history.push({ at: economics.foreclosure.recordedAt, kind: 'foreclosure', title: economics.foreclosure.docType || 'Foreclosure filing', amount: null, detail: economics.foreclosure.auctionAt ? `Auction ${economics.foreclosure.auctionAt}` : null })
   for (const h of arr(ns?.asking_price_history)) history.push({ at: h.at, kind: 'ask', title: h.kind === 'initial' ? 'Seller named a price' : 'Seller moved price', amount: pos(h.value), detail: clean(h.extracted_text) ? `“${clean(h.extracted_text)}”` : null })
   for (const s of snapshots) history.push({ at: s.computed_at, kind: 'analysis', title: 'Engine analysis', amount: pos(s.recommended_cash_offer), detail: [TIER_META[clean(s.decision_tier)]?.label || humanize(s.decision_tier), pos(s.valuation_mid) ? `value ${money(s.valuation_mid)}` : null].filter(Boolean).join(' · ') })
@@ -633,9 +897,15 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
 
   const compsTop = score ? topComps(score.evidence, 12, compDetails, subjectForComps) : []
   const integrity = score ? assetIntegrity(compsTop, subjectForComps) : null
-  const risks = deriveDealRisks({ score, props, parcel, records, ns, replay, quality, thread: threadRes.data, propertyId, ask, avm, now, integrity })
+  const risks = deriveDealRisks({ score, props, parcel, records, ns, replay, quality, thread: threadRes.data, propertyId, ask, avm, now, integrity, lienDocs })
   const latestSnap = snapshots[0] || null
   const stage = clean(opp?.acquisition_stage) || null
+  const closingRow = arr(closingRes.data).find((c) => !c.provenance?.voided) || null
+  const automation = automationState({ opp, thread: threadRes.data, execution, closing: closingRow, ns, now })
+  const cbRaw = obj(score?.evidence?.confidence_breakdown)
+  const subjectMissing = arr(cbRaw.subject_data_completeness?.missing).map(humanize).filter(Boolean)
+  const financeMissing = arr(cbRaw.finance_distress_completeness?.missing).map(humanize).filter(Boolean)
+  const compDates = compsTop.map((c) => ts(c.saleDate)).filter(Boolean)
 
   return {
     generatedAt: new Date(now).toISOString(),
@@ -682,8 +952,17 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
         subject: num(score.evidence.confidence_breakdown.subject_data_completeness?.score),
         buyer: num(score.evidence.confidence_breakdown.buyer_behavior_confidence),
         finance: num(score.evidence.confidence_breakdown.finance_distress_completeness?.score),
-        missing: [...arr(score.evidence.confidence_breakdown.subject_data_completeness?.missing), ...arr(score.evidence.confidence_breakdown.finance_distress_completeness?.missing)].map(humanize),
+        // The two completeness lists overlap (ownership years is in both); once each.
+        missing: [...new Set([...subjectMissing, ...financeMissing])],
+        subjectMissing,
+        financeMissing,
+        uncapped: num(cbRaw.uncapped_overall),
+        cap: num(cbRaw.confidence_cap),
+        capReason: humanize(cbRaw.cap_reason),
       } : null,
+      aosComposition: aosComposition(score),
+      investorEvidence: investorEvidence(score),
+      strategyBasis: strategyBasis(score),
       bestStrategy: clean(score.best_strategy) || null,
       bestStrategyLabel: STRATEGY_LABELS[clean(score.best_strategy).toUpperCase()] || humanize(score.best_strategy),
       leadWith: humanize(score.evidence.recommended_conversation_strategy?.primary_offer_to_lead_with),
@@ -724,6 +1003,9 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
       buyerCeilingReasons: arr(oc.buyer_ceiling_reasons).map(humanize),
       targetMargin: num(oc.target_assignment_fee),
       protectedMargin: num(oc.protected_margin),
+      // The fee gate's threshold (minimum economics) and the room above it.
+      assignmentMarginFloor: num(oc.assignment_margin_floor) ?? num(oc.assignment_margin_policy?.minimum_margin),
+      negotiableMargin: num(oc.negotiable_margin),
       marginPct: num(oc.assignment_margin_policy?.margin_pct),
       marginPolicy: clean(oc.assignment_margin_policy?.policy_version) || null,
       repairs: { amount: num(score.evidence.repair_estimate?.amount ?? score.estimated_repairs), source: score.evidence.repair_estimate?.source === 'property_estimated_repair_cost' ? 'Data-provider estimate' : humanize(score.evidence.repair_estimate?.source), confidence: num(score.evidence.repair_estimate?.confidence) },
@@ -755,7 +1037,13 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
       prospects: prospectCards(prospectRes.data),
     },
     history: history.slice(0, 40),
-    valuationHistory: snapshots.map((s) => ({ at: s.computed_at, low: pos(s.valuation_low), mid: pos(s.valuation_mid), high: pos(s.valuation_high), offer: pos(s.recommended_cash_offer), tier: TIER_META[clean(s.decision_tier)]?.label || humanize(s.decision_tier), comps: num(s.selected_comp_count) })).reverse(),
+    valuationHistory: snapshots.map((s) => ({
+      at: s.computed_at, low: pos(s.valuation_low), mid: pos(s.valuation_mid), high: pos(s.valuation_high),
+      offer: pos(s.recommended_cash_offer), floor: pos(s.minimum_acceptable_offer),
+      tier: TIER_META[clean(s.decision_tier)]?.label || humanize(s.decision_tier), comps: num(s.selected_comp_count),
+      confidence: num(s.confidence), snapshotId: clean(s.snapshot_id) || null,
+      engineVersion: clean(s.engine_version) || null, policyVersion: clean(s.policy_version) || null,
+    })).reverse(),
     strategies: engineStrategies(score),
     risks,
     buyers,
@@ -768,6 +1056,17 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
       current: replay.result,
       sensitivity: offerSensitivity(replay.inputs),
     } : null,
+    contact: contactFromThread(threadRes.data),
+    automation,
+    // When each evidence family was last true — so a stale family can say so.
+    freshness: {
+      decision: computedAt,
+      marketDataThrough: market?.window?.dataThrough ?? null,
+      latestCompSale: compDates.length ? new Date(Math.max(...compDates)).toISOString().slice(0, 10) : null,
+      lastSellerReply: threadRes.data?.last_inbound_at || conversation?.responsiveness?.lastInboundAt || null,
+      buyerMatchRun: arr(buyersRes.data)[0]?.created_at || null,
+      latestRecordedLoan: [...mortgages, ...loanBook.prior].map((m) => m.recordedAt).filter(Boolean).sort().slice(-1)[0] || null,
+    },
     lineage: {
       engine: clean(score?.evidence?.engine?.name) || 'acquisition_decision_engine',
       engineVersion: clean(score?.evidence?.engine?.version) || latestSnap?.engine_version || null,

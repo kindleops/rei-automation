@@ -217,6 +217,9 @@ export function enrichComp(sel, detail, subject) {
     buyerKind: buyer.kind,
     buyerLabel: buyer.label,
     photo: /^https:\/\//.test(clean(d.streetview_image)) ? clean(d.streetview_image) : null,
+    // Where the sale is, so a desktop evidence plot can place it around the subject.
+    lat: num(d.latitude),
+    lng: num(d.longitude),
   }
 }
 
@@ -224,7 +227,7 @@ export const COMP_DETAIL_COLUMNS = [
   'id', 'property_type', 'normalized_asset_class', 'total_bedrooms', 'total_baths', 'building_square_feet', 'lot_square_feet',
   'units_count', 'year_built', 'effective_year_built', 'building_condition', 'building_quality', 'construction_type',
   'renovation_level_classification', 'stories', 'pool', 'computed_ppsf', 'ppu', 'sale_source', 'purchase_info',
-  'mls_sold_price', 'estimated_value', 'streetview_image', 'sale_price',
+  'mls_sold_price', 'estimated_value', 'streetview_image', 'sale_price', 'latitude', 'longitude',
 ].join(',')
 
 export { money as recordMoney }

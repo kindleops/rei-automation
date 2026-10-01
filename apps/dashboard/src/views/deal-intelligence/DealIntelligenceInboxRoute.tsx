@@ -1,8 +1,17 @@
-import { useContext, useEffect, useState } from 'react'
+import { lazy, Suspense, useContext, useEffect, useState } from 'react'
 import { openInboxDealIntelligence, openInboxThread } from '../../modules/mobile/mobile-inbox-bridge'
 import { getUniversalEntityContextSnapshot, subscribeUniversalEntityContext } from '../../domain/entity-graph/universal-entity-context-store'
 import { PaneRouteContext } from '../../app/router'
 import { MobileSellerCommandCenter } from '../../modules/deal-intelligence/mobile/MobileSellerCommandCenter'
+import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+
+/**
+ * The desktop decision room is its own chunk: a phone never downloads it, and
+ * the phone path below is byte-for-byte the behaviour it had.
+ */
+const DealIntelligenceDesktop = lazy(() =>
+  import('./desktop/DealIntelligenceDesktop').then((m) => ({ default: m.DealIntelligenceDesktop })),
+)
 
 /**
  * THE ROUTE HAS TO CARRY THE SUBJECT.
@@ -41,7 +50,8 @@ function identityFromUrl(search?: string): {
   }
   return {
     threadKey: read('thread_key', 'threadKey'),
-    propertyId: read('property_id', 'propertyId'),
+    // Notifications link `?property=` (notification-destination.ts); it was dropped here.
+    propertyId: read('property_id', 'propertyId', 'property'),
     prospectId: read('prospect_id', 'prospectId'),
     masterOwnerId: read('master_owner_id', 'masterOwnerId'),
   }
@@ -56,6 +66,17 @@ function identityFromUrl(search?: string): {
  */
 export function DealIntelligenceInboxRoute() {
   const pane = useContext(PaneRouteContext)
+  const { isModernDesktop } = useBreakpoint()
+  // DESKTOP: the acquisition decision room, in the main pane or any side pane.
+  // It reads its own pane's location (?property_id= / ?property= / ?thread_key=)
+  // and follows linked context; it never redirects into the Inbox.
+  if (isModernDesktop) {
+    return (
+      <Suspense fallback={<div className="dr-route-fallback" aria-busy="true" />}>
+        <DealIntelligenceDesktop />
+      </Suspense>
+    )
+  }
   if (pane) return <DealIntelligenceCompanion search={pane.location.includes('?') ? pane.location.slice(pane.location.indexOf('?')) : ''} />
   return <DealIntelligenceRedirect />
 }
