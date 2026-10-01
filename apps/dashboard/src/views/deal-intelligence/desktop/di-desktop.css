@@ -199,7 +199,9 @@ p.dr-none { margin: 4px 0 0; font: var(--lc-t-body); color: var(--lc-ink-3); }
   transition: opacity var(--lc-dur-layout) var(--lc-ease-standard), filter var(--lc-dur-layout) var(--lc-ease-standard);
 }
 /* subject change: the decision dims, the next one arrives in place */
-.dr.is-pending .dr-main__inner { opacity: 0.38; filter: saturate(0.5); pointer-events: none; }
+/* Subject change: the old decision dims as fast as the identity changes (exit
+   timing), then the new decision eases in on the base layout timing. */
+.dr.is-pending .dr-main__inner { opacity: 0.38; filter: saturate(0.5); pointer-events: none; transition-duration: var(--lc-dur-fast); transition-timing-function: var(--lc-ease-exit); }
 .dr.is-pending .dr-insp { opacity: 0.5; pointer-events: none; }
 .dr-banner { padding: 10px var(--dr-pad) 0; }
 .dr-route-fallback { position: absolute; inset: 0; }

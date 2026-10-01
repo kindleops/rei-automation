@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   confidenceModel, decisionState, economicBridge, evidenceGaps, factsDiffer, gateViews, layoutLanes, namesMatch, niceTicks,
   offerFigures, offerTrack, presetInputs, priceSteps, recordCategories, scenarioOutcome, sensitivityGrid, snapshotRows,
-  spectrumModel, thesis, underwritingStatus, weightsFromFormula,
+  spectrumModel, statusContradicted, thesis, underwritingStatus, weightsFromFormula,
 } from './di-model'
-import { buildDiPath, fetchKey, modeFromSearch, sameSubject, searchOf, subjectFromSearch } from './di-subject'
+import { buildDiPath, fetchKey, isDiLocation, modeFromSearch, sameSubject, searchOf, subjectFromSearch } from './di-subject'
 import type { DiDecision } from './di-types'
 
 /**
@@ -244,7 +244,26 @@ describe('snapshots, records, status', () => {
   })
 })
 
+describe('conversation status', () => {
+  it('a not_contacted status on a thread with messages is contradicted by its own facts (273312064)', () => {
+    const live = { lastInboundAt: '2026-10-01T12:58:37Z', lastOutboundAt: '2026-10-01T12:47:09Z', messageCount: 18 }
+    expect(statusContradicted('not_contacted', live)).toBe(true)
+    expect(statusContradicted('waiting_on_seller', live)).toBe(false)
+    expect(statusContradicted('not_contacted', { lastInboundAt: null, lastOutboundAt: null, messageCount: 0 })).toBe(false)
+    expect(statusContradicted(null, live)).toBe(false)
+  })
+})
+
 describe('subject contract', () => {
+  it('reads and writes only on its own route, as the workspace interceptor attributes paths', () => {
+    expect(isDiLocation('/deal-intelligence')).toBe(true)
+    expect(isDiLocation('/deal-intelligence?property_id=273312064&mode=record')).toBe(true)
+    expect(isDiLocation(buildDiPath(subjectFromSearch('?property=273312064'), 'scenario'))).toBe(true)
+    // the shell already pointed this pane at another app: never adopt its params or rewrite it
+    expect(isDiLocation('/map?property_id=273312064')).toBe(false)
+    expect(isDiLocation('/inbox?thread_key=%2B16122756497')).toBe(false)
+    expect(isDiLocation('')).toBe(false)
+  })
   it('reads every spelling of the subject from a pane location', () => {
     expect(subjectFromSearch(searchOf('/deal-intelligence?property=273312064')).propertyId).toBe('273312064')
     expect(subjectFromSearch('?property_id=1&thread_key=%2B16122756497').threadKey).toBe('+16122756497')

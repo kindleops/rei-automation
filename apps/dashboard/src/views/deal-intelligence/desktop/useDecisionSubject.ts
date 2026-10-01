@@ -3,7 +3,7 @@ import { replaceRoutePath, useRouteLocation } from '../../../app/router'
 import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
 import { useWorkspaceLink } from '../../../modules/desktop/workspace/instance-context'
 import {
-  buildDiPath, EMPTY_SUBJECT, fetchKey, hasSubject, modeFromSearch, sameSubject, searchOf, subjectFromLocator, subjectFromSearch, type DiSubject,
+  buildDiPath, EMPTY_SUBJECT, fetchKey, hasSubject, isDiLocation, modeFromSearch, sameSubject, searchOf, subjectFromLocator, subjectFromSearch, type DiSubject,
 } from './di-subject'
 import type { DiMode } from './di-types'
 
@@ -23,10 +23,21 @@ interface Active { subject: DiSubject; source: Source }
  * Whichever of location / locator changed most recently wins. When the
  * subject came from the locator or an in-app selection, the location is
  * rewritten (replace, not push) so a reload or a shared link returns here.
+ *
+ * Where that rewrite lands is the workspace interceptor's rule
+ * (workspace-store intercept()): with one instance per app, a
+ * `/deal-intelligence?…` replace belongs to DI's own instance. As the primary,
+ * it replaces the address-bar entry (same history depth). In a secondary pane,
+ * it updates that instance's path silently: no activation, no focus change,
+ * and the address bar is untouched. The interceptor retargets the FOCUSED pane
+ * when the app is not open, so DI reads and writes its subject only while its
+ * location is attributed to DI. A frame where the shell has already pointed
+ * this instance at another app is neither read nor rewritten.
  */
 export function useDecisionSubject(explicit?: DiSubject | null) {
   const location = useRouteLocation()
-  const search = searchOf(location)
+  const onRoute = isDiLocation(location)
+  const search = onRoute ? searchOf(location) : ''
   const urlSubject = useMemo(() => subjectFromSearch(search), [search])
   const urlMode = useMemo(() => modeFromSearch(search), [search])
   const { follows, pinned, pinLabel } = useWorkspaceLink()
@@ -84,13 +95,13 @@ export function useDecisionSubject(explicit?: DiSubject | null) {
 
   // Keep the location truthful when the subject did not come from it.
   useEffect(() => {
-    if (source === 'prop' || source === 'none') return
+    if (!onRoute || source === 'prop' || source === 'none') return
     const want = buildDiPath(subject, mode)
     const current = `/deal-intelligence${search}`
     if (fetchKey(subjectFromSearch(search)) !== fetchKey(subject) || (modeFromSearch(search) ?? 'decision') !== mode) {
       if (want !== current) replaceRoutePath(want)
     }
-  }, [subject, mode, search, source])
+  }, [onRoute, subject, mode, search, source])
 
   const setMode = useCallback((m: DiMode) => setModeState(m), [])
 

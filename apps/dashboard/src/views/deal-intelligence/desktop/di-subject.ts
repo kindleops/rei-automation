@@ -12,6 +12,7 @@
  *   3. linked context: the property locator, live, only while the pane
  *      follows the workspace selection.
  */
+import { resolveAppForRoute } from '../../../domain/app-registry/app-registry'
 import type { PropertyLocator } from '../../../domain/locator/property-locator'
 import type { DiMode } from './di-types'
 
@@ -34,6 +35,16 @@ const clean = (v: unknown): string | null => {
 }
 
 /** The query string of a path+query location ("/deal-intelligence?property=1" → "?property=1"). */
+/**
+ * Whether the shell attributes a location to Deal Intelligence. It uses the
+ * pathname, as workspace-store's appOfPath does, so legacy aliases resolve too.
+ * DI reads and writes its subject only on its own route.
+ */
+export function isDiLocation(location: string | null | undefined): boolean {
+  const path = String(location ?? '').split(/[?#]/)[0] || '/'
+  return resolveAppForRoute(path).id === 'deal-intelligence'
+}
+
 export function searchOf(location: string | null | undefined): string {
   const s = String(location ?? '')
   const i = s.indexOf('?')

@@ -9,7 +9,7 @@
 import { computeScenarioOffer } from '../../../domain/deal-intelligence/deal-scenario-model'
 import type { ScenarioInputs, ScenarioResult } from '../../../domain/deal-intelligence/deal-decision-api'
 import { humanize, int, usd } from './di-format'
-import { isAvailable, type DiAvailable, type DiDecision, type DiGate, type DiRecordedDocument, type DiSellerFact } from './di-types'
+import { isAvailable, type DiAvailable, type DiContact, type DiDecision, type DiGate, type DiRecordedDocument, type DiSellerFact } from './di-types'
 
 const pos = (v: number | null | undefined): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null)
 const fin = (v: number | null | undefined): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -981,4 +981,15 @@ export function recordCategories(d: DiDecision): RecordCategory[] {
 export function factsDiffer(list: ReadonlyArray<{ display: string | null }>): boolean {
   const substantive = list.map((f) => String(f.display ?? '').trim().toLowerCase()).filter((v) => v && !/^unknown$|not itemized|^not captured/.test(v))
   return substantive.length > 1 && new Set(substantive).size > 1
+}
+
+/**
+ * inbox_thread_state.operational_status lags its thread: production carries
+ * 'not_contacted' on threads with 18 messages and a reply minutes old. A
+ * status the thread's own message facts contradict is not presented as status.
+ */
+export function statusContradicted(status: string | null | undefined, c: Pick<DiContact, 'lastInboundAt' | 'lastOutboundAt' | 'messageCount'> | null): boolean {
+  if (!status || !c) return false
+  const contacted = Boolean(c.lastInboundAt || c.lastOutboundAt || (c.messageCount ?? 0) > 0)
+  return contacted && status === 'not_contacted'
 }

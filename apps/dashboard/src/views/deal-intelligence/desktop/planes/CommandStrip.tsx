@@ -2,7 +2,7 @@ import { Icon } from '../../../../shared/icons'
 import { cx, LCButton, LCIconButton, LCMenu, LCStatus, LCTabs, LCTooltip, lcMenu } from '../../../../shared/lc'
 import { ago, humanize, phone as fmtPhone, splitAddress } from '../di-format'
 import type { DiLinks } from '../di-links'
-import { STAGE_ORDER, type DecisionState, type SellerIdentity, type UnderwritingStatus } from '../di-model'
+import { STAGE_ORDER, statusContradicted, type DecisionState, type SellerIdentity, type UnderwritingStatus } from '../di-model'
 import type { DiSubject } from '../di-subject'
 import { DI_MODES, type DiDecision, type DiMode } from '../di-types'
 
@@ -59,8 +59,15 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
   const contactState = contact?.suppressed
     ? { label: 'Suppressed', tone: 'crit' as const }
     : contact?.contactability ? CONTACT[contact.contactability] ?? { label: humanize(contact.contactability) ?? '—', tone: 'attn' as const } : null
-  const conversation = contact?.operationalStatus ? OPERATIONAL[contact.operationalStatus] ?? humanize(contact.operationalStatus) : null
   const lastReply = contact?.lastInboundAt ? ago(contact.lastInboundAt, now) : null
+  const lastSent = contact?.lastOutboundAt ? ago(contact.lastOutboundAt, now) : null
+  const statusLabel = contact?.operationalStatus && !statusContradicted(contact.operationalStatus, contact)
+    ? OPERATIONAL[contact.operationalStatus] ?? humanize(contact.operationalStatus)
+    : null
+  // A stale status gives way to the thread's facts: who spoke last, and when.
+  const conversation = statusLabel
+    ? `${statusLabel}${lastReply ? ` · replied ${lastReply}` : ''}`
+    : lastReply ? `Seller replied ${lastReply}` : lastSent ? `Last sent ${lastSent}` : null
   const telHref = contact?.phone && !contact.suppressed ? `tel:${contact.phone}` : null
 
   const more = links ? lcMenu(
@@ -99,7 +106,7 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
         <div className="dr-strip__signals" aria-label="Seller status">
           {contactState ? <LCStatus label={contactState.label} tone={contactState.tone} /> : null}
           {contact?.temperature ? <span className="dr-chip" data-temp={contact.temperature}>{humanize(contact.temperature)}</span> : null}
-          {conversation ? <span className="dr-chip is-quiet">{conversation}{lastReply ? ` · replied ${lastReply}` : ''}</span> : null}
+          {conversation ? <span className="dr-chip is-quiet">{conversation}</span> : null}
         </div>
 
         <div className="dr-strip__actions">

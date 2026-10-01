@@ -9,9 +9,16 @@ import path from 'node:path'
  *   node scripts/proof/desktop/deal-intelligence-capture.mjs \
  *     --subject=273312064 --themes=dark --sizes=1440x900 --scenes=decision --out=/tmp/di
  *
- * Scenes: decision · decision-scroll · marker · fact · evidence-comps · comp ·
- *         evidence-debt · record-ownership · record-tax · model · snapshot ·
- *         scenario · scenario-custom · pane (DI in a ~520px box)
+ * Scenes: decision · decision-scroll · marker · fact · gate · evidence-comps ·
+ *         comp · evidence-debt · record-ownership · record-tax · model ·
+ *         snapshot · scenario · scenario-custom · pane (the room at 560 and
+ *         900 px wide) · transition (--next=<property>) · deeplink-mode
+ *
+ * --replay=<dir> serves the two Deal Intelligence GETs (decision, deal story)
+ * from { ok, data } files named decision-<property_id>.json and
+ * story-<opportunity_id>.json — the same envelopes the routes return, read
+ * from the same read models — for when the local API server is saturated.
+ * Everything else still goes to the live dev server, behind the same guard.
  */
 const arg = (n, f) => { const h = process.argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : f }
 const BASE = arg('base', 'http://localhost:5173')
@@ -21,6 +28,9 @@ const THEMES = arg('themes', 'dark').split(',')
 const SUBJECT = arg('subject', '273312064')
 const PARAM = arg('param', 'property_id')
 const SCENES = arg('scenes', 'decision').split(',')
+const REPLAY = arg('replay', '') ? path.resolve(arg('replay', '')) : ''
+const REPLAY_DELAY = Number(arg('replay-delay', '900'))
+const WATCHDOG_S = Number(arg('watchdog', '420'))
 await fs.mkdir(OUT, { recursive: true })
 
 const browser = await chromium.launch()
@@ -51,7 +61,23 @@ for (const theme of THEMES) {
       blocked.push(`${m} ${u.hostname}${u.pathname}`)
       return r.abort()
     })
-    const watchdog = setTimeout(() => { console.log('WATCHDOG: capture exceeded 420 s'); process.exit(2) }, 420_000)
+    if (REPLAY) {
+      // Registered after the guard, so these run first; anything but a GET falls back to it.
+      const serve = async (r, file, missing) => {
+        if (r.request().method() !== 'GET') return r.fallback()
+        await new Promise((res) => setTimeout(res, REPLAY_DELAY))
+        try {
+          return await r.fulfill({ status: 200, contentType: 'application/json', body: await fs.readFile(path.join(REPLAY, file), 'utf8') })
+        } catch {
+          return r.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ ok: false, error: missing }) })
+        }
+      }
+      await page.route((u) => u.pathname === '/api/cockpit/deal-intelligence/decision', (r) =>
+        serve(r, `decision-${new URL(r.request().url()).searchParams.get('property_id') || 'none'}.json`, 'property_not_found'))
+      await page.route((u) => u.pathname.startsWith('/api/cockpit/pipeline/command/story/'), (r) =>
+        serve(r, `story-${decodeURIComponent(new URL(r.request().url()).pathname.split('/').pop() || '')}.json`, 'opportunity_not_found'))
+    }
+    const watchdog = setTimeout(() => { console.log(`WATCHDOG: capture exceeded ${WATCHDOG_S} s`); process.exit(2) }, WATCHDOG_S * 1000)
     const tag = `${theme}-${W}x${H}-${SUBJECT}`
     await page.goto(`${BASE}/deal-intelligence?${PARAM}=${encodeURIComponent(SUBJECT)}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
     await page.waitForSelector('.dr', { timeout: 120000 })
@@ -93,10 +119,12 @@ for (const theme of THEMES) {
           // Linked context: a selection elsewhere publishes the property locator; a following
           // pane moves in place — dim → new identity → new decision — and rewrites its URL.
           const next = arg('next', '273330908')
+          await mode('Decision'); await scrollMain(0)
           await page.evaluate((pid) => window.dispatchEvent(new CustomEvent('nexus:property-locator', { detail: { propertyId: pid, threadKey: null, opportunityId: null, prospectId: null, masterOwnerId: null, address: null, setAt: Date.now() } })), next)
-          await page.waitForTimeout(160)
+          // Observe the pending state before shooting; the old decision dims on the fast exit timing.
+          const pending = await page.waitForFunction(() => document.querySelector('.dr.is-pending'), null, { timeout: 5000 }).then(() => true, () => false)
+          await page.waitForTimeout(260)
           await shot('transition-1-dim')
-          const pending = await page.evaluate(() => document.querySelector('.dr')?.classList.contains('is-pending') ?? false)
           await page.waitForFunction((pid) => document.querySelector('.dr') && !document.querySelector('.dr.is-pending') && new URLSearchParams(location.search).get('property_id') === pid, next, { timeout: 120000 }).catch(() => {})
           await page.waitForTimeout(1200)
           await shot('transition-2-arrived')
@@ -107,6 +135,18 @@ for (const theme of THEMES) {
           await page.waitForTimeout(800)
           await shot('deeplink-record')
           report.push({ tag, ...(await measure(scene)), mode: await page.evaluate(() => document.querySelector('.dr')?.getAttribute('data-mode')) })
+        } else if (scene === 'pane') {
+          // A narrow Shell pane: the room lays out from its own width (container queries), never the viewport.
+          await mode('Decision'); await scrollMain(0)
+          for (const w of [560, 900]) {
+            await page.evaluate((px) => { const el = document.querySelector('.dr'); if (el) { el.style.right = 'auto'; el.style.width = `${px}px` } }, w)
+            await page.waitForTimeout(900)
+            const box = await page.locator('.dr').boundingBox()
+            if (box) await shot(`pane-${w}`, { clip: { x: box.x, y: box.y, width: box.width, height: box.height } })
+            report.push({ tag, ...(await measure(`pane-${w}`)) })
+          }
+          await page.evaluate(() => { const el = document.querySelector('.dr'); if (el) { el.style.right = ''; el.style.width = '' } })
+          await page.waitForTimeout(600)
         } else if (scene === 'decision') {
           await mode('Decision'); await scrollMain(0)
           await shot('decision'); report.push({ tag, ...(await measure(scene)) })
@@ -172,7 +212,7 @@ for (const theme of THEMES) {
       }
     }
     clearTimeout(watchdog)
-    console.log(JSON.stringify({ tag, blocked: blocked.slice(0, 6), errors: errors.slice(0, 6) }))
+    console.log(JSON.stringify({ tag, replay: REPLAY || null, blocked: blocked.slice(0, 6), errors: errors.slice(0, 6) }))
     await ctx.close()
   }
 }
