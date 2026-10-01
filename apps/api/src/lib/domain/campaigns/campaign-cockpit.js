@@ -25,6 +25,7 @@
  * response at its max-rows, so an unpaged `.limit()` above it would lie).
  */
 
+import { campaignWindowZones, multiZoneWindowState, resolveCampaignScheduleTimezones } from '@/lib/domain/campaigns/campaign-market-identity.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { contactWindowState } from '@/lib/domain/map/map-world-service.js'
 import {
@@ -250,7 +251,9 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
 
   const md = obj(campaign.metadata)
   const lineage = describeCampaignLineage(campaign)
-  const dayTimezone = clean(md.timezone || md.launch_timezone) || FEEDER_DAY_FALLBACK_TZ
+  // Same zone the feeder counts "today" in (campaign-market-identity).
+  const daySchedule = resolveCampaignScheduleTimezones(campaign)
+  const dayTimezone = daySchedule.primary || FEEDER_DAY_FALLBACK_TZ
   const dayParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
     timeZone: dayTimezone, year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(now).map((p) => [p.type, p.value]))
@@ -399,8 +402,11 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
     end: hhmm(campaign.contact_window_end) || hhmm(controls.queue_contact_window_end),
   }
   const windowSource = hhmm(campaign.contact_window_start) && hhmm(campaign.contact_window_end) ? 'campaign' : 'operator'
-  const windowState = lineage.timezone && windowSpec.start && windowSpec.end
-    ? contactWindowState(nowMs, lineage.timezone, windowSpec)
+  // Every recipient zone of the cohort (campaign-market-identity), not one
+  // campaign-level zone: open when any recipient's window is open.
+  const windowZones = campaignWindowZones(campaign)
+  const windowState = windowZones.length && windowSpec.start && windowSpec.end
+    ? multiZoneWindowState(nowMs, windowZones, windowSpec, contactWindowState)
     : null
 
   // ── senders: who is carrying this campaign ───────────────────────────────
@@ -548,15 +554,16 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
       sent_today: sentToday,
       day_start: dayStart,
       day_timezone: dayTimezone,
-      day_timezone_basis: clean(md.timezone || md.launch_timezone) ? 'campaign' : 'feeder_default',
+      day_timezone_basis: daySchedule.basis === 'default' ? 'feeder_default' : 'campaign',
+      day_timezones: daySchedule.timezones,
       last_sent_at: lastSent ?? null,
       first_sent_at: firstSent ?? null,
       failed_last_hour: failedLastHour,
     },
     feed,
     window: windowState
-      ? { ...windowState, timezone: lineage.timezone, source: windowSource }
-      : { open: null, timezone: lineage.timezone, source: windowSource, reason: lineage.timezone ? 'window_unreadable' : 'campaign_timezone_unset' },
+      ? { ...windowState, source: windowSource }
+      : { open: null, timezone: windowZones[0] || null, source: windowSource, reason: windowZones.length ? 'window_unreadable' : 'campaign_timezone_unset' },
     processor: {
       mode: clean(controls.queue_processor_mode) || null,
       execution_mode: clean(controls.queue_execution_mode) || null,

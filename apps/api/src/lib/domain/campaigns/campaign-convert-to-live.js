@@ -22,19 +22,9 @@ import {
   syncProductionQueueRailsFromCampaign,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
+import { resolveCampaignScheduleTimezones } from '@/lib/domain/campaigns/campaign-market-identity.js'
 
 const PROOF_CANCEL_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
-const MARKET_TIMEZONES = {
-  'miami, fl': 'America/New_York',
-  'jacksonville, fl': 'America/New_York',
-  'dallas, tx': 'America/Chicago',
-  'houston, tx': 'America/Chicago',
-  'los angeles, ca': 'America/Los_Angeles',
-  'minneapolis, mn': 'America/Chicago',
-  'charlotte, nc': 'America/New_York',
-  'atlanta, ga': 'America/New_York',
-}
-
 function clean(value) {
   return String(value ?? '').trim()
 }
@@ -44,14 +34,6 @@ function parseTimeMinutes(value, fallback = 8 * 60) {
   const match = raw.match(/^(\d{1,2}):(\d{2})$/)
   if (!match) return fallback
   return Number(match[1]) * 60 + Number(match[2])
-}
-
-function resolveCampaignTimezone(campaign = {}) {
-  const market = clean(campaign.market || campaign.metadata?.market).toLowerCase()
-  if (MARKET_TIMEZONES[market]) return MARKET_TIMEZONES[market]
-  const metaTz = clean(campaign.metadata?.timezone || campaign.metadata?.recipient_timezone)
-  if (metaTz) return metaTz
-  return 'America/New_York'
 }
 
 function getLocalParts(date, timezone) {
@@ -94,8 +76,33 @@ function localPartsToUtc(parts, timezone) {
   return guess
 }
 
+/**
+ * The next instant the campaign may place a batch.
+ *
+ * The zone(s) come from the campaign's built cohort (campaign-market-identity):
+ * a single-zone cohort uses that zone; a multi-zone cohort takes the EARLIEST
+ * next-valid instant across its recipients' zones, so an open Pacific window is
+ * not held back by a closed Eastern one (and vice versa). Each recipient's own
+ * window is still enforced per target by createCampaignQueuePlan. This used to
+ * read a stale `campaigns.market` first and otherwise trust a metadata.timezone
+ * that the builder filled from the operator's browser clock.
+ */
 export function computeNextValidSendInstant(campaign = {}, now = new Date()) {
-  const timezone = resolveCampaignTimezone(campaign)
+  const zones = resolveCampaignScheduleTimezones(campaign)
+  let best = null
+  for (const zone of zones.timezones) {
+    const candidate = nextValidInstantInZone(campaign, now, zone)
+    if (!best || Date.parse(candidate.scheduled_for) < Date.parse(best.scheduled_for)) best = candidate
+  }
+  return {
+    ...best,
+    timezones: zones.timezones,
+    timezone_mode: zones.mode,
+    timezone_basis: zones.basis,
+  }
+}
+
+function nextValidInstantInZone(campaign = {}, now = new Date(), timezone) {
   const startMinutes = parseTimeMinutes(campaign.contact_window_start, 8 * 60)
   const endMinutes = parseTimeMinutes(campaign.contact_window_end, 21 * 60)
   const localNow = getLocalParts(now, timezone) || getLocalParts(now, 'America/New_York')

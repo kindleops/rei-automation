@@ -2,6 +2,7 @@
  * Canonical campaign activation — shared by Activate Now and scheduled worker.
  */
 
+import { SCHEDULE_MISSED_GRACE_MS, isScheduleMissed, isCampaignStartMissed } from '@/lib/domain/campaigns/campaign-schedule-missed.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { activateCampaignWithHydration } from '@/lib/domain/campaigns/campaign-automation-service.js'
 import { evaluateCampaignLaunchReadiness, resolveLaunchReadinessContext } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
@@ -270,27 +271,39 @@ function failResult(error, steps, extra = {}) {
  * send the moment a deploy lands: a missed schedule is surfaced for the operator
  * to reschedule or activate, never auto-fired.
  */
-export const SCHEDULE_MISSED_GRACE_MS = 2 * 60 * 60 * 1000
-
-export function isScheduleMissed(campaign = {}, now = Date.now()) {
-  const at = Date.parse(campaign.scheduled_for || '')
-  return Number.isFinite(at) && now - at > SCHEDULE_MISSED_GRACE_MS
-}
+export { SCHEDULE_MISSED_GRACE_MS, isScheduleMissed, isCampaignStartMissed }
 
 export async function findDueScheduledCampaigns(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
-  const now = new Date(deps.now || Date.now()).toISOString()
-  const { data, error } = await supabase
+  const nowMs = new Date(deps.now || Date.now()).getTime()
+  const now = new Date(nowMs).toISOString()
+  const graceFloor = new Date(nowMs - SCHEDULE_MISSED_GRACE_MS).toISOString()
+  // Two reads, not one. A single `scheduled_for <= now ORDER BY scheduled_for
+  // LIMIT 20` returns the OLDEST due rows first — which are exactly the missed
+  // ones, already marked and never activated. Twenty of them would starve every
+  // campaign that is genuinely due right now until it, too, aged into "missed".
+  const { data: due, error } = await supabase
     .from('campaigns')
     // '*' — this selected id/name/status/scheduled_for only, so the activation
     // request read `campaign.batch_max` as undefined and hydrated 5 rows.
     .select('*')
     .eq('status', 'scheduled')
     .lte('scheduled_for', now)
+    .gte('scheduled_for', graceFloor)
     .order('scheduled_for', { ascending: true })
     .limit(20)
   if (error) throw error
-  return data || []
+  const { data: stale, error: staleError } = await supabase
+    .from('campaigns')
+    .select('*')
+    .eq('status', 'scheduled')
+    .lt('scheduled_for', graceFloor)
+    .order('scheduled_for', { ascending: false })
+    .limit(20)
+  if (staleError) throw staleError
+  // Already-marked missed rows need no further work; only unmarked ones are returned.
+  const unmarked = (stale || []).filter((c) => (c.metadata && typeof c.metadata === 'object' ? c.metadata.schedule_missed_for : null) !== c.scheduled_for)
+  return [...(due || []), ...unmarked]
 }
 
 /** Internal hydration chunk for the first activation; the feeder continues from there. */

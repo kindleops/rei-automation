@@ -106,6 +106,19 @@ export function extractMarketFromFilterDraft(draft: CampaignWizardDraft): { mark
   return { market, state }
 }
 
+/**
+ * The zone of a known canonical market label, or null. No substring guesses
+ * ("texas" is not one zone — El Paso is Mountain) and no browser fallback.
+ */
+export function knownMarketTimezone(market: string | null): string | null {
+  const normalized = clean(market).toLowerCase()
+  return (normalized && MARKET_TIMEZONES[normalized]) || null
+}
+
+/**
+ * DISPLAY ONLY (builder preview of "is it inside the window right now").
+ * Never persisted — see buildCampaignPersistPayload.
+ */
 export function resolveCampaignTimezone(market: string | null): string {
   const normalized = clean(market).toLowerCase()
   if (normalized && MARKET_TIMEZONES[normalized]) return MARKET_TIMEZONES[normalized]
@@ -156,7 +169,10 @@ export function buildCampaignPersistPayload(
   isUpdate = false,
 ): Record<string, unknown> {
   const { market, state } = extractMarketFromFilterDraft(draft)
-  const timezone = resolveCampaignTimezone(market)
+  // Persist a zone only when the market filter names a known market. Without
+  // one, the zone is NOT the operator's browser clock: the server derives the
+  // cohort's zone(s) from the built targets (campaign-market-identity.js).
+  const timezone = knownMarketTimezone(market)
   const dailyCap = parsePositiveInt(launch.daily_cap, 750)
   // total_cap is the operator's campaign size. batch_max is only the worker's
   // first hydration chunk — it was `Math.min(max_targets, 50)`, which the feeder

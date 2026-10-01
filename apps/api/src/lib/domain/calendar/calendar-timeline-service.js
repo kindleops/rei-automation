@@ -51,6 +51,7 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
+import { isCampaignStartMissed } from '@/lib/domain/campaigns/campaign-schedule-missed.js'
 import { getClosingPortfolio } from '@/lib/domain/closings/closing-execution-service.js'
 
 const DAY = 86_400_000
@@ -586,7 +587,7 @@ export function buildCampaignEvents(campaigns = [], { from, to, now = Date.now()
     const tz = campaignZone(c)
     const s = stats.get(c.id) || {}
     const scheduledAt = Date.parse(c.scheduled_for || '')
-    const missed = status === 'scheduled' && Number.isFinite(scheduledAt) && now - scheduledAt > 2 * 60 * MIN
+    const missed = isCampaignStartMissed(c, now) // the activation worker's own rule
     if (status === 'scheduled' && Number.isFinite(scheduledAt)) {
       out.push({
         id: `campaign:${c.id}:start`,
@@ -685,7 +686,7 @@ export function campaignRoster(campaigns = [], { stats = new Map(), now = Date.n
     const tz = campaignZone(c)
     const s = stats.get(c.id) || {}
     const scheduledAt = Date.parse(c.scheduled_for || '')
-    const missed = status === 'scheduled' && Number.isFinite(scheduledAt) && now - scheduledAt > 2 * 60 * MIN
+    const missed = isCampaignStartMissed(c, now) // the activation worker's own rule
     const left = Number(s.remaining || 0) + Number(s.scheduled || 0)
     // Today's window in the CAMPAIGN's zone, from its own contact window —
     // independent of the date range the operator happens to be viewing.

@@ -47,6 +47,16 @@ describe('what the draft actually persists', () => {
     expect(payload.metadata.planned_first_scheduled_at).toBe('2026-09-20T09:00')
   })
 
+  it('never persists the operator browser zone when no market filter names one (RC 7.1)', () => {
+    // Map-area / Entity Graph / score-only campaigns have no market filter. The
+    // builder used to stamp Intl…resolvedOptions().timeZone (the operator's
+    // clock) — "75+ ACQ SCORE", all-Miami, was saved as America/Chicago. The
+    // server derives the cohort's zone(s) from the built targets instead.
+    const payload = buildCampaignPersistPayload(draft, launch(), serialize) as Record<string, any>
+    expect(payload.metadata.timezone).toBeNull()
+    expect(payload.metadata.launch_timezone).toBeNull()
+  })
+
   it('records the planned schedule as INTENT, never as the canonical one', () => {
     // `campaigns.scheduled_for` is owned by the state machine and is only
     // meaningful paired with status='scheduled'. Writing it on a draft would

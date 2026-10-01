@@ -36,6 +36,7 @@
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { contactWindowState } from '@/lib/domain/map/map-world-service.js'
+import { campaignWindowZones, multiZoneWindowState, resolveCampaignScheduleTimezones } from '@/lib/domain/campaigns/campaign-market-identity.js'
 import { campaignDayStart, FEEDER_BUFFER_TARGET, FEEDER_HYDRATION_CHUNK } from '@/lib/domain/campaigns/run-campaign-outbound-feeder.js'
 import { fetchCampaignResponses } from '@/lib/domain/campaigns/campaign-responses.js'
 import { describeCampaignLineage } from '@/lib/domain/campaigns/campaign-lineage.js'
@@ -164,16 +165,17 @@ function campaignZone(campaign) {
 }
 
 function windowOf(campaign, controls, nowMs) {
-  const tz = campaignZone(campaign)
+  const zones = campaignWindowZones(campaign)
   const spec = {
     start: hhmm(campaign.contact_window_start) || hhmm(controls.queue_contact_window_start),
     end: hhmm(campaign.contact_window_end) || hhmm(controls.queue_contact_window_end),
   }
   const source = hhmm(campaign.contact_window_start) && hhmm(campaign.contact_window_end) ? 'campaign' : 'operator'
-  if (!tz) return { open: null, timezone: null, source, reason: 'campaign_timezone_unset' }
-  if (!spec.start || !spec.end) return { open: null, timezone: tz, source, reason: 'window_unset' }
-  const state = contactWindowState(nowMs, tz, spec)
-  return state ? { ...state, timezone: tz, source } : { open: null, timezone: tz, source, reason: 'window_unreadable' }
+  if (!zones.length) return { open: null, timezone: null, source, reason: 'campaign_timezone_unset' }
+  if (!spec.start || !spec.end) return { open: null, timezone: zones[0], source, reason: 'window_unset' }
+  // One state per recipient zone; open when any recipient's window is open.
+  const state = multiZoneWindowState(nowMs, zones, spec, contactWindowState)
+  return state ? { ...state, source } : { open: null, timezone: zones[0], source, reason: 'window_unreadable' }
 }
 
 function feederDigest(md) {
@@ -389,7 +391,7 @@ async function computeBook(deps) {
     targets.set(row.campaign_id, t)
   }
 
-  const zoneOf = new Map(open.map((c) => [c.id, campaignZone(c) || 'America/New_York']))
+  const zoneOf = new Map(open.map((c) => [c.id, resolveCampaignScheduleTimezones(c).primary]))
   const dayStartOf = new Map()
   for (const [id, tz] of zoneOf) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((p) => [p.type, p.value]))
@@ -738,7 +740,7 @@ export async function buildCampaignIntel(campaignId, deps = {}) {
       return null
     }
   }
-  const tz = campaignZone(campaign) || 'America/New_York'
+  const tz = resolveCampaignScheduleTimezones(campaign).primary // the feeder's own "today"
   const dayParts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((p) => [p.type, p.value]))
   const dayStart = campaignDayStart(now, tz, dayParts)
   const fetchResponses = deps.fetchResponses || fetchCampaignResponses

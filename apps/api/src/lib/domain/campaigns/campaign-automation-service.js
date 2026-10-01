@@ -48,6 +48,9 @@ import {
 import { evaluatePreSendEligibility } from '@/lib/domain/outbound/presend-eligibility-engine.js'
 import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst-timing.js'
 import { resolveTimezone } from '@/lib/sms/latency.js'
+import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/lib/domain/campaigns/campaign-market-identity.js'
+import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
+import { loadCanonicalMarketDirectory, resolveMarketLabel } from '@/lib/domain/geography/canonical-market.js'
 import {
   ageBucketFromMob,
   ageFromMob,
@@ -284,6 +287,15 @@ export function normalizeCampaignInput(payload = {}, existing = {}) {
       launch_timezone: clean(payload.metadata?.launch_timezone || payload.launch_timezone || metadata.launch_timezone || existing.metadata?.launch_timezone) || null,
       timezone: clean(payload.metadata?.timezone || payload.timezone || metadata.timezone || existing.metadata?.timezone) || null,
     },
+  }
+  // Once a build has derived the cohort's zone(s) (campaign-market-identity),
+  // a config save does not overwrite them with the builder's guess; the next
+  // build re-derives from the new cohort.
+  const existingIdentity = metadataObject(existing.metadata).market_identity
+  if (existingIdentity && typeof existingIdentity === 'object') {
+    row.metadata.market_identity = existingIdentity
+    row.metadata.timezone = clean(existing.metadata?.timezone) || null
+    row.metadata.launch_timezone = clean(existing.metadata?.launch_timezone) || null
   }
 
   if (!row.name && !existing.id) row.name = `Campaign ${new Date().toISOString().slice(0, 10)}`
@@ -1183,6 +1195,27 @@ function shouldRetryFallbackSourceForMappings(source, sourceColumns = {}, catalo
   })
 }
 
+/**
+ * A market/state the BUILD derived from its own cohort (campaign-market-identity)
+ * describes the campaign; it is not targeting. Only an operator-set value may
+ * narrow a later build — otherwise a derived "Dallas, TX" would quietly turn an
+ * unfiltered campaign into a Dallas campaign instead of refusing it.
+ */
+function derivedIdentityMarket(campaign) {
+  const identity = metadataObject(campaign?.metadata).market_identity
+  return identity && identity.kind === 'single_market' ? clean(identity.markets?.[0]?.market_name) : ''
+}
+function storedTargetingMarket(campaign) {
+  const stored = clean(campaign?.market)
+  return stored && stored === derivedIdentityMarket(campaign) ? '' : stored
+}
+function storedTargetingState(campaign) {
+  const stored = clean(campaign?.state)
+  const identity = metadataObject(campaign?.metadata).market_identity
+  const derivedState = identity && identity.kind === 'single_market' ? clean(identity.markets?.[0]?.state) : ''
+  return stored && derivedIdentityMarket(campaign) && clean(campaign?.market) === derivedIdentityMarket(campaign) && stored === derivedState ? '' : stored
+}
+
 function previewOptionsFromInput(input = {}, campaign = null) {
   const filters = getTargetFilters(input)
   const metadata = metadataObject(campaign?.metadata)
@@ -1228,10 +1261,10 @@ function previewOptionsFromInput(input = {}, campaign = null) {
      */
     market: catalogFilters.has_catalog_filters && catalogFilters.supported.length
       ? null
-      : clean(input.market || campaign?.market || firstArrayValue(mergedFilters.markets)) || null,
+      : clean(input.market || storedTargetingMarket(campaign) || firstArrayValue(mergedFilters.markets)) || null,
     state: catalogFilters.has_catalog_filters && catalogFilters.supported.length
       ? null
-      : clean(input.state || campaign?.state || firstArrayValue(mergedFilters.states)) || null,
+      : clean(input.state || storedTargetingState(campaign) || firstArrayValue(mergedFilters.states)) || null,
     scan_limit: Math.max(1, Math.min(effectiveScanLimit, 5000)),
     target_limit: Math.max(1, Math.min(targetLimit, 5000)),
     template_use_case: clean(input.template_use_case || metadata.template_use_case || campaign?.objective || mergedFilters.template_use_case || 'ownership_check') || 'ownership_check',
@@ -6287,6 +6320,34 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
   }
 }
 
+/**
+ * Record the built cohort's canonical market identity on the campaign
+ * (campaign-market-identity.js). Re-reads the row so the metadata merge is
+ * against the latest state (the status transition above just wrote it).
+ */
+export async function persistCampaignMarketIdentity(campaignId, rows = [], deps = {}) {
+  const supabase = deps.supabase || defaultSupabase
+  let directory = null
+  try {
+    directory = await (deps.loadCanonicalMarketDirectory || loadCanonicalMarketDirectory)({ supabase })
+  } catch {
+    directory = null // ids stay null; the canonical display names still stand
+  }
+  const identity = summarizeCampaignMarketIdentity(rows, {
+    resolveMarket: directory ? (label) => resolveMarketLabel(directory, label, null) : null,
+  })
+  const { data: current, error: readError } = await supabase.from('campaigns').select('id,market,state,metadata').eq('id', campaignId).maybeSingle()
+  if (readError) throw readError
+  if (!current) return { identity, written: false }
+  const patch = campaignMarketIdentityPatch(identity, current)
+  const { error } = await supabase
+    .from('campaigns')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', campaignId)
+  if (error) throw error
+  return { identity, written: true }
+}
+
 export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const detail = await getCampaign(campaignId, deps)
@@ -6503,6 +6564,11 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
         await transitionCampaignStatus(supabase, campaignId, 'built', { reason: 'build_targets' })
       }
     }
+    // The campaign's market + schedule zone(s) come from the cohort it just
+    // built — never from its name and never from the operator's clock.
+    const marketIdentity = inserted > 0
+      ? await persistCampaignMarketIdentity(campaignId, rows, deps).catch((error) => ({ error: error?.message || String(error) }))
+      : null
     await finishCampaignRun(run.id, {
       status: 'completed',
       total_scanned: graph.totalMatched,
@@ -6534,6 +6600,7 @@ export async function buildCampaignTargets(campaignId, input = {}, deps = {}) {
       campaign_id: campaignId,
       built_count: inserted,
       no_send_queue_rows_created: true,
+      market_identity: marketIdentity?.identity || null,
       // Ready / held by reason, exactly as written — the preflight shows it.
       build_summary: planned.summary,
       preview: {
@@ -6842,7 +6909,28 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
   // themselves keep their existing fallback-to-America/Chicago behavior so
   // non-queue callers of this function (e.g. evaluateCampaignLaunchReadiness's
   // template-preview sampling) are unaffected.
-  const rawTimezone = firstNonEmpty(target.timezone, snapshot.timezone)
+  const storedTimezone = firstNonEmpty(target.timezone, snapshot.timezone)
+  /**
+   * THE PROPERTY'S ZONE, NOT THE OWNER'S PHONE.
+   *
+   * Older targets stored a LABEL inherited from master_owners.routing_timezone
+   * (owner phone area code). Measured 2026-10-01 on non-archived campaigns:
+   * "LA - TEST" has a CA property stored "Central" (08:00 CT = 06:00 PT, a
+   * pre-dawn text); "Miami - Test Campaign" has 8 FL properties stored
+   * "Central" and 6 stored "Pacific". When a target HAS a usable stored zone
+   * and the property's own state (+ ZIP for split-zone states) resolves
+   * confidently to a different one, geography wins. A missing or invalid stored
+   * zone still fails closed (missing_timezone / invalid_timezone) exactly as
+   * before — the correction never turns a broken target into a sendable one.
+   */
+  const storedIsUsable = Boolean(storedTimezone) && isValidIanaTimezone(resolveTimezone(storedTimezone))
+  const geo = storedIsUsable
+    ? deriveTimezoneFromGeography(
+      firstNonEmpty(target.state, snapshot.state, snapshot.property_state, snapshot.property_address_state),
+      firstNonEmpty(snapshot.property_zip, snapshot.property_address_zip, snapshot.zip),
+    )
+    : { confident: false, iana: null }
+  const rawTimezone = geo.confident && geo.iana ? geo.iana : storedTimezone
   const sourceTimezone = rawTimezone || 'America/Chicago'
   const timezone = resolveTimezone(sourceTimezone)
   /**
@@ -6893,6 +6981,8 @@ export function launchCandidateFromTarget(target = {}, campaign = {}) {
     state,
     timezone,
     source_timezone: sourceTimezone,
+    timezone_basis: geo.confident && geo.iana ? 'property_geography' : (storedTimezone ? 'stored_target' : 'missing'),
+    ...(geo.confident && geo.iana && storedTimezone && resolveTimezone(storedTimezone) !== geo.iana ? { timezone_corrected_from: storedTimezone } : {}),
     timezone_eligibility_reason: timezoneEligibilityReason,
     contact_window: firstNonEmpty(snapshot.contact_window, target.contact_window),
     language: canonicalLanguage,

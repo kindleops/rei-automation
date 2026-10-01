@@ -17,6 +17,8 @@ import {
   syncProductionQueueRailsFromCampaign,
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
+import { resolveCampaignScheduleTimezones } from '@/lib/domain/campaigns/campaign-market-identity.js'
+import { isWithinContactWindow } from '@/lib/domain/campaigns/contact-window-timezone.js'
 
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 
@@ -302,10 +304,82 @@ export async function recycleFilteredSends(supabase, campaignId, { now = Date.no
   return { recycled, skipped }
 }
 
+/**
+ * WHAT "STALLED" MEANS (deterministic, RC 7.1).
+ *
+ * 2026-10-01 18:25Z every live feeder reported `no_row_placed` + `stalled`.
+ * The feeder had run on time (heartbeat every 5 min); each campaign's
+ * remaining `ready` targets were skipped for reasons the plan itself reported,
+ * and the skip counts summed EXACTLY to ready_remaining:
+ *   Dallas map area      14 = TEMPLATE_RENDER_LINT_FAILURE 12 + NO_TEMPLATE 2
+ *   Minneapolis map area 15 = TEMPLATE_RENDER_LINT_FAILURE 9 + NO_TEMPLATE 6
+ *   Entity Graph 186     37 = ROUTING_BLOCKED 22 + sender_blocked_by_operator 14 + lint 1
+ * The old flag was "ready > 0 and nothing queued and not capacity-bound", so a
+ * cohort whose residue is legitimately blocked was reported as a stall — and a
+ * campaign checked before its window opened would have been too.
+ *
+ * A campaign is STALLED only when ALL of these hold:
+ *   1. it is live and not completed (the feeder only runs live campaigns);
+ *   2. remaining eligible audience > 0            (ready targets left);
+ *   3. at least one recipient zone's window is open now;
+ *   4. capacity exists (no daily/total cap, sender/market cap, window-full skip);
+ *   5. no progress: nothing placed this cycle, nothing queued ahead, and the
+ *      last placement is older than FEEDER_STALL_INTERVAL_MS;
+ *   6. no legitimate blocking reason explains it — i.e. the plan did not
+ *      attribute the skips to template/routing/sender/eligibility gates.
+ * Otherwise the state is one of: completed | progressing | queued_ahead |
+ * waiting_window | pacing | blocked | idle_recent.
+ */
+export const FEEDER_STALL_DEFINITION_VERSION = 'feeder_stall_v2_deterministic'
+export const FEEDER_STALL_INTERVAL_MS = 30 * 60 * 1000 // six 5-minute feeder cycles
+
+function anyRecipientWindowOpen(campaign, zones, now) {
+  const start = Number(String(campaign.contact_window_start || '08:00').split(':')[0])
+  const end = Number(String(campaign.contact_window_end || '21:00').split(':')[0])
+  return zones.some((tz) => isWithinContactWindow(now, tz, Number.isFinite(start) ? start : 8, Number.isFinite(end) ? end : 21).ok)
+}
+
+export function classifyFeederProgress({
+  completed = false,
+  inserted = 0,
+  readyRemaining = 0,
+  activeLiveRows = 0,
+  feedBound = null,
+  skippedByReason = {},
+  blockers = [],
+  insideWindow = true,
+  lastProgressAt = null,
+  now = Date.now(),
+} = {}) {
+  const verdict = (state, extra = {}) => ({ state, stalled: state === 'stalled', blocked_by: null, ...extra })
+  if (completed) return verdict('completed')
+  if (inserted > 0) return verdict('progressing')
+  if (readyRemaining <= 0) return verdict('exhausted')
+  if (activeLiveRows > 0) return verdict('queued_ahead')
+  if (['daily_cap_reached', 'total_cap_reached'].includes(feedBound)) return verdict('pacing', { blocked_by: feedBound })
+  const skips = Object.entries(skippedByReason || {}).filter(([, n]) => Number(n) > 0)
+  if (skips.some(([r]) => CAPACITY_REASONS.has(r))) return verdict('pacing', { blocked_by: 'capacity_reached_today' })
+  if (!insideWindow) return verdict('waiting_window')
+  const named = (blockers || []).map((b) => String(b ?? '').trim()).filter(Boolean)
+  if (named.length) return verdict('blocked', { blocked_by: named[0] })
+  if (skips.length) {
+    // The plan named why every candidate was skipped: operator-fixable or
+    // permanent, but explained. Surface the dominant reason, not a stall.
+    const [top] = [...skips].sort((a, b) => Number(b[1]) - Number(a[1]))
+    return verdict('blocked', { blocked_by: top[0] })
+  }
+  const last = Date.parse(lastProgressAt || '')
+  if (Number.isFinite(last) && now - last < FEEDER_STALL_INTERVAL_MS) return verdict('idle_recent')
+  return verdict('stalled')
+}
+
 export async function feedCampaignBatch(campaign, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const now = new Date(deps.now || Date.now())
-  const timezone = clean(campaign.metadata?.timezone || campaign.metadata?.launch_timezone) || 'America/New_York'
+  // "Today" for caps/pacing: the cohort's zone, or for a multi-zone cohort the
+  // zone whose day starts first (conservative). Never the server's clock.
+  const zones = resolveCampaignScheduleTimezones(campaign)
+  const timezone = zones.primary
   const recycle = await (deps.recycleFilteredSends || recycleFilteredSends)(supabase, campaign.id, { now: now.getTime() })
     .catch((error) => ({ recycled: 0, skipped: 0, error: error?.message || String(error) }))
   const [activeLiveRows, readyRemaining, heldTargets, committedTargets, sentToday] = await Promise.all([
@@ -376,14 +450,21 @@ export async function feedCampaignBatch(campaign, deps = {}) {
     completed = transition?.ok !== false
   }
 
-  // A live campaign with sendable targets left that could not place a single
-  // row, while nothing is queued ahead, is stalled — say so, don't idle.
-  // Hitting today's capacity (sender cap, window, daily cap) is pacing, not a
-  // stall: the remainder waits for the next day/window by design.
   const skipped = result?.skipped_counts_by_reason || {}
+  const progress = classifyFeederProgress({
+    completed,
+    inserted,
+    readyRemaining: readyAfter,
+    activeLiveRows,
+    feedBound: feed.bound,
+    skippedByReason: skipped,
+    blockers: result?.blockers || [],
+    insideWindow: anyRecipientWindowOpen(campaign, zones.timezones, now),
+    lastProgressAt: campaign.metadata?.feeder_last?.last_refill_at || campaign.activated_at || null,
+    now: now.getTime(),
+  })
+  const stalled = progress.stalled
   const capacityBound = Object.keys(skipped).some((r) => CAPACITY_REASONS.has(r) && Number(skipped[r]) > 0)
-  const stalled = !completed && readyAfter > 0 && activeLiveRows + inserted === 0 && !capacityBound &&
-    !['daily_cap_reached', 'total_cap_reached'].includes(feed.bound)
   const reason = completed
     ? 'cohort_resolved'
     : inserted > 0
@@ -407,6 +488,13 @@ export async function feedCampaignBatch(campaign, deps = {}) {
           ready_remaining: readyAfter,
           reason,
           stalled,
+          // Deterministic progress verdict (classifyFeederProgress) — `stalled`
+          // is only true when nothing legitimate explains the lack of progress.
+          progress_state: progress.state,
+          blocked_by: progress.blocked_by,
+          stall_definition: FEEDER_STALL_DEFINITION_VERSION,
+          schedule_timezones: zones.timezones,
+          schedule_timezone_basis: zones.basis,
           skipped_counts_by_reason: result?.skipped_counts_by_reason || {},
           // Why the refill placed what it didn't, in words and per market —
           // the cockpit and readiness read it straight off the campaign.
@@ -429,6 +517,8 @@ export async function feedCampaignBatch(campaign, deps = {}) {
     skipped: inserted === 0,
     reason,
     stalled,
+    progress_state: progress.state,
+    blocked_by: progress.blocked_by,
     completed,
     inserted,
     skipped_count: Number(result?.skipped_count || 0),
