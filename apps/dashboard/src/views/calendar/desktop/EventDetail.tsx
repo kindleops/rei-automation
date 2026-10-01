@@ -102,7 +102,7 @@ export function EventDetail({ e, tz, now, canSplit, onClose, onOpen, onBeside, o
       {/* WHY ATTENTION? — evidence, not a score (§113) */}
       {e.attention && !e.history ? (
         <LCInspectorSection title="Why attention">
-          <p className="tcc-insp__why is-attn">{e.reason || 'Flagged by the read model.'}</p>
+          <p className="tcc-insp__why is-attn">{humanReason(e.reason) || 'Flagged by the read model.'}</p>
           {at && at < now ? <p className="tcc-insp__basis">Its time passed {span(now - at)} ago.</p> : null}
         </LCInspectorSection>
       ) : null}
@@ -122,7 +122,7 @@ export function EventDetail({ e, tz, now, canSplit, onClose, onOpen, onBeside, o
 
       {e.next || (e.reason && !e.attention) ? (
         <LCInspectorSection title="What happens next">
-          <p className="tcc-insp__why">{e.next || e.reason}</p>
+          <p className="tcc-insp__why">{e.next || humanReason(e.reason)}</p>
         </LCInspectorSection>
       ) : null}
 

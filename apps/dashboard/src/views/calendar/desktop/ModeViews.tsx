@@ -2,6 +2,7 @@ import { memo, useMemo, useState } from 'react'
 import { Icon } from '../../../shared/icons'
 import { LCEmpty, LCHoverCard, LCSegmented, LCSkeleton, cx } from '../../../shared/lc'
 import type { DeskDay, DeskEvent, DeskTimeline } from '../../../domain/calendar/calendar-timeline-api'
+import { humanReason } from '../../../domain/calendar/calendar-timeline-api'
 import {
   LANE_ICON, MONTH_METRICS, STATUS_LABEL, attentionGroups, laneOf, loadWord, monthModel, statusOf, timeText, toneOf, weekModel, type LaneKey, type MonthMetric,
 } from './temporal-model'
@@ -161,7 +162,7 @@ export const AttentionView = memo(function AttentionView({ data, tz, now, filter
                     <span className="tcc-attn__what">
                       <span className="tcc-attn__kind"><Icon name={LANE_ICON[laneOf(i.e)]} size={11} />{i.kind}</span>
                       <b>{i.e.subtitle && i.e.type !== 'campaign_start' ? `${i.e.title} · ${i.e.subtitle}` : i.e.type === 'campaign_start' ? `${i.e.subtitle}` : i.e.title}</b>
-                      <em>{i.why}</em>
+                      <em>{humanReason(i.why)}</em>
                     </span>
                     <span className="tcc-attn__go">{i.e.deep_link ? <>{i.e.deep_link.label}<Icon name="arrow-up-right" size={11} /></> : STATUS_LABEL[statusOf(i.e)]}</span>
                   </button>
@@ -197,7 +198,7 @@ export const SearchResults = memo(function SearchResults({ results, query, range
                 <li key={e.id}>
                   <button type="button" className={cx('tcc-attn__row', e.history && 'is-history')} data-tone={toneOf(e)} onClick={() => onOpen(e)}>
                     <span className="tcc-attn__when"><b>{e.all_day ? 'All day' : clock(e.start, tz)}</b><em>{t.alt || zoneAbbr(tz)}</em></span>
-                    <span className="tcc-attn__what"><span className="tcc-attn__kind"><Icon name={LANE_ICON[laneOf(e)]} size={11} />{STATUS_LABEL[statusOf(e)]}</span><b>{e.title}{e.subtitle ? ` · ${e.subtitle}` : ''}</b><em>{e.place || e.reason || ''}</em></span>
+                    <span className="tcc-attn__what"><span className="tcc-attn__kind"><Icon name={LANE_ICON[laneOf(e)]} size={11} />{STATUS_LABEL[statusOf(e)]}</span><b>{e.title}{e.subtitle ? ` · ${e.subtitle}` : ''}</b><em>{e.place || humanReason(e.reason) || ''}</em></span>
                   </button>
                 </li>
               )

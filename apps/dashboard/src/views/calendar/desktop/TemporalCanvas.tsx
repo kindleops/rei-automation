@@ -2,6 +2,7 @@ import { memo, useMemo, useState, type CSSProperties, type PointerEvent as React
 import { Icon } from '../../../shared/icons'
 import { LCPopover, cx } from '../../../shared/lc'
 import type { DeskBrief, DeskEvent } from '../../../domain/calendar/calendar-timeline-api'
+import { humanReason } from '../../../domain/calendar/calendar-timeline-api'
 import {
   LANES, LANE_ICON, LOAD_KEYS, axisTicks, bandDensity, eventLabel, laneLayout, laneOf, loadSeries, pct, statusOf, STATUS_LABEL, timeText, toneOf,
   type Domain, type LaneKey, type LoadKey, type Shape,
@@ -366,7 +367,7 @@ function CarryChip({ items, tz, now, onOpen }: { items: DeskEvent[]; tz: string;
             <li key={m.id}>
               <button type="button" className="tcc-pop__row" onClick={() => { setOpen(false); onOpen(m) }}>
                 <span className="tcc-dot" data-tone={toneOf(m)} aria-hidden="true" />
-                <span className="tcc-pop__main"><b>{m.subtitle || m.title}</b><em>{m.reason || m.title}</em></span>
+                <span className="tcc-pop__main"><b>{m.subtitle || m.title}</b><em>{humanReason(m.reason) || m.title}</em></span>
                 <span className="tcc-pop__when">{m.undated ? 'No date' : `${statusOf(m) === 'missed' ? 'Missed' : 'Overdue'} ${span(now - Date.parse(m.start))}`}<em>{m.undated ? '' : `${weekday(dayKey(m.start, tz))} ${clock(m.start, tz)}`}</em></span>
               </button>
             </li>
