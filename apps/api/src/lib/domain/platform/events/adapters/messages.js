@@ -23,7 +23,7 @@ import { readKeyed } from '../keyset.js'
 export const CAMPAIGN_SEND_SOURCES = Object.freeze(['campaign_launch_execution', 'enqueue_campaign_target_one'])
 const TEST_SOURCES = new Set(['internal_canary', 'inbox_lock_certification', 'queue_limited_cap_proof'])
 const OPERATOR_SOURCES = new Set(['inbox', 'inbox_bulk_follow_up', 'manual', 'operator'])
-const COLS = 'id, direction, event_type, created_at, thread_key, property_id, prospect_id, master_owner_id, market, seller_display_name, property_address, message_body, detected_intent, classification_confidence, is_opt_out, delivery_status, failure_reason, delivered_at, failed_at, queue_id, from_phone_number, metadata'
+const COLS = 'id, direction, event_type, created_at, thread_key, property_id, prospect_id, master_owner_id, market, seller_display_name, property_address, message_body, detected_intent, classification_confidence, is_opt_out, delivery_status, failure_reason, delivered_at, failed_at, queue_id, from_phone_number, provider_message_sid, metadata'
 
 const clean = (v) => String(v ?? '').trim()
 const preview = (s) => { const t = clean(s).replace(/\s+/g, ' '); return t ? (t.length > 140 ? `${t.slice(0, 139)}…` : t) : null }
@@ -68,7 +68,8 @@ export function messageEvent(r, q = null, { includeCampaignSends = false, campai
       summary: kind.tail
         ? `${name || (kind.type === 'seller.wrong_person' ? 'Recipient' : 'Seller')} ${kind.tail}`
         : `${name || 'Seller'} replied${intent ? ` · ${humanize(intent)}` : ''}`,
-      details: { intent, confidence: Number.isFinite(Number(r.classification_confidence)) && r.classification_confidence !== null ? Number(r.classification_confidence) : null, opt_out: r.is_opt_out === true, preview: preview(r.message_body) },
+      // provider_sid: the causal id the inbound notification rows carry (metrics_snapshot.provider_message_sid)
+      details: { intent, confidence: Number.isFinite(Number(r.classification_confidence)) && r.classification_confidence !== null ? Number(r.classification_confidence) : null, opt_out: r.is_opt_out === true, preview: preview(r.message_body), provider_sid: clean(r.provider_message_sid) || null },
     })
   }
   if (r.direction !== 'outbound') return null
