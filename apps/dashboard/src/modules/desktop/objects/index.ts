@@ -44,5 +44,6 @@ export {
   type ShowOnMapOptions,
 } from './object-actions'
 export { ObjectMenu, ObjectMenuButton } from './ObjectMenu'
+export { HOME_PIN_EVENT, HOME_PIN_KEY, homePinFor, pinToHome, queueHomePin, takeHomePins, type HomePin } from './home-pins'
 export { objectMenuEntries } from './object-menu-model'
 export { useClickGesture } from './use-click-gesture'

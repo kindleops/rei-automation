@@ -6,7 +6,7 @@ import type { ObjectRef } from './object-registry'
 export function objectMenuEntries(ref: ObjectRef | null, opts: ObjectActionsOptions & { extra?: LCMenuEntry[] } = {}): LCMenuEntry[] {
   if (!ref) return opts.extra ?? []
   const actions = objectActions(ref, opts)
-  const nav = actions.filter((a) => a.id === 'open' || a.id === 'beside' || a.id === 'inspect' || a.id === 'map')
+  const nav = actions.filter((a) => a.id === 'open' || a.id === 'beside' || a.id === 'inspect' || a.id === 'map' || a.id === 'pin')
   const missions = actions.filter((a) => a.id.startsWith('mission:'))
   const row = (a: (typeof actions)[number]): LCMenuEntry => ({ id: a.id, label: a.label, icon: a.icon, shortcut: a.shortcut, disabled: a.disabled, reason: a.reason, onSelect: () => { a.run() } })
   const out: LCMenuEntry[] = nav.map(row)

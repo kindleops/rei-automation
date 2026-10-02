@@ -11,6 +11,7 @@ import * as L from '../workspace/layout'
 import { planMission, type MissionKind } from '../workspace/missions'
 import { announceWorkspace, getWorkspace, isWorkspaceRunning, openApp, revealInstance, startMission } from '../workspace/workspace-store'
 import { hintOf, objectCapabilities, propertyIdOf, type ObjectRef } from './object-registry'
+import { homePinFor, pinToHome } from './home-pins'
 
 /**
  * THE UNIVERSAL OBJECT ACTIONS (System Refinement 8.2 §2).
@@ -32,7 +33,7 @@ import { hintOf, objectCapabilities, propertyIdOf, type ObjectRef } from './obje
 export interface ObjectActionResult {
   ok: boolean
   /** what happened, for the caller (and tests) */
-  outcome: 'opened' | 'beside' | 'focused' | 'inspected' | 'revealed' | 'map-opened' | 'navigated' | 'pinned' | 'unavailable' | 'refused' | 'mission'
+  outcome: 'opened' | 'beside' | 'focused' | 'inspected' | 'revealed' | 'map-opened' | 'navigated' | 'pinned' | 'home-pinned' | 'unavailable' | 'refused' | 'mission'
   /** why not, in operator words */
   reason?: string
 }
@@ -191,7 +192,7 @@ export function showOnMap(target: ObjectRef | ObjectRef[], opts: ShowOnMapOption
 
 /* ── the action list (one canonical object menu) ──────────────────────── */
 
-export type ObjectActionId = 'open' | 'beside' | 'inspect' | 'map' | `mission:${MissionKind}`
+export type ObjectActionId = 'open' | 'beside' | 'inspect' | 'map' | 'pin' | `mission:${MissionKind}`
 
 export interface ObjectAction {
   id: ObjectActionId
@@ -224,6 +225,8 @@ export function objectActions(ref: ObjectRef, opts: ObjectActionsOptions = {}): 
   if (cap.spec.mapBehaviour !== 'none') {
     out.push({ id: 'map', label: 'Show on Map', icon: 'map', disabled: !cap.map.propertyId, reason: cap.map.reason ?? undefined, run: () => showOnMap(ref, opts.showOnMap) })
   }
+  // Pin to Home (Home 2.0): only for objects that have a Home instrument
+  if (homePinFor(ref)) out.push({ id: 'pin', label: 'Pin to Home', icon: 'pin', run: () => { const r = pinToHome(ref); return r.ok ? { ok: true, outcome: 'home-pinned' } : { ok: false, outcome: 'unavailable', reason: r.reason } } })
   for (const m of cap.missions) out.push({ id: `mission:${m.kind}`, label: m.verb, icon: 'target', run: () => startObjectMission(ref, m.kind) })
   return out.filter((a) => !omit.has(a.id))
 }

@@ -19,6 +19,8 @@ import { deckLine, machineCommands, missionCommands, missionSubject, placeholder
 import { useFocusedDeckSubject } from '../workspace/deck-subject'
 import { WorkspaceSelector } from './WorkspaceSelector'
 import { composerCommands } from '../../../views/campaign-command/composer/composer-commands'
+import { homeDeckCommands } from '../../../views/home/desktop/board/home-commands'
+import { getBoard } from '../../../views/home/desktop/board/board-store'
 import './command-deck.css'
 
 /**
@@ -123,7 +125,8 @@ export function CommandDeck(p: CommandDeckProps) {
   const extra = (q: string) => {
     const subject = missionSubject({ locator: hasSelection ? readPropertyLocator() : null, focusedPath, focusedTitle, campaignSubject: readCampaignSubjectName() })
     const selection = hasSelection ? readPropertyLocator() : null
-    return [...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
+    const home = homeDeckCommands(q, { layouts: getBoard().layouts.map((l) => ({ id: l.id, name: l.name })), campaign: subject?.campaignId ? { id: subject.campaignId, label: subject.label } : null })
+    return [...home, ...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
   }
 
   const runWorkspace = (cmd: WorkspaceCommand) => {
