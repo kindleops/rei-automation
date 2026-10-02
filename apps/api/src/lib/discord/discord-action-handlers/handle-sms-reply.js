@@ -5,6 +5,7 @@
 
 import { child } from "@/lib/logging/logger.js";
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { beginCorrectionCapture } from "@/lib/domain/intelligence/runtime/observation.js";
 import {
   cancelInboundAutopilotQueue,
   expediteInboundAutopilotQueue,
@@ -307,11 +308,21 @@ async function suppressInboundContact({ message_event_id = "", discord_user_id =
   const from_phone_number = clean(event_row?.from_phone_number || event_row?.metadata?.from_phone_number || event_row?.metadata?.inbound_from);
   if (from_phone_number) {
     if (suppression_reason === "wrong_number") {
-      await supabase.from("phones").update({
+      // IC8 correction capture (fail-open; inert unless both IC8 logging gates are on).
+      const correction = await beginCorrectionCapture({
+        operatorId: discord_user_id ? `discord:${discord_user_id}` : null,
+        source: "route:discord:wrong_number",
+        load: async () => {
+          const { data: phones } = await supabase.from("phones").select("id,phone_contact_status").eq("canonical_e164", from_phone_number).limit(20);
+          return (phones || []).map((row) => ({ subject: { type: "phone", id: String(row.id) }, field: "phone_contact_status", original: row.phone_contact_status ?? null, corrected: "wrong_number", metadata: { message_event_id: message_event_id || null } }));
+        },
+      });
+      const wrongNumberWrite = await supabase.from("phones").update({
         phone_contact_status: "wrong_number",
         wrong_number_at: new Date().toISOString(),
         wrong_number_source_thread_key: from_phone_number,
       }).eq("canonical_e164", from_phone_number).catch(() => null);
+      if (wrongNumberWrite && !wrongNumberWrite.error) correction.commit();
     } else {
       await supabase.from("sms_suppression_list").insert({
         phone_number: from_phone_number,
@@ -525,6 +536,19 @@ export async function handleMarkHotLead({
   const supabase = getDefaultSupabaseClient();
 
   try {
+    // IC8 correction capture (fail-open; inert unless both IC8 logging gates
+    // are on). The update below REPLACES the whole metadata object, so the
+    // original flag and the replaced key names are kept (keys only, no values).
+    const correction = await beginCorrectionCapture({
+      operatorId: discord_user_id ? `discord:${discord_user_id}` : null,
+      source: "route:discord:mark_hot_lead",
+      load: async () => {
+        const { data: before } = await supabase.from("message_events").select("id,metadata").eq("id", message_event_id).maybeSingle();
+        if (!before) return [];
+        const md = before.metadata && typeof before.metadata === "object" ? before.metadata : {};
+        return [{ subject: { type: "message_event", id: String(message_event_id) }, field: "marked_hot", original: md.marked_hot_by_discord === true, corrected: true, metadata: { metadata_replaced: true, replaced_metadata_keys: Object.keys(md).slice(0, 100) } }];
+      },
+    });
     const { error } = await supabase
       .from("message_events")
       .update({
@@ -536,6 +560,7 @@ export async function handleMarkHotLead({
       })
       .eq("id", message_event_id);
 
+    if (!error) correction.commit();
     if (error) {
       logger.warn("mark_hot_error", { error: error?.message });
       // Don't throw — this is enhancement only

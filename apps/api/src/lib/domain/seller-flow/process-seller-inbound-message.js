@@ -83,6 +83,7 @@ import { hasSupabaseConfig } from "@/lib/supabase/client.js";
 import { getDealContextByThread } from "@/lib/domain/deal-context/deal-context-service.js";
 import { info, warn } from "@/lib/logging/logger.js";
 import { cancelPendingSellerEmails } from "@/lib/domain/email/email-seller-cancel.js";
+import { observeSellerTurn } from "@/lib/domain/intelligence/runtime/observation.js";
 
 const defaultDeps = {
   classify,
@@ -2104,6 +2105,10 @@ export async function processSellerInboundMessage({
       adeSnapshotPrecomputed: fresh_ade_snapshot,
     });
   }
+
+  // IC8 H1 (observation only): one seller_turn journal row per turn. Synchronous,
+  // never awaited, never throws; a no-op unless both IC8 logging gates are on.
+  observeSellerTurn({ inboundEventId, threadKey: threadKey || inboundFrom, propertyId, ownerId, writesSuppressed: writes_suppressed, orchestration: { transition, negotiation, next_best_action, response_strategy, execution, decision, classification, deal_persistence } });
 
   const dispatch_side_effects = !skipNotifications && !writes_suppressed;
   if (dispatch_side_effects) {

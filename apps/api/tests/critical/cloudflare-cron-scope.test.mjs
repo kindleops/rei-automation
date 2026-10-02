@@ -78,7 +78,14 @@ const EMAIL_SEND_CAPABLE_JOB_PATHS = ["/api/internal/email/dispatch"];
  */
 const WORKFLOW_ORCHESTRATOR_JOB_PATHS = ["/api/internal/workflow-studio/orchestrator/tick"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS];
+/**
+ * Signal Center evaluator (Platform 7.0) — registered, NOT commissioned: its
+ * CRON_SIGNAL_EVALUATE_ENABLED flag is absent from every wrangler config.
+ * Send-incapable (writes only signal tables + notification_events).
+ */
+const SIGNAL_EVALUATE_JOB_PATHS = ["/api/internal/signals/evaluate"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -259,6 +266,29 @@ test("production declares the reconciliation and send schedules, and only approv
     ],
     `unexpected enabled cron flags: ${enabled.join(", ")}`
   );
+
+  // Intelligence Core 8.0 env ceilings (architecture §10). Approved-ON list is
+  // EMPTY until the owner activates observation (tmp/ic8/design/
+  // observation-activation.md); turning one on is an edit to this list.
+  const IC8_CEILINGS = [
+    "INTELLIGENCE_LOGGING_ENABLED",
+    "SELLER_MODEL_SHADOW",
+    "CONVERSATION_MODEL_SHADOW",
+    "COMP_CHALLENGER_SHADOW",
+    "CAMPAIGN_POLICY_SHADOW",
+    "STRATEGY_RECOMMENDATIONS_ENABLED",
+    "CAMPAIGN_AUTONOMY_ENABLED",
+  ];
+  const ic8On = IC8_CEILINGS.filter((k) => vars[k] === "true");
+  assert.deepEqual(ic8On, [], `unapproved IC8 ceilings enabled: ${ic8On.join(", ")}`);
+});
+
+test("the IC8 logging ceiling is forwarded default-deny and no other IC8 ceiling is forwarded yet", async () => {
+  const code = await workerCode();
+  assert.match(code, /INTELLIGENCE_LOGGING_ENABLED:\s*env\.INTELLIGENCE_LOGGING_ENABLED === "true" \? "true" : "false"/);
+  for (const k of ["SELLER_MODEL_SHADOW", "CONVERSATION_MODEL_SHADOW", "COMP_CHALLENGER_SHADOW", "CAMPAIGN_POLICY_SHADOW", "STRATEGY_RECOMMENDATIONS_ENABLED", "CAMPAIGN_AUTONOMY_ENABLED"]) {
+    assert.ok(!new RegExp(`${k}:`).test(code), `${k} must not be forwarded before its phase`);
+  }
 });
 
 test("the send lane sits on its OWN expression, not bolted onto reconciliation", async () => {
@@ -379,4 +409,22 @@ test("the workflow orchestrator rides the reconciliation cadence, never the send
   assert.equal(vars.WORKFLOW_ORCHESTRATOR_ENABLED, "true");
   const staging = await configVars(STAGING);
   assert.notEqual(staging.WORKFLOW_ORCHESTRATOR_ENABLED, "true", "staging shares the production DB: no orchestrator");
+});
+
+test("the Signal Center evaluator is registered on the reconciliation cadence but switched OFF everywhere (flag + env ceiling default-deny)", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const fiveMin = table[1].match(/"\*\/5 \* \* \* \*":\s*\[([^\]]*)\]/);
+  const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(fiveMin[1].includes("SIGNAL_EVALUATE"));
+  assert.ok(!oneMin[1].includes("SIGNAL_EVALUATE"));
+  const block = code.match(/const SIGNAL_EVALUATE: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block && block[1].includes('"CRON_SIGNAL_EVALUATE_ENABLED"') && block[1].includes('"/api/internal/signals/evaluate"'));
+  assert.ok(!/body\s*:/.test(block[1]), "the evaluator takes no body");
+  assert.match(code, /SIGNAL_CENTER_ENABLED:\s*\n?\s*env\.SIGNAL_CENTER_ENABLED === "true" \? "true" : "false"/);
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.notEqual(vars.CRON_SIGNAL_EVALUATE_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.notEqual(vars.SIGNAL_CENTER_ENABLED, "true", "not commissioned: the owner flips this");
+  }
 });

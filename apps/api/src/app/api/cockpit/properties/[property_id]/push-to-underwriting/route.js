@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, parseJsonSafe } from '../../../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { transferDealToUnderwriting } from '@/lib/domain/underwriting/transfer-to-underwriting.js'
+import { beginCorrectionCapture } from '@/lib/domain/intelligence/runtime/observation.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -72,13 +73,25 @@ export async function POST(request, { params }) {
 
     // 3. Update thread state
     if (thread_key) {
-      await supabase
+      // IC8 correction capture (fail-open; inert unless both IC8 logging gates
+      // are on): the stage below is a destructive overwrite, keep the original.
+      const correction = await beginCorrectionCapture({
+        headers: request.headers,
+        source: 'route:/api/cockpit/properties/[property_id]/push-to-underwriting',
+        reason: notes || null,
+        load: async () => {
+          const { data: before } = await supabase.from('inbox_thread_state').select('stage').eq('thread_key', thread_key).maybeSingle()
+          return [{ subject: { type: 'thread', id: thread_key }, field: 'stage', original: before?.stage ?? null, corrected: 'underwriting_needed', metadata: { property_id } }]
+        },
+      })
+      const stageWrite = await supabase
         .from('inbox_thread_state')
         .upsert({
           thread_key,
           stage: 'underwriting_needed',
           updated_at: new Date().toISOString()
         }, { onConflict: 'thread_key' })
+      if (!stageWrite?.error) correction.commit()
     }
 
     // 4. Transfer to Podio Underwriting

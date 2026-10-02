@@ -14,6 +14,7 @@ import {
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { buildSendQueueDedupeKey } from '@/lib/supabase/sms-engine.js'
+import { observeCampaignBatchInsert } from '@/lib/domain/intelligence/runtime/observation.js'
 import { getSystemValue } from '@/lib/system-control.js'
 import {
   asBoolean,
@@ -8527,6 +8528,8 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
           .select('id,campaign_target_id,from_phone_number,textgrid_number_id,to_phone_number,template_id,queue_status,scheduled_for_utc,metadata')
         if (error) throw error
         insertedQueueRows.push(...(data || []))
+        // IC8 H2 (observation only): this batch bypasses insertSupabaseSendQueueRow.
+        observeCampaignBatchInsert(rowChunk, data)
         // Resumable checkpoint + lease heartbeat after each committed chunk.
         if (executionLock.token) {
           await renewCampaignExecutionLock(supabase, campaignId, executionLock.token)

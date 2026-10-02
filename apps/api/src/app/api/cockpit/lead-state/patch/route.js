@@ -3,6 +3,7 @@ import { ensureMutationAuth, corsHeaders } from '../../_shared.js';
 import { supabase } from '@/lib/supabase/client.js';
 import { patchUniversalLeadState } from '@/lib/domain/lead-state/patch-universal-lead-state.js';
 import { buildOperatorSuppressionEvidence } from '@/lib/domain/lead-state/suppression-evidence.js';
+import { beginCorrectionCapture } from '@/lib/domain/intelligence/runtime/observation.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,10 @@ export const dynamic = 'force-dynamic';
 function clean(value) {
   return String(value ?? '').trim();
 }
+
+// IC8: the operator-correctable classifications on inbox_thread_state (stage,
+// status/bucket, intent disposition, temperature, contactability, next action).
+const IC8_CORRECTION_FIELDS = ['lifecycle_stage', 'operational_status', 'lead_temperature', 'disposition', 'contactability_status', 'next_action'];
 
 export async function OPTIONS(request) {
   return new Response(null, { status: 204, headers: corsHeaders(request) });
@@ -41,6 +46,20 @@ export async function PATCH(request) {
       reason: body.reason || null,
       source_authority: 'cockpit_lead_state_patch',
     });
+
+    // IC8 correction capture (fail-open; inert unless both IC8 logging gates
+    // are on, and only for manual, non-dry-run patches).
+    const correction = dryRun || clean(changeSource).toLowerCase() !== 'manual' || !threadKey
+      ? { commit: () => ({ scheduled: 0 }) }
+      : await beginCorrectionCapture({
+        headers: request.headers,
+        source: 'route:/api/cockpit/lead-state/patch',
+        reason: body.reason || null,
+        load: async () => {
+          const { data: before } = await supabase.from('inbox_thread_state').select(IC8_CORRECTION_FIELDS.join(',')).eq('thread_key', threadKey).maybeSingle();
+          return IC8_CORRECTION_FIELDS.map((field) => ({ subject: { type: 'thread', id: threadKey }, field, original: before?.[field] ?? null, corrected: undefined, metadata: { source_view: clean(body.source_view || body.sourceView) || null } }));
+        },
+      });
 
     const result = await patchUniversalLeadState({
       threadKey,
@@ -78,6 +97,10 @@ export async function PATCH(request) {
 
     if (!result.ok) {
       return NextResponse.json(result, { status: 400, headers: cors });
+    }
+    if (!result.dry_run) {
+      const written = new Set(result.realtime_event?.fields || []);
+      correction.commit(Object.fromEntries(IC8_CORRECTION_FIELDS.filter((f) => written.has(f)).map((f) => [f, result.row?.[f] ?? null])));
     }
 
     return NextResponse.json({

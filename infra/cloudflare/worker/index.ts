@@ -59,6 +59,16 @@ export class ApiContainer extends Container<Env> {
       // AND system_control.workflow_orchestrator_enabled='true'.
       WORKFLOW_ORCHESTRATOR_ENABLED:
         env.WORKFLOW_ORCHESTRATOR_ENABLED === "true" ? "true" : "false",
+      // Intelligence Core 8.0 observation journal (2026-10-02). The env CEILING:
+      // the decision-journal / corrections hooks do nothing unless this is
+      // "true" AND system_control.intelligence_logging_enabled is on. It writes
+      // only to the `intelligence` schema; it never sends or changes a decision.
+      INTELLIGENCE_LOGGING_ENABLED:
+        env.INTELLIGENCE_LOGGING_ENABLED === "true" ? "true" : "false",
+      // Signal Center evaluator (Platform 7.0). Evaluates nothing unless this is
+      // "true" AND system_control.signal_center_enabled='true'. Default OFF.
+      SIGNAL_CENTER_ENABLED:
+        env.SIGNAL_CENTER_ENABLED === "true" ? "true" : "false",
 
       ...(env.DEPLOYMENT_ID ? { DEPLOYMENT_ID: env.DEPLOYMENT_ID } : {}),
       ...(env.DEPLOY_GIT_SHA ? { DEPLOY_GIT_SHA: env.DEPLOY_GIT_SHA } : {}),
@@ -232,6 +242,10 @@ interface Env {
   AUTOMATION_LIVE_SENDS_ENABLED?: string;
   WORKFLOW_LIVE_SENDS_ENABLED?: string;
   WORKFLOW_ORCHESTRATOR_ENABLED?: string;
+  // IC8 observation journal env ceiling (default-deny).
+  INTELLIGENCE_LOGGING_ENABLED?: string;
+  /** Signal Center ceiling (container env). Absent => "false". */
+  SIGNAL_CENTER_ENABLED?: string;
   // Email (Brevo transport + inbound verification).
   EMAIL_SEND_ENABLED?: string;
   BREVO_API_KEY?: string;
@@ -743,6 +757,22 @@ const WORKFLOW_ORCHESTRATOR: CronJob = {
 };
 
 /**
+ * Signal Center evaluator (Platform 7.0, NOT commissioned). Reads the platform
+ * event envelope past a durable checkpoint, Analytics Lab rates per campaign /
+ * sender, queue health and the New Replies bucket; writes only its own signal
+ * tables and notification_events (domain 'signals'). Send-incapable: it queues,
+ * sends and mutates no seller state. Triple gate: CRON_SIGNAL_EVALUATE_ENABLED
+ * (this registration) + SIGNAL_CENTER_ENABLED (container ceiling) +
+ * system_control.signal_center_enabled; then only ARMED rules run. Fails closed
+ * (does nothing) while the Signal Center migration is unapplied.
+ */
+const SIGNAL_EVALUATE: CronJob = {
+  id: "signal_evaluate",
+  enabledBy: "CRON_SIGNAL_EVALUATE_ENABLED",
+  path: "/api/internal/signals/evaluate",
+};
+
+/**
  * THE ONE GOVERNED PRODUCTION SCHEDULE.
  *
  * PRODUCTION-COMMISSIONING-1: until this commit a live Vercel deployment was
@@ -777,6 +807,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     CAMPAIGN_FEED,
     CLOSING_AUTOMATION,
     WORKFLOW_ORCHESTRATOR,
+    SIGNAL_EVALUATE,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

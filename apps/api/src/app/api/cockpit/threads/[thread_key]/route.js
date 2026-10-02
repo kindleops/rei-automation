@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth } from '../../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
+import { beginCorrectionCapture } from '@/lib/domain/intelligence/runtime/observation.js'
 import { emitAutomationEvent } from '@/lib/domain/automation/automation-events.js'
 import { AUTOMATION_LOG_TAGS, logAutomationConsole } from '@/lib/domain/automation/automation-audit.js'
 
@@ -118,6 +119,19 @@ export async function PATCH(request, { params }) {
 
     if (fetchError) throw fetchError
 
+    // IC8 correction capture (fail-open; inert unless both IC8 logging gates
+    // are on). deal_thread_state is overwritten in place with no audit table.
+    const ic8Fields = ['universal_status', 'universal_stage', 'inbox_bucket', 'lead_temperature', 'needs_review', 'not_interested'].filter((f) => f in updates)
+    const correction = await beginCorrectionCapture({
+      headers: request.headers,
+      source: 'route:/api/cockpit/threads/[thread_key]',
+      load: async () => {
+        if (!ic8Fields.length) return []
+        const { data: before } = await supabase.from('deal_thread_state').select(ic8Fields.join(',')).eq('thread_key', thread_key).maybeSingle()
+        return before ? ic8Fields.map((field) => ({ subject: { type: 'thread', id: thread_key }, field, original: before[field] ?? null, corrected: updates[field] })) : []
+      },
+    })
+
     // Mark as manually overridden if status or stage is changed
     updates.manually_overridden = true
 
@@ -129,6 +143,7 @@ export async function PATCH(request, { params }) {
       .single()
       
     if (error) throw error
+    correction.commit()
     
     // Write audit log
     await supabase.from('deal_thread_state_events').insert({

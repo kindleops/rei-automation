@@ -48,6 +48,7 @@ import {
 } from "@/lib/domain/queue/queue-send-brake-state.js";
 import { normalizeCampaignStatus } from "@/lib/domain/campaigns/campaign-state-machine.js";
 import { attachOutboundProvenance } from "@/lib/domain/automation/outbound-provenance.js";
+import { observeSendQueueInsert } from "@/lib/domain/intelligence/runtime/observation.js";
 import { isAmbiguousSendRow } from "@/lib/domain/messaging/ambiguous-send-evidence.js";
 
 const SEND_QUEUE_TABLE = "send_queue";
@@ -5159,6 +5160,9 @@ export async function insertSupabaseSendQueueRow(payload, deps = {}) {
     .maybeSingle();
 
   if (!error) {
+    // IC8 H2 (observation only): one message_strategy journal row per insert.
+    // Synchronous, never awaited, never throws; no-op unless both gates are on.
+    observeSendQueueInsert(data);
     return {
       ok: true,
       item_id: data?.id || null,

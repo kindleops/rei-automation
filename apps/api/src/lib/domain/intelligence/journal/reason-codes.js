@@ -71,6 +71,8 @@ export const REASON_CODES = Object.freeze({
   FEED_BOUND_TOTAL_CAP_REACHED: define("campaign", "Feed limited: total cap reached."),
   FEED_BOUND_DAILY_CAP_REACHED: define("campaign", "Feed limited: daily cap reached."),
   FEED_BOUND_BUFFER_FULL: define("campaign", "Feed limited: buffer full."),
+  FEED_BOUND_CAMPAIGN_CAP_ZERO: define("campaign", "Feed limited: a per-sender or per-market cap is 0."),
+  FEED_BOUND_UNKNOWN: define("campaign", "Feed bound not recognised by the journal (recorded as unknown, never guessed)."),
   SCALE_BINDING_DAILY_CAP: define("campaign", "Rolling plan bound by the daily cap."),
   SCALE_BINDING_CONTACT_WINDOW: define("campaign", "Rolling plan bound by contact windows."),
   SCALE_BINDING_SENDER_CAPACITY: define("campaign", "Rolling plan bound by sender capacity."),

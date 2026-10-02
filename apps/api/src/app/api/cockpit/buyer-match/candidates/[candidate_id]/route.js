@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server.js'
 import { ensureMutationAuth, parseJsonSafe } from '../../../../_shared.js'
 import { supabase } from '@/lib/supabase/client.js'
+import { beginCorrectionCapture } from '@/lib/domain/intelligence/runtime/observation.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -94,6 +95,18 @@ export async function PATCH(request, { params }) {
   }
 
   try {
+    // IC8 correction capture (fail-open; inert unless both IC8 logging gates are on):
+    // read the original disposition BEFORE this in-place overwrite.
+    const correction = await beginCorrectionCapture({
+      headers: request.headers,
+      source: 'route:/api/cockpit/buyer-match/candidates/[candidate_id]',
+      load: async () => {
+        const fields = Object.keys(updates).filter((f) => f !== 'notes')
+        if (!fields.length) return []
+        const { data: before } = await supabase.from('buyer_match_candidates').select(fields.join(',')).eq('candidate_id', candidate_id).maybeSingle()
+        return before ? fields.map((field) => ({ subject: { type: 'buyer_match_candidate', id: candidate_id }, field, original: before[field] ?? null, corrected: updates[field] })) : []
+      },
+    })
     const { data: updated, error } = await supabase
       .from('buyer_match_candidates')
       .update(updates)
@@ -102,6 +115,7 @@ export async function PATCH(request, { params }) {
       .single()
 
     if (error) throw error
+    correction.commit()
 
     return NextResponse.json(
       { ok: true, data: updated },

@@ -3,6 +3,7 @@
  */
 
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
+import { observeFeederDecision } from '@/lib/domain/intelligence/runtime/observation.js'
 import { asBoolean, isEmergencyStopActive } from '@/lib/domain/queue/queue-control-safety.js'
 import { getSystemValue, setSystemValues } from '@/lib/system-control.js'
 import { createCampaignQueuePlan } from '@/lib/domain/campaigns/campaign-automation-service.js'
@@ -510,6 +511,8 @@ export async function feedCampaignBatch(campaign, deps = {}) {
     : inserted > 0
       ? null
       : (result?.blockers?.[0] || (capacityBound ? 'capacity_reached_today' : feed.limit > 0 ? 'no_row_placed' : feed.bound))
+  // IC8 H3 (observation only): a campaign_feed row when limit > 0 or the reason changed.
+  observeFeederDecision({ campaignId: campaign.id, runAt: now.toISOString(), limit: feed.limit, bound: feed.bound, reason, previousReason: campaign.metadata?.feeder_last?.reason ?? null, inserted, versions: { feeder_stall: FEEDER_STALL_DEFINITION_VERSION } })
 
   const heartbeatAt = new Date().toISOString()
   const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
