@@ -125,6 +125,10 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
   scrollbar-width: none;
 }
 .cr__nav::-webkit-scrollbar { display: none; }
+/* short displays (a 1280x800 laptop): the rows tighten so every app fits above
+   the Settings foot; below that the list scrolls and shows a thin bar on hover
+   so nothing is ever silently unreachable (row compaction: end of file) */
+.cr__nav:hover { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
 
 /* the lens: a slightly closer, clearer piece of glass that glides between apps */
 .cr__lens {
@@ -462,3 +466,13 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 html.lc-ws-dragging .cr-row:not(:hover) { opacity: 0.72; }
 @media (prefers-reduced-motion: reduce) { .cr-row.is-resolving .cr-row__glyph { animation: none; } }
 html[data-lc-motion='off'] .cr-row.is-resolving .cr-row__glyph { animation: none; }
+
+/* short displays: rows tighten (after the base row rules so they win) */
+@media (max-height: 880px) {
+  .cr-row { height: 30px; }
+  .cr-sec__head { height: 22px; }
+}
+@media (max-height: 760px) {
+  .cr-row { height: 28px; }
+  .cr-sec__head { height: 20px; }
+}

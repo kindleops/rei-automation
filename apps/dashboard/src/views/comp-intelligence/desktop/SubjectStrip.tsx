@@ -4,6 +4,7 @@ import { fmtAge, fmtDate, fmtInt, fmtMoney, fmtPct, fmtUnitValue, subjectImplied
 import { staticStreetViewUrl } from '../../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
 import type { Workstation } from './derive-workstation'
 import { MorphValue } from './MorphValue'
+import { displayAddress } from '../utils/comp-display'
 
 interface Props {
   m: Workstation
@@ -29,7 +30,7 @@ export function SubjectStrip({ m, pinLabel, pinned, onOpenDeal, onOpenGraph, onO
   const c = m.w.conclusion
   const [photoFailed, setPhotoFailed] = useState<string | null>(null)
   const photo = staticStreetViewUrl(s.address, s.lat, s.lng)
-  const [street, ...rest] = (s.address ?? 'Subject property').split(',')
+  const [street, ...rest] = displayAddress(s.address ?? 'Subject property').split(',')
   const place = [rest.join(',').trim(), s.county ? `${s.county} County` : null, s.subdivision ? titleCase(s.subdivision) : null].filter(Boolean).join(' · ')
   const specs = [
     s.familyLabel ?? s.propertyType,

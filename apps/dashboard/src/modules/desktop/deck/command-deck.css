@@ -55,12 +55,13 @@ html.is-desktop-modern .cd {
   font: 620 12px/1 var(--lc-font-ui);
   color: var(--lc-ink-2);
   cursor: pointer;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .cd-ws:hover, .cd-ws[data-state='open'] { color: var(--lc-ink-1); background: rgba(255, 255, 255, 0.05); }
 .cd-ws:focus-visible { box-shadow: var(--lc-focus-ring); }
-.cd-ws b { font-weight: 640; letter-spacing: 0.01em; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-ws b { min-width: 0; font-weight: 640; letter-spacing: 0.01em; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cd-ws__count { font: 650 10px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-3); }
 .cd-ws.is-dirty b::after { content: ''; display: inline-block; width: 4px; height: 4px; margin-left: 5px; border-radius: 50%; vertical-align: middle; background: rgb(var(--lc-select-rgb)); }
 /* a mission in progress: one quiet capsule beside the workspace — tap to end and go home */
@@ -93,10 +94,12 @@ html.is-desktop-modern .cd {
 .cdw-mini rect { fill: rgba(255, 255, 255, 0.06); stroke: rgba(255, 255, 255, 0.28); stroke-width: 0.9; }
 .cdw-mini.is-active rect { stroke: rgba(var(--lc-select-rgb), 0.75); fill: rgba(var(--lc-select-rgb), 0.08); }
 
-.cd-app { display: flex; align-items: center; gap: 10px; min-width: 0; padding-left: 10px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
+/* the context zone is a bounded grid column: everything in it shrinks and
+   truncates inside it — nothing may draw over the command capsule */
+.cd-app { display: flex; flex: 0 3 auto; align-items: center; gap: 10px; min-width: 0; overflow: hidden; padding-left: 10px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
 .cd-app__glyph { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: color-mix(in srgb, var(--app, var(--lc-ink-1)) 75%, var(--lc-ink-1)); background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
 .cd-app__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.cd-app__text b { font: 650 10.5px/1 var(--lc-font-ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--lc-ink-2); white-space: nowrap; }
+.cd-app__text b { font: 650 10.5px/1 var(--lc-font-ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--lc-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cd-app__text small { display: inline-flex; align-items: center; gap: 4px; font: 520 12.5px/1.15 var(--lc-font-ui); color: var(--lc-ink-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cd-app__text small svg { flex: none; color: rgb(var(--lc-select-rgb)); }
 
@@ -291,6 +294,10 @@ svg.cd-g { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: 
 /* ── responsive: secondary copy goes first ────────────────────────────── */
 
 @container deck (max-width: 1180px) { .cd-app__text small { display: none; } }
+/* a mission capsule + a named workspace already fill the context zone: the
+   focused app is named by its pane tab, so the deck drops its title first */
+@container deck (max-width: 1400px) { .cd__ctx:has(.cd-mission) .cd-app { display: none; } }
+@container deck (max-width: 1100px) { .cd-app__text { display: none; } }
 @container deck (max-width: 1020px) { .cd-ws b { display: none; } .cd-machine { min-width: 0; max-width: 160px; } }
 @container deck (max-width: 880px) { .cd-app__text { display: none; } .cd__glass { grid-template-columns: auto minmax(220px, 1fr) auto; } }
 

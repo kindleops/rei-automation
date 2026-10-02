@@ -10,6 +10,7 @@ import { CompStreetView } from './CompStreetView'
 import type { Tier } from './derive-workstation'
 import { SaleTypeBadge } from './SaleType'
 import { useFocusOf, type FocusStore } from './focus-store'
+import { displayAddress } from '../utils/comp-display'
 
 export interface CompRowProps {
   c: EvidenceComp
@@ -96,7 +97,7 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
       />
       <div className="ciw-row__main">
         <div className="ciw-row__title">
-          <span className="ciw-row__addr">{c.address ?? 'Address not recorded'}</span>
+          <span className="ciw-row__addr">{displayAddress(c.address) ?? 'Address not recorded'}</span>
           {tier === 'added' ? <span className="ciw-pill is-added">Added</span> : null}
           {tier === 'removed' ? <span className="ciw-pill is-removed">Removed</span> : null}
           {c.corpus === 'transaction_corpus' ? <LCTooltip content="Recorded deed from the transaction corpus — reviewed with the engine's rules, but not in the engine's own pricing pool."><span className="ciw-pill is-deed">Deed</span></LCTooltip> : null}

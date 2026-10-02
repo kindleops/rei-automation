@@ -377,3 +377,15 @@ export function buildComparisonRows(
 
   return rows
 }
+/**
+ * Display-only: a source that title-cases whole addresses writes the state code
+ * as "Mn" ("Minneapolis, Mn 55412"). A two-letter token that follows a comma
+ * and ends the address, precedes a ZIP or precedes another comma is a state
+ * code — show it in capitals. Nothing else in the string changes.
+ */
+export function displayAddress(address: string): string
+export function displayAddress(address: string | null | undefined): string | null
+export function displayAddress(address: string | null | undefined): string | null {
+  if (!address) return address ?? null
+  return address.replace(/(,\s*)([A-Za-z]{2})(?=(?:\s+\d{5}(?:-\d{4})?)?\s*(?:,|$))/g, (_m, sep: string, st: string) => sep + st.toUpperCase())
+}

@@ -188,7 +188,7 @@ export function IntelHero({ variant = 'overview', metrics = HERO_METRICS, height
       <footer className="ix-hero__foot">
         <div className="ix-legend" aria-hidden={view === 'table'}>
           <span><i className="ix-key is-cur" />This period</span>
-          {overview?.compare.available ? <span><i className="ix-key is-prev" />{compareRange}</span> : null}
+          {overview?.compare.available ? <span title={view === 'line' ? 'A previous-period day with no neighbour to connect to is drawn as a dot' : undefined}><i className="ix-key is-prev" />{view === 'line' ? <i className="ix-key is-prevdot" /> : null}{compareRange}</span> : null}
           {isRate && view === 'line' ? <span><i className="ix-key is-band" />95% interval</span> : null}
           {isRate && view === 'line' ? <span><i className="ix-key is-thin" />small sample</span> : null}
           {view === 'line' && def?.unit !== 'count' && points.some((p) => p.value === null) ? <span title="Days with no value are connected, never filled in"><i className="ix-key is-bridge" />{isRate && def?.denominator?.label ? `bridged · no ${def.denominator.label} or small sample` : 'bridged · nothing recorded'}</span> : null}

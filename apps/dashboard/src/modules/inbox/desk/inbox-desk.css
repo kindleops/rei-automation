@@ -440,7 +440,9 @@ html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-skeleton__col { display
     padding: 9px 14px 9px 8px;
   }
   html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row::before { left: 30px; right: 14px; }
-  html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row__who { display: flex; flex-direction: row; align-items: baseline; gap: 8px; align-self: end; }
+  /* row axis now: the base column rule's justify-content:center would centre the
+     name once the street drops out (<520px) — names start at the left edge */
+  html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row__who { display: flex; flex-direction: row; justify-content: flex-start; align-items: baseline; gap: 8px; align-self: end; }
   html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row__name { flex: 0 1 auto; }
   html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row__stage-inline { display: inline-flex; align-self: center; }
   html.is-desktop-modern #nx-inbox-root.is-desk-inbox .ixl-row__street { flex: 1 1 0; min-width: 0; }

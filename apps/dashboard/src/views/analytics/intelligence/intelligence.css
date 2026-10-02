@@ -354,6 +354,8 @@ button.ix-callout:hover { background: rgba(var(--lc-attn-rgb), 0.12); }
 .ix-legend span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .ix-key { display: inline-block; flex: none; width: 16px; height: 2px; border-radius: 2px; background: var(--ix-series); }
 .ix-key.is-prev { background: repeating-linear-gradient(90deg, var(--ix-compare) 0 4px, transparent 4px 7px); }
+/* the trend's lone previous-period day (.ixt__prevdot) — same ink, same size */
+.ix-key.is-prevdot { width: 4.5px; height: 4.5px; margin-left: -2px; border-radius: 50%; background: var(--ix-compare); }
 .ix-key.is-band { height: 9px; background: rgba(var(--ix-series-rgb), 0.16); }
 .ix-key.is-thin { width: 8px; height: 8px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px var(--ix-series); }
 .ix-key.is-bridge { background: repeating-linear-gradient(90deg, rgba(var(--ix-series-rgb), 0.55) 0 2px, transparent 2px 6px); }

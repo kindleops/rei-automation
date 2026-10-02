@@ -4,6 +4,7 @@ import { getUniversalEntityContextSnapshot, subscribeUniversalEntityContext } fr
 import { PaneRouteContext } from '../../app/router'
 import { MobileSellerCommandCenter } from '../../modules/deal-intelligence/mobile/MobileSellerCommandCenter'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
+import { LCSkeleton } from '../../shared/lc'
 
 /**
  * The desktop decision room is its own chunk: a phone never downloads it, and
@@ -72,13 +73,29 @@ export function DealIntelligenceInboxRoute() {
   // and follows linked context; it never redirects into the Inbox.
   if (isModernDesktop) {
     return (
-      <Suspense fallback={<div className="dr-route-fallback" aria-busy="true" />}>
+      <Suspense fallback={<DecisionRoomChunkFallback />}>
         <DealIntelligenceDesktop />
       </Suspense>
     )
   }
   if (pane) return <DealIntelligenceCompanion search={pane.location.includes('?') ? pane.location.slice(pane.location.indexOf('?')) : ''} />
   return <DealIntelligenceRedirect />
+}
+
+/**
+ * While the decision room's own chunk downloads. This was an empty div: a
+ * freshly composed pane (a "Work seller" mission) sat visibly BLANK for the
+ * chunk fetch plus the decision read (measured 6–17 s against prod). The room's
+ * stylesheet ships inside that chunk, so the boot skeleton is laid out inline.
+ */
+function DecisionRoomChunkFallback() {
+  return (
+    <div className="dr-route-fallback" aria-busy="true" style={{ display: 'grid', gap: 14, alignContent: 'start', padding: 22 }}>
+      <LCSkeleton shape="lines" count={2} label="Loading Deal Intelligence" />
+      <LCSkeleton shape="block" height={220} />
+      <LCSkeleton shape="rows" count={4} />
+    </div>
+  )
 }
 
 function DealIntelligenceCompanion({ search }: { search: string }) {

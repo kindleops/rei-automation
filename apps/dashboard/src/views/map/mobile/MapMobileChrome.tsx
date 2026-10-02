@@ -730,9 +730,24 @@ export function MapMobileChrome(props: MapMobileChromeProps) {
     // Any move we didn't make — a drag, a pinch, a search fly-to, a tap that
     // centres a property — means the operator has taken the camera: a late
     // home framing must never yank it back to the national view.
-    const mark = () => { if (!framingRef.current) userMovedRef.current = true }
-    map.on('movestart', mark)
-    return () => { map.off('movestart', mark) }
+    //
+    // Only a camera that actually CHANGED counts. map.resize() fires
+    // movestart/moveend with the camera untouched, and the desktop pane
+    // resizes the map several times while it mounts — read as "the operator
+    // moved", that cancelled the first framing and left the desktop Map on its
+    // boot camera over Kansas ("No properties in this view").
+    const cam = () => { const c = map.getCenter(); return `${c.lng.toFixed(5)},${c.lat.toFixed(5)},${map.getZoom().toFixed(3)}` }
+    let settled = cam()
+    const mark = () => {
+      const now = cam()
+      if (now !== settled && !framingRef.current) userMovedRef.current = true
+      settled = now
+    }
+    // a gesture in progress counts at once, so a late framing never fights a drag
+    const grab = (e: { originalEvent?: unknown }) => { if (e.originalEvent && !framingRef.current) userMovedRef.current = true }
+    map.on('movestart', grab)
+    map.on('moveend', mark)
+    return () => { map.off('movestart', grab); map.off('moveend', mark) }
   }, [map, mapEpoch])
   useEffect(() => {
     if (framedRef.current || userMovedRef.current || selectedLngLat || !homeBounds || !map) return
