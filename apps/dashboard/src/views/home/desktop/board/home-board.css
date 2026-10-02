@@ -124,15 +124,13 @@
   box-shadow: inset 0 0 0 1px var(--ch-edge), inset 0 1px 0 var(--ch-spec), var(--ch-shadow);
   overflow: hidden;
   container: hbw / size;
-  transition:
-    transform 300ms var(--ch-spring),
-    width 300ms var(--ch-spring),
-    height 300ms var(--ch-spring),
-    box-shadow 200ms var(--ch-ease);
+  /* geometry moves only while arranging; a pane resize or a width-family change at rest is instant */
+  transition: box-shadow 200ms var(--ch-ease);
   will-change: transform;
   outline: none;
 }
 .hb-w:focus-visible { box-shadow: inset 0 0 0 1px var(--ch-edge), var(--lc-focus-ring, 0 0 0 2px rgb(var(--hb-sel) / 0.6)), var(--ch-shadow); }
+.hb.is-editing .hb-w { transition: transform 300ms var(--ch-spring), width 300ms var(--ch-spring), height 300ms var(--ch-spring), box-shadow 200ms var(--ch-ease); }
 .hb.is-dragging .hb-w { transition: transform 220ms var(--ch-ease), width 220ms var(--ch-ease), height 220ms var(--ch-ease); }
 .hb-w.is-lifted {
   z-index: 40;
@@ -320,7 +318,7 @@ button.hb-fig:hover .hb-fig__v { color: var(--ch-ink); text-shadow: 0 0 18px rgb
 
 /* ── Home Brief ─────────────────────────────────────────────────────── */
 
-.hb-brief { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; justify-content: flex-end; }
+.hb-brief { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; justify-content: center; }
 .hb-brief__wave { position: absolute; inset: auto -16px -14px; height: 70%; opacity: 0.55; pointer-events: none; -webkit-mask-image: linear-gradient(180deg, transparent, #000 50%); mask-image: linear-gradient(180deg, transparent, #000 50%); }
 .hb-brief__wave svg { width: 100%; height: 100%; }
 .hb-brief > :not(.hb-brief__wave) { position: relative; }
@@ -330,11 +328,12 @@ button.hb-fig:hover .hb-fig__v { color: var(--ch-ink); text-shadow: 0 0 18px rgb
 .hb-orb.is-warn { background: var(--ch-warn); box-shadow: 0 0 12px var(--ch-warn); }
 .hb-orb.is-bad { background: var(--ch-bad); box-shadow: 0 0 12px var(--ch-bad); }
 .hb-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ch-ink-3); opacity: 0.6; }
-.hb-brief__greeting { margin: 0; font: 300 clamp(24px, 7.5cqi, 44px)/1.05 var(--lc-font-display, var(--lc-font-ui)); letter-spacing: -0.025em; color: var(--ch-ink); }
+.hb-brief__greeting { margin: 0; font: 300 clamp(22px, min(7.5cqi, 19cqh), 44px)/1.05 var(--lc-font-display, var(--lc-font-ui)); letter-spacing: -0.025em; color: var(--ch-ink); }
 .hb-brief.is-small .hb-brief__greeting, .hb-brief.is-compact .hb-brief__greeting { font-size: clamp(20px, 10cqi, 28px); }
 .hb-brief__line { margin: 0; max-width: 64ch; font: 400 clamp(13px, 2.4cqi, 15.5px)/1.45 var(--lc-font-ui); color: var(--ch-ink-2); }
 .hb-brief__line b { color: var(--ch-ink); font-weight: 600; }
 .hb-brief__line .is-need { color: var(--ch-warn); }
+@container hbw (max-height: 230px) { .hb-brief__note { display: none; } .hb-brief { gap: 7px; } }
 .hb-brief__note { margin: 0; font: 450 11px/1.2 var(--lc-font-ui); color: var(--ch-ink-3); }
 .hb-tele { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 4px; }
 .hb-tele__i { display: grid; gap: 3px; padding: 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
@@ -406,6 +405,7 @@ button.hb-fig:hover .hb-fig__v { color: var(--ch-ink); text-shadow: 0 0 18px rgb
 .hb-map__head { display: flex; align-items: baseline; gap: 10px; }
 .hb-map__lens { display: inline-flex; align-items: center; gap: 7px; font: 600 13px/1 var(--lc-font-ui); color: var(--ch-ink); }
 .hb-map__lens i { width: 8px; height: 8px; border-radius: 50%; background: var(--lens); box-shadow: 0 0 12px var(--lens); }
+.hb-map.is-small .hb-map__lens small { display: none; }
 .hb-map__lens small { font: 500 11.5px/1 var(--lc-font-ui); color: var(--ch-ink-3); }
 .hb-map__total { margin-left: auto; font: 300 24px/1 var(--lc-font-display, var(--lc-font-ui)); color: var(--ch-ink); font-variant-numeric: tabular-nums; }
 .hb-map__total small { font: 500 11px/1 var(--lc-font-ui); color: var(--ch-ink-3); }

@@ -42,7 +42,9 @@ export function InboxWidget({ size, cells }: WidgetRenderProps) {
           </div>
         )
         if (size === 'compact') return head
-        const rows = size === 'small' ? 1 : size === 'medium' ? 3 : 6
+        // as many conversations as the height holds whole (a row with its preview is ~one grid row)
+        const preview = size !== 'medium'
+        const rows = Math.max(1, Math.min(8, cells.h - (preview ? 3 : 2)))
         const latest = d.threads[0]
         return (
           <div className={cx('hb-inbox', `is-${size}`)}>
@@ -50,7 +52,7 @@ export function InboxWidget({ size, cells }: WidgetRenderProps) {
             {size === 'small' && latest ? <p className="hb-muted hb-inbox__latest">Latest reply {relativeTime(latest.at)} · {latest.seller}</p> : null}
             {size !== 'small' ? (d.threads.length ? (
               <ul className={cx('hb-threads', (size === 'wide' || size === 'feature') && 'is-cols')}>
-                {d.threads.slice(0, rows).map((t) => <ThreadRow key={t.id} t={t} showPreview={size !== 'medium'} />)}
+                {d.threads.slice(0, rows).map((t) => <ThreadRow key={t.id} t={t} showPreview={preview} />)}
               </ul>
             ) : <WEmpty>No seller replies waiting.</WEmpty>) : null}
           </div>

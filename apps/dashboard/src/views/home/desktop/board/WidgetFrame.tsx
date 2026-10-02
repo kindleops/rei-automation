@@ -1,4 +1,4 @@
-import { Component, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Icon } from '../../../../shared/icons'
 import { LCButton, LCIconButton, LCPopover, LCSegmented, LCSelect, LCSwitch } from '../../../../shared/lc'
 import { useHomeSource } from './home-sources'
@@ -34,8 +34,13 @@ interface FrameProps {
   inst: WidgetInstance
   def: HomeWidgetDef | null
   size: WidgetSize
-  rect: { left: number; top: number; width: number; height: number }
-  cells: { w: number; h: number }
+  /** pixel geometry as primitives, so an unmoved widget never re-renders during a drag */
+  left: number
+  top: number
+  width: number
+  height: number
+  cw: number
+  ch: number
   editing: boolean
   lifted: boolean
   scrollRoot: HTMLElement | null
@@ -144,7 +149,16 @@ function WidgetSettings({ inst, def, config, actions }: { inst: WidgetInstance; 
   )
 }
 
-export const WidgetFrame = memo(function WidgetFrame({ inst, def, size, rect, cells, editing, lifted, scrollRoot, actions, capped }: FrameProps) {
+/** The instrument itself — memoised apart from the frame, so a lifted widget following the pointer does not re-render its content. */
+const WidgetBody = memo(function WidgetBody({ Comp, inst, size, config, active, cw, ch, editing, actions }: { Comp: HomeWidgetDef['component']; inst: WidgetInstance; size: WidgetSize; config: WidgetConfig; active: boolean; cw: number; ch: number; editing: boolean; actions: FrameActions }) {
+  const context = useMemo(() => ({ mode: inst.context.mode, subject: inst.context.mode === 'pinned' ? inst.context.subject : null }), [inst.context])
+  const cells = useMemo(() => ({ w: cw, h: ch }), [cw, ch])
+  const id = inst.id
+  const setConfig = useCallback((patch: Partial<WidgetConfig>) => actions.config(id, patch), [actions, id])
+  return <Comp instanceId={id} size={size} config={config} context={context} active={active} cells={cells} editing={editing} setConfig={setConfig} />
+})
+
+export const WidgetFrame = memo(function WidgetFrame({ inst, def, size, left, top, width, height, cw, ch, editing, lifted, scrollRoot, actions, capped }: FrameProps) {
   const ref = useRef<HTMLElement | null>(null)
   const inView = useInView(ref, scrollRoot)
   // lazy: a widget mounts the first time it comes into view, then stays mounted (and idle) offscreen
@@ -157,7 +171,7 @@ export const WidgetFrame = memo(function WidgetFrame({ inst, def, size, rect, ce
   const beside = def?.openBesideAction?.({ config, subject }) ?? null
   const [settingsOpen, setSettingsOpen] = useState(false)
   const title = def ? (subject ? `${def.name} · ${subject.label}` : def.name) : 'Unavailable widget'
-  const style: CSSProperties = { transform: `translate3d(${rect.left}px, ${rect.top}px, 0)`, width: rect.width, height: rect.height }
+  const style: CSSProperties = { transform: `translate3d(${left}px, ${top}px, 0)`, width, height }
 
   const Comp = def?.component
   return (
@@ -165,7 +179,7 @@ export const WidgetFrame = memo(function WidgetFrame({ inst, def, size, rect, ce
       ref={ref}
       className={cx('hb-w', `is-${size}`, editing && 'is-editing', lifted && 'is-lifted', inst.locked && 'is-locked', !def && 'is-missing')}
       style={style}
-      aria-label={`${title}${editing ? ` — ${cells.w} by ${cells.h}. Arrows move, Shift+arrows resize, Delete removes.` : ''}`}
+      aria-label={`${title}${editing ? ` — ${cw} by ${ch}. Arrows move, Shift+arrows resize, Delete removes.` : ''}`}
       tabIndex={editing ? 0 : -1}
       data-widget={inst.id}
       onKeyDown={editing ? (e) => actions.key(inst.id, e) : undefined}
@@ -193,7 +207,7 @@ export const WidgetFrame = memo(function WidgetFrame({ inst, def, size, rect, ce
           capped ? <p className="hb-empty"><Icon name="map" size={13} />Paused — this board already runs the maximum live {def!.name} widgets.</p> : (
             <WidgetRuntimeContext.Provider value={runtime}>
               <WidgetBoundary name={def!.name}>
-                {seen || lifted ? <Comp instanceId={inst.id} size={size} config={config} context={{ mode: inst.context.mode, subject: inst.context.mode === 'pinned' ? inst.context.subject : null }} active={runtime.active} cells={cells} editing={editing} setConfig={(patch) => actions.config(inst.id, patch)} /> : <div className="hb-offscreen" aria-hidden="true" />}
+                {seen || lifted ? <WidgetBody Comp={Comp} inst={inst} size={size} config={config} active={runtime.active} cw={cw} ch={ch} editing={editing} actions={actions} /> : <div className="hb-offscreen" aria-hidden="true" />}
               </WidgetBoundary>
             </WidgetRuntimeContext.Provider>
           )

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import { useAuth } from '../../../../components/auth/AuthProvider'
 import { replaceRoutePath, useRouteLocation } from '../../../../app/router'
 import { Icon } from '../../../../shared/icons'
@@ -63,6 +63,9 @@ const DEPS: BoardDeps = {
 }
 
 const NEW_ID = '__new__'
+
+/** Read-only measurement seam (capture scripts): pointer-move → commit times during drags. */
+const PERF_PROBE = { moves: [] as number[] }
 
 interface DragView {
   id: string
@@ -198,6 +201,15 @@ export function HomeBoard() {
 
   /* ── drag surface (one DnD system: workspace/drag) ── */
   const [drag, setDrag] = useState<DragView | null>(null)
+  // measurement seam: pointer move → committed frame, for the performance pass
+  const dragT0 = useRef(0)
+  useLayoutEffect(() => {
+    if (!drag || !dragT0.current) return
+    const probe = PERF_PROBE.moves
+    probe.push(performance.now() - dragT0.current)
+    if (probe.length > 400) probe.splice(0, probe.length - 400)
+    dragT0.current = 0
+  }, [drag])
   const dragRef = useRef<DragView | null>(null)
   const setDragView = useCallback((v: DragView | null) => { dragRef.current = v; setDrag(v) }, [])
   const editingRef = useRef(editing)
@@ -216,6 +228,7 @@ export function HomeBoard() {
       return Boolean(RAIL_DEFAULT_WIDGET[src.app] && getHomeWidget(RAIL_DEFAULT_WIDGET[src.app]) && (inside(r) || inside(root)))
     },
     over(src: DragSource, x: number, y: number) {
+      dragT0.current = performance.now()
       const grid = gridRef.current?.getBoundingClientRect()
       if (!grid) return
       const m = metricsRef.current
@@ -366,7 +379,7 @@ export function HomeBoard() {
   const instById = useMemo(() => new Map((layout?.widgets ?? []).map((w) => [w.id, w])), [layout])
 
   // perf seam for the capture scripts (read-only)
-  useEffect(() => { (window as unknown as { __homeBoard?: unknown }).__homeBoard = { stats: homeSourceStats, widgets: () => layout?.widgets.length ?? 0, family } }, [layout, family])
+  useEffect(() => { (window as unknown as { __homeBoard?: unknown }).__homeBoard = { stats: homeSourceStats, widgets: () => layout?.widgets.length ?? 0, family, dragMoves: () => PERF_PROBE.moves.slice() } }, [layout, family])
 
   if (!board.ready || !layout) {
     return <div className="ch hb"><div className="hb-scroll"><div className="hb-grid-wrap" ref={gridRef} /></div></div>
@@ -422,7 +435,7 @@ export function HomeBoard() {
             const size: WidgetSize = def ? sizeModeFor(it.cell.w, it.cell.h, def.sizes) : 'medium'
             return (
               <div key={it.id} role="listitem" className="hb-slot">
-                <WidgetFrame inst={inst} def={def} size={size} rect={rect} cells={{ w: it.cell.w, h: it.cell.h }} editing={editing} lifted={lifted || resizing} scrollRoot={scrollEl} actions={actions} capped={capOf(def, inst.id)} />
+                <WidgetFrame inst={inst} def={def} size={size} left={rect.left} top={rect.top} width={rect.width} height={rect.height} cw={it.cell.w} ch={it.cell.h} editing={editing} lifted={lifted || resizing} scrollRoot={scrollEl} actions={actions} capped={capOf(def, inst.id)} />
               </div>
             )
           })}
