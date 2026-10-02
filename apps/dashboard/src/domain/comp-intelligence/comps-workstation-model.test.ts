@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CompsWorkspace, EngineRules, EvidenceComp } from './comps-evidence-api'
 import {
   assetKind, describeFilters, evidenceDepth, filterCount, fmtDate, fmtMiles, matchesPreset, NO_FILTERS, passesFilters, PRESETS,
-  engineAgeMonths, recencyStepOf, recencySteps, sameSet, setDiff, subjectImplied, unitMetricFor, unitValue, weaknesses, whyExcluded, whyIncluded,
+  engineAgeMonths, engineRecencyFor, recencyStepOf, recencySteps, sameSet, setDiff, subjectImplied, unitMetricFor, unitValue, weaknesses, whyExcluded, whyIncluded,
 } from './comps-workstation-model'
 
 const NOW = Date.parse('2026-10-01T15:00:00Z')
@@ -17,7 +17,8 @@ const rules: EngineRules = {
   minSalePrice: 10000, nominalPriceToValue: 0.25, minCompScore: 30, maxSelected: 12, pool: { source: 'engine pool', limit: 100 },
   outlier: { method: 'median_absolute_deviation', minObservations: 5, madMultiple: 3.5, floorShareOfMedian: 0.28 },
   weight: { formula: '', mlsFactor: 1, otherFactor: 0.92 },
-  recency: [{ maxMonths: 3, score: 100 }, { maxMonths: 6, score: 94 }, { maxMonths: 12, score: 82 }, { maxMonths: null, score: 10 }],
+  recency: [{ months: 1.5, score: 100 }, { months: 4.5, score: 94 }, { months: 9, score: 82 }, { months: 15, score: 68 }, { months: 21, score: 52 }, { months: 30, score: 30 }, { months: 42, score: 10 }],
+  recencyBasis: { age: 'elapsed_days_from_valuation_as_of', daysPerMonth: 365.25 / 12, interpolation: 'linear', unknownDateScore: 35 },
   confidence: { formula: '', depthFullAt: 8, weights: { depth: 0.32, compScore: 0.25, completeness: 0.18, consistency: 0.2, sourceDiversity: 0.05 } },
 }
 
@@ -129,16 +130,36 @@ describe('sets and depth', () => {
     expect(d.within12mo).toBe(2)
     expect(d.mlsCount).toBe(2)
   })
-  it('recency buckets are the engine’s calendar-month steps', () => {
-    // Sep 30 → Oct 1 ages every sale a month: the engine counts calendar months
-    expect(engineAgeMonths('2026-09-30', Date.parse('2026-09-30T23:00:00Z'))).toBe(0)
-    expect(engineAgeMonths('2026-09-30', Date.parse('2026-10-01T01:00:00Z'))).toBe(1)
-    expect(engineAgeMonths('2024-04-15', NOW)).toBe(30)
+  it('recency is the engine’s continuous curve on elapsed age — no calendar-month step (RC 7.1)', () => {
+    // Sep 30 → Oct 1 ages a sale by the hours that passed, not by a month.
+    const dpm = 365.25 / 12
+    expect(engineAgeMonths('2026-09-30', Date.parse('2026-09-30T23:00:00Z'))).toBeCloseTo(23 / 24 / dpm, 12)
+    expect(engineAgeMonths('2026-09-30', Date.parse('2026-10-01T01:00:00Z'))).toBeCloseTo(25 / 24 / dpm, 12)
+    const march = (iso: string) => engineRecencyFor(rules, engineAgeMonths('2026-03-20', Date.parse(iso)) as number) as number
+    expect(Math.abs(march('2026-10-01T00:01:00Z') - march('2026-09-30T23:59:00Z'))).toBeLessThan(1e-3)
+    expect(engineAgeMonths('2024-04-15', NOW)).toBeCloseTo(899.625 / dpm, 9)
+    // recencyScore(): knots, linear between, flat outside.
+    expect(engineRecencyFor(rules, 0)).toBe(100)
+    expect(engineRecencyFor(rules, 3)).toBe(97)
+    expect(engineRecencyFor(rules, 6)).toBe(90)
+    expect(engineRecencyFor(rules, 12)).toBe(75)
+    expect(engineRecencyFor(rules, 24)).toBeCloseTo(52 - 22 / 3, 12)
+    expect(engineRecencyFor(rules, 60)).toBe(10)
+    let prev = 100
+    for (let m = 0; m <= 60; m += 0.25) {
+      const r = engineRecencyFor(rules, m) as number
+      expect(r).toBeLessThanOrEqual(prev)
+      prev = r
+    }
     const steps = recencySteps(rules)
-    expect(steps.map((x) => [x.label, x.factor])).toEqual([['≤ 3 mo', 100], ['4–6 mo', 94], ['7–12 mo', 82], ['13+ mo', 10]])
-    expect(recencyStepOf(steps, 3)?.factor).toBe(100)
-    expect(recencyStepOf(steps, 4)?.factor).toBe(94)
-    expect(recencyStepOf(steps, 13)?.factor).toBe(10)
+    expect(steps.map((x) => [x.label, x.factor, x.factorEnd])).toEqual([
+      ['≤ 1.5 mo', 100, 100], ['1.5–4.5 mo', 100, 94], ['4.5–9 mo', 94, 82], ['9–15 mo', 82, 68],
+      ['15–21 mo', 68, 52], ['21–30 mo', 52, 30], ['30–42 mo', 30, 10], ['42+ mo', 10, 10],
+    ])
+    expect(recencyStepOf(steps, 1.5)?.id).toBe('r0')
+    expect(recencyStepOf(steps, 1.6)?.factor).toBe(100)
+    expect(recencyStepOf(steps, 4.6)?.factor).toBe(94)
+    expect(recencyStepOf(steps, 43)?.factor).toBe(10)
     expect(recencyStepOf(steps, null)).toBeNull()
   })
 })

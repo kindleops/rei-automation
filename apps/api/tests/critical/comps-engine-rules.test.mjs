@@ -8,16 +8,21 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  DAYS_PER_MONTH,
+  RECENCY_CURVE as ENGINE_RECENCY_CURVE,
   calculateAcquisitionDecision,
   evaluateCompEligibility,
   normalizePropertyFeatures,
+  recencyScore,
   scoreComparable,
 } from '../../src/lib/acquisition/acquisitionDecisionEngine.js'
 import {
   ENGINE_COMP_DETAIL_COLUMNS,
-  RECENCY_STEPS,
+  RECENCY_BASIS,
+  RECENCY_CURVE,
   engineRulesFor,
   engineSearchWindow,
+  recencyFactorAt,
 } from '../../src/lib/domain/comp-intelligence/comps-engine-rules.js'
 
 const NOW = new Date('2026-10-15T12:00:00Z')
@@ -90,13 +95,24 @@ test('multifamily window and unit band match the engine', () => {
   assert.ok(reasons(s, c({ distance_miles: 1, units_count: 20, sale_date: monthsAgo(37) })).includes('sale_too_old'))
 })
 
-test('recency steps match scoreComparable’s recency factor', () => {
-  // A 36-month multifamily window lets every step but the last be probed.
+test('the recency curve is the engine’s: same knots, same interpolation, elapsed-day basis', () => {
+  // RC 7.1 (2026-10-01): recency used to be a calendar-month step table; it is
+  // now piecewise-linear in elapsed months. The description must equal the engine.
+  assert.deepEqual(RECENCY_CURVE.map((k) => ({ ...k })), ENGINE_RECENCY_CURVE.map((k) => ({ ...k })))
+  assert.equal(RECENCY_BASIS.daysPerMonth, DAYS_PER_MONTH)
+  assert.equal(engineRulesFor('residential').recency, RECENCY_CURVE)
+  assert.equal(recencyScore(null), RECENCY_BASIS.unknownDateScore)
+  assert.equal(recencyFactorAt(null), RECENCY_BASIS.unknownDateScore)
+  for (let m = 0; m <= 60; m += 0.125) assert.ok(Math.abs(recencyFactorAt(m) - recencyScore(m)) < 1e-9, `${m} months`)
+  // Probed through scoreComparable at exact elapsed ages. The 36-month
+  // multifamily window reaches every knot but the last.
   const mf = { property_type: 'Multi-Family', units_count: 4, building_square_feet: 3200 }
   const s = subjectOf(mf)
-  const at = (m) => scoreComparable(s, { ...mf, id: `r${m}`, property_id: `R${m}`, latitude: 45.01, longitude: -93, sale_price: 400000, sale_date: monthsAgo(m), source: 'v_recent_sold_comps' }, { source: 'v_recent_sold_comps', distance_miles: 0.5, now: NOW }).recency_score
-  const expected = (m) => RECENCY_STEPS.find((st) => st.maxMonths === null || m <= st.maxMonths).score
-  for (const m of [0, 3, 4, 6, 7, 12, 13, 18, 19, 24, 25, 36]) assert.equal(at(m), expected(m), `${m} months`)
+  const saleAt = (m) => new Date(NOW.getTime() - m * DAYS_PER_MONTH * 86_400_000).toISOString()
+  const at = (m) => scoreComparable(s, { ...mf, id: `r${m}`, property_id: `R${m}`, latitude: 45.01, longitude: -93, sale_price: 400000, sale_date: saleAt(m), source: 'v_recent_sold_comps' }, { source: 'v_recent_sold_comps', distance_miles: 0.5, now: NOW }).recency_score
+  for (const m of [0, 1.5, 3, 4.5, 6, 7, 9, 12, 13, 15, 18, 21, 24, 25, 30, 33]) {
+    assert.equal(at(m), Math.round(recencyFactorAt(m) * 100) / 100, `${m} months`)
+  }
 })
 
 test('weight is score × confidence × recency × source factor', () => {

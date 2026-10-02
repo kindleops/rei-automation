@@ -82,7 +82,7 @@ export function ModelMode({ m, store }: { m: Workstation; store: FocusStore }) {
             <li>Sale price ≥ <b>{fmtMoney(rules.minSalePrice)}</b> and ≥ <b>{Math.round(rules.nominalPriceToValue * 100)}%</b> of the recorded value (no nominal transfers); package sales rejected</li>
             <li>Comparability score ≥ <b>{rules.minCompScore}</b>; adjusted prices outside median ± max(<b>{rules.outlier.madMultiple}× MAD</b>, <b>{Math.round(rules.outlier.floorShareOfMedian * 100)}%</b> of median) are outliers (needs ≥ {rules.outlier.minObservations} comps)</li>
             <li>Top <b>{rules.maxSelected}</b> by weight = comparability × comp confidence × recency × source (MLS ×{rules.weight.mlsFactor}, other ×{rules.weight.otherFactor})</li>
-            <li>Recency: {rules.recency.map((r, i) => `${r.maxMonths === null ? `>${rules.recency[i - 1]?.maxMonths ?? 0}` : `≤${r.maxMonths}`} mo ${r.score}%`).join(' · ')}</li>
+            <li>Recency, by elapsed days with no month steps: {rules.recency.map((k) => `${k.months} mo ${k.score}%`).join(' → ')}, straight between, flat before and after</li>
           </ul>
         </section>
       ) : null}
@@ -132,7 +132,7 @@ export function ModelMode({ m, store }: { m: Workstation; store: FocusStore }) {
         <section className="ciw-block">
           <header className="ciw-block__head"><span className="ciw-block__title">Since the engine ran</span></header>
           <p className="ciw-muted lc-num">
-            {m.drift.aged ? `${m.drift.aged} of the system comps crossed a calendar-month recency step, so today’s rules weigh them less. ` : ''}
+            {m.drift.aged ? `${m.drift.aged} of the system comps have aged since the engine ran, so today’s rules weigh them less. ` : ''}
             {m.drift.rejected ? `${m.drift.rejected} would now be rejected by the engine’s rules. ` : ''}
             {today && sys ? `The same set with today’s weights: central ${fmtMoney(today.mid)} (${fmtPct((today.mid - sys.mid) / sys.mid, 1, true)}), confidence ${today.confidence}. The stored valuation stays canonical until the engine re-runs.` : ''}
           </p>
@@ -145,7 +145,7 @@ export function ModelMode({ m, store }: { m: Workstation; store: FocusStore }) {
           {missing.length ? <li>Subject fields not recorded: <b>{missing.join(', ')}</b> — the engine cannot compare what the subject record lacks, which lowers completeness.</li> : null}
           <li>Recorded deeds are judged with the engine’s rules for review, but the engine prices only from its own pool of sold comps.</li>
           <li>Comps from the engine’s set keep the weights it priced with; comps you add are scored by its rules today.</li>
-          <li>The engine ages sales by calendar month, so weights step down at month boundaries.</li>
+          <li>Recency falls a little each day, so today’s weights drift slightly from the stored ones between engine runs.</li>
           <li>No listing feed: active and pending supply are not part of this evidence.</li>
         </ul>
       </section>

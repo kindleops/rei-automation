@@ -609,6 +609,10 @@ function hasValue(value) {
   return value !== null && value !== undefined && clean(value) !== '';
 }
 
+// CALENDAR-month age. Feeds only the hard sale-age gates (sale_too_old, the
+// 30-month buyer-purchase window) and the displayed sale_age_months. It steps
+// at 00:00 UTC on the 1st, so it must never feed a score or a weight: those use
+// saleAgeDays() below.
 function ageMonths(dateValue, now = new Date()) {
   const date = new Date(dateValue);
   if (!dateValue || Number.isNaN(date.getTime())) return null;
@@ -618,6 +622,29 @@ function ageMonths(dateValue, now = new Date()) {
       now.getUTCMonth() -
       date.getUTCMonth(),
   );
+}
+
+// Average month length (365.25 / 12), the same month acquisitionMath.monthsBetween uses.
+const DAYS_PER_MONTH = 365.25 / 12;
+const MS_PER_DAY = 86_400_000;
+
+// ELAPSED age in days, measured from the valuation as-of time (`now`) to the
+// sale. It is continuous in `now` and has no calendar boundaries. Future-dated
+// sales clamp to 0, as ageMonths does.
+function saleAgeDays(dateValue, now = new Date()) {
+  if (!dateValue) return null;
+  const date = new Date(dateValue);
+  const asOf = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(date.getTime()) || Number.isNaN(asOf.getTime())) return null;
+  return Math.max(0, (asOf.getTime() - date.getTime()) / MS_PER_DAY);
+}
+
+// The age recency is scored on: elapsed months when the sale date is known.
+// A row carrying only a precomputed calendar age falls back to it.
+function recencyAgeMonths(row = {}) {
+  const days = num(row.sale_age_days);
+  if (days !== null) return days / DAYS_PER_MONTH;
+  return num(row.sale_age_months);
 }
 
 function haversineMiles(lat1, lng1, lat2, lng2) {
@@ -830,6 +857,7 @@ export function normalizePropertyFeatures(row = {}, options = {}) {
     sale_price: salePrice,
     sale_date: saleDate || null,
     sale_age_months: ageMonths(saleDate, options.now),
+    sale_age_days: saleAgeDays(saleDate, options.now),
     sale_source:
       num(row.mls_sold_price) > 0
         ? 'mls_sold'
@@ -1132,16 +1160,64 @@ function scoreFeature(subjectValue, compValue, kind) {
   return numericSimilarity(subjectValue, compValue, kind);
 }
 
+/**
+ * RECENCY IS CONTINUOUS IN ELAPSED TIME (RC 7.1, 2026-10-01).
+ *
+ * This used to be a step table on CALENDAR-month age (<=3 mo 100, <=6 94,
+ * <=12 82, <=18 68, <=24 52, <=36 30, else 10). Every sale from one month
+ * changed weight at the same instant, 00:00 UTC on the 1st. Property 273312064
+ * went $362,500 -> $327,900 (-9.5%) from 09-30 to 10-01 on an identical
+ * 100-candidate pool: its March sales went from "6 months" (94) to "7 months"
+ * (82), and two of them fell out of the top 12.
+ *
+ * Now the score is piecewise-linear in elapsed months (days since the sale,
+ * measured from the valuation as-of time, / DAYS_PER_MONTH). Each old step
+ * value sits at the middle of the age band it used to cover: 0-3 -> 100 at
+ * 1.5, 3-6 -> 94 at 4.5, 6-12 -> 82 at 9, 12-18 -> 68 at 15, 18-24 -> 52 at 21,
+ * 24-36 -> 30 at 30, 36-48 -> 10 at 42. Between knots it is linear; it is flat
+ * at 100 before the first knot and at 10 after the last. The scale and shape
+ * are the same as before; only the jumps are gone.
+ *
+ * Stability bound: the steepest segment falls 12 points over 4.5 months, so
+ * the score moves at most 0.0876 points per day. For a comp in a priced set
+ * (comp_score >= 30, so comp_confidence >= 18, and recency >= 10),
+ * d ln(weight)/d recency <= 0.03/30 + 0.1665/18 + 1/10 = 0.1103. Every weight
+ * therefore changes by at most a factor e^(0.00966 * days). A weighted mean of
+ * positive prices moves by no more than its weights' largest relative change,
+ * so for a fixed selected set |ln V(t2) - ln V(t1)| <= 0.00966 * |t2 - t1| in
+ * days. From 23:59 to 00:01 that is 0.0013%, before the 4-dp weight rounding
+ * and the $100 output rounding.
+ *
+ * The argument may be fractional months. A null age (unknown sale date)
+ * scores 35, as before.
+ */
+const RECENCY_CURVE = Object.freeze([
+  Object.freeze({ months: 1.5, score: 100 }),
+  Object.freeze({ months: 4.5, score: 94 }),
+  Object.freeze({ months: 9, score: 82 }),
+  Object.freeze({ months: 15, score: 68 }),
+  Object.freeze({ months: 21, score: 52 }),
+  Object.freeze({ months: 30, score: 30 }),
+  Object.freeze({ months: 42, score: 10 }),
+]);
+const RECENCY_UNKNOWN_AGE_SCORE = 35;
+
 function recencyScore(months) {
   const value = num(months);
-  if (value === null) return 35;
-  if (value <= 3) return 100;
-  if (value <= 6) return 94;
-  if (value <= 12) return 82;
-  if (value <= 18) return 68;
-  if (value <= 24) return 52;
-  if (value <= 36) return 30;
-  return 10;
+  if (value === null) return RECENCY_UNKNOWN_AGE_SCORE;
+  const firstKnot = RECENCY_CURVE[0];
+  if (value <= firstKnot.months) return firstKnot.score;
+  for (let index = 1; index < RECENCY_CURVE.length; index += 1) {
+    const upper = RECENCY_CURVE[index];
+    if (value <= upper.months) {
+      const lower = RECENCY_CURVE[index - 1];
+      return (
+        lower.score +
+        ((upper.score - lower.score) * (value - lower.months)) / (upper.months - lower.months)
+      );
+    }
+  }
+  return RECENCY_CURVE[RECENCY_CURVE.length - 1].score;
 }
 
 function weightedAverage(rows, valueKey, weightKey = 'weight') {
@@ -1388,7 +1464,9 @@ const NOMINAL_PRICE_TO_VALUE_RATIO = 0.25;
 export function evaluateCompEligibility(subject, comp, now = new Date(), options = {}) {
   const reasons = [];
   const limits = eligibilityLimits(subject);
+  // Calendar age for the hard gate below; elapsed days for recency scoring.
   const age = comp.sale_age_months ?? ageMonths(comp.sale_date, now);
+  const ageDays = comp.sale_age_days ?? saleAgeDays(comp.sale_date, now);
   const distance =
     comp.distance_miles ??
     haversineMiles(subject.latitude, subject.longitude, comp.latitude, comp.longitude);
@@ -1438,6 +1516,7 @@ export function evaluateCompEligibility(subject, comp, now = new Date(), options
     reasons,
     distance_miles: distance === null ? null : round(distance, 2),
     sale_age_months: age,
+    sale_age_days: ageDays,
     // Always present, eligible or not. A bare 'asset_type_mismatch' is exactly
     // what made the Riverdale defect undiagnosable from the outside.
     asset_compatibility: assetVerdict,
@@ -1531,6 +1610,7 @@ export function scoreComparable(subject, rawComp, options = {}) {
   });
   comp.distance_miles = eligibility.distance_miles;
   comp.sale_age_months = eligibility.sale_age_months;
+  comp.sale_age_days = eligibility.sale_age_days;
 
   if (!eligibility.eligible) {
     return {
@@ -1604,7 +1684,7 @@ export function scoreComparable(subject, rawComp, options = {}) {
     availableCategoryWeight > 0
       ? weightedCategoryScore / availableCategoryWeight
       : 0;
-  const recentScore = recencyScore(comp.sale_age_months);
+  const recentScore = recencyScore(recencyAgeMonths(comp));
   const riskCompletenessScore = 0.6 * recentScore + 0.4 * completeness;
   const finalScore = clamp(directScore * 0.95 + riskCompletenessScore * 0.05);
   const compConfidence = clamp(
@@ -1628,8 +1708,20 @@ export function scoreComparable(subject, rawComp, options = {}) {
     adjusted_price: price.adjusted_price,
     price_adjustments: price.adjustments,
     weight: round(weight, 4),
+    // Unrounded, for ordering only (see byWeightDesc). Stored/displayed weight stays 4 dp.
+    weight_exact: weight,
     feature_match_breakdown: categoryBreakdown,
   };
+}
+
+// Rank comps on the unrounded weight. With continuous recency, two comps near
+// the top-12 cut cross once. Ranking on the 4-dp rounded weight made them tie,
+// so the order followed input order and could flip back and forth for hours
+// around the crossing: the 273312064 pool swapped a $240K comp and a $646K comp
+// five times on 2026-08-24, about 10% each time. Step recency never hit this,
+// because weights only changed on the 1st.
+function byWeightDesc(a, b) {
+  return (b.weight_exact ?? b.weight) - (a.weight_exact ?? a.weight);
 }
 
 function removeOutliers(scoredComps = []) {
@@ -1835,7 +1927,7 @@ function calculateInvestorCeiling(subject, valuation, rawPurchases = [], now = n
           : purchase.zip === subject.zip
             ? 0.85
             : 0.55;
-      const recency = recencyScore(purchase.sale_age_months) / 100;
+      const recency = recencyScore(recencyAgeMonths(purchase)) / 100;
       const investorSignal =
         purchase.corporate_owner ||
         includesAny(`${purchase.buyer_type} ${purchase.likely_strategy}`, [
@@ -1885,9 +1977,13 @@ function calculateInvestorCeiling(subject, valuation, rawPurchases = [], now = n
   const mid = weightedQuantile(purchases, 'adjusted_price', 0.5);
   const high = weightedQuantile(purchases, 'adjusted_price', 0.8);
   const distinctBuyers = new Set(purchases.map((purchase) => purchase.buyer_key).filter(Boolean)).size;
-  const recentCount = purchases.filter(
-    (purchase) => purchase.sale_age_months !== null && purchase.sale_age_months <= 12,
-  ).length;
+  // "Recent" means 12 elapsed months from the as-of time. On calendar months,
+  // every purchase from one month left the count together on the 1st. A count
+  // still changes one purchase at a time, but not on the calendar roll.
+  const recentCount = purchases.filter((purchase) => {
+    const months = recencyAgeMonths(purchase);
+    return months !== null && months <= 12;
+  }).length;
   const localCount = purchases.filter(
     (purchase) =>
       (purchase.distance_miles !== null && purchase.distance_miles <= 5) ||
@@ -3266,7 +3362,7 @@ export function calculateAcquisitionDecision({
     }));
   const initiallySelected = scored
     .filter((comp) => comp.eligible && comp.comp_score >= 30 && comp.adjusted_price)
-    .sort((a, b) => b.weight - a.weight);
+    .sort(byWeightDesc);
   const outliers = removeOutliers(initiallySelected);
   // ASSET-FAMILY INVARIANT (defense in depth, 2026-09-27). Eligibility already
   // rejects asset_type_mismatch / unit_count_outside_range; this re-asserts it
@@ -3280,7 +3376,7 @@ export function calculateAcquisitionDecision({
     return false;
   });
   const selected = familySafe
-    .sort((a, b) => b.weight - a.weight)
+    .sort(byWeightDesc)
     .slice(0, MAX_SELECTED_COMPS);
   const excessRejected = familySafe
     .slice(MAX_SELECTED_COMPS)
@@ -4278,9 +4374,13 @@ export async function loadBatchProperties(
 }
 
 export {
+  DAYS_PER_MONTH,
   DECISION_TIERS,
   DEFAULT_TARGET_ASSIGNMENT_FEE,
+  RECENCY_CURVE,
   SCORE_TABLE,
+  recencyScore,
+  saleAgeDays,
 };
 
 export default {

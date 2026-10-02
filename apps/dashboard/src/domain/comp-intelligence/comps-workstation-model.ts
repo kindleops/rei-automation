@@ -122,37 +122,53 @@ export function saleAgeDays(c: Pick<EvidenceComp, 'compare' | 'saleDate'>, now =
   return Number.isFinite(t) ? Math.max(0, Math.round((now - t) / 86_400_000)) : null
 }
 
+/** Average month length the engine scores recency in (365.25 / 12 days). */
+const ENGINE_DAYS_PER_MONTH = 365.25 / 12
+
 /**
- * The engine ages a sale in CALENDAR months (UTC year×12 + month difference —
- * acquisitionDecisionEngine ageMonths), so a sale ages a month at every
- * month boundary, not every 30 days.
+ * The engine scores recency on ELAPSED age: days from the sale to the
+ * valuation as-of time, divided by 30.4375 (acquisitionDecisionEngine
+ * saleAgeDays, RC 7.1). The result is fractional. No calendar boundary moves
+ * it. The calendar-month count still exists in the engine, but only for the
+ * hard sale-age window.
  */
 export function engineAgeMonths(saleDate: string | null | undefined, now: number): number | null {
   if (!saleDate) return null
   const t = Date.parse(saleDate.length === 10 ? `${saleDate}T00:00:00Z` : saleDate)
   if (!Number.isFinite(t) || !Number.isFinite(now)) return null
-  const a = new Date(t)
-  const b = new Date(now)
-  return Math.max(0, (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + b.getUTCMonth() - a.getUTCMonth())
+  return Math.max(0, (now - t) / 86_400_000 / ENGINE_DAYS_PER_MONTH)
 }
 
-export interface RecencyStep { id: string; label: string; minMonths: number; maxMonths: number | null; factor: number }
+/** One segment of the engine's recency curve. The factor glides linearly from `factor` to `factorEnd` across it. */
+export interface RecencyStep { id: string; label: string; minMonths: number; maxMonths: number | null; factor: number; factorEnd: number }
 
-/** Recency buckets ARE the engine's recency steps — the chart shows the weighting the engine applies. */
+const recencyKnots = (rules: EngineRules | null | undefined) =>
+  (rules?.recency ?? []).filter((k) => Number.isFinite(k?.months) && Number.isFinite(k?.score))
+
+const fmtMonths = (m: number) => (Number.isInteger(m) ? String(m) : m.toFixed(1))
+
+/**
+ * Recency bands ARE the engine's curve segments: flat at the first knot's
+ * factor up to it, linear between knots, flat after the last. So the chart
+ * shows the weighting the engine applies.
+ */
 export function recencySteps(rules: EngineRules | null | undefined): RecencyStep[] {
-  if (!rules?.recency?.length) return []
-  let lo = 0
-  return rules.recency.map((st, i) => {
-    const step: RecencyStep = {
-      id: `r${i}`,
-      label: st.maxMonths === null ? `${lo}+ mo` : lo === 0 ? `≤ ${st.maxMonths} mo` : `${lo}–${st.maxMonths} mo`,
-      minMonths: lo,
-      maxMonths: st.maxMonths,
-      factor: st.score,
-    }
-    lo = (st.maxMonths ?? lo) + 1
-    return step
-  })
+  const knots = recencyKnots(rules)
+  if (!knots.length) return []
+  const first = knots[0]
+  const last = knots[knots.length - 1]
+  return [
+    { id: 'r0', label: `≤ ${fmtMonths(first.months)} mo`, minMonths: 0, maxMonths: first.months, factor: first.score, factorEnd: first.score },
+    ...knots.slice(1).map((k, i) => ({
+      id: `r${i + 1}`,
+      label: `${fmtMonths(knots[i].months)}–${fmtMonths(k.months)} mo`,
+      minMonths: knots[i].months,
+      maxMonths: k.months,
+      factor: knots[i].score,
+      factorEnd: k.score,
+    })),
+    { id: `r${knots.length}`, label: `${fmtMonths(last.months)}+ mo`, minMonths: last.months, maxMonths: null, factor: last.score, factorEnd: last.score },
+  ]
 }
 
 export function recencyStepOf(steps: RecencyStep[], months: number | null): RecencyStep | null {
@@ -160,10 +176,17 @@ export function recencyStepOf(steps: RecencyStep[], months: number | null): Rece
   return steps.find((s) => s.maxMonths === null || months <= s.maxMonths) ?? null
 }
 
-/** The engine's recency factor for an age in calendar months (rules.recency). */
+/** The engine's recency factor at an elapsed age in months: recencyScore(), linear between rules.recency knots. */
 export function engineRecencyFor(rules: EngineRules | null | undefined, months: number): number | null {
-  if (!rules) return null
-  return rules.recency.find((s) => s.maxMonths === null || months <= s.maxMonths)?.score ?? null
+  const knots = recencyKnots(rules)
+  if (!knots.length || !Number.isFinite(months)) return null
+  if (months <= knots[0].months) return knots[0].score
+  for (let i = 1; i < knots.length; i += 1) {
+    const a = knots[i - 1]
+    const b = knots[i]
+    if (months <= b.months) return a.score + ((b.score - a.score) * (months - a.months)) / (b.months - a.months)
+  }
+  return knots[knots.length - 1].score
 }
 
 /* ── explanation ──────────────────────────────────────────────────────── */

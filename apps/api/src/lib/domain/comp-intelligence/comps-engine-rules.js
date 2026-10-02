@@ -9,7 +9,7 @@
  *   evaluateCompEligibility  price floor, nominal ratio, size / unit bands
  *   calculateAcquisitionDecision  score floor, MAD outlier rule, top-N cut
  *   scoreComparable          weight = score × confidence × recency × source
- *   recencyScore             the calendar-month recency steps
+ *   recencyScore             the continuous recency curve (elapsed days)
  *   calculateValuation       the valuation-confidence blend
  *
  * tests/critical/comps-engine-rules.test.mjs probes the engine's own exported
@@ -51,16 +51,46 @@ const SIZE_BANDS = Object.freeze({
   commercial: { field: 'sqft', label: 'Building sq ft', min: 0.3, max: 3.5, reason: 'building_size_outside_range' },
 })
 
-/** recencyScore(): the sale's age in calendar months → recency factor. */
-export const RECENCY_STEPS = Object.freeze([
-  { maxMonths: 3, score: 100 },
-  { maxMonths: 6, score: 94 },
-  { maxMonths: 12, score: 82 },
-  { maxMonths: 18, score: 68 },
-  { maxMonths: 24, score: 52 },
-  { maxMonths: 36, score: 30 },
-  { maxMonths: null, score: 10 },
+/**
+ * recencyScore(): the recency factor is CONTINUOUS in the sale's elapsed age.
+ * Age is the days from the sale to the valuation as-of time, divided by
+ * 30.4375 days per month. The factor is linear between these knots, 100 before
+ * the first and 10 after the last. Each knot is an old calendar-month step
+ * value placed at the middle of the band it covered (RC 7.1, 2026-10-01). A
+ * sale with no known date scores 35.
+ */
+export const RECENCY_CURVE = Object.freeze([
+  Object.freeze({ months: 1.5, score: 100 }),
+  Object.freeze({ months: 4.5, score: 94 }),
+  Object.freeze({ months: 9, score: 82 }),
+  Object.freeze({ months: 15, score: 68 }),
+  Object.freeze({ months: 21, score: 52 }),
+  Object.freeze({ months: 30, score: 30 }),
+  Object.freeze({ months: 42, score: 10 }),
 ])
+
+export const RECENCY_BASIS = Object.freeze({
+  age: 'elapsed_days_from_valuation_as_of',
+  daysPerMonth: 365.25 / 12,
+  interpolation: 'linear',
+  unknownDateScore: 35,
+})
+
+/** The engine's recency factor at an elapsed age in (fractional) months. */
+export function recencyFactorAt(months) {
+  const m = Number(months)
+  if (months === null || months === undefined || !Number.isFinite(m)) return RECENCY_BASIS.unknownDateScore
+  const knots = RECENCY_CURVE
+  if (m <= knots[0].months) return knots[0].score
+  for (let i = 1; i < knots.length; i += 1) {
+    if (m <= knots[i].months) {
+      const a = knots[i - 1]
+      const b = knots[i]
+      return a.score + ((b.score - a.score) * (m - a.months)) / (b.months - a.months)
+    }
+  }
+  return knots[knots.length - 1].score
+}
 
 /** The engine's comparable rules for one asset family. Unknown families use the engine's default (residential) window. */
 export function engineRulesFor(family) {
@@ -78,7 +108,8 @@ export function engineRulesFor(family) {
     pool: { source: 'engine pool (recent sold comps)', limit: 100 },
     outlier: { method: 'median_absolute_deviation', minObservations: 5, madMultiple: 3.5, floorShareOfMedian: 0.28 },
     weight: { formula: 'comparability score × comp confidence × recency × source', mlsFactor: 1, otherFactor: 0.92 },
-    recency: RECENCY_STEPS,
+    recency: RECENCY_CURVE,
+    recencyBasis: RECENCY_BASIS,
     confidence: {
       formula: '32% depth + 25% comparability + 18% completeness + 20% consistency + 5% source diversity',
       depthFullAt: 8,

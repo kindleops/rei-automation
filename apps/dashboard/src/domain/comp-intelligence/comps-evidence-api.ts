@@ -61,7 +61,10 @@ export type EngineRules = {
   pool: { source: string; limit: number }
   outlier: { method: string; minObservations: number; madMultiple: number; floorShareOfMedian: number }
   weight: { formula: string; mlsFactor: number; otherFactor: number }
-  recency: Array<{ maxMonths: number | null; score: number }>
+  /** recencyScore() knots: linear in elapsed months between knots, flat before the first and after the last (RC 7.1). */
+  recency: Array<{ months: number; score: number }>
+  /** How the engine measures a sale's age for recency. */
+  recencyBasis?: { age: string; daysPerMonth: number; interpolation: string; unknownDateScore: number }
   confidence: { formula: string; depthFullAt: number; weights: { depth: number; compScore: number; completeness: number; consistency: number; sourceDiversity: number } }
 }
 
