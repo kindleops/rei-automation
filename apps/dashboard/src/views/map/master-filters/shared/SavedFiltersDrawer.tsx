@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lcPrompt } from '../../../../shared/lc'
 
 import {
   deleteMapFilterSaved,
@@ -83,8 +84,8 @@ export function SavedFiltersDrawer({ onClose }: SavedFiltersDrawerProps) {
               <div className="mf-saved__item-actions">
                 <button type="button" className="mf-icon-btn" aria-label="Favorite" onClick={() => void updateMapFilterSaved(item.id, { isFavorite: !item.isFavorite }).then(refresh)}>★</button>
                 <button type="button" className="mf-icon-btn" aria-label="Duplicate" onClick={() => void updateMapFilterSaved(item.id, { action: 'duplicate' }).then(refresh)}>⧉</button>
-                <button type="button" className="mf-icon-btn" aria-label="Rename" onClick={() => {
-                  const next = window.prompt('Rename saved filter', item.name)
+                <button type="button" className="mf-icon-btn" aria-label="Rename" onClick={async () => {
+                  const next = await lcPrompt({ title: 'Rename saved filter', label: 'Filter name', initialValue: item.name, confirmLabel: 'Rename', nativeText: 'Rename saved filter' })
                   if (!next?.trim()) return
                   void updateMapFilterSaved(item.id, { name: next.trim() }).then(refresh)
                 }}>✎</button>

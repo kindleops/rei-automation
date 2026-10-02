@@ -2056,3 +2056,14 @@ html.is-desktop-modern .egm .egm-toolbar__count { line-height: 20px; }
 html.is-desktop-modern .egx-sheet .egx-kpi { padding: 12px; }
 html.is-desktop-modern .egx-sheet .egx-kpi strong { font-size: 18px; }
 html.is-desktop-modern .egx-sheet .egx-kpi span { font-size: 12px; }
+
+/* ── R8.2 residue: the desk list speaks the LC grammar ─────────────────────
+   Universe = LCTabs, view = LCSegmented, sort = LCSelect, tools = LCButton /
+   LCIconButton, counts load as skeletons (never "counting…" / "Loading…").
+   Phones keep the egm pills (EntityGraphMobile gates on isModernDesktop). */
+html.is-desktop-modern .egm .egm-desk-scopes { grid-area: scopes; margin: 20px -4px 0; min-width: 0; }
+html.is-desktop-modern .egm .egm-desk-views { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+html.is-desktop-modern .egm .egm-desk-skel { display: inline-block; height: 10px; vertical-align: middle; }
+@container pane (max-width: 859px) {
+  html.is-desktop-modern .egm .egm-desk-scopes { margin-top: 4px; }
+}

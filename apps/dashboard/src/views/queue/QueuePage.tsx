@@ -26,7 +26,7 @@ import {
 import { Icon } from '../../shared/icons'
 import { resolveAssetTypeIcon } from '../../shared/asset-type-icons'
 import { formatRelativeTime } from '../../shared/formatters'
-import { emitNotification } from '../../shared/NotificationToast'
+import { lcToast } from '../../shared/lc'
 import { buildContextFromQueueItem, type ActiveInboxContext } from '../../modules/inbox/active-context'
 import {
   findQueueItemForActiveContext,
@@ -1236,7 +1236,7 @@ export const QueuePage = ({
         // No credentials is not a queue of 900 invented rows, which is what this
         // branch used to substitute. It is an empty queue and a stated reason.
         setModel(_ => ({ ...emptyQueueModel(), totalCount: 0, currentPage: 0, pageSize, totalPages: 0, hasMore: false, fetchOptions: {} }))
-        emitNotification({
+        lcToast({
           title: 'Queue unavailable',
           detail: 'Supabase is not configured for this build, so no queue work can be read.',
           severity: 'critical',
@@ -1251,7 +1251,7 @@ export const QueuePage = ({
       const result = await Promise.race([fetchQueueModel(buildOpts(page)), timeout])
       if (result && seq === fetchSeqRef.current) setModel(result)
     } catch (err) {
-      emitNotification({
+      lcToast({
         title: 'Queue Load Failed',
         detail: err instanceof Error ? err.message : 'Database sync error',
         severity: 'critical',
@@ -1543,9 +1543,9 @@ export const QueuePage = ({
       setBusyAction('retry-all-failed')
       try {
         const res = await retryAllFailed()
-        emitNotification({ title: res.ok ? 'Retry queued' : 'Retry failed', detail: res.errorMessage ?? 'Done', severity: res.ok ? 'success' : 'critical', sound: res.ok ? 'notification' : undefined })
+        lcToast({ title: res.ok ? 'Retry queued' : 'Retry failed', detail: res.errorMessage ?? 'Done', severity: res.ok ? 'success' : 'critical', sound: res.ok ? 'notification' : undefined })
         if (res.ok) await refreshData(currentPage)
-      } catch { emitNotification({ title: 'Error', detail: 'Could not reach backend', severity: 'critical' }) }
+      } catch { lcToast({ title: 'Error', detail: 'Could not reach backend', severity: 'critical' }) }
       finally { setBusyAction(null) }
       return
     }
@@ -1555,9 +1555,9 @@ export const QueuePage = ({
       setBusyAction('run-queue-now')
       try {
         const res = await runQueueOnce()
-        emitNotification({ title: res.ok ? 'Queue run triggered' : 'Run failed', detail: res.errorMessage ?? 'Processing started', severity: res.ok ? 'success' : 'critical', sound: res.ok ? 'notification' : undefined })
+        lcToast({ title: res.ok ? 'Queue run triggered' : 'Run failed', detail: res.errorMessage ?? 'Processing started', severity: res.ok ? 'success' : 'critical', sound: res.ok ? 'notification' : undefined })
         if (res.ok) setTimeout(() => refreshData(currentPage), 3000)
-      } catch { emitNotification({ title: 'Error', detail: 'Could not reach backend', severity: 'critical' }) }
+      } catch { lcToast({ title: 'Error', detail: 'Could not reach backend', severity: 'critical' }) }
       finally { setBusyAction(null) }
       return
     }
@@ -1593,11 +1593,11 @@ export const QueuePage = ({
       try {
         const res = await resultPromise
         if (res.ok) {
-          emitNotification({ title: 'Done', detail: successMsg, severity: 'success', sound: 'notification' })
+          lcToast({ title: 'Done', detail: successMsg, severity: 'success', sound: 'notification' })
           refreshData(currentPage)
         } else throw new Error(res.errorMessage ?? 'Unknown error')
       } catch (err) {
-        emitNotification({ title: 'Action Failed', detail: err instanceof Error ? err.message : 'Error', severity: 'critical' })
+        lcToast({ title: 'Action Failed', detail: err instanceof Error ? err.message : 'Error', severity: 'critical' })
       }
     }
   }, [model, eventItems, refreshData, currentPage])
@@ -1671,15 +1671,15 @@ export const QueuePage = ({
 
       // Report what actually happened, at the severity it actually warrants.
       if (failures.length === 0) {
-        emitNotification({ title: 'Bulk action complete', detail: `${succeeded} of ${eligible.length} rows processed`, severity: 'success', sound: 'notification' })
+        lcToast({ title: 'Bulk action complete', detail: `${succeeded} of ${eligible.length} rows processed`, severity: 'success', sound: 'notification' })
       } else if (succeeded === 0) {
-        emitNotification({
+        lcToast({
           title: 'Bulk action refused',
           detail: `0 of ${eligible.length} rows changed. ${failures[0]}${failures.length > 1 ? ` (+${failures.length - 1} more)` : ''}`,
           severity: 'critical',
         })
       } else {
-        emitNotification({
+        lcToast({
           title: 'Bulk action partially applied',
           detail: `${succeeded} of ${eligible.length} succeeded, ${failures.length} refused. ${failures[0]}`,
           severity: 'warning',
@@ -1688,7 +1688,7 @@ export const QueuePage = ({
       clearSelection()
       await refreshData(currentPage)
     } catch (err) {
-      emitNotification({ title: 'Bulk action failed', detail: err instanceof Error ? err.message : 'Error', severity: 'critical' })
+      lcToast({ title: 'Bulk action failed', detail: err instanceof Error ? err.message : 'Error', severity: 'critical' })
     } finally {
       setBusyAction(null)
     }

@@ -1,5 +1,5 @@
 import { type FC } from 'react'
-import { emitNotification } from '../../../../shared/NotificationToast'
+import { lcToast } from '../../../../shared/lc'
 
 import type { QueueItem } from '../../../../domain/queue/queue.types'
 
@@ -27,7 +27,7 @@ const healthTone = (h: SenderNumberHealth['health']) =>
 export const SenderNumberHealthPanel: FC<SenderNumberHealthPanelProps> = ({ items }) => {
   const handleAction = (action: string, number: string) => {
     // TODO: wire each action to backend API endpoints
-    emitNotification({
+    lcToast({
       title: `${action}: ${number.slice(-4)}…`,
       detail: 'TODO: wire to sender management API',
       severity: 'warning',

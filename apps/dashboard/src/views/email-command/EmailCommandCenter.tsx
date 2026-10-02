@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { LCPaneLoading } from '../../shared/lc'
 import { Icon } from '../../shared/icons'
 import {
   LOADING,
@@ -1286,7 +1287,7 @@ export const EmailCommandCenter = ({
   const { isMobile: phone, isModernDesktop } = useBreakpoint()
   if (isModernDesktop && paneWidth === '100') {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<LCPaneLoading layout="split" label="Loading Email Command" />}>
         <EmailDesk />
       </Suspense>
     )

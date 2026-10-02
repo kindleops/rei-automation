@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import type { QueueProcessorHealth } from '../../../lib/data/inboxData'
-import { emitNotification } from '../../../shared/NotificationToast'
+import { lcToast } from '../../../shared/lc'
 import { pushRoutePath } from '../../../app/router'
 import { Icon } from '../../../shared/icons'
 
@@ -220,10 +220,10 @@ export function QueueCommandCenter({
 }: QueueCommandCenterProps) {
   // Default stubs for new actions when not wired by parent
   const handleBackfill = onBackfillMessageEvents ?? (() =>
-    emitNotification({ title: 'Backfill Message Events', detail: 'TODO: wire to backend API /api/queue/backfill-message-events', severity: 'warning', sound: 'notification' })
+    lcToast({ title: 'Backfill Message Events', detail: 'TODO: wire to backend API /api/queue/backfill-message-events', severity: 'warning', sound: 'notification' })
   )
   const handleWriteSuppression = onWriteSuppressionFromFailures ?? (() =>
-    emitNotification({ title: 'Write Suppression From Failures', detail: 'TODO: wire to backend API /api/queue/write-suppression-from-failures', severity: 'warning', sound: 'notification' })
+    lcToast({ title: 'Write Suppression From Failures', detail: 'TODO: wire to backend API /api/queue/write-suppression-from-failures', severity: 'warning', sound: 'notification' })
   )
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('')
@@ -264,10 +264,10 @@ export function QueueCommandCenter({
 
   const handleWindowControl = (action: 'open' | 'close') => {
     if (!campaignSelected) {
-      emitNotification({ title: 'Select a campaign first', detail: 'Send window controls are campaign-scoped.', severity: 'warning', sound: 'notification' })
+      lcToast({ title: 'Select a campaign first', detail: 'Send window controls are campaign-scoped.', severity: 'warning', sound: 'notification' })
       return
     }
-    emitNotification({
+    lcToast({
       title: action === 'open' ? 'Open Window Disabled' : 'Close Window Disabled',
       detail: 'Phase 1 exposes planned windows only. Use Campaign View to dry-run the queue plan.',
       severity: 'warning',

@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react'
+import { lcToast } from '../../../shared/lc'
 import { markDealDeskMount } from '../../../domain/inbox/deal-desk-runtime-proof'
 import type { ThreadIntelligenceRecord, ThreadMessage, ThreadContext } from '../../../lib/data/inboxData'
 import type { InboxStatus, SellerStage, InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
@@ -803,7 +804,7 @@ function DealIntelligenceCard({ thread, dealContext, onOpenComps }: { thread: Wo
       body: JSON.stringify({ thread_key: thread.threadKey })
     })
     const result = await res.json()
-    if (result.ok) alert('Deal pushed to underwriting workflow.')
+    if (result.ok) lcToast({ title: 'Deal pushed to underwriting workflow.', severity: 'success' })
   }
 
   return (
@@ -1151,7 +1152,7 @@ export const OfferMemoCard = ({
       setUnderwritingData(data)
     } catch (err) {
       console.error('Underwriting failed:', err)
-      alert('Underwriting failed: ' + (err instanceof Error ? err.message : String(err)))
+      lcToast({ title: 'Underwriting failed: ' + (err instanceof Error ? err.message : String(err)), severity: 'critical' })
     } finally {
       setIsUnderwriting(false)
     }

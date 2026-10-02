@@ -4,7 +4,7 @@ import type { InboxActivityEvent } from '../../../lib/data/inboxActivityData'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import type { InboxSavedFilterPreset, InboxViewSelectValue } from '../inbox-ui-helpers'
 import type { CommandSuggestion } from '../ai-command-center'
-import { emitNotification } from '../../../shared/NotificationToast'
+import { lcToast } from '../../../shared/lc'
 import { formatRelativeTime } from '../../../shared/formatters'
 import { Icon } from '../../../shared/icons'
 import { InboxCommandMap } from '../../../views/map/InboxCommandMap'
@@ -195,28 +195,28 @@ export function CommandView({
     window.setTimeout(() => {
       if (input.includes('show inbox') || input.includes('toggle inbox')) {
         toggleRail('inbox')
-        emitNotification({ title: 'Command View', detail: 'Inbox rail toggled.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'Inbox rail toggled.', severity: 'success' })
       } else if (input.includes('show list') || input.includes('toggle list')) {
         toggleRail('list')
-        emitNotification({ title: 'Command View', detail: 'List rail toggled.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'List rail toggled.', severity: 'success' })
       } else if (input.includes('hide rails')) {
         setVisibleRails([])
-        emitNotification({ title: 'Command View', detail: 'All rails hidden.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'All rails hidden.', severity: 'success' })
       } else if (input.includes('ticker off') || input.includes('hide ticker')) {
         setBottomStripVisible(false)
-        emitNotification({ title: 'Command View', detail: 'Bottom command strip hidden.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'Bottom command strip hidden.', severity: 'success' })
       } else if (input.includes('ticker on') || input.includes('show ticker')) {
         setBottomStripVisible(true)
-        emitNotification({ title: 'Command View', detail: 'Bottom command strip shown.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'Bottom command strip shown.', severity: 'success' })
       } else if (input.includes('priority')) {
         onApplySavedPreset('positive_hot')
-        emitNotification({ title: 'Command View', detail: 'Priority view armed.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'Priority view armed.', severity: 'success' })
       } else if (input.includes('new replies')) {
         onSetViewFilter('new_replies')
-        emitNotification({ title: 'Command View', detail: 'New replies highlighted.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'New replies highlighted.', severity: 'success' })
       } else if (input.includes('spanish')) {
         onSetViewFilter('spanish_language')
-        emitNotification({ title: 'Command View', detail: 'Spanish conversations isolated.', severity: 'success' })
+        lcToast({ title: 'Command View', detail: 'Spanish conversations isolated.', severity: 'success' })
       } else if (input.includes('map only') || input.includes('focus map')) {
         setVisibleRails([])
         setBottomStripVisible(false)
@@ -228,7 +228,7 @@ export function CommandView({
         onSwitchViewMode('dossier')
       } else {
         setCommandStatus('thinking')
-        emitNotification({ title: 'Routing To Copilot', detail: 'Opening live AI command surface for this request.', severity: 'success' })
+        lcToast({ title: 'Routing To Copilot', detail: 'Opening live AI command surface for this request.', severity: 'success' })
         onOpenAi()
       }
 
@@ -248,7 +248,7 @@ export function CommandView({
 
     const Recognition = getSpeechRecognition()
     if (!Recognition) {
-      emitNotification({ title: 'Voice Unavailable', detail: 'Speech recognition is not available in this browser.', severity: 'warning' })
+      lcToast({ title: 'Voice Unavailable', detail: 'Speech recognition is not available in this browser.', severity: 'warning' })
       return
     }
 

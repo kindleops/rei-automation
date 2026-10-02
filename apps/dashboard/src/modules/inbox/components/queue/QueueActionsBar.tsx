@@ -1,6 +1,6 @@
 import { type FC } from 'react'
 import type { QueueCommandMode } from '../QueueCommandCenter'
-import { emitNotification } from '../../../../shared/NotificationToast'
+import { lcToast } from '../../../../shared/lc'
 
 interface QueueActionsBarProps {
   mode: QueueCommandMode
@@ -32,11 +32,11 @@ export const QueueActionsBar: FC<QueueActionsBarProps> = ({
 
   // TODO: wire onBackfillMessageEvents to backend API endpoint /api/queue/backfill-message-events
   const handleBackfill = () =>
-    emitNotification({ title: 'Backfill Message Events', detail: 'TODO: wire to backend API', severity: 'warning', sound: 'notification' })
+    lcToast({ title: 'Backfill Message Events', detail: 'TODO: wire to backend API', severity: 'warning', sound: 'notification' })
 
   // TODO: wire onWriteSuppressionFromFailures to backend API endpoint /api/queue/write-suppression
   const handleWriteSuppression = () =>
-    emitNotification({ title: 'Write Suppression From Failures', detail: 'TODO: wire to backend API', severity: 'warning', sound: 'notification' })
+    lcToast({ title: 'Write Suppression From Failures', detail: 'TODO: wire to backend API', severity: 'warning', sound: 'notification' })
 
   const actions: Array<{
     label: string

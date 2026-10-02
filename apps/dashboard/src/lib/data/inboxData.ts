@@ -21,7 +21,7 @@ import {
   shouldUseSupabase,
   type AnyRecord,
 } from './shared'
-import { emitNotification } from '../../shared/NotificationToast'
+import { lcToast } from '../../shared/lc/toast-bus'
 import {
   buildInboxLiveFetchError,
   classifyInboxBackendFailure,
@@ -2327,7 +2327,7 @@ export const getInboxRowsForView = async (
         // This notification fires ONLY when /api/cockpit/inbox/live itself fails.
         // Enrichment endpoint failures (deal-context, valuation-snapshot) are isolated
         // at the call site and must never reach this path.
-        emitNotification({
+        lcToast({
           title: 'Inbox could not load',
           detail: 'Retry.',
           severity: 'warning',
@@ -2907,7 +2907,7 @@ export const fetchInboxMapPins = async (
   if (error) {
     if (DEV) console.warn('[fetchInboxMapPins] failed', mapErrorMessage(error))
     if (error.message?.includes('does not exist')) {
-      emitNotification({
+      lcToast({
         title: 'Map pins unavailable',
         detail: 'Map pins unavailable — view missing.',
         severity: 'warning'

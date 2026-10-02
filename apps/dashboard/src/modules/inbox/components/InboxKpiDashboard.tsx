@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lcToast } from '../../../shared/lc'
 import type { ViewLayoutMode } from '../../../domain/inbox/view-layout'
 import {
   loadKpiDashboardSummary,
@@ -699,14 +700,14 @@ function UsaMap({ states, selectedState, onStateClick, loading, markets = [] }: 
                 <button
                   type="button"
                   className="kpi-btn kpi-btn--primary"
-                  onClick={() => alert(`Optimizing outreach parameters for ${selectedStateData.stateName}...`)}
+                  onClick={() => lcToast({ title: `Optimizing outreach parameters for ${selectedStateData.stateName}...`, severity: 'info' })}
                 >
                   🚀 Optimize State Routing
                 </button>
                 <button
                   type="button"
                   className="kpi-btn kpi-btn--secondary"
-                  onClick={() => alert(`Initiating TextGrid carrier cleanup for ${selectedStateData.stateName}...`)}
+                  onClick={() => lcToast({ title: `Initiating TextGrid carrier cleanup for ${selectedStateData.stateName}...`, severity: 'info' })}
                 >
                   📡 Cycle Numbers
                 </button>

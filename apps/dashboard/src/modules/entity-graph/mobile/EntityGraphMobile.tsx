@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
+import { LCButton, LCIconButton, LCSegmented, LCSelect, LCTabs } from '../../../shared/lc'
 import { useBreakpoint } from '../../mobile/useBreakpoint'
 import { buildEntityGraphActions } from '../../../domain/entity-graph/entity-graph-actions'
 import {
@@ -760,7 +761,31 @@ export function EntityGraphMobile({
     ? ' matching'
     : unrankedCount !== null && unrankedCount > 0 ? ' ranked' : ''
 
-  const viewSwitch = (
+  // The graph is the relationship network of a record. With a network host
+  // available it opens full-bleed for the open record (or the first in the
+  // cohort) instead of a thumbnail.
+  const pickView = (key: ViewMode) => {
+    if (key === 'graph' && onOpenNetwork) {
+      const anchor = openResult ?? results[0]
+      if (anchor) onOpenNetwork(anchor)
+      return
+    }
+    setViewMode(key)
+  }
+
+  // Desk: LC segmented control + an icon tool for columns (phones keep the pills).
+  const viewSwitch = isModernDesktop ? (
+    <span className="egm-desk-views">
+      <LCSegmented
+        size="sm"
+        label="View mode"
+        value={viewMode}
+        onChange={pickView}
+        options={VIEW_MODES.map((entry) => ({ value: entry.key, label: entry.label, icon: entry.icon }))}
+      />
+      {viewMode === 'table' ? <LCIconButton icon="settings" label="Columns" size="sm" onClick={() => setColumnsOpen(true)} /> : null}
+    </span>
+  ) : (
     <div className="egm-views" role="tablist" aria-label="View mode">
       {VIEW_MODES.map((entry) => (
         <button
@@ -804,7 +829,7 @@ export function EntityGraphMobile({
       error={compositionError}
       collapsed={compositionCollapsed || searching}
       fieldFilters={fieldFilters}
-      cohortLabel={searching ? `matching “${debouncedQuery}”` : activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} · tap a bar to refine` : 'Tap a bar to filter'}
+      cohortLabel={searching ? `matching “${debouncedQuery}”` : activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} · ${isModernDesktop ? 'click' : 'tap'} a bar to refine` : isModernDesktop ? 'Click a bar to filter' : 'Tap a bar to filter'}
       onToggleCollapsed={() => setCompositionCollapsed((c) => !c)}
       onPickDimension={(key) => setDimensionByScope((current) => ({ ...current, [compositionTab]: key }))}
       onToggleFilter={toggleFieldFilter}
@@ -850,7 +875,9 @@ export function EntityGraphMobile({
           <span className="egm-header__total">
             {scopeTotal !== null
               ? `${scopeTotal.toLocaleString()} ${scopeTotalNoun}`
-              : 'counting…'}
+              : isModernDesktop
+                ? <i className="lc-skel egm-desk-skel" style={{ width: 112 }} role="status" aria-label="Counting" />
+                : 'counting…'}
           </span>
         </div>
 
@@ -876,6 +903,37 @@ export function EntityGraphMobile({
           ) : null}
         </div>
 
+        {isModernDesktop ? (
+          <LCTabs
+            className="egm-desk-scopes"
+            label="Universe"
+            value={(debouncedQuery ? crossTypeSearch : universeAll) ? 'all' : scope}
+            items={[
+              { id: 'all', label: 'All' },
+              ...MOBILE_SCOPES.map((entry) => {
+                const count = counts?.[entry.countKey as keyof EntityGraphTabCounts] as number | null | undefined
+                return { id: entry.key as string, label: entry.label, count: typeof count === 'number' ? count : null }
+              }),
+            ]}
+            onChange={(id) => {
+              if (id === 'all') {
+                if (debouncedQuery) setSearchScopeLocked(false)
+                else setUniverseAll(true)
+                exitSelection()
+                return
+              }
+              const key = id as EntityScope
+              setUniverseAll(false)
+              if (scope !== key) {
+                setScope(key)
+                setSortKey(SCOPE_DEFAULT_SORT_KEY[key])
+                setFieldFilters([])
+              }
+              setSearchScopeLocked(true)
+              exitSelection()
+            }}
+          />
+        ) : (
         <div className="egm-scopes" role="tablist" aria-label="Universe">
           {/* ALL: with a query it searches every type; without one it is the
               interconnected-universe overview. */}
@@ -922,6 +980,7 @@ export function EntityGraphMobile({
             )
           })}
         </div>
+        )}
       </header>
 
       {universeAll && !debouncedQuery ? (
@@ -948,7 +1007,7 @@ export function EntityGraphMobile({
       <div className="egm-toolbar is-sticky">
         <span className="egm-toolbar__count">
           {loading && results.length === 0 ? (
-            'Loading…'
+            isModernDesktop ? <i className="lc-skel egm-desk-skel" style={{ width: 132 }} role="status" aria-label="Loading records" /> : 'Loading…'
           ) : (
             <>
               {/* "loaded" implied the rest had failed to arrive. What is
@@ -965,6 +1024,41 @@ export function EntityGraphMobile({
         {/* Desk: one toolbar row — count, view, sort, filter, select. */}
         {isModernDesktop ? viewSwitch : null}
 
+        {isModernDesktop ? (
+          <>
+            {scope === 'contact_methods' ? (
+              <LCIconButton
+                size="sm"
+                icon={contactSubtype === 'phone' ? 'phone' : 'mail'}
+                label={contactSubtype === 'phone' ? 'Showing phones. Click for emails.' : 'Showing emails. Click for phones.'}
+                onClick={() => setContactSubtype((c) => (c === 'phone' ? 'email' : 'phone'))}
+              />
+            ) : null}
+            {sortOptions.length > 1 ? (
+              <LCSelect
+                size="sm"
+                variant="quiet"
+                label="Sort"
+                prefix="Sort"
+                align="end"
+                value={activeSort.key}
+                onChange={(key) => setSortKey(key)}
+                options={sortOptions.map((option) => ({ value: option.key, label: option.label }))}
+              />
+            ) : null}
+            <LCButton size="sm" variant={activeFilterCount > 0 ? 'secondary' : 'quiet'} icon="filter" onClick={() => setFiltersOpen(true)}>
+              {activeFilterCount > 0 ? `Filter · ${activeFilterCount}` : 'Filter'}
+            </LCButton>
+            <LCIconButton
+              size="sm"
+              icon="check-double"
+              selected={selectionMode}
+              label={selectionMode ? 'Exit selection' : 'Select records'}
+              onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+            />
+          </>
+        ) : (
+          <>
         {scope === 'contact_methods' ? (
           <button
             type="button"
@@ -1009,6 +1103,8 @@ export function EntityGraphMobile({
         >
           <Icon name="check-double" />
         </button>
+          </>
+        )}
       </div>
 
         {loading && results.length === 0 ? (

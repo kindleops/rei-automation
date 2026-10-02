@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { LCPaneLoading } from '../../shared/lc'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
 import './styles/closing-desk.css'
 import { useClosingDesk } from './hooks/useClosingDesk'
@@ -34,7 +35,7 @@ export function ClosingDeskView() {
   const { isMobile, isModernDesktop } = useBreakpoint()
   if (isModernDesktop) {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<LCPaneLoading layout="split" label="Loading Closing Desk" />}>
         <ClosingDeskDesktop3 />
       </Suspense>
     )

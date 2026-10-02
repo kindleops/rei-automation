@@ -89,7 +89,6 @@ import {
 import { commitDashboardMessages, patchDashboardThread } from '../../lib/data/dashboardEntityStore'
 import { logRealtimePatchApplied } from '../../lib/data/dashboardDataLayer'
 import { WatchlistProvider } from '../../lib/watchlistContext'
-import { emitNotification } from '../../shared/NotificationToast'
 import { Icon } from '../../shared/icons'
 import { NexusTopBar } from './components/NexusTopBar'
 import { type CampaignControlDiagnostics, type QueueCommandCaps, type QueueCommandMode } from './components/QueueCommandCenter'
@@ -146,7 +145,7 @@ import {
 } from '../mobile/mobile-inbox-bridge'
 import { useDeckSubject } from '../desktop/workspace/deck-subject'
 import { openApp } from '../desktop/workspace/workspace-store'
-import { useLcReducedMotion } from '../../shared/lc'
+import { LCPaneLoading, lcConfirm, lcToast, useLcReducedMotion } from '../../shared/lc'
 import { InboxDeskLedger, type BesideApp } from './desk/InboxDeskLedger'
 import { DeskComposer } from './desk/DeskComposer'
 import { lensDef, resolveDeskLens, splitAddress, type DeskLens } from './desk/ledger-model'
@@ -331,11 +330,16 @@ const ClosingDeskView = lazy(() => import('../../views/closing-desk/ClosingDeskV
 const EMPTY_DESK_MESSAGES: ThreadMessage[] = []
 const EMPTY_DESK_STATUSES: Record<string, string> = {}
 
-const WorkspaceSuspense = ({ children }: { children: ReactNode }) => (
-  <Suspense fallback={<div className="nx-workspace-surface__loading">Loading workspace…</div>}>
-    {children}
-  </Suspense>
-)
+// Desktop: one quiet loading plane (was a centred spinner + "Loading
+// workspace…" stacked in front of Map and Calendar). Phones keep theirs.
+const WorkspaceSuspense = ({ children }: { children: ReactNode }) => {
+  const { isPhone } = useBreakpoint()
+  return (
+    <Suspense fallback={isPhone ? <div className="nx-workspace-surface__loading">Loading workspace…</div> : <LCPaneLoading layout="board" label="Loading workspace" />}>
+      {children}
+    </Suspense>
+  )
+}
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
   tokens.filter(Boolean).join(' ')
@@ -1889,7 +1893,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   }, [])
 
   const announceLayout = useCallback((message: string) => {
-    emitNotification({ title: message, detail: 'NEXUS layout updated', severity: 'success' })
+    lcToast({ title: message, detail: 'NEXUS layout updated', severity: 'success' })
   }, [])
 
   const handleResetFilters = useCallback(() => {
@@ -2032,7 +2036,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleSelectWorkspaceView = useCallback((viewKey: string) => {
     const viewMenuOption = WORKSPACE_VIEW_MENU_OPTIONS.find((option) => option.key === viewKey)
     if (viewMenuOption?.status) {
-      emitNotification({
+      lcToast({
         title: viewMenuOption.status === 'backend_not_ready' ? 'Backend Not Ready' : 'Coming Soon',
         detail: `${viewMenuOption.label} is visible but not fully implemented yet.`,
         severity: 'warning',
@@ -2044,7 +2048,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setSelectedWorkspaceViews((current) => {
         if (current.includes(mappedView)) {
           if (current.length <= 1) {
-            emitNotification({
+            lcToast({
               title: 'View Required',
               detail: 'At least one view must stay active.',
               severity: 'warning',
@@ -2070,7 +2074,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedWorkspaceViews((current) => {
       if (current.includes(asWorkspaceView)) {
         if (current.length <= 1) {
-          emitNotification({
+          lcToast({
             title: 'View Required',
             detail: 'At least one view must stay active.',
             severity: 'warning',
@@ -2085,7 +2089,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setWorkspaceWidthOverrides((existing) => sanitizeWorkspaceWidthOverrides(nextViews, existing))
       return nextViews
     })
-  }, [emitNotification, isMobile, isRouteFullscreen])
+  }, [lcToast, isMobile, isRouteFullscreen])
 
   const handleSelectWorkspaceViewWidth = useCallback((viewKey: string, width: ViewWidthPercent) => {
     const normalizedViewKey = viewKey === 'analytics'
@@ -2122,7 +2126,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedWorkspaceViews((current) => {
       if (!current.includes(viewKey as InboxWorkspaceView)) return current
       if (current.length <= 1) {
-        emitNotification({
+        lcToast({
           title: 'View Required',
           detail: 'At least one view must stay active.',
           severity: 'warning',
@@ -3075,14 +3079,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
       setThreadTranslations(nextTranslations)
       setThreadViewMode('translated')
-      emitNotification({
+      lcToast({
         title: 'Thread Translated',
         detail: `${Object.keys(nextTranslations).length} inbound messages translated to English`,
         severity: 'success',
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to translate thread messages'
-      emitNotification({
+      lcToast({
         title: 'Translation Failed',
         detail: message,
         severity: 'warning',
@@ -3126,14 +3130,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         }
       }
       if (detected && isEnglishLanguage(detected)) {
-        emitNotification({ title: 'The seller writes in English', detail: 'Nothing to translate.', severity: 'info' })
+        lcToast({ title: 'The seller writes in English', detail: 'Nothing to translate.', severity: 'info' })
         return
       }
       // Only when the seller has never written back is the language unknown;
       // then say so rather than translating silently.
       const targetLanguage = detected ?? 'es'
       if (!detected) {
-        emitNotification({ title: 'Translated to Spanish', detail: 'The seller hasn’t replied yet, so their language isn’t known.', severity: 'info' })
+        lcToast({ title: 'Translated to Spanish', detail: 'The seller hasn’t replied yet, so their language isn’t known.', severity: 'info' })
       }
 
       const result = await translateText({
@@ -3150,7 +3154,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       setDraftText(result.translatedText)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to translate draft'
-      emitNotification({
+      lcToast({
         title: 'Draft Translation Failed',
         detail: message,
         severity: 'warning',
@@ -3314,14 +3318,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       }
       await refreshQueueHealth()
       await refreshQueueControl()
-      emitNotification({
+      lcToast({
         title: options?.successTitle || 'Queue Updated',
         detail: options?.successDetail ? options.successDetail(payload) : 'Queue action completed successfully.',
         severity: 'success',
       })
       return payload
     } catch (error) {
-      emitNotification({
+      lcToast({
         title: 'Queue Action Failed',
         detail: error instanceof Error ? error.message : 'Unknown queue action error',
         severity: 'critical',
@@ -3415,9 +3419,15 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     return () => { active = false }
   }, [queueModel, selectedWorkspaceViews])
 
-  const handleQueueCommandModeChange = useCallback((mode: QueueCommandMode) => {
+  const handleQueueCommandModeChange = useCallback(async (mode: QueueCommandMode) => {
     if (mode === 'automatic') {
-      if (!window.confirm('Set Live Limited mode? Queue work still requires explicit caps and scope before any live seller rows are created or sent.')) return
+      const confirmed = await lcConfirm({
+        title: 'Set Live Limited mode?',
+        effects: [{ text: 'Queue work still requires explicit caps and scope before any live seller rows are created or sent.', kind: 'note' }],
+        confirmLabel: 'Set Live Limited',
+        nativeText: 'Set Live Limited mode? Queue work still requires explicit caps and scope before any live seller rows are created or sent.',
+      })
+      if (!confirmed) return
     }
     setQueueCommandMode(mode)
     const action = mode === 'paused' ? 'pause_queue_processor' : 'resume_queue_processor'
@@ -3426,7 +3436,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       method: 'POST',
       body: JSON.stringify({ action, campaign_mode: campaignMode }),
     }).then(() => refreshQueueControl())
-    emitNotification({
+    lcToast({
       title: 'Queue Mode Updated',
       detail: mode === 'paused' ? 'Queue processor is paused.' : mode === 'assisted' ? 'Dry-run preview mode enabled.' : 'Live Limited selected; caps and scope are still required for live work.',
       severity: mode === 'automatic' ? 'warning' : 'success',
@@ -3526,7 +3536,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       method: 'POST',
       body: JSON.stringify({ action: 'emergency_stop' }),
     })
-    emitNotification({
+    lcToast({
       title: 'Emergency Pause Enabled',
       detail: 'Queue processor mode set to off and auto controls paused.',
       severity: 'warning',
@@ -3759,7 +3769,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (DEV) console.log(`[NexusInbox] Mutation Result: ${label}`, result)
       
       if (result && 'ok' in result && !result.ok) {
-        emitNotification({ title: 'Error', detail: result.errorMessage || 'Unknown error', severity: 'critical' })
+        lcToast({ title: 'Error', detail: result.errorMessage || 'Unknown error', severity: 'critical' })
         return false
       }
       if (!options?.skipRefresh) {
@@ -3777,14 +3787,14 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (options?.skipCountRefresh !== true) {
         void refreshInboxCounts()
       }
-      emitNotification({ 
+      lcToast({ 
         title: label, 
         detail: 'Action completed successfully', 
         severity: 'success',
         action: options?.action
       })
     } catch (err) {
-      emitNotification({ title: 'Error', detail: String(err), severity: 'critical' })
+      lcToast({ title: 'Error', detail: String(err), severity: 'critical' })
     }
   }, [refreshInbox, refreshInboxCounts, currentInboxQuery, DEV])
 
@@ -4242,7 +4252,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       // Surface it. The operator clicked the thread, so it will stay unread; silently
       // skipping (DEV-only logging) left them with no way to know why. Full mutation
       // error UX is N.2 — this is the minimum honest signal.
-      emitNotification({
+      lcToast({
         title: 'Could not mark as read',
         detail: 'This conversation has no writable canonical phone route.',
         severity: 'warning',
@@ -4296,7 +4306,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       if (peekPendingInboxThread()?.threadKey !== pending.threadKey) return
       clearPendingInboxThread()
       if (!hit) {
-        emitNotification({ title: 'Conversation not found', detail: `No thread for ${pending.threadKey}.`, severity: 'warning' })
+        lcToast({ title: 'Conversation not found', detail: `No thread for ${pending.threadKey}.`, severity: 'warning' })
         return
       }
       setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
@@ -5107,7 +5117,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const handleSend = useCallback(async (text: string, template?: SmsTemplate | null) => {
     if (!selected || !text.trim() || isSending) return
     if (selectedSuppressed) {
-      emitNotification({
+      lcToast({
         title: 'Suppressed Thread',
         detail: 'No message needed — suppression logged.',
         severity: 'warning',
@@ -5135,7 +5145,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     const activeParticipantPhone = String(selectedParticipant?.canonical_e164 ?? '').trim()
     const selectedThreadPhone = String(selected.canonicalE164 ?? selected.phoneNumber ?? '').trim()
     if (activeParticipantPhone && selectedThreadPhone && activeParticipantPhone !== selectedThreadPhone) {
-      emitNotification({
+      lcToast({
         title: 'No conversation with this contact yet',
         detail: `${selectedParticipant?.display_name || 'This contact'} has no thread on this property, so this message would go to the previous contact. Start from their own thread instead.`,
         severity: 'warning',
@@ -5164,7 +5174,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         clientSendId,
         // The send-now response was lost: say so, and that we are checking --
         // the message may already be out, so this is not the moment to resend.
-        onConfirmingSend: () => emitNotification({
+        onConfirmingSend: () => lcToast({
           title: 'Confirming Send…',
           detail: 'The connection dropped before the server answered. Checking whether the message went out — do not resend.',
           severity: 'info',
@@ -5172,13 +5182,21 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       })
       const overrideAllowed = !result.ok && result.operatorOverrideAllowed === true
       if (overrideAllowed) {
-        const retryMessage =
+        // Same text and the same single explicit decision as the browser
+        // confirm this replaces: the issue, then the question. Dismissing is
+        // "no"; nothing is re-sent without the button.
+        const [issue, question, confirmLabel] =
           result.backendReason === 'recent_delivery_failures'
-            ? 'Recent delivery issue detected. Retry anyway?'
+            ? ['Recent delivery issue detected.', 'Retry anyway?', 'Retry anyway']
             : result.backendReason === 'content_blocked'
-              ? 'Potential content issue detected. Send anyway?'
-              : 'This send was blocked, but operator override is allowed. Retry anyway?'
-        const retry = window.confirm(retryMessage)
+              ? ['Potential content issue detected.', 'Send anyway?', 'Send anyway']
+              : ['This send was blocked, but operator override is allowed.', 'Retry anyway?', 'Retry anyway']
+        const retry = await lcConfirm({
+          title: question,
+          effects: [{ text: issue, kind: 'stops' }],
+          confirmLabel,
+          nativeText: `${issue} ${question}`,
+        })
         if (retry) {
           result = await sendInboxMessageNow(selected, text, {
             selectedTemplate: template ?? null,
@@ -5188,7 +5206,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           })
         }
       }
-      emitNotification({
+      lcToast({
         title: result.ok
           ? 'Message Sent'
           : result.outcomeUnknown
@@ -5301,7 +5319,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       selectedTemplate: payload.template,
       threadContext,
     })
-    emitNotification({
+    lcToast({
       title: result.ok ? 'Reply Queued For Approval' : 'Queue Failed',
       detail: result.ok
         ? `Queue row ${result.queueId ?? 'created'} is waiting for approval`
@@ -5363,7 +5381,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     detail: string,
   ) => {
     setAutonomyControls((current) => ({ ...current, ...patch }))
-    emitNotification({ title, detail, severity: patch.autonomousMode === 'emergency_stop' ? 'critical' : 'success' })
+    lcToast({ title, detail, severity: patch.autonomousMode === 'emergency_stop' ? 'critical' : 'success' })
     await logInboxActivity({
       event_type: 'ai_copilot_interaction',
       thread_key: selected?.threadKey || '__system__',
@@ -5689,7 +5707,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const handleSaveCurrentWorkspaceLayout = () => {
     persistWorkspaceViewOverride(selectedWorkspaceKey, selectedWorkspaceViews)
-    emitNotification({
+    lcToast({
       title: 'Layout Saved',
       detail: 'Current workspace active views were saved locally.',
       severity: 'success',
@@ -5707,7 +5725,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     setSelectedWorkspaceViews(nextViews)
     setWorkspaceWidthOverrides(resolvePresetWidthOverrides(nextViews, preset.widths))
     setLayoutState(resetLayoutMode)
-    emitNotification({
+    lcToast({
       title: 'Layout Reset',
       detail: `${preset.label} restored to default active views.`,
       severity: 'success',
@@ -6409,7 +6427,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         activeViewWidths={workspaceWidths as Partial<Record<string, ViewWidthPercent>>}
         onSelectViewWidth={handleSelectWorkspaceViewWidth}
         onSaveCurrentLayout={handleSaveCurrentWorkspaceLayout}
-        onWorkspaceSettings={() => emitNotification({ title: 'Workspace Settings', detail: 'Workspace settings panel is not available yet.', severity: 'warning' })}
+        onWorkspaceSettings={() => lcToast({ title: 'Workspace Settings', detail: 'Workspace settings panel is not available yet.', severity: 'warning' })}
         onOpenMap={() => setSelectedWorkspaceViews(['command_map'])}
         onOpenDossier={() => handleOpenDealIntelligence(selected?.id ?? null)}
         onOpenAi={() => setActiveOverlay('ai')}
@@ -6693,7 +6711,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           setSchedulePanelOpen(false)
           const payload = scheduledTemplatePayload ?? { text: draftText, template: null }
           if (!selected || !payload.text.trim()) {
-            emitNotification({ title: 'Schedule Failed', detail: 'No message available to schedule.', severity: 'warning' })
+            lcToast({ title: 'Schedule Failed', detail: 'No message available to schedule.', severity: 'warning' })
             return
           }
           void (async () => {
@@ -6701,7 +6719,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               selectedTemplate: payload.template,
               threadContext,
             })
-            emitNotification({
+            lcToast({
               title: result.ok ? 'Scheduled' : 'Schedule Failed',
               detail: result.ok ? `Sent set for ${time.label}` : (result.errorMessage ?? 'Could not schedule message'),
               severity: result.ok ? 'success' : 'critical',

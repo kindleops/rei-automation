@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LCPaneLoading } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import type { ViewLayoutMode, ViewWidthPercent } from '../../../domain/inbox/view-layout'
 import { buildWorkflowStepPayload } from '../WorkflowBuilder'
@@ -116,7 +117,7 @@ export const WorkflowStudioV2 = (props: Parameters<typeof WorkflowStudioWorkspac
   // Desktop (modern product): Workflow Studio 3.0 — the observatory + canvas. The phone keeps its surface.
   if (isModernDesktop && !editor) {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<LCPaneLoading layout="board" label="Loading Workflow Studio" />}>
         <WorkflowStudioDesktop />
       </Suspense>
     )

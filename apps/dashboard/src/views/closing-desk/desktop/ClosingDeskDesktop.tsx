@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
+import { LCPaneLoading } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
 import { PaneRouteContext, replaceRoutePath } from '../../../app/router'
 import {
@@ -235,7 +236,7 @@ export function ClosingDeskDesktop() {
   if (width < 760) {
     return (
       <div ref={rootRef} className="cdx-narrow">
-        <Suspense fallback={null}><ClosingSurface /></Suspense>
+        <Suspense fallback={<LCPaneLoading layout="list" label="Loading Closing Desk" />}><ClosingSurface /></Suspense>
       </div>
     )
   }

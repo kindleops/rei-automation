@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lcPrompt } from '../../../shared/lc'
 import * as backendClient from '../../../lib/api/backendClient'
 import type { InboxWorkflowThread } from '../../../lib/data/inboxWorkflowData'
 import { Icon } from '../../../shared/icons'
@@ -1962,8 +1963,8 @@ export const InboxSidebar = ({
             <Icon name="alert" /> Inbox could not load. Retry.
           </button>
         )}
-        <button type="button" onClick={() => {
-          const name = typeof window !== 'undefined' ? window.prompt('Save current filter as:') : null
+        <button type="button" onClick={async () => {
+          const name = await lcPrompt({ title: 'Save current filter', label: 'Save current filter as:', confirmLabel: 'Save filter', nativeText: 'Save current filter as:' })
           if (!name) return
           const next: LocalSavedFilter[] = [{ id: `${Date.now()}`, name, view: activeViewFilter, query: searchQuery }, ...savedFilters].slice(0, 20)
           persistSavedFilters(next)
