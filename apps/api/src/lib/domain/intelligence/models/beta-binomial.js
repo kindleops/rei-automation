@@ -7,7 +7,20 @@
  * coordinate ascent; no randomness), each group's posterior is
  * Beta(alpha + s, beta + n - s), and every rate is reported with an
  * equal-tailed credible interval. Small groups are flagged low_support.
+ *
+ * PRIOR STRENGTH CAP. When groups look homogeneous the marginal-likelihood
+ * concentration (alpha + beta) runs to its search boundary (1e5): the prior
+ * then outweighs any group's own data, every posterior collapses onto the
+ * pooled mean and credible intervals shrink to a few hundredths of a point --
+ * one market's data "credibly" condemns another's. A small number of groups
+ * cannot support that much certainty about between-group homogeneity, so the
+ * fitted concentration is capped at `maxPriorStrength` pseudo-observations
+ * (default 100: a prior never counts for more than ~100 sends). The uncapped
+ * MLE is still reported (mle_concentration) and `strength_capped` says when the
+ * cap bound. Pass maxPriorStrength: Infinity for the uncapped fit.
  */
+
+export const DEFAULT_MAX_PRIOR_STRENGTH = 100;
 
 const LANCZOS = [
   0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
@@ -140,13 +153,27 @@ function validateGroups(groups) {
  * (mean, concentration). With fewer than two informative groups the prior
  * falls back to the pooled mean with a weak concentration (2), flagged.
  */
-export function fitBetaPrior(rawGroups, { minConcentration = 1e-2, maxConcentration = 1e5, rounds = 40 } = {}) {
+export function fitBetaPrior(
+  rawGroups,
+  { minConcentration = 1e-2, maxConcentration = 1e5, rounds = 40, maxPriorStrength = DEFAULT_MAX_PRIOR_STRENGTH } = {},
+) {
   const groups = validateGroups(rawGroups).filter((g) => g.trials > 0);
   const totalS = groups.reduce((a, g) => a + g.successes, 0);
   const totalN = groups.reduce((a, g) => a + g.trials, 0);
   const pooled = totalN > 0 ? Math.min(MU_MAX, Math.max(MU_MIN, totalS / totalN)) : 0.5;
   if (groups.length < 2) {
-    return { alpha: pooled * 2, beta: (1 - pooled) * 2, mean: pooled, concentration: 2, method: "weak_pooled_fallback", boundary: false, groups: groups.length };
+    return {
+      alpha: pooled * 2,
+      beta: (1 - pooled) * 2,
+      mean: pooled,
+      concentration: 2,
+      mle_concentration: null,
+      strength_capped: false,
+      max_prior_strength: maxPriorStrength,
+      method: "weak_pooled_fallback",
+      boundary: false,
+      groups: groups.length,
+    };
   }
   let mu = pooled;
   let logKappa = Math.log(10);
@@ -159,14 +186,18 @@ export function fitBetaPrior(rawGroups, { minConcentration = 1e-2, maxConcentrat
     mu = Math.min(MU_MAX, Math.max(MU_MIN, expit(z)));
     logKappa = goldenSectionMax((value) => ll(mu, value), Math.log(minConcentration), Math.log(maxConcentration));
   }
-  const concentration = Math.exp(logKappa);
+  const mle = Math.exp(logKappa);
+  const concentration = Math.min(mle, maxPriorStrength);
   return {
     alpha: mu * concentration,
     beta: (1 - mu) * concentration,
     mean: mu,
     concentration,
+    mle_concentration: mle,
+    strength_capped: mle > maxPriorStrength,
+    max_prior_strength: maxPriorStrength,
     method: "marginal_mle",
-    boundary: concentration > maxConcentration * 0.99 || concentration < minConcentration * 1.01,
+    boundary: mle > maxConcentration * 0.99 || mle < minConcentration * 1.01,
     groups: groups.length,
   };
 }
@@ -186,9 +217,9 @@ export function posteriorInterval(successes, trials, prior, { level = 0.9 } = {}
 }
 
 /** Shrink every group toward a fitted (or given) prior; intervals and low_support per group. */
-export function shrinkRates(rawGroups, { prior = null, level = 0.9, lowSupportTrials = 30 } = {}) {
+export function shrinkRates(rawGroups, { prior = null, level = 0.9, lowSupportTrials = 30, maxPriorStrength = DEFAULT_MAX_PRIOR_STRENGTH } = {}) {
   const groups = validateGroups(rawGroups);
-  const fitted = prior || fitBetaPrior(groups);
+  const fitted = prior || fitBetaPrior(groups, { maxPriorStrength });
   const rates = groups.map((g) => {
     const post = posteriorInterval(g.successes, g.trials, fitted, { level });
     return {
@@ -208,9 +239,9 @@ export function shrinkRates(rawGroups, { prior = null, level = 0.9, lowSupportTr
   return { prior: fitted, rates };
 }
 
-function fitChildConcentration(children, { minConcentration = 1e-2, maxConcentration = 1e5 } = {}) {
+function fitChildConcentration(children, { minConcentration = 1e-2, maxConcentration = 1e5, maxPriorStrength = DEFAULT_MAX_PRIOR_STRENGTH } = {}) {
   const informative = children.filter((c) => c.trials > 0);
-  if (informative.length < 2) return { concentration: 2, method: "weak_fallback" };
+  if (informative.length < 2) return { concentration: 2, mle_concentration: null, strength_capped: false, method: "weak_fallback" };
   const ll = (lk) => {
     const kappa = Math.exp(lk);
     let total = 0;
@@ -220,8 +251,8 @@ function fitChildConcentration(children, { minConcentration = 1e-2, maxConcentra
     }
     return total;
   };
-  const lk = goldenSectionMax(ll, Math.log(minConcentration), Math.log(maxConcentration));
-  return { concentration: Math.exp(lk), method: "marginal_mle_given_parent" };
+  const mle = Math.exp(goldenSectionMax(ll, Math.log(minConcentration), Math.log(maxConcentration)));
+  return { concentration: Math.min(mle, maxPriorStrength), mle_concentration: mle, strength_capped: mle > maxPriorStrength, method: "marginal_mle_given_parent" };
 }
 
 /**
@@ -230,7 +261,7 @@ function fitChildConcentration(children, { minConcentration = 1e-2, maxConcentra
  * mean, each template toward its campaign's, with one concentration fitted
  * per level. rows: atomic { [level]: key, successes, trials }.
  */
-export function hierarchicalShrink(rows, { levels, level = 0.9, lowSupportTrials = 30 } = {}) {
+export function hierarchicalShrink(rows, { levels, level = 0.9, lowSupportTrials = 30, maxPriorStrength = DEFAULT_MAX_PRIOR_STRENGTH } = {}) {
   if (!Array.isArray(levels) || !levels.length) throw new RangeError("levels are required");
   const clean = validateGroups(rows);
   const out = [];
@@ -249,13 +280,13 @@ export function hierarchicalShrink(rows, { levels, level = 0.9, lowSupportTrials
     let priorInfo;
     const posteriors = new Map();
     if (depth === 0) {
-      const prior = fitBetaPrior(list);
-      priorInfo = { method: prior.method, mean: prior.mean, concentration: prior.concentration };
+      const prior = fitBetaPrior(list, { maxPriorStrength });
+      priorInfo = { method: prior.method, mean: prior.mean, concentration: prior.concentration, mle_concentration: prior.mle_concentration, strength_capped: prior.strength_capped };
       for (const g of list) posteriors.set(g.key, posteriorInterval(g.successes, g.trials, prior, { level }));
     } else {
       const children = list.map((g) => ({ ...g, parentMean: parentMeans.get(g.parentKey) }));
-      const fit = fitChildConcentration(children);
-      priorInfo = { method: fit.method, concentration: fit.concentration };
+      const fit = fitChildConcentration(children, { maxPriorStrength });
+      priorInfo = { method: fit.method, concentration: fit.concentration, mle_concentration: fit.mle_concentration, strength_capped: fit.strength_capped };
       for (const c of children) {
         const m = Math.min(MU_MAX, Math.max(MU_MIN, c.parentMean));
         posteriors.set(c.key, posteriorInterval(c.successes, c.trials, { alpha: m * fit.concentration, beta: (1 - m) * fit.concentration }, { level }));

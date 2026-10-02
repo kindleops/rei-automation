@@ -214,3 +214,33 @@ test("beta-binomial: incomplete beta and quantiles, EB prior, shrinkage with cre
   assert.ok(tiny.posterior_mean > 0.02, "0/3 is not reported as a 0% rate");
   assert.ok(Math.abs(tiny.posterior_mean - parent.posterior_mean) < 0.05, "it shrinks toward its own market");
 });
+
+test("prior strength cap: homogeneous groups no longer collapse credible intervals (controller finding)", () => {
+  // Five markets with near-identical rates: the marginal MLE concentration runs to its 1e5 boundary.
+  const groups = [
+    { key: "dallas", successes: 30, trials: 400 },
+    { key: "minneapolis", successes: 31, trials: 410 },
+    { key: "phoenix", successes: 29, trials: 390 },
+    { key: "tulsa", successes: 30, trials: 405 },
+    { key: "tiny", successes: 0, trials: 12 },
+  ];
+  const uncapped = fitBetaPrior(groups, { maxPriorStrength: Infinity });
+  assert.ok(uncapped.concentration > 1e4, `uncapped concentration ${uncapped.concentration}`);
+  const collapsed = shrinkRates(groups, { prior: uncapped }).rates.find((r) => r.key === "tiny");
+  assert.ok(collapsed.upper - collapsed.lower < 0.005, "uncapped: a 0/12 market gets a ~0.4 pp interval borrowed from the others");
+
+  const capped = fitBetaPrior(groups);
+  assert.equal(capped.concentration, 100);
+  assert.equal(capped.strength_capped, true);
+  assert.ok(capped.mle_concentration > 1e4, "the uncapped MLE is still reported");
+  const { rates } = shrinkRates(groups);
+  const tiny = rates.find((r) => r.key === "tiny");
+  assert.ok(tiny.upper - tiny.lower > 0.05, `capped interval width ${tiny.upper - tiny.lower}`);
+  assert.ok(tiny.lower <= tiny.posterior_mean && tiny.posterior_mean <= tiny.upper);
+  // heterogeneous groups fit below the cap and are untouched
+  const spread = fitBetaPrior([{ successes: 2, trials: 100 }, { successes: 30, trials: 100 }, { successes: 12, trials: 100 }]);
+  assert.equal(spread.strength_capped, false);
+  assert.equal(spread.concentration, spread.mle_concentration);
+  const levels = hierarchicalShrink(groups.map((g) => ({ market: g.key, ...g })), { levels: ["market"] });
+  assert.equal(levels[0].prior.strength_capped, true);
+});
