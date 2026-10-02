@@ -15,13 +15,35 @@ import { sound } from '../../../shared/sound'
  */
 
 export interface DragSource {
-  kind: 'app' | 'instance'
+  kind: 'app' | 'instance' | 'widget'
   /** route + query the app should open with (contextual when there is a selection) */
   path: string
   app: string
   label: string
   instanceId?: string
+  /**
+   * kind 'widget': a Home board widget being moved / resized, or a library
+   * widget being placed. Only a registered drop surface (the Home board) takes
+   * it — it never lands in a workspace pane.
+   */
+  widget?: { id: string | null; op: 'move' | 'resize' | 'add'; type?: string; grabX: number; grabY: number }
 }
+
+/**
+ * A surface that takes drags itself (the Home board in edit mode): checked
+ * before the panes, so the same gesture — threshold, Esc, click suppression —
+ * composes widgets on Home and apps in the workspace. One DnD system.
+ */
+export interface DropSurface {
+  id: string
+  accepts(source: DragSource, x: number, y: number): boolean
+  over(source: DragSource, x: number, y: number): void
+  leave(source: DragSource): void
+  drop(source: DragSource, x: number, y: number): boolean
+}
+
+const surfaces = new Set<DropSurface>()
+export function registerDropSurface(s: DropSurface): () => void { surfaces.add(s); return () => { surfaces.delete(s) } }
 
 export interface DragSnapshot {
   active: boolean
@@ -35,9 +57,11 @@ export interface DragSnapshot {
   replaceRect: L.Rect | null
   /** the workspace's own rect, captured when the drag began */
   root: L.Rect | null
+  /** the drop surface under the pointer (e.g. 'home'), when one takes the drag */
+  surface: string | null
 }
 
-const IDLE: DragSnapshot = { active: false, source: null, x: 0, y: 0, target: null, rects: {}, replaceRect: null, root: null }
+const IDLE: DragSnapshot = { active: false, source: null, x: 0, y: 0, target: null, rects: {}, replaceRect: null, root: null, surface: null }
 let snap: DragSnapshot = IDLE
 const listeners = new Set<() => void>()
 const set = (patch: Partial<DragSnapshot>) => { snap = { ...snap, ...patch }; listeners.forEach((l) => l()) }
@@ -105,17 +129,32 @@ export function beginDrag(e: { clientX: number; clientY: number; pointerId: numb
   const sy = e.clientY
   let active = false
   let resolved: DragSource | null = null
+  let surface: DropSurface | null = null
 
+  let lastX = sx
+  let lastY = sy
   const move = (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId) return
+    lastX = ev.clientX
+    lastY = ev.clientY
     if (!active) {
       if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < THRESHOLD) return
       active = true
       resolved = typeof source === 'function' ? source() : source
       document.documentElement.classList.add('lc-ws-dragging')
-      set({ active: true, source: resolved, x: ev.clientX, y: ev.clientY, rects: measurePanes(), target: null, replaceRect: null, root: workspaceRect() })
-      sound.workspace.pickup()
+      set({ active: true, source: resolved, x: ev.clientX, y: ev.clientY, rects: measurePanes(), target: null, replaceRect: null, root: workspaceRect(), surface: null })
+      // a widget lift is silent here; the semantic sound layer decides later
+      if (resolved.kind !== 'widget') sound.workspace.pickup()
     }
+    const over = [...surfaces].find((s) => s.accepts(resolved!, ev.clientX, ev.clientY)) ?? null
+    if (surface && surface !== over) surface.leave(resolved!)
+    surface = over
+    if (over) {
+      over.over(resolved!, ev.clientX, ev.clientY)
+      set({ x: ev.clientX, y: ev.clientY, target: null, replaceRect: null, surface: over.id })
+      return
+    }
+    if (resolved!.kind === 'widget') { set({ x: ev.clientX, y: ev.clientY, target: null, replaceRect: null, surface: null }); return }
     const hit = hitTest(ev.clientX, ev.clientY, resolved!)
     set({ x: ev.clientX, y: ev.clientY, target: hit.target, replaceRect: hit.replaceRect })
   }
@@ -131,6 +170,15 @@ export function beginDrag(e: { clientX: number; clientY: number; pointerId: numb
     const { target } = snap
     const src = resolved!
     set(IDLE)
+    if (surface) {
+      const s = surface
+      surface = null
+      if (!commit) { s.leave(src); if (src.kind !== 'widget') sound.workspace.cancel(); return }
+      const ok = s.drop(src, lastX, lastY)
+      if (src.kind !== 'widget') { if (ok) sound.workspace.drop('stack'); else sound.workspace.cancel() }
+      return
+    }
+    if (src.kind === 'widget') return
     if (!commit || !target || target.blocked) { sound.workspace.cancel(); return }
     const path = src.kind === 'instance' ? (getWorkspace().layout.instances[src.instanceId!]?.path ?? src.path) : src.path
     const result = openApp(path, { pane: target.pane, zone: target.zone, share: target.share })

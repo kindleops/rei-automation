@@ -328,6 +328,8 @@ html.lc-ws-dragging .ws-pane > .ws-pane__frame { filter: saturate(0.82) brightne
   will-change: transform;
 }
 .ws-drag-chip .ws-glyph { color: color-mix(in srgb, var(--app, var(--lc-ink-1)) 80%, white); }
+/* over the Home board in edit mode: the app becomes its default widget */
+.ws-drag-chip__to { font: 560 11px/1 var(--lc-font-ui); color: rgb(var(--lc-select-rgb, 94 234 212)); padding-left: 8px; margin-left: 2px; box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.12); }
 
 /* ── themes ───────────────────────────────────────────────────────────── */
 

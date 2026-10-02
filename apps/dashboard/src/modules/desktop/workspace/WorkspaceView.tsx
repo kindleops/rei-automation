@@ -367,7 +367,8 @@ function NodeView({ node, ws, chrome, rects, onResizing }: { node: L.LayoutNode;
 
 function DropOverlay() {
   const drag = useDrag()
-  if (!drag.active || !drag.source) return null
+  // a Home widget draws its own lift on the board; nothing of the pane overlay applies
+  if (!drag.active || !drag.source || drag.source.kind === 'widget') return null
   const ox = drag.root?.x ?? 0
   const oy = drag.root?.y ?? 0
   const t = drag.target
@@ -392,6 +393,7 @@ function DropOverlay() {
       <div className="ws-drag-chip" style={{ transform: `translate(${drag.x - ox + 14}px, ${drag.y - oy + 12}px)`, ['--app' as string]: appHue(drag.source.app) }}>
         <Glyph app={drag.source.app} size={14} />
         <b>{drag.source.label}</b>
+        {drag.surface === 'home' ? <small className="ws-drag-chip__to">Add to Home</small> : null}
       </div>
     </div>
   )
