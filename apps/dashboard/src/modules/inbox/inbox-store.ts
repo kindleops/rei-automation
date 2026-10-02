@@ -193,27 +193,12 @@ const rowBelongsToBucket = (row: Record<string, unknown>, bucketKey: string): bo
     return outboundMs > 0 && (Date.now() - outboundMs) > WAITING_REPLY_WINDOW_MS
   }
   if (key === 'new_replies') {
-    if (['dead', 'suppressed'].includes(rowBucket)) return false
-    const direction = String(getRowValue(row, 'latest_message_direction', 'latestDirection', 'direction') ?? '').trim().toLowerCase()
-    const normalizedDirection = direction === 'in' || direction === 'incoming' ? 'inbound'
-      : direction === 'out' || direction === 'outgoing' ? 'outbound'
-        : direction
-    if (normalizedDirection !== 'inbound') return false
-    if (Number(getRowValue(row, 'pending_queue_count', 'pendingQueueCount') ?? 0) > 0) return false
-    const lastOut = getRowValue(row, 'last_outbound_at', 'lastOutboundAt')
-    const lastIn = getRowValue(row, 'last_inbound_at', 'lastInboundAt', 'latest_message_at', 'latestMessageAt')
-    const inMs = rowTimestampMs(lastIn)
-    const outMs = rowTimestampMs(lastOut)
-    if (!inMs) return false
-    if (outMs > 0 && inMs < outMs) return false
-    const isRead = getRowValue(row, 'is_read', 'isRead') === true
-    const isActioned = getRowValue(row, 'is_actioned', 'isActioned') === true
-    const isTerminal = getRowValue(row, 'opt_out', 'optOut') === true
-      || getRowValue(row, 'wrong_number', 'wrongNumber') === true
-      || getRowValue(row, 'not_interested', 'notInterested') === true
-      || getRowValue(row, 'is_suppressed', 'isSuppressed') === true
-    if (isRead || isActioned || isTerminal) return false
-    return rowBucket === 'new_replies' || normalizedDirection === 'inbound'
+    // ONE definition (7.2): v_inbox_thread_state_buckets.in_new_replies. The
+    // client never derives membership from direction / timestamps / intents;
+    // it trusts the server flag, or the server-assigned bucket on the row.
+    const flag = getRowValue(row, 'in_new_replies', 'inNewReplies')
+    if (typeof flag === 'boolean') return flag
+    return rowBucket === 'new_replies'
   }
   return rowBucket === key
 }

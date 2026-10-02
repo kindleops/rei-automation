@@ -802,7 +802,12 @@ const resolveRealtimeBucketForRow = (row: Record<string, unknown>, table: string
   if (row.needs_review === true || intent.includes('manual_review')) return 'needs_review'
   if (table === 'send_queue') return 'follow_up'
   const direction = normalizeRealtimeDirection(row.direction)
-  if (direction === 'inbound') return 'new_replies'
+  // New Replies membership is decided ONLY by the server view
+  // (v_inbox_thread_state_buckets.in_new_replies, 7.2): an inbound event does
+  // not make a thread a New Reply here (a reaction, a sold, a wrong person
+  // must not). The thread keeps its server bucket; the authoritative counts
+  // refresh right after the patch.
+  if (direction === 'inbound') return ''
   if (direction === 'outbound') return 'follow_up'
   return 'cold'
 }
@@ -1726,6 +1731,13 @@ export const useInboxData = (options: { initialSourceMode?: InboxSourceMode; pau
               table,
               eventType: payload.eventType ?? null,
             })
+            // An inbound can change New Replies membership; only the server view
+            // decides it, so reconcile the chips from v_inbox_bucket_counts.
+            if (table === 'message_events' && patch.latestDirection === 'inbound') {
+              refreshAuthoritativeViewCounts(dispatch, (warning) => {
+                metaRef.current.countsFetchWarning = warning
+              })
+            }
             logRealtimePatchApplied({
               table,
               eventType: payload.eventType ?? null,
