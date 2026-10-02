@@ -65,6 +65,66 @@ export function loggedRows(records, outcomeId, { leadsOnly }) {
   return { rows: valid, counts };
 }
 
+/** Wilson 95% interval for k of n. */
+export function wilson(k, n, z = 1.959964) {
+  if (!n) return { rate: null, lower: null, upper: null };
+  const p = k / n;
+  const d = 1 + (z * z) / n;
+  const c = (p + (z * z) / (2 * n)) / d;
+  const h = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return { rate: p, lower: Math.max(0, c - h), upper: Math.min(1, c + h) };
+}
+
+const median = (v) => {
+  if (!v.length) return null;
+  const s = [...v].sort((a, b) => a - b);
+  return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+};
+
+/**
+ * Template quasi-experiment table (8.1): per logged template and per template
+ * family, on verified legacy rotation sends. Delivery/filtering per send;
+ * reply / meaningful reply / opt-out per episode lead (mature labels only).
+ */
+export function quasiExperiment(records, { familyOf }) {
+  const groups = new Map();
+  const add = (key, r) => {
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  };
+  for (const r of records) {
+    const rot = r.strata?.rotation;
+    if (r.strata?.kind !== "first_touch_legacy_feeder" || !rot || !(rot.hash_matches_logged_index && rot.pool_logged_completely && rot.chosen_matches_pool_slot)) continue;
+    const t = String(r.features["template.template_id"]);
+    add(`template:${t}`, r);
+    add(`family:${familyOf(t)}`, r);
+  }
+  const rate = (rows, id) => {
+    const mature = rows.filter((r) => r.outcomes[id]?.status === "mature");
+    return { n: mature.length, ...wilson(mature.filter((r) => r.outcomes[id].value === true).length, mature.length) };
+  };
+  const out = { templates: [], families: [] };
+  for (const [key, rows] of [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))) {
+    const leads = rows.filter((r) => r.strata.episode_lead === true);
+    const latencies = leads
+      .filter((r) => r.outcomes["reply_any@1"]?.value === true && r.outcomes["reply_any@1"].observed_at)
+      .map((r) => (Date.parse(r.outcomes["reply_any@1"].observed_at) - Date.parse(r.as_of)) / 3600e3);
+    const entry = {
+      key: key.replace(/^(template|family):/, ""),
+      sends: rows.length,
+      delivered: rate(rows, "delivered@1"),
+      filtered: rate(rows, "carrier_filtered@1"),
+      leads: leads.length,
+      reply_any: rate(leads, "reply_any@1"),
+      reply_meaningful: rate(leads, "reply_meaningful@1"),
+      opt_out_keyword: rate(leads, "opt_out_keyword@1"),
+      median_reply_latency_hours: median(latencies),
+    };
+    (key.startsWith("template:") ? out.templates : out.families).push(entry);
+  }
+  return out;
+}
+
 export function buildPolicies({ templates, blocked, governance }) {
   const attr = new Map(templates.map((t) => [String(t.template_id), t]));
   const lengths = templates.map((t) => t.length).filter(Number.isFinite).sort((a, b) => a - b);
@@ -109,6 +169,8 @@ export function runOpe({ records, templates, blocked, governance }) {
     }
     out.rewards[name] = entry;
   }
+  const attr = new Map(templates.map((t) => [String(t.template_id), t]));
+  out.quasi_experiment = quasiExperiment(records, { familyOf: (t) => attr.get(t)?.variant_group_key || "unknown_family" });
   return out;
 }
 
@@ -148,6 +210,32 @@ function renderReport(result, { datasetManifest }) {
       lines.push("");
     }
   }
+  const q = result.quasi_experiment;
+  const qRow = (e) =>
+    `| ${e.key} | ${e.sends} | ${ciText({ estimate: e.delivered.rate, ...e.delivered }, 3)} | ${ciText({ estimate: e.filtered.rate, ...e.filtered }, 3)} | ${e.leads} | ${ciText({ estimate: e.reply_any.rate, ...e.reply_any }, 3)} | ${ciText({ estimate: e.reply_meaningful.rate, ...e.reply_meaningful }, 3)} | ${ciText({ estimate: e.opt_out_keyword.rate, ...e.opt_out_keyword }, 3)} | ${f(e.median_reply_latency_hours, 2)} |`;
+  const qHead = "| key | sends | delivered [95% CI] | carrier-filtered [95% CI] | episode leads | real reply (reply_any) [95% CI] | meaningful reply [95% CI] | opt-out keyword (7d) [95% CI] | median reply latency (h) |";
+  lines.push(
+    "## Template quasi-experiment report (IC 8.1)",
+    "",
+    "**Assumptions.** (1) Within a logged pool the template was assigned by a hash of identifiers, unrelated to the seller's propensity to answer, so differences between templates that shared pools are not confounded by who received them; (2) templates did NOT share all pools (pools vary by language, owner history and time), so raw per-template rates below still mix in pool composition -- the IPW/SNIPW tables above are the pool-adjusted comparison; (3) carrier behaviour drifted over Apr-Aug and changed again on 2026-09-28, so none of this predicts a template's performance today. Rates are descriptive with Wilson 95% intervals; **no causal claim is made from a single row.**",
+    "",
+    "**Not reported:** positive / qualified replies (they come from classifier intents -- `detected_intent`, 23% unclear, no version stamp -- not a trustworthy label); wrong person (the versioned 7.2 wrong-person rule was not injected into this labeler run, so `wrong_person@1` is unlabelled).",
+    "",
+    "### By template family (sms_templates.variant_group_key)",
+    "",
+    qHead,
+    "|---|---|---|---|---|---|---|---|---|",
+    ...q.families.map(qRow),
+    "",
+    "### By template (logged >= 30 sends)",
+    "",
+    qHead,
+    "|---|---|---|---|---|---|---|---|---|",
+    ...q.templates.filter((e) => e.sends >= 30).map(qRow),
+    "",
+    `${q.templates.filter((e) => e.sends < 30).length} templates with fewer than 30 logged sends are in ope.json only.`,
+    "",
+  );
   lines.push(
     "## Reading the per-template tables",
     "",

@@ -42,17 +42,17 @@ import { haversineMiles, pointIndex } from "./lib/geo-tiles.mjs";
 import { writeDatasetCard } from "./lib/dataset-card.mjs";
 
 export const DATASETS_ROOT = "/Users/ryankindle/.claude/jobs/c39b0175/tmp/ic8/datasets";
-export const DATASET_NAME = "first_touch_sends_v2";
+export const DATASET_NAME = "first_touch_sends_v3";
 export const LABEL_NOW = "2026-10-02T00:00:00.000Z";
 export const WINDOW = Object.freeze({ from: "2026-04-20T00:00:00.000Z", to: "2026-09-29T00:00:00.000Z" });
 
-export const SNAPSHOT_FEATURE_SET = "seller_first_touch_all@2";
+export const SNAPSHOT_FEATURE_SET = "seller_first_touch_all@3";
 
 export function resolveAllFieldsSet(registry) {
-  if (!registry.hasSet(SNAPSHOT_FEATURE_SET)) throw new Error(`${SNAPSHOT_FEATURE_SET} missing: needs foundation commit fddd8b0f or later`);
+  if (!registry.hasSet(SNAPSHOT_FEATURE_SET)) throw new Error(`${SNAPSHOT_FEATURE_SET} missing: needs foundation commit 254fc90e or later`);
   return {
     id: SNAPSHOT_FEATURE_SET,
-    note: "seller_first_touch@1 + the eight personal_attribute fields (fb5682ba) + the 40 market_investor_activity features (fddd8b0f); every @1 and @2 arm is a subset of these columns",
+    note: "seller_first_touch@1 + the eight personal_attribute fields (fb5682ba) + the 40 market_investor_activity features (fddd8b0f) + school district and the two modeled-wealth bands (254fc90e); every @1/@2/@3 arm and variant B-E is a subset of these columns",
   };
 }
 
@@ -132,10 +132,13 @@ export async function loadInboundInMemory({ supabase, secret, log }) {
 export function prepareSource({ work, inbound }) {
   const sends = work.sends;
   const coords = byKey(work.property_coords, "property_id");
+  const schools = byKey(work.property_school, "property_id");
+  const wealth = byKey(work.prospect_wealth, "prospect_id");
   const properties = new Map(
     work.properties.map((p) => {
       const c = coords.get(String(p.property_id));
-      return [String(p.property_id), { ...p, latitude: c?.latitude ?? null, longitude: c?.longitude ?? null }];
+      const school = schools.get(String(p.property_id));
+      return [String(p.property_id), { ...p, latitude: c?.latitude ?? null, longitude: c?.longitude ?? null, school_district_name: school?.school_district_name ?? null }];
     }),
   );
   const salesFor = marketSalesIndex(work.market_sales);
@@ -159,7 +162,12 @@ export function prepareSource({ work, inbound }) {
     const candidates = (phonesByOwner.get(send.master_owner_id) || [])
       .filter((p) => p.hk && p.hk === send.hk && p.primary_prospect_id)
       .sort((a, b) => String(a.phone_id).localeCompare(String(b.phone_id)));
-    return candidates.length ? prospects.get(String(candidates[0].primary_prospect_id)) || null : null;
+    if (!candidates.length) return null;
+    const id = String(candidates[0].primary_prospect_id);
+    const person = prospects.get(id);
+    if (!person) return null;
+    const w = wealth.get(id);
+    return { ...person, net_asset_value: w?.net_asset_value ?? null, buying_power: w?.buying_power ?? null };
   }
 
   const rowFor = (send) => {
@@ -287,6 +295,8 @@ export function readWork(workDir = DEFAULT_WORK_DIR) {
     prospects: read("prospects"),
     campaigns: read("campaigns"),
     property_coords: read("property_coords"),
+    property_school: read("property_school"),
+    prospect_wealth: read("prospect_wealth"),
     market_sales: [...read("mv_sales"), ...read("engine_pool_sales")],
     marketSalesManifest: JSON.parse(fs.readFileSync(path.join(workDir, "market-sales-manifest.json"), "utf8")),
     extractManifest: JSON.parse(fs.readFileSync(path.join(workDir, "extract-manifest.json"), "utf8")),

@@ -63,6 +63,15 @@ export const COLUMN_SPECS = Object.freeze({
   "prospect.household_income_band": { kind: "categorical", name: "pa_income_band" },
   "prospect.education_level": { kind: "categorical", name: "pa_education" },
   "prospect.occupation_group": { kind: "categorical", name: "pa_occupation" },
+  "property.school_district": { kind: "categorical", name: "school_district" },
+  "prospect.net_asset_value_band": { kind: "categorical", name: "pa_net_asset_band" },
+  "prospect.buying_power_band": { kind: "categorical", name: "pa_buying_power_band" },
+  "owner.portfolio_property_count": { kind: "numeric", name: "log1p_portfolio_properties", transform: (v) => Math.log1p(Math.min(v, 10000)), doc: "log1p(min(property_count, 10000))" },
+  "owner.portfolio_total_units": { kind: "numeric", name: "log1p_portfolio_units", transform: (v) => Math.log1p(Math.min(v, 100000)), doc: "log1p(min(units, 100000))" },
+  "owner.max_ownership_years": { kind: "numeric", name: "max_ownership_years", transform: (v) => Math.min(v, 80), doc: "min(years, 80)" },
+  "owner.portfolio_equity_share_band": { kind: "categorical", name: "portfolio_equity_band" },
+  "owner.active_lien_count": { kind: "numeric", name: "log1p_active_liens", transform: (v) => Math.log1p(Math.min(v, 1000)), doc: "log1p(min(count, 1000))" },
+  "owner.tax_delinquent_count": { kind: "numeric", name: "log1p_tax_delinquent", transform: (v) => Math.log1p(Math.min(v, 1000)), doc: "log1p(min(count, 1000))" },
 });
 
 /** An arm = a registry feature set minus unavailable members, mapped to model columns. */
@@ -89,14 +98,20 @@ export function armFromSet(set, name) {
   });
 }
 
-/** Snapshot features -> model record for an arm (only the arm's members are read). */
-export function toModelRecord(features, arm) {
+/**
+ * Snapshot features -> model record for an arm (only the arm's members are
+ * read). Missingness is never zero-filled: a numeric gap stays null (the
+ * encoder adds an explicit __missing__ indicator); a categorical gap becomes
+ * its tri-state kind (__unknown__ / __not_applicable__) or null (__missing__).
+ */
+export function toModelRecord(features, arm, missingness = {}) {
   const out = {};
   for (const key of arm.members) {
     const spec = columnSpec(key);
     const value = features[key];
     if (value === null || value === undefined) {
-      out[spec.name] = null;
+      const kind = missingness[key];
+      out[spec.name] = spec.kind === "categorical" && (kind === "unknown" || kind === "not_applicable") ? `__${kind}__` : null;
     } else if (spec.kind === "numeric") {
       const n = spec.transform(Number(value));
       out[spec.name] = Number.isFinite(n) ? n : null;
@@ -110,7 +125,7 @@ export function toModelRecord(features, arm) {
 export const ENCODER_DEFAULTS = Object.freeze({ minCategoryCount: 20, maxLevels: 80 });
 
 export function fitArm(trainRows, arm, { l2 }) {
-  const records = trainRows.map((r) => toModelRecord(r.features, arm));
+  const records = trainRows.map((r) => toModelRecord(r.features, arm, r.missingness));
   return trainLogisticModel(records, trainRows.map((r) => r.y), {
     encoder: { numeric: [...arm.numeric], categorical: [...arm.categorical], ...ENCODER_DEFAULTS },
     params: { l2, maxIter: 50, tol: 1e-7 },
@@ -120,7 +135,7 @@ export function fitArm(trainRows, arm, { l2 }) {
 export function predictArm(model, rows, arm) {
   return predictProba(
     model,
-    rows.map((r) => toModelRecord(r.features, arm)),
+    rows.map((r) => toModelRecord(r.features, arm, r.missingness)),
   );
 }
 

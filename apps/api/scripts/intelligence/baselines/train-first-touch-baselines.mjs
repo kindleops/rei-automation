@@ -151,12 +151,11 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
   const registry = createV1Registry();
   const sets = {
     base_v1: registry.getSet("seller_first_touch@1"),
-    all_fields_v1: registry.getSet("seller_first_touch_all@1"),
-    base: registry.getSet("seller_first_touch@2"),
-    all_fields: registry.getSet("seller_first_touch_all@2"),
+    base: registry.getSet("seller_first_touch@3"),
+    all_fields: registry.getSet("seller_first_touch_all@3"),
   };
   if (datasetManifest.feature_set_id !== sets.all_fields.featureSetId || datasetManifest.feature_set_hash !== sets.all_fields.definitionHash) {
-    throw new Error("snapshot feature set does not match seller_first_touch_all@2 in this registry");
+    throw new Error("snapshot feature set does not match seller_first_touch_all@3 in this registry");
   }
   for (const set of Object.values(sets)) registry.assertSetForFamily(set.featureSetId, "seller_first_touch_reply");
   for (const family of ["send_opt_out_risk", "send_carrier_filtering"]) {
@@ -166,13 +165,8 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
   const arms = Object.fromEntries(Object.entries(sets).map(([name, set]) => [name, armFromSet(set, name)]));
   const armBase = arms.base;
   const armAll = arms.all_fields;
-  const replyArms = [arms.base_v1, arms.base, arms.all_fields_v1, arms.all_fields];
-  const replyPairs = [
-    ["all_fields", "base"],
-    ["base", "base_v1"],
-    ["all_fields", "all_fields_v1"],
-    ["all_fields_v1", "base_v1"],
-  ];
+  const replyArms = [arms.base, arms.all_fields];
+  const replyPairs = [["all_fields", "base"]];
   const pops = familyPopulations(records);
   const ds = datasetManifest.dataset_id;
   const summary = {};
@@ -213,10 +207,9 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
       target: "reply_any@1 (behaviour, 72h); secondary reply_meaningful@1 (rules meaningful_reply@1 + stop_family_exact@1)",
       data: { dataset_id: ds, dataset_sha256: datasetManifest.sha256, population: "episode leads (one row per first-touch burst) whose lead send was delivered", window: `${datasetManifest.spec.asOfWindow.from} to ${datasetManifest.spec.asOfWindow.to}`, label_cutoff: datasetManifest.spec.labelNow },
       arms: {
-        base: `seller_first_touch@2 minus unavailable features: ${armBase.members.length} inputs (permitted + 40 market_investor_activity)`,
-        all_fields: `seller_first_touch_all@2 minus unavailable features: ${armAll.members.length} inputs (adds gender, marital status, owner language, agent persona, age band, income band, education, occupation; owner decision 2026-10-01, counsel approved)`,
-        base_v1: `seller_first_touch@1 (${arms.base_v1.members.length} inputs): ablation without the investor block`,
-        all_fields_v1: `seller_first_touch_all@1 (${arms.all_fields_v1.members.length} inputs): ablation without the investor block`,
+        base: `seller_first_touch@3 minus unavailable features: ${armBase.members.length} inputs (permitted: operational, property, school district, market, owner entity class, 40 market_investor_activity)`,
+        all_fields: `seller_first_touch_all@3 minus unavailable features: ${armAll.members.length} inputs (adds gender, marital status, owner language, agent persona, age band, income band, education, occupation and the two modeled-wealth bands; owner decisions 2026-10-01/02)`,
+        variants: "variants/report.md: A-F incremental lift, block ablation (incl. separate wealth, school district, investor, prospect rows), permutation importance, market-balanced metrics",
       },
       metrics: {
         base: metricSummary(primary, "base"),
@@ -225,7 +218,7 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
         base_vs_baseline: verdictOf(primary.comparisons[`base_vs_${primary.reference_baseline}`]),
         all_fields_vs_baseline: verdictOf(primary.comparisons[`all_fields_vs_${primary.reference_baseline}`]),
         all_fields_vs_base: `dAUC ${f(lift.auc.estimate, 4)} [${f(lift.auc.lower, 4)}, ${f(lift.auc.upper, 4)}], dlog loss ${f(lift.log_loss.estimate, 5)} [${f(lift.log_loss.lower, 5)}, ${f(lift.log_loss.upper, 5)}]: ${verdictOf(lift)}`,
-        investor_block_base: `base (@2) vs base_v1: ${verdictOf(primary.comparisons.base_vs_base_v1)}; dAUC ${f(primary.comparisons.base_vs_base_v1.auc.estimate, 4)} [${f(primary.comparisons.base_vs_base_v1.auc.lower, 4)}, ${f(primary.comparisons.base_vs_base_v1.auc.upper, 4)}]`,
+
       },
       fairness: "fairness-report.json: performance and score distribution by each personal-attribute group for both arms (test window).",
       limitations: COMMON_LIMITATIONS,
@@ -244,18 +237,17 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
       "",
       `Dataset \`${ds}\` (sha256 \`${datasetManifest.sha256}\`), ${records.length} snapshot rows; population ${pops[family].rows.length} delivered episode leads. Period ${datasetManifest.spec.asOfWindow.from.slice(0, 10)} to ${datasetManifest.spec.asOfWindow.to.slice(0, 10)} (exclusive); labels as of ${datasetManifest.spec.labelNow}.`,
       "",
-      "**Arms.** Primary comparison: the @2 arms.",
-      `- base (seller_first_touch@2): ${arms.base_v1.members.join(", ")}, plus the 40 market_investor_activity features (investor purchases / share in the ZIP, ~1 km cell, 0.5/1/2 mi over 3/6/12 months, 6v6 trends).`,
-      `- all_fields (seller_first_touch_all@2): base + ${armAll.members.filter((m) => !armBase.members.includes(m)).join(", ")}.`,
-      "- base_v1 / all_fields_v1 (@1 sets): the same without the investor block (ablation).",
+      "**Arms (the foundation's per-model contracts).** The A-F variant study with block ablations is in `variants/report.md`.",
+      `- base (seller_first_touch@3): ${arms.base_v1.members.join(", ")}, school district, plus the 40 market_investor_activity features.`,
+      `- all_fields (seller_first_touch_all@3): base + ${armAll.members.filter((m) => !armBase.members.includes(m)).join(", ")}.`,
       `- excluded (unreadable source): ${UNAVAILABLE_FEATURES.join(", ")}.`,
       "",
       "**Baselines.** base_rate (training mean); market_rate and template_rate (beta-binomial empirical-Bayes shrunk rates by property market / template id, unseen keys get the prior mean).",
       "",
       "## Verdict",
       "",
-      `- reply_any@1: base vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`base_vs_${primary.reference_baseline}`])}**; all_fields vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`all_fields_vs_${primary.reference_baseline}`])}**; all_fields vs base (personal attributes): **${verdictOf(lift)}**; investor block (base vs base_v1): **${verdictOf(primary.comparisons.base_vs_base_v1)}**, (all_fields vs all_fields_v1): **${verdictOf(primary.comparisons.all_fields_vs_all_fields_v1)}**.`,
-      `- reply_meaningful@1: base vs ${secondary.reference_baseline}: **${verdictOf(secondary.comparisons[`base_vs_${secondary.reference_baseline}`])}**; all_fields vs base: **${verdictOf(secondary.comparisons.all_fields_vs_base)}**; investor block (base vs base_v1): **${verdictOf(secondary.comparisons.base_vs_base_v1)}**.`,
+      `- reply_any@1: base vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`base_vs_${primary.reference_baseline}`])}**; all_fields vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`all_fields_vs_${primary.reference_baseline}`])}**; all_fields vs base (personal attributes + wealth): **${verdictOf(lift)}**.`,
+      `- reply_meaningful@1: base vs ${secondary.reference_baseline}: **${verdictOf(secondary.comparisons[`base_vs_${secondary.reference_baseline}`])}**; all_fields vs base: **${verdictOf(secondary.comparisons.all_fields_vs_base)}**.`,
       "",
       ...evaluationSection(primary, { title: "Primary target: reply_any@1 (72h)", target: "reply_any@1" }),
       ...evaluationSection(secondary, { title: "Secondary target: reply_meaningful@1 (72h, rules meaningful_reply@1)", target: "reply_meaningful@1" }),
@@ -288,13 +280,13 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
       target: `${target} (${family === "send_carrier_filtering" ? "behaviour" : "deterministic rule stop_family_exact@1"})`,
       data: { dataset_id: ds, dataset_sha256: datasetManifest.sha256, population, window: `${datasetManifest.spec.asOfWindow.from} to ${datasetManifest.spec.asOfWindow.to}`, label_cutoff: datasetManifest.spec.labelNow },
       arms: {
-        base: `seller_first_touch@2 minus unavailable features (${armBase.members.length} inputs, incl. the 40 market_investor_activity features). delivery_risk families take permitted inputs only.`,
-        base_v1: `seller_first_touch@1 (${arms.base_v1.members.length} inputs): ablation without the investor block`,
+        base: `seller_first_touch@3 minus unavailable features (${armBase.members.length} inputs, incl. school district and the 40 market_investor_activity features). delivery_risk families take permitted inputs only.`,
+        base_v1: `seller_first_touch@1 (${arms.base_v1.members.length} inputs): ablation without the investor block and school district`,
       },
       metrics: {
         base: metricSummary(primary, "base"),
         base_v1: metricSummary(primary, "base_v1"),
-        investor_block: `base vs base_v1: ${verdictOf(primary.comparisons.base_vs_base_v1)}`,
+        investor_and_school_block: `base vs base_v1: ${verdictOf(primary.comparisons.base_vs_base_v1)}`,
         reference_baseline: `${primary.reference_baseline}: ${metricSummary(primary, primary.reference_baseline)}`,
         base_vs_baseline: verdictOf(primary.comparisons[`base_vs_${primary.reference_baseline}`]),
       },
@@ -317,13 +309,13 @@ export async function trainAll({ datasetDir, outRoot = MODELS_ROOT, log = consol
       "",
       `Dataset \`${ds}\` (sha256 \`${datasetManifest.sha256}\`); population: ${population}, ${pops[family].rows.length} rows. Labels as of ${datasetManifest.spec.labelNow}.`,
       "",
-      `**Features.** base (seller_first_touch@2): ${arms.base_v1.members.join(", ")} + the 40 market_investor_activity features; base_v1 (@1): without the investor block. Excluded (unreadable source): ${UNAVAILABLE_FEATURES.join(", ")}.`,
+      `**Features.** base (seller_first_touch@3): ${arms.base_v1.members.join(", ")} + school district + the 40 market_investor_activity features; base_v1 (@1): without them. Excluded (unreadable source): ${UNAVAILABLE_FEATURES.join(", ")}.`,
       "",
       "**Baselines.** base_rate; market_rate and template_rate (beta-binomial shrunk).",
       "",
       "## Verdict",
       "",
-      `- base vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`base_vs_${primary.reference_baseline}`])}**; base_v1 vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`base_v1_vs_${primary.reference_baseline}`])}**; investor block (base vs base_v1): **${verdictOf(primary.comparisons.base_vs_base_v1)}**.`,
+      `- base vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`base_vs_${primary.reference_baseline}`])}**; base_v1 vs ${primary.reference_baseline}: **${verdictOf(primary.comparisons[`base_v1_vs_${primary.reference_baseline}`])}**; investor activity + school district block (base vs base_v1): **${verdictOf(primary.comparisons.base_vs_base_v1)}**.`,
       "",
       ...evaluationSection(primary, { title: `Target: ${target}`, target }),
       "## Known limitations",
