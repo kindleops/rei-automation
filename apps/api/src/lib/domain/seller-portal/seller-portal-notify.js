@@ -1,0 +1,59 @@
+/**
+ * Seller portal — notifications through the canonical Brevo client.
+ *
+ * Only meaningful events: sign-in code, call scheduled, offer ready, message
+ * from Prominent, action needed, closing scheduled. Each deep-links into the
+ * authenticated portal; none asks the seller to call. Off unless
+ * SELLER_PORTAL_EMAIL_ENABLED=1, and never logs codes or message bodies.
+ */
+
+import { sendBrevoTransactionalEmail } from '@/lib/email/brevo-client.js';
+
+const clean = (v) => String(v ?? '').trim();
+const esc = (v) => clean(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+function when(iso, tz) {
+  return new Intl.DateTimeFormat('en-US', { timeZone: tz || 'America/New_York', weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(iso));
+}
+
+export function renderSellerEmail({ kind, context = {} }, env = process.env) {
+  const base = clean(env.SELLER_PORTAL_PUBLIC_BASE_URL) || 'https://www.prominentcashoffer.com';
+  const link = (path) => `${base}${path}`;
+  const table = {
+    sign_in_code: { subject: `Your Prominent sign-in code: ${context.code}`, title: 'Your sign-in code', body: `Enter this code to open your Prominent account. It expires in ${context.minutes} minutes.`, code: context.code },
+    call_scheduled: { subject: 'Prominent will call you', title: 'Your call is scheduled.', body: `Prominent will call you ${when(context.start_at, context.timezone)}, about ${clean(context.reason).toLowerCase()}.`, cta: ['View your property', link('/account/')] },
+    offer_ready: { subject: 'Your Prominent offer is ready', title: 'Your offer is ready.', body: 'Review the written terms in your Prominent account.', cta: ['Review your offer', link('/account/offer/')] },
+    message: { subject: 'A message from Prominent', title: 'You have a new message.', body: 'Prominent replied about your property.', cta: ['Read the message', link('/account/messages/')] },
+    action_needed: { subject: 'We need one item from you', title: 'We need one item from you.', body: clean(context.body) || 'Open your account for the details.', cta: ['See what is needed', link('/account/')] },
+    closing_scheduled: { subject: 'Your closing is scheduled', title: 'Your closing is scheduled.', body: context.start_at ? `Closing is set for ${when(context.start_at, context.timezone)}.` : 'Your closing details are ready.', cta: ['View closing', link('/account/closing/')] },
+  };
+  const t = table[kind];
+  if (!t) return null;
+  const html = `<!doctype html><html><body style="margin:0;background:#fbf8f2;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#16140f">
+<div style="max-width:520px;margin:0 auto;padding:40px 28px">
+<p style="font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#a8823f;margin:0 0 28px">Prominent</p>
+<h1 style="font-size:28px;line-height:1.1;margin:0 0 14px;font-weight:600">${esc(t.title)}</h1>
+<p style="font-size:16px;line-height:1.6;color:#4a463f;margin:0 0 26px">${esc(t.body)}</p>
+${t.code ? `<p style="font-size:36px;letter-spacing:.3em;font-weight:600;margin:0 0 26px">${esc(t.code)}</p>` : ''}
+${t.cta ? `<a href="${esc(t.cta[1])}" style="display:inline-block;background:#16140f;color:#fbf8f2;text-decoration:none;padding:14px 22px;border-radius:999px;font-weight:600">${esc(t.cta[0])}</a>` : ''}
+<p style="font-size:12px;color:#7a7367;margin:34px 0 0">If you didn't expect this email, you can ignore it.</p>
+</div></body></html>`;
+  const text = [t.title, t.body, t.code, t.cta ? `${t.cta[0]}: ${t.cta[1]}` : ''].filter(Boolean).join('\n\n');
+  return { subject: t.subject, html, text };
+}
+
+export function createSellerNotifier(deps = {}) {
+  const env = deps.env ?? process.env;
+  const send = deps.send ?? sendBrevoTransactionalEmail;
+  return async function notify({ kind, to, context }) {
+    if (clean(env.SELLER_PORTAL_EMAIL_ENABLED) !== '1') return { sent: false, reason: 'seller_email_disabled' };
+    const rendered = renderSellerEmail({ kind, context }, env);
+    if (!rendered || !clean(to)) return { sent: false, reason: 'unrenderable' };
+    try {
+      await send({ to, subject: rendered.subject, htmlContent: rendered.html, textContent: rendered.text, brand_key: 'prominent_cash_offer', tags: ['seller_portal', kind] });
+      return { sent: true };
+    } catch (error) {
+      return { sent: false, reason: error?.code || 'send_failed' };
+    }
+  };
+}
