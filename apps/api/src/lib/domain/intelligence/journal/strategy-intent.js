@@ -14,10 +14,15 @@
  * It never infers a strategy from message text. A value with no mapping is
  * reported as unmapped (STRATEGY_LABEL_UNMAPPED), never guessed.
  *
- * Mapping: the code audit's §3.3 table, confirmed by the architecture.
+ * Mapping: the code audit's §3.3 table, confirmed by the architecture, plus the
+ * IC8.1 owner-approved additions (strategy_label_map@2). Every addition was
+ * mapped from its producer contract, its realising template use case and its
+ * stage, never from its name alone; the evidence per value is in
+ * tmp/ic8/reports/strategy-label-mapping.md. `mapped_value` always carries the
+ * raw production value, so a coarse label never loses the original.
  */
 
-export const STRATEGY_LABEL_MAP_VERSION = "strategy_label_map@1";
+export const STRATEGY_LABEL_MAP_VERSION = "strategy_label_map@2";
 export const STRATEGY_INTENT_VERSION = "ic8_strategy_intent@1";
 
 export const STRATEGY_LABELS = Object.freeze([
@@ -60,7 +65,22 @@ export const STRATEGY_LABEL_MAP = Object.freeze({
     "clarify_authority",
     "clarify_required_signer",
   ]),
-  condition: Object.freeze(["condition_probe", "condition_discovery", "occupancy_probe"]),
+  condition: Object.freeze([
+    "condition_probe",
+    "condition_discovery",
+    "occupancy_probe",
+    // @2: NBA objective whose V2 use case is condition_probe (S4).
+    "discover_condition",
+    // @2: occupancy follows occupancy_probe into `condition` (same S4 family;
+    // the live condition_probe copy itself asks "vacant or occupied?").
+    "discover_occupancy",
+    "occupancy_discovery",
+    // @2: condition-family use cases in the condition_discovery contract and
+    // the valuation-evidence condition question (all S4 / S4B).
+    "price_high_condition_probe",
+    "repair_clarification",
+    "ask_condition_clarifier",
+  ]),
   timeline: Object.freeze(["ask_timeline", "discover_timeline"]),
   objection_response: Object.freeze([
     "justify_price",
@@ -82,10 +102,38 @@ export const STRATEGY_LABEL_MAP = Object.freeze({
     "novation_probe",
     "seller_finance_probe",
     "structured_terms_review",
+    // @2: NBA objective realised as offer_reveal_cash (S5A, monetary).
+    "prepare_offer",
+    // @2: NBA objective for an outstanding offer, realised as counter_offer (S5).
+    "negotiate",
+    // @2: router strategy whose contract is offer_reveal_cash / initial_offer.
+    "direct_purchase",
   ]),
-  follow_up: Object.freeze(["stage_no_reply", "future_nurture", "follow_up_later"]),
+  follow_up: Object.freeze([
+    "stage_no_reply",
+    "future_nurture",
+    "follow_up_later",
+    // @2: operator bulk follow-up use case (inbox_bulk_follow_up).
+    "reengagement",
+  ]),
   closing_coordination: Object.freeze(["contract_information_request", "collect_contract_facts", "contract_next_step"]),
-  hand_off: Object.freeze(["human_review"]),
+  hand_off: Object.freeze([
+    "human_review",
+    // @2: the producer's ONLY output is HUMAN_REVIEW with no template family.
+    "handle_agent_involvement",
+  ]),
+});
+
+/**
+ * Values that are intentionally NOT strategies and stay unmapped (@2). They
+ * mean "send nothing" (suppression / no reply owed) or "operator typed it";
+ * mapping them would invent a strategy that was never chosen.
+ */
+export const STRATEGY_INTENTIONALLY_UNMAPPED = Object.freeze({
+  suppress: "NBA objective: suppression/opt-out wins; nothing is sent (STRATEGY_NO_OUTBOUND).",
+  no_reply: "NBA objective: no reply is owed; nothing is sent (STRATEGY_NO_OUTBOUND).",
+  manual_reply: "operator free-typed reply; strategy unknown (STRATEGY_OPERATOR_UNSPECIFIED).",
+  inbox_manual_send_now: "operator free-typed send-now; strategy unknown (STRATEGY_OPERATOR_UNSPECIFIED).",
 });
 /** Prefix rules (code audit: `nurture_<intent>` -> follow_up). */
 export const STRATEGY_PREFIX_MAP = Object.freeze([Object.freeze({ prefix: "nurture_", label: "follow_up" })]);

@@ -130,7 +130,8 @@ test("strategy labels: the code-audit mapping table, never guessed", () => {
   assert.equal(mapStrategyLabel("verify_ownership"), "ownership_check");
   assert.equal(mapStrategyLabel("nurture_not_interested"), "follow_up");
   assert.equal(mapStrategyLabel("comp_anchor"), "price_anchor");
-  assert.equal(mapStrategyLabel("discover_condition"), null, "not in the table: unmapped, not guessed");
+  assert.equal(mapStrategyLabel("discover_condition"), "condition", "strategy_label_map@2: owner-approved, evidence-mapped");
+  assert.equal(mapStrategyLabel("not_a_production_value"), null, "not in the table: unmapped, not guessed");
   assert.equal(mapStrategyLabel(""), null);
 });
 
@@ -199,7 +200,7 @@ test("strategy intent from the H1 orchestration objects", () => {
     policy_fingerprint: "pf-abc",
   });
   assert.equal(queued.layer, "v2_response_strategy");
-  assert.equal(queued.strategy_label, "condition", "objective unmapped -> falls to the chosen use case");
+  assert.equal(queued.strategy_label, "condition", "the V2 objective maps (map@2) to the same label as the chosen use case");
   assert.equal(queued.policy_fingerprint, "pf-abc");
   assert.deepEqual(queued.versions, { nba: "seller_next_best_action_v1", response: "seller_response_strategy_v1" });
 
