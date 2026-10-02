@@ -99,7 +99,7 @@ test("v1 vector: future rows invisible, receipts after the decision masked, PROP
   const registry = createV1Registry();
   const vector = computeFeatureVector({
     registry,
-    featureSetId: "seller_first_touch_tier_r@1",
+    featureSetId: "seller_first_touch_all@1",
     entity: decisionEntity(),
     asOf: AS_OF,
     bundle: bundle(),
@@ -197,12 +197,12 @@ test("a feature that hunts for future data sees none; outcome columns never reac
 });
 
 test("identity and legacy fields are unreachable from any feature, whatever its class", () => {
-  for (const fairnessClass of ["permitted", "protected_analysis_only"]) {
+  for (const fairnessClass of ["permitted", "personal_attribute"]) {
     const registry = probeRegistry({
       fairnessClass,
       lineage: { sources: [fairnessClass === "permitted" ? "send_queue.sent_at" : "prospects.gender"], calc: "probe" },
       compute: ({ read }) => {
-        const rows = [...read("property"), ...read("owner_profile"), ...(fairnessClass === "protected_analysis_only" ? [...read("prospect_protected"), ...read("owner_protected")] : [])];
+        const rows = [...read("property"), ...read("owner_profile"), ...(fairnessClass === "personal_attribute" ? [...read("prospect_person"), ...read("owner_person")] : [])];
         return rows.some((row) => ["owner_1_name", "final_acquisition_score", "best_phone", "best_email", "full_name"].some((f) => f in row));
       },
     });
@@ -219,9 +219,8 @@ test("identity and legacy fields are unreachable from any feature, whatever its 
   }
 });
 
-test("protected and restricted person fields are reachable only by features of that class", () => {
-  // a permitted feature can see neither protected nor restricted person fields
-  for (const collection of ["prospect_protected", "owner_protected", "prospect_person"]) {
+test("personal attribute fields are reachable only by personal_attribute features", () => {
+  for (const collection of ["prospect_person", "owner_person"]) {
     const permitted = probeRegistry({ compute: ({ read }) => read(collection).length > 0 });
     assert.throws(
       () => computeFeatureVector({ registry: permitted, featureSetId: "probe@1", entity: decisionEntity(), asOf: AS_OF, bundle: bundle() }),
@@ -229,30 +228,17 @@ test("protected and restricted person fields are reachable only by features of t
       collection,
     );
   }
-  // a restricted_targeting feature can read restricted fields but not protected ones
-  const restricted = probeRegistry({
-    fairnessClass: "restricted_targeting",
-    lineage: { sources: ["prospects.mob"], calc: "probe" },
-    compute: ({ read }) => read("prospect_protected").length > 0,
-  });
-  assert.throws(
-    () => computeFeatureVector({ registry: restricted, featureSetId: "probe@1", entity: decisionEntity(), asOf: AS_OF, bundle: bundle() }),
-    (error) => error.code === "FAIRNESS_CLASS_VIOLATION",
-  );
-  const reader = createAsOfReader(bundle(), { asOf: AS_OF, pitClass: "static_fact", fairnessClass: "restricted_targeting" });
-  const [person] = reader.read("prospect_person");
-  assert.equal("gender" in person || "marital_status" in person, false, "the restricted projection never carries protected fields");
-  // the research set computes the protected fields (allowed in datasets; blocked from live decisions elsewhere)
-  const research = computeFeatureVector({
+  const vector = computeFeatureVector({
     registry: createV1Registry(),
-    featureSetId: "seller_first_touch_protected_research@1",
+    featureSetId: "seller_first_touch_all@1",
     entity: decisionEntity(),
     asOf: AS_OF,
-    bundle: { ...bundle(), prospect_protected: { prospect_id: "pr1", gender: "F", marital_status: "Married" }, owner_protected: { master_owner_id: "mo1", best_language: "Spanish", agent_persona: "Carlos Mendez" } },
+    bundle: { ...bundle(), owner_person: { master_owner_id: "mo1", best_language: "Spanish", agent_persona: "Carlos Mendez" } },
   });
-  assert.equal(research.values["prospect.gender"], "f");
-  assert.equal(research.values["owner.language"], "spanish");
-  assert.equal(research.values["owner.agent_persona"], "carlos_mendez");
+  assert.equal(vector.values["prospect.gender"], "f");
+  assert.equal(vector.values["prospect.marital_status"], "married");
+  assert.equal(vector.values["owner.language"], "spanish");
+  assert.equal(vector.values["owner.agent_persona"], "carlos_mendez");
 });
 
 test("PIT class and fairness class gate which collections a feature may read", () => {

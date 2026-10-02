@@ -11,26 +11,20 @@
  *     and a prior send counts as delivered only if its receipt arrived before
  *     the decision;
  *   - recorded sales / mortgages are dated documents (end of their date < T);
- *   - owner entity class, restricted_targeting and protected_analysis_only
- *     person fields come from imports frozen since 2026-04 (static_fact with a
- *     documented as_of);
+ *   - owner entity class and the personal_attribute fields come from imports
+ *     frozen since 2026-04 (static_fact with a documented as_of);
  *   - absentee and lien counts have no dated source (properties is rewritten in
  *     place; 95% of seller.property_lien rows carry no recording/filing date),
  *     so they are decision_snapshot_only: captured online at decision time,
  *     never part of a historical training set.
  *
- * Feature sets (all historical training, family seller_first_touch_reply):
- *   seller_first_touch@1                     permitted inputs only
- *   seller_first_touch_tier_r@1              + the four restricted_targeting
- *                                            fields: the with/without ablation
- *                                            arm (the family ships a fairness
- *                                            report)
- *   seller_first_touch_protected_research@1  + the four protected_analysis_only
- *                                            fields: research/backtest and
- *                                            fairness-report grouping ONLY. The
- *                                            model registry refuses to promote
- *                                            any model built on it
- *                                            (PROTECTED_FEATURE_DECISION_BLOCK).
+ * Feature sets (historical training, family seller_first_touch_reply):
+ *   seller_first_touch@1      permitted inputs only (the baseline arm)
+ *   seller_first_touch_all@1  + the eight personal_attribute fields (gender,
+ *                             marital status, owner language, agent persona,
+ *                             age band, household income band, education,
+ *                             occupation). Models built on it ship a fairness
+ *                             report (fairness/group-audit.js).
  */
 
 import {
@@ -588,7 +582,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
       return state ? boundedNumber(state.lien_count, { min: 0, max: 1000, integer: true }) : null;
     },
   },
-  // ── restricted_targeting (Tier R): targeting_response families only, with a fairness report ──
+  // ── personal_attribute: targeting_response families; models using them ship a fairness report ──
   {
     key: "prospect.age_band",
     version: 1,
@@ -597,7 +591,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "restricted_targeting",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["prospects.mob"],
       keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
@@ -620,7 +614,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "restricted_targeting",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["prospects.est_household_income"],
       keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
@@ -643,7 +637,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "restricted_targeting",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["prospects.education_model"],
       keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
@@ -666,7 +660,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "restricted_targeting",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["prospects.occupation_group"],
       keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
@@ -681,7 +675,6 @@ export const V1_FEATURE_SPECS = Object.freeze([
       return person ? normalizeCategory(person.occupation_group) : null;
     },
   },
-  // ── protected_analysis_only: research and fairness reports, never a live decision ──
   {
     key: "prospect.gender",
     version: 1,
@@ -690,7 +683,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "protected_analysis_only",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["prospects.gender"],
       keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
@@ -701,7 +694,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     owner: "intelligence",
     freshnessSla: null,
     compute: ({ read }) => {
-      const [person] = read("prospect_protected");
+      const [person] = read("prospect_person");
       return person ? normalizeCategory(person.gender) : null;
     },
   },
@@ -713,7 +706,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "protected_analysis_only",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["prospects.marital_status"],
       keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
@@ -724,7 +717,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     owner: "intelligence",
     freshnessSla: null,
     compute: ({ read }) => {
-      const [person] = read("prospect_protected");
+      const [person] = read("prospect_person");
       return person ? normalizeCategory(person.marital_status) : null;
     },
   },
@@ -736,7 +729,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "protected_analysis_only",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["master_owners.best_language"],
       keys: ["send_queue.master_owner_id"],
@@ -747,7 +740,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     owner: "intelligence",
     freshnessSla: null,
     compute: ({ read }) => {
-      const [owner] = read("owner_protected");
+      const [owner] = read("owner_person");
       return owner ? normalizeCategory(owner.best_language) : null;
     },
   },
@@ -759,7 +752,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     valueType: "categorical",
     mode: "both",
     pitClass: "static_fact",
-    fairnessClass: "protected_analysis_only",
+    fairnessClass: "personal_attribute",
     lineage: {
       sources: ["master_owners.agent_persona"],
       keys: ["send_queue.master_owner_id"],
@@ -770,7 +763,7 @@ export const V1_FEATURE_SPECS = Object.freeze([
     owner: "intelligence",
     freshnessSla: null,
     compute: ({ read }) => {
-      const [owner] = read("owner_protected");
+      const [owner] = read("owner_person");
       return owner ? normalizeCategory(owner.agent_persona) : null;
     },
   },
@@ -798,14 +791,11 @@ export const V1_BASE_MEMBERS = Object.freeze([
   "property.recorded_mortgage_count@1",
 ]);
 
-export const V1_RESTRICTED_MEMBERS = Object.freeze([
+export const V1_PERSONAL_MEMBERS = Object.freeze([
   "prospect.age_band@1",
   "prospect.household_income_band@1",
   "prospect.education_level@1",
   "prospect.occupation_group@1",
-]);
-
-export const V1_PROTECTED_MEMBERS = Object.freeze([
   "prospect.gender@1",
   "prospect.marital_status@1",
   "owner.language@1",
@@ -823,24 +813,15 @@ export function registerV1Features(registry) {
     family: SELLER_FIRST_TOUCH_FAMILY,
     description: "First-touch reply model inputs, no Tier R fields.",
   });
-  const withRestricted = registry.defineSet({
-    name: "seller_first_touch_tier_r",
+  const all = registry.defineSet({
+    name: "seller_first_touch_all",
     version: 1,
-    members: [...V1_BASE_MEMBERS, ...V1_RESTRICTED_MEMBERS],
+    members: [...V1_BASE_MEMBERS, ...V1_PERSONAL_MEMBERS],
     purpose: "historical_training",
     family: SELLER_FIRST_TOUCH_FAMILY,
-    description: "Ablation arm: the base set plus the four restricted_targeting fields. A model trained on it ships a fairness report.",
+    description: "The base set plus the eight personal_attribute fields. Models built on it ship a fairness report.",
   });
-  const protectedResearch = registry.defineSet({
-    name: "seller_first_touch_protected_research",
-    version: 1,
-    members: [...V1_BASE_MEMBERS, ...V1_RESTRICTED_MEMBERS, ...V1_PROTECTED_MEMBERS],
-    purpose: "historical_training",
-    family: SELLER_FIRST_TOUCH_FAMILY,
-    description:
-      "Research/backtest and fairness-report grouping only. Contains protected_analysis_only fields: no model built on it can be promoted past backtest.",
-  });
-  return { base, withRestricted, protectedResearch };
+  return { base, all };
 }
 
 export function createV1Registry() {

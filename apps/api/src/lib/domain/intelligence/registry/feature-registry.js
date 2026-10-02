@@ -7,7 +7,8 @@
  *   {key, version, scope, domain, valueType, pitClass, fairnessClass,
  *    statedFact, lineage, compute.toString()}
  * The arch §3.1 list plus `domain` (owner decision 2026-10-01) and
- * `statedFact`, which changes what a price family may read.
+ * `statedFact` (marks seller-STATED facts; reserved for the input policy of
+ * the price families, which are not defined in this phase).
  * A changed hash under the same version is a hard failure: a redefinition
  * needs a new version.
  *
@@ -103,7 +104,8 @@ export function defineFeature(spec = {}) {
   requireOneOf(problems, "mode", spec.mode, FEATURE_MODES);
   requireOneOf(problems, "pitClass", spec.pitClass, PIT_CLASSES);
   requireOneOf(problems, "fairnessClass", spec.fairnessClass, FAIRNESS_CLASSES);
-  if (spec.fairnessTier !== undefined) problems.push("fairnessTier is retired: declare fairnessClass restricted_targeting / protected_analysis_only");
+  if (spec.fairnessClass === "prohibited") problems.push("a prohibited feature can never be defined");
+  if (spec.fairnessTier !== undefined) problems.push("fairnessTier is retired: declare fairnessClass personal_attribute");
   if (spec.statedFact !== undefined && typeof spec.statedFact !== "boolean") problems.push("statedFact must be boolean");
   if (spec.statedFact === true && spec.domain !== "ownership_prospect") {
     problems.push("statedFact applies only to ownership_prospect features (seller-STATED facts)");
@@ -293,12 +295,10 @@ export function createFeatureRegistry({ familyPolicies = DEFAULT_FAMILY_POLICIES
       family,
       description,
       members: Object.freeze(membersOut),
-      restrictedMembers: membersOfClass("restricted_targeting"),
-      protectedMembers: membersOfClass("protected_analysis_only"),
+      personalMembers: membersOfClass("personal_attribute"),
       conversationMembers: membersOfClass("conversation_only"),
-      containsRestricted: membersOut.some((m) => m.fairnessClass === "restricted_targeting"),
-      /** true = research/backtest only: the model registry refuses to promote models built on it. */
-      containsProtected: membersOut.some((m) => m.fairnessClass === "protected_analysis_only"),
+      /** true = any model built on this set ships a fairness report (required for promotion). */
+      containsPersonal: membersOut.some((m) => m.fairnessClass === "personal_attribute"),
       definitionHash: featureSetHash({ featureSetId, purpose, members: membersOut }),
     });
     const existing = sets.get(featureSetId);

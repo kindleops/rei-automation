@@ -12,11 +12,10 @@
  *     that is not strictly before `asOf` (e.g. delivered_at of a prior send
  *     whose receipt arrived after the decision);
  *   - refuses collections the feature's PIT class or fairness class may not
- *     read (a programming error, so it throws): restricted_targeting
- *     collections only for restricted_targeting (or protected_analysis_only)
- *     features, protected_analysis_only collections only for
- *     protected_analysis_only features, message text only for
- *     conversation_only features;
+ *     read (a programming error, so it throws): personal_attribute
+ *     collections only for personal_attribute features, message text only for
+ *     conversation_only features -- so a feature's declared class is always
+ *     truthful;
  *   - tracks max_input_time across everything it returned.
  * computeFeatureVector() then asserts max_input_time < asOf (assertNoLeakage).
  *
@@ -121,22 +120,24 @@ export const PIT_COLLECTIONS = Object.freeze({
   prospect_person: {
     pitClass: "static_fact",
     static: true,
-    requiresFairnessClass: "restricted_targeting",
-    source: "public.prospects via phones.primary_prospect_id (import 2026-04-24/25; frozen since). restricted_targeting fields only.",
-    fields: { prospect_id: "key", mob: "value", est_household_income: "value", education_model: "value", occupation_group: "value" },
+    requiresFairnessClass: "personal_attribute",
+    source: "public.prospects via phones.primary_prospect_id (import 2026-04-24/25; frozen since). personal_attribute fields.",
+    fields: {
+      prospect_id: "key",
+      mob: "value",
+      est_household_income: "value",
+      education_model: "value",
+      occupation_group: "value",
+      gender: "value",
+      marital_status: "value",
+      language_preference: "value",
+    },
   },
-  prospect_protected: {
+  owner_person: {
     pitClass: "static_fact",
     static: true,
-    requiresFairnessClass: "protected_analysis_only",
-    source: "public.prospects via phones.primary_prospect_id (import 2026-04-24/25). protected_analysis_only: research and fairness reports, never live decisions.",
-    fields: { prospect_id: "key", gender: "value", marital_status: "value", language_preference: "value" },
-  },
-  owner_protected: {
-    pitClass: "static_fact",
-    static: true,
-    requiresFairnessClass: "protected_analysis_only",
-    source: "public.master_owners (import 2026-04-24/25). protected_analysis_only: research and fairness reports, never live decisions.",
+    requiresFairnessClass: "personal_attribute",
+    source: "public.master_owners (import 2026-04-24/25, +2026-05-30; frozen since). personal_attribute fields.",
     fields: { master_owner_id: "key", best_language: "value", agent_persona: "value", agent_family: "value" },
   },
   recorded_sales: {
@@ -194,8 +195,7 @@ export const PIT_COLLECTIONS = Object.freeze({
 /** Which feature fairness classes may read a collection that requires a class. */
 const CLASS_MAY_READ = Object.freeze({
   conversation_only: ["conversation_only"],
-  restricted_targeting: ["restricted_targeting", "protected_analysis_only"],
-  protected_analysis_only: ["protected_analysis_only"],
+  personal_attribute: ["personal_attribute"],
 });
 
 const READABLE_PIT_CLASSES = Object.freeze({

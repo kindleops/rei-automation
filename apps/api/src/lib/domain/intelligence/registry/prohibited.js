@@ -1,51 +1,46 @@
 /**
- * IC8 FAIRNESS LINT (architecture §3.3; owner decisions of 2026-10-01).
+ * IC8 FAIRNESS LINT -- FINAL policy (owner decision 2026-10-01, counsel
+ * approved; supersedes the earlier tiered drafts).
  *
- * Every feature declares one fairness class, and the lint derives the class
- * its lineage REQUIRES. The declaration must equal the requirement, so a flag
- * can neither be forgotten nor overstated.
+ * Every source column is classified, and every feature declares the class its
+ * lineage requires (the declaration must EQUAL the requirement, so a flag can
+ * neither be forgotten nor overstated):
  *
- *   permitted                 ordinary inputs.
- *   conversation_only         message text, message/template language.
- *                             Only conversation_understanding families.
- *   restricted_targeting      age / age band, modeled household income (and
- *                             the modeled-wealth attributes of the same vendor
- *                             family -- owner to confirm), education,
- *                             occupation. Only targeting_response families
- *                             that declare requiresFairnessReport.
- *   protected_analysis_only   gender/sex, marital status, owner language /
- *                             best_language as a person attribute, and
- *                             agent_persona (the sender name derived from it).
- *                             Allowed in definitions, feature snapshots,
- *                             dataset snapshots and development/backtest runs;
- *                             never in a live decision: the model registry
- *                             refuses shadow/challenger/champion
- *                             (PROTECTED_FEATURE_DECISION_BLOCK, see
- *                             fairness/decision-eligibility.js), the policy
- *                             engine refuses to load such a model, and no
- *                             experiment may use them as an arm or a stratum.
+ *   permitted           ordinary inputs.
+ *   conversation_only   message text, message/template language. Only
+ *                       conversation_understanding families.
+ *   personal_attribute  gender, marital status, owner language / best_language,
+ *                       agent_persona, age / age band, household income (and
+ *                       the modeled-wealth attributes of the same vendor
+ *                       family), education, occupation. ALLOWED as inputs in
+ *                       targeting_response families (who to contact, when,
+ *                       which message, reply likelihood), in every promotion
+ *                       state, and as experiment arms/strata for those
+ *                       families. Any model using one ships a fairness report
+ *                       (fairness/group-audit.js); the model registry requires
+ *                       it for promotion.
+ *   prohibited          everywhere, never definable: identity fields (names,
+ *                       phone numbers, area codes, emails, blobs that embed
+ *                       them), neighbourhood demographic composition, the
+ *                       legacy opaque composite scores. Protected
+ *                       characteristics the owner did not address (race /
+ *                       ethnicity, religion, national origin, disability,
+ *                       familial status, veteran status, sexual orientation,
+ *                       dates of death/divorce) and school district (pending
+ *                       owner review) stay prohibited under the brief's
+ *                       stricter-reading rule.
  *
- * PROHIBITED everywhere (no class unlocks them): identity fields (names, phone
- * numbers, area codes, emails, blobs that embed them), neighbourhood
- * demographic composition, the legacy opaque scores. Protected characteristics
- * the owner did not reverse (race/ethnicity, religion, national origin,
- * disability, familial status, veteran status, sexual orientation, dates of
- * death/divorce) and school district (pending owner review: "only where
- * legally appropriate to valuation") stay prohibited under the brief's
- * stricter-reading rule.
- *
- * Price rule: valuation / offer / negotiation families take property, market,
- * transaction, financial/title records and seller-STATED facts only -- never a
- * seller personal attribute of any class.
+ * Valuation / offer / negotiation / buyer_selection families are not defined
+ * in this phase; their input policy is set with the owner when they are.
  *
  * The lint is name-based and conservative: an unknown `*_name` column is a
  * person's name until it is allowlisted here.
  */
 
-export const FAIRNESS_CLASSES = Object.freeze(["permitted", "conversation_only", "restricted_targeting", "protected_analysis_only"]);
-/** Classes a model family may list as allowed (protected_analysis_only is research-only, never a family class). */
-export const DECISION_FAIRNESS_CLASSES = Object.freeze(["permitted", "conversation_only", "restricted_targeting"]);
-const CLASS_RANK = Object.freeze({ permitted: 0, conversation_only: 1, restricted_targeting: 2, protected_analysis_only: 3 });
+export const FAIRNESS_CLASSES = Object.freeze(["permitted", "conversation_only", "personal_attribute", "prohibited"]);
+/** Classes a feature can be defined with (prohibited never can). */
+export const DEFINABLE_FAIRNESS_CLASSES = Object.freeze(["permitted", "conversation_only", "personal_attribute"]);
+const CLASS_RANK = Object.freeze({ permitted: 0, conversation_only: 1, personal_attribute: 2, prohibited: 3 });
 
 /** The owner's canonical input universe (architecture §3.2b). */
 export const FEATURE_DOMAINS = Object.freeze([
@@ -56,23 +51,10 @@ export const FEATURE_DOMAINS = Object.freeze([
   "operational",
 ]);
 
-export const FAMILY_TYPES = Object.freeze([
-  "targeting_response",
-  "valuation",
-  "offer",
-  "negotiation",
-  "buyer_selection",
-  "conversation_understanding",
-  "campaign_allocation",
-  "delivery_risk",
-]);
-
-/** Price rule: these families take property, market, transaction, financial/title and seller-STATED facts only. */
-export const PRICE_FAMILY_TYPES = Object.freeze(["valuation", "offer", "negotiation"]);
-/** restricted_targeting is permitted only here (and only with a fairness report). */
-export const RESTRICTED_TARGETING_FAMILY_TYPES = Object.freeze(["targeting_response"]);
-/** Domains a price family may read; ownership_prospect only for seller-stated facts. */
-export const PRICE_FAMILY_DOMAINS = Object.freeze(["property", "financial_title"]);
+/** Family types defined in this phase (valuation/offer/negotiation/buyer_selection come later, with the owner). */
+export const FAMILY_TYPES = Object.freeze(["targeting_response", "conversation_understanding", "campaign_allocation", "delivery_risk"]);
+/** personal_attribute inputs are granted to these family types. */
+export const PERSONAL_ATTRIBUTE_FAMILY_TYPES = Object.freeze(["targeting_response"]);
 
 /** Tables whose rows describe a PERSON: a bare `language` column here is the person's language. */
 export const PERSON_TABLES = Object.freeze([
@@ -152,35 +134,34 @@ export const SOURCE_RULES = Object.freeze([
         t,
       ),
   },
-  // ── protected_analysis_only (owner reversal of 2026-10-01) ─────────────
-  { id: "gender_sex", effect: "protected_analysis_only", category: "protected_analysis", test: (t) => /gender|(^|_)sex(_|$)/.test(t) },
-  { id: "marital_status", effect: "protected_analysis_only", category: "protected_analysis", test: (t) => /marital/.test(t) },
+  // ── personal_attribute ─────────────────────────────────────────────────
+  { id: "gender_sex", effect: "personal_attribute", category: "personal_attribute", test: (t) => /gender|(^|_)sex(_|$)/.test(t) },
+  { id: "marital_status", effect: "personal_attribute", category: "personal_attribute", test: (t) => /marital/.test(t) },
   {
     id: "person_language",
-    effect: "protected_analysis_only",
-    category: "protected_analysis",
+    effect: "personal_attribute",
+    category: "personal_attribute",
     test: (t, ctx) =>
       /best_language|language_preference|preferred_language|owner_language|linked_languages|requested_language|spoken_language/.test(t) ||
       (/^(language|lang)$/.test(t) && isPersonTable(ctx.table)),
   },
-  { id: "agent_persona", effect: "protected_analysis_only", category: "protected_analysis", test: (t) => PERSONA_RE.test(t) },
-  // ── restricted_targeting (Tier R) ──────────────────────────────────────
+  { id: "agent_persona", effect: "personal_attribute", category: "personal_attribute", test: (t) => PERSONA_RE.test(t) },
   {
     id: "age",
-    effect: "restricted_targeting",
+    effect: "personal_attribute",
     category: "age",
     test: (t) => /(^|_)age(_|$)|age_bucket|age_band|age_range|(^|_)mob(_|$)|month_of_birth|birth|(^|_)dob(_|$)|senior/.test(t),
   },
   {
     id: "modeled_income",
-    effect: "restricted_targeting",
+    effect: "personal_attribute",
     category: "modeled_income",
     test: (t, ctx) =>
       /household_income|net_asset|net_worth|buying_power|wealth|credit_tier|credit_score|spender_type|consumer_type|investment_type/.test(t) ||
       (/income/.test(t) && !isPropertyTable(ctx.table)),
   },
-  { id: "education", effect: "restricted_targeting", category: "education", test: (t) => /education/.test(t) },
-  { id: "occupation", effect: "restricted_targeting", category: "occupation", test: (t) => /occupation|employment/.test(t) },
+  { id: "education", effect: "personal_attribute", category: "education", test: (t) => /education/.test(t) },
+  { id: "occupation", effect: "personal_attribute", category: "occupation", test: (t) => /occupation|employment/.test(t) },
   // ── conversation_only ──────────────────────────────────────────────────
   {
     id: "message_text",
@@ -258,12 +239,11 @@ export function classifySource(source) {
   return { source: raw, table, tokens, findings };
 }
 
-/** The fairness class a set of sources requires (null when any source is prohibited). */
+/** The fairness class a set of sources requires ("prohibited" wins). */
 export function requiredFairnessClass(sources = []) {
   let required = "permitted";
   for (const source of sources) {
     for (const finding of classifySource(source).findings) {
-      if (finding.effect === "prohibited") return null;
       if (CLASS_RANK[finding.effect] > CLASS_RANK[required]) required = finding.effect;
     }
   }
@@ -296,7 +276,9 @@ export function lintFeatureSources({ sources = [], keys = [], fairnessClass = "p
       if (!finding.keyAllowed) violations.push({ ...finding, violation: "sensitive_join_key" });
     }
   }
-  if (!violations.some((v) => v.violation === "prohibited_source") && fairnessClass !== required) {
+  if (fairnessClass === "prohibited") {
+    violations.push({ violation: "prohibited_class_not_definable", declared: fairnessClass, required, source: null, token: null, rule: null });
+  } else if (!violations.some((v) => v.violation === "prohibited_source") && fairnessClass !== required) {
     violations.push({
       violation: "fairness_class_mismatch",
       declared: fairnessClass,
@@ -329,82 +311,39 @@ export function formatViolations(violations) {
 // ── Model-family policies ─────────────────────────────────────────────────
 
 /**
- * A family declares its type, the fairness classes its live decisions may
- * consume and whether it ships a fairness report. The registry rejects any
- * feature set that violates the declaration.
+ * A family declares its type and the fairness classes its inputs may use.
+ * The registry rejects any feature set that violates the declaration.
  */
-export function defineFamilyPolicy({
-  family,
-  familyType,
-  allowedFairnessClasses = ["permitted"],
-  requiresFairnessReport = false,
-  description = null,
-} = {}) {
+export function defineFamilyPolicy({ family, familyType, allowedFairnessClasses = ["permitted"], description = null } = {}) {
   const problems = [];
   if (!/^[a-z][a-z0-9_]*$/.test(String(family || ""))) problems.push("family must be snake_case");
-  if (!FAMILY_TYPES.includes(familyType)) problems.push(`familyType must be one of ${FAMILY_TYPES.join(", ")}`);
+  if (!FAMILY_TYPES.includes(familyType)) problems.push(`familyType must be one of ${FAMILY_TYPES.join(", ")} (others are not defined in this phase)`);
   const classes = [...new Set(allowedFairnessClasses)];
   for (const value of classes) {
-    if (value === "protected_analysis_only") {
-      problems.push("protected_analysis_only is research-only and can never be a family-allowed class");
-    } else if (!DECISION_FAIRNESS_CLASSES.includes(value)) {
-      problems.push(`unknown fairness class ${value}`);
-    }
+    if (!DEFINABLE_FAIRNESS_CLASSES.includes(value)) problems.push(`fairness class ${value} cannot be allowed`);
   }
   if (!classes.includes("permitted")) problems.push("every family allows permitted features");
   if (classes.includes("conversation_only") && familyType !== "conversation_understanding") {
     problems.push("conversation_only features are allowed ONLY in conversation_understanding families");
   }
-  if (classes.includes("restricted_targeting")) {
-    if (!RESTRICTED_TARGETING_FAMILY_TYPES.includes(familyType)) problems.push("restricted_targeting is allowed ONLY in targeting_response families");
-    if (!requiresFairnessReport) problems.push("a family that uses restricted_targeting features must declare requiresFairnessReport");
-  }
-  if (PRICE_FAMILY_TYPES.includes(familyType) && classes.some((c) => c !== "permitted")) {
-    problems.push("price families (valuation/offer/negotiation) allow permitted features only");
+  if (classes.includes("personal_attribute") && !PERSONAL_ATTRIBUTE_FAMILY_TYPES.includes(familyType)) {
+    problems.push("personal_attribute inputs are granted to targeting_response families");
   }
   if (problems.length) {
     throw new FairnessLintError(`invalid family policy ${family}: ${problems.join("; ")}`, problems.map((p) => ({ violation: p })));
   }
-  return Object.freeze({
-    family,
-    familyType,
-    allowedFairnessClasses: Object.freeze(classes),
-    requiresFairnessReport: Boolean(requiresFairnessReport),
-    description,
-  });
+  return Object.freeze({ family, familyType, allowedFairnessClasses: Object.freeze(classes), description });
 }
 
-/**
- * Validate a feature set (array of feature definitions) for a family policy.
- * protected_analysis_only members are accepted for research/backtest in
- * non-price families (the promotion block keeps them out of live decisions).
- */
+/** Validate a feature set (array of feature definitions) for a family policy. */
 export function lintFeatureSetForFamily(features, policy) {
   const violations = [];
   if (!policy) return [{ violation: "family_policy_missing" }];
-  const priceFamily = PRICE_FAMILY_TYPES.includes(policy.familyType);
   for (const def of features) {
     const id = `${def.key}@${def.version}`;
     for (const finding of lintFeatureDefinition(def)) violations.push({ feature: id, ...finding });
-    const cls = def.fairnessClass;
-    if (cls === "protected_analysis_only") {
-      if (priceFamily) violations.push({ feature: id, violation: "price_rule_violation", reason: "seller personal attribute" });
-    } else if (!policy.allowedFairnessClasses.includes(cls)) {
-      if (cls === "restricted_targeting") {
-        violations.push({
-          feature: id,
-          violation: RESTRICTED_TARGETING_FAMILY_TYPES.includes(policy.familyType)
-            ? "restricted_targeting_requires_fairness_report"
-            : "restricted_targeting_prohibited_for_family_type",
-          familyType: policy.familyType,
-        });
-      } else {
-        violations.push({ feature: id, violation: "fairness_class_not_allowed_for_family", fairnessClass: cls });
-      }
-    }
-    if (priceFamily && cls !== "protected_analysis_only") {
-      const domainOk = PRICE_FAMILY_DOMAINS.includes(def.domain) || (def.domain === "ownership_prospect" && def.statedFact === true);
-      if (!domainOk || cls !== "permitted") violations.push({ feature: id, violation: "price_rule_violation", domain: def.domain });
+    if (!policy.allowedFairnessClasses.includes(def.fairnessClass)) {
+      violations.push({ feature: id, violation: "fairness_class_not_allowed_for_family", fairnessClass: def.fairnessClass, familyType: policy.familyType });
     }
   }
   return violations;
@@ -415,9 +354,8 @@ export const DEFAULT_FAMILY_POLICIES = Object.freeze({
   seller_first_touch_reply: defineFamilyPolicy({
     family: "seller_first_touch_reply",
     familyType: "targeting_response",
-    allowedFairnessClasses: ["permitted", "restricted_targeting"],
-    requiresFairnessReport: true,
-    description: "P(reply within 72h | delivered first touch). restricted_targeting only in the declared ablation set; ships a fairness report.",
+    allowedFairnessClasses: ["permitted", "personal_attribute"],
+    description: "P(reply within 72h | delivered first touch). Models using personal_attribute inputs ship a fairness report.",
   }),
   send_carrier_filtering: defineFamilyPolicy({ family: "send_carrier_filtering", familyType: "delivery_risk" }),
   send_opt_out_risk: defineFamilyPolicy({ family: "send_opt_out_risk", familyType: "delivery_risk" }),
@@ -426,7 +364,5 @@ export const DEFAULT_FAMILY_POLICIES = Object.freeze({
     familyType: "conversation_understanding",
     allowedFairnessClasses: ["permitted", "conversation_only"],
   }),
-  comp_micromarket: defineFamilyPolicy({ family: "comp_micromarket", familyType: "valuation" }),
   campaign_controller: defineFamilyPolicy({ family: "campaign_controller", familyType: "campaign_allocation" }),
-  seller_strategy_policy: defineFamilyPolicy({ family: "seller_strategy_policy", familyType: "negotiation" }),
 });

@@ -17,9 +17,9 @@ import { V1_FEATURE_SPECS, createV1Registry } from "../../src/lib/domain/intelli
  */
 const PINNED = Object.freeze({
   "owner.absentee@1": "88cb2b3727db45ad31d61a37b8bc6fb84e6beb0e9c14fb23e0f7ab4418a62dcb",
-  "owner.agent_persona@1": "40df7dfa94b3e34e87d23f70f29f850e5cac9e7f5e7f15b043def3b4b3d1bdd4",
+  "owner.agent_persona@1": "32033ae7349de373284d585163b8dab604e3aaad463c0f789520b6f5cd0e4270",
   "owner.entity_class@1": "9515ad03d2a1b5ae147286929e9a1c45eaf29a09ba7ecfd0dc82b672a5f349aa",
-  "owner.language@1": "3b83ccef8cad914f5ef9926aa0b6baa201b300a92d60fd2e9e2f028b3b1459df",
+  "owner.language@1": "46b8e6fadbfc777c8dfb66a897334295904e140b4458d49b8383fa9830b847cd",
   "property.asset_family@1": "bf31e4d5415a6560fc70fa9a4a4dee462cac779f5cab3ccb3f59a380efdc8e64",
   "property.bathrooms@1": "66005279575f37610877b75c1e7c5dc93da64e116413d84ab8da147c390e7c45",
   "property.bedrooms@1": "2ecf42cc7a9c5efd125ff8c48455fb9e750778e1d78139a805d3b33269794bbb",
@@ -30,12 +30,12 @@ const PINNED = Object.freeze({
   "property.unit_count@1": "7c9b83d57696e59b4e594be053551dc3d5cd5a8e5a3757889155d2e7ff234617",
   "property.year_built@1": "fa9f01842e8e9cfb690a5872e281de3972a392e15ac71cd16c52d53d99a6e4da",
   "property.years_since_last_recorded_sale@1": "4ea5f46ff60fc89cfd37340eb7958ba19b57773a966a544e84a351f37de357df",
-  "prospect.age_band@1": "fa8b75bd977753277915009913afbf20a53d5216fa86ae3998e9ba48c7fa92f1",
-  "prospect.education_level@1": "d8b95e45ef6062cd9daeef45e65806902d94ca763f4c94121830490657651910",
-  "prospect.gender@1": "dff49f3bf3ca6fb8ea52fd87e90effcc2dbe08d69a974a53ea6489aa67495e0f",
-  "prospect.household_income_band@1": "b3988e919371432fcddc971ec4e76872550c275e259c85ca3b5764ecb6102b16",
-  "prospect.marital_status@1": "6bad4f54a438becbf10ee01911b14032f8e551a14f5bd33f3bf04e7079c67a5d",
-  "prospect.occupation_group@1": "7c30b56464c68417c0b091d8cf293b4a7e2b91e1760dc80c4fd6bf088caa6114",
+  "prospect.age_band@1": "2fb9706aa974626b422dac83df83c93bc3ee5033fdd5d76a81d78729e0d08e22",
+  "prospect.education_level@1": "3d2f2abdfb6f13b2e4890177b734b509582e38909b0b9832feb672d67425afe9",
+  "prospect.gender@1": "d82782d34014749fee6fedb1a70cee83a2416f77c63dd0de211d1da6433eaa50",
+  "prospect.household_income_band@1": "96e756dc4590eb7e334de22a3aed84ee11f0116859426e232bde262b36454697",
+  "prospect.marital_status@1": "29081f6a91b02d40411a16d26c18df11e7f347d92b7b0c69a7c81749343e6b1b",
+  "prospect.occupation_group@1": "60e5466331ad91db9d8b3eeba865d4f9fc7d68ffa54b5ebeebe66f81809209c3",
   "seller.days_since_last_touch@1": "a0426b9769e427b96b77532654e7c7b8d344d297516df87adf6fb43bb6152818",
   "seller.prior_delivered_count@1": "a13c2ace9dedbba630a3a5a1ec618012e9c126aa2f8ffefe486b2a1c6fbada64",
   "seller.prior_touch_count@1": "bb935c9ebc7d06f19426e9e5f9a66c73e4af40023cc97a0e78e76fd5179d0c48",
@@ -43,8 +43,7 @@ const PINNED = Object.freeze({
   "send.recipient_local_weekday@1": "e12556724d2407014a4e8c3788841db2314dfaa273b6bb11e77848240b358a5c",
   "template.template_id@1": "39b74486bca1b592419754943e273d119162e071b5a1372c1759dfccad287e1c",
   "template.use_case@1": "dff9686727563fcb4ed7b0737b999b2f75e1f665c76899f8536eb38a4d6d68bd",
-  "seller_first_touch_protected_research@1": "c0d6cfe6aa362bb6beac153cf5f72ebfc11d70f233e17536fe6f653dd80183ea",
-  "seller_first_touch_tier_r@1": "40eae689034d6e5a46308562294e325d1d50cd116d566d5abac536ac9e29a49e",
+  "seller_first_touch_all@1": "31d2359631897149375a7c5655d534f97b28ff36848d712091ac81f50851d900",
   "seller_first_touch@1": "3ce39382ab59530b96ea1bf9093005a0cbf31cbeee7cf2655f6167a10df4e280",
 });
 
@@ -61,7 +60,7 @@ test("definition_hash covers domain, pit class, fairness declarations, lineage a
   const hash = featureDefinitionHash(base);
   const variants = [
     { domain: "financial_title" },
-    { fairnessClass: "restricted_targeting" },
+    { fairnessClass: "personal_attribute" },
     { statedFact: true },
     { pitClass: "event_time" },
     { scope: "deal" },
@@ -123,11 +122,11 @@ test("mirror rows carry domain and fairness class for intelligence.feature_defin
   const registry = createV1Registry();
   const row = toFeatureDefinitionRow(registry.get("prospect.age_band", 1));
   assert.equal(row.domain, "ownership_prospect");
-  assert.equal(row.fairness_class, "restricted_targeting");
+  assert.equal(row.fairness_class, "personal_attribute");
   assert.equal(row.pit_class, "static_fact");
   assert.equal(row.definition_hash.length, 64);
-  assert.equal(toFeatureDefinitionRow(registry.get("prospect.gender", 1)).fairness_class, "protected_analysis_only");
+  assert.equal(toFeatureDefinitionRow(registry.get("prospect.gender", 1)).fairness_class, "personal_attribute");
   const absentee = toFeatureDefinitionRow(registry.get("owner.absentee", 1));
   assert.equal(absentee.freshness_sla, "300 seconds");
-  assert.equal(registry.toFeatureSetRows().length, 3);
+  assert.equal(registry.toFeatureSetRows().length, 2);
 });

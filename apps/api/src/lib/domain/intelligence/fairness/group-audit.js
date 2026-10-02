@@ -1,25 +1,33 @@
 /**
- * IC8 FAIRNESS GROUP AUDIT (architecture §3.3; owner decisions of 2026-10-01).
+ * IC8 FAIRNESS REPORTING (owner decision 2026-10-01, final policy).
  *
- * Every model ships a fairness report: performance and score distribution by
- * the protected_analysis_only groups (gender, marital status, owner language,
- * agent persona) and the restricted_targeting groups (age band, income band,
- * education, occupation). Group values are read from a dataset record's
- * research features (seller_first_touch_protected_research@1 carries them) or
- * from any caller-supplied lookup -- this is measurement, not a model input.
+ * Every model that uses a personal_attribute input ships a fairness report:
+ * performance and score distribution by each personal-attribute group
+ * (gender, marital status, owner language, agent persona, age band, income
+ * band, education, occupation). The model registry requires a valid report to
+ * promote such a model to shadow / challenger / champion.
  *
- * The report holds aggregates only: no subject ids, no per-row group values.
- * Groups smaller than minGroupSize are suppressed.
+ * Group values are read from snapshot records built with
+ * seller_first_touch_all@1 (or any caller-supplied lookup). The report holds
+ * aggregates only: no subject ids, no per-row group values. Groups smaller
+ * than minGroupSize are suppressed.
  */
 
 import { auc, calibrationTable } from "../models/metrics.js";
 
-export const GROUP_AUDIT_FIELDS = Object.freeze({
-  protected_analysis_only: Object.freeze(["gender", "marital_status", "owner_language", "agent_persona"]),
-  restricted_targeting: Object.freeze(["age_band", "income_band", "education", "occupation"]),
-});
+export const FAIRNESS_REPORT_VERSION = "ic8_fairness_report@1";
+export const GROUP_AUDIT_FIELDS = Object.freeze([
+  "gender",
+  "marital_status",
+  "owner_language",
+  "agent_persona",
+  "age_band",
+  "income_band",
+  "education",
+  "occupation",
+]);
 
-/** Where each audit group lives in a dataset record built with the research feature set. */
+/** Where each audit group lives in a record built with seller_first_touch_all@1. */
 export const GROUP_FEATURE_KEYS = Object.freeze({
   gender: "prospect.gender",
   marital_status: "prospect.marital_status",
@@ -57,7 +65,7 @@ export function auditByGroups(
     groupOf = groupOfFromRecord,
     labelOf,
     scoreOf,
-    fields = [...GROUP_AUDIT_FIELDS.protected_analysis_only, ...GROUP_AUDIT_FIELDS.restricted_targeting],
+    fields = GROUP_AUDIT_FIELDS,
     minGroupSize = DEFAULT_MIN_GROUP_SIZE,
   } = {},
 ) {
@@ -115,7 +123,7 @@ export function auditByGroups(
       };
     }
     out[field] = {
-      fairness_class: GROUP_AUDIT_FIELDS.protected_analysis_only.includes(field) ? "protected_analysis_only" : "restricted_targeting",
+      fairness_class: "personal_attribute",
       groups,
       reported_groups: Object.keys(groups).length,
       suppressed_groups: suppressed,
@@ -125,4 +133,31 @@ export function auditByGroups(
     };
   }
   return { measurement_only: true, min_group_size: minGroupSize, overall, fields: out };
+}
+
+/** A promotion-ready fairness report for one model version. */
+export function buildFairnessReport(records, { modelVersionId, featureSetId, datasetId = null, generatedAt, labelOf, scoreOf, groupOf, fields, minGroupSize } = {}) {
+  if (!modelVersionId || !featureSetId) throw new TypeError("buildFairnessReport needs modelVersionId and featureSetId");
+  return {
+    report_version: FAIRNESS_REPORT_VERSION,
+    model_version_id: String(modelVersionId),
+    feature_set_id: featureSetId,
+    dataset_id: datasetId,
+    generated_at: generatedAt || new Date().toISOString(),
+    ...auditByGroups(records, { labelOf, scoreOf, groupOf, fields, minGroupSize }),
+  };
+}
+
+/** Structural validation used by the model registry before promotion. */
+export function validateFairnessReport(report, { modelVersionId } = {}) {
+  const problems = [];
+  if (!report || typeof report !== "object") return { ok: false, problems: ["fairness report required"] };
+  if (report.report_version !== FAIRNESS_REPORT_VERSION) problems.push(`report_version must be ${FAIRNESS_REPORT_VERSION}`);
+  if (modelVersionId && String(report.model_version_id) !== String(modelVersionId)) problems.push("report is for another model version");
+  if (report.measurement_only !== true) problems.push("not a group-audit report");
+  if (!report.overall || !(report.overall.n > 0)) problems.push("report covers no rows");
+  const fields = report.fields && typeof report.fields === "object" ? Object.keys(report.fields) : [];
+  if (!fields.length) problems.push("report has no groups");
+  if (!Number.isFinite(Date.parse(report.generated_at))) problems.push("generated_at required");
+  return { ok: problems.length === 0, problems };
 }
