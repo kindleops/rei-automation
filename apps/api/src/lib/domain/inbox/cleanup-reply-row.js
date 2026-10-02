@@ -31,6 +31,8 @@ import {
 import { isManualInboxSend, isUnknownAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { resolveSellerIdentity } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
 import { calculateOwnerProspectAlignment } from "@/lib/identity/ownerProspectAlignment.js";
+import { resolveQueueRowIdentity } from "@/lib/domain/communications/queue-row-identity.js";
+import { assertNoEmDash } from "@/lib/domain/messaging/outbound-content-guard.js";
 
 const clean = (v) => String(v ?? "").trim();
 
@@ -191,6 +193,7 @@ export function buildCleanupReplyRow({
     to_phone_number: threadKey,
     from_phone_number: sender.phone_number,
     textgrid_number_id: sender.item_id || sender.textgrid_number_id || null,
+    routing_tier: sender.routing_tier || null,
     queue_status: "queued",
     scheduled_for: now,
     scheduled_for_utc: now,
@@ -223,7 +226,12 @@ export function buildCleanupReplyRow({
       template_language: template.language || null,
       seller_first_name: clean(identity?.seller_first_name) || null,
       is_first_touch: false,
-      sender_selection: { engine: "supabase_candidate_feeder.chooseTextgridNumber", reason: sender.selection_reason || null },
+      routing_tier: sender.routing_tier || null,
+      sender_selection: {
+        engine: "cleanup-reply-sender.selectCleanupReplySender (chooseTextgridNumber + operator blocklist + sms health guard)",
+        reason: sender.selection_reason || null,
+        routing_tier: sender.routing_tier || null,
+      },
       recipient_timezone: timezone,
       candidate_snapshot,
       ...extra_metadata,
@@ -250,5 +258,10 @@ export function checkCleanupRowAgainstRunner(row, { now } = {}) {
   if (window?.hold === true) failures.push(window.reason || "recipient_timezone_unresolved");
   else if (window?.allowed !== true) failures.push(window?.reason || "outside_contact_window");
   if (hitsBlankGreetingGuard(row.message_body)) failures.push("blank_greeting_guard");
+  // The dispatcher's identity (dispatch-seller-queue-row step 1) and content guard.
+  const identity = resolveQueueRowIdentity(probe);
+  if (!identity.ok) failures.push(identity.reason);
+  const dash = assertNoEmDash(row.message_body);
+  if (!dash.ok) failures.push(dash.reason);
   return { ok: failures.length === 0, reason: failures[0] || null, failures, window };
 }

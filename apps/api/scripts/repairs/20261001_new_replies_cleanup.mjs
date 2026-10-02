@@ -91,7 +91,9 @@ const REPLIES = value("replies");
 // Dry run of the reply eligibility chain (reads only): --replies-dry --replies=<plan.json>
 const REPLIES_DRY = Boolean(flag("replies-dry"));
 // rc-7.1: cancel the 16 runner-paused replies and queue them again (see header).
-const REPLIES_REQUEUE = Boolean(flag("replies-requeue"));
+const REPLIES_REQUEUE = Boolean(flag("replies-requeue")) || Boolean(flag("replies-requeue-sender"));
+// rc-7.1 pass 2: the rows refused for an operator-blocked sender (20:16Z).
+const REQUEUE_PASS = flag("replies-requeue-sender") ? "sender" : "snapshot";
 // The owner-locked late-reply copy (late-reply-locked-copy.js). Always on for
 // --replies-requeue; --locked-copy turns it on for --replies / --replies-dry.
 const LOCKED_COPY = Boolean(flag("locked-copy")) || REPLIES_REQUEUE;
@@ -390,8 +392,9 @@ async function main() {
       return;
     }
     const dryRun = REPLIES_DRY || !APPLY;
-    if (!dryRun && CONFIRM !== "rc71_replies_requeue") {
-      console.error("--replies-requeue --apply requires --confirm=rc71_replies_requeue. Nothing written.");
+    const confirmTag = REQUEUE_PASS === "sender" ? "rc71_replies_requeue_sender" : "rc71_replies_requeue";
+    if (!dryRun && CONFIRM !== confirmTag) {
+      console.error(`re-queue --apply requires --confirm=${confirmTag}. Nothing written.`);
       process.exitCode = 2;
       return;
     }
@@ -689,8 +692,24 @@ async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {})
     import("../../src/lib/domain/inbox/cleanup-reply-row.js"),
     import("../../src/lib/domain/queue/template-asset-guard.js"),
   ]);
+  const [senderMod, actionMod] = await Promise.all([
+    import("../../src/lib/domain/inbox/cleanup-reply-sender.js"),
+    import("../../src/lib/domain/communications/operator-action-store.js"),
+  ]);
   const db = dryRun ? readOnlyClient(sb, blocked) : sb;
   const k = (threadKey) => variants(threadKey);
+  // Uncached, error-raising system_control read (system-control.getSystemValue
+  // turns a read error into null, i.e. "no blocklist").
+  const SC_KEYS = ["sms_blocked_sender_numbers", "sms_blocked_template_ids", "require_local_routing", "allow_regional_fallback_for_first_touch"];
+  let scPromise = null;
+  const strictSystemValue = async (key) => {
+    scPromise = scPromise || db.from("system_control").select("key,value").in("key", SC_KEYS).then(({ data, error }) => {
+      if (error) throw error;
+      return new Map((data || []).map((r) => [r.key, r.value]));
+    });
+    const map = await scPromise;
+    return map.has(key) ? map.get(key) : null;
+  };
   return {
     dryRun,
     ...(dryRun && DRY_AT ? { now: new Date(DRY_AT).toISOString() } : {}),
@@ -759,20 +778,27 @@ async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {})
       return r?.iana || null;
     },
     isWithinContactWindow: (now, tz) => windowMod.isWithinContactWindow(now, tz),
-    selectSender: async ({ ctx }) => {
-      const r = await feeder.chooseTextgridNumber(
-        { market: ctx.market || null, state: ctx.property?.state || null, touch_number: 2, is_first_touch: false },
-        { first_touch: false },
-        { supabase: db }
-      );
-      return {
-        routing_allowed: r?.ok === true && r?.routing_allowed !== false,
-        phone_number: r?.selected_textgrid_number || r?.selected?.phone_number || null,
-        item_id: r?.selected?.id || null,
-        selection_reason: r?.selection_reason || null,
-        routing_block_reason: r?.routing_block_reason || r?.reason_code || null,
-      };
+    strictSystemValue,
+    // Campaign-router selection + operator blocklist + the runner's sms health
+    // guard (cleanup-reply-sender.js). system_control is read STRICTLY: an
+    // unreadable blocklist means no sender, never an empty blocklist.
+    selectSender: async ({ ctx, template_id }) =>
+      senderMod.selectCleanupReplySender(
+        { market: ctx.market || null, state: ctx.property?.state || null, template_id },
+        { chooseTextgridNumber: feeder.chooseTextgridNumber, getSystemValue: strictSystemValue, supabase: db }
+      ),
+    // The dispatcher's identity anchor (operator_reply action, one per queue_key).
+    findOperatorAction: async (key) => {
+      const { data, error } = await db.from("seller_operator_actions").select("id").eq("request_idempotency_key", key).maybeSingle();
+      if (error) throw error;
+      return data?.id || null;
     },
+    resolveOperatorAction: dryRun
+      ? async () => {
+          blocked.push("resolveOperatorAction");
+          throw new Error("dry run: operator action write blocked");
+        }
+      : (input) => actionMod.resolveOperatorAction(input, { supabase: sb }),
   };
 }
 
@@ -784,7 +810,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
   const { applyLockedLateReplyCopy } = await import("../../src/lib/domain/inbox/late-reply-locked-copy.js");
   const blocked = [];
   const deps = await buildReplyDeps(sb, COHORT, { dryRun, blocked });
-  const ROW_COLS = "id,queue_key,dedupe_key,queue_status,sent_at,guard_reason,paused_reason,metadata,created_at";
+  const ROW_COLS = "id,queue_key,dedupe_key,queue_status,sent_at,provider_message_id,from_phone_number,guard_reason,paused_reason,metadata,created_at";
   const requeueDeps = {
     source: CLEANUP_SOURCE,
     // Every row for the thread's cleanup keys (exact keys: both are indexed).
@@ -792,7 +818,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
       const key = `${CLEANUP_SOURCE}:reply:${threadKey}`;
       const [byDedupe, byQueueKey] = await Promise.all([
         deps.supabase.from("send_queue").select(ROW_COLS).eq("dedupe_key", key).limit(50),
-        deps.supabase.from("send_queue").select(ROW_COLS).in("queue_key", [key, `${key}:${requeueMod.REQUEUE_QUEUE_KEY_SUFFIX}`]).limit(50),
+        deps.supabase.from("send_queue").select(ROW_COLS).in("queue_key", [key, ...Object.values(requeueMod.REQUEUE_PASSES).map((p) => `${key}:${p.suffix}`)]).limit(50),
       ]);
       if (byDedupe.error || byQueueKey.error) return null;
       const byId = new Map([...(byDedupe.data || []), ...(byQueueKey.data || [])].map((r) => [r.id, r]));
@@ -805,12 +831,13 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
         .from("send_queue")
         .update(patch)
         .eq("id", row.id)
-        .eq("queue_status", requeueMod.PAUSED_STATUS)
+        .eq("queue_status", row.queue_status)
         .select("id");
       if (error) return { ok: false, reason: error.message };
       return { ok: true, changed: (data || []).length === 1 };
     },
     queueReply: queueCleanupReply,
+    pass: requeueMod.REQUEUE_PASSES[REQUEUE_PASS],
   };
   const results = [];
   for (const item of items) {
@@ -834,6 +861,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
       outcome: r.outcome || (r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown"),
       ...(requeue ? { cancelled: r.cancelled || [], replaces_queue_row_ids: r.replaces_queue_row_ids || [], queue_key_suffix: r.queue_key ? r.queue_key.split(":").slice(-2).join(":") : null } : {}),
       runner_window: r.runner_window || null,
+      routing_tier: r.sender?.routing_tier || null,
       runner_failures: r.runner_failures || null,
       asset_guard: r.asset_guard || null,
       seller_first_name_source: r.seller_first_name_source || null,
@@ -845,6 +873,33 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
       template_state: r.template_state || null,
       sender: r.sender ? { phone: `•••${clean(r.sender.phone_number).slice(-4)}`, selection_reason: r.sender.selection_reason } : null,
       recipient_timezone: r.recipient_timezone || null,
+    });
+  }
+  // The fleet as the selector sees it: which markets have an unblocked,
+  // healthy number right now (read-only).
+  let fleet = null;
+  if (requeue) {
+    const [feederMod, engine, guardMod] = await Promise.all([
+      import("../../src/lib/domain/outbound/supabase-candidate-feeder.js"),
+      import("../../src/lib/supabase/sms-engine.js"),
+      import("../../src/lib/domain/delivery/sms-health-guard.js"),
+    ]);
+    const sc = await guardMod.loadSmsHealthGuardSystemControl(deps.strictSystemValue);
+    const blockedSet = guardMod.getDispatchBlockedSets(process.env, sc).sender_numbers;
+    const rows = await feederMod.loadTextgridNumberFleet({ supabase: deps.supabase });
+    fleet = rows.map((r) => {
+      const blockedByOperator = guardMod.isSenderDispatchBlocked(r.phone_number, { sender_numbers: blockedSet });
+      const elig = engine.evaluateOutboundNumberEligibility(r, new Date());
+      return {
+        number: `•••${clean(r.phone_number).slice(-4)}`,
+        market: r.market || null,
+        status: r.status || null,
+        health_state: r.health_state || null,
+        cooling_until: r.cooling_until || null,
+        operator_blocked: blockedByOperator,
+        eligibility: elig.ok ? "ok" : elig.reason,
+        sendable: !blockedByOperator && elig.ok === true,
+      };
     });
   }
   const summary = {
@@ -859,7 +914,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
   };
   const file = path.join(OUT, `${requeue ? "replies-requeue-" : ""}${dryRun ? "replies-dry.json" : "cleanup-replies-apply-result.json"}`);
   fs.mkdirSync(OUT, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ ...summary, results }, null, 1));
+  fs.writeFileSync(file, JSON.stringify({ ...summary, ...(fleet ? { fleet } : {}), results }, null, 1));
   console.log(JSON.stringify({ file, ...summary }, null, 1));
   if (dryRun && blocked.length) {
     console.error("dry run reached a write path:", blocked);

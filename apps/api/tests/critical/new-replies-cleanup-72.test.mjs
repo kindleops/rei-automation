@@ -306,6 +306,7 @@ function replyDeps(overrides = {}) {
       template_body: SAFE_BODY,
     }),
     loadSellerIdentity: async () => IDENTITY,
+    resolveOperatorAction: async () => ({ ok: true, operator_action_id: "act-1" }),
     resolveTimezone: () => "America/New_York",
     isWithinContactWindow: (now, tz) => {
       const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hourCycle: "h23" }).format(new Date(now)));

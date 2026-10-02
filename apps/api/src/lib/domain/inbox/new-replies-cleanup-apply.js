@@ -67,6 +67,7 @@ export const REPLY_HOLD = Object.freeze({
   NO_SELLER_NAME: "seller_first_name_unresolved",
   RUNNER_INVALID: "runner_invariant_failed",
   ASSET: "template_asset_incompatible",
+  NO_ACTION: "operator_action_not_durable",
   REVIEW: "needs_review",
 });
 
@@ -185,7 +186,7 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
   if (rendered.unresolved.length) return hold(REPLY_HOLD.RENDER, { unresolved: rendered.unresolved, template_state });
 
   // 5. Sender: the normal engine decides; nothing on the plan can pin a number.
-  const sender = await safely(deps.selectSender, { thread, ctx, language: template.language });
+  const sender = await safely(deps.selectSender, { thread, ctx, language: template.language, template_id: template.template_id });
   if (!sender || sender.routing_allowed !== true || !clean(sender.phone_number)) {
     return hold(REPLY_HOLD.NO_SENDER, { detail: sender?.routing_block_reason || sender?.selection_reason || "sender_engine_unavailable", template_state });
   }
@@ -222,6 +223,20 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
     extra_metadata: { ...(reply.plan_template_id ? { plan_template_id: reply.plan_template_id } : {}), ...(deps.extraMetadata || {}) },
   });
 
+  // 6b. The row's communication identity. The dispatcher refuses any row whose
+  //     action it cannot name (queue_row_identity_underivable): the Inbox
+  //     operator path anchors a scheduled row on a seller_operator_actions row
+  //     (operator_reply), and so does this owner-approved send, one action per
+  //     queue_key (idempotent). The check below runs on the anchor the row
+  //     will carry; the action itself is recorded only on the live path.
+  const action_key = queue_key;
+  let operator_action_id = null;
+  if (deps.findOperatorAction) {
+    operator_action_id = await safely(deps.findOperatorAction, action_key);
+  }
+  row.metadata.operator_action_idempotency_key = action_key;
+  row.metadata.operator_action_id = operator_action_id || `pending:${action_key}`;
+
   // 7. The runner's own invariants on the exact row (preclaim validity, seller
   //    name, blank-greeting guard, the runner's recipient-zone window).
   const runner = checkCleanupRowAgainstRunner(row, { now: nowIso });
@@ -233,7 +248,7 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
     template_id: template.template_id,
     template_state,
     rendered_message: rendered.text,
-    sender: { phone_number: sender.phone_number, selection_reason: sender.selection_reason || null },
+    sender: { phone_number: sender.phone_number, selection_reason: sender.selection_reason || null, routing_tier: sender.routing_tier || null },
     recipient_timezone: tz,
     seller_first_name_source: identity.seller_name_source || null,
     queue_key,
@@ -264,6 +279,20 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
     return { ok: true, would_queue: true, ...summary };
   }
 
+  if (!operator_action_id) {
+    const action = await safely(deps.resolveOperatorAction, {
+      action_type: "operator_reply",
+      request_idempotency_key: action_key,
+      thread_key: threadKey,
+      to_phone_number: threadKey,
+      operator_note: `${CLEANUP_SOURCE}: owner-approved late reply (${template.template_id})`,
+    });
+    if (!action?.ok || !clean(action.operator_action_id)) {
+      return { ok: true, held: true, held_reason: REPLY_HOLD.NO_ACTION, detail: action?.reason || "operator_action_store_unavailable", ...summary };
+    }
+    operator_action_id = action.operator_action_id;
+  }
+  row.metadata.operator_action_id = operator_action_id;
   const result = await deps.enqueueSendQueueItem(row, { supabase: deps.supabase });
   if (result?.ok === false) return { ok: false, reason: result.reason || "enqueue_failed", thread_key: threadKey };
   return {

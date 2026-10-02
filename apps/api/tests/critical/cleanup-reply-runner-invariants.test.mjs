@@ -55,6 +55,7 @@ function replyDeps(overrides = {}) {
     checkSuppression: async () => ({ suppressed: false }),
     checkRelationship: async () => ({ not_owner: false }),
     loadSellerIdentity: async () => IDENTITY,
+    resolveOperatorAction: async () => ({ ok: true, operator_action_id: "act-1" }),
     loadTemplate: async (id) => ({ template_id: id, use_case: "late_reply_identity", language: "English", is_active: true, template_body: SAFE_BODY }),
     selectSender: async () => ({ routing_allowed: true, phone_number: "+15550001000", item_id: "tg-1", selection_reason: "exact_market" }),
     resolveTimezone: () => "America/New_York",
@@ -189,6 +190,10 @@ test("the built row is never an operator/auto-reply exemption and carries no pin
     rendered_text: "Hey Pat, this is Sam.", sender: { phone_number: "+15550001000" }, timezone: "America/New_York",
     identity: IDENTITY, source: SOURCE, dedupe_key: "k", now: NOW,
   });
+  // Without an action anchor the dispatcher refuses it (e740c6d8, 20:18Z).
+  const unanchored = checkCleanupRowAgainstRunner(row, { now: NOW });
+  assert.deepEqual(unanchored.failures, ["queue_row_identity_underivable"]);
+  row.metadata.operator_action_id = "act-1";
   assert.equal(checkCleanupRowAgainstRunner(row, { now: NOW }).ok, true);
   assert.equal(row.metadata.source, SOURCE);
 });
@@ -253,7 +258,8 @@ function requeueWorld(initialRows) {
     cancelPausedRow: async (row, patch) => {
       writes.push({ op: "cancel", id: row.id });
       const live = rows.find((r) => r.id === row.id);
-      if (!live || live.queue_status !== "paused_invalid_queue_row") return { ok: true, changed: false };
+      // CAS on the status that was read (the script's .eq("queue_status", row.queue_status)).
+      if (!live || live.queue_status !== row.queue_status) return { ok: true, changed: false };
       Object.assign(live, patch);
       return { ok: true, changed: true };
     },
@@ -375,4 +381,121 @@ test("first-name hold is token-aware: no name token -> no hold; a name token wit
   const held = await queueCleanupReply(PLAN, CTX, named.deps);
   assert.equal(held.held_reason, REPLY_HOLD.NO_SELLER_NAME);
   assert.equal(named.queued.length, 0);
+});
+
+// ── Sender selection (20:16Z: 15 rows on operator-blocked numbers) ──────────
+
+import { selectCleanupReplySender } from "@/lib/domain/inbox/cleanup-reply-sender.js";
+import { chooseTextgridNumber } from "@/lib/domain/outbound/supabase-candidate-feeder.js";
+import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import { evaluateOutboundNumberEligibility } from "@/lib/supabase/sms-engine.js";
+import { resolveQueueRowIdentity } from "@/lib/domain/communications/queue-row-identity.js";
+
+const LA_BLOCKED = "+13235554544";
+const LA_OK = "+13235550001";
+const fleetRow = (phone, market, extra = {}) => ({ id: `tg-${phone.slice(-4)}`, phone_number: phone, market, status: "active", health_state: "healthy", messages_sent_today: 0, ...extra });
+const SC = { sms_blocked_sender_numbers: LA_BLOCKED, sms_blocked_template_ids: "", require_local_routing: "false", allow_regional_fallback_for_first_touch: "true" };
+const scReader = (sc = SC) => async (key) => sc[key] ?? null;
+const env = {};
+
+test("sender: the operator-blocked number is never chosen; the selection passes the runner's sender guards (parity)", async () => {
+  // The blocked number has the lowest usage: the pre-fix selector picked it.
+  const fleet = [fleetRow(LA_BLOCKED, "Los Angeles, CA"), fleetRow(LA_OK, "Los Angeles, CA", { messages_sent_today: 40 })];
+  const pre = await chooseTextgridNumber({ market: "Los Angeles, CA", state: "CA", touch_number: 2 }, { first_touch: false }, { textgridNumberRows: fleet });
+  assert.equal(pre.selected_textgrid_number, LA_BLOCKED, "the defect, reproduced: no blocklist -> blocked number");
+  const s = await selectCleanupReplySender({ market: "Los Angeles, CA", state: "CA", template_id: "lc-late-checkin-en-1" }, { chooseTextgridNumber, getSystemValue: scReader(), textgridNumberRows: fleet, env });
+  assert.equal(s.routing_allowed, true);
+  assert.equal(s.phone_number, LA_OK);
+  // Parity: exactly what the runner evaluates at send time.
+  const guard = evaluateSmsHealthGuard({ from_phone_number: s.phone_number, template_id: "lc-late-checkin-en-1", routing_tier: s.routing_tier, first_touch: false, system_control: SC, env });
+  assert.equal(guard.allowed, true);
+  assert.equal(evaluateOutboundNumberEligibility(fleet.find((r) => r.phone_number === s.phone_number)).ok, true);
+});
+
+test("sender parity, exhaustive over a mixed fleet: whatever is returned passes the runner's guard", async () => {
+  const fleet = [
+    fleetRow(LA_BLOCKED, "Los Angeles, CA"),
+    fleetRow("+13055555670", "Miami, FL"),
+    fleetRow("+17135550002", "Houston, TX", { health_state: "cooling", cooling_until: "2099-01-01T00:00:00Z" }),
+    fleetRow("+16125550495", "Minneapolis, MN"),
+    fleetRow("+12145550003", "Dallas, TX", { status: "paused" }),
+  ];
+  const sc = { ...SC, sms_blocked_sender_numbers: `${LA_BLOCKED},+13055555670` };
+  for (const [market, state] of [["Los Angeles, CA", "CA"], ["Miami, FL", "FL"], ["Houston, TX", "TX"], ["Minneapolis, MN", "MN"], ["Providence, RI", "RI"], ["Dallas, TX", "TX"]]) {
+    const s = await selectCleanupReplySender({ market, state, template_id: "t" }, { chooseTextgridNumber, getSystemValue: scReader(sc), textgridNumberRows: fleet, env });
+    if (!s.routing_allowed) {
+      assert.equal(s.phone_number, null, "no eligible sender -> nothing pinned");
+      continue;
+    }
+    assert.notEqual(s.phone_number, LA_BLOCKED);
+    assert.notEqual(s.phone_number, "+13055555670");
+    const guard = evaluateSmsHealthGuard({ from_phone_number: s.phone_number, template_id: "t", routing_tier: s.routing_tier, first_touch: false, system_control: sc, env });
+    assert.equal(guard.allowed, true, `${market}: ${guard.reason}`);
+    assert.equal(evaluateOutboundNumberEligibility(fleet.find((r) => r.phone_number === s.phone_number)).ok, true, market);
+  }
+});
+
+test("sender: no eligible number -> no_eligible_sender HOLD; an unreadable blocklist holds too (fail closed)", async () => {
+  const fleet = [fleetRow(LA_BLOCKED, "Los Angeles, CA")];
+  const none = await selectCleanupReplySender({ market: "Los Angeles, CA", state: "CA" }, { chooseTextgridNumber, getSystemValue: scReader(), textgridNumberRows: fleet, env });
+  assert.equal(none.routing_allowed, false);
+  assert.equal(none.phone_number, null);
+  const down = await selectCleanupReplySender({ market: "Los Angeles, CA", state: "CA" }, { chooseTextgridNumber, getSystemValue: async () => { throw new Error("down"); }, textgridNumberRows: [fleetRow(LA_OK, "Los Angeles, CA")], env });
+  assert.equal(down.routing_block_reason, "sender_blocklist_unreadable");
+  // Through the executor: HOLD no_eligible_sender, nothing queued.
+  const { deps, queued } = replyDeps({ selectSender: async () => none });
+  const res = await queueCleanupReply(PLAN, CTX, deps);
+  assert.equal(res.held_reason, REPLY_HOLD.NO_SENDER);
+  assert.equal(queued.length, 0);
+});
+
+test("a queued cleanup row names its action (operator_reply anchor), one action per queue_key; no anchor -> HOLD", async () => {
+  const actions = [];
+  const { deps, queued } = replyDeps({
+    resolveOperatorAction: async (input) => { actions.push(input); return { ok: true, operator_action_id: "act-9" }; },
+  });
+  await queueCleanupReply(PLAN, CTX, deps);
+  assert.equal(actions[0].action_type, "operator_reply");
+  assert.equal(actions[0].request_idempotency_key, queued[0].queue_key);
+  assert.equal(queued[0].metadata.operator_action_id, "act-9");
+  const id = resolveQueueRowIdentity({ ...queued[0], id: "r-1" });
+  assert.equal(id.ok, true);
+  assert.equal(id.anchors.operator_action_id, "act-9");
+  assert.equal(isManualInboxSend(queued[0]), false, "an action anchor is not the operator window exemption");
+  const failing = replyDeps({ resolveOperatorAction: async () => ({ ok: false, reason: "operator_action_not_durable" }) });
+  const r = await queueCleanupReply(PLAN, CTX, failing.deps);
+  assert.equal(r.held_reason, REPLY_HOLD.NO_ACTION);
+  assert.equal(failing.queued.length, 0);
+  // Existing action (a re-run): reused, nothing new recorded.
+  const again = replyDeps({ findOperatorAction: async () => "act-old", resolveOperatorAction: async () => { throw new Error("must not create"); } });
+  await queueCleanupReply(PLAN, CTX, again.deps);
+  assert.equal(again.queued[0].metadata.operator_action_id, "act-old");
+});
+
+test("re-queue SENDER pass: cancels only the blocked row, keeps one live row per thread, never touches a live/sent thread", async () => {
+  const { REQUEUE_PASSES } = await import("@/lib/domain/inbox/cleanup-reply-requeue.js");
+  const blockedRow = {
+    id: "blk-1", queue_key: `${SOURCE}:reply:${THREAD_KEY}:requeue:rc71`, dedupe_key: `${SOURCE}:reply:${THREAD_KEY}`,
+    queue_status: "blocked_by_health_guard", guard_reason: "blocked_sender_number", from_phone_number: LA_BLOCKED, sent_at: null,
+    metadata: { source: SOURCE },
+  };
+  const original = { ...PAUSED_ROW, queue_status: "cancelled", guard_reason: REQUEUE_TAG };
+  const w = requeueWorld([original, blockedRow]);
+  const pass = REQUEUE_PASSES.sender;
+  const r = await requeueCleanupReply(PLAN, CTX, { ...w.deps, pass });
+  assert.equal(r.outcome, "queued", JSON.stringify(r));
+  const blk = w.rows.find((x) => x.id === "blk-1");
+  assert.equal(blk.queue_status, "cancelled");
+  assert.equal(blk.guard_reason, "rc71_replies_requeue_sender");
+  assert.equal(blk.metadata["requeue_audit_rc71_replies_requeue_sender"].prior_from_phone_masked, "•••4544");
+  assert.equal(w.rows.find((x) => x.id === "old-1").guard_reason, REQUEUE_TAG, "the pass-1 row is untouched");
+  const fresh = w.rows.filter((x) => x.queue_key.endsWith(":requeue:rc71:sender"));
+  assert.equal(fresh.length, 1);
+  const again = await requeueCleanupReply(PLAN, CTX, { ...w.deps, pass });
+  assert.equal(again.reason, "live_row_exists");
+  // A thread whose row is live (e740c6d8's shape) is never touched.
+  const liveThread = requeueWorld([{ ...blockedRow, id: "live-1", queue_status: "queued", guard_reason: null }]);
+  const lr = await requeueCleanupReply(PLAN, CTX, { ...liveThread.deps, pass });
+  assert.equal(lr.reason, "live_row_exists");
+  assert.deepEqual(liveThread.writes, []);
 });

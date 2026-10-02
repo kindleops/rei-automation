@@ -27,6 +27,30 @@ export const REQUEUE_QUEUE_KEY_SUFFIX = "requeue:rc71";
 export const PAUSED_STATUS = "paused_invalid_queue_row";
 export const PAUSED_GUARD = "missing_candidate_snapshot";
 
+/**
+ * One re-queue PASS per runner refusal. Each pass names the dead rows it may
+ * cancel, the tag it cancels them with, and its own queue_key suffix (unique
+ * per pass, so a pass's second run replays instead of inserting).
+ */
+export const REQUEUE_PASSES = Object.freeze({
+  // 2026-10-02 ~19:00Z: no candidate snapshot.
+  snapshot: Object.freeze({
+    tag: REQUEUE_TAG,
+    suffix: REQUEUE_QUEUE_KEY_SUFFIX,
+    status: PAUSED_STATUS,
+    guard: PAUSED_GUARD,
+    why: "runner paused the row: missing_candidate_snapshot (executor defect, fixed); re-queued through the fixed path",
+  }),
+  // 2026-10-02 20:16Z: the selector chose operator-blocked senders.
+  sender: Object.freeze({
+    tag: "rc71_replies_requeue_sender",
+    suffix: "requeue:rc71:sender",
+    status: "blocked_by_health_guard",
+    guard: "blocked_sender_number",
+    why: "runner refused the row: blocked_sender_number (selector ignored the operator blocklist, fixed); re-queued through the fixed sender selection",
+  }),
+});
+
 // Mirrors the predicate of uq_send_queue_active_dedupe_key.
 export const LIVE_STATUSES = new Set([
   "queued", "ready", "runnable", "scheduled", "pending", "paused", "paused_after_hours",
@@ -36,33 +60,34 @@ const SENT_STATUSES = new Set(["sent", "delivered", "sending_confirmed"]);
 
 const guardOf = (r) => clean(r?.guard_reason || r?.metadata?.guard_reason || r?.metadata?.skip_reason || r?.paused_reason);
 
-export function classifyCleanupRows(rows = [], { source }) {
+export function classifyCleanupRows(rows = [], { source, pass = REQUEUE_PASSES.snapshot }) {
   const mine = rows.filter((r) => clean(r?.metadata?.source) === source);
   return {
-    sent: mine.filter((r) => r.sent_at || SENT_STATUSES.has(clean(r.queue_status))),
+    sent: mine.filter((r) => r.sent_at || clean(r.provider_message_id) || SENT_STATUSES.has(clean(r.queue_status))),
     live: mine.filter((r) => !r.sent_at && LIVE_STATUSES.has(clean(r.queue_status))),
-    paused: mine.filter((r) => clean(r.queue_status) === PAUSED_STATUS && guardOf(r) === PAUSED_GUARD),
-    cancelled_by_requeue: mine.filter((r) => clean(r.queue_status) === "cancelled" && guardOf(r) === REQUEUE_TAG),
+    paused: mine.filter((r) => clean(r.queue_status) === pass.status && guardOf(r) === pass.guard),
+    cancelled_by_requeue: mine.filter((r) => clean(r.queue_status) === "cancelled" && guardOf(r) === pass.tag),
   };
 }
 
-export function requeueCancelPatch(row, { now }) {
+export function requeueCancelPatch(row, { now, pass = REQUEUE_PASSES.snapshot }) {
   const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
   return {
     queue_status: "cancelled",
-    guard_reason: REQUEUE_TAG,
+    guard_reason: pass.tag,
     guard_status: "cancelled",
     updated_at: now,
     metadata: {
       ...metadata,
       final_queue_status: "cancelled",
-      requeue_audit: {
-        tag: REQUEUE_TAG,
+      [pass === REQUEUE_PASSES.snapshot ? "requeue_audit" : `requeue_audit_${pass.tag}`]: {
+        tag: pass.tag,
         cancelled_at: now,
         prior_queue_status: clean(row.queue_status) || null,
         prior_guard_reason: guardOf(row) || null,
-        reason: "runner paused the row: missing_candidate_snapshot (executor defect, fixed); re-queued through the fixed path",
-        replacement_queue_key_suffix: REQUEUE_QUEUE_KEY_SUFFIX,
+        prior_from_phone_masked: clean(row.from_phone_number) ? `•••${clean(row.from_phone_number).slice(-4)}` : null,
+        reason: pass.why,
+        replacement_queue_key_suffix: pass.suffix,
       },
     },
   };
@@ -84,7 +109,8 @@ export async function requeueCleanupReply(plan, ctx, deps = {}) {
     rows = null;
   }
   if (!Array.isArray(rows)) return { ok: false, outcome: "refused", reason: "existing_rows_unreadable", thread_key: threadKey };
-  const c = classifyCleanupRows(rows, { source: deps.source });
+  const pass = deps.pass || REQUEUE_PASSES.snapshot;
+  const c = classifyCleanupRows(rows, { source: deps.source, pass });
   if (c.sent.length) return { ok: true, outcome: "skipped", reason: "already_sent", queue_row_id: c.sent[0].id, thread_key: threadKey };
   if (c.live.length) return { ok: true, outcome: "skipped", reason: "live_row_exists", queue_row_id: c.live[0].id, queue_status: c.live[0].queue_status, thread_key: threadKey };
   if (!c.paused.length && !c.cancelled_by_requeue.length) {
@@ -97,7 +123,7 @@ export async function requeueCleanupReply(plan, ctx, deps = {}) {
       cancelled.push({ id: row.id, would_cancel: true });
       continue;
     }
-    const res = await deps.cancelPausedRow(row, requeueCancelPatch(row, { now }));
+    const res = await deps.cancelPausedRow(row, requeueCancelPatch(row, { now, pass }));
     if (!res?.ok) return { ok: false, outcome: "refused", reason: `cancel_failed:${res?.reason || "unknown"}`, queue_row_id: row.id, thread_key: threadKey };
     cancelled.push({ id: row.id, cancelled: res.changed !== false });
   }
@@ -105,8 +131,8 @@ export async function requeueCleanupReply(plan, ctx, deps = {}) {
 
   const r = await deps.queueReply(plan, ctx, {
     ...deps,
-    queueKeySuffix: REQUEUE_QUEUE_KEY_SUFFIX,
-    extraMetadata: { requeue: { tag: REQUEUE_TAG, replaces_queue_row_ids: replaced, requeued_at: now } },
+    queueKeySuffix: pass.suffix,
+    extraMetadata: { requeue: { tag: pass.tag, replaces_queue_row_ids: replaced, requeued_at: now } },
   });
   const outcome = r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown";
   return { ...r, outcome, cancelled, replaces_queue_row_ids: replaced };
