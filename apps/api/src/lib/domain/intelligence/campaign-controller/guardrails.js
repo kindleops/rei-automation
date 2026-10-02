@@ -45,7 +45,7 @@ export const DEFAULT_DETERMINISTIC_LIMITS = deepFreeze({
   per_number_daily_limit: 800,
   /** #4 contact_window_v1_0800_2100_local_fail_closed, recipient (property) zone. */
   contact_window: { start: "08:00", end: "21:00" },
-  /** resolveFeedLimit: asPositiveInteger(daily_cap, 0) -> 0/null = UNLIMITED. The controller's floor. */
+  /** resolveFeedLimit (campaign-caps.js): null = no daily cap, 0 = send nothing. The controller's floor: it never writes 0 (it pauses). */
   min_daily_cap: 1,
   /** SMS cost constant used by metrics (war-room-service.js SMS_COST_PER_MSG). */
   cost_per_send_usd: 0.0079,
@@ -76,7 +76,7 @@ export function validateGuardrails(g) {
   const posInt = (v) => Number.isInteger(v) && v > 0;
   if (!posInt(g.run_size_clamp) || g.run_size_clamp > 50) problems.push("run_size_clamp must be an integer in 1..50");
   if (!posInt(g.per_number_daily_limit)) problems.push("per_number_daily_limit");
-  if (!posInt(g.min_daily_cap)) problems.push("min_daily_cap must be a positive integer (0 = unlimited in the feeder)");
+  if (!posInt(g.min_daily_cap)) problems.push("min_daily_cap must be a positive integer (0 = send nothing in the feeder; the controller pauses instead)");
   const start = minutesOf(g.contact_window?.start);
   const end = minutesOf(g.contact_window?.end);
   const floor = minutesOf(DEFAULT_DETERMINISTIC_LIMITS.contact_window.start);

@@ -48,6 +48,7 @@ import {
 } from '@/lib/domain/queue/queue-control-safety.js'
 import { evaluateGlobalSendBrakeState } from '@/lib/domain/queue/queue-send-brake-state.js'
 import { normalizeCampaignStatus } from '@/lib/domain/campaigns/campaign-state-machine.js'
+import { parseCampaignCap, zeroCampaignCaps } from '@/lib/domain/campaigns/campaign-caps.js'
 
 async function campaignServiceHelpers() {
   const service = await import('@/lib/domain/campaigns/campaign-automation-service.js')
@@ -78,6 +79,7 @@ const BLOCKER_LABELS = {
   unrestricted_auto_send: 'Unrestricted auto-send must remain disabled for guarded launch',
   missing_daily_cap: 'Daily send cap is missing',
   missing_total_cap: 'Total send cap is missing',
+  campaign_cap_zero: 'A send cap is set to 0 (send nothing)',
   missing_batch_max: 'Batch maximum is missing',
   missing_market_cap: 'Market cap is missing',
   missing_per_sender_cap: 'Per-sender cap is missing',
@@ -482,8 +484,10 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
   }
 
   if (!asBoolean(outboundSms, false)) block('provider_disabled')
-  if (!campaign.daily_cap) block('missing_daily_cap')
-  if (!campaign.total_cap) warnings.push('Total send cap is not set')
+  // 0 is a set cap meaning "send nothing" (campaign-caps.js), not a missing one.
+  if (zeroCampaignCaps(campaign).length) block('campaign_cap_zero')
+  else if (parseCampaignCap(campaign.daily_cap) === null) block('missing_daily_cap')
+  if (parseCampaignCap(campaign.total_cap) === null) warnings.push('Total send cap is not set')
   /**
    * batch_max and market_cap are NOT launch requirements. batch_max is the
    * worker's hydration chunk (the feeder owns its own chunk/buffer and never

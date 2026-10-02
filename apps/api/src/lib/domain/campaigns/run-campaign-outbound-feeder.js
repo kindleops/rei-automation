@@ -18,6 +18,7 @@ import {
 } from '@/lib/domain/campaigns/campaign-live-execution.js'
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 import { resolveCampaignScheduleTimezones } from '@/lib/domain/campaigns/campaign-market-identity.js'
+import { capRemaining, zeroCampaignCaps } from '@/lib/domain/campaigns/campaign-caps.js'
 import { isWithinContactWindow } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import {
   holdTemplateFailedTargets,
@@ -140,21 +141,25 @@ export function resolveFeedLimit({
   committedTargets = 0,
   sentToday = 0,
 } = {}) {
-  const dailyCap = asPositiveInteger(campaign.daily_cap, 0)
-  const totalCap = asPositiveInteger(campaign.total_cap, 0)
+  // Caps (campaign-caps.js): null = no cap of that kind, 0 = SEND NOTHING.
+  // This read `cap ? ... : Infinity`, so a campaign throttled to 0 was uncapped.
   const bufferNeed = Math.max(0, FEEDER_BUFFER_TARGET - activeLiveRows)
   // Rows already sitting in the queue will spend today's allowance first.
-  const dailyRemaining = dailyCap ? Math.max(0, dailyCap - sentToday - activeLiveRows) : Number.POSITIVE_INFINITY
+  const dailyRemaining = capRemaining(campaign.daily_cap, Number(sentToday || 0) + Number(activeLiveRows || 0))
   // total_cap is the operator's campaign-size intent: targets already handed
   // to the queue (planned or beyond) count against it, held targets do not.
-  const totalRemaining = totalCap ? Math.max(0, totalCap - committedTargets) : Number.POSITIVE_INFINITY
-  const limit = Math.min(bufferNeed, FEEDER_HYDRATION_CHUNK, dailyRemaining, totalRemaining, Math.max(0, readyRemaining))
+  const totalRemaining = capRemaining(campaign.total_cap, committedTargets)
+  // A per-sender or per-market cap of 0 means no number / no market may send.
+  const zeroCaps = zeroCampaignCaps(campaign)
+  const zeroRemaining = zeroCaps.length ? 0 : Number.POSITIVE_INFINITY
+  const limit = Math.min(bufferNeed, FEEDER_HYDRATION_CHUNK, dailyRemaining, totalRemaining, zeroRemaining, Math.max(0, readyRemaining))
   let bound = 'buffer'
   if (readyRemaining <= 0) bound = 'cohort_exhausted'
+  else if (zeroCaps.length) bound = 'campaign_cap_zero'
   else if (totalRemaining <= 0) bound = 'total_cap_reached'
   else if (dailyRemaining <= 0) bound = 'daily_cap_reached'
   else if (bufferNeed <= 0) bound = 'buffer_full'
-  return { limit: Math.max(0, Math.trunc(limit)), bound, buffer_need: bufferNeed, daily_remaining: dailyRemaining, total_remaining: totalRemaining }
+  return { limit: Math.max(0, Math.trunc(limit)), bound, buffer_need: bufferNeed, daily_remaining: dailyRemaining, total_remaining: totalRemaining, zero_caps: zeroCaps }
 }
 
 export function isCohortResolved({ readyRemaining = 0, activeLiveRows = 0, inserted = 0, skippedByReason = {} } = {}) {
@@ -374,6 +379,7 @@ export function classifyFeederProgress({
   if (inserted > 0) return verdict('progressing')
   if (readyRemaining <= 0) return verdict('exhausted')
   if (activeLiveRows > 0) return verdict('queued_ahead')
+  if (feedBound === 'campaign_cap_zero') return verdict('blocked', { blocked_by: feedBound })
   if (['daily_cap_reached', 'total_cap_reached'].includes(feedBound)) return verdict('pacing', { blocked_by: feedBound })
   const skips = Object.entries(skippedByReason || {}).filter(([, n]) => Number(n) > 0)
   if (skips.some(([r]) => CAPACITY_REASONS.has(r))) return verdict('pacing', { blocked_by: 'capacity_reached_today' })

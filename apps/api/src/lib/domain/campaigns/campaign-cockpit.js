@@ -38,6 +38,7 @@ import { fetchCampaignSendStateCounts } from '@/lib/domain/campaigns/campaign-re
 import { fetchCampaignResponses } from '@/lib/domain/campaigns/campaign-responses.js'
 import { fetchCampaignFailureRows } from '@/lib/domain/campaigns/campaign-failures.js'
 import { describeCampaignLineage, explicitPropertyIds } from '@/lib/domain/campaigns/campaign-lineage.js'
+import { parseCampaignCap } from '@/lib/domain/campaigns/campaign-caps.js'
 import {
   ACTIVE_QUEUE_STATUSES,
   OVERDUE_GRACE_MS,
@@ -457,7 +458,8 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
   ])
   const blockedSenders = new Set(splitList(controls.sms_blocked_sender_numbers))
   const configuredCap = posInt(controls.queue_per_number_cap)
-  const campaignCap = posInt(campaign.per_sender_cap)
+  // 0 = send nothing, shown as 0 (never as "no cap"); campaign-caps.js.
+  const campaignCap = parseCampaignCap(campaign.per_sender_cap)
   const numbers = new Map()
   for (const row of [...(numberRows || []), ...(poolRows || [])]) numbers.set(clean(row.phone_number), row)
   const carrying = new Set(senderPhones)
@@ -529,9 +531,9 @@ export async function buildCampaignCockpit(campaignId, deps = {}) {
         : null,
     },
     caps: {
-      daily_cap: posInt(campaign.daily_cap),
-      total_cap: posInt(campaign.total_cap),
-      market_cap: posInt(campaign.market_cap),
+      daily_cap: parseCampaignCap(campaign.daily_cap),
+      total_cap: parseCampaignCap(campaign.total_cap),
+      market_cap: parseCampaignCap(campaign.market_cap),
       per_sender_cap: campaignCap,
       configured_per_number_cap: configuredCap,
       batch_max: posInt(campaign.batch_max),

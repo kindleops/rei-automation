@@ -89,6 +89,7 @@ import {
 import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stage-code.js'
 import { resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { resolvePropertyTypeScope } from '@/lib/sms/property_scope.js'
+import { CAMPAIGN_CAP_COLUMNS, isValidCampaignCapInput, parseCampaignCap, zeroCampaignCaps } from '@/lib/domain/campaigns/campaign-caps.js'
 import {
   acquireCampaignExecutionLock,
   checkpointCampaignHydration,
@@ -255,11 +256,11 @@ export function normalizeCampaignInput(payload = {}, existing = {}) {
     state: clean(payload.state || firstArrayValue(filters.states) || (carriesTargeting ? '' : existing.state)) || null,
     language_policy: clean(payload.language_policy || filters.language || existing.language_policy || 'auto') || 'auto',
     agent_persona: clean(payload.agent_persona || filters.agent_persona || existing.agent_persona) || null,
-    daily_cap: optionalInt(payload.daily_cap ?? filters.daily_cap ?? existing.daily_cap),
-    total_cap: optionalInt(payload.total_cap ?? filters.total_cap ?? existing.total_cap),
+    daily_cap: parseCampaignCap(payload.daily_cap ?? filters.daily_cap ?? existing.daily_cap),
+    total_cap: parseCampaignCap(payload.total_cap ?? filters.total_cap ?? existing.total_cap),
     batch_max: optionalInt(payload.batch_max ?? filters.batch_max ?? filters.max_batch_size ?? existing.batch_max),
-    market_cap: optionalInt(payload.market_cap ?? filters.market_cap ?? existing.market_cap),
-    per_sender_cap: optionalInt(payload.per_sender_cap ?? filters.per_sender_cap ?? filters.per_number_cap ?? existing.per_sender_cap),
+    market_cap: parseCampaignCap(payload.market_cap ?? filters.market_cap ?? existing.market_cap),
+    per_sender_cap: parseCampaignCap(payload.per_sender_cap ?? filters.per_sender_cap ?? filters.per_number_cap ?? existing.per_sender_cap),
     send_interval_seconds: optionalInt(
       payload.send_interval_seconds ?? filters.interval_seconds ?? filters.send_interval_seconds ?? existing.send_interval_seconds
     ),
@@ -1306,7 +1307,7 @@ function buildTargetSnapshot(campaign, candidate, routing, rendered, index) {
     strategy: clean(campaign?.objective || rendered?.template_use_case || 'ownership_check') || 'ownership_check',
     language: clean(rendered?.language || candidate.best_language || candidate.language || campaign?.language_policy || 'auto') || 'auto',
     source_view_name: clean(campaign?.candidate_source || DEFAULT_CANDIDATE_SOURCE),
-    daily_cap: campaign?.daily_cap || null,
+    daily_cap: parseCampaignCap(campaign?.daily_cap),
     status: 'ready',
     master_owner_id: clean(candidate.master_owner_id) || null,
     property_id: clean(candidate.property_id) || null,
@@ -4247,7 +4248,7 @@ function buildTargetSnapshotFromGraphRow(campaign, row = {}, index = 0, options 
      */
     language: clean(row.resolved_language || row.language) || null,
     source_view_name: CAMPAIGN_TARGET_GRAPH_TABLE,
-    daily_cap: campaign?.daily_cap || null,
+    daily_cap: parseCampaignCap(campaign?.daily_cap),
     status: readiness.ready ? 'ready' : 'blocked',
     master_owner_id: clean(row.master_owner_id) || null,
     prospect_id: prospectId,
@@ -4634,8 +4635,9 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     }))
   const blocked = graph.blockedCounts || {}
   const blockedSummary = buildBlockedSummary(blocked)
-  const dailyCap = asPositiveInteger(input.daily_cap ?? campaign?.daily_cap ?? options.filters.daily_cap, null)
-  const queueableToday = dailyCap ? Math.min(graph.readyToQueue, dailyCap) : graph.readyToQueue
+  // 0 = send nothing, null = no daily cap (campaign-caps.js).
+  const dailyCap = parseCampaignCap(input.daily_cap ?? campaign?.daily_cap ?? options.filters.daily_cap)
+  const queueableToday = dailyCap !== null ? Math.min(graph.readyToQueue, dailyCap) : graph.readyToQueue
   const audienceFunnel = [
     { key: 'addressable', label: 'Addressable properties', count: graph.addressableProperties, approximate: Boolean(graph.addressableApproximate) },
     { key: 'matched_properties', label: 'Matched properties', count: graph.totalMatched },
@@ -5237,9 +5239,10 @@ export async function previewCampaignTargets(input = {}, deps = {}) {
   const cleanTargetsSource = fullSourceCleanTargets !== null ? 'full_source_graph' : 'candidate_window'
   const fullSourceReadyToQueue = compactNumber(fullReach.ready_to_queue_count)
   const readyToQueueCount = fullSourceReadyToQueue ?? summary.ready_to_queue
-  const dailyCap = asPositiveInteger(input.daily_cap ?? input.campaign?.daily_cap ?? effectiveOptions.filters.daily_cap, null)
-  const queueableToday = dailyCap ? Math.min(readyToQueueCount, dailyCap) : readyToQueueCount
-  const candidateWindowQueueableToday = dailyCap ? Math.min(summary.ready_to_queue, dailyCap) : summary.ready_to_queue
+  // 0 = send nothing, null = no daily cap (campaign-caps.js).
+  const dailyCap = parseCampaignCap(input.daily_cap ?? input.campaign?.daily_cap ?? effectiveOptions.filters.daily_cap)
+  const queueableToday = dailyCap !== null ? Math.min(readyToQueueCount, dailyCap) : readyToQueueCount
+  const candidateWindowQueueableToday = dailyCap !== null ? Math.min(summary.ready_to_queue, dailyCap) : summary.ready_to_queue
   const score = readinessScore({ matched: totalReachMatched, ready: readyToQueueCount, blockers: blocked })
   const explicitBlockedWaterfall = buildExplicitBlockedWaterfall(blocked)
   const eligibilityWaterfall = buildEligibilityWaterfall({
@@ -6223,6 +6226,21 @@ export async function updateCampaign(campaignId, payload = {}, deps = {}) {
   if (clean(payload.auto_reply_mode) && clean(payload.auto_reply_mode) !== 'disabled') {
     return { ok: false, status: 423, error: 'auto_reply_live_disabled', message: 'Phase 1 does not enable live auto-reply.' }
   }
+  // Caps: 0 is stored as 0 ("send nothing"), never coerced to null — null
+  // means "no cap" to every reader, so 0 -> null uncapped a throttled campaign.
+  // A value that is not a non-negative number is refused for the same reason.
+  const capSources = [payload, explicitPatchFilters(payload) || {}]
+  const invalidCaps = CAMPAIGN_CAP_COLUMNS.concat(['per_number_cap'])
+    .filter((key) => capSources.some((source) => hasOwn(source, key) && !isValidCampaignCapInput(source[key])))
+  if (invalidCaps.length) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'invalid_cap',
+      fields: invalidCaps,
+      message: `${invalidCaps.join(', ')} must be a whole number of 0 or more (0 = send nothing).`,
+    }
+  }
   const current = await getCampaign(campaignId, deps)
   const existing = current.campaign || {}
   const full = normalizeCampaignInput(payload, existing)
@@ -6868,11 +6886,11 @@ function computeWindowForTimezone(timezone, campaign, now = new Date()) {
 
 function campaignCaps(campaign = {}) {
   return {
-    daily_cap: asPositiveInteger(campaign.daily_cap, null),
-    total_cap: asPositiveInteger(campaign.total_cap, null),
+    daily_cap: parseCampaignCap(campaign.daily_cap),
+    total_cap: parseCampaignCap(campaign.total_cap),
     batch_max: asPositiveInteger(campaign.batch_max, null),
-    market_cap: asPositiveInteger(campaign.market_cap, null),
-    per_sender_cap: asPositiveInteger(campaign.per_sender_cap, null),
+    market_cap: parseCampaignCap(campaign.market_cap),
+    per_sender_cap: parseCampaignCap(campaign.per_sender_cap),
   }
 }
 
@@ -6965,6 +6983,31 @@ function resolveLaunchCaps(campaign = {}, input = {}, readyTargetCount = 0) {
     capFallback
   )
   const totalCap = asPositiveInteger(input.total_cap ?? input.totalCap ?? campaign.total_cap, null)
+  // A cap of 0 is "send nothing" (campaign-caps.js). The positive-int reads
+  // above turned 0 into a fallback (batch_max / 500), so a campaign throttled
+  // to zero planned a full batch. The campaign row's 0 always wins; an input
+  // 0 (an operator's explicit throttle for this run) does too.
+  const zeroCaps = [...new Set([
+    ...zeroCampaignCaps(campaign),
+    ...zeroCampaignCaps({
+      daily_cap: input.daily_cap ?? input.dailyCap,
+      total_cap: input.total_cap ?? input.totalCap,
+      market_cap: input.per_market_cap ?? input.perMarketCap ?? input.market_cap,
+      per_sender_cap: input.per_sender_cap ?? input.perSenderCap,
+    }),
+  ])]
+  if (zeroCaps.length) {
+    return {
+      max_targets: 0,
+      daily_cap: zeroCaps.includes('daily_cap') ? 0 : dailyCap,
+      per_sender_cap: zeroCaps.includes('per_sender_cap') ? 0 : perSenderCap,
+      per_market_cap: zeroCaps.includes('market_cap') ? 0 : perMarketCap,
+      batch_max: batchMax || capFallback,
+      total_cap: zeroCaps.includes('total_cap') ? 0 : totalCap,
+      effective_limit: 0,
+      zero_caps: zeroCaps,
+    }
+  }
   const requestedMax = maxTargets || batchMax || dailyCap || readyTargetCount
   const effectiveLimit = Math.max(0, Math.min(
     readyTargetCount,
@@ -6978,11 +7021,14 @@ function resolveLaunchCaps(campaign = {}, input = {}, readyTargetCount = 0) {
     batch_max: batchMax || capFallback,
     total_cap: totalCap,
     effective_limit: effectiveLimit || capFallback,
+    zero_caps: [],
   }
 }
 
 function missingLaunchCaps(caps = {}) {
   const missing = []
+  // A zero cap is set (to "send nothing"), not missing; it blocks on its own.
+  if (caps.zero_caps?.length) return missing
   if (!caps.max_targets && !caps.effective_limit) missing.push('max_targets')
   if (!caps.daily_cap) missing.push('daily_cap')
   if (!caps.per_market_cap) missing.push('per_market_cap')
@@ -7773,7 +7819,7 @@ export function buildRollingPlan({
   const windowMinutes = endMin > startMin ? endMin - startMin : (24 * 60 - startMin) + endMin
   const spacing = Math.max(1, Number(intervalSeconds) || 60)
   const windowCapacity = Math.max(1, Math.floor((windowMinutes * 60) / spacing)) * Math.max(1, Number(timezoneGroups) || 1)
-  const dailyCap = Number(caps.daily_cap) > 0 ? Number(caps.daily_cap) : null
+  const dailyCap = parseCampaignCap(caps.daily_cap)
   const perSenderCap = Number(caps.per_sender_cap) > 0 ? Number(caps.per_sender_cap) : null
   const sendableSenders = sendableSendersByMarket
     ? Object.values(sendableSendersByMarket).reduce((sum, count) => sum + Number(count || 0), 0)
@@ -7784,7 +7830,10 @@ export function buildRollingPlan({
     ['contact_window', windowCapacity],
     ['sender_capacity', senderCapacity],
   ].filter(([, value]) => Number.isFinite(value) && value > 0)
-  const [binding, sendsPerDay] = bounds.reduce((min, bound) => (bound[1] < min[1] ? bound : min), bounds[0] || ['contact_window', windowCapacity])
+  // daily_cap 0 = send nothing: the projection says so instead of dropping the bound.
+  const [binding, sendsPerDay] = dailyCap === 0
+    ? ['daily_cap', 0]
+    : bounds.reduce((min, bound) => (bound[1] < min[1] ? bound : min), bounds[0] || ['contact_window', windowCapacity])
   const count = Math.max(0, Number(schedulable) || 0)
   return {
     ready: Number(ready) || 0,
@@ -7804,7 +7853,7 @@ export function buildRollingPlan({
     sender_capacity_per_day: senderCapacity,
     sends_per_day: sendsPerDay,
     binding,
-    days_to_complete: count > 0 ? Math.ceil(count / sendsPerDay) : 0,
+    days_to_complete: count > 0 ? (sendsPerDay > 0 ? Math.ceil(count / sendsPerDay) : null) : 0,
     first_send_at: firstScheduledAt,
     first_day_scheduled: Number(scheduledToday) || 0,
     after_first_day: Number(pacedToLaterDays) || 0,
@@ -7929,6 +7978,7 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   const productionLiveWrite = writeMode.productionLiveWrite === true
   const blockers = []
   for (const cap of missingLaunchCaps(caps)) blockers.push(`missing_cap:${cap}`)
+  for (const cap of caps.zero_caps || []) blockers.push(`campaign_cap_zero:${cap}`)
   if (!isQueueableStatus(campaign.status)) blockers.push(`campaign_status_not_queueable:${campaign.status}`)
   if (!campaign.auto_queue_enabled && !explicitOperatorAction) blockers.push('auto_queue_disabled_without_operator_action')
   if (campaignStop) blockers.push('campaign_emergency_stop_active')

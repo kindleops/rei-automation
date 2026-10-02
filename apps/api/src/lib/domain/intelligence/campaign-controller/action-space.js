@@ -86,7 +86,7 @@ export function actionSpaceViolations(proposal, { guardrails, envelope, lifecycl
   if (proposal.action === "set_daily_cap") {
     const cap = body.daily_cap;
     if (Object.keys(body).join(",") !== "daily_cap") v.push("set_daily_cap writes daily_cap only");
-    if (!Number.isInteger(cap) || cap < guardrails.min_daily_cap) v.push(`daily_cap ${cap} below min ${guardrails.min_daily_cap} (0/null = UNLIMITED in the feeder)`);
+    if (!Number.isInteger(cap) || cap < guardrails.min_daily_cap) v.push(`daily_cap ${cap} below min ${guardrails.min_daily_cap} (the controller never writes 0 = send nothing; it pauses)`);
     if (Number.isInteger(cap) && cap > envelope.volume.max_daily_per_campaign) v.push(`daily_cap ${cap} above envelope max_daily_per_campaign`);
     if (Number.isInteger(cap) && Number.isFinite(proposal.limits?.capacity) && cap > proposal.limits.capacity) v.push(`daily_cap ${cap} above sender capacity ${proposal.limits.capacity}`);
   }

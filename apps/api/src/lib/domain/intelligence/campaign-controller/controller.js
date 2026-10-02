@@ -339,6 +339,10 @@ function decideCampaign(c, rates, ctx) {
   const throttleCodes = [...new Set(conditions.filter((x) => x.severity === "throttle").map((x) => x.code))].sort();
 
   if (stopCodes.length) return { ...base, kind: "stop", action: "pause", codes: stopCodes };
+  // daily_cap 0 is the operator's "send nothing" (campaign-caps.js). capOf()
+  // reads it as uncapped, which would propose raising it to the envelope max
+  // and so undo the operator's stop. Never raise or reshape a zero cap.
+  if (c.caps?.daily_cap === 0) return { ...base, kind: "hold", action: "hold", codes: ["OPERATOR_CAP_ZERO"] };
   const policy = [];
   if (!envelope.markets.allowed.includes(c.market)) policy.push("POLICY_MARKET_NOT_ALLOWED");
   if (!envelope.cohorts.allowed.includes(String(c.cohort ?? ""))) policy.push("POLICY_COHORT_NOT_ALLOWED");

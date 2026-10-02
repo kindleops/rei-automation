@@ -73,7 +73,7 @@ test("an opt-out or wrong-person rise can only pause or throttle, never scale", 
   assert.notEqual(q.kind, "scale");
 });
 
-test("daily caps: never above the envelope, sender capacity or total; never 0/null (= UNLIMITED in the feeder)", () => {
+test("daily caps: never above the envelope, sender capacity or total; never written as 0 (= send nothing) or null (= no cap)", () => {
   for (const { res } of SWEEP) {
     let total = 0;
     for (const p of res.proposals) {
@@ -86,13 +86,16 @@ test("daily caps: never above the envelope, sender capacity or total; never 0/nu
     }
     assert.ok(total <= DEFAULT_ENVELOPE.volume.max_daily_total + 0);
   }
-  // an uncapped live campaign is clamped to the envelope, never left unlimited and never set to 0
-  for (const cap of [null, 0]) {
-    const p = primary(run([healthyCampaign({ caps: { daily_cap: cap } })]), "camp-healthy");
-    assert.equal(p.action, "set_daily_cap");
-    assert.equal(p.to.daily_cap, Math.min(DEFAULT_ENVELOPE.volume.max_daily_per_campaign, 1280));
-    assert.ok(p.why.includes("POLICY_DAILY_VOLUME_LIMIT"));
-  }
+  // an uncapped (null) live campaign is clamped to the envelope, never left unlimited and never set to 0
+  const uncapped = primary(run([healthyCampaign({ caps: { daily_cap: null } })]), "camp-healthy");
+  assert.equal(uncapped.action, "set_daily_cap");
+  assert.equal(uncapped.to.daily_cap, Math.min(DEFAULT_ENVELOPE.volume.max_daily_per_campaign, 1280));
+  assert.ok(uncapped.why.includes("POLICY_DAILY_VOLUME_LIMIT"));
+  // rc-7.1 D9b: daily_cap 0 is the operator's "send nothing"; the controller
+  // holds and never raises it (it used to read 0 as uncapped and propose the envelope max)
+  const zero = primary(run([healthyCampaign({ caps: { daily_cap: 0 } })]), "camp-healthy");
+  assert.equal(zero.action, "hold");
+  assert.ok(zero.why.includes("OPERATOR_CAP_ZERO"));
   // a throttle that would go below 1 becomes a lifecycle pause instead
   const tiny = primary(run([healthyCampaign({ caps: { daily_cap: 1 }, metrics: { rolling: { filtered: 200 } } })]), "camp-healthy");
   assert.equal(tiny.action, "pause");
