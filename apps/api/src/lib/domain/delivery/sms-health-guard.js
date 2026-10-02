@@ -208,6 +208,25 @@ export function evaluateSmsHealthGuard({
     };
   }
 
+  // RC 7.1 D8 — "paused templates must never send." Template governance
+  // (ownership_template_rotation_control) is enforced here too, for every
+  // producer: the campaign planner, the legacy feeder, bulk follow-ups, an
+  // operator who picked a template. The caller supplies the governed-but-not-
+  // sendable ids (template-governance.js governanceExcludedTemplateIds).
+  const governance_paused = system_control?.governance_paused_template_ids;
+  const governance_paused_set = governance_paused instanceof Set
+    ? governance_paused
+    : new Set(Array.isArray(governance_paused) ? governance_paused.map((id) => clean(id)) : []);
+  if (resolved_template_id && governance_paused_set.has(resolved_template_id)) {
+    return {
+      allowed: false,
+      reason: "template_governance_paused",
+      block_class: "template_health_block",
+      cooldown_until: null,
+      diagnostics,
+    };
+  }
+
   if (
     tier === "approved_regional_fallback" &&
     (local_required || (is_first_touch && !allow_first_touch_regional))

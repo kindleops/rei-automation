@@ -30,6 +30,11 @@ import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-sel
 import { buildDispatchRefusalBackoff } from "@/lib/domain/queue/dispatch-refusal-backoff.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import {
+  governanceApplies,
+  governanceExcludedTemplateIds,
+  indexGovernance,
+} from "@/lib/domain/campaigns/template-governance.js";
 import { emitAutomationEvent } from "@/lib/domain/automation/automation-events.js";
 import {
   AUTOMATION_LOG_TAGS,
@@ -500,6 +505,56 @@ async function loadSmsHealthGuardSystemControl(deps = {}) {
     require_local_routing: await get_system_value("require_local_routing"),
     allow_regional_fallback_for_first_touch: await get_system_value("allow_regional_fallback_for_first_touch"),
   };
+}
+
+/**
+ * TEMPLATE GOVERNANCE AT SEND TIME (rc-7.1 D8: "paused templates must never
+ * send"). The governed-but-not-sendable template ids, read from
+ * ownership_template_rotation_control (tens of rows) and cached per client for
+ * a minute. Returns null when governance cannot be read and no earlier read is
+ * cached: the caller then defers rows that could carry a governed template
+ * instead of guessing they are allowed.
+ */
+const GOVERNANCE_CACHE_MS = 60_000;
+const governance_cache = new WeakMap();
+
+export async function loadGovernancePausedTemplateIds(deps = {}) {
+  if (typeof deps.loadGovernancePausedTemplateIds === "function") {
+    return deps.loadGovernancePausedTemplateIds();
+  }
+  let supabase = null;
+  try {
+    supabase = getSupabase(deps);
+  } catch {
+    return null;
+  }
+  const cached = governance_cache.get(supabase);
+  if (cached && Date.now() - cached.at < GOVERNANCE_CACHE_MS) return cached.ids;
+  try {
+    const { data, error } = await supabase
+      .from("ownership_template_rotation_control")
+      .select("template_id,rotation_status,daily_cap,last_40d_total_sent");
+    if (error) throw error;
+    const ids = governanceExcludedTemplateIds(indexGovernance(Array.isArray(data) ? data : []));
+    governance_cache.set(supabase, { at: Date.now(), ids });
+    return ids;
+  } catch (error) {
+    warn("queue.template_governance_unreadable", { message: error?.message || String(error) });
+    return cached?.ids || null;
+  }
+}
+
+/** Could this row carry a governed (ownership-check) template? */
+export function rowMayCarryGovernedTemplate(queue_row = {}) {
+  if (!resolveQueueTemplateId(queue_row)) return false;
+  const use_case = lower(
+    queue_row.use_case_template ||
+      queue_row.metadata?.template_use_case ||
+      queue_row.metadata?.selected_use_case ||
+      queue_row.metadata?.use_case ||
+      ""
+  );
+  return !use_case || governanceApplies(use_case);
 }
 
 async function blockQueueRowBySmsHealthGuard(queue_row = {}, guard = {}, deps = {}) {
@@ -2183,13 +2238,33 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       };
     }
 
+    const governance_paused_template_ids = await loadGovernancePausedTemplateIds(deps);
+    if (governance_paused_template_ids === null && rowMayCarryGovernedTemplate(queue_row)) {
+      // Governance unreadable: do not guess the template is allowed. Defer —
+      // no retry consumed, nothing terminal; the next run re-reads.
+      warn("queue.template_governance_unreadable_deferred", { queue_row_id, template_id: resolveQueueTemplateId(queue_row) || null });
+      await releaseSkippedQueueRow(queue_row, lock_token, "template_governance_unreadable", { ...deps, now });
+      return {
+        ok: true,
+        skipped: true,
+        sent: false,
+        reason: "template_governance_unreadable",
+        queue_status: queue_row.queue_status,
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
+
     const sms_health_guard = evaluateSmsHealthGuard({
       from_phone_number: message_fields.from,
       template_id: resolveQueueTemplateId(queue_row),
       routing_tier: resolveQueueRoutingTier(queue_row),
       first_touch: isQueueFirstTouch(queue_row),
       metadata: queue_row.metadata || {},
-      system_control: await loadSmsHealthGuardSystemControl(deps),
+      system_control: {
+        ...(await loadSmsHealthGuardSystemControl(deps)),
+        governance_paused_template_ids: governance_paused_template_ids || new Set(),
+      },
       now,
     });
 
