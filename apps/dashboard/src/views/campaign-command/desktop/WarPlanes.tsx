@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
 import { LCActivityFeed, LCLink, LCProgress, LCSkeleton, LCTooltip, cx } from '../../../shared/lc'
 import type { CampaignIntel, FleetNumber, WarSystem } from './war-room-api'
@@ -71,7 +71,7 @@ export const TimePlane = memo(function TimePlane({
           </div>
           <div className="cc3-window__track" role="img" aria-label={`Contact window ${track.label}; now ${track.nowLabel}`}>
             <span className="cc3-window__span" style={{ left: `${(track.start / 24) * 100}%`, width: `${((track.end - track.start) / 24) * 100}%` }} />
-            <span className="cc3-window__now" style={{ left: `${(track.now / 24) * 100}%` }}><b className="lc-num">{track.nowLabel}</b></span>
+            <span className="cc3-window__now" style={{ left: `${(track.now / 24) * 100}%`, ['--p' as string]: Math.min(1, Math.max(0, track.now / 24)) } as CSSProperties}><b className="lc-num">{track.nowLabel}</b></span>
             {HOURS.map((h) => <i key={h} className="cc3-window__tick" style={{ left: `${(h / 24) * 100}%` }} />)}
           </div>
           <div className="cc3-window__scale lc-num" aria-hidden="true">{HOURS.map((h) => <span key={h} style={{ left: `${(h / 24) * 100}%` }}>{String(h).padStart(2, '0')}</span>)}</div>

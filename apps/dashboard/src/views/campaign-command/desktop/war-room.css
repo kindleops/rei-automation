@@ -738,6 +738,9 @@ html.is-desktop-modern .cc3-window__label { font: var(--lc-t-meta); color: var(-
 html.is-desktop-modern .cc3-window__track {
   position: relative;
   height: 26px;
+  /* rc-7.1 D6: the "now" label lives in its own lane above the track, so it
+     can never sit on the head row's send-window label at any width. */
+  margin-top: 16px;
   border-radius: 8px;
   background: linear-gradient(180deg, transparent 11px, rgba(var(--lc-edge-rgb), 0.08) 11px, rgba(var(--lc-edge-rgb), 0.08) 15px, transparent 15px);
 }
@@ -752,7 +755,9 @@ html.is-desktop-modern .cc3-window__span {
 }
 html.is-desktop-modern .cc3-window__now { position: absolute; top: 0; bottom: 0; width: 0; }
 html.is-desktop-modern .cc3-window__now::before { content: ''; position: absolute; left: -1px; top: 2px; bottom: 2px; width: 2px; border-radius: 2px; background: var(--lc-ink-1); }
-html.is-desktop-modern .cc3-window__now b { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); white-space: nowrap; font: 600 10.5px/1 var(--lc-font-ui); color: var(--lc-ink-1); }
+/* Anchored by --p (0 at midnight → 1 at 24:00): centred mid-day, flush to the
+   track's edge near either end, so it never spills out of the pane. */
+html.is-desktop-modern .cc3-window__now b { position: absolute; top: -17px; left: 0; transform: translateX(calc(var(--p, 0.5) * -100%)); white-space: nowrap; font: 600 10.5px/1 var(--lc-font-ui); color: var(--lc-ink-1); }
 html.is-desktop-modern .cc3-window__tick { position: absolute; top: 9px; width: 1px; height: 8px; background: var(--lc-ink-4); }
 html.is-desktop-modern .cc3-window__scale { position: relative; height: 12px; font: 500 10px/1 var(--lc-font-ui); color: var(--lc-ink-4); }
 html.is-desktop-modern .cc3-window__scale span { position: absolute; transform: translateX(-50%); }
