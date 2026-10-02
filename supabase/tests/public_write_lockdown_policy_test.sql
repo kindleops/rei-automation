@@ -27,7 +27,7 @@ insert into _lockdown_tables values
   ('seller_automation_execution_steps', false), ('seller_followup_state', false),
   ('contact_property_resolution', false), ('thread_identity_binding', false),
   ('workflow_scheduled_tasks', false), ('sms_templates', false),
-  ('message_events', true);              -- anon SELECT intentionally kept (owner follow-up)
+  ('message_events', false);
 grant select on _lockdown_tables to anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------- catalog ----

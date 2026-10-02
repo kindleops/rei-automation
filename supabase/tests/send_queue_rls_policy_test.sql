@@ -28,6 +28,11 @@ begin
                and roles && array['anon','authenticated','public']::name[]) then
     raise exception 'FAIL: a write policy for anon/authenticated/public still exists on send_queue';
   end if;
+  if has_table_privilege('anon', 'public.send_queue', 'SELECT')
+     or exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'send_queue'
+                  and roles && array['anon']::name[]) then
+    raise exception 'FAIL: anon can still read send_queue';
+  end if;
   if has_table_privilege('anon', 'public.send_queue', 'TRUNCATE')
      or has_table_privilege('authenticated', 'public.send_queue', 'TRUNCATE') then
     raise exception 'FAIL: anon/authenticated can TRUNCATE send_queue (RLS does not cover TRUNCATE)';

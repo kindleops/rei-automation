@@ -81,11 +81,11 @@
 --   B sms_templates: authenticated SELECT policy added (fixes the empty read).
 --      anon SELECT policy dropped and anon fully revoked. authenticated keeps
 --      SELECT only. The service-role policy is unchanged.
---   C message_events: both INSERT policies dropped (anon, authenticated).
---      INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER revoked from anon and
---      authenticated. SELECT is unchanged for both (anon SELECT is an owner
---      follow-up, same as send_queue; conversation_detail_view is a
---      security_invoker view that anon can select).
+--   C message_events: both INSERT policies dropped (anon, authenticated) and
+--      anon_select_message_events dropped (owner-approved 2026-10-01: anon reads
+--      came only from local QA and proof scripts). anon: no privileges.
+--      authenticated: SELECT only (dashboard + realtime). The security_invoker
+--      view conversation_detail_view therefore also stops answering anon.
 --   D EXECUTE on the 7 writer functions: service_role only.
 --
 -- EXPECTED API BEHAVIOUR AFTER APPLY
@@ -94,7 +94,7 @@
 --   * Dashboard, signed in: unchanged reads and realtime. The sms_templates read
 --     starts returning rows.
 --   * PostgREST with the anon key, any table above: 401/42501 on every verb
---     (message_events SELECT still allowed).
+--     (including message_events SELECT).
 --     With a user JWT: SELECT allowed; POST/PATCH/DELETE give 42501.
 --     RPCs in D give 42501 for anon and authenticated.
 --
@@ -119,6 +119,7 @@
 --   drop policy if exists "sms_templates_authenticated_read" on public.sms_templates;
 --   create policy "anon_select_sms_templates" on public.sms_templates for select to anon using (true);
 --   grant all on public.sms_templates to anon, authenticated;
+--   create policy "anon_select_message_events" on public.message_events for select to anon using (true);
 --   create policy "Allow anon to insert message_events" on public.message_events
 --     for insert to anon with check (true);
 --   create policy "Authenticated users can insert message_events" on public.message_events
@@ -173,7 +174,10 @@ grant all    on public.sms_templates to service_role;
 -- C. message_events -------------------------------------------------------------
 drop policy if exists "Allow anon to insert message_events"           on public.message_events;
 drop policy if exists "Authenticated users can insert message_events" on public.message_events;
-revoke insert, update, delete, truncate, references, trigger on public.message_events from anon, authenticated;
+drop policy if exists "anon_select_message_events"                    on public.message_events;
+revoke all on public.message_events from anon;
+revoke insert, update, delete, truncate, references, trigger on public.message_events from authenticated;
+grant select on public.message_events to authenticated;
 grant all on public.message_events to service_role;
 
 -- D. SECURITY INVOKER writer RPCs ----------------------------------------------

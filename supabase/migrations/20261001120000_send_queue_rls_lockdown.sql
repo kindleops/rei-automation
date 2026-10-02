@@ -41,7 +41,7 @@
 --     that writes send_queue.
 --
 -- NEW STATE:
---   anon           SELECT only (kept: see "Deliberately NOT changed").
+--   anon           no privileges at all (policy anon_select_send_queue dropped).
 --   authenticated  SELECT only (dashboard reads + realtime). No write policy.
 --   service_role   unchanged: ALL (bypasses RLS anyway).
 --   Queue mutator RPCs: EXECUTE for service_role (and owner) only.
@@ -49,8 +49,8 @@
 -- EXPECTED API BEHAVIOUR AFTER APPLY:
 --   * apps/api, queue worker, operator queue control: unchanged (service_role).
 --   * Dashboard reads / realtime: unchanged (authenticated SELECT kept).
---   * PostgREST with the anon or a user JWT: POST/PATCH/DELETE /rest/v1/send_queue
---     -> 401/403 "permission denied for table send_queue" (42501).
+--   * PostgREST with the anon key: every verb on /rest/v1/send_queue -> 42501.
+--     With a user JWT: GET allowed; POST/PATCH/DELETE -> 42501.
 --     POST /rest/v1/rpc/claim_queue_jobs etc. -> 42501 permission denied for function.
 --
 -- LOCKS: DROP/CREATE POLICY and GRANT/REVOKE take a brief ACCESS EXCLUSIVE /
@@ -59,15 +59,14 @@
 --   behind the runner.
 -- BACKFILL: none. No rows read or written.
 --
--- Deliberately NOT changed (owner decision, listed in the RC report):
---   * anon SELECT on send_queue (phones + message bodies readable with the public
---     key). The dashboard is behind the auth gate, so revoking it should be safe,
---     but it is a read path; separate follow-up:
---       drop policy "anon_select_send_queue" on public.send_queue;
---       revoke select on public.send_queue from anon;
+-- ANON READ (owner-approved 2026-10-01): anon SELECT is removed too. Prod edge
+-- logs (24h) show anon reads only from local QA browsers and proof scripts;
+-- production operators read as authenticated.
 --
 -- ROLLBACK (restores today's exact state):
 --   begin;
+--   create policy "anon_select_send_queue" on public.send_queue for select to anon using (true);
+--   grant select on public.send_queue to anon;
 --   create policy "Allow anon to insert into send_queue" on public.send_queue
 --     for insert to anon with check (true);
 --   create policy "Allow anon to update send_queue" on public.send_queue
@@ -92,9 +91,10 @@ begin;
 
 set local lock_timeout = '5s';
 
--- 1. Remove anonymous write policies.
+-- 1. Remove every anonymous policy (write and read).
 drop policy if exists "Allow anon to insert into send_queue" on public.send_queue;
 drop policy if exists "Allow anon to update send_queue"      on public.send_queue;
+drop policy if exists "anon_select_send_queue"               on public.send_queue;
 
 -- 2. authenticated: ALL -> SELECT only.
 drop policy if exists "Authenticated users can manage send_queue" on public.send_queue;
@@ -104,8 +104,9 @@ create policy "Authenticated users can read send_queue"
 
 -- 3. Table privileges: writes (incl. TRUNCATE, which RLS does not cover) are
 --    service_role only.
+revoke all on public.send_queue from anon;
 revoke insert, update, delete, truncate, references, trigger
-  on public.send_queue from anon, authenticated;
+  on public.send_queue from authenticated;
 grant select on public.send_queue to authenticated;
 grant all    on public.send_queue to service_role;
 
