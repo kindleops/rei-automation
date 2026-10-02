@@ -1,0 +1,101 @@
+import { fetchAnalyticsPerformance, type AnalyticsPerformance, type RangeKey } from '../../../../domain/analytics/analytics-performance-api'
+import { fetchPipelineFeed, fetchPipelineOverview, fetchPipelinePoints, type PipelineCommandCard, type PipelineCommandOverview } from '../../../../domain/pipeline/pipeline-command-api'
+import { fetchCampaignsSurface } from '../../../campaign-command/campaigns.adapter'
+import type { CampaignSummary } from '../../../campaign-command/campaigns.types'
+import { fetchRegistry } from '../../../workflow-studio/desktop/lib/api'
+import type { RegistryResponse } from '../../../workflow-studio/desktop/lib/types'
+import { fetchHome as fetchEmailHome, type Home as EmailHome } from '../../../email-command/mobile/email-command-api'
+import { fetchSignalCenter } from '../../../../modules/notifications/signals/signals-api'
+import type { SignalCenterModel } from '../../../../modules/notifications/signals/signals-model'
+import {
+  loadHomeCalendar,
+  loadHomeClosings,
+  loadHomeInbox,
+  loadHomeMessaging,
+  loadHomePipeline,
+  loadHomeQueue,
+  summarizeCampaigns,
+  type HomeCalendar,
+  type HomeCampaigns,
+  type HomeClosings,
+  type HomeInbox,
+  type HomeLoad,
+  type HomeMessaging,
+  type HomePipeline,
+  type HomeQueue,
+} from '../../home-signals'
+import { fetchStudioActivity, type StudioActivity } from '../command/home-command-model'
+
+/**
+ * THE HOME SOURCES — every read a first-party widget makes, by key.
+ *
+ * Each is an existing canonical read endpoint the owning app already uses;
+ * Home adds no new read model. Keys are what make reads shared: every widget
+ * that needs `inbox` reads one request. `apps` are the rail routes whose
+ * ledger events refresh the source early.
+ */
+
+export interface SourceDef<T> { key: string; load: (signal: AbortSignal) => Promise<T>; apps: readonly string[]; everyMs: number }
+
+const unwrap = async <T,>(p: Promise<HomeLoad<T>>): Promise<T> => {
+  const r = await p
+  if (r.status === 'ready') return r.data
+  throw new Error(r.status === 'unavailable' ? r.reason : 'Unavailable')
+}
+
+export interface CampaignBook { list: CampaignSummary[]; summary: HomeCampaigns; truncated: boolean }
+
+export const SOURCES = {
+  inbox: { key: 'inbox', load: (s) => unwrap(loadHomeInbox(s)), apps: ['/inbox'], everyMs: 45_000 } satisfies SourceDef<HomeInbox>,
+  queue: { key: 'queue', load: () => unwrap(loadHomeQueue()), apps: ['/queue'], everyMs: 45_000 } satisfies SourceDef<HomeQueue>,
+  messaging: { key: 'messaging', load: () => unwrap(loadHomeMessaging()), apps: ['/queue', '/inbox'], everyMs: 60_000 } satisfies SourceDef<HomeMessaging>,
+  campaigns: {
+    key: 'campaigns',
+    load: async () => {
+      const surface = await fetchCampaignsSurface()
+      if (!surface.ok) throw new Error(surface.errorMessage ?? 'Campaigns unavailable')
+      return { list: surface.data, summary: summarizeCampaigns(surface.data, Boolean(surface.degraded)), truncated: Boolean(surface.truncated) }
+    },
+    apps: ['/campaign-command'],
+    everyMs: 120_000,
+  } satisfies SourceDef<CampaignBook>,
+  pipeline: { key: 'pipeline', load: () => unwrap(loadHomePipeline()), apps: ['/pipeline'], everyMs: 180_000 } satisfies SourceDef<HomePipeline>,
+  pipelineOverview: { key: 'pipeline-overview', load: (s) => fetchPipelineOverview({ scope: 'active' }, s), apps: ['/pipeline'], everyMs: 180_000 } satisfies SourceDef<PipelineCommandOverview>,
+  pipelineTop: {
+    key: 'pipeline-top',
+    load: async (s) => (await fetchPipelineFeed({ scope: 'active', view: 'all', sort: 'value', limit: 6 }, s)).rows.filter((c) => (c.money.value ?? 0) > 0),
+    apps: ['/pipeline'],
+    everyMs: 180_000,
+  } satisfies SourceDef<PipelineCommandCard[]>,
+  pipelinePoints: {
+    key: 'pipeline-points',
+    load: async (s) => (await fetchPipelinePoints({ scope: 'active' }, s)).points.map((p) => ({ lat: p.lat, lng: p.lng })),
+    apps: ['/pipeline'],
+    everyMs: 600_000,
+  } satisfies SourceDef<Array<{ lat: number; lng: number }>>,
+  closings: { key: 'closings', load: (s) => unwrap(loadHomeClosings(s)), apps: ['/closing-desk'], everyMs: 180_000 } satisfies SourceDef<HomeClosings>,
+  calendar: { key: 'calendar', load: () => unwrap(loadHomeCalendar()), apps: [], everyMs: 300_000 } satisfies SourceDef<HomeCalendar>,
+  activity: { key: 'activity', load: (s) => fetchStudioActivity({ hours: 24, limit: 90 }, s), apps: ['/inbox', '/queue', '/campaign-command', '/workflow-studio', '/closing-desk', '/pipeline'], everyMs: 30_000 } satisfies SourceDef<StudioActivity>,
+  workflow: { key: 'workflow-registry', load: (s) => fetchRegistry(s), apps: ['/workflow-studio'], everyMs: 120_000 } satisfies SourceDef<RegistryResponse>,
+  email: { key: 'email-home', load: (s) => fetchEmailHome({}, s), apps: ['/email-command'], everyMs: 120_000 } satisfies SourceDef<EmailHome>,
+  signals: {
+    key: 'signals',
+    load: async () => {
+      const r = await fetchSignalCenter()
+      if (!r.ok) throw new Error(r.message)
+      return r
+    },
+    apps: [],
+    everyMs: 120_000,
+  } satisfies SourceDef<SignalCenterModel>,
+} as const
+
+/** Performance for a period (and optional market) — one request per distinct (range, market). */
+export function performanceSource(range: RangeKey, market: string | null = null): SourceDef<AnalyticsPerformance> {
+  return {
+    key: `performance:${range}:${market ?? '*'}`,
+    load: (s) => fetchAnalyticsPerformance({ range, market }, s),
+    apps: [],
+    everyMs: range === 'today' ? 120_000 : 300_000,
+  }
+}
