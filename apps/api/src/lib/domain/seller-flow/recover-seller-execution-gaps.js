@@ -78,6 +78,40 @@ async function emitRecoveryEvent(supabase, { type, subjectId, payload = {} }) {
   }
 }
 
+/**
+ * A REAL review hold for a thread, from the seller decision ledger: the latest
+ * decision put the turn under an owned exception workflow with an SLA
+ * (lineage.exception_sla_deadline, coverage-net/exception-workflows.js) or a
+ * human exception. Returns { reason, deadline } or null. This is the only
+ * canonical due rule for review work; nothing else justifies `human_review`.
+ */
+export async function loadRealReviewHold(supabase, threadKey) {
+  const key = clean(threadKey);
+  if (!key) return null;
+  const { data, error } = await supabase
+    .from("seller_automation_decisions")
+    .select("action,action_reason,lineage,observed_at")
+    .eq("conversation_id", key)
+    .order("observed_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const latest = Array.isArray(data) ? data[0] : null;
+  return realReviewHoldOf(latest);
+}
+
+/** Pure: the review hold a decision-ledger row carries, or null. */
+export function realReviewHoldOf(decision = null) {
+  if (!decision) return null;
+  const lineage = decision.lineage && typeof decision.lineage === "object" ? decision.lineage : {};
+  const deadline = clean(lineage.exception_sla_deadline) || null;
+  const humanException = clean(lineage.coverage_state) === "human_exception_with_owned_workflow";
+  if (!deadline && !humanException) return null;
+  return {
+    reason: clean(lineage.exception_workflow) || clean(decision.action_reason) || clean(decision.action) || "exception_hold",
+    deadline,
+  };
+}
+
 /** Gap 1 — active leads with no next action and no recent movement. */
 async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, now }) {
   const outcome = { gap: "stale_active_without_next_action", scanned: 0, repaired: 0, results: [] };
@@ -107,22 +141,40 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
       if (row.is_suppressed === true) return;
       outcome.scanned += 1;
 
-      // Prefer the persisted deal record's next action; otherwise surface the
-      // lead for review — recovery never invents an outbound send.
-      let nextAction = NEXT_ACTIONS.HUMAN_REVIEW;
+      // Prefer the persisted deal record's next action. Otherwise, human review
+      // ONLY when the decision ledger holds a real review reason/deadline (P7,
+      // rc-7.1 D5). This used to stamp `human_review` with no reason and no
+      // date onto every stale thread and its opportunity: 4,593 of 4,597 live
+      // review threads and 330 deals were this placeholder, 4,299 of them on
+      // threads where the seller never replied. A thread with nothing to
+      // review is left as it is — recovery never invents work or a send.
+      let nextAction = null;
       let nextActionDue = null;
+      let reviewReason = null;
       const { data: opps, error: opps_error } = await supabase
         .from("acquisition_opportunities")
         .select("id,next_action,next_action_due")
         .eq("primary_thread_key", row.thread_key)
         .order("updated_at", { ascending: false })
         .limit(1);
-      // A failed read keeps the safe default (human review) — never guesses.
       const canonical = !opps_error && opps?.[0] ? opps[0] : null;
       const canonicalHasNextAction = Boolean(clean(canonical?.next_action));
-      if (canonicalHasNextAction) {
+      const canonicalIsReview = clean(canonical?.next_action) === NEXT_ACTIONS.HUMAN_REVIEW;
+      if (canonicalHasNextAction && !canonicalIsReview) {
         nextAction = canonical.next_action;
         nextActionDue = canonical.next_action_due || null;
+      } else {
+        // A failed ledger read is not a review reason either.
+        const hold = await loadRealReviewHold(supabase, row.thread_key).catch(() => null);
+        if (hold) {
+          nextAction = NEXT_ACTIONS.HUMAN_REVIEW;
+          nextActionDue = hold.deadline || canonical?.next_action_due || null;
+          reviewReason = hold.reason;
+        }
+      }
+      if (!nextAction) {
+        outcome.results.push({ thread_key: row.thread_key, ok: true, skipped: "no_review_reason", dry_run: dryRun });
+        return;
       }
 
       if (!dryRun) {
@@ -134,7 +186,7 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
             meta: {
               change_source: STATE_SOURCE_CODES.SYSTEM,
               source_view: "seller_execution_gap_recovery",
-              reason: "stale_active_without_next_action",
+              reason: reviewReason ? `stale_active_without_next_action:${reviewReason}` : "stale_active_without_next_action",
             },
           });
           if (patched?.ok !== true) {
@@ -175,7 +227,7 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
         }
       }
       outcome.repaired += 1;
-      outcome.results.push({ thread_key: row.thread_key, ok: true, next_action: nextAction, dry_run: dryRun, canonical_stamp_needed: Boolean(canonical?.id) && !canonicalHasNextAction });
+      outcome.results.push({ thread_key: row.thread_key, ok: true, next_action: nextAction, review_reason: reviewReason, next_action_at: nextActionDue, dry_run: dryRun, canonical_stamp_needed: Boolean(canonical?.id) && !canonicalHasNextAction });
     },
   });
 
@@ -765,7 +817,8 @@ export const SELLER_GAP_SWEEPS = Object.freeze({
  * Only one qualifies. `stale_active_without_next_action` reads
  * inbox_thread_state, copies a next_action that already exists on the canonical
  * acquisition_opportunities row, and otherwise writes the non-send sentinel
- * `human_review`. It writes exactly one table (inbox_thread_state, via
+ * `human_review` ONLY when the decision ledger holds a real review hold
+ * (loadRealReviewHold); with no reason it writes nothing (rc-7.1 P7). It writes exactly one table (inbox_thread_state, via
  * patchUniversalLeadState) and creates no send_queue row, no follow-up, no
  * offer and no closing case.
  *

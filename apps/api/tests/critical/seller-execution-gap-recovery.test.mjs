@@ -13,6 +13,7 @@ function makeFakeSupabase(seed = {}) {
     acquisition_opportunities: seed.acquisition_opportunities || [],
     send_queue: seed.send_queue || [],
     message_events: seed.message_events || [],
+    seller_automation_decisions: seed.seller_automation_decisions || [],
     // The durable offer ledger. Unseeded tables fall through to `other` (an
     // empty array), so without this the S6 accepted-offer check would read
     // empty for every fixture and no repair could ever be proven.
@@ -327,11 +328,15 @@ test("an EMPTY-STRING next_action projection row is repaired (the sentinel is ab
     acquisition_opportunities: [
       { id: "opp-2", primary_thread_key: "+13125550200", next_action: null, next_action_due: null, updated_at: OLD, version: 1, metadata: {} },
     ],
+    // rc-7.1 P7: human_review only with a real ledger hold (owned exception workflow + SLA).
+    seller_automation_decisions: [
+      { conversation_id: "+13125550200", action: "hold", observed_at: OLD, lineage: { exception_workflow: "ambiguous_context", exception_sla_deadline: "2026-07-02T00:00:00.000Z" } },
+    ],
   });
   const result = await recoverSellerExecutionGaps({ supabaseClient: supabase, dryRun: false, now: NOW });
   const sweep = result.sweeps.find((s) => s.gap === "stale_active_without_next_action");
   assert.equal(sweep.repaired, 1, "the '' row must be seen and repaired");
-  // projection restored to the safe default (no canonical next action existed)
+  // projection: a real hold surfaces as human_review with its deadline
   assert.equal(supabase._state.inbox_thread_state[0].next_action, "human_review");
   // canonical opportunity stamped with the SAME resolved action
   assert.equal(supabase._state.acquisition_opportunities[0].next_action, "human_review");

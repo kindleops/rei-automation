@@ -35,6 +35,7 @@ function makeFakeSupabase(seed = {}) {
     acquisition_opportunities: seed.acquisition_opportunities || [],
     send_queue: seed.send_queue || [],
     message_events: seed.message_events || [],
+    seller_automation_decisions: seed.seller_automation_decisions || [],
     other: [],
   };
   const touched = new Set();
@@ -110,6 +111,12 @@ function makeFakeSupabase(seed = {}) {
 
   return { _state: state, _touched: touched, _writes: writes, from: (t) => query(t) };
 }
+
+/** A real review hold in the decision ledger (rc-7.1 P7): an owned exception workflow with an SLA. */
+const REAL_HOLD = [{
+  conversation_id: "+13125550100", action: "escalate", action_reason: "ambiguous_context",
+  observed_at: OLD, lineage: { exception_workflow: "ambiguous_context", exception_sla_deadline: "2026-07-01T16:00:00.000Z", coverage_state: "safe_fallback_coverage" },
+}];
 
 function staleThread(overrides = {}) {
   return {
@@ -231,11 +238,40 @@ test("a canonical next_action is COPIED, never invented", async () => {
   assert.equal(supabase._state.inbox_thread_state[0].next_action, "send_message_now");
 });
 
-test("with NO canonical evidence it writes the non-send human_review sentinel, and never an outbound action", async () => {
-  const supabase = makeFakeSupabase({ inbox_thread_state: [staleThread()] });
+test("rc-7.1 P7: with NO canonical evidence and NO review reason it writes NOTHING (no human_review placeholder)", async () => {
+  const supabase = makeFakeSupabase({
+    inbox_thread_state: [staleThread()],
+    acquisition_opportunities: [{
+      id: "opp-1", primary_thread_key: "+13125550100",
+      next_action: null, next_action_due: null, updated_at: OLD, version: 1, metadata: {},
+    }],
+  });
+  const result = await runSafeLane(supabase);
+  assert.equal(result.total_repaired, 0);
+  assert.equal(supabase._state.inbox_thread_state[0].next_action, null, "no placeholder on the thread");
+  assert.equal(supabase._state.acquisition_opportunities[0].next_action, null, "no placeholder on the deal");
+  assert.equal(supabase._writes.length, 0);
+  assert.equal(result.sweeps[0].results[0].skipped, "no_review_reason");
+});
+
+test("rc-7.1 P7: a sweep-stamped human_review on the deal is not a reason to stamp the thread", async () => {
+  const supabase = makeFakeSupabase({
+    inbox_thread_state: [staleThread()],
+    acquisition_opportunities: [{
+      id: "opp-1", primary_thread_key: "+13125550100",
+      next_action: "human_review", next_action_due: null, updated_at: OLD, version: 1, metadata: {},
+    }],
+  });
+  await runSafeLane(supabase);
+  assert.equal(supabase._state.inbox_thread_state[0].next_action, null);
+});
+
+test("with a REAL ledger hold it writes the non-send human_review sentinel WITH its deadline, and never an outbound action", async () => {
+  const supabase = makeFakeSupabase({ inbox_thread_state: [staleThread()], seller_automation_decisions: REAL_HOLD });
   await runSafeLane(supabase);
   const written = supabase._state.inbox_thread_state[0].next_action;
-  assert.equal(written, "human_review", "absent evidence must surface to a human, not guess");
+  assert.equal(written, "human_review", "a real hold surfaces to a human");
+  assert.equal(supabase._state.inbox_thread_state[0].next_action_at, "2026-07-01T16:00:00.000Z", "with the SLA deadline, not undated");
   // Critically it must not fabricate a send instruction.
   assert.notEqual(written, "send_message_now");
   assert.notEqual(written, "schedule_follow_up");
@@ -287,7 +323,7 @@ test("dry_run writes NOTHING", async () => {
 });
 
 test("re-running is idempotent: the second pass finds nothing left to repair", async () => {
-  const supabase = makeFakeSupabase({ inbox_thread_state: [staleThread()] });
+  const supabase = makeFakeSupabase({ inbox_thread_state: [staleThread()], seller_automation_decisions: REAL_HOLD });
   const first = await runSafeLane(supabase);
   assert.ok(first.total_repaired >= 1);
   const second = await runSafeLane(supabase);
@@ -338,6 +374,7 @@ test("the reconciliation stamp does NOT trigger the workflow fan-out", async () 
   // and not a gate. The reconciliation lane must never enter that chain.
   const supabase = makeFakeSupabase({
     inbox_thread_state: [staleThread()],
+    seller_automation_decisions: REAL_HOLD,
     acquisition_opportunities: [{
       id: "opp-1", primary_thread_key: "+13125550100",
       next_action: null, next_action_due: null, updated_at: OLD, version: 1, metadata: {},
@@ -352,11 +389,12 @@ test("the reconciliation stamp does NOT trigger the workflow fan-out", async () 
   assert.equal(supabase._state.send_queue.length, 0, "no queue row from the fan-out");
 });
 
-test("the reconciliation stamp DOES repair the canonical opportunity next_action", async () => {
+test("the reconciliation stamp DOES repair the canonical opportunity next_action (real hold)", async () => {
   // The projection alone is not enough: the canonical acquisition_opportunities
   // row is what the autonomy invariant reads.
   const supabase = makeFakeSupabase({
     inbox_thread_state: [staleThread()],
+    seller_automation_decisions: REAL_HOLD,
     acquisition_opportunities: [{
       id: "opp-1", primary_thread_key: "+13125550100",
       next_action: null, next_action_due: null, updated_at: OLD, version: 1, metadata: {},
