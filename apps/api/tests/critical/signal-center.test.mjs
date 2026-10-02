@@ -112,14 +112,14 @@ test('every event rule names a real envelope source + event types; every rule ha
 
 test('the migration seeds exactly the code registry, all disarmed, in the envelope vocabulary', async () => {
   const { readFile } = await import('node:fs/promises')
-  const sql = await readFile(new URL('../../supabase/migrations/PROPOSED_20261001131000_signal_center.sql', import.meta.url), 'utf8')
+  const sql = await readFile(new URL('../../../../supabase/migrations/20261002101000_signal_center.sql', import.meta.url), 'utf8')
   for (const r of BUILT_IN_RULES) assert.ok(sql.includes(`('${r.rule_key}',`), `seed for ${r.rule_key}`)
   assert.ok(!/to authenticated\s+using\s*\(true\)/i.test(sql), 'no authenticated using(true)')
   assert.ok(!/'high'|'medium'|'low'/.test(sql), 'no second severity vocabulary')
   assert.match(sql, /is_enabled\s+boolean not null default false/)
   assert.match(sql, /notification_event_id\s+uuid/)
   assert.match(sql, /signal_evaluator_checkpoints/)
-  const lock = await readFile(new URL('../../supabase/migrations/PROPOSED_20261002100000_notification_watchlist_lockdown.sql', import.meta.url), 'utf8')
+  const lock = await readFile(new URL('../../../../supabase/migrations/20261002100000_notification_watchlist_lockdown.sql', import.meta.url), 'utf8')
   assert.match(lock, /revoke all on public\.notification_watchlist from anon, authenticated/)
   const lockSql = lock.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n')
   assert.ok(!/create policy[^;]*to (anon|authenticated)/i.test(lockSql))
