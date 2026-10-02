@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { NONDISCLOSURE_SIGNATURE_STATES, NONDISCLOSURE_STATUTORY_UNMEASURED, PRICE_CODE_MAP } from "../../../src/lib/domain/intelligence/transactions/price-taxonomy.js";
 import { COVERAGE_MARKETS } from "../../../src/lib/domain/intelligence/transactions/markets.js";
 import { INVESTOR_ARCHETYPES } from "../../../src/lib/domain/intelligence/features/sale-type.js";
+import { STATE_FIPS } from "../../../src/lib/domain/intelligence/transactions/geography.js";
 
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const list = (xs) => xs.map(q).join(", ");
@@ -241,6 +242,88 @@ from (
 ) x group by 1 order by 3 desc;`;
 }
 
+/**
+ * Geography CTEs mirroring resolveTransactionGeography(): fips (txn, else
+ * comp_properties), else the property join (comp_properties, properties), else
+ * the ZIP membership; market = properties.canonical_market_id, else
+ * market_zip_membership (resolved).
+ */
+function geoCtes() {
+  const fipsMap = Object.entries(STATE_FIPS).map(([f, s]) => `(${q(f)}, ${q(s)})`).join(", ");
+  return `sf(f2, st) as (values ${fipsMap}),
+mz as (select zip5, min(canonical_market_id) canonical_market_id from public.market_zip_membership where status = 'resolved' group by zip5),
+geo as (
+  select t.id, t.primary_property_id pid, t.event_date, coalesce(t.price, 0) price, t.price_code, t.price_source, t.buyer_1_name,
+    g.fips, coalesce(sf.st, g.prop_state) st, g.county, g.zip5, coalesce(p.canonical_market_id, mz.canonical_market_id) market,
+    (case when g.fips is not null then 'fips' when cp.property_id is not null or p.property_id is not null then 'property' when mz.zip5 is not null then 'zip5' else 'unattributed' end) geo_source,
+    (case when p.canonical_market_id is not null then 'properties' when mz.canonical_market_id is not null then 'zip5' else 'unattributed' end) market_source
+  from comp_private.comp_canonical_transactions t
+  left join comp_private.comp_properties cp on cp.property_id = t.primary_property_id
+  left join public.properties p on p.property_id = t.primary_property_id
+  cross join lateral (select nullif(lpad(coalesce(nullif(t.fips, ''), nullif(trim(cp.fips), '')), 5, '0'), '00000') fips,
+      upper(coalesce(cp.state::text, p.property_address_state)) prop_state,
+      upper(regexp_replace(trim(coalesce(cp.county_name, p.property_address_county_name)), '\\s+county$', '', 'i')) county,
+      left(lpad(coalesce(cp.zip5::text, p.property_address_zip), 5, '0'), 5) zip5) g
+  left join sf on sf.f2 = left(g.fips, 2)
+  left join mz on mz.zip5 = g.zip5
+)`;
+}
+
+/** Per (state, county, market): canonical coverage, eligibility (price > 0), investor, confidence mix (compact rows). */
+export function countyCoverageSql() {
+  const ND = list(NONDISCLOSURE_SIGNATURE_STATES);
+  return `set local statement_timeout = '300s';
+with ${geoCtes()},
+${priceCodesValuesSql()},
+bl as (select distinct on (l.canonical_transaction_id) l.canonical_transaction_id id, b.entity_type, b.archetype
+       from comp_private.w8c_transaction_buyer_links l join public.eg_buyer_index b on b.entity_key = l.buyer_entity_id
+       order by l.canonical_transaction_id, l.confidence desc nulls last),
+pool as (select b.id, b.property_id, b.sale_date, b.mls_sold_date,
+    coalesce(case when b.mls_sold_price > 0 then b.mls_sold_price else coalesce(b.sale_price, b.saleprice) end, 0) price
+  from public.buyer_comp_raw_v2 b where b.import_status is distinct from 'rejected' and b.property_id is not null),
+link as (select g.id, max(pl.price) pool_price from geo g join pool pl on pl.property_id = g.pid
+  and (abs(g.event_date - pl.sale_date) <= 10 or abs(g.event_date - pl.mls_sold_date) <= 10) group by g.id),
+c as (
+  select g.*, greatest(g.price, coalesce(lk.pool_price, 0)) best,
+    (coalesce(bl.archetype = any(array[${list(INVESTOR_ARCHETYPES)}]), false) or coalesce(bl.entity_type, case when g.buyer_1_name ~* ${q(COMPANY_RE)} then 'company' when g.buyer_1_name is not null then 'person' end) = 'company') investor,
+    (case when g.price <= 0 or (g.price <= 1000 and g.st in (${ND})) then 'U'
+          when g.price_code is null then (case when g.price_source = 'unknown' or g.st in (${ND}) then 'L' else 'H' end)
+          when k.code is null then 'L'
+          else left(case when g.st in (${ND}) then k.nd_conf else k.conf end, 1) end) conf,
+    k.source k_source
+  from geo g left join link lk on lk.id = g.id left join bl on bl.id = g.id left join codes k on k.code = g.price_code
+)
+select json_agg(json_build_array(st, county, market, n, eligible, deduped_eligible, investor, h, m, l, u, est_code, fips_n, prop_n, zip_n, unattr_n, mkt_unattr) order by n desc)::text
+from (select coalesce(st, '??') st, coalesce(county, '(none)') county, coalesce(market, '(none)') market, count(*) n,
+  count(*) filter (where price > 0) eligible, count(*) filter (where best > 0) deduped_eligible, count(*) filter (where investor) investor,
+  count(*) filter (where conf = 'H') h, count(*) filter (where conf = 'M') m, count(*) filter (where conf = 'L') l, count(*) filter (where conf = 'U') u,
+  count(*) filter (where k_source = 'VENDOR_ESTIMATE') est_code,
+  count(*) filter (where geo_source = 'fips') fips_n, count(*) filter (where geo_source = 'property') prop_n,
+  count(*) filter (where geo_source = 'zip5') zip_n, count(*) filter (where geo_source = 'unattributed') unattr_n,
+  count(*) filter (where market_source = 'unattributed') mkt_unattr
+  from c group by 1, 2, 3) x;`;
+}
+
+/** Engine pool per (state, county, market): rows, usable, pool-only eligible (no canonical match). */
+export function poolCountySql() {
+  return `set local statement_timeout = '120s';
+with mz as (select zip5, min(canonical_market_id) canonical_market_id from public.market_zip_membership where status = 'resolved' group by zip5),
+pool as (select b.id, b.property_id, b.sale_date, b.mls_sold_date, upper(b.property_address_state) st,
+    upper(regexp_replace(trim(b.property_address_county_name), '\\s+county$', '', 'i')) county,
+    coalesce(p.canonical_market_id, mz.canonical_market_id) market,
+    coalesce(case when b.mls_sold_price > 0 then b.mls_sold_price else coalesce(b.sale_price, b.saleprice) end, 0) price,
+    (b.latitude is not null and b.sale_date is not null and coalesce(b.sale_price, b.saleprice, b.mls_sold_price) is not null) usable
+  from public.buyer_comp_raw_v2 b
+  left join public.properties p on p.property_id = b.property_id
+  left join mz on mz.zip5 = left(lpad(b.property_address_zip::text, 5, '0'), 5)
+  where b.import_status is distinct from 'rejected'),
+m as (select pl.id from pool pl where pl.property_id is not null and exists (select 1 from comp_private.comp_canonical_transactions t
+  where t.primary_property_id = pl.property_id and (abs(t.event_date - pl.sale_date) <= 10 or abs(t.event_date - pl.mls_sold_date) <= 10)))
+select json_agg(json_build_array(st, county, market, n, usable, pool_only_eligible) order by n desc)::text
+from (select coalesce(st, '??') st, coalesce(county, '(none)') county, coalesce(market, '(none)') market, count(*) n, count(*) filter (where usable) usable,
+  count(*) filter (where price > 0 and id not in (select id from m)) pool_only_eligible from pool group by 1, 2, 3) x;`;
+}
+
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
   const out = (process.argv.find((a) => a.startsWith("--out=")) ?? "--out=.").slice(6);
@@ -250,5 +333,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
   fs.writeFileSync(path.join(out, "pool-coverage.sql"), `${poolCoverageSql()}\n`);
   fs.writeFileSync(path.join(out, "texas-quality.sql"), `${texasQualitySql()}\n`);
   fs.writeFileSync(path.join(out, "eligible-counts.sql"), `${eligibleCountsSql()}\n`);
-  console.log(`wrote 5 SQL files to ${out}`);
+  fs.writeFileSync(path.join(out, "county-coverage.sql"), `${countyCoverageSql()}\n`);
+  fs.writeFileSync(path.join(out, "pool-county.sql"), `${poolCountySql()}\n`);
+  console.log(`wrote 7 SQL files to ${out}`);
 }
