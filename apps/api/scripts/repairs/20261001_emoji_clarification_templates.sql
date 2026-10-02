@@ -85,7 +85,7 @@ insert into public.sms_templates (
   template_id, use_case, agent_persona, language, template_body, english_translation, variables,
   is_active, version, stage_code, stage_label, property_type_scope, deal_strategy,
   is_first_touch, is_follow_up, metadata, template_name, allowed_property_groups, prohibited_property_groups,
-  safe_for_auto_reply, reply_mode, identity_contact_mode, variant_group_key, fallback_rank,
+  safe_for_auto_reply, reply_mode, identity_contact_mode, fallback_rank,
   minimal_fallback, quarantine_state
 )
 select r.template_id, r.use_case, null, r.language, r.template_body, coalesce(r.english_translation, r.template_body), '[]'::jsonb,
@@ -99,7 +99,7 @@ select r.template_id, r.use_case, null, r.language, r.template_body, coalesce(r.
          'purpose', 'one confirmation question after an emoji-only likely answer; same stage, never a fact'
        ),
        null, array['sfr','duplex','triplex','fourplex','small_multifamily','multifamily_5_plus'], null,
-       true, 'auto', 'neutral', r.stage_code || '|' || r.use_case || '|' || r.language || '|Any Residential', null,
+       true, 'auto', 'neutral', null,
        false, 'active'
   from emoji_confirm_rows r
  where not exists (select 1 from public.sms_templates t where t.template_id = r.template_id);
