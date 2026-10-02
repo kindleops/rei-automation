@@ -2,6 +2,10 @@
  * MESSAGES adapter — message_events (the message ledger).
  *
  *   inbound_sms                      → seller.replied        (inbox)
+ *     typed by what the reply was (New Replies 7.2, still ONE event per row):
+ *     a relayed tapback → seller.reaction · emoji only → seller.emoji_reply ·
+ *     language → seller.language_request · wrong number/person →
+ *     seller.wrong_person · hostility → seller.hostile · call → seller.call_request
  *   outbound, conversation sources   → message.sent/.failed  (queue)   one per message
  *   outbound, campaign sources       → message.sent/.failed  (campaign) ONLY in a seller/property replay;
  *                                      the global feed sees them as campaign.batch_sent (campaign-sends.js)
@@ -12,6 +16,7 @@
  * handsets, proof rows) is excluded like every operational read.
  */
 import { isInternalTestPhone } from '@/lib/config/internal-phones.js'
+import { parsePlatformReaction, extractEmojis, textWithoutEmoji } from '@/lib/domain/classification/emoji-interpretation.js'
 import { envelope, links, refs, humanize } from '../envelope.js'
 import { readKeyed } from '../keyset.js'
 
@@ -23,6 +28,24 @@ const COLS = 'id, direction, event_type, created_at, thread_key, property_id, pr
 const clean = (v) => String(v ?? '').trim()
 const preview = (s) => { const t = clean(s).replace(/\s+/g, ' '); return t ? (t.length > 140 ? `${t.slice(0, 139)}…` : t) : null }
 const isTest = (r, q) => r.metadata?.internal_test === true || r.metadata?.proof === true || TEST_SOURCES.has(q?.source) || (r.direction === 'inbound' && isInternalTestPhone(r.from_phone_number))
+
+/**
+ * What kind of seller reply this inbound row was (7.2). Pure; reads only the
+ * row: the stored intent and the body. Returns { type, summary_tail }.
+ */
+export function inboundReplyKind(r = {}) {
+  const intent = clean(r.detected_intent).toLowerCase()
+  const body = clean(r.message_body)
+  const reaction = parsePlatformReaction(body)
+  if (reaction) return { type: 'seller.reaction', tail: `reacted ${reaction.emoji || reaction.verb || ''} to your message`.replace(/\s+/g, ' ').trim() }
+  const emojis = extractEmojis(body)
+  if (emojis.length && !/[\p{L}\p{N}]/u.test(textWithoutEmoji(body))) return { type: 'seller.emoji_reply', tail: `replied ${emojis.slice(0, 4).join('')}` }
+  if (intent === 'wrong_number' || intent === 'wrong_person') return { type: 'seller.wrong_person', tail: 'says wrong person' }
+  if (intent === 'hostile_or_legal') return { type: 'seller.hostile', tail: 'replied with hostility' }
+  if (intent === 'callback_requested') return { type: 'seller.call_request', tail: 'asked for a call · unscheduled' }
+  if (intent === 'language_switch') return { type: 'seller.language_request', tail: 'asked about language' }
+  return { type: 'seller.replied', tail: null }
+}
 
 /** Pure: one message row (+ its queue row) → envelope, or null when it is not an operator-level event. */
 export function messageEvent(r, q = null, { includeCampaignSends = false, campaignName = null } = {}) {
@@ -37,11 +60,14 @@ export function messageEvent(r, q = null, { includeCampaignSends = false, campai
   const sellerRefs = [refs.seller(r.thread_key, name), refs.property(r.property_id, clean(r.property_address) || null)]
   if (r.direction === 'inbound') {
     const intent = clean(r.detected_intent) || null
+    const kind = inboundReplyKind(r)
     return envelope({
-      ...base, source_system: 'inbox', event_type: 'seller.replied', severity: 'info',
+      ...base, source_system: 'inbox', event_type: kind.type, severity: kind.type === 'seller.hostile' ? 'attention' : 'info',
       actor: { kind: 'seller', label: name },
       entity_refs: sellerRefs,
-      summary: `${name || 'Seller'} replied${intent ? ` · ${humanize(intent)}` : ''}`,
+      summary: kind.tail
+        ? `${name || (kind.type === 'seller.wrong_person' ? 'Recipient' : 'Seller')} ${kind.tail}`
+        : `${name || 'Seller'} replied${intent ? ` · ${humanize(intent)}` : ''}`,
       details: { intent, confidence: Number.isFinite(Number(r.classification_confidence)) && r.classification_confidence !== null ? Number(r.classification_confidence) : null, opt_out: r.is_opt_out === true, preview: preview(r.message_body) },
     })
   }
@@ -71,7 +97,7 @@ export const messagesAdapter = {
   name: 'messages',
   table: 'message_events',
   systems: ['inbox', 'queue', 'campaign'],
-  types: ['seller.replied', 'message.sent', 'message.failed'],
+  types: ['seller.replied', 'seller.reaction', 'seller.emoji_reply', 'seller.language_request', 'seller.wrong_person', 'seller.hostile', 'seller.call_request', 'message.sent', 'message.failed'],
   supports: (subject) => !subject || subject.type === 'seller' || subject.type === 'property',
 
   async read(scope, { db }) {

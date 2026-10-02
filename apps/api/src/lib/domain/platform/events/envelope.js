@@ -8,6 +8,11 @@
  *
  *   fact                                  owner adapter   ledger
  *   seller.replied                        messages        message_events (inbound)
+ *   seller.reaction / .emoji_reply /
+ *     .language_request / .wrong_person /
+ *     .hostile / .call_request            messages        message_events (inbound) -- the SAME row as
+ *                                                         seller.replied, typed by what the reply was
+ *                                                         (New Replies 7.2); never a second event
  *   message.sent / message.failed         messages        message_events (outbound, conversation sources)
  *   campaign sends (individually)         messages        message_events — only in a seller/property replay
  *   campaign.batch_sent                   campaign_sends  send_queue.sent_at (campaign sources), per campaign per 10 min
@@ -38,6 +43,13 @@ export const SUBJECT_TYPES = Object.freeze(['seller', 'property', 'campaign', 'c
 /** The vocabulary (dotted). Anything an adapter emits must be listed here. */
 export const EVENT_TYPES = Object.freeze({
   'seller.replied': 'Seller replied',
+  // New Replies 7.2: one inbound, typed by what it was (never in addition to seller.replied).
+  'seller.reaction': 'Seller reacted',
+  'seller.emoji_reply': 'Seller replied with an emoji',
+  'seller.language_request': 'Seller asked about language',
+  'seller.wrong_person': 'Wrong person replied',
+  'seller.hostile': 'Hostile reply',
+  'seller.call_request': 'Seller asked for a call',
   'seller.opted_out': 'Seller opted out',
   'message.sent': 'Message sent',
   'message.failed': 'Message failed',

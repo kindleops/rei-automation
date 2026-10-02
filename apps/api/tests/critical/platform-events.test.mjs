@@ -137,6 +137,27 @@ test('messages: replies are seller.replied; conversation sends one event with ou
   assert.equal(messageEvent(msg(6, 5, { direction: 'outbound', metadata: { source: 'x' } }), { source: 'internal_canary' }), null)
 })
 
+test('messages: an inbound is typed by what the reply was (New Replies 7.2), still exactly one event per row', () => {
+  const reaction = messageEvent(msg(7, 5, { message_body: '\u200b👍\u200b to “ Are you still the owner of 123 Main St? ”' }))
+  assert.equal(reaction.event_type, 'seller.reaction')
+  assert.match(reaction.summary, /reacted 👍 to your message/)
+  assert.equal(messageEvent(msg(8, 5, { message_body: '👍' })).event_type, 'seller.emoji_reply')
+  const wrong = messageEvent(msg(9, 5, { message_body: 'Not James', detected_intent: 'wrong_number' }))
+  assert.equal(wrong.event_type, 'seller.wrong_person')
+  const hostile = messageEvent(msg(10, 5, { message_body: 'go get a real job', detected_intent: 'hostile_or_legal' }))
+  assert.equal(hostile.event_type, 'seller.hostile')
+  assert.equal(hostile.severity, 'attention')
+  const call = messageEvent(msg(11, 5, { message_body: 'Are you available for a quick call?', detected_intent: 'callback_requested' }))
+  assert.equal(call.event_type, 'seller.call_request')
+  assert.match(call.summary, /unscheduled/, 'never an invented calendar time')
+  assert.equal(messageEvent(msg(12, 5, { message_body: 'English', detected_intent: 'language_switch' })).event_type, 'seller.language_request')
+  assert.equal(messageEvent(msg(13, 5, { message_body: 'What is your offer?', detected_intent: 'asks_offer' })).event_type, 'seller.replied')
+  for (const t of ['seller.reaction', 'seller.emoji_reply', 'seller.language_request', 'seller.wrong_person', 'seller.hostile', 'seller.call_request']) {
+    assert.ok(EVENT_TYPES[t], `${t} is registered`)
+    assert.ok(messagesAdapter.types.includes(t), `${t} is declared by the messages adapter`)
+  }
+})
+
 /* ── campaign batching ────────────────────────────────────────────────── */
 
 const sq = (i, sentAt, o = {}) => ({ id: uid('b', i), campaign_id: 'c1', sent_at: sentAt, delivered_at: null, queue_status: 'delivered', source: 'campaign_launch_execution', market: 'Dallas', ...o })

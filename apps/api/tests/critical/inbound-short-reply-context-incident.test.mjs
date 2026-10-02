@@ -130,7 +130,6 @@ for (const text of [
   "Correct",
   "I do",
   "Still do",
-  "👍",
   "Si",
   "Sí",
   "Claro",
@@ -148,6 +147,22 @@ for (const text of [
     assert.ok(applied.confidence >= 0.82, `${text} confidence ${applied.confidence} too low`);
   });
 }
+
+// 7.2 (2026-10-01): an emoji is never bound as a confirmed answer. 👍 / 👎 are
+// read upstream by emoji-interpretation.js as LIKELY and answered with one
+// confirmation question; the short-reply binder no longer takes them.
+test('"👍" is not a short-reply token: the emoji layer reads it as likely, never confirmed', async () => {
+  const context = await buildConversationContext({
+    thread_key: THREAD,
+    inbound_received_at: INBOUND_AT,
+    supabase: supabaseWithLastOutbound([INCIDENT_ROW]),
+  });
+  const validated = validateConversationContext(context);
+  for (const emoji of ["👍", "👎", "✅", "❌"]) {
+    const applied = applyContextualShortReply(emoji, validated);
+    assert.equal(applied.applied, false, `${emoji} must not bind as a confirmed answer`);
+  }
+});
 
 for (const text of ["Nah", "Nope", "no", "Not anymore", "Sold it", "Wrong house", "👎", "ya no"]) {
   test(`negative variant ${JSON.stringify(text)} does not confirm ownership`, async () => {
