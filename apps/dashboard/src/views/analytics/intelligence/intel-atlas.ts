@@ -13,11 +13,12 @@
  *   city            NO boundary source exists (not in us-atlas, not in the
  *                   database) — a city is drawn at the centre of its own
  *                   properties (server centroid), sized by its base
- *   ZIP             TIGER ZIP polygons exist in production
- *                   (risk_private.geography_authoritative, 322 of the 376 ZIPs
- *                   messaged in 120 days) but no read path reaches them without
- *                   a migration; until then a ZIP is drawn at its properties'
- *                   centre, like a city
+ *   ZIP             US Census ZCTA outlines (risk_private.geography_authoritative,
+ *                   322 of the 376 ZIPs messaged in 120 days) read through the
+ *                   Lab's /boundaries route → public.analytics_zip_boundaries
+ *                   (owner-approved, RC 7.1). Until that function exists, and
+ *                   for any ZIP it has no outline for, a ZIP is drawn at its
+ *                   properties' centre, like a city — and the key says so
  */
 import { clamp } from './intel-format'
 
@@ -177,4 +178,71 @@ export function dodge<T extends { x: number; y: number; r: number }>(marks: T[],
     if (!moved) break
   }
   return out
+}
+
+/* ── ZIP outlines (US Census ZCTA, read through the Lab API) ──────────── */
+
+export type GeoJsonOutline =
+  | { type: 'Polygon'; coordinates: number[][][] }
+  | { type: 'MultiPolygon'; coordinates: number[][][][] }
+/** The Lab's /boundaries answer. `available: false` until the outline function exists (or when it fails). */
+export type ZipOutlines = { available: boolean; reason?: string; source?: string; zips?: Record<string, GeoJsonOutline>; missing?: string[] }
+type Projector = (lng: number, lat: number) => [number, number] | null
+
+/**
+ * A GeoJSON outline projected into the heat map's frame (the same Albers USA
+ * projection the county polygons were generated in): SVG path data at
+ * 0.001-unit precision (a ZIP is a fraction of a unit wide), its box, and an
+ * area-weighted anchor. Rings that leave the projection or collapse are
+ * dropped; nothing usable → null.
+ */
+export function outlineShape(geom: GeoJsonOutline | null | undefined, proj: Projector): { d: string; box: [number, number, number, number]; at: [number, number] } | null {
+  if (!geom || !Array.isArray(geom.coordinates)) return null
+  const polys: number[][][][] = geom.type === 'Polygon' ? [geom.coordinates] : geom.type === 'MultiPolygon' ? geom.coordinates : []
+  let d = ''
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity
+  let ax = 0; let ay = 0; let aw = 0
+  for (const poly of polys) {
+    poly.forEach((ring, ri) => {
+      const pts: Array<[number, number]> = []
+      for (const c of ring || []) {
+        const xy = Array.isArray(c) ? proj(Number(c[0]), Number(c[1])) : null
+        if (xy && Number.isFinite(xy[0]) && Number.isFinite(xy[1])) pts.push(xy)
+      }
+      if (pts.length < 3) return
+      d += `M${pts.map(([x, y]) => `${x.toFixed(3)},${y.toFixed(3)}`).join('L')}Z`
+      for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y }
+      if (ri !== 0) return
+      let a2 = 0; let cx = 0; let cy = 0
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i += 1) {
+        const f = pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1]
+        a2 += f; cx += (pts[j][0] + pts[i][0]) * f; cy += (pts[j][1] + pts[i][1]) * f
+      }
+      if (Math.abs(a2) > 1e-12) { const w = Math.abs(a2); ax += (cx / (3 * a2)) * w; ay += (cy / (3 * a2)) * w; aw += w }
+    })
+  }
+  if (!d) return null
+  return { d, box: [x0, y0, x1, y1], at: aw ? [ax / aw, ay / aw] : [(x0 + x1) / 2, (y0 + y1) / 2] }
+}
+
+/**
+ * Split the ZIP rows on show into outlined areas and centre marks, and say
+ * which. The "approximated" statement survives exactly as long as one ZIP on
+ * show is still drawn at its properties' centre.
+ */
+export function zipOutlineLayer<R extends { key: string }>(rows: R[], outlines: ZipOutlines | null | undefined, proj: Projector) {
+  const areas: Array<{ row: R; d: string; box: [number, number, number, number]; at: [number, number] }> = []
+  const rest: R[] = []
+  const usable = outlines?.available ? outlines.zips || {} : null
+  for (const r of rows) {
+    const shape = usable ? outlineShape(usable[r.key], proj) : null
+    if (shape) areas.push({ row: r, ...shape }); else rest.push(r)
+  }
+  const source = outlines?.source || 'US Census ZCTA'
+  const note = !usable
+    ? 'ZIPs have no outline available — drawn at the centre of their properties'
+    : rest.length
+      ? `ZIP outlines: ${source} · ${rest.length} without outline shown at property centre`
+      : `ZIP outlines: ${source}`
+  return { areas, rest, note, approximated: rest.length > 0 }
 }

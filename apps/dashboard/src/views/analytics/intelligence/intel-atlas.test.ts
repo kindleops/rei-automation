@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { atlasLevel, dodge, frameBox, heatClass, heatOf, loadCounties, loadStates, matchCounty, normCounty, pointInPath } from './intel-atlas'
+import { atlasLevel, dodge, frameBox, heatClass, heatOf, loadCounties, loadStates, matchCounty, normCounty, outlineShape, pointInPath, zipOutlineLayer } from './intel-atlas'
+import type { GeoJsonOutline, ZipOutlines } from './intel-atlas'
 import { project } from './intel-geo'
 
 describe('intel-atlas — geometry and matching, never a number', () => {
@@ -63,5 +64,53 @@ describe('intel-atlas — geometry and matching, never a number', () => {
     }
     expect(out[3]).toMatchObject({ x: 40, y: 40, ox: 40, oy: 40 })
     expect(out[0]).toMatchObject({ ox: 10, oy: 10 })
+  })
+
+  /* ── ZIP outlines (fixture GeoJSON: real ZCTA 55411 / 55412 as the outline function returns them) ── */
+  const Z55411: GeoJsonOutline = { type: 'Polygon', coordinates: [[[-93.32061, 44.98938], [-93.31847, 44.98697], [-93.31847, 44.98405], [-93.29819, 44.98447], [-93.29392, 44.98427], [-93.29365, 44.98304], [-93.29084, 44.98317], [-93.29108, 44.98426], [-93.28533, 44.98422], [-93.28538, 44.98685], [-93.2806, 44.99029], [-93.28093, 44.9909], [-93.2829, 44.99088], [-93.28294, 44.99197], [-93.27637, 44.99202], [-93.27364, 44.99286], [-93.27577, 44.99652], [-93.27442, 45.00441], [-93.27489, 45.01313], [-93.29306, 45.01314], [-93.29547, 45.01391], [-93.2963, 45.01316], [-93.31849, 45.01325], [-93.31846, 44.99891], [-93.31987, 44.99725], [-93.31926, 44.99156], [-93.32061, 44.98938]]] }
+  const Z55412: GeoJsonOutline = { type: 'MultiPolygon', coordinates: [[[[-93.32321, 45.04058], [-93.31849, 45.01325], [-93.27489, 45.01313], [-93.28449, 45.04393], [-93.32321, 45.04058]]], [[[-93.31938, 45.04202], [-93.31931, 45.04018], [-93.31807, 45.0402], [-93.31938, 45.04202]]]] }
+
+  it('a ZIP outline lands in the same frame as the Census counties (55411 sits inside Hennepin)', async () => {
+    const shape = outlineShape(Z55411, project)
+    expect(shape).not.toBeNull()
+    expect(shape?.d.startsWith('M')).toBe(true)
+    expect(shape?.d.endsWith('Z')).toBe(true)
+    // its own anchor is inside it, and inside the county polygon it belongs to
+    expect(pointInPath(shape!.d, shape!.at[0], shape!.at[1])).toBe(true)
+    const hennepin = (await loadCounties('MN')).find((c) => c.id === '27053')!
+    expect(pointInPath(hennepin.d, shape!.at[0], shape!.at[1])).toBe(true)
+    // a ZIP is a fraction of a frame unit: the path keeps sub-unit precision
+    expect(shape!.box[2] - shape!.box[0]).toBeLessThan(1)
+    expect(shape!.box[2] - shape!.box[0]).toBeGreaterThan(0.05)
+  })
+
+  it('multipolygons keep every part; rings outside the projection or collapsed are dropped', () => {
+    expect(outlineShape(Z55412, project)?.d.match(/M/g)?.length).toBe(2)
+    expect(outlineShape({ type: 'Polygon', coordinates: [[[2.35, 48.85], [2.36, 48.85], [2.36, 48.86], [2.35, 48.85]]] }, project)).toBeNull()
+    expect(outlineShape({ type: 'Polygon', coordinates: [[[-93.3, 45.0], [-93.29, 45.0]]] }, project)).toBeNull()
+    expect(outlineShape(null, project)).toBeNull()
+  })
+
+  it('ZIP layer: outlines where the function has them, centre marks for the rest, and the key says which', () => {
+    const rows = [{ key: '55411' }, { key: '55412' }, { key: '55405' }]
+    // before the function exists (or when it fails): every ZIP is a centre mark, the approximation is stated
+    for (const answer of [null, { available: false, reason: 'not_installed' } as ZipOutlines]) {
+      const l = zipOutlineLayer(rows, answer, project)
+      expect(l.areas).toEqual([])
+      expect(l.rest.map((r) => r.key)).toEqual(['55411', '55412', '55405'])
+      expect(l.approximated).toBe(true)
+      expect(l.note).toBe('ZIPs have no outline available — drawn at the centre of their properties')
+    }
+    // the function answers, one ZIP has no outline
+    const some = zipOutlineLayer(rows, { available: true, source: 'US Census ZCTA', zips: { 55411: Z55411, 55412: Z55412 }, missing: ['55405'] }, project)
+    expect(some.areas.map((a) => a.row.key)).toEqual(['55411', '55412'])
+    expect(some.rest.map((r) => r.key)).toEqual(['55405'])
+    expect(some.note).toBe('ZIP outlines: US Census ZCTA · 1 without outline shown at property centre')
+    expect(some.approximated).toBe(true)
+    // every ZIP on show has an outline: the approximation caption is gone
+    const all = zipOutlineLayer(rows.slice(0, 2), { available: true, source: 'US Census ZCTA', zips: { 55411: Z55411, 55412: Z55412 }, missing: [] }, project)
+    expect(all.rest).toEqual([])
+    expect(all.approximated).toBe(false)
+    expect(all.note).toBe('ZIP outlines: US Census ZCTA')
   })
 })

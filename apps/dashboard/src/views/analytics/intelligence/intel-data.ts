@@ -183,4 +183,6 @@ export const paths = {
     `${BASE}/records?ctx=${encodeStable(ctx)}&cohort=${encodeStable(cohort)}&page=${page}&pageSize=${pageSize}${sort ? `&sort=${encodeURIComponent(sort)}` : ''}&dir=${dir}`,
   options: (ctx: unknown, field: string) => `${BASE}/options?ctx=${encodeStable(ctx)}&field=${encodeURIComponent(field)}`,
   views: () => `${BASE}/views`,
+  /** ZIP outlines for the heat map (the ZIPs on screen, sorted so one set is one request) */
+  boundaries: (zips: string[]) => `${BASE}/boundaries?zips=${[...zips].sort().join(',')}`,
 }

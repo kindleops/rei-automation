@@ -14,7 +14,8 @@
  *
  * Arcs are simplified ONCE (Ramer–Douglas–Peucker, per shared arc, so
  * neighbouring areas still meet exactly) and written as SVG path data with
- * 0.1-unit precision. Counties are split per state so a drill loads only the
+ * 0.1-unit precision (states) / 0.01 (counties, which are opened at deep
+ * zoom). Counties are split per state so a drill loads only the
  * state it opens. Geometry only — no business data is involved.
  */
 import fs from 'node:fs'
@@ -68,7 +69,7 @@ function rdp(points, tol) {
 }
 const simplified = (tol) => raw.map((a) => rdp(a, tol))
 
-function pathOf(geom, arcs) {
+function pathOf(geom, arcs, dp = 1) {
   const arcPoints = (i) => (i >= 0 ? arcs[i] : [...arcs[~i]].reverse())
   const ring = (indices) => indices.flatMap((idx, k) => (k === 0 ? arcPoints(idx) : arcPoints(idx).slice(1)))
   const polys = geom.type === 'Polygon' ? [geom.arcs] : geom.type === 'MultiPolygon' ? geom.arcs : []
@@ -79,7 +80,7 @@ function pathOf(geom, arcs) {
     poly.forEach((r, ri) => {
       const pts = ring(r)
       if (pts.length < 3) return
-      d += `M${pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}Z`
+      d += `M${pts.map(([x, y]) => `${x.toFixed(dp)},${y.toFixed(dp)}`).join('L')}Z`
       if (ri === 0) {
         // the label anchor: area-weighted centroid of outer rings
         let a2 = 0; let cx = 0; let cy = 0
@@ -92,7 +93,7 @@ function pathOf(geom, arcs) {
       for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y }
     })
   }
-  const r1 = (v) => Math.round(v * 10) / 10
+  const r1 = (v) => Math.round(v * 100) / 100
   return { d, box: [r1(x0), r1(y0), r1(x1), r1(y1)], at: aw ? [r1(ax / aw), r1(ay / aw)] : [r1((x0 + x1) / 2), r1((y0 + y1) / 2)] }
 }
 
@@ -113,7 +114,7 @@ const byState = new Map()
 for (const g of topology.objects.counties.geometries) {
   const abbr = FIPS[String(g.id).slice(0, 2)]
   if (!abbr) continue
-  const p = pathOf(g, countyArcs)
+  const p = pathOf(g, countyArcs, 2) // counties are opened at deep zoom: 0.01-unit precision keeps them crisp
   if (!p.d) continue
   const list = byState.get(abbr) || []
   list.push({ id: g.id, name: g.properties?.name || g.id, ...p })

@@ -10,6 +10,13 @@ import path from 'node:path'
  * hero trend (at rest + scrubbed onto an empty day) and the heat map at
  * nation / state / county / city / ZIP, Dark + Light at 1440.
  *
+ * ZIP outlines have two legs. The live API answers { available: false } until
+ * public.analytics_zip_boundaries is applied, so the plain city / ZIP shots
+ * are the FALLBACK leg as production serves it. The `*-zcta-*` shots are the
+ * POLYGON leg: the harness (never production code) fulfils /boundaries from
+ * fixtures/zcta-minneapolis.json — a read-only copy of exactly what the
+ * function returns for those ZIPs (its own SQL against the ZCTA table).
+ *
  *   node scripts/proof/desktop/analytics-heatmap-capture.mjs --out=<dir>
  */
 const arg = (n, f) => { const h = process.argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : f }
@@ -20,7 +27,7 @@ const TZ = 'America/Chicago'
 await fs.mkdir(OUT, { recursive: true })
 const watchdog = setTimeout(() => { console.log('WATCHDOG — exiting'); process.exit(2) }, Number(arg('watchdog', 25 * 60_000)))
 
-const stats = { blocked: [], api: 0 }
+const stats = { blocked: [], api: 0, stubbed: 0 }
 let inflight = 0
 let lastApi = Date.now()
 async function quiet(ms = 2500, max = 240_000) {
@@ -28,7 +35,13 @@ async function quiet(ms = 2500, max = 240_000) {
   while (Date.now() - t0 < max) { if (inflight === 0 && Date.now() - lastApi > ms) return true; await new Promise((r) => setTimeout(r, 300)) }
   return false
 }
-async function context(browser, { width, height, theme }) {
+const ZCTA = JSON.parse(await fs.readFile(new URL('./fixtures/zcta-minneapolis.json', import.meta.url), 'utf8'))
+function zctaAnswer(url) {
+  const asked = (new URL(url).searchParams.get('zips') || '').split(',').filter((z) => /^[0-9]{5}$/.test(z))
+  const zips = Object.fromEntries(asked.filter((z) => ZCTA.zips[z]).map((z) => [z, ZCTA.zips[z]]))
+  return { ok: true, data: { available: true, source: 'US Census ZCTA', zips, missing: asked.filter((z) => !ZCTA.zips[z]) } }
+}
+async function context(browser, { width, height, theme, stubZcta = false }) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, timezoneId: TZ })
   await ctx.addInitScript(({ t }) => {
     try {
@@ -48,6 +61,10 @@ async function context(browser, { width, height, theme }) {
     const supa = /supabase\.co$/.test(u.hostname)
     if ((api || supa) && !['GET', 'HEAD', 'OPTIONS'].includes(m)) { stats.blocked.push(`${m} ${u.pathname}`); return route.abort() }
     if (supa && /\/rest\/v1\//.test(u.pathname)) return route.abort()
+    if (stubZcta && m === 'GET' && u.pathname === '/api/cockpit/analytics/lab/boundaries') {
+      stats.stubbed += 1
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(zctaAnswer(req.url())) })
+    }
     if (api) {
       stats.api += 1; inflight += 1; lastApi = Date.now()
       try { return await route.continue() } finally { inflight -= 1; lastApi = Date.now() }
@@ -75,6 +92,10 @@ const SHOTS = [
     { id: `map-city-${theme}`, theme, ctx: { lens: 'geography', segment: [MN, HEN, MPLS] }, el: '.ix-geo', hover: '55412' },
     { id: `map-zip-${theme}`, theme, ctx: { lens: 'geography', segment: [MN, HEN, MPLS, ZIP] }, el: '.ix-geo' },
   ]),
+  // the polygon leg (harness-stubbed /boundaries from the read-only ZCTA fixture)
+  { id: 'map-city-zcta-dark', theme: 'dark', ctx: { lens: 'geography', segment: [MN, HEN, MPLS] }, el: '.ix-geo', hover: '55412', stubZcta: true },
+  { id: 'map-city-zcta-light', theme: 'light', ctx: { lens: 'geography', segment: [MN, HEN, MPLS] }, el: '.ix-geo', hover: '55412', stubZcta: true },
+  { id: 'map-zip-zcta-dark', theme: 'dark', ctx: { lens: 'geography', segment: [MN, HEN, MPLS, ZIP] }, el: '.ix-geo', stubZcta: true },
   { id: 'map-nation-sellers-reached-dark', theme: 'dark', ctx: { lens: 'geography', metric: 'sellers_reached' }, el: '.ix-geo', hover: 'TX' },
   { id: 'map-state-tx-delivery-rate-dark', theme: 'dark', ctx: { lens: 'geography', metric: 'delivery_rate', segment: [{ dim: 'state', value: 'TX', label: 'Texas' }] }, el: '.ix-geo' },
 ].filter((s) => !ONLY || ONLY.split(',').includes(s.id))
@@ -82,7 +103,7 @@ const SHOTS = [
 const browser = await chromium.launch()
 const report = []
 for (const s of SHOTS) {
-  const ctx = await context(browser, { width: 1440, height: 900, theme: s.theme })
+  const ctx = await context(browser, { width: 1440, height: 900, theme: s.theme, stubZcta: Boolean(s.stubZcta) })
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 200)))
@@ -121,7 +142,7 @@ for (const s of SHOTS) {
       return {
         garbage: (txt.match(/\bNaN\b|\bundefined\b|\[object Object\]|Infinity/g) || []).slice(0, 5),
         areas: document.querySelectorAll('.ix-geo__area').length, filled: [...document.querySelectorAll('.ix-geo__area')].filter((e) => e.getAttribute('style')).length,
-        points: document.querySelectorAll('.ix-geo__pt').length, crumbs: [...document.querySelectorAll('.ix-geo__crumbs button')].map((b) => b.textContent).join(' › '),
+        points: document.querySelectorAll('.ix-geo__pt').length, src: document.querySelector('.ix-geo__src')?.textContent || null, crumbs: [...document.querySelectorAll('.ix-geo__crumbs button')].map((b) => b.textContent).join(' › '),
         tip: document.querySelector('.ix-geo__tip, .ix-hero__basis')?.textContent?.slice(0, 160) || null,
       }
     }, s.el)
@@ -134,6 +155,6 @@ for (const s of SHOTS) {
   await ctx.close()
 }
 await fs.writeFile(path.join(OUT, 'report.json'), JSON.stringify({ report, stats: { api: stats.api, blockedWrites: stats.blocked.length, blocked: stats.blocked.slice(0, 20) } }, null, 2))
-console.log('stats', JSON.stringify({ api: stats.api, blockedWrites: stats.blocked.length }))
+console.log('stats', JSON.stringify({ api: stats.api, stubbedBoundaries: stats.stubbed, blockedWrites: stats.blocked.length }))
 await browser.close()
 clearTimeout(watchdog)

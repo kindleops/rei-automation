@@ -672,9 +672,11 @@ button.ix-callout:hover { background: rgba(var(--lc-attn-rgb), 0.12); }
 .ix-geo__svg { display: block; width: 100%; height: auto; aspect-ratio: 975 / 610; overflow: hidden; }
 .ix-geo__land { fill: rgba(var(--ixg-dot-rgb), 0.035); stroke: rgba(var(--ixg-dot-rgb), 0.12); stroke-width: 0.6; }
 .ix-geo__land.is-focus { fill: rgba(var(--ixg-dot-rgb), 0.05); stroke: rgba(var(--ixg-dot-rgb), 0.3); stroke-width: 1; }
-.ix-geo__area { fill: rgba(var(--ixg-dot-rgb), 0.055); stroke: rgba(var(--ixg-dot-rgb), 0.2); stroke-width: 0.7; outline: none; transition: fill var(--lc-dur-surface) var(--lc-ease-standard), opacity var(--lc-dur-fast) var(--lc-ease-standard); }
+.ix-geo__area { fill-rule: evenodd; fill: rgba(var(--ixg-dot-rgb), 0.055); stroke: rgba(var(--ixg-dot-rgb), 0.2); stroke-width: 0.7; outline: none; transition: fill var(--lc-dur-surface) var(--lc-ease-standard), opacity var(--lc-dur-fast) var(--lc-ease-standard); }
 .ix-geo__area.is-empty { fill: rgba(var(--ixg-dot-rgb), 0.03); stroke: rgba(var(--ixg-dot-rgb), 0.12); }
 .ix-geo__area.is-drill, .ix-geo__pt.is-drill { cursor: pointer; }
+.ix-geo__area.is-sib { opacity: 0.5; }
+.ix-geo__area.is-sel { stroke: rgb(var(--lc-exec-rgb)); stroke-width: 1.6; }
 /* at state zoom a hot county is a few pixels: it glows so it is found, not hunted */
 .ix-geo__area.is-hot { filter: drop-shadow(0 0 5px rgba(var(--lc-exec-rgb), 0.55)); }
 :root[data-nexus-theme='light'] .ix-geo__area.is-hot { filter: drop-shadow(0 0 3px rgba(var(--lc-exec-rgb), 0.45)); }

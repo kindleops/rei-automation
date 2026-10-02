@@ -12,9 +12,11 @@
  * Honesty layer:
  *   · aggregation is server-side and bounded (the Lab's breakdown: one row per
  *     area, ≤ 400) — no raw rows reach the browser
- *   · state and county are true Census polygons; cities and ZIPs have no
- *     readable boundary, so they are drawn at the centre of their own
- *     properties and the key says so (intel-atlas.ts)
+ *   · state and county are true Census polygons; ZIPs are US Census ZCTA
+ *     outlines when the Lab can read them (/boundaries → the owner-approved
+ *     analytics_zip_boundaries function), otherwise — and for any ZIP without
+ *     an outline — drawn at the centre of their own properties; cities have
+ *     no boundary source at all. The key always says which (intel-atlas.ts)
  *   · a rate under the registry's min_sample is HATCHED and never sets the
  *     scale; an area with no activity is quiet, not zero-coloured
  *   · counts shade on a square-root scale (labelled), rates linearly from 0
@@ -34,8 +36,8 @@ import { useLab } from './intel-context'
 import { paths, useIntel } from './intel-data'
 import { fmtThrough, useBuyerWindow } from './intel-hooks'
 import { project, stateLabel } from './intel-geo'
-import { ATLAS_CHILD, FRAME, GEO_SEGMENT_DIMS, LEVEL_NOUN, atlasLevel, dodge, frameBox, heatClass, heatOf, loadCounties, loadStates, matchCounty, unionBox } from './intel-atlas'
-import type { AreaShape, Box, GeoLevel, StateShape } from './intel-atlas'
+import { ATLAS_CHILD, FRAME, GEO_SEGMENT_DIMS, LEVEL_NOUN, atlasLevel, dodge, frameBox, heatClass, heatOf, loadCounties, loadStates, matchCounty, unionBox, zipOutlineLayer } from './intel-atlas'
+import type { AreaShape, Box, GeoLevel, StateShape, ZipOutlines } from './intel-atlas'
 import { fmtInt, seqColor } from './intel-format'
 import { serverContext } from './intel-state'
 import { RankedBars } from './IntelCharts'
@@ -106,6 +108,14 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
     return seqColor(0.1 + 0.9 * heatClass(t, STEPS))
   }
 
+  // ZIP outlines (US Census ZCTA) when the Lab can read them; centre marks otherwise
+  const zipShown = mapDim === 'zip'
+  const zipKeys = useMemo(() => (zipShown ? named.map((r) => r.key).filter((k) => /^[0-9]{5}$/.test(k)).slice(0, 400) : []), [zipShown, named])
+  const outlineQ = useIntel<ZipOutlines>(zipKeys.length ? paths.boundaries(zipKeys) : null, 10 * 60_000)
+  // an answer for another ZIP set (held while the next loads) is not this set's outlines
+  const outlines = outlineQ.stale ? null : outlineQ.data
+  const zipLayer = useMemo(() => (zipShown ? zipOutlineLayer(named, outlines, project) : null), [zipShown, named, outlines])
+
   // the areas on show, each tied to its row
   const areas = useMemo(() => {
     const out: Array<{ key: string; label: string; d: string; at: [number, number]; box: [number, number, number, number]; row: Row | null }> = []
@@ -120,9 +130,11 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
         if (shape && !byShape.has(shape.id)) byShape.set(shape.id, r)
       }
       for (const c of counties) { const r = byShape.get(c.id) || null; out.push({ key: r?.key || `fips:${c.id}`, label: r?.label || c.name, d: c.d, at: c.at, box: c.box, row: r }) }
+    } else if (zipLayer) {
+      for (const a of zipLayer.areas) out.push({ key: a.row.key, label: a.row.label, d: a.d, at: a.at, box: a.box, row: a.row })
     }
     return out
-  }, [level, states, counties, named])
+  }, [level, states, counties, named, zipLayer])
   const drawnKeys = new Set(areas.filter((a) => a.row).map((a) => a.row?.key))
   const notDrawn = level === 'state' && counties ? named.filter((r) => !drawnKeys.has(r.key)).length : 0
 
@@ -132,16 +144,16 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
     return matchCounty(String(countyStep.value), counties)
   }, [counties, countyStep?.value])
 
-  // cities / ZIPs: no boundary source → the centre of their own properties
+  // cities (no boundary source) and ZIPs without an outline → the centre of their own properties
   const points = useMemo(() => {
     if (level === 'nation' || level === 'state') return []
     const base = Math.max(1, ...named.map((r) => (isRate ? r.den ?? r.n : r.n)))
-    return named.map((r) => {
+    return (zipLayer ? zipLayer.rest : named).map((r) => {
       const xy = r.centroid ? project(r.centroid.lng, r.centroid.lat) : null
       return xy ? { row: r, x: xy[0], y: xy[1], w: Math.sqrt(Math.max(1, isRate ? r.den ?? r.n : r.n) / base) } : null
     }).filter(Boolean) as Array<{ row: Row; x: number; y: number; w: number }>
-  }, [level, named, isRate])
-  const unplaced = level === 'nation' || level === 'state' ? 0 : named.length - points.length
+  }, [level, named, isRate, zipLayer])
+  const unplaced = level === 'nation' || level === 'state' ? 0 : named.length - points.length - areas.length
 
   /* ── the camera ── */
   const target: Box = useMemo(() => {
@@ -150,10 +162,11 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
     const stBox = st ? frameBox(unionBox([st.box]), 0.06) : null
     if (level === 'state') return stBox || frameBox(null)
     if (level === 'county') return countyShape ? frameBox(unionBox([countyShape.box]), 0.12) : points.length ? frameBox(unionBox(points.map((p) => [p.x, p.y, p.x, p.y])), 0.3, 18) : stBox || frameBox(null)
-    // city and ZIP share one frame (the ZIPs of the city), so selecting a ZIP never jumps
-    if (points.length) return frameBox(unionBox(points.map((p) => [p.x, p.y, p.x, p.y])), 0.45, 3.5)
+    // city and ZIP share one frame (the ZIPs of the city: outlines and centre marks), so selecting a ZIP never jumps
+    const zipBoxes = [...areas.map((a) => a.box), ...points.map((p) => [p.x, p.y, p.x, p.y] as [number, number, number, number])]
+    if (zipBoxes.length) return frameBox(unionBox(zipBoxes), areas.length ? 0.1 : 0.45, 3.5)
     return countyShape ? frameBox(unionBox([countyShape.box]), 0.12) : stBox || frameBox(null)
-  }, [level, states, focusState, countyShape, points])
+  }, [level, states, focusState, countyShape, points, areas])
 
   const svg = useRef<SVGSVGElement | null>(null)
   const shown = useRef<Box | null>(null)
@@ -251,7 +264,9 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
 
   const levelNote = level === 'nation' || level === 'state'
     ? `${level === 'nation' ? 'States' : 'Counties'}: US Census boundaries`
-    : `${LEVEL_NOUN[mapDim]} have no boundary source — drawn at the centre of their properties`
+    : zipLayer
+      ? zipLayer.note
+      : `${LEVEL_NOUN[mapDim]} have no boundary source — drawn at the centre of their properties`
   const sampleLabel = def?.denominator?.label || 'base'
   const delta = (r: Row) => {
     const p = r.prev?.value
@@ -267,7 +282,10 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
         ? { key: a.key, row: a.row as Row, x: a.at[0], y: a.at[1], text: a.key, side: false }
         // a county is small at state zoom: its name sits beside it, never over its colour
         : { key: a.key, row: a.row as Row, x: a.box[2] + 4 * px, y: a.at[1], text: (a.row?.label || a.label).replace(/, [A-Z]{2}$/, ''), side: true }))
-      : marks.map((p) => ({ key: p.row.key, row: p.row, x: p.x, y: p.y - p.r - 7 * px, text: p.row.label.replace(/, [A-Z]{2}$/, ''), side: false }))
+      : [
+          ...areas.filter((a) => a.row).map((a) => ({ key: a.key, row: a.row as Row, x: a.at[0], y: a.at[1], text: a.key, side: false })),
+          ...marks.map((p) => ({ key: p.row.key, row: p.row, x: p.x, y: p.y - p.r - 7 * px, text: p.row.label.replace(/, [A-Z]{2}$/, ''), side: false })),
+        ]
     const placed: Array<{ key: string; x: number; y: number; text: string; side: boolean; box: [number, number, number, number] }> = []
     for (const c of cands.sort((a, b) => (b.row.den ?? b.row.n ?? 0) - (a.row.den ?? a.row.n ?? 0))) {
       if (placed.length >= (level === 'nation' ? 14 : 8)) break
@@ -313,7 +331,9 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
             </defs>
             {/* the country: quiet land under everything (and the neighbours of an open state) */}
             {states && level !== 'nation' ? states.map((s) => <path key={`land-${s.abbr}`} d={s.d} className={cx('ix-geo__land', s.abbr === focusState && 'is-focus')} vectorEffect="non-scaling-stroke" />) : null}
-            {/* choropleth areas: states (nation) or counties (state) */}
+            {/* county and below: the state's counties as context, the open county outlined */}
+            {level !== 'nation' && level !== 'state' && counties ? counties.map((c) => <path key={`c-${c.id}`} d={c.d} className={cx('ix-geo__ctx', countyShape?.id === c.id && 'is-focus')} vectorEffect="non-scaling-stroke" />) : null}
+            {/* choropleth areas: states (nation), counties (state) or ZIP outlines (city / ZIP) */}
             {areas.map((a) => {
               const r = a.row
               const thin = Boolean(r && isRate && r.insufficient)
@@ -323,7 +343,7 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
               return (
                 <path
                   key={a.key} d={a.d} data-k={a.key}
-                  className={cx('ix-geo__area', !r && 'is-empty', thin && 'is-thin', lit && 'is-on', can && 'is-drill', Boolean(f) && level === 'state' && 'is-hot')}
+                  className={cx('ix-geo__area', !r && 'is-empty', thin && 'is-thin', lit && 'is-on', can && 'is-drill', Boolean(f) && level === 'state' && 'is-hot', level === 'zip' && (String(zipStep?.value) === a.key ? 'is-sel' : 'is-sib'))}
                   style={f ? { fill: f } : thin ? { fill: `url(#${hatchId})` } : undefined}
                   vectorEffect="non-scaling-stroke"
                   tabIndex={can ? 0 : undefined} role={can ? 'button' : undefined}
@@ -334,8 +354,6 @@ export function IntelGeo({ variant = 'overview' }: { variant?: 'overview' | 'len
               )
             })}
             {hoverArea ? <path d={hoverArea.d} className="ix-geo__hl" vectorEffect="non-scaling-stroke" /> : null}
-            {/* county and below: the state's counties as context, the open county outlined */}
-            {level !== 'nation' && level !== 'state' && counties ? counties.map((c) => <path key={`c-${c.id}`} d={c.d} className={cx('ix-geo__ctx', countyShape?.id === c.id && 'is-focus')} vectorEffect="non-scaling-stroke" />) : null}
             {/* cities / ZIPs at the centre of their properties */}
             {marks.map((p) => {
               const r = p.row
