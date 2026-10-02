@@ -31,6 +31,12 @@
  *                       2026-07-31). Reported; repaired only with
  *                       --include-legacy (owner decision).
  *
+ * Atomicity (RC 7.1 runbook gap 5): the status change and its audit row are
+ * ONE statement in ONE transaction through a direct Postgres connection
+ * (applyStatusTransitionAtomic), so a partial failure can never leave a status
+ * change without its audit row or an audit row without the change. --apply
+ * therefore needs SUPABASE_DB_URL / DATABASE_URL; the dry run does not.
+ *
  * Usage (from apps/api):
  *   node --import ./tests/register-aliases.mjs scripts/repair-not-interested-nurture.mjs
  *   node --import ./tests/register-aliases.mjs scripts/repair-not-interested-nurture.mjs --json
@@ -170,7 +176,7 @@ async function loadPopulation(db) {
   return [...byPhone.values()];
 }
 
-async function hydrate(db, s) {
+export async function hydrate(db, s) {
   if (!s.phone) return s;
   const variants = phoneVariants(s.phone);
   const orPhone = variants.map((v) => `phone_e164.eq.${v}`).concat(variants.map((v) => `phone_number.eq.${v}`)).join(",");
@@ -200,33 +206,95 @@ async function hydrate(db, s) {
   return s;
 }
 
-async function applyRepair(db, s, decision, scheduleFollowUp) {
+/**
+ * ONE statement, ONE transaction: the guarded status (and optional stage)
+ * change and its audit row land together or not at all. A writable CTE is a
+ * single statement, so Postgres applies both or neither; the explicit
+ * BEGIN/COMMIT adds a post-check that refuses (ROLLBACK) if the change landed
+ * without its audit row. Idempotent: the guard (`from_status`, optional
+ * `from_stage`) matches nothing once applied, and the audit insert is keyed by
+ * a UNIQUE idempotency_key (`on conflict do nothing`).
+ *
+ * @param {import('pg').PoolClient|import('pg').Client} pgClient
+ * @returns {Promise<{updated:number, audited:number}>}
+ */
+export const ATOMIC_STATUS_TRANSITION_SQL = `
+  with upd as (
+    update public.acquisition_opportunities o
+       set opportunity_status  = $3,
+           acquisition_stage   = coalesce($5, o.acquisition_stage),
+           stage_entered_at    = case when $5 is not null and $5 is distinct from o.acquisition_stage then now() else o.stage_entered_at end,
+           last_updated_source = $6,
+           last_updated_by     = $6,
+           metadata            = coalesce(o.metadata, '{}'::jsonb) || $9::jsonb,
+           version             = coalesce(o.version, 0) + 1,
+           updated_at          = now()
+     where o.id = $1::uuid
+       and o.opportunity_status = $2
+       and ($4::text is null or o.acquisition_stage = $4)
+    returning o.id
+  ), ins as (
+    insert into public.acquisition_opportunity_history
+      (opportunity_id, event_type, field_name, previous_value, new_value, reason, actor, source, idempotency_key, metadata, created_at)
+    select upd.id, 'status_change', 'opportunity_status', $2, $3, $7, $6, $6, $8, $9::jsonb, now() from upd
+    on conflict (idempotency_key) do nothing
+    returning id
+  )
+  select (select count(*) from upd)::int as updated, (select count(*) from ins)::int as audited`;
+
+export async function applyStatusTransitionAtomic(pgClient, t) {
+  await pgClient.query("begin");
+  try {
+    await pgClient.query("set local lock_timeout = '5s'");
+    await pgClient.query("set local statement_timeout = '30s'");
+    const { rows } = await pgClient.query(ATOMIC_STATUS_TRANSITION_SQL, [
+      t.opportunity_id,
+      t.from_status,
+      t.to_status,
+      t.from_stage ?? null,
+      t.to_stage ?? null,
+      t.source,
+      t.reason,
+      t.idempotency_key,
+      JSON.stringify(t.metadata || {}),
+    ]);
+    const r = rows[0] || { updated: 0, audited: 0 };
+    if (r.updated !== r.audited) {
+      // e.g. the idempotency key already exists from another path: never leave
+      // a change without its own audit row.
+      throw new Error(`atomic_status_transition_mismatch updated=${r.updated} audited=${r.audited}`);
+    }
+    await pgClient.query("commit");
+    return r;
+  } catch (error) {
+    await pgClient.query("rollback").catch(() => {});
+    throw error;
+  }
+}
+
+export async function openRepairPgClient() {
+  const { default: pg } = await import("pg");
+  const { resolveDatabaseUrl } = await import("../src/lib/postgres/resolve-database-url.js");
+  const url = resolveDatabaseUrl();
+  if (!url) throw new Error("--apply needs a database URL (SUPABASE_DB_URL / DATABASE_URL) for the atomic status+audit write");
+  const client = new pg.Client({ connectionString: url, ssl: url.includes("localhost") ? false : { rejectUnauthorized: false } });
+  await client.connect();
+  return client;
+}
+
+async function applyRepair(db, s, decision, scheduleFollowUp, pgClient) {
   const out = { status_fixed: false, follow_up: null };
   if (decision.fixStatus && s.opportunity) {
-    const now = new Date().toISOString();
-    const { data, error } = await db
-      .from("acquisition_opportunities")
-      .update({ opportunity_status: "nurture", last_updated_source: REPAIR_SOURCE, updated_at: now })
-      .eq("id", s.opportunity.id)
-      .eq("opportunity_status", "suppressed") // status guard: never clobber a newer state
-      .select("id");
-    if (error) throw error;
-    if ((data || []).length === 1) {
-      out.status_fixed = true;
-      const { error: hErr } = await db.from("acquisition_opportunity_history").insert({
-        opportunity_id: s.opportunity.id,
-        event_type: "status_change",
-        field_name: "opportunity_status",
-        previous_value: "suppressed",
-        new_value: "nurture",
-        reason: "not_interested_is_30_day_follow_up",
-        actor: REPAIR_SOURCE,
-        source: REPAIR_SOURCE,
-        idempotency_key: `${REPAIR_SOURCE}:${s.opportunity.id}`,
-        metadata: { rule: "A not interested is a 30 day follow up (owner, 2026-09-30)" },
-      });
-      if (hErr) throw hErr;
-    }
+    const r = await applyStatusTransitionAtomic(pgClient, {
+      opportunity_id: s.opportunity.id,
+      from_status: "suppressed", // status guard: never clobber a newer state
+      to_status: "nurture",
+      source: REPAIR_SOURCE,
+      reason: "not_interested_is_30_day_follow_up",
+      idempotency_key: `${REPAIR_SOURCE}:${s.opportunity.id}`,
+      metadata: { rule: "A not interested is a 30 day follow up (owner, 2026-09-30)" },
+    });
+    out.status_fixed = r.updated === 1;
   }
   if (decision.needFollowUp) {
     out.follow_up = await scheduleFollowUp(
@@ -278,13 +346,18 @@ async function main() {
 
   if (APPLY) {
     const { scheduleFollowUp } = await import("../src/lib/domain/seller-flow/seller-followup-scheduler.js");
+    const pgClient = await openRepairPgClient();
     let done = 0;
-    for (const r of report) {
-      const eligible = r.action === "REPAIR" || (INCLUDE_LEGACY && r.action === "LEGACY_JUL01");
-      if (!eligible || done >= LIMIT) continue;
-      const decision = r.action === "LEGACY_JUL01" ? { fixStatus: false, needFollowUp: r._decision.needFollowUp } : r._decision;
-      r.result = await applyRepair(db, r._seller, decision, scheduleFollowUp);
-      done += 1;
+    try {
+      for (const r of report) {
+        const eligible = r.action === "REPAIR" || (INCLUDE_LEGACY && r.action === "LEGACY_JUL01");
+        if (!eligible || done >= LIMIT) continue;
+        const decision = r.action === "LEGACY_JUL01" ? { fixStatus: false, needFollowUp: r._decision.needFollowUp } : r._decision;
+        r.result = await applyRepair(db, r._seller, decision, scheduleFollowUp, pgClient);
+        done += 1;
+      }
+    } finally {
+      await pgClient.end().catch(() => {});
     }
     console.log(`[apply] repaired ${done} seller(s)`);
   }

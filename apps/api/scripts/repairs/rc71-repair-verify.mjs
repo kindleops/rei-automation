@@ -57,7 +57,7 @@ export const TAGS = Object.freeze({
   p7: "rc71_p7_cleanup",
   canary_d2: "rc7.1_canary_cleanup",
   canary_d2b: "ic8.1_canary_cleanup",
-  dequincy: "rc7.1_dequincy_fix",
+  dequincy: "rc71_dequincy_option_a",
   nurture: "rc71_not_interested_nurture_repair",
   nr: "classifier_cleanup_20261001",
   market: "rc71_campaign_market_identity",
@@ -254,10 +254,14 @@ export const SECTIONS = {
           'p7_threads', (select count(*) from universal_lead_state_events where source_view = '${TAGS.p7}'),
           'p7_deals', (select count(*) from acquisition_opportunity_history where source = '${TAGS.p7}'),
           'canary', (select count(*) from acquisition_opportunity_history where idempotency_key like 'rc71_canary_archive:%' or idempotency_key like 'ic81_canary_archive:%'),
+          'canary_thread_archives', (select count(*) from universal_lead_state_events where source_view = 'rc71_canary_cleanup'),
+          'dequincy_history', (select count(*) from acquisition_opportunity_history where source = '${TAGS.dequincy}'),
+          'dequincy_queue_rows', (select count(*) from send_queue where metadata->>'source' = '${TAGS.dequincy}'),
           'nurture_history', (select count(*) from acquisition_opportunity_history where source = '${TAGS.nurture}'),
           'nr_lead_state', (select count(*) from universal_lead_state_events where source_view = '${TAGS.nr}'),
           'nr_history', (select count(*) from acquisition_opportunity_history where source = '${TAGS.nr}'),
-          'market_campaigns', (select count(*) from campaigns where metadata->'market_identity'->>'repaired_by' = '${TAGS.market}')),
+          'market_campaigns', (select count(*) from campaigns where metadata->'market_identity'->>'repaired_by' = '${TAGS.market}'),
+          'market_audit_events', (select count(*) from campaign_events where event_type = 'campaign.market_identity_repaired')),
       -- invariants: the same subject touched twice by one repair
       'dup_p7_thread', (select count(*) from (select thread_key from universal_lead_state_events where source_view = '${TAGS.p7}' group by 1 having count(*) > 1) d),
       'dup_p7_deal', (select count(*) from (select opportunity_id from acquisition_opportunity_history where source = '${TAGS.p7}' group by 1 having count(*) > 1) d),
@@ -281,6 +285,7 @@ export const SECTIONS = {
     ), w as (
       select q.*, ${k10("q.thread_key")} k,
         case when q.metadata->>'source' = '${TAGS.nurture}' then 'nurture_repair'
+             when q.metadata->>'source' = '${TAGS.dequincy}' then 'dequincy_option_a'
              when q.metadata->>'source' = '${TAGS.nr}' then 'new_replies_cleanup'
              when exists (select 1 from nr_threads n where n.k = ${k10("q.thread_key")}) then 'new_replies_thread_other_source'
              else null end attribution
@@ -321,20 +326,29 @@ export const INVARIANTS = [
   ["audit.dup_p7_deal", (s) => num(s.audit?.dup_p7_deal) === 0, "P7 touched each deal once"],
   ["audit.dup_nurture_deal", (s) => num(s.audit?.dup_nurture_deal) === 0, "nurture touched each deal once"],
   ["audit.dup_nr_thread_field", (s) => num(s.audit?.dup_nr_thread_field) === 0, "New Replies cleanup wrote each thread field once"],
+  ["audit.repair_tag_totals.dequincy_history", (s) => num(s.audit?.repair_tag_totals?.dequincy_history) <= 1, "Dequincy Option A audited at most once"],
+  ["audit.repair_tag_totals.dequincy_queue_rows", (s) => num(s.audit?.repair_tag_totals?.dequincy_queue_rows) <= 1, "Dequincy gets at most one nurture follow-up"],
+  ["audit.repair_tag_totals.market_audit_events", (s) => num(s.audit?.repair_tag_totals?.market_audit_events) === num(s.audit?.repair_tag_totals?.market_campaigns), "one campaign_events audit row per market-identity-repaired campaign"],
 ];
 
 // ── expected end-state (after the full sequence) — informational, from the dry runs
 export const EXPECTED_AFTER = [
   ["audit.repair_tag_totals.p7_threads", 4373, "P7 preview clear_ok threads (2026-10-01)"],
   ["audit.repair_tag_totals.p7_deals", 52, "P7 preview clear_ok deals"],
+  ["audit.repair_tag_totals.market_campaigns", 14, "market identity dry run: campaigns with targets (R1)"],
+  ["audit.repair_tag_totals.market_audit_events", 14, "one campaign_events row per repaired campaign"],
   ["canary.deals_archived", 5, "d2 (3) + d2b (2)"],
   ["audit.repair_tag_totals.canary", 5, "one history row per archived canary"],
+  ["audit.repair_tag_totals.canary_thread_archives", 2, "+13059807795 (d2) and 6127433952 (d2b)"],
+  ["audit.repair_tag_totals.dequincy_history", 1, "Dequincy Option A: one audited nurture transition"],
+  ["audit.repair_tag_totals.dequincy_queue_rows", 1, "Dequincy: one 30-day nurture follow-up"],
   ["audit.repair_tag_totals.nurture_history", 34, "nurture dry run: suppressed → nurture"],
   ["nurture.repair_queue_rows", 35, "nurture dry run: follow-ups scheduled"],
   ["nurture.repair_rows_sent", 0, "nurture rows are due +30 days; none may send in the window"],
 ];
 
 function num(v) {
+  if (v === null || v === undefined) return 0; // a counter not yet present (older snapshot) is zero
   const n = Number(v);
   return Number.isFinite(n) ? n : NaN;
 }
