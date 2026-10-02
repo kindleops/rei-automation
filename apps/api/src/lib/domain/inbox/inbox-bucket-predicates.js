@@ -37,6 +37,36 @@ function object(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+// ── New Replies 7.2 (2026-10-01) ────────────────────────────────────────────
+// A thread whose LATEST inbound already resolved the conversation is not a new
+// reply, whatever its stored bucket says: an opt-out, a wrong person, a sale,
+// a decline or a "not now", hostility. Mirrors f_reply_resolved in
+// v_inbox_thread_state_buckets (migration 20261001160000).
+export const RESOLVED_REPLY_INTENTS = Object.freeze([
+  "opt_out",
+  "wrong_number",
+  "wrong_person",
+  "sold_property",
+  "not_interested",
+  "need_time",
+  "hostile_or_legal",
+]);
+// Replies that carry no engagement: they leave the thread where it was.
+export const NON_ENGAGEMENT_REPLY_INTENTS = Object.freeze(["reaction_only", "acknowledgement"]);
+// Dispositions that close the thread for this property (derived "dead").
+export const CLOSED_DISPOSITIONS = Object.freeze(["sold", "unqualified"]);
+
+function latestInboundIntent(row = {}) {
+  const direction = normalizeDirection(row.latest_message_direction || row.latest_direction || row.direction);
+  if (direction !== "inbound") return "";
+  return lower(row.last_intent || row.latest_intent || row.primary_intent);
+}
+
+/** The latest inbound already resolved the conversation (7.2). */
+export function isResolvedReplyRow(row = {}) {
+  return RESOLVED_REPLY_INTENTS.includes(latestInboundIntent(row));
+}
+
 export function isArchivedThread(row = {}) {
   return row.is_archived === true;
 }
@@ -57,10 +87,15 @@ export function isWrongNumberContact(row = {}) {
   return disposition === "wrong_number" || disposition === "wrong_person";
 }
 
+/** Sold / unqualified: the thread is closed for this property (7.2). */
+export function isClosedDispositionThread(row = {}) {
+  return CLOSED_DISPOSITIONS.includes(lower(row.disposition));
+}
+
 export function isTerminalNoContactThread(row = {}) {
   const bucket = lower(row.inbox_bucket);
   if (["dead", "suppressed"].includes(bucket)) return true;
-  return isWrongNumberContact(row) || isSuppressedContact(row);
+  return isWrongNumberContact(row) || isSuppressedContact(row) || isClosedDispositionThread(row);
 }
 
 export function isCancelledDeliveryStatus(status = "") {
@@ -115,6 +150,7 @@ export function threadMatchesAllMessagesFacts(thread = {}, nowMs = Date.now()) {
 export function threadMatchesNewRepliesFacts(thread = {}, nowMs = Date.now()) {
   if (isArchivedThread(thread)) return false;
   if (isTerminalNoContactThread(thread)) return false;
+  if (isResolvedReplyRow(thread)) return false;
 
   const bucket = lower(thread.inbox_bucket);
   if (["priority", "needs_review", "waiting", "cold"].includes(bucket)) return false;
@@ -157,6 +193,7 @@ export function isStaleExplicitInboxBucket(row = {}, explicitBucket = "", nowMs 
     if (!inMs) return true;
     if (outMs > 0 && inMs < outMs) return true;
     if (isTerminalNoContactThread(row)) return true;
+    if (isResolvedReplyRow(row)) return true;
   }
 
   if (explicit === "waiting") {
@@ -214,7 +251,7 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       //
       // Genuine opt-outs are untouched: 309 threads carry opt_out and stay
       // blocked, as do the 173 carrier-level STOP records (TextGrid 21610).
-      return bucket === "dead" || isWrongNumberContact(thread);
+      return bucket === "dead" || isWrongNumberContact(thread) || isClosedDispositionThread(thread);
     case "suppressed":
       return bucket === "suppressed" || isSuppressedContact(thread);
     case "active":
@@ -268,6 +305,7 @@ export function resolveDerivedInboxBucket(row = {}) {
   const disposition = lower(row.disposition);
   if (row.is_suppressed === true) return "suppressed";
   if (disposition === "wrong_number" || disposition === "wrong_person") return "dead";
+  if (CLOSED_DISPOSITIONS.includes(disposition)) return "dead";
   if (disposition === "not_interested") return "follow_up";
   if (normalizeDirection(row.latest_direction ?? row.latest_message_direction) === "inbound") return "new_replies";
   return "cold";
@@ -308,25 +346,41 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
 
   const suppressedContact = row.is_suppressed === true || bucket === "suppressed";
   const wrongNumberContact = disposition === "wrong_number" || disposition === "wrong_person";
+  const closedDisposition = CLOSED_DISPOSITIONS.includes(disposition);
   const deliveryOk = WAITING_DELIVERY_OK.has(delivery);
   // NULL last_inbound_at reads as "never replied", which is why it must not be
   // compared numerically against a real outbound timestamp.
   const outboundLastNoReply = outMs > 0 && (!inMs || inMs < outMs);
-  const terminal = bucket === "dead" || bucket === "suppressed" || wrongNumberContact || suppressedContact;
+  const terminal = bucket === "dead" || bucket === "suppressed" || wrongNumberContact || suppressedContact || closedDisposition;
+  // 7.2: what the latest inbound was, when the latest message is inbound.
+  const lastIntent = direction === "inbound" ? lower(row.last_intent) : "";
+  const replyResolved = RESOLVED_REPLY_INTENTS.includes(lastIntent);
+  const nonEngagementLatest = NON_ENGAGEMENT_REPLY_INTENTS.includes(lastIntent);
+  const realOutMs = parseTimestampMs(row.last_outbound_at);
 
   const available = !archived && !snoozed && !pendingSchedule;
   const actionable = available && !terminal;
 
-  const inWaiting = actionable
+  const inWaiting = (actionable
     && direction === "outbound"
     && outboundLastNoReply
     && (nowMs - outMs) <= WAITING_REPLY_WINDOW_MS
     && deliveryOk
-    && !metadataNoContact;
+    && !metadataNoContact)
+    // 7.2: a reaction / acknowledgement / auto-reply that left nothing open
+    // keeps the thread waiting on a real answer inside the reply window.
+    || (actionable
+      && direction === "inbound"
+      && nonEngagementLatest
+      && bucket === "cold"
+      && realOutMs > 0
+      && (nowMs - realOutMs) <= WAITING_REPLY_WINDOW_MS
+      && !metadataNoContact);
 
   const inNewReplies = actionable
     && !["priority", "needs_review", "waiting", "cold", "follow_up"].includes(bucket)
     && !needsReviewFlag
+    && !replyResolved
     && direction === "inbound"
     && inboundAtMs > 0
     && (!parseTimestampMs(row.last_outbound_at) || inboundAtMs >= parseTimestampMs(row.last_outbound_at));
@@ -353,7 +407,7 @@ export function resolveInboxBucketFlags(row = {}, nowMs = Date.now()) {
     // (Waiting was 0 while sends were paused) and it would have surfaced the
     // moment outbound resumed.
     in_cold: actionable && bucket === "cold" && !inWaiting,
-    in_dead: !archived && (bucket === "dead" || wrongNumberContact),
+    in_dead: !archived && (bucket === "dead" || wrongNumberContact || closedDisposition),
     in_suppressed: !archived && (bucket === "suppressed" || suppressedContact),
     in_waiting: inWaiting,
     in_all_messages: !archived && !inWaiting,

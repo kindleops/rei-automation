@@ -275,6 +275,9 @@ const PRIORITY_INTENTS = [
   "asking_price_provided",
   "asks_offer",
   "callback_requested",
+  // "Send the contract on over" is the strongest message a seller can send; it
+  // fell to the new_replies default because nobody listed it here.
+  "contract_requested",
   // Contact-modality asks route with the callback family: a human owes the
   // seller a same-channel follow-up.
   "voicemail_call_request",
@@ -311,9 +314,60 @@ const NEW_REPLY_INTENTS = [
   "who_is_this",
   "condition_disclosed",
   "tenant_occupied",
-  "need_time",
   "language_switch",
 ];
+
+// ── New Replies 7.2 (2026-10-01) ────────────────────────────────────────────
+// New Replies = genuine seller engagement + no resolved disposition + a
+// response still owed. 111 production threads sat there that were none of
+// those, because every inbound that was not priority/review defaulted here.
+//
+// Not engagement: an acknowledgement, a reaction that leaves nothing open, a
+// provider/system auto-reply (classify.js labels those reaction_only with a
+// non-engagement rule id). The thread keeps the state it was in before.
+const NON_ENGAGEMENT_INTENTS = new Set(["reaction_only", "acknowledgement"]);
+// The attention buckets a non-engagement message must NOT pull a thread out
+// of: an earlier unanswered question is still unanswered after a 👍.
+const ATTENTION_BUCKETS = new Set(["new_replies", "priority", "needs_review", "follow_up"]);
+// Hostility WITHOUT opt-out language: owner decision 2026-10-01 -- archive /
+// cool, no automatic nurture, no DNC. A legal threat keeps the human lane.
+const HOSTILE_COOL_RULE_IDS = new Set([
+  "hostile_insult_no_opt_out",
+  "hostile_profanity",
+  "emoji_hostile",
+  "emoji_hostile_with_text",
+]);
+
+function classificationRuleIds(classification = {}) {
+  return Array.isArray(classification?.matched_rule_ids)
+    ? classification.matched_rule_ids.map((id) => lower(id))
+    : [];
+}
+
+/**
+ * The 7.2 reply dispositions that decide the bucket regardless of read/queue
+ * state. Returns undefined when the generic resolution should continue.
+ */
+export function resolveReplyDispositionBucket({ primary = "", classification = {}, existingBucket = "", lastOutboundAt = null, now = Date.now() } = {}) {
+  const intent = lower(primary);
+  if (intent === "sold_property") return "dead";
+  if (intent === "hostile_or_legal" && classificationRuleIds(classification).some((id) => HOSTILE_COOL_RULE_IDS.has(id))) {
+    return "dead";
+  }
+  // "Not at this time" / "No sell right now": the not-now family is a
+  // follow-up (nurture), never an open New Reply.
+  if (intent === "need_time") return "follow_up";
+  if (NON_ENGAGEMENT_INTENTS.has(intent)) {
+    const prior = lower(existingBucket);
+    if (ATTENTION_BUCKETS.has(prior)) return prior;
+    // Nothing was open: the thread is still waiting on a real answer. The view
+    // shows it as Waiting inside the reply window and Cold after it.
+    void lastOutboundAt;
+    void now;
+    return "cold";
+  }
+  return undefined;
+}
 
 function isOperatorEscalation(classification = {}) {
   const decision = classification.automation_decision || {};
@@ -467,13 +521,26 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
     return ownershipProbeTransition.inbox_bucket;
   }
 
+  // A not-interested seller who writes back with real engagement ("what's a
+  // fair price", "call me") is a NEW REPLY (closure pass M2, and the owner's
+  // rule that a reply reopens the conversation). The stored decline is sticky
+  // only for outbound turns and for messages that are themselves a decline or
+  // carry no engagement.
+  const inboundEngages =
+    !is_outbound &&
+    !inboundFlags.not_interested &&
+    !NON_ENGAGEMENT_INTENTS.has(lower(primary)) &&
+    lower(primary) !== "need_time";
   if (
-    flags.not_interested ||
+    inboundFlags.not_interested ||
+    (!inboundEngages && (
+      existingFlags.not_interested ||
+      disposition === "not_interested" ||
+      reasonCodes.includes("not_interested")
+    )) ||
     existingStatus === "dead" ||
     existingBucket === "dead" ||
-    disposition === "dead" ||
-    disposition === "not_interested" ||
-    reasonCodes.includes("not_interested")
+    disposition === "dead"
   ) {
     return null;
   }
@@ -495,6 +562,15 @@ export function resolveInboxBucketFromClassification(classification = {}, messag
     });
     return outboundState.inbox_bucket;
   }
+
+  const replyDispositionBucket = resolveReplyDispositionBucket({
+    primary,
+    classification,
+    existingBucket,
+    lastOutboundAt: existingState.last_outbound_at || null,
+    now,
+  });
+  if (replyDispositionBucket !== undefined) return replyDispositionBucket;
 
   const pendingQueue = Number(existingState.pending_queue_count || 0) > 0;
   const blockedQueue = Number(existingState.blocked_queue_count || 0) > 0;
