@@ -28,6 +28,8 @@ export interface BoardSnapshot {
   layouts: HomeLayout[]
   activeId: string | null
   editing: boolean
+  /** the Add Widget library is open (edit mode only) */
+  library: boolean
   persistence: Persistence
   /** why persistence is local, in operator words */
   note: string | null
@@ -46,7 +48,7 @@ export interface BoardDeps {
 const LOCAL_PREFIX = 'lc.home.board.v1:'
 interface LocalFile { v: 1; activeId: string | null; layouts: unknown[]; synced: string[] }
 
-const EMPTY: BoardSnapshot = { ready: false, operatorKey: null, layouts: [], activeId: null, editing: false, persistence: 'booting', note: null, adoptedAt: null }
+const EMPTY: BoardSnapshot = { ready: false, operatorKey: null, layouts: [], activeId: null, editing: false, library: false, persistence: 'booting', note: null, adoptedAt: null }
 
 let snap: BoardSnapshot = EMPTY
 let deps: BoardDeps | null = null
@@ -239,7 +241,8 @@ export function setActiveLayout(id: string) {
   writeLocal()
 }
 
-export function setEditing(on: boolean) { if (snap.editing !== on) set({ editing: on }) }
+export function setEditing(on: boolean) { if (snap.editing !== on) set({ editing: on, library: on ? snap.library : false }) }
+export function setLibrary(on: boolean) { if (snap.library !== on) set({ library: on, editing: on ? true : snap.editing }) }
 
 function insertLayout(l: HomeLayout, activate = true) {
   set({ layouts: [...snap.layouts, l], activeId: activate ? l.id : snap.activeId })

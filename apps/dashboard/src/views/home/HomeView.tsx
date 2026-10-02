@@ -26,7 +26,7 @@ import {
 } from './HomeModules'
 import './home.css'
 import { useBreakpoint } from '../../modules/mobile/useBreakpoint'
-import { CommandHome } from './desktop/command/CommandHome'
+import { HomeBoard } from './desktop/board/HomeBoard'
 
 const cls = (...tokens: Array<string | false | null | undefined>) => tokens.filter(Boolean).join(' ')
 
@@ -278,13 +278,14 @@ const CustomizeSheet = ({ open, onClose }: { open: boolean; onClose: () => void 
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 /**
- * Desktop gets the command center (desktop/command/CommandHome), not the
- * phone's cinematic column: the same honest sources plus the machine feed,
- * the market field, the money in motion and the performance read model.
+ * Desktop gets Home 2.0 — the operator's personal command board
+ * (desktop/board/HomeBoard): the Command Center's instruments (brief, needs
+ * you, the pixel map, the machine feed…) as widgets the operator arranges.
+ * The phone keeps its cinematic column, untouched.
  */
 export const HomeView = () => {
   const { isModernDesktop } = useBreakpoint()
-  return isModernDesktop ? <CommandHome /> : <MobileHomeView />
+  return isModernDesktop ? <HomeBoard /> : <MobileHomeView />
 }
 
 const MobileHomeView = () => {
