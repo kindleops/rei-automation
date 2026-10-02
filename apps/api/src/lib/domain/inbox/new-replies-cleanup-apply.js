@@ -26,6 +26,8 @@
  */
 
 import { CLEANUP_SOURCE, CLEANUP_CATEGORY } from "./new-replies-cleanup.js";
+import { buildCleanupReplyRow, checkCleanupRowAgainstRunner } from "./cleanup-reply-row.js";
+import { normalizeVendorDnc } from "./vendor-dnc-lookup.js";
 
 const clean = (v) => String(v ?? "").trim();
 
@@ -40,8 +42,13 @@ const clean = (v) => String(v ?? "").trim();
 //   vendor DNC seller.owner_phone.do_not_call -> HOLD (semantics unconfirmed)
 //   our flags  suppression / DNC / opt-out, and a wrong person for THIS
 //              property -> HOLD (every lookup fails closed)
-// Chain order: vendor DNC -> suppression -> relationship -> template ->
-// sender -> window. deps.dryRun runs the same chain with ZERO writes.
+//   identity   the seller first name from the canonical resolver (the runner
+//              requires it on every non-operator row)
+//   runner     the built row passes the runner's OWN preclaim check, contact
+//              window, blank-greeting and template-asset guards, or it HOLDS
+// Chain order: vendor DNC -> suppression -> relationship -> identity ->
+// template -> sender -> window -> runner invariants. deps.dryRun runs the
+// same chain with ZERO writes.
 // Anything that fails is HELD with a reason and reported, never forced.
 
 export const REPLY_HOLD = Object.freeze({
@@ -56,6 +63,10 @@ export const REPLY_HOLD = Object.freeze({
   WINDOW: "outside_contact_window",
   TIMEZONE: "recipient_timezone_unresolved",
   NO_SENDER: "no_eligible_sender",
+  IDENTITY_UNKNOWN: "seller_identity_lookup_unavailable",
+  NO_SELLER_NAME: "seller_first_name_unresolved",
+  RUNNER_INVALID: "runner_invariant_failed",
+  ASSET: "template_asset_incompatible",
   REVIEW: "needs_review",
 });
 
@@ -118,9 +129,9 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
   if (!reply?.template_id) return hold(REPLY_HOLD.REVIEW, { detail: reply?.review_reason || "no_template_for_this_reply" });
 
   // 1. Vendor do_not_call (seller.owner_phone). Fail closed: unreadable is not clear.
-  const vendor_dnc = await safely(deps.loadVendorDnc, threadKey);
-  if (vendor_dnc === null || vendor_dnc === undefined) return hold(REPLY_HOLD.VENDOR_DNC_UNKNOWN);
-  const rule = vendorDncChannelRule({ channel: "sms", vendor_dnc: vendor_dnc === true });
+  const vendor = normalizeVendorDnc(await safely(deps.loadVendorDnc, threadKey));
+  if (vendor.dnc === null) return hold(REPLY_HOLD.VENDOR_DNC_UNKNOWN, vendor.basis ? { detail: vendor.basis } : {});
+  const rule = vendorDncChannelRule({ channel: "sms", vendor_dnc: vendor.dnc === true });
   if (rule.action === "hold") return hold(rule.reason);
 
   // 2. Our own suppression / DNC / opt-out (sms_suppression_list, automation
@@ -138,6 +149,16 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
   if (!relationship) return hold(REPLY_HOLD.RELATIONSHIP_UNKNOWN);
   if (relationship.not_owner) return hold(REPLY_HOLD.NOT_OWNER, { detail: relationship.reason || null });
 
+  // 3b. Seller identity (canonical resolver). The runner refuses any
+  //     non-operator row without a seller first name, so an unresolved name is
+  //     held here, not queued to pause. Fail closed.
+  const identity = await safely(deps.loadSellerIdentity, {
+    thread_key: threadKey,
+    master_owner_id: clean(thread.master_owner_id) || null,
+  });
+  if (!identity) return hold(REPLY_HOLD.IDENTITY_UNKNOWN);
+  if (!clean(identity.seller_first_name)) return hold(REPLY_HOLD.NO_SELLER_NAME, { detail: identity.identity_alignment_status || null });
+
   // 4. Template: must exist; must be ACTIVE to send. A dry run reports an
   //    inactive row (expected until the deploy window activates it), or a row
   //    only present in the pending deploy SQL, and goes on.
@@ -149,7 +170,7 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
       ? "pending_deploy_sql"
       : "inactive_until_deploy";
   if (template_state !== "active" && !dryRun) return hold(REPLY_HOLD.NO_TEMPLATE, { template_id: reply.template_id, template_state });
-  const rendered = renderCleanupTemplate(template.template_body, reply.variables || {});
+  const rendered = renderCleanupTemplate(template.template_body, { seller_first_name: identity.seller_first_name, ...(reply.variables || {}) });
   if (rendered.unresolved.length) return hold(REPLY_HOLD.RENDER, { unresolved: rendered.unresolved, template_state });
 
   // 5. Sender: the normal engine decides; nothing on the plan can pin a number.
@@ -167,56 +188,82 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
   const windowCheck = deps.isWithinContactWindow ? deps.isWithinContactWindow(now, tz) : false;
   const inWindow = windowCheck === true || windowCheck?.ok === true;
 
+  const dedupe_key = `${CLEANUP_SOURCE}:reply:${threadKey}`;
+  // A re-queue (rc-7.1) writes a NEW queue_key for the same per-thread
+  // dedupe_key: queue_key is unique across all statuses, the dedupe key only
+  // across live ones, so the thread can never hold two live rows.
+  const queue_key = deps.queueKeySuffix ? `${dedupe_key}:${deps.queueKeySuffix}` : dedupe_key;
+  const nowIso = now.toISOString();
+  const row = buildCleanupReplyRow({
+    thread,
+    property: ctx.property || {},
+    market: ctx.market || null,
+    template,
+    rendered_text: rendered.text,
+    sender,
+    timezone: tz,
+    identity,
+    category: plan.category || null,
+    source: CLEANUP_SOURCE,
+    dedupe_key,
+    queue_key,
+    now: nowIso,
+    extra_metadata: deps.extraMetadata || {},
+  });
+
+  // 7. The runner's own invariants on the exact row (preclaim validity, seller
+  //    name, blank-greeting guard, the runner's recipient-zone window).
+  const runner = checkCleanupRowAgainstRunner(row, { now: nowIso });
+  const runnerWindow = runner.window
+    ? { allowed: runner.window.allowed === true, reason: runner.window.reason || null, timezone: runner.window.timezone || null }
+    : null;
+  const summary = {
+    thread_key: threadKey,
+    template_id: template.template_id,
+    template_state,
+    rendered_message: rendered.text,
+    sender: { phone_number: sender.phone_number, selection_reason: sender.selection_reason || null },
+    recipient_timezone: tz,
+    seller_first_name_source: identity.seller_name_source || null,
+    queue_key,
+    dedupe_key,
+    window: typeof windowCheck === "object" && windowCheck ? windowCheck : { ok: inWindow },
+    runner_window: runnerWindow,
+    checks: { vendor_dnc: false, suppressed: false, not_owner: false },
+  };
+  // Both windows must pass: the executor's and the runner's.
+  // 8. Template x property compatibility, as the runner checks it at send
+  //    (a read; evaluated even when step 7 failed so the report is complete).
+  let asset = null;
+  if (deps.evaluateTemplateAssetGuard) {
+    asset = await safely(deps.evaluateTemplateAssetGuard, { supabase: deps.supabase, queue_row: row, body: rendered.text });
+    summary.asset_guard = asset ? { allowed: asset.allowed === true, reason: asset.reason || null } : { allowed: false, reason: "asset_guard_unavailable" };
+  }
+  summary.runner_failures = runner.failures;
+  const outsideWindow = !inWindow || runner.failures.includes("outside_local_send_window");
+  const otherRunner = runner.failures.filter((f) => f !== "outside_local_send_window");
+  const assetOk = !deps.evaluateTemplateAssetGuard || asset?.allowed === true;
+  const heldAt = (held_reason, extra = {}) => ({ ok: true, held: true, held_reason, ...(dryRun ? { would_queue: false } : {}), ...extra, ...summary });
+  if (outsideWindow) return heldAt(REPLY_HOLD.WINDOW, { passes_all_other_checks: otherRunner.length === 0 && assetOk });
+  if (!runner.ok) return heldAt(REPLY_HOLD.RUNNER_INVALID, { detail: runner.reason });
+  if (!assetOk) return heldAt(REPLY_HOLD.ASSET, { detail: asset?.reason || "asset_guard_unavailable" });
+
   if (dryRun) {
     // ZERO writes: the queue writer is never reached in a dry run.
-    return {
-      ok: true,
-      would_queue: inWindow,
-      ...(inWindow ? {} : { held: true, held_reason: REPLY_HOLD.WINDOW, passes_all_other_checks: true }),
-      window: typeof windowCheck === "object" && windowCheck ? windowCheck : { ok: inWindow },
-      thread_key: threadKey,
-      template_id: template.template_id,
-      template_state,
-      rendered_message: rendered.text,
-      sender: { phone_number: sender.phone_number, selection_reason: sender.selection_reason || null },
-      recipient_timezone: tz,
-      checks: { vendor_dnc: false, suppressed: false, not_owner: false },
-    };
+    return { ok: true, would_queue: true, ...summary };
   }
-  if (!inWindow) return hold(REPLY_HOLD.WINDOW, { timezone: tz });
 
-  const dedupe_key = `${CLEANUP_SOURCE}:reply:${threadKey}`;
-  const result = await deps.enqueueSendQueueItem({
-    queue_key: dedupe_key,
-    queue_id: dedupe_key,
-    dedupe_key,
-    thread_key: threadKey,
-    to_phone_number: threadKey,
-    from_phone_number: sender.phone_number,
-    textgrid_number_id: sender.item_id || sender.textgrid_number_id || null,
-    queue_status: "queued",
-    type: "outbound",
-    message_type: "reengagement",
-    message_body: rendered.text,
-    rendered_message: rendered.text,
-    template_id: template.template_id,
-    template_source: "sms_templates",
-    use_case_template: template.use_case,
-    language: template.language,
-    master_owner_id: clean(thread.master_owner_id) || null,
-    property_id: clean(thread.property_id) || null,
-    source: CLEANUP_SOURCE,
-    metadata: {
-      source: CLEANUP_SOURCE,
-      repair_tag: CLEANUP_SOURCE,
-      cleanup_category: plan.category || null,
-      selected_template_id: template.template_id,
-      sender_selection: { engine: "supabase_candidate_feeder.chooseTextgridNumber", reason: sender.selection_reason || null },
-      recipient_timezone: tz,
-    },
-  }, { supabase: deps.supabase });
+  const result = await deps.enqueueSendQueueItem(row, { supabase: deps.supabase });
   if (result?.ok === false) return { ok: false, reason: result.reason || "enqueue_failed", thread_key: threadKey };
-  return { ok: true, queued: true, idempotent_replay: result?.idempotent_replay === true, template_id: template.template_id, thread_key: threadKey };
+  return {
+    ok: true,
+    queued: true,
+    idempotent_replay: result?.idempotent_replay === true,
+    queue_row_id: result?.queue_row_id || result?.item_id || null,
+    template_id: template.template_id,
+    thread_key: threadKey,
+    queue_key,
+  };
 }
 
 const BUCKET_BY_CATEGORY = Object.freeze({
@@ -394,7 +441,7 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
         // 2026-10-02); an unreadable flag holds too (fail closed).
         let vendor_dnc = null;
         try {
-          vendor_dnc = deps.loadVendorDnc ? await deps.loadVendorDnc(threadKey) : null;
+          vendor_dnc = normalizeVendorDnc(deps.loadVendorDnc ? await deps.loadVendorDnc(threadKey) : null).dnc;
         } catch {
           vendor_dnc = null;
         }

@@ -276,6 +276,20 @@ import {
   REPLY_HOLD,
 } from "@/lib/domain/inbox/new-replies-cleanup-apply.js";
 
+// A body the send-time blank-greeting guards accept ("Hey Pat," is a real
+// greeting; "Hey, this is" is refused by process-send-queue + textgrid).
+const SAFE_BODY = "Hey {{seller_first_name}}, this is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?";
+const IDENTITY = Object.freeze({
+  seller_first_name: "Pat",
+  seller_full_name: "Pat Q Owner",
+  seller_display_name: "Pat Q Owner",
+  seller_name_source: "master_owner_display_name",
+  identity_alignment_status: "probable",
+  phone_id: "ph-1",
+  prospect_id: "pr-1",
+  candidate: { owner_display_name: "Pat Q Owner", master_owner_display_name: "Pat Q Owner" },
+});
+
 function replyDeps(overrides = {}) {
   const queued = [];
   const senderCalls = [];
@@ -289,8 +303,9 @@ function replyDeps(overrides = {}) {
       use_case: "late_reply_identity",
       language: "English",
       is_active: true,
-      template_body: "Hey, this is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?",
+      template_body: SAFE_BODY,
     }),
+    loadSellerIdentity: async () => IDENTITY,
     resolveTimezone: () => "America/New_York",
     isWithinContactWindow: (now, tz) => {
       const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hourCycle: "h23" }).format(new Date(now)));
@@ -320,7 +335,7 @@ const REPLY_PLAN = {
     from_phone_number: "+15559999999",
   },
 };
-const REPLY_CTX = { thread: { thread_key: "+15555550100", master_owner_id: "mo-1", property_id: "p-1" } };
+const REPLY_CTX = { thread: { thread_key: "+15555550100", master_owner_id: "mo-1", property_id: "p-1" }, property: { state: "NY", zip: "10001" }, market: "New York, NY" };
 
 test("a cleanup reply goes through the normal queue with the sender ENGINE's number, never a pinned one", async () => {
   const { deps, queued, senderCalls } = replyDeps();
@@ -332,7 +347,7 @@ test("a cleanup reply goes through the normal queue with the sender ENGINE's num
   assert.notEqual(queued[0].from_phone_number, REPLY_PLAN.reply.from_phone_number);
   assert.equal(queued[0].template_id, "lc-late-identity-en-1");
   assert.equal(queued[0].template_source, "sms_templates");
-  assert.equal(queued[0].message_body, "Hey, this is Sam. I reached out a while back about 123 Main St. Just checking back in. Are you still the owner?");
+  assert.equal(queued[0].message_body, "Hey Pat, this is Sam. I reached out a while back about 123 Main St. Just checking back in. Are you still the owner?");
   assert.equal(queued[0].metadata.source, "classifier_cleanup_20261001");
   // Idempotent: a second run replays the same dedupe key, no second row.
   const again = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, deps);
@@ -461,14 +476,14 @@ test("DRY RUN: the full eligibility chain runs with ZERO writes; an inactive tem
       use_case: "late_reply_identity",
       language: "English",
       is_active: false,
-      template_body: "Hey, this is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?",
+      template_body: SAFE_BODY,
     }),
   });
   const ok = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, base.deps);
   assert.equal(ok.would_queue, true);
   assert.equal(ok.template_state, "inactive_until_deploy");
   assert.equal(ok.sender.phone_number, "+15550001000");
-  assert.equal(ok.rendered_message.startsWith("Hey, this is Sam."), true);
+  assert.equal(ok.rendered_message.startsWith("Hey Pat, this is Sam."), true);
   const dnc = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, { ...base.deps, loadVendorDnc: async () => true });
   assert.equal(dnc.would_queue, undefined);
   assert.equal(dnc.held_reason, "vendor_dnc_semantics_unconfirmed");

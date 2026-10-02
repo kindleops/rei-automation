@@ -1,0 +1,113 @@
+/**
+ * RC 7.1 — RE-QUEUE the 16 cleanup replies the runner paused
+ * (paused_invalid_queue_row / missing_candidate_snapshot, 2026-10-02 ~19:00Z).
+ *
+ * Per thread:
+ *   1. read every row for the thread's cleanup keys (unreadable -> refuse);
+ *   2. a SENT row ends it (never a second text); a LIVE row ends it (the
+ *      thread already has one: idempotent);
+ *   3. only threads that carry one of the paused rows are in scope (the 16);
+ *   4. cancel the paused row: queue_status='cancelled',
+ *      guard_reason='rc71_replies_requeue', audit in metadata (CAS on status);
+ *   5. queue again through the FIXED executor (queueCleanupReply), which
+ *      re-evaluates every hold NOW: vendor DNC, suppression, relationship,
+ *      seller identity, template, sender engine, contact window, and the
+ *      runner's own invariants. A hold writes no row.
+ *
+ * Keys: the per-thread dedupe_key is unchanged; the new row's queue_key is
+ * `<dedupe_key>:requeue:rc71`. queue_key is unique over ALL rows, the
+ * dedupe_key over LIVE rows (uq_send_queue_active_dedupe_key), so a cancelled
+ * row never blocks the re-queue and a second run can never add a second row.
+ * Dry run (deps.dryRun): the same reads and chain, ZERO writes.
+ */
+const clean = (v) => String(v ?? "").trim();
+
+export const REQUEUE_TAG = "rc71_replies_requeue";
+export const REQUEUE_QUEUE_KEY_SUFFIX = "requeue:rc71";
+export const PAUSED_STATUS = "paused_invalid_queue_row";
+export const PAUSED_GUARD = "missing_candidate_snapshot";
+
+// Mirrors the predicate of uq_send_queue_active_dedupe_key.
+export const LIVE_STATUSES = new Set([
+  "queued", "ready", "runnable", "scheduled", "pending", "paused", "paused_after_hours",
+  "processing", "approved", "approval", "held", "sending",
+]);
+const SENT_STATUSES = new Set(["sent", "delivered", "sending_confirmed"]);
+
+const guardOf = (r) => clean(r?.guard_reason || r?.metadata?.guard_reason || r?.metadata?.skip_reason || r?.paused_reason);
+
+export function classifyCleanupRows(rows = [], { source }) {
+  const mine = rows.filter((r) => clean(r?.metadata?.source) === source);
+  return {
+    sent: mine.filter((r) => r.sent_at || SENT_STATUSES.has(clean(r.queue_status))),
+    live: mine.filter((r) => !r.sent_at && LIVE_STATUSES.has(clean(r.queue_status))),
+    paused: mine.filter((r) => clean(r.queue_status) === PAUSED_STATUS && guardOf(r) === PAUSED_GUARD),
+    cancelled_by_requeue: mine.filter((r) => clean(r.queue_status) === "cancelled" && guardOf(r) === REQUEUE_TAG),
+  };
+}
+
+export function requeueCancelPatch(row, { now }) {
+  const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return {
+    queue_status: "cancelled",
+    guard_reason: REQUEUE_TAG,
+    guard_status: "cancelled",
+    updated_at: now,
+    metadata: {
+      ...metadata,
+      final_queue_status: "cancelled",
+      requeue_audit: {
+        tag: REQUEUE_TAG,
+        cancelled_at: now,
+        prior_queue_status: clean(row.queue_status) || null,
+        prior_guard_reason: guardOf(row) || null,
+        reason: "runner paused the row: missing_candidate_snapshot (executor defect, fixed); re-queued through the fixed path",
+        replacement_queue_key_suffix: REQUEUE_QUEUE_KEY_SUFFIX,
+      },
+    },
+  };
+}
+
+/**
+ * @param {object} plan  { category, reply, deal }
+ * @param {object} ctx   queueCleanupReply ctx
+ * @param {object} deps  queueCleanupReply deps + { source, loadCleanupRows(thread_key), cancelPausedRow(row, patch), queueReply }
+ */
+export async function requeueCleanupReply(plan, ctx, deps = {}) {
+  const threadKey = clean(ctx?.thread?.thread_key);
+  const dryRun = deps.dryRun === true;
+  const now = deps.now ? new Date(deps.now).toISOString() : new Date().toISOString();
+  let rows = null;
+  try {
+    rows = await deps.loadCleanupRows(threadKey);
+  } catch {
+    rows = null;
+  }
+  if (!Array.isArray(rows)) return { ok: false, outcome: "refused", reason: "existing_rows_unreadable", thread_key: threadKey };
+  const c = classifyCleanupRows(rows, { source: deps.source });
+  if (c.sent.length) return { ok: true, outcome: "skipped", reason: "already_sent", queue_row_id: c.sent[0].id, thread_key: threadKey };
+  if (c.live.length) return { ok: true, outcome: "skipped", reason: "live_row_exists", queue_row_id: c.live[0].id, queue_status: c.live[0].queue_status, thread_key: threadKey };
+  if (!c.paused.length && !c.cancelled_by_requeue.length) {
+    return { ok: true, outcome: "skipped", reason: "not_in_requeue_set", thread_key: threadKey };
+  }
+
+  const cancelled = [];
+  for (const row of c.paused) {
+    if (dryRun) {
+      cancelled.push({ id: row.id, would_cancel: true });
+      continue;
+    }
+    const res = await deps.cancelPausedRow(row, requeueCancelPatch(row, { now }));
+    if (!res?.ok) return { ok: false, outcome: "refused", reason: `cancel_failed:${res?.reason || "unknown"}`, queue_row_id: row.id, thread_key: threadKey };
+    cancelled.push({ id: row.id, cancelled: res.changed !== false });
+  }
+  const replaced = [...c.paused, ...c.cancelled_by_requeue].map((r) => r.id);
+
+  const r = await deps.queueReply(plan, ctx, {
+    ...deps,
+    queueKeySuffix: REQUEUE_QUEUE_KEY_SUFFIX,
+    extraMetadata: { requeue: { tag: REQUEUE_TAG, replaces_queue_row_ids: replaced, requeued_at: now } },
+  });
+  const outcome = r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown";
+  return { ...r, outcome, cancelled, replaces_queue_row_ids: replaced };
+}

@@ -41,6 +41,13 @@
  * Anything that cannot pass is HELD and listed, never forced. Idempotent: one
  * dedupe key per thread (classifier_cleanup_20261001:reply:<thread>).
  *
+ * RE-QUEUE (rc-7.1, --replies-requeue --replies=<plan.json>): the 16 replies the
+ * runner paused (paused_invalid_queue_row / missing_candidate_snapshot) are
+ * cancelled (guard_reason=rc71_replies_requeue, audited in metadata) and queued
+ * again through the fixed executor, every hold re-evaluated at run time
+ * (cleanup-reply-requeue.js). Add --replies-dry for the zero-write preview;
+ * the live run needs --apply --confirm=rc71_replies_requeue.
+ *
  * Usage (from apps/api):
  *   node --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261001_new_replies_cleanup.mjs [--freeze=<file>] [--out=<dir>]
  *   node --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261001_new_replies_cleanup.mjs --apply \
@@ -83,6 +90,8 @@ const FREEZE = value("freeze");
 const REPLIES = value("replies");
 // Dry run of the reply eligibility chain (reads only): --replies-dry --replies=<plan.json>
 const REPLIES_DRY = Boolean(flag("replies-dry"));
+// rc-7.1: cancel the 16 runner-paused replies and queue them again (see header).
+const REPLIES_REQUEUE = Boolean(flag("replies-requeue"));
 // Dry run only: evaluate the recipient contact window AT this instant (the
 // planned send time) instead of now. --apply always uses the real clock.
 const DRY_AT = value("at");
@@ -371,6 +380,23 @@ function renderReport(plans, summary, meta) {
 
 async function main() {
   const startedAt = new Date().toISOString();
+  if (REPLIES_REQUEUE) {
+    if (!REPLIES) {
+      console.error("--replies-requeue needs --replies=<plan.json>");
+      process.exitCode = 2;
+      return;
+    }
+    const dryRun = REPLIES_DRY || !APPLY;
+    if (!dryRun && CONFIRM !== "rc71_replies_requeue") {
+      console.error("--replies-requeue --apply requires --confirm=rc71_replies_requeue. Nothing written.");
+      process.exitCode = 2;
+      return;
+    }
+    await runReplies(db(), { thread_ids: new Set(), thread_keys: new Set(), deal_ids: new Set(COHORT_27_DEALS) }, { dryRun, requeue: true });
+    const pg = await import("../../src/lib/postgres/client.js");
+    if (pg.hasDatabaseUrl()) await pg.getPgPool().end().catch(() => {});
+    return;
+  }
   if (REPLIES_DRY) {
     // The real eligibility chain for every reply, against production, with
     // ZERO writes (read-only client, no queue writer). No --apply needed.
@@ -566,26 +592,26 @@ function cleanupCohort(threads) {
   return { thread_ids, thread_keys, deal_ids: new Set(COHORT_27_DEALS) };
 }
 
-/** seller.owner_phone is not exposed through PostgREST: direct read; null on failure (callers HOLD). */
+/**
+ * seller.owner_phone is not exposed through PostgREST: direct read in a READ
+ * ONLY transaction. { dnc: null } on any failure (callers HOLD). See
+ * vendor-dnc-lookup.js for why the old regexp full scan timed out.
+ */
 async function loadVendorDnc(threadKey) {
   const pg = await import("../../src/lib/postgres/client.js");
-  if (!pg.hasDatabaseUrl()) return null;
+  const { lookupVendorDnc } = await import("../../src/lib/domain/inbox/vendor-dnc-lookup.js");
+  if (!pg.hasDatabaseUrl()) return { dnc: null, basis: "no_database_url" };
   let client = null;
   try {
-    const d10 = clean(threadKey).replace(/\D/g, "").slice(-10);
     client = await pg.getPgPool().connect();
-    // A READ ONLY transaction: this lookup can never write, in any mode.
     await client.query("begin read only");
-    await client.query("set local statement_timeout = 15000");
-    const res = await client.query(
-      "select bool_or(do_not_call) as dnc from seller.owner_phone where right(regexp_replace(phone_value, '\\D', '', 'g'), 10) = $1",
-      [d10]
-    );
+    await client.query("set local statement_timeout = 30000");
+    const result = await lookupVendorDnc((sql, params) => client.query(sql, params), threadKey);
     await client.query("rollback");
-    return res?.rows?.[0]?.dnc === true;
-  } catch {
+    return result;
+  } catch (error) {
     if (client) await client.query("rollback").catch(() => {});
-    return null;
+    return { dnc: null, basis: `connection_failed:${clean(error?.code || error?.message).slice(0, 60)}` };
   } finally {
     if (client) client.release();
   }
@@ -649,13 +675,15 @@ function readOnlyClient(sb, blocked) {
 
 /** The eligibility deps shared by --apply and --replies-dry (one chain, one truth). */
 async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {}) {
-  const [{ enqueueSendQueueItem }, feeder, windowMod] = await Promise.all([
+  const [{ enqueueSendQueueItem }, feeder, windowMod, identityMod, assetGuard] = await Promise.all([
     import("../../src/lib/supabase/sms-engine.js"),
     // The LIVE sender engine (Supabase textgrid_numbers fleet: status, health,
     // cooling, caps, approved routing). routing/choose-textgrid-number.js
     // reads the retired Podio app and is not used.
     import("../../src/lib/domain/outbound/supabase-candidate-feeder.js"),
     import("../../src/lib/domain/campaigns/contact-window-timezone.js"),
+    import("../../src/lib/domain/inbox/cleanup-reply-row.js"),
+    import("../../src/lib/domain/queue/template-asset-guard.js"),
   ]);
   const db = dryRun ? readOnlyClient(sb, blocked) : sb;
   const k = (threadKey) => variants(threadKey);
@@ -671,6 +699,10 @@ async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {})
         }
       : enqueueSendQueueItem,
     loadVendorDnc,
+    // The canonical seller-name resolver (the runner requires a first name).
+    loadSellerIdentity: ({ thread_key, master_owner_id }) => identityMod.loadCleanupSellerIdentity(db, { thread_key, master_owner_id }),
+    // The runner's template x property guard, read-only.
+    evaluateTemplateAssetGuard: (args) => assetGuard.evaluateTemplateAssetGuard({ ...args, supabase: db }),
     checkSuppression: async (threadKey) => {
       const keys = k(threadKey);
       const [supp, auto, threads, optOut] = await Promise.all([
@@ -740,12 +772,41 @@ async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {})
   };
 }
 
-async function runReplies(sb, COHORT, { dryRun = false } = {}) {
+async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) {
   const plan = JSON.parse(fs.readFileSync(REPLIES, "utf8"));
   const items = Array.isArray(plan) ? plan : plan.items || [];
   const { queueCleanupReply } = await import("../../src/lib/domain/inbox/new-replies-cleanup-apply.js");
+  const requeueMod = await import("../../src/lib/domain/inbox/cleanup-reply-requeue.js");
   const blocked = [];
   const deps = await buildReplyDeps(sb, COHORT, { dryRun, blocked });
+  const ROW_COLS = "id,queue_key,dedupe_key,queue_status,sent_at,guard_reason,paused_reason,metadata,created_at";
+  const requeueDeps = {
+    source: CLEANUP_SOURCE,
+    // Every row for the thread's cleanup keys (exact keys: both are indexed).
+    loadCleanupRows: async (threadKey) => {
+      const key = `${CLEANUP_SOURCE}:reply:${threadKey}`;
+      const [byDedupe, byQueueKey] = await Promise.all([
+        deps.supabase.from("send_queue").select(ROW_COLS).eq("dedupe_key", key).limit(50),
+        deps.supabase.from("send_queue").select(ROW_COLS).in("queue_key", [key, `${key}:${requeueMod.REQUEUE_QUEUE_KEY_SUFFIX}`]).limit(50),
+      ]);
+      if (byDedupe.error || byQueueKey.error) return null;
+      const byId = new Map([...(byDedupe.data || []), ...(byQueueKey.data || [])].map((r) => [r.id, r]));
+      return [...byId.values()];
+    },
+    // Compare-and-set on the paused status: a row that moved is not touched.
+    cancelPausedRow: async (row, patch) => {
+      // deps.supabase is the read-only proxy in a dry run: a write throws.
+      const { data, error } = await deps.supabase
+        .from("send_queue")
+        .update(patch)
+        .eq("id", row.id)
+        .eq("queue_status", requeueMod.PAUSED_STATUS)
+        .select("id");
+      if (error) return { ok: false, reason: error.message };
+      return { ok: true, changed: (data || []).length === 1 };
+    },
+    queueReply: queueCleanupReply,
+  };
   const results = [];
   for (const item of items) {
     // A reply is in the cohort only through its DEAL (one of the 27).
@@ -754,13 +815,22 @@ async function runReplies(sb, COHORT, { dryRun = false } = {}) {
       continue;
     }
     const ctx = { deal_id: item.deal, thread: { thread_key: item.thread_key, master_owner_id: item.master_owner_id, property_id: item.property_id }, property: item.property || {}, market: item.market || null, market_id: item.market_id || null };
-    const r = await queueCleanupReply({ category: item.category, reply: item.reply, deal: item.deal }, ctx, { ...deps, cohort: { ...COHORT, thread_keys: new Set() } });
+    const replyPlan = { category: item.category, reply: item.reply, deal: item.deal };
+    const replyDeps = { ...deps, ...(requeue ? requeueDeps : {}), cohort: { ...COHORT, thread_keys: new Set() } };
+    const r = requeue
+      ? await requeueMod.requeueCleanupReply(replyPlan, ctx, replyDeps)
+      : await queueCleanupReply(replyPlan, ctx, replyDeps);
     results.push({
       deal: item.deal,
       deal_short: clean(item.deal).slice(0, 8),
       phone: `•••${clean(item.thread_key).slice(-4)}`,
       template_id: item.reply?.template_id || null,
-      outcome: r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown",
+      outcome: r.outcome || (r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown"),
+      ...(requeue ? { cancelled: r.cancelled || [], replaces_queue_row_ids: r.replaces_queue_row_ids || [], queue_key_suffix: r.queue_key ? r.queue_key.split(":").slice(-2).join(":") : null } : {}),
+      runner_window: r.runner_window || null,
+      runner_failures: r.runner_failures || null,
+      asset_guard: r.asset_guard || null,
+      seller_first_name_source: r.seller_first_name_source || null,
       passes_all_other_checks: r.passes_all_other_checks === true || r.would_queue === true,
       window: r.window || null,
       reason: r.held_reason || r.reason || null,
@@ -771,7 +841,7 @@ async function runReplies(sb, COHORT, { dryRun = false } = {}) {
     });
   }
   const summary = {
-    mode: dryRun ? "replies_dry_run" : "replies_apply",
+    mode: `${requeue ? "replies_requeue" : "replies"}_${dryRun ? "dry_run" : "apply"}`,
     run_at: new Date().toISOString(),
     window_evaluated_at: dryRun && DRY_AT ? new Date(DRY_AT).toISOString() : new Date().toISOString(),
     writes_blocked: blocked,
@@ -780,7 +850,7 @@ async function runReplies(sb, COHORT, { dryRun = false } = {}) {
     held_by_reason: results.filter((r) => r.outcome === "held").reduce((acc, r) => ({ ...acc, [r.reason]: (acc[r.reason] || 0) + 1 }), {}),
     template_states: results.reduce((acc, r) => (r.template_state ? { ...acc, [r.template_state]: (acc[r.template_state] || 0) + 1 } : acc), {}),
   };
-  const file = path.join(OUT, dryRun ? "replies-dry.json" : "cleanup-replies-apply-result.json");
+  const file = path.join(OUT, `${requeue ? "replies-requeue-" : ""}${dryRun ? "replies-dry.json" : "cleanup-replies-apply-result.json"}`);
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ ...summary, results }, null, 1));
   console.log(JSON.stringify({ file, ...summary }, null, 1));
