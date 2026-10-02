@@ -23,7 +23,7 @@
  *               stays one transaction PER PARCEL, flagged package_n
  *
  * Canonical price = the best record by explicit quality rules, never by
- * recency: confidence (HIGH > MEDIUM > LOW > UNKNOWN), then a non-estimate,
+ * recency: a positive price first, then confidence (HIGH > MEDIUM > LOW > UNKNOWN), then a non-estimate,
  * then the SOURCE_PRIORITY ladder, then corpus order, then id.
  */
 
@@ -70,6 +70,10 @@ const relDiff = (a, b) => (a && b ? Math.abs(a - b) / Math.max(a, b) : null);
 export function comparePriceRecords(a, b) {
   const na = a.price_norm;
   const nb = b.price_norm;
+  // A positive price always beats no price, so the canonical deduped price is > 0
+  // whenever any observation has one (the eligibility rule reads only that price).
+  const pos = ((nb?.transaction_price ?? 0) > 0 ? 1 : 0) - ((na?.transaction_price ?? 0) > 0 ? 1 : 0);
+  if (pos) return pos;
   const conf = (CONFIDENCE_RANK[nb?.confidence] ?? 0) - (CONFIDENCE_RANK[na?.confidence] ?? 0);
   if (conf) return conf;
   const est = (na?.is_estimated === true ? 1 : 0) - (nb?.is_estimated === true ? 1 : 0);

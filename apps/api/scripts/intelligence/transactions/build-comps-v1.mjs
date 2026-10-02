@@ -3,7 +3,7 @@
  * IC8.1 comps-v1 snapshot: the comp-snapshot-v1 record format (same regions,
  * same pool/deed record mapping, imported from ../comps/build-comp-snapshot.mjs)
  * plus transaction price provenance, canonical dedupe and the two valuation
- * truth sets. Sealed for the backtest v1 agent.
+ * price eligibility (price > 0) with diagnostics. Sealed for the backtest v1 agent.
  *
  *   1. read   public.v_recent_sold_comps (+ buyer_comp_raw_v2) keyset pages and
  *             public.comps_market_evidence (STABLE RPC over
@@ -11,7 +11,8 @@
  *             the v0 builder does, but KEEPING the deed price_code
  *   2. price  normalizeTransactionPrice() on every record (transactions/price-taxonomy.js)
  *   3. dedupe canonicalizeTransactions() per region (transactions/dedupe.js)
- *   4. truth  truthSetOf() per canonical transaction (transactions/truth-sets.js)
+ *   4. elig   isEligiblePricedSale() (canonical deduped price > 0: THE rule) and
+ *             priceDiagnosticOf() (diagnostic only) per canonical transaction
  *   5. seal   NDJSON.gz per region + manifest.json (sha256 of every file) +
  *             dataset-card.md; files chmod 0444; SEAL = sha256(manifest.json)
  *
@@ -32,7 +33,8 @@ import { fileURLToPath } from "node:url";
 import { DEED_IMPORT_BATCHES, POOL_COLUMNS, QUERY_SPEC, REGIONS, deedRecord, gitInfo, poolRecord } from "../comps/build-comp-snapshot.mjs";
 import { PRICE_TAXONOMY_VERSION, normalizeTransactionPrice } from "../../../src/lib/domain/intelligence/transactions/price-taxonomy.js";
 import { DEDUPE_VERSION, canonicalizeTransactions } from "../../../src/lib/domain/intelligence/transactions/dedupe.js";
-import { LABEL_WEIGHTS, TRUTH_SETS_VERSION, truthSetOf } from "../../../src/lib/domain/intelligence/transactions/truth-sets.js";
+import { LABEL_WEIGHTS, PRICE_DIAGNOSTICS_VERSION, priceDiagnosticOf } from "../../../src/lib/domain/intelligence/transactions/price-diagnostics.js";
+import { ELIGIBILITY_VERSION } from "../../../src/lib/domain/intelligence/transactions/eligibility.js";
 
 export const SPEC_VERSION = "comps-v1";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -73,7 +75,7 @@ export function priceInputOf(r) {
 }
 
 /**
- * Attach price provenance, canonical transaction and truth set to v0 records (in place).
+ * Attach price provenance, canonical transaction, eligibility and price diagnostics to v0 records (in place).
  * Pure apart from mutation of `records`; exported for tests.
  */
 export function annotateRecords(records) {
@@ -87,11 +89,11 @@ export function annotateRecords(records) {
   }
   const { transactions, ambiguous, stats } = canonicalizeTransactions(records);
   const byId = new Map(records.map((r) => [r.id, r]));
-  const truthCounts = {};
+  const eligibilityCounts = {};
   for (const t of transactions) {
     const group = t.members.map((m) => byId.get(m.id));
     const winner = group[0];
-    const truth = truthSetOf({
+    const diag = priceDiagnosticOf({
       price: t.price,
       price_conflict: t.price_conflict,
       package_n: t.package_n,
@@ -100,8 +102,8 @@ export function annotateRecords(records) {
       nominal_flag: winner.src === "pool" ? (t.price.transaction_price ?? 0) < 10000 : winner.nominal_flag === true,
       usable: winner.usable_comp === true,
     });
-    const key = `${t.market ?? "(buffer)"}|${truth.truth_set}${truth.primary_strict ? "_strict" : ""}`;
-    truthCounts[key] = (truthCounts[key] ?? 0) + 1;
+    const key = `${t.market ?? "(buffer)"}|${diag.eligible ? "eligible" : "ineligible"}|${diag.diagnostic_class}${diag.diagnostic_strict ? "_strict" : ""}`;
+    eligibilityCounts[key] = (eligibilityCounts[key] ?? 0) + 1;
     group.forEach((r, i) => {
       r.txn_id = t.canonical_id;
       r.txn_role = i === 0 ? "price_source" : "provenance";
@@ -110,13 +112,15 @@ export function annotateRecords(records) {
       r.dedup = group.length === 1 ? null : i === 0
         ? { role: "winner", merged: group.slice(1).map((x) => x.id).sort(), basis: t.merge_basis.join(",") }
         : { role: "loser", winner: winner.id, basis: t.merge_basis.join(",") };
-      r.truth_set = i === 0 ? truth.truth_set : "duplicate";
-      r.truth_primary_strict = i === 0 ? truth.primary_strict : false;
-      r.truth_reasons = i === 0 ? truth.reasons : ["provenance_record_of_" + winner.id];
-      r.label_weight = i === 0 ? truth.label_weight : 0;
+      // eligibility (the only gate) lives on the price_source record; provenance records are never extra labels
+      r.price_eligible = i === 0 ? diag.eligible : false;
+      r.price_diagnostic_class = i === 0 ? diag.diagnostic_class : "provenance_duplicate";
+      r.price_diagnostic_strict = i === 0 ? diag.diagnostic_strict : false;
+      r.price_diagnostic_reasons = i === 0 ? diag.diagnostic_reasons : ["provenance_record_of_" + winner.id];
+      r.label_weight = i === 0 ? diag.label_weight : 0;
     });
   }
-  return { transactions, ambiguous, stats, truthCounts };
+  return { transactions, ambiguous, stats, eligibilityCounts };
 }
 
 class Checkpoint {
@@ -317,7 +321,7 @@ async function main() {
     const seen = new Set();
     const deeds = deedsAll.filter((r) => (seen.has(r.id) ? false : seen.add(r.id)));
     const records = [...pool, ...deeds];
-    const { transactions, ambiguous, stats, truthCounts } = annotateRecords(records);
+    const { transactions, ambiguous, stats, eligibilityCounts } = annotateRecords(records);
     records.sort((a, b) => (a.sale_date ?? "").localeCompare(b.sale_date ?? "") || a.id.localeCompare(b.id, "en", { numeric: true }));
     const file = path.join(opts.out, `${region.region}.ndjson.gz`);
     fs.writeFileSync(file, zlib.gzipSync(Buffer.from(records.map((r) => `${JSON.stringify(r)}\n`).join("")), { level: 9 }));
@@ -330,7 +334,7 @@ async function main() {
       canonical_transactions: transactions.length,
       dedupe: stats,
       ambiguous_total: ambiguous.length,
-      truth_by_market: truthCounts,
+      eligibility_by_market: eligibilityCounts,
       price_by_market_confidence: countBy(priceSource, (r) => `${r.market ?? "(buffer)"}|${r.src}|${r.price_source_class}|${r.price_confidence}`),
       deeds_by_import_batch_confidence: countBy(records.filter((r) => r.src === "deeds"), (r) => `${r.ingested_at}|${r.price_confidence}`),
     };
@@ -342,7 +346,8 @@ async function main() {
     "scripts/intelligence/comps/build-comp-snapshot.mjs",
     "src/lib/domain/intelligence/transactions/price-taxonomy.js",
     "src/lib/domain/intelligence/transactions/dedupe.js",
-    "src/lib/domain/intelligence/transactions/truth-sets.js",
+    "src/lib/domain/intelligence/transactions/price-diagnostics.js",
+    "src/lib/domain/intelligence/transactions/eligibility.js",
   ];
   const manifest = {
     snapshot_id: `comps-v1-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`,
@@ -351,7 +356,7 @@ async function main() {
     built_at: new Date().toISOString(),
     fetch_started_at: fetchStartedAt,
     uri: opts.out,
-    versions: { price_taxonomy: PRICE_TAXONOMY_VERSION, dedupe: DEDUPE_VERSION, truth_sets: TRUTH_SETS_VERSION },
+    versions: { price_taxonomy: PRICE_TAXONOMY_VERSION, dedupe: DEDUPE_VERSION, price_diagnostics: PRICE_DIAGNOSTICS_VERSION, eligibility: ELIGIBILITY_VERSION },
     code: gitInfo(codeFiles),
     source: {
       supabase_project: "lcppdrmrdfblstpcbgpf",
@@ -376,14 +381,14 @@ async function main() {
       txn_price_conflict: "reliable member prices disagree by > 5%",
       dedup: "v0-compatible: {role:'winner', merged, basis} | {role:'loser', winner, basis} | null (single-record transaction)",
       package_n: "parcels in the package deed (same date + price); 0 = none",
-      truth_set: "primary | secondary | excluded (on the price_source record) | duplicate (provenance records)",
-      truth_primary_strict: "primary AND confidence HIGH",
-      truth_reasons: "why secondary/excluded",
+      price_eligible: "THE eligibility rule: txn_role='price_source' AND canonical deduped price > 0 (isEligiblePricedSale); confidence never excludes",
+      price_diagnostic_class: "DIAGNOSTIC ONLY: reliable_actual | weak_price | market_context | no_price | provenance_duplicate",
+      price_diagnostic_strict: "diagnostic: reliable_actual AND HIGH",
+      price_diagnostic_reasons: "diagnostic flags (segments / candidate features), never filters",
       label_weight: "default confidence weight (HIGH 1, MEDIUM 0.75, LOW 0.25, UNKNOWN 0) for weighted-training experiments",
     },
     usage: {
-      primary_labels: "records with txn_role='price_source' AND truth_set='primary' (strict: truth_primary_strict)",
-      weak_labels: "txn_role='price_source' AND truth_set='secondary' - never mixed into primary metrics without a flag",
+      labels: "records with price_eligible = true (txn_role='price_source' AND price > 0); segment or weight by price_confidence / price_diagnostic_class, never exclude on them",
       comps_pool: "any txn_role='price_source' record may serve as comp evidence; weight it by price_confidence; never use provenance duplicates as extra comps",
       as_of: "unchanged from v0: sale_date/known_date; ingested_at gives the corpus import date",
     },
@@ -409,15 +414,12 @@ const pct = (a, b) => (b ? `${((100 * a) / b).toFixed(1)}%` : "-");
 export function datasetCard(m) {
   const rows = [];
   for (const [region, c] of Object.entries(m.counts)) {
-    const markets = new Set(Object.keys(c.truth_by_market).map((k) => k.split("|")[0]));
+    const markets = new Set(Object.keys(c.eligibility_by_market).map((k) => k.split("|")[0]));
     for (const market of [...markets].sort()) {
-      const get = (k) => c.truth_by_market[`${market}|${k}`] ?? 0;
-      const strict = get("primary_strict");
-      const primary = strict + get("primary");
-      const secondary = get("secondary");
-      const excluded = get("excluded");
+      const sum = (re) => Object.entries(c.eligibility_by_market).filter(([k]) => k.startsWith(`${market}|`) && re.test(k)).reduce((a, [, v]) => a + v, 0);
+      const eligible = sum(/\|eligible\|/);
       const dm = c.dedupe.by_market[market === "(buffer)" ? "(none)" : market] ?? {};
-      rows.push(`| ${region} | ${market} | ${dm.records ?? "-"} | ${dm.transactions ?? "-"} | ${dm.dedupe_rate ?? "-"} | ${primary} | ${strict} | ${secondary} | ${excluded} | ${pct(primary, primary + secondary)} |`);
+      rows.push(`| ${region} | ${market} | ${dm.records ?? "-"} | ${dm.transactions ?? "-"} | ${dm.dedupe_rate ?? "-"} | ${eligible} | ${sum(/\|eligible\|reliable_actual/)} | ${sum(/\|eligible\|weak_price/)} | ${sum(/\|eligible\|market_context/)} | ${sum(/\|ineligible\|/)} |`);
     }
   }
   return `# Dataset card: ${m.snapshot_id} (IC8.1 comps-v1)
@@ -428,26 +430,20 @@ Versions: ${Object.entries(m.versions).map(([k, v]) => `${k} \`${v}\``).join(", 
 ## What it is
 The comp-snapshot-v1 records (same five export regions, same pool/deed mapping as
 \`comps-20261002-1b1cf609\`) with, on every record, the price provenance of
-\`normalizeTransactionPrice()\`, the canonical transaction it belongs to, and the
-valuation truth set of that transaction. One economic transaction = one
-\`txn_id\`; its best-priced record is \`txn_role = 'price_source'\`, every other
-observation is kept as \`provenance\` (truth_set \`duplicate\`).
+\`normalizeTransactionPrice()\`, the canonical transaction it belongs to, the
+eligibility of that transaction and its price diagnostics. One economic
+transaction = one \`txn_id\`; its best-priced record is \`txn_role = 'price_source'\`,
+every other observation is kept as \`provenance\`.
 
-## Truth sets (never mix without a flag)
-- **primary**: HIGH/MEDIUM, verified actual consideration, not an estimate, market sale
-  (no package, distress/transfer deed, nominal, non-arm's-length, cross-source price
-  conflict). \`truth_primary_strict\` = HIGH only. Use for MAE / MdAPE, calibration,
-  promotion decisions.
-- **secondary**: market-looking sale with a weak price (Texas 'Estimated Sales Price'
-  = concurrent loan x 1.33/1.25/1.01/0.98; uncoded provider prices in non-disclosure
-  states TX/IN/MO/KS/UT/NM/ID; pool MLS prices there). Weak labels only:
-  supplementary learning, coverage, sensitivity. \`label_weight\` gives the default
-  HIGH 1 / MEDIUM 0.75 / LOW 0.25 / UNKNOWN 0 for weighted-training experiments.
-- **excluded**: no valuation label (no price, non-market amount, package, distress
-  deed, nominal, missing geo/date). Still a transaction: keep it for activity.
+## Eligibility (the only rule)
+A sale / comp / valuation label is eligible iff its canonical deduped price is > 0
+(\`price_eligible\`, isEligiblePricedSale). Nationwide, TX/IN/MO included.
+Price confidence, source and \`price_diagnostic_*\` are diagnostics and candidate
+features: segment, weight (\`label_weight\`, for weighted-training experiments) or
+study them, never use them to drop a positive price.
 
-## Counts (canonical transactions, price_source records)
-| Region | Market | Records | Transactions | Dedupe rate | Primary | of which strict | Secondary | Excluded | Primary share of labelled |
+## Counts (canonical transactions)
+| Region | Market | Records | Transactions | Dedupe rate | Eligible (price > 0) | of which reliable_actual | weak_price | market_context | Ineligible (no price) |
 |---|---|---|---|---|---|---|---|---|---|
 ${rows.join("\n")}
 
@@ -455,13 +451,13 @@ ${rows.join("\n")}
 
 ## Known limits
 - ${m.source.limits}.
-- Indiana: the 2026-09-30 Marion County import has NO price code and the importer
-  labelled it 'recorded_full'; its prices carry the non-disclosure signature (29%
-  divisible by $100 vs 90-97% in disclosure states), so IND has 0 primary labels.
-  The IC8 v0 "IND improved 27% -> 18% MdAPE" was measured against these labels.
-- Texas: 0 HIGH-confidence prices. Doc-stated amounts (MEDIUM, unverified) are
-  secondary with reason \`nondisclosure_stated_amount\`: the best Texas price
-  evidence available, still not verified consideration.
+- Indiana / Missouri: the 2026-09-30 county imports carry NO price code (importer
+  wrote 'recorded_full'); their prices carry the non-disclosure rounding signature
+  (29% divisible by $100 vs 90-97% in disclosure states): confidence LOW as a
+  DIAGNOSTIC. They are eligible (price > 0). Report IND/TX metrics also split by
+  price_confidence so label quality is visible.
+- Texas: 0 HIGH-confidence prices (vendor 'Estimated Sales Price' = loan x a
+  constant); eligible when > 0, diagnosed LOW.
 - Package detection is heuristic (same date + price within a ZIP / ~1 mi, or a
   non-round price on >= 3 parcels); a deed document number is not available.
 - \`nominal_flag\` on deeds is the evidence MV flag (price < 25% of the import-time

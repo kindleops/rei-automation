@@ -117,7 +117,8 @@ export function canonicalRowsCte({ investor = true, stateFilter = null } = {}) {
 ${deedClassCtes("canon", from)}`;
 }
 
-const PRIMARY_SQL = (c) => `${c}.conf in ('HIGH','MEDIUM') and ${c}.est is not true and ${c}.verified and ${c}.price >= 10000 and ${c}.src <> 'NON_MARKET_AMOUNT'
+// DIAGNOSTIC ONLY (reliable actual consideration); eligibility is price > 0 (eligibleCountsSql).
+const RELIABLE_ACTUAL_SQL = (c) => `${c}.conf in ('HIGH','MEDIUM') and ${c}.est is not true and ${c}.verified and ${c}.price >= 10000 and ${c}.src <> 'NON_MARKET_AMOUNT'
     and not ${c}.distress and ${c}.is_arms_length is not false and not ${c}.nominal and ${c}.lat is not null`;
 
 // mirrors flagPackageDeeds (minus the ~1 mi proximity test): same date+price+ZIP on >= 2 parcels,
@@ -139,9 +140,9 @@ select c.market,
   count(*) filter (where c.conf = 'LOW') conf_low, count(*) filter (where c.conf = 'UNKNOWN') conf_unknown,
   count(*) filter (where c.verified) verified, count(*) filter (where c.est is true) estimated,
   count(*) filter (where c.package) package_members,
-  count(*) filter (where ${PRIMARY_SQL("c")} and not c.package) primary_n,
-  count(*) filter (where ${PRIMARY_SQL("c")} and not c.package and c.conf = 'HIGH') primary_strict_n,
-  count(*) filter (where ${PRIMARY_SQL("c")} and not c.package and c.event_date >= '2023-01-01') primary_since_2023
+  count(*) filter (where ${RELIABLE_ACTUAL_SQL("c")} and not c.package) diag_reliable_actual,
+  count(*) filter (where ${RELIABLE_ACTUAL_SQL("c")} and not c.package and c.conf = 'HIGH') diag_reliable_strict,
+  count(*) filter (where ${RELIABLE_ACTUAL_SQL("c")} and not c.package and c.event_date >= '2023-01-01') diag_reliable_since_2023
 from canonp c group by c.market order by 2 desc;`;
 }
 
@@ -172,7 +173,7 @@ select market, count(*) pool_rows, count(*) filter (where usable) pool_usable,
   count(*) filter (where est is true) estimated,
   count(*) filter (where id in (select id from matched)) matched_to_canonical,
   count(*) filter (where usable and id in (select id from matched)) usable_matched,
-  count(*) filter (where usable and conf = 'HIGH' and price >= 10000 and id not in (select id from matched)) pool_primary_unmatched,
+  count(*) filter (where usable and conf = 'HIGH' and price >= 10000 and id not in (select id from matched)) pool_reliable_unmatched,
   count(*) filter (where is_corporate_owner) corporate_owner
 from pool group by 1 order by 2 desc;`;
 }
@@ -197,11 +198,47 @@ select tx.market,
   count(*) filter (where tx.src = 'VENDOR_ESTIMATE') vendor_estimate_code, count(*) filter (where tx.conf = 'UNKNOWN') unknown_price,
   count(*) filter (where tx.investor) investor_txns, count(*) filter (where tx.investor and tx.event_date >= '2025-07-01') investor_since_2025_07,
   count(*) filter (where tx.distress) distress_doc, count(*) filter (where tx.loan > 0) with_concurrent_loan,
-  count(*) filter (where ${PRIMARY_SQL("tx")} and not tx.package) primary_truth,
-  count(*) filter (where ${PRIMARY_SQL("tx")} and not tx.package and tx.conf = 'HIGH') primary_strict,
+  count(*) filter (where ${RELIABLE_ACTUAL_SQL("tx")} and not tx.package) diag_reliable_actual,
+  count(*) filter (where ${RELIABLE_ACTUAL_SQL("tx")} and not tx.package and tx.conf = 'HIGH') diag_reliable_strict,
   max(cov.properties) properties, max(cov.props_with_mortgage) props_with_mortgage, max(cov.props_with_lien) props_with_lien,
   max(cov.props_with_company) props_with_company, max(cov.props_with_listing) props_with_listing
 from tx left join cov on cov.market = tx.market group by tx.market order by 2 desc;`;
+}
+
+/**
+ * THE eligibility count (isEligiblePricedSale): deduped transactions whose canonical
+ * price is > 0, per market. Canonical transactions with price > 0, plus canonical
+ * transactions with no price whose matched pool row has one, plus pool rows (price > 0)
+ * that match no canonical transaction (property_id, +-10 days).
+ */
+export function eligibleCountsSql() {
+  return `set local statement_timeout = '300s';
+with canon as (
+  select t.id, t.primary_property_id pid, t.event_date, coalesce(t.price, 0) price, g.st, ${marketCaseSql("g.st", "g.zip")} market
+  from comp_private.comp_canonical_transactions t
+  left join comp_private.comp_properties cp on cp.property_id = t.primary_property_id
+  left join public.properties p on p.property_id = t.primary_property_id and cp.property_id is null
+  cross join lateral (select upper(coalesce(cp.state::text, p.property_address_state)) st, coalesce(cp.zip5::text, p.property_address_zip) zip) g
+), pool as (
+  select b.id, b.property_id, b.sale_date, b.mls_sold_date, upper(b.property_address_state) st,
+    ${marketCaseSql("upper(b.property_address_state)", "b.property_address_zip")} market,
+    coalesce(case when b.mls_sold_price > 0 then b.mls_sold_price else coalesce(b.sale_price, b.saleprice) end, 0) price
+  from public.buyer_comp_raw_v2 b where b.import_status is distinct from 'rejected'
+), link as (
+  select distinct on (pl.id) pl.id pool_id, c.id canon_id, pl.price pool_price
+  from pool pl join canon c on c.pid = pl.property_id and (abs(c.event_date - pl.sale_date) <= 10 or abs(c.event_date - pl.mls_sold_date) <= 10)
+  order by pl.id, least(abs(c.event_date - pl.sale_date), abs(c.event_date - pl.mls_sold_date)) nulls last, c.id
+), canon_best as (
+  select c.market, c.id, greatest(c.price, coalesce(max(l.pool_price), 0)) best from canon c left join link l on l.canon_id = c.id group by c.market, c.id, c.price
+), pool_only as (
+  select pl.market, pl.price from pool pl where not exists (select 1 from link l where l.pool_id = pl.id)
+)
+select market, sum(txns) deduped_txns, sum(eligible) eligible_price_gt0, sum(canon_eligible) canon_eligible, sum(pool_only_eligible) pool_only_eligible
+from (
+  select market, count(*) txns, count(*) filter (where best > 0) eligible, count(*) filter (where best > 0) canon_eligible, 0 pool_only_eligible from canon_best group by 1
+  union all
+  select market, count(*), count(*) filter (where price > 0), 0, count(*) filter (where price > 0) from pool_only group by 1
+) x group by 1 order by 3 desc;`;
 }
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -212,5 +249,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
   fs.writeFileSync(path.join(out, "canonical-source-mix.sql"), `${canonicalSourceMixSql()}\n`);
   fs.writeFileSync(path.join(out, "pool-coverage.sql"), `${poolCoverageSql()}\n`);
   fs.writeFileSync(path.join(out, "texas-quality.sql"), `${texasQualitySql()}\n`);
-  console.log(`wrote 4 SQL files to ${out}`);
+  fs.writeFileSync(path.join(out, "eligible-counts.sql"), `${eligibleCountsSql()}\n`);
+  console.log(`wrote 5 SQL files to ${out}`);
 }
