@@ -7,6 +7,7 @@ import { CopilotShell, type CopilotContext, type ResolvedIntent } from '../share
 import { isCopilotSurfaceEnabled } from '../shared/copilot/copilot-availability'
 import { BriefingPanel, buildBriefingDigest, type BriefingDigest } from '../shared/BriefingPanel'
 import { NotificationToasts } from '../shared/NotificationToast'
+import { LCAskHost, LCToast } from '../shared/lc'
 import { NotificationIntelligenceProvider, useNotificationIntelligence } from '../domain/notifications/useNotificationIntelligence'
 import { LeadCommandNotificationBell, LeadCommandNotificationCenter } from '../modules/notifications/LeadCommandNotificationCenter'
 import { playSound } from '../shared/sounds'
@@ -695,7 +696,9 @@ export const CommandCenterApp = () => {
             </div>
           )}
 
-          <NotificationToasts />
+          {/* Desktop: SystemToast + LC confirm/prompt host. Phones keep their
+              own toast stack, and asks fall back to the browser there. */}
+          {isPhone ? <NotificationToasts /> : <><LCToast /><LCAskHost /></>}
 
           {isCopilotSurfaceEnabled(isMobile) ? (
             <CopilotShell

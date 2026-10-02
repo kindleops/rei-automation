@@ -2,8 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { PaneRouteContext, pushRoutePath, replaceRoutePath, useRouteLocation } from '../../../app/router'
 import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
 import { setPropertyLocator } from '../../../domain/locator/property-locator'
-import { LCButton, LCConfirm, LCEmpty, LCLive, LCSearch, LCSkeleton, LCTabs, lcMenu, type LCMenuEntry } from '../../../shared/lc'
-import { emitNotification } from '../../../shared/NotificationToast'
+import { LCButton, LCConfirm, LCEmpty, LCLive, LCSearch, LCSkeleton, LCTabs, lcMenu, lcToast, type LCMenuEntry } from '../../../shared/lc'
 import { sound } from '../../../shared/sound'
 import type { CampaignModel, CampaignSummary } from '../campaigns.types'
 import { getDetailActions } from '../campaign-health'
@@ -260,12 +259,12 @@ export function CampaignWarRoom({
       const cohort = await fetchCohortPoints(selectedId)
       const name = subjectName ?? 'this campaign'
       if (!writeMapFocusSet({ label: cohort.basis === 'source_cohort' ? `in ${name}` : `in ${name}’s audience`, tone: 'property', points: cohort.points.map((p) => ({ lat: p.lat, lng: p.lng, id: p.id, label: p.label })) })) {
-        emitNotification({ title: 'Nothing to show on the Map', detail: 'None of these properties have map coordinates.', severity: 'info' })
+        lcToast({ title: 'Nothing to show on the Map', detail: 'None of these properties have map coordinates.', severity: 'info' })
         return
       }
       pushRoutePath('/map')
     } catch {
-      emitNotification({ title: 'The cohort couldn’t be loaded', detail: 'Nothing was changed.', severity: 'warning' })
+      lcToast({ title: 'The cohort couldn’t be loaded', detail: 'Nothing was changed.', severity: 'warning' })
     }
   }, [selectedId, subjectName])
 
@@ -285,7 +284,7 @@ export function CampaignWarRoom({
   }, [onAction, refreshCore, refreshBook])
 
   const request = useCallback((action: string) => {
-    if (demoOn) { emitNotification({ title: 'Demo data', detail: 'Actions are off while demo data is on screen. Nothing was changed.', severity: 'info' }); return }
+    if (demoOn) { lcToast({ title: 'Demo data', detail: 'Actions are off while demo data is on screen. Nothing was changed.', severity: 'info' }); return }
     if (!summary) return
     if (action === 'refresh') { onRefresh(); refreshCore(); refreshIntel(); refreshBook(); return }
     if (action === 'activate') sound.ui.tap()

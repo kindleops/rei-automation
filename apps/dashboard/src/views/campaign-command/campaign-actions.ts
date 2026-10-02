@@ -1,4 +1,5 @@
-import { emitNotification } from '../../shared/NotificationToast'
+import { lcConfirm } from '../../shared/lc/ask-bus'
+import { lcToast } from '../../shared/lc/toast-bus'
 import { CAMPAIGN_HYDRATION_CHUNK } from './campaign-builder-launch'
 import {
   buildCampaignTargetSnapshots,
@@ -113,7 +114,7 @@ export async function executeCampaignAction(
       const res = await buildCampaignTargetSnapshots(campaign.id, {
         limit: Math.max(campaign.total_targets, campaign.ready_targets, 500),
       })
-      emitNotification({
+      lcToast({
         title: `Built ${res.built_count} targets`,
         detail: `"${campaign.campaign_name}" snapshot v${(res.preview as Record<string, unknown> | undefined)?.build_version ?? 'latest'}`,
         severity: 'success',
@@ -134,7 +135,7 @@ export async function executeCampaignAction(
 
     if (action === 'activate' || action === 'activate-now' || action === 'start') {
       if (['archived', 'completed', 'failed'].includes(campaign.status)) {
-        emitNotification({
+        lcToast({
           title: 'Cannot activate',
           detail: `Campaign is ${campaign.status}. Restore or duplicate first.`,
           severity: 'warning',
@@ -167,7 +168,7 @@ export async function executeCampaignAction(
     if (action === 'queue-batch' || action === 'queue_batch' || action === 'queue_batch_test' || action === 'queue_batch_live') {
       if (!canQueueBatch(campaign)) {
         const health = computeCampaignHealth(campaign)
-        emitNotification({
+        lcToast({
           title: 'Cannot Queue Batch',
           detail: health.issues[0] ?? `Campaign is ${campaign.status} or has no ready targets`,
           severity: 'warning',
@@ -175,12 +176,16 @@ export async function executeCampaignAction(
         return false
       }
       // A caller that has already shown its own confirmation (the mobile
-      // confirmation sheet) passes `confirmed: true`; anything else still gets
-      // the native prompt. Either way nothing live happens unconfirmed.
+      // confirmation sheet) passes `confirmed: true`; anything else is asked
+      // through LCConfirm (the browser dialog where no LC host is mounted).
+      // Either way nothing live happens unconfirmed.
       if (action === 'queue_batch_live' && payload.confirmed !== true) {
-        const confirmed = window.confirm(
-          'Prepare a controlled LIVE batch? This will create executable send_queue rows subject to all readiness gates.',
-        )
+        const confirmed = await lcConfirm({
+          title: 'Prepare a controlled LIVE batch?',
+          effects: [{ text: 'This will create executable send_queue rows subject to all readiness gates.', kind: 'stops' }],
+          confirmLabel: 'Prepare live batch',
+          nativeText: 'Prepare a controlled LIVE batch? This will create executable send_queue rows subject to all readiness gates.',
+        })
         if (!confirmed) return false
       }
       pendingActions.add(key)
@@ -198,11 +203,11 @@ export async function executeCampaignAction(
       const result = res.result as Record<string, unknown> | undefined
       const testModeHydration = Boolean(result?.proof_hydration ?? result?.no_send)
       if (res.blockers?.length && inserted === 0) {
-        emitNotification({ title: 'Batch blocked', detail: res.blockers.join(' · '), severity: 'warning' })
+        lcToast({ title: 'Batch blocked', detail: res.blockers.join(' · '), severity: 'warning' })
       } else {
         const skipped = Number(result?.skipped_count ?? 0)
         const blocked = Number(result?.blocked_count ?? 0)
-        emitNotification({
+        lcToast({
           title: inserted > 0
             ? (testModeHydration ? `Prepared ${inserted} test rows` : `Prepared ${inserted} live sends`)
             : 'No new rows prepared',
@@ -224,7 +229,7 @@ export async function executeCampaignAction(
       const lifecycleAction = LIFECYCLE_MAP[action]
       const result = await campaignLifecycle(campaign.id, lifecycleAction, payload)
       void result
-      emitNotification({
+      lcToast({
         title: campaign.campaign_name || 'Campaign',
         detail: OUTCOME_COPY[lifecycleAction]?.done ?? 'Updated.',
         severity: ['pause', 'cancel', 'archive', 'unschedule'].includes(action) ? 'warning' : 'success',
@@ -236,7 +241,7 @@ export async function executeCampaignAction(
     if (action === 'clone' || action === 'duplicate') {
       pendingActions.add(key)
       const newId = await cloneCampaign(campaign.id)
-      emitNotification({
+      lcToast({
         title: 'Campaign duplicated',
         detail: `New draft created from "${campaign.campaign_name}".`,
         severity: 'success',
@@ -246,16 +251,22 @@ export async function executeCampaignAction(
     }
 
     if (action === 'convert_to_live' || action === 'convert-to-live') {
-      const confirmed = payload.confirmed === true || window.confirm(
-        `Convert "${campaign.campaign_name}" to a LIVE campaign?\n\nThis will purge test queue rows, hydrate the real send path, and schedule the next valid sending window. Targets, pacing, caps, and templates are preserved.`,
-      )
+      const confirmed = payload.confirmed === true || await lcConfirm({
+        title: `Convert "${campaign.campaign_name}" to a LIVE campaign?`,
+        effects: [
+          { text: 'This will purge test queue rows, hydrate the real send path, and schedule the next valid sending window.', kind: 'stops' },
+          { text: 'Targets, pacing, caps, and templates are preserved.', kind: 'keeps' },
+        ],
+        confirmLabel: 'Convert to live',
+        nativeText: `Convert "${campaign.campaign_name}" to a LIVE campaign?\n\nThis will purge test queue rows, hydrate the real send path, and schedule the next valid sending window. Targets, pacing, caps, and templates are preserved.`,
+      })
       if (!confirmed) return false
       pendingActions.add(key)
       const result = await campaignLifecycle(campaign.id, 'convert_to_live' as ExtendedLifecycleAction, {
         confirm_live: true,
         explicit_operator_action: true,
       })
-      emitNotification({
+      lcToast({
         title: 'Converted to Live Campaign',
         detail: result.to
           ? `Now ${result.to}. Scheduled launch preserved.`
@@ -269,7 +280,7 @@ export async function executeCampaignAction(
     if (action === 'sync_metrics' || action === 'sync-metrics') {
       pendingActions.add(key)
       await campaignLifecycle(campaign.id, 'sync_metrics' as ExtendedLifecycleAction)
-      emitNotification({ title: 'Metrics synced', detail: 'Campaign counts recomputed from canonical sources.', severity: 'success' })
+      lcToast({ title: 'Metrics synced', detail: 'Campaign counts recomputed from canonical sources.', severity: 'success' })
       await callbacks.onRefresh()
       return true
     }
@@ -277,22 +288,28 @@ export async function executeCampaignAction(
     if (action === 'delete' || action === 'delete_draft') {
       const forceDelete = canForceDeleteCampaign(campaign)
       if (!canDeleteDraft(campaign) && !forceDelete) {
-        emitNotification({
+        lcToast({
           title: 'Cannot delete',
           detail: 'Only unexecuted drafts can be deleted. Archive instead.',
           severity: 'warning',
         })
         return false
       }
-      const confirmed = window.confirm(
-        forceDelete
+      const confirmed = await lcConfirm({
+        title: forceDelete
+          ? `Permanently remove "${campaign.campaign_name}" and all test/mock rows?`
+          : `Delete draft "${campaign.campaign_name}"?`,
+        effects: [{ text: 'This cannot be undone.', kind: 'danger' }],
+        confirmLabel: forceDelete ? 'Remove permanently' : 'Delete draft',
+        tone: 'danger',
+        nativeText: forceDelete
           ? `Permanently remove "${campaign.campaign_name}" and all test/mock rows? This cannot be undone.`
           : `Delete draft "${campaign.campaign_name}"? This cannot be undone.`,
-      )
+      })
       if (!confirmed) return false
       pendingActions.add(key)
       const res = await deleteCampaign(campaign.id, { force_delete: forceDelete })
-      emitNotification({
+      lcToast({
         title: res.archived ? 'Campaign archived' : 'Campaign deleted',
         detail: res.archived
           ? 'Send history preserved; archived instead of deleted.'
@@ -305,7 +322,7 @@ export async function executeCampaignAction(
 
     // An action with no handler must not report success. This branch used to
     // toast the raw action id and return true.
-    emitNotification({
+    lcToast({
       title: 'That action isn’t available here',
       detail: 'Nothing was changed.',
       severity: 'warning',
@@ -314,7 +331,7 @@ export async function executeCampaignAction(
   } catch (err) {
     const lifecycle = LIFECYCLE_MAP[action]
     const stillTrue = lifecycle ? OUTCOME_COPY[lifecycle]?.stillTrue : null
-    emitNotification({
+    lcToast({
       title: `Couldn’t ${verbFor(action)} ${campaign.campaign_name || 'this campaign'}`,
       detail: humanDetail(err, [stillTrue, 'Try again.'].filter(Boolean).join(' ')),
       severity: 'critical',

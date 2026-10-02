@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from '../../shared/icons'
-import { emitNotification } from '../../shared/NotificationToast'
+import { lcToast } from '../../shared/lc'
 import {
   getCampaignProgress,
   setCampaignLifecycle,
@@ -135,7 +135,7 @@ export function CampaignControlCenter({
     try {
       const res = await setCampaignLifecycle(campaignId, action)
       if (res.ok && res.data?.ok) {
-        emitNotification({ title: `Campaign ${label}`, detail: `Now ${res.data.to ?? action}.`, severity: 'success' })
+        lcToast({ title: `Campaign ${label}`, detail: `Now ${res.data.to ?? action}.`, severity: 'success' })
         await load(true)
         onLifecycleChange?.()
       } else {
@@ -159,14 +159,14 @@ export function CampaignControlCenter({
           : rawMsg === 'illegal_campaign_transition'
             ? `Not allowed from "${status}".`
             : String(rawMsg)
-        emitNotification({
+        lcToast({
           title: `Could not ${label.toLowerCase()}`,
           detail,
           severity: 'critical',
         })
       }
     } catch (e) {
-      emitNotification({ title: `Could not ${label.toLowerCase()}`, detail: e instanceof Error ? e.message : String(e), severity: 'critical' })
+      lcToast({ title: `Could not ${label.toLowerCase()}`, detail: e instanceof Error ? e.message : String(e), severity: 'critical' })
     } finally {
       if (mounted.current) setBusy(null)
     }

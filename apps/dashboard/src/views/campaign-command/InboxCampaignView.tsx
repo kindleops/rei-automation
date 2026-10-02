@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Icon } from '../../shared/icons'
-import { emitNotification } from '../../shared/NotificationToast'
+import { lcToast } from '../../shared/lc'
 import { loadCampaigns, fetchCampaignTargets } from './campaigns.adapter'
 import { executeCampaignAction } from './campaign-actions'
 import { getPrimaryAction, matchesListFilter, type CampaignListFilter } from './campaign-health'
@@ -135,7 +135,7 @@ export const InboxCampaignView = ({
       const data = await loadCampaigns()
       setModel(data)
     } catch {
-      emitNotification({ title: 'Failed to load campaigns', severity: 'critical' })
+      lcToast({ title: 'Failed to load campaigns', severity: 'critical' })
     } finally {
       setLoading(false)
     }

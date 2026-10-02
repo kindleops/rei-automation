@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Icon } from '../../shared/icons'
-import { emitNotification } from '../../shared/NotificationToast'
+import { lcPrompt, lcToast } from '../../shared/lc'
 import {
   loadCampaigns,
   fetchCampaignTargetsPageData,
@@ -1654,7 +1654,7 @@ export const CampaignsPage = () => {
     } catch (err) {
       console.error('[CampaignsPage] load failed', err)
       setLoadFailed(true)
-      if (!opts.quiet) emitNotification({ title: 'Campaign load failed', detail: 'Could not fetch campaign data.', severity: 'critical' })
+      if (!opts.quiet) lcToast({ title: 'Campaign load failed', detail: 'Could not fetch campaign data.', severity: 'critical' })
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -1754,14 +1754,14 @@ export const CampaignsPage = () => {
         return
       }
       if (action === 'rename') {
-        const next = window.prompt('Rename campaign', campaign.campaign_name)
+        const next = await lcPrompt({ title: 'Rename campaign', label: 'Campaign name', initialValue: campaign.campaign_name, confirmLabel: 'Rename', nativeText: 'Rename campaign' })
         if (!next?.trim()) return
         await updateCampaignDraft(campaign.id, { name: next.trim() })
         await load({ silent: true })
         return
       }
       // `payload` carries `confirmed: true` from the mobile confirmation sheet,
-      // so a confirmed action is not asked a second time by window.confirm.
+      // so a confirmed action is not asked a second time.
       await executeCampaignAction(action, campaign, actionCallbacks, payload ?? {})
     },
     [actionCallbacks, load],
@@ -1790,11 +1790,11 @@ export const CampaignsPage = () => {
     }
     if (action === 'schedule') {
       if (selectedCampaign) void handleCampaignAction('schedule', selectedCampaign)
-      else emitNotification({ title: 'Select a campaign to schedule', severity: 'info' })
+      else lcToast({ title: 'Select a campaign to schedule', severity: 'info' })
       return
     }
     if (action === 'refresh') {
-      emitNotification({ title: 'Refreshing campaigns', severity: 'info' })
+      lcToast({ title: 'Refreshing campaigns', severity: 'info' })
       void load({ silent: true })
     }
   }
@@ -1877,7 +1877,7 @@ export const CampaignsPage = () => {
               const isProof = result.proofHydration || result.activationMode === 'test'
               // the activation the operator launched was confirmed by the API
               if (!isProof) sound.outcome.success('strong')
-              emitNotification({
+              lcToast({
                 title: result.idempotent
                   ? (isProof ? 'Test hydration replay' : 'Already activated')
                   : (isProof ? 'Test hydration complete' : 'Live activation complete'),
@@ -2149,7 +2149,7 @@ export const CampaignsPage = () => {
           onClose={closeActivation}
           onSuccess={(result) => {
             const isProof = result.proofHydration || result.activationMode === 'test'
-            emitNotification({
+            lcToast({
               title: result.idempotent
                 ? (isProof ? 'Test hydration replay' : 'Already activated')
                 : (isProof ? 'Test hydration complete' : 'Live activation complete'),
