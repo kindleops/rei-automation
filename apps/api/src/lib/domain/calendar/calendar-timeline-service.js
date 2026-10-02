@@ -1105,6 +1105,37 @@ export function buildEmailEvents(rows = [], { now = Date.now(), sendingEnabled =
 }
 
 /**
+ * Appointments from the shared scheduling core (any brand). The core is the
+ * record; the Calendar shows them beside everything else. Customer contact
+ * details stay in the appointment view, not on the timeline.
+ */
+export function buildAppointmentEvents(rows = [], { now = Date.now() } = {}) {
+  const out = []
+  for (const r of rows) {
+    const at = Date.parse(r.start_at || '')
+    if (!Number.isFinite(at)) continue
+    const st = clean(r.status)
+    const live = st === 'scheduled' || st === 'confirmed'
+    const opp = (r.related_refs || []).find((x) => String(x).startsWith('opportunity:'))?.slice('opportunity:'.length) || null
+    const needs = live && (!r.resource_id || r.sync_status === 'drift')
+    out.push({
+      id: `appointment:${r.id}`, dedupe_key: `appointment:${r.id}`, type: 'appointment', source: 'scheduling_appointments', source_id: String(r.id), app: 'scheduling',
+      title: clean(r.event_type?.name) || 'Appointment', subtitle: [humanize(r.brand_key), clean(r.customer?.name)].filter(Boolean).join(' · ') || null, place: null,
+      start: iso(at), end: r.end_at ? iso(Date.parse(r.end_at)) : null, all_day: false, time_kind: live ? 'scheduled' : 'occurred', tz: r.customer_timezone || null,
+      actor: live ? 'you' : 'completed',
+      status: live ? (at < now ? 'past_due' : st) : st,
+      priority: 'high', overdue: live && Date.parse(r.end_at || r.start_at) < now, attention: needs,
+      reason: !r.resource_id && live ? 'Needs assignment' : r.sync_status === 'drift' ? 'Changed in Google Calendar — the appointment kept its time; resolve in Calendar' : null,
+      count: 1,
+      links: { opportunity_id: opp, appointment_id: String(r.id) },
+      detail: { brand: r.brand_key, type_key: r.event_type?.type_key || null, assigned: r.resource?.display_name || null, sync_status: r.sync_status || null },
+      owner: r.resource?.display_name || 'unassigned', updated_at: r.updated_at || null,
+    })
+  }
+  return out
+}
+
+/**
  * One real event, one row: a closing/EMD date recorded on both the seller
  * offer and the closing case is the closing case's (it is the later, more
  * authoritative record). Keyed on dedupe_key when the builder states one,
@@ -1285,6 +1316,7 @@ function provenanceFor(e, opTz) {
 function deepLink(e) {
   const l = e.links || {}
   const q = (o) => { const s = new URLSearchParams(); for (const [k, v] of Object.entries(o)) if (v) s.set(k, String(v)); const t = s.toString(); return t ? `?${t}` : '' }
+  if (e.app === 'scheduling' && l.appointment_id) return { app: 'scheduling', label: 'Open appointment', path: `/calendar${q({ appointment: l.appointment_id })}` }
   if (e.app === 'workflow' && l.run_id) return { app: 'workflow', label: 'Open run in Workflow Studio', path: `/workflow-studio${q({ studio: e.detail?.workflow_key, run: l.run_id, node: e.detail?.node_id })}` }
   if (e.app === 'closing' && l.closing_case_id) return { app: 'closing', label: 'Open in Closing Desk', path: `/closing-desk${q({ case: l.closing_case_id })}` }
   if (e.app === 'campaigns' && l.campaign_id) return { app: 'campaigns', label: 'Open in Campaign Command', path: `/campaign-command${q({ campaign: l.campaign_id })}` }
@@ -1471,7 +1503,7 @@ async function source(name, status, fn) {
   }
 }
 
-const PHONE_TYPES = new Set(['campaign_sends', 'campaign_start', 'campaign_window', 'scheduled_message', 'scheduled_message_group', 'seller_follow_up', 'pipeline_action', 'offer', 'closing', 'closing_milestone'])
+const PHONE_TYPES = new Set(['appointment', 'campaign_sends', 'campaign_start', 'campaign_window', 'scheduled_message', 'scheduled_message_group', 'seller_follow_up', 'pipeline_action', 'offer', 'closing', 'closing_milestone'])
 
 export async function getCalendarTimeline({ from, to, tz, propertyId = null, view = null } = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
@@ -1702,6 +1734,15 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
     })
   }
 
+  const appointments = prop ? [] : await source('scheduling_appointments', status, async () => {
+    const { data, error } = await supabase.from('scheduling_appointments')
+      .select('id,brand_key,status,start_at,end_at,related_refs,resource_id,sync_status,customer_timezone,updated_at,customer,event_type:scheduling_event_types(name,type_key),resource:scheduling_resources(display_name)')
+      .gte('start_at', iso(fromAt)).lt('start_at', iso(toAt))
+      .limit(1000)
+    if (error) throw error
+    return data || []
+  })
+
   // History is always BUILT (a completed thread follow-up must still absorb its
   // pipeline mirror in dedupe); the phone simply never receives it.
   const raw = [
@@ -1713,6 +1754,7 @@ export async function getCalendarTimeline({ from, to, tz, propertyId = null, vie
     ...buildOfferEvents(offers, { from: readFrom, to: end, today, now }),
     ...wfEvents,
     ...buildEmailEvents(emails, { now, sendingEnabled: system.email_sending }),
+    ...buildAppointmentEvents(appointments, { now }),
   ]
   let events = dedupeEvents(raw)
     .filter((e) => desk || (PHONE_TYPES.has(e.type) && !e.history_only))

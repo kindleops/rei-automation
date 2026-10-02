@@ -711,6 +711,18 @@ const CLOSING_AUTOMATION: CronJob = {
 };
 
 /**
+ * Scheduling reconciliation (2026-10-03): catches up Google Calendar busy time
+ * and push-channel renewals, retries appointments whose calendar copy failed,
+ * removes orphaned events. Sends nothing to customers (reminders are rows in
+ * email_queue, sent by EMAIL_DISPATCH). Off until CRON_SCHEDULING_ENABLED.
+ */
+const SCHEDULING_TICK: CronJob = {
+  id: "scheduling_tick",
+  enabledBy: "CRON_SCHEDULING_ENABLED",
+  path: "/api/internal/scheduling/tick",
+};
+
+/**
  * Email dispatch (2026-09-29): the ONE email sender. Bridges Closing
  * Authority requests into the outbox, revalidates every due message against
  * live business state, sends through the brand's provider, fetches inbound
@@ -777,6 +789,7 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
     CAMPAIGN_FEED,
     CLOSING_AUTOMATION,
     WORKFLOW_ORCHESTRATOR,
+    SCHEDULING_TICK,
   ],
   // Separate expression: the send lane's cadence must be tunable without
   // touching reconciliation, and a reader must see at a glance which schedule

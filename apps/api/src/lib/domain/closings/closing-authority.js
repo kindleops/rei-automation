@@ -16,6 +16,7 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { transitionOpportunityStage } from '@/lib/domain/opportunity/opportunity-service.js'
 import { emitNotificationFromBusinessEvent } from '@/lib/domain/notifications/notification-emitter.js'
+import { emitSellerLifecycle } from '@/lib/domain/seller-portal/seller-portal-lifecycle.js'
 import { buildBuyerOfferId } from '@/lib/domain/disposition/buyer-commitment-authority.js'
 import { evaluateClosingGuard } from './closing-guard.js'
 import { cancelOpenEmailRequests } from './closing-email-requests.js'
@@ -31,7 +32,7 @@ export const STAGE_ORDER = ['ownership_confirmation', 'offer_interest', 'asking_
 const stageRank = (s) => STAGE_ORDER.indexOf(lower(s))
 
 const fail = (code, message, extra = {}) => ({ ok: false, code, message, ...extra })
-const ctx = (deps) => ({ db: deps.supabase || defaultSupabase, now: () => (deps.now ? new Date(deps.now()) : new Date()), notify: deps.notify || emitNotificationFromBusinessEvent, transition: deps.transitionOpportunityStage || transitionOpportunityStage })
+const ctx = (deps) => ({ db: deps.supabase || defaultSupabase, now: () => (deps.now ? new Date(deps.now()) : new Date()), notify: deps.notify || emitNotificationFromBusinessEvent, transition: deps.transitionOpportunityStage || transitionOpportunityStage, sellerLifecycle: deps.sellerLifecycle || emitSellerLifecycle })
 const isDuplicate = (error) => error && (error.code === '23505' || /duplicate key/i.test(String(error.message || '')))
 
 function requireActor(actor) {
@@ -388,7 +389,8 @@ export async function openTitleIssue(input = {}, deps = {}) {
   if (error && !isDuplicate(error)) throw error
   if (!error) {
     await audit(env.db, c, { type: 'title_issue_opened', actor: input.actor, source: row.source, detail: { issue_id: issueId, type: row.issue_type, description: row.description }, key: `title_issue_opened:${issueId}` })
-    await env.notify({ eventType: 'closing_title_issue', sourceEntityType: 'closing_case', sourceEntityId: c.closing_case_id, closingId: c.closing_case_id, propertyId: c.property_id, dealId: c.opportunity_id, titleVars: { case_name: c.property_address }, description: `${row.issue_type.replace(/_/g, ' ')}${row.description ? ` — ${row.description}` : ''}`, deduplicationKey: `closing_title_issue:${issueId}` })
+    await env.notify({ eventType: 'closing_title_issue', sourceEntityType: 'closing_case', sourceEntityId: c.closing_case_id, closingId: c.closing_case_id, propertyId: c.property_id, dealId: c.opportunity_id, titleVars: { case_name: c.property_address }, description: `${row.issue_type.replace(/_/g, ' ')}${row.description ? ` — ${row.description}` : ''}`, deduplicationKey: `closing_title_issue:${issueId}` })    // The seller hears about an item only when it is theirs to provide.
+    if (row.owner === 'seller' && c.opportunity_id) await env.sellerLifecycle({ kind: 'action_needed', opportunityId: c.opportunity_id, dedupeKey: `action_needed:${issueId}` })
   }
   return { ok: true, duplicate: Boolean(error), issueId }
 }
@@ -480,6 +482,8 @@ export async function setClosingDate(input = {}, deps = {}) {
   if (prior.at && iso(prior.at) !== at) {
     await env.notify({ eventType: 'closing_status_changed', sourceEntityType: 'closing_case', sourceEntityId: c.closing_case_id, closingId: c.closing_case_id, propertyId: c.property_id, dealId: c.opportunity_id, title: `Closing rescheduled — ${c.property_address || 'closing'}`, description: clean(input.reason), deduplicationKey: `closing_rescheduled:${c.closing_case_id}:${at}` })
   }
+  // Sellers are told about confirmed dates only; targets are internal.
+  if (confirmed && c.opportunity_id) await env.sellerLifecycle({ kind: prior.confirmed && prior.at ? 'closing_changed' : 'closing_scheduled', opportunityId: c.opportunity_id, dedupeKey: `closing_date:${c.closing_case_id}:${at}`, context: { start_at: at, timezone: next.closing_tz || undefined } })
   next = await maybePreparedToClose(env, next, input.actor)
   return { ok: true, closing: { at, confirmed, tz: next.closing_tz } }
 }
@@ -575,6 +579,7 @@ export async function finalizeClosing(input = {}, deps = {}) {
   if (!data.already_closed) {
     await cancelOpenEmailRequests(env.db, c.closing_case_id, 'closing_finalized')
     await env.notify({ eventType: 'closing_case_completed', sourceEntityType: 'closing_case', sourceEntityId: c.closing_case_id, closingId: c.closing_case_id, propertyId: c.property_id, dealId: c.opportunity_id, participantId: c.thread_key, titleVars: { case_name: c.property_address }, metrics: { actual_net_proceeds: data.actual_net_proceeds, actual_assignment_fee: data.actual_assignment_fee }, deduplicationKey: `closing_case_completed:${c.closing_case_id}` })
+    if (c.opportunity_id) await env.sellerLifecycle({ kind: 'closed', opportunityId: c.opportunity_id, dedupeKey: `closed:${c.closing_case_id}` })
   }
   return { ok: true, alreadyClosed: Boolean(data.already_closed), closedAt: data.closed_at, closingCaseId: c.closing_case_id }
 }
