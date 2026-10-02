@@ -473,7 +473,11 @@ async function main() {
   let result;
   if (INGEST) {
     // MCP output: { "<section>": <v jsonb> , … } assembled by hand from execute_sql results
-    result = { sections: JSON.parse(fs.readFileSync(INGEST, "utf8")), errors: {} };
+    // Accepts the bare object, { snapshot: {...} }, or the MCP row array [{ snapshot: {...} }].
+    let raw = JSON.parse(fs.readFileSync(INGEST, "utf8"));
+    if (Array.isArray(raw)) raw = raw[0];
+    if (raw && raw.snapshot && typeof raw.snapshot === "object") raw = raw.snapshot;
+    result = { sections: raw, errors: {} };
   } else {
     result = await runLive(since);
   }
