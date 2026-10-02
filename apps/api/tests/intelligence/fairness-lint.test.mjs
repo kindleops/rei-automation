@@ -224,7 +224,8 @@ test("v1 sets: identity never present; the eight personal attributes only in sel
   assert.equal(all.containsPersonal, true);
   assert.deepEqual([...all.personalMembers].sort(), [...V1_PERSONAL_MEMBERS].sort());
   assert.equal(V1_PERSONAL_MEMBERS.length, 8);
-  assert.deepEqual(registry.listSets().map((s) => s.featureSetId).sort(), ["seller_first_touch@1", "seller_first_touch_all@1"]);
+  assert.deepEqual(registry.listSets().map((s) => s.featureSetId).sort(), ["seller_first_touch@1", "seller_first_touch@2", "seller_first_touch_all@1", "seller_first_touch_all@2"]);
+  assert.equal(registry.getSet("seller_first_touch@2").containsPersonal, false);
   for (const def of registry.list()) {
     for (const source of def.lineage.sources) {
       assert.ok(!classifySource(source).findings.some((f) => f.effect === "prohibited"), `${def.id} reads prohibited ${source}`);

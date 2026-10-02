@@ -20,6 +20,10 @@
  *
  * Feature sets (historical training, family seller_first_touch_reply):
  *   seller_first_touch@1      permitted inputs only (the baseline arm)
+ *   seller_first_touch@2 / seller_first_touch_all@2
+ *                             the same plus the 40-feature
+ *                             market_investor_activity group
+ *                             (features/market-investor-activity.js)
  *   seller_first_touch_all@1  + the eight personal_attribute fields (gender,
  *                             marital status, owner language, agent persona,
  *                             age band, household income band, education,
@@ -32,6 +36,7 @@ import {
   deriveTimezoneFromGeography,
 } from "../../campaigns/contact-window-timezone.js";
 import { createFeatureRegistry } from "../registry/feature-registry.js";
+import { MARKET_INVESTOR_ACTIVITY_MEMBERS, MARKET_INVESTOR_ACTIVITY_SPECS } from "./market-investor-activity.js";
 import { DAY_MS, dateOnlyEndMs, toMs } from "../util/time.js";
 
 /** Version of the helper functions below; part of every lineage that uses them. */
@@ -821,7 +826,26 @@ export function registerV1Features(registry) {
     family: SELLER_FIRST_TOUCH_FAMILY,
     description: "The base set plus the eight personal_attribute fields. Models built on it ship a fairness report.",
   });
-  return { base, all };
+  // The market_investor_activity group (owner decision 2026-10-01) changes the
+  // set definitions, so it ships as @2 of both sets; @1 stays reproducible.
+  for (const spec of MARKET_INVESTOR_ACTIVITY_SPECS) registry.register(spec);
+  const baseV2 = registry.defineSet({
+    name: "seller_first_touch",
+    version: 2,
+    members: [...V1_BASE_MEMBERS, ...MARKET_INVESTOR_ACTIVITY_MEMBERS],
+    purpose: "historical_training",
+    family: SELLER_FIRST_TOUCH_FAMILY,
+    description: "seller_first_touch@1 plus the market_investor_activity group (permitted property/market features).",
+  });
+  const allV2 = registry.defineSet({
+    name: "seller_first_touch_all",
+    version: 2,
+    members: [...V1_BASE_MEMBERS, ...MARKET_INVESTOR_ACTIVITY_MEMBERS, ...V1_PERSONAL_MEMBERS],
+    purpose: "historical_training",
+    family: SELLER_FIRST_TOUCH_FAMILY,
+    description: "seller_first_touch_all@1 plus the market_investor_activity group. Models built on it ship a fairness report.",
+  });
+  return { base, all, baseV2, allV2 };
 }
 
 export function createV1Registry() {

@@ -16,6 +16,46 @@ import { V1_FEATURE_SPECS, createV1Registry } from "../../src/lib/domain/intelli
  * pinned hash to make this pass.
  */
 const PINNED = Object.freeze({
+  "market.investor_count_trend_cell1km_6v6@1": "249e9f663ef674de453de3d075b859b61fca9b05ac3c2747793e2fd037d8a0f2",
+  "market.investor_count_trend_r0_5mi_6v6@1": "fd2a12d5b38e6387ccc0ed558f778d52439275751e68eb9729b7c623ab7b122b",
+  "market.investor_count_trend_r1mi_6v6@1": "cc28bbc8c1a417f2fc7b7eb2019b9dc9b763ba55c39f069b798f6290595bc4df",
+  "market.investor_count_trend_r2mi_6v6@1": "dc5e7508c61273e888c8884b0536819ea478f298e6f912db4d5125062a217649",
+  "market.investor_count_trend_zip_6v6@1": "f748539e76991e762827bff6227ec1536116d4563c7a29be2990c4e2cd02fbc8",
+  "market.investor_purchases_cell1km_12m@1": "f8b7e5a10e207968c7605ec7a9375e6892b158b7210e8f54d3cc3d3b78679f20",
+  "market.investor_purchases_cell1km_3m@1": "712ffab3f49387363c8e4bf447faee91a5d304d6dfbe6f0512c9a9ec5c75090f",
+  "market.investor_purchases_cell1km_6m@1": "8dc3c63d723452188023a9cee341077b842c8ca5b9ea547210902a5d8c6d261e",
+  "market.investor_purchases_r0_5mi_12m@1": "ad8b5646344c5c08b61d0e85db5d99905677164251313ae8d1d7062ceb4abe5e",
+  "market.investor_purchases_r0_5mi_3m@1": "b3064c53eda9551da10da114e9a3f778616696924ebcd1e021efb5919683c89b",
+  "market.investor_purchases_r0_5mi_6m@1": "6664e1ce060f5c12bde64234ad18a88568b376ef08ebbc1bcfa657e217aaf1df",
+  "market.investor_purchases_r1mi_12m@1": "436d6dced4c2ad79667b554c7d4223949fc805fc44e95bbbc66faa29ce6cb80b",
+  "market.investor_purchases_r1mi_3m@1": "908be83fc78b72defec499d101323d8e8407c4adc11efba2b8837d215db37923",
+  "market.investor_purchases_r1mi_6m@1": "e1a59f4e72b4e12f2dc70b5358669e0472d9aa165d43d5a09f78c39cf4be0f2a",
+  "market.investor_purchases_r2mi_12m@1": "ddad57393b2909f7b177022e3f0d722aa9de691910a862384ba79f8245e4f727",
+  "market.investor_purchases_r2mi_3m@1": "01090a922f7aaa0df48c6223919bac0b77a1d1533beda3441d85832a342e57c1",
+  "market.investor_purchases_r2mi_6m@1": "a90935ba9ee067eb07439d8f06d00749eb615bb48c9f3ddf730af613137d3e14",
+  "market.investor_purchases_zip_12m@1": "90e6cabeaec129817d78cdff988f35d0a7b284233c1e07d682ed11b986b05c5d",
+  "market.investor_purchases_zip_3m@1": "b38048a907aad0ae22f08c28dad7c8b041a01e666a837a629957f83611a3b791",
+  "market.investor_purchases_zip_6m@1": "050c22740fd0338643f58998737bd342e0d4c23ea7596a8b33538fef770c759f",
+  "market.investor_share_cell1km_12m@1": "6a3472a94780d854505da473b860a71685abb0583f3c84b35ac9f88d3f507ed6",
+  "market.investor_share_cell1km_3m@1": "cd433840a6c19e72151da3202b47bb7fa7ed3237c9abb51ff8c4bd88e913658f",
+  "market.investor_share_cell1km_6m@1": "da559f087b31334d289ff0a93c7fd2f634ff4fe6553b236298aac17229ceb9c7",
+  "market.investor_share_r0_5mi_12m@1": "103ed21c75563c8fa92085424b12492f5b9c6091b046b3d63d653c9230004048",
+  "market.investor_share_r0_5mi_3m@1": "36a5e5c47ff8a27f8d8831b95639479373d5403d933b355962f9a91ac347204e",
+  "market.investor_share_r0_5mi_6m@1": "69fb88dbfc247b6aff14e51a87bce6286697fe9d9e50ef27381ce235466543fc",
+  "market.investor_share_r1mi_12m@1": "6519131da60303f876a8eb17d821c7683044362c0e1432fce75dbf8401b31621",
+  "market.investor_share_r1mi_3m@1": "78e6ed0cd2b0877caf4a47f8f24dea57fb66734b2860e53b02e3a3fc1503c86e",
+  "market.investor_share_r1mi_6m@1": "4cbb40d6939c5ce714eb19e80c283626e0de292766e5df977781ab9ea99a20b5",
+  "market.investor_share_r2mi_12m@1": "cd96c5287e859f4be830a9b77857cfbe7f8069c6288c8dc1a643e6c3d3f96b61",
+  "market.investor_share_r2mi_3m@1": "83f0ed726866ffa3cfdf8d302862875a5e2d86d5e3092ae77ce0aa6c0f686d85",
+  "market.investor_share_r2mi_6m@1": "c948ac259db43df3e56e03dab14e35f2f5626deaeca0592de8115dd1d6795912",
+  "market.investor_share_trend_cell1km_6v6@1": "3d9c901da19506a0a9ba5f29eaf1253bcf6cff28fade8981f3179d0cc8c6a48a",
+  "market.investor_share_trend_r0_5mi_6v6@1": "0977731d39ddb476aafb37963d8282fd5ac78cb1d6ed086eaa38451cde082be6",
+  "market.investor_share_trend_r1mi_6v6@1": "f7e465e876cc95a922fad9fac638f988edded536d47c34cfd1b3525fd56e5047",
+  "market.investor_share_trend_r2mi_6v6@1": "042a0210fb36a6b14c9587357d39833bcdeac2f44cc9a44a125b9916e8961c14",
+  "market.investor_share_trend_zip_6v6@1": "155a44ca89f0025de2ea247328f7a85eec0169b33f01e6d1303e678b26761a8e",
+  "market.investor_share_zip_12m@1": "8f70cb8f9e6eb93654de44fcbe33f2412503a3df99535c14e2c4130deb2d714e",
+  "market.investor_share_zip_3m@1": "06b2e3e520be782753ef737aabbf1b3840f6b6f8e5ef9e8bf4366a07bfe47d1e",
+  "market.investor_share_zip_6m@1": "55a55f379741acc0fa3cf41de7b147c88048f9c32693ff3da747b5599ce50fdb",
   "owner.absentee@1": "88cb2b3727db45ad31d61a37b8bc6fb84e6beb0e9c14fb23e0f7ab4418a62dcb",
   "owner.agent_persona@1": "32033ae7349de373284d585163b8dab604e3aaad463c0f789520b6f5cd0e4270",
   "owner.entity_class@1": "9515ad03d2a1b5ae147286929e9a1c45eaf29a09ba7ecfd0dc82b672a5f349aa",
@@ -44,7 +84,9 @@ const PINNED = Object.freeze({
   "template.template_id@1": "39b74486bca1b592419754943e273d119162e071b5a1372c1759dfccad287e1c",
   "template.use_case@1": "dff9686727563fcb4ed7b0737b999b2f75e1f665c76899f8536eb38a4d6d68bd",
   "seller_first_touch_all@1": "31d2359631897149375a7c5655d534f97b28ff36848d712091ac81f50851d900",
+  "seller_first_touch_all@2": "2ede9ba6d8dc8f3da70777c78071b8ec2403c73b99ca3568b5d2c5a1711ab849",
   "seller_first_touch@1": "3ce39382ab59530b96ea1bf9093005a0cbf31cbeee7cf2655f6167a10df4e280",
+  "seller_first_touch@2": "4918e0e0fd04c687323c521e02b136073792a92094adc7e3dd30ae93b4e50d78",
 });
 
 test("v1 definition hashes are pinned: a changed hash under the same version fails", () => {
@@ -128,5 +170,5 @@ test("mirror rows carry domain and fairness class for intelligence.feature_defin
   assert.equal(toFeatureDefinitionRow(registry.get("prospect.gender", 1)).fairness_class, "personal_attribute");
   const absentee = toFeatureDefinitionRow(registry.get("owner.absentee", 1));
   assert.equal(absentee.freshness_sla, "300 seconds");
-  assert.equal(registry.toFeatureSetRows().length, 2);
+  assert.equal(registry.toFeatureSetRows().length, 4);
 });
