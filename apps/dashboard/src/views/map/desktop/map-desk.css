@@ -101,7 +101,8 @@ html.is-desktop-modern[data-nexus-theme='true_black'] .mx.is-desk {
   --mxg-edge: rgb(255 255 255 / 0.11);
   --mxg-edge-lo: rgb(255 255 255 / 0.06);
 }
-/* Red Ops: red marks the accent — the selection, the primary, LIVE — never the room. */
+/* Red Ops is an environment, not a semantic: red keeps meaning "blocked / failed".
+   The room is warm; selection, switches and LIVE stay execution cyan, success stays green. */
 html.is-desktop-modern[data-nexus-theme='red_ops'] .mx.is-desk {
   --mxg-l1: rgb(16 10 10 / clamp(0.82, calc(0.9 * var(--lg-alpha, 1)), 0.96));
   --mxg-l2: rgb(18 11 11 / clamp(0.82, calc(0.9 * var(--lg-alpha, 1)), 0.96));
@@ -110,8 +111,7 @@ html.is-desktop-modern[data-nexus-theme='red_ops'] .mx.is-desk {
   --mxg-edge: rgb(255 140 128 / 0.11);
   --mxg-edge-hi: rgb(255 176 166 / calc(0.16 * var(--lg-sheen, 1)));
   --mxg-rule: rgb(255 140 128 / 0.08);
-  --mxg-accent: #ff3b30;
-  --mxg-good: #ff6a5c;
+  --mxg-accent: rgb(var(--lc-exec-rgb, 125, 211, 252));
 }
 
 /* ── shared material ─────────────────────────────────────────────────────── */

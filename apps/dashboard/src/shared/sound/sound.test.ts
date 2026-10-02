@@ -112,3 +112,17 @@ describe('the sound arbiter', () => {
     expect(played).toHaveLength(0)
   })
 })
+
+describe('sound prefs snapshot', () => {
+  it('returns the same object until settings change (useSyncExternalStore getSnapshot contract)', async () => {
+    await fresh()
+    const prefs = await import('./prefs')
+    const a = prefs.readSoundPrefs()
+    expect(prefs.readSoundPrefs()).toBe(a)
+    prefs.writeSoundPrefs({ volume: 0.2 })
+    const b = prefs.readSoundPrefs()
+    expect(b).not.toBe(a)
+    expect(b.volume).toBe(0.2)
+    expect(prefs.readSoundPrefs()).toBe(b)
+  })
+})

@@ -421,11 +421,13 @@ export const buildSellerDeskModel = (
         tone: smsEligible === false ? 'attention' : 'verified',
       }
 
+  // A dated sale with no recorded price is still a sale: never say "none on record" above its date.
+  const saleMissing = dossierReady ? (saleDate ? 'Price not recorded' : 'No sale on record') : 'Loads with the record'
   const lienSub = dossierReady ? (activeLien ? 'Active lien on record' : 'No lien flag on record') : null
   const tiles: DeskFact[] = [
     { key: 'value', label: 'Est. value', value: money(estimated), sub: input.pricePerSqft ? `${formatMoney(input.pricePerSqft)} / sqft` : null, tone: 'value', missing: 'No valuation on record' },
     { key: 'equity', label: 'Equity', value: equityPct == null ? null : formatPercent(equityPct), sub: money(equityAmt), tone: 'value', missing: 'Not on record' },
-    { key: 'sale', label: 'Last sale', value: money(saleAmount), sub: saleDate ? formatDate(saleDate) : null, dossier: true, missing: dossierReady ? 'No sale on record' : 'Loads with the record' },
+    { key: 'sale', label: 'Last sale', value: money(saleAmount), sub: saleDate ? formatDate(saleDate) : null, dossier: true, missing: saleMissing },
     { key: 'debt', label: 'Loans · liens', value: money(loan), sub: lienSub, tone: activeLien && dossierReady ? 'attention' : undefined, dossier: true, missing: dossierReady ? (activeLien ? 'Lien on record' : 'No balance on record') : 'Loads with the record' },
     {
       key: 'ownership',
@@ -444,7 +446,7 @@ export const buildSellerDeskModel = (
     { key: 'value', label: 'Est. value', value: money(estimated), sub: input.pricePerSqft ? `${formatMoney(input.pricePerSqft)} / sqft` : null, tone: 'value', missing: 'Not on record' },
     { key: 'equity', label: 'Equity', value: equityPct == null ? null : formatPercent(equityPct), sub: money(equityAmt), tone: 'value', missing: 'Not on record' },
     { key: 'loan', label: 'Loan balance', value: money(loan), sub: lienSub, dossier: true, missing: dossierReady ? 'None on record' : 'Loads with the record' },
-    { key: 'sale', label: 'Last sale', value: money(saleAmount), sub: saleDate ? formatDate(saleDate) : null, dossier: true, missing: dossierReady ? 'None on record' : 'Loads with the record' },
+    { key: 'sale', label: 'Last sale', value: money(saleAmount), sub: saleDate ? formatDate(saleDate) : null, dossier: true, missing: saleMissing },
     { key: 'repairs', label: 'Repairs est.', value: money(repairs), missing: 'Not on record' },
     acquisitionScore != null
       ? { key: 'score', label: 'Acquisition score', value: formatInteger(acquisitionScore), sub: motivation != null ? `Motivation ${formatInteger(motivation)}` : null, tone: 'active' }
@@ -586,8 +588,8 @@ export const buildSellerDeskModel = (
   const marketFacts: DeskFact[] = [
     { key: 'mls', label: 'MLS status', value: str(record, ['mls_market_status']) ? titleize(text(record.mls_market_status).toLowerCase()) : null, dossier: true, missing: dossierReady ? 'Not listed' : 'Loads with the record' },
     { key: 'list', label: 'List price', value: money(nOrNull(record.mls_current_listing_price)), dossier: true, missing: dossierReady ? 'Not listed' : 'Loads with the record' },
-    { key: 'mls-sold', label: 'MLS sold', value: money(nOrNull(record.mls_sold_price)), sub: str(record, ['mls_sold_date']) ? formatDate(text(record.mls_sold_date)) : null, dossier: true, missing: dossierReady ? 'None on record' : 'Loads with the record' },
-    { key: 'last-sale', label: 'Last sale', value: money(saleAmount), sub: saleDate ? formatDate(saleDate) : null, dossier: true, missing: dossierReady ? 'None on record' : 'Loads with the record' },
+    { key: 'mls-sold', label: 'MLS sold', value: money(nOrNull(record.mls_sold_price)), sub: str(record, ['mls_sold_date']) ? formatDate(text(record.mls_sold_date)) : null, dossier: true, missing: dossierReady ? (str(record, ['mls_sold_date']) ? 'Price not recorded' : 'None on record') : 'Loads with the record' },
+    { key: 'last-sale', label: 'Last sale', value: money(saleAmount), sub: saleDate ? formatDate(saleDate) : null, dossier: true, missing: saleMissing },
   ]
 
   const queueItems = thread.context?.queueContext?.items ?? []

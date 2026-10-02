@@ -34,7 +34,7 @@ const shot = async (name) => { await page.screenshot({ path: `${OUT}/${tag}-${na
 const R = {}
 
 await page.goto(`${BASE}/home`, { waitUntil: 'domcontentloaded', timeout: 120000 })
-await page.waitForSelector('.dsk-side', { timeout: 90000 })
+await page.waitForSelector('.dsk-bd', { timeout: 90000 })
 await page.waitForTimeout(2500)
 
 // ⌘V inside a field must reach the field (it used to be cancelled globally).

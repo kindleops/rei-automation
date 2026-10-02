@@ -60,9 +60,25 @@ type WithSound = NexusSettings & { experienceSound?: Partial<ExperienceSoundPref
 const MODES: InterfaceSoundMode[] = ['off', 'subtle', 'full']
 const MATERIALS: SoundMaterial[] = ['mech', 'default', 'press']
 
-/** Read with defaults; anything stored that is invalid falls back, never breaks. */
+let lastSource: NexusSettings | null = null
+let lastPrefs: ExperienceSoundPrefs | null = null
+
+/**
+ * Read with defaults; anything stored that is invalid falls back, never breaks.
+ * Memoized on the settings snapshot: this is a useSyncExternalStore getSnapshot,
+ * so it must return the SAME object until settings change (a fresh object per
+ * call loops React forever — "Maximum update depth exceeded").
+ */
 export function readSoundPrefs(): ExperienceSoundPrefs {
-  const raw = (loadSettings() as WithSound).experienceSound ?? {}
+  const source = loadSettings()
+  if (lastPrefs && source === lastSource) return lastPrefs
+  lastSource = source
+  lastPrefs = parseSoundPrefs(source)
+  return lastPrefs
+}
+
+function parseSoundPrefs(source: NexusSettings): ExperienceSoundPrefs {
+  const raw = (source as WithSound).experienceSound ?? {}
   const vol = Number(raw.volume)
   return {
     version: 1,

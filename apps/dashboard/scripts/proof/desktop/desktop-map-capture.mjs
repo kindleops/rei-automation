@@ -17,6 +17,9 @@ const CENTER = arg('center', '').split(',').filter(Boolean).map(Number)
 const ZOOM = Number(arg('zoom', 11))
 const STATES = arg('states', 'rest,layers,activity,card').split(',')
 const SPLIT = arg('split', '')
+// --strict-rpc=1: only POST rpc/get_* reads pass (every other non-GET is aborted)
+const STRICT_RPC = arg('strict-rpc', '') === '1'
+const allowedRpc = new Set()
 const TAG = arg('tag', `${THEME}-${W}x${H}${SPLIT ? '-split' : ''}`)
 await fs.mkdir(OUT, { recursive: true })
 const browser = await chromium.launch()
@@ -28,11 +31,17 @@ await ctx.addInitScript((t) => {
 const page = await ctx.newPage()
 const errors = []; const blocked = []
 page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 200)))
+const rpcLog = []
+page.on('response', async (res) => { const u = new URL(res.url()); if (!/\/rpc\/|\/api\/.*map/.test(u.pathname)) return; let n = null; try { const b = await res.body(); n = b.length } catch { /* streamed */ } rpcLog.push(`${res.request().method()} ${u.pathname.split('/').slice(-2).join('/')} ${res.status()} ${n}B${res.status() >= 400 ? ` ${u.search}` : ''}`) })
 await page.route('**/api/**', (r) => { const m = r.request().method(); if (['GET', 'OPTIONS', 'HEAD'].includes(m)) return r.continue(); blocked.push(`${m} ${new URL(r.request().url()).pathname}`); return r.abort() })
+// any other Supabase non-GET (auth, functions, storage) is aborted too
+await page.route(/supabase\.co\//, (r) => { const m = r.request().method(); if (['GET', 'OPTIONS', 'HEAD'].includes(m)) return r.continue(); blocked.push(`${m} ${new URL(r.request().url()).pathname}`); return r.abort() })
 // Supabase: reads only. Table writes are aborted; RPCs pass only when they are reads (get_/list_/search_/count_).
 await page.route('**/rest/v1/**', (r) => {
   const m = r.request().method(); const u = new URL(r.request().url())
-  if (['GET', 'OPTIONS', 'HEAD'].includes(m) || /\/rest\/v1\/rpc\/(get|list|search|count)_/.test(u.pathname)) return r.continue()
+  const readRpc = STRICT_RPC ? /\/rest\/v1\/rpc\/get_/ : /\/rest\/v1\/rpc\/(get|list|search|count)_/
+  if (['GET', 'OPTIONS', 'HEAD'].includes(m)) return r.continue()
+  if (readRpc.test(u.pathname)) { allowedRpc.add(u.pathname.replace('/rest/v1/rpc/', '')); return r.continue() }
   blocked.push(`${m} ${u.pathname}`); return r.abort()
 })
 await page.goto(`${BASE}/map`, { waitUntil: 'domcontentloaded', timeout: 120000 })
@@ -192,5 +201,5 @@ const info = await page.evaluate(() => ({
   zoom: window.__nxMap?.getZoom?.().toFixed(2),
   center: window.__nxMap?.getCenter?.().toArray().map((v) => v.toFixed(3)),
 }))
-console.log(JSON.stringify({ info, errors: errors.slice(0, 5), blocked }))
+console.log(JSON.stringify({ info, errors: errors.slice(0, 5), blocked, allowedRpc: [...allowedRpc], rpcLog: rpcLog.slice(0, 30) }))
 await browser.close()

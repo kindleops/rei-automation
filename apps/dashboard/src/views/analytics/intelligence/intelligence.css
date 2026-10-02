@@ -876,7 +876,7 @@ button.ix-callout:hover { background: rgba(var(--lc-attn-rgb), 0.12); }
 
 /* ══ MONEY ═════════════════════════════════════════════════════════════════ */
 .ix-bases { display: grid; gap: 1px; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); border-radius: 16px; overflow: hidden; background: var(--ix-hair); box-shadow: inset 0 0 0 1px var(--ix-hair); }
-.ix-bases.is-three { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.ix-bases.is-three { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } /* auto-fit: three tiles fill the row, no empty hairline cell */
 .ix-basis { display: grid; gap: 6px; align-content: start; padding: 12px 14px; background: var(--lc-mat-float-bg); position: relative; }
 :root:not([data-nexus-theme='light']) .ix-basis { background: rgb(var(--lc-fill) / 0.86); }
 .ix-basis::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 2px; border-radius: 1px; background: rgba(var(--lc-st-rgb), 0.85); }

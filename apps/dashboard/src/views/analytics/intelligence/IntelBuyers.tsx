@@ -84,7 +84,7 @@ export function IntelBuyers({ variant = 'overview' }: { variant?: 'overview' | '
                   <i aria-hidden="true" />{j.label}
                 </button>
                 <span role="cell" className="ix-sxd__supply"><i style={{ width: `${(j.reached / maxR) * 100}%` }} /><b>{fmtInt(j.reached)}</b><small>{j.interested ? `${fmtInt(j.interested)} interested` : ''}</small></span>
-                <span role="cell" className="ix-sxd__demand"><i style={{ width: `${(j.purchases / maxP) * 100}%` }} /><b>{fmtInt(j.purchases)}</b><small>{j.buyers ? `${fmtInt(j.buyers)} buyers` : ''}</small></span>
+                <span role="cell" className="ix-sxd__demand"><i style={{ width: `${(j.purchases / maxP) * 100}%` }} /><b>{fmtInt(j.purchases)}</b><small>{j.buyers ? `${fmtInt(j.buyers)} ${j.buyers === 1 ? 'buyer' : 'buyers'}` : ''}</small></span>
               </div>
             ))}
           </div>
