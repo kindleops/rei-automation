@@ -29,6 +29,7 @@ if (!args.dataset) throw new Error("usage: --dataset=<dir> [--published=<models 
 const published = args.published || MODELS_ROOT;
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "ic8-determinism-"));
 run("train-first-touch-baselines.mjs", [`--dataset=${args.dataset}`, `--out=${scratch}`]);
+run("train-first-text-variants.mjs", [`--dataset=${args.dataset}`, `--out=${scratch}`]);
 run("template-ope.mjs", [`--dataset=${args.dataset}`, `--out=${scratch}`]);
 run("stage-feasibility.mjs", [`--out=${scratch}`]);
 const files = {};
