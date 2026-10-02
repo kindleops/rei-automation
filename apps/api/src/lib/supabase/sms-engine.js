@@ -2627,7 +2627,9 @@ export async function reconcileCanonicalQueueLifecycle(options = {}) {
 
   const { data: active_rows, error: active_error } = await supabase
     .from(SEND_QUEUE_TABLE)
-    .select("id,queue_status,created_at,updated_at,scheduled_for,scheduled_for_utc,sent_at,delivered_at,provider_message_id,textgrid_message_id,is_locked,lock_token,retry_count,max_retries,dedupe_key,to_phone_number,from_phone_number,metadata")
+    // queue_key/type/message_type: so a conversation reply (D3/D7) is recognised
+    // here too and not held by its campaign's pause.
+    .select("id,queue_status,created_at,updated_at,scheduled_for,scheduled_for_utc,sent_at,delivered_at,provider_message_id,textgrid_message_id,is_locked,lock_token,retry_count,max_retries,dedupe_key,to_phone_number,from_phone_number,queue_key,type,message_type,metadata")
     .in("queue_status", CANONICAL_ACTIVE_QUEUE_STATUSES)
     .order("updated_at", { ascending: true })
     .limit(max_rows);
