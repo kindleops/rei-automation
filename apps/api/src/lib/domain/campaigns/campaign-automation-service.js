@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { isTemplateHoldReason } from '@/lib/domain/campaigns/campaign-template-hold.js'
 import { effectivePerSenderCap, loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 import { isSenderDispatchBlocked, isTemplateDispatchBlocked, loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
@@ -7862,6 +7863,9 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   }
   const plannedItems = []
   const sampleSkips = []
+  // Every target whose template check failed (not a sample): the feeder holds
+  // them instead of re-rendering them every cycle (campaign-template-hold.js).
+  const templateHolds = []
   const skippedCounts = {}
   const senderCounts = {}
   const senderMarketCounts = {}
@@ -8067,6 +8071,14 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
       continue
     }
     if (!rendered.ok || !templateId || !messageBody) {
+      if (isTemplateHoldReason(rendered.reason_code)) {
+        templateHolds.push({
+          target,
+          reason: rendered.reason_code,
+          detail: rendered.reason || rendered.render_error_message || null,
+          template_id: templateId || null,
+        })
+      }
       recordSkip(rendered.reason_code || rendered.reason || 'template_render_failed', target, {
         template_id: templateId,
         render_error_message: rendered.render_error_message || rendered.reason || null,
@@ -8557,6 +8569,14 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     skipped_count: launchSummary.skipped_count,
     skipped_counts_by_reason: skippedCounts,
     sample_skips: sampleSkips,
+    template_holds: templateHolds.map((hold) => ({
+      campaign_target_id: hold.target.id || null,
+      reason: hold.reason,
+      detail: hold.detail,
+      template_id: hold.template_id,
+    })),
+    // Internal hand-off to the feeder (full target rows for a merge-safe hold).
+    template_hold_targets: templateHolds,
     // Per market: why no sender could carry these sellers, number by number.
     routing_blocks_by_market: routingBlocksByMarket,
     skip_summary: describePlanSkips(skippedCounts, routingBlocksByMarket),

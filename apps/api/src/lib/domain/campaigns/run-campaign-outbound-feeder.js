@@ -19,6 +19,24 @@ import {
 import { recomputeCampaignProgress } from '@/lib/domain/campaigns/campaign-progress.js'
 import { resolveCampaignScheduleTimezones } from '@/lib/domain/campaigns/campaign-market-identity.js'
 import { isWithinContactWindow } from '@/lib/domain/campaigns/contact-window-timezone.js'
+import {
+  holdTemplateFailedTargets,
+  loadTemplateCatalogFingerprint,
+  releaseTemplateHoldsOnCatalogChange,
+} from '@/lib/domain/campaigns/campaign-template-hold.js'
+
+/**
+ * The catalogue fingerprint, read once per feeder run (memoised on deps) — not
+ * once per campaign. Unreadable → null: nothing is released this cycle.
+ */
+async function resolveTemplateCatalogFingerprint(supabase, deps = {}) {
+  if (typeof deps.templateCatalogFingerprint === 'string') return deps.templateCatalogFingerprint
+  if (deps.templateCatalogFingerprint === null) return null
+  const loader = deps.loadTemplateCatalogFingerprint || loadTemplateCatalogFingerprint
+  const fingerprint = await loader(supabase).catch(() => null)
+  deps.templateCatalogFingerprint = fingerprint
+  return fingerprint
+}
 
 const ACTIVE_QUEUE_STATUSES = ['queued', 'scheduled', 'pending', 'ready', 'approved', 'processing', 'sending']
 
@@ -382,6 +400,15 @@ export async function feedCampaignBatch(campaign, deps = {}) {
   const timezone = zones.primary
   const recycle = await (deps.recycleFilteredSends || recycleFilteredSends)(supabase, campaign.id, { now: now.getTime() })
     .catch((error) => ({ recycled: 0, skipped: 0, error: error?.message || String(error) }))
+  // Template holds (campaign-template-hold.js): a target that failed the
+  // template check waits for the catalogue to change instead of being
+  // re-rendered every cycle. Release first, so a newly approved template is
+  // tried in this same pass.
+  const templateFingerprint = await resolveTemplateCatalogFingerprint(supabase, deps)
+  const templateRelease = templateFingerprint
+    ? await (deps.releaseTemplateHoldsOnCatalogChange || releaseTemplateHoldsOnCatalogChange)(supabase, campaign.id, { fingerprint: templateFingerprint, now })
+      .catch((error) => ({ released: 0, error: error?.message || String(error) }))
+    : { released: 0, skipped: 'catalogue_fingerprint_unavailable' }
   const [activeLiveRows, readyRemaining, heldTargets, committedTargets, sentToday] = await Promise.all([
     countActiveLiveQueueRows(supabase, campaign.id),
     countTargets(supabase, campaign.id, ['ready']),
@@ -433,7 +460,14 @@ export async function feedCampaignBatch(campaign, deps = {}) {
     inserted = Number(result.send_queue_rows_created ?? result.queue_rows_created ?? 0)
   }
 
-  const readyAfter = Math.max(0, readyRemaining - inserted)
+  // Targets whose template check failed are HELD (blocked with the reason) so
+  // the cohort can resolve; they return to ready when the catalogue changes.
+  const holdCandidates = Array.isArray(result?.template_hold_targets) ? result.template_hold_targets : []
+  const templateHold = holdCandidates.length
+    ? await (deps.holdTemplateFailedTargets || holdTemplateFailedTargets)(supabase, holdCandidates, { fingerprint: templateFingerprint, now })
+      .catch((error) => ({ held: 0, failed: holdCandidates.length, error: error?.message || String(error) }))
+    : { held: 0, failed: 0 }
+  const readyAfter = Math.max(0, readyRemaining - inserted - Number(templateHold.held || 0))
   const resolved = isCohortResolved({
     readyRemaining: readyAfter,
     activeLiveRows: activeLiveRows + inserted,
@@ -500,6 +534,11 @@ export async function feedCampaignBatch(campaign, deps = {}) {
           // the cockpit and readiness read it straight off the campaign.
           skip_summary: result?.skip_summary || null,
           routing_blocks_by_market: result?.routing_blocks_by_market || {},
+          template_holds: {
+            held_now: Number(templateHold.held || 0),
+            released_now: Number(templateRelease?.released || 0),
+            catalog_fingerprint: templateFingerprint,
+          },
           ...(inserted > 0 ? { last_refill_at: heartbeatAt } : { last_refill_at: metadata.feeder_last?.last_refill_at || null }),
         },
       },
@@ -521,6 +560,8 @@ export async function feedCampaignBatch(campaign, deps = {}) {
     blocked_by: progress.blocked_by,
     completed,
     inserted,
+    template_holds_held: Number(templateHold.held || 0),
+    template_holds_released: Number(templateRelease?.released || 0),
     skipped_count: Number(result?.skipped_count || 0),
     skipped_counts_by_reason: result?.skipped_counts_by_reason || {},
     blockers: result?.blockers || [],
@@ -554,6 +595,8 @@ export async function runCampaignOutboundFeeder(deps = {}) {
   }
 
   const campaigns = await findFeedableCampaigns(deps)
+  // One template-catalogue fingerprint read per run, shared by every campaign.
+  const runDeps = { ...deps }
   const results = []
   let totalInserted = 0
   let totalBlocked = 0
@@ -564,7 +607,7 @@ export async function runCampaignOutboundFeeder(deps = {}) {
       if (isCampaignFullyLive(campaign)) {
         await syncProductionQueueRailsFromCampaign(campaign, deps)
       }
-      const feedResult = await feedCampaignBatch(campaign, deps)
+      const feedResult = await feedCampaignBatch(campaign, runDeps)
       results.push(feedResult)
       totalInserted += Number(feedResult.inserted || 0)
       if ((feedResult.blockers || []).length) totalBlocked += 1
