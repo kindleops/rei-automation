@@ -6,8 +6,9 @@ import { canonicalizeRoutePath } from '../../domain/app-registry/app-registry'
 import { openApp } from './workspace/workspace-store'
 import type { WorkspaceCommand } from './deck/deck-model'
 import { sound } from '../../shared/sound'
-import { inspectRefOfCommand } from './inspector/command-inspect'
+import { inspectRefOfCommand, objectRefOfCommand } from './inspector/command-inspect'
 import { openInspector } from './inspector/inspector-store'
+import { MOD_KEY, openObjectBeside } from './objects/object-actions'
 
 /**
  * THE COMMAND BAR — one field that searches the whole product.
@@ -15,7 +16,7 @@ import { openInspector } from './inspector/inspector-store'
  * Same providers, same ranking and same execute path as the command palette
  * (useGlobalCommandSearch + the app's executeGlobalCommand); on the desktop it
  * lives in the top bar instead of a modal. ⌘K focuses it from anywhere, arrows
- * move, Enter runs (⌥↵ beside, ⇧↵ inspect a seller/property), Esc lets go. Results arrive grouped, best matches first,
+ * move, Enter opens, ⌘/Ctrl↵ opens beside (⌥↵ still works), ⇧↵ inspects, Esc lets go. Results arrive grouped, best matches first,
  * with a live preview of the highlighted result beside them.
  */
 
@@ -91,23 +92,32 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
       return
     }
     sound.command.execute()
-    // ⌥↵ / ⌥-click: open a routed result BESIDE what is on screen (split pane).
-    if (split && r.route) openApp(canonicalizeRoutePath(r.route), 'beside')
+    // ⌘↵ / ⌘-click (⌥ too): open the result BESIDE what is on screen (split pane).
+    // An object result goes through the object registry (canonical deep link +
+    // linked context); a plain route splits as it always did.
+    const obj = split ? objectRefOfCommand(r) : null
+    if (obj && openObjectBeside(obj).ok) { /* opened beside */ }
+    else if (split && r.route) openApp(canonicalizeRoutePath(r.route), 'beside')
     else onExecute(r)
     setQuery('')
     onClose()
     inputRef.current?.blur()
   }
 
+  const inspect = (ref: NonNullable<ReturnType<typeof inspectRefOfCommand>>) => {
+    openInspector(ref, { replace: true }); sound.ui.select(); setQuery(''); onClose(); inputRef.current?.blur()
+  }
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, Math.max(ordered.length - 1, 0))); return }
     if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); return }
-    if (e.key === 'Enter' && e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
       // ⇧↵ inspects a seller/property result in place instead of navigating
       const ref = inspectRefOfCommand(ordered[activeIndex] ?? null)
-      if (ref) { e.preventDefault(); openInspector(ref, { replace: true }); sound.ui.select(); setQuery(''); onClose(); inputRef.current?.blur(); return }
+      if (ref) { e.preventDefault(); inspect(ref); return }
     }
-    if (e.key === 'Enter') { e.preventDefault(); run(ordered[activeIndex] ?? null, e.altKey); return }
+    // ↵ open · ⌘/Ctrl↵ open beside (⌥↵ kept as an alias)
+    if (e.key === 'Enter') { e.preventDefault(); run(ordered[activeIndex] ?? null, e.metaKey || e.ctrlKey || e.altKey); return }
     if (e.key === 'Escape') { e.preventDefault(); if (query) setQuery(''); else { onClose(); inputRef.current?.blur() } }
   }
 
@@ -122,7 +132,12 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
         className={cls('dsk-cmd__item', i === activeIndex && 'is-active', r.meta?.disabled && 'is-disabled')}
         data-cmd-index={i}
         onMouseMove={() => { if (i !== activeIndex) setActiveIndex(i) }}
-        onClick={(e) => run(r, e.altKey)}
+        onClick={(e) => {
+          // the click grammar: ⇧-click inspects, ⌘/Ctrl-click opens beside
+          const ref = e.shiftKey && !e.metaKey && !e.ctrlKey ? inspectRefOfCommand(r) : null
+          if (ref) inspect(ref)
+          else run(r, e.altKey || e.metaKey || e.ctrlKey)
+        }}
       >
         <span className="dsk-cmd__icon"><Icon name={r.icon || 'command'} size={15} strokeWidth={1.7} /></span>
         <span className="dsk-cmd__copy">
@@ -199,7 +214,7 @@ export function DesktopCommandBar({ open, initialQuery, context, onOpen, onClose
             {active ? (
               <footer className="dsk-cmd__run">
                 <span>{active.route ? active.route : active.action?.label || 'Action'}</span>
-                <b>↵ {active.meta?.hint || (active.route ? 'Open' : 'Run')}{active.route ? <span className="dsk-cmd__alt">⌥↵ Split</span> : null}</b>
+                <b>↵ {active.meta?.hint || (active.route ? 'Open' : 'Run')}{active.route || objectRefOfCommand(active) ? <span className="dsk-cmd__alt">{MOD_KEY === '⌘' ? '⌘↵' : 'Ctrl↵'} Beside</span> : null}{inspectRefOfCommand(active) ? <span className="dsk-cmd__alt">⇧↵ Inspect</span> : null}</b>
               </footer>
             ) : null}
           </aside>

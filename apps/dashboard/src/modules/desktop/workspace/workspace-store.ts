@@ -337,6 +337,31 @@ export function startWorkspace(): () => void {
 
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
 export const getWorkspace = () => get()
+/** True while a desktop shell owns this tab (outside it — phones, single-app shells — actions fall back to plain navigation). */
+export const isWorkspaceRunning = () => started
+/** Say something to assistive tech through the workspace's live region (object actions use it). */
+export function announceWorkspace(text: string) { if (text) say(text) }
+
+/**
+ * Bring an open instance into view WITHOUT taking focus from the pane the
+ * operator is working in: its tab becomes active, and a different maximized
+ * pane is restored so the instance is actually on screen. ("Show on Map" from
+ * Comps must not move the operator out of Comps.)
+ */
+export function revealInstance(instanceId: string): 'visible' | 'revealed' | 'missing' {
+  const s = get()
+  const pane = L.paneOf(s.layout, instanceId)
+  if (!pane) return 'missing'
+  const hiddenTab = pane.active !== instanceId
+  const hiddenByMax = Boolean(s.layout.maximized && s.layout.maximized !== pane.id)
+  if (!hiddenTab && !hiddenByMax) return 'visible'
+  let layout = s.layout
+  if (hiddenTab) layout = { ...L.activate(layout, pane.id, instanceId), focus: layout.focus }
+  if (hiddenByMax) layout = { ...layout, maximized: null }
+  set({ layout })
+  if (hiddenByMax) emit({ type: 'restored', pane: s.layout.maximized! })
+  return 'revealed'
+}
 export function useWorkspace(): WorkspaceSnapshot {
   return useSyncExternalStore(subscribe, get, get)
 }

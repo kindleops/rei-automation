@@ -74,6 +74,11 @@ export function setInspectorPinned(pinned: boolean) {
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
 const read = () => state
 
+/** Non-reactive read for event handlers (object actions decide whether an unpinned inspector yields). */
+export function readInspectorState(): { current: EntityRef | null; pinned: boolean } {
+  return { current: state.stack[state.stack.length - 1] ?? null, pinned: state.pinned }
+}
+
 export function useInspector(): { current: EntityRef | null; previous: EntityRef | null; depth: number; pinned: boolean } {
   const s = useSyncExternalStore(subscribe, read, read)
   return {
