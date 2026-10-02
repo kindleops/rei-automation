@@ -55,6 +55,10 @@ import { CampaignCommandReadout } from './components/CampaignCommandReadout'
 import { CampaignCommandMobile } from './mobile/CampaignCommandMobile'
 // Desktop 3.0 — the outbound execution war room (modern product on a wide screen only).
 import { CampaignWarRoom } from './desktop/CampaignWarRoom'
+import { CampaignComposer } from './composer/CampaignComposer'
+import { intakeFromLocation, type Intake } from './composer/composer-intake'
+import { isLegacyBuilderForced } from './composer/composer-flag'
+import { replaceRoutePath, useRouteLocation } from '../../app/router'
 import { sound } from '../../shared/sound'
 import { CampaignDetailBar, CampaignDetailHero } from './mobile/CampaignDetailMobile'
 import { CampaignSectionTabs } from './mobile/CampaignSectionTabs'
@@ -1598,6 +1602,23 @@ export const CampaignsPage = () => {
   const closeActivation = useCallback(() => { setActivationCampaign(null); setLinkIntent(null); clearCampaignIntent() }, [])
   // A campaign the desktop cockpit should open (e.g. one just created).
   const [desktopFocusId, setDesktopFocusId] = useState<string | null>(null)
+  // COMPOSER 2.0 (desktop). The legacy modal stays behind the rollback flag
+  // (composer-flag.ts) and is still the phone's builder. The Composer reads its
+  // intent from THIS instance's route (a workspace pane's own path), not
+  // window.location, so `/campaign-command?compose=1…` opened beside the Map
+  // composes in that pane.
+  const [legacyBuilder] = useState(() => isLegacyBuilderForced())
+  const routeLocation = useRouteLocation()
+  const [composer, setComposer] = useState<{ intake: Intake | null; seq: number } | null>(() => {
+    const intake = intakeFromLocation(routeLocation)
+    return intake ? { intake, seq: 0 } : null
+  })
+  const [seenLocation, setSeenLocation] = useState(routeLocation)
+  if (seenLocation !== routeLocation) {
+    setSeenLocation(routeLocation)
+    const intake = intakeFromLocation(routeLocation)
+    if (intake) setComposer((c) => ({ intake, seq: (c?.seq ?? 0) + 1 }))
+  }
   const [deepLink] = useState(readCampaignDeepLink)
   const [detailTab, setDetailTab] = useState<CampaignDetailTab | undefined>(deepLink.section)
   
@@ -1768,8 +1789,10 @@ export const CampaignsPage = () => {
   )
 
   useEffect(() => {
-    if (readComposeIntent()) clearComposeIntent()
-  }, [])
+    // The Composer keeps its intent in the route (a workspace pane remounts
+    // from its own path); only the legacy builder strips it.
+    if (legacyBuilder && readComposeIntent()) clearComposeIntent()
+  }, [legacyBuilder])
 
   const handleGlobalAction = (action: string) => {
     if (action === 'create') {
@@ -1831,6 +1854,26 @@ export const CampaignsPage = () => {
   // phone), so its index and detail below are untouched. Actions and modals
   // are the same ones.
   if (isModernDesktop) {
+    const composing = !legacyBuilder && (composer !== null || isCreateModalOpen)
+    const composerIntake: Intake | null = composer?.intake ?? (editCampaignId ? { kind: 'draft', campaignId: editCampaignId } : null)
+    const closeComposer = () => {
+      setComposer(null)
+      setIsCreateModalOpen(false)
+      setEditCampaignId(null)
+      setBuilderMode('create')
+      if (intakeFromLocation(routeLocation)) replaceRoutePath('/campaign-command')
+    }
+    if (composing) {
+      return (
+        <CampaignComposer
+          key={`${composer?.seq ?? 0}:${editCampaignId ?? ''}`}
+          intake={composerIntake}
+          persistKey={JSON.stringify(composerIntake ?? { kind: 'blank' })}
+          onClose={() => { closeComposer(); void load({ silent: true }) }}
+          onLaunched={(id) => { closeComposer(); void load({ silent: true }); setDesktopFocusId(id) }}
+        />
+      )
+    }
     return (
       <>
         <CampaignWarRoom
@@ -1843,7 +1886,7 @@ export const CampaignsPage = () => {
           onAction={(action, c, payload) => handleCampaignAction(action, c, payload)}
           focusCampaignId={desktopFocusId}
         />
-        {isCreateModalOpen && (
+        {legacyBuilder && isCreateModalOpen && (
           <CreateCampaignModal
             campaignId={editCampaignId ?? undefined}
             mode={builderMode}

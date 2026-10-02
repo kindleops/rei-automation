@@ -1,0 +1,19 @@
+{
+  "_note": "CAPTURE FIXTURE ONLY (campaign-composer-capture.mjs --fixture-review=1). Numbers mirror the read-only Dallas audience read on 2026-10-02 (737 sender-carried ready of a 1,000-row simulated build). No draft was saved, no targets built.",
+  "ok": true,
+  "campaign_id": "fixture-draft",
+  "build": { "ready": 737, "held": 144, "duplicate_phones_collapsed": 119 },
+  "readiness": {
+    "state": "warnings",
+    "blockers": [],
+    "blocker_codes": [],
+    "warnings": ["144 sellers held at build (entity contact review 128, identity linkage 16)"],
+    "launch_ready": 737,
+    "ready": 737,
+    "routable": 737,
+    "counts": { "targets_persisted": 881, "launch_ready": 737 },
+    "language_coverage": [{ "language": "English", "sellers": 737, "renders": true, "reason": null }],
+    "sender_coverage": [{ "market": "Dallas, TX", "sellers": 737, "sendable": true }],
+    "template_readiness": "resolved"
+  }
+}

@@ -18,6 +18,7 @@ import { planMission } from '../workspace/missions'
 import { deckLine, machineCommands, missionCommands, missionSubject, placeholderFor, workspaceCommands, type DeckGlyph, type WorkspaceCommand } from './deck-model'
 import { useFocusedDeckSubject } from '../workspace/deck-subject'
 import { WorkspaceSelector } from './WorkspaceSelector'
+import { composerCommands } from '../../../views/campaign-command/composer/composer-commands'
 import './command-deck.css'
 
 /**
@@ -121,7 +122,8 @@ export function CommandDeck(p: CommandDeckProps) {
   // recomputed per keystroke inside the bar's own memo — cheap, so no manual memo here
   const extra = (q: string) => {
     const subject = missionSubject({ locator: hasSelection ? readPropertyLocator() : null, focusedPath, focusedTitle, campaignSubject: readCampaignSubjectName() })
-    return [...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
+    const selection = hasSelection ? readPropertyLocator() : null
+    return [...composerCommands(q, { selection: selection ? { propertyId: selection.propertyId, address: selection.address } : null }), ...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
   }
 
   const runWorkspace = (cmd: WorkspaceCommand) => {
