@@ -38,11 +38,19 @@ const clean = (v) => String(v ?? "").trim();
 //              from-number on the plan is ignored, and there is no override.
 //   window     the recipient's contact window (08:00-21:00 local)
 //   vendor DNC seller.owner_phone.do_not_call -> HOLD (semantics unconfirmed)
+//   our flags  suppression / DNC / opt-out, and a wrong person for THIS
+//              property -> HOLD (every lookup fails closed)
+// Chain order: vendor DNC -> suppression -> relationship -> template ->
+// sender -> window. deps.dryRun runs the same chain with ZERO writes.
 // Anything that fails is HELD with a reason and reported, never forced.
 
 export const REPLY_HOLD = Object.freeze({
   VENDOR_DNC: "vendor_dnc_semantics_unconfirmed",
   VENDOR_DNC_UNKNOWN: "vendor_dnc_lookup_unavailable",
+  SUPPRESSED: "suppressed_or_opted_out",
+  SUPPRESSION_UNKNOWN: "suppression_lookup_unavailable",
+  NOT_OWNER: "wrong_person_relationship",
+  RELATIONSHIP_UNKNOWN: "relationship_lookup_unavailable",
   NO_TEMPLATE: "template_missing_or_inactive",
   RENDER: "template_render_incomplete",
   WINDOW: "outside_contact_window",
@@ -95,38 +103,87 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
   const thread = ctx.thread || {};
   const threadKey = clean(thread.thread_key);
   const reply = plan?.reply || null;
+  const dryRun = deps.dryRun === true;
   const hold = (reason, extra = {}) => ({ ok: true, held: true, held_reason: reason, thread_key: threadKey, ...extra });
+  const safely = async (fn, ...args) => {
+    try {
+      return fn ? await fn(...args) : null;
+    } catch {
+      return null;
+    }
+  };
   if (!isInCleanupCohort(deps.cohort, { thread_key: threadKey, deal_id: ctx.deal_id || plan?.deal || null })) {
     return { ok: false, reason: deps.cohort ? "outside_frozen_cohort" : "cohort_gate_missing", thread_key: threadKey };
   }
   if (!reply?.template_id) return hold(REPLY_HOLD.REVIEW, { detail: reply?.review_reason || "no_template_for_this_reply" });
 
-  // Fail closed: an unreadable vendor flag is not a clear flag.
-  let vendor_dnc = null;
-  try {
-    vendor_dnc = deps.loadVendorDnc ? await deps.loadVendorDnc(threadKey) : null;
-  } catch {
-    vendor_dnc = null;
-  }
+  // 1. Vendor do_not_call (seller.owner_phone). Fail closed: unreadable is not clear.
+  const vendor_dnc = await safely(deps.loadVendorDnc, threadKey);
   if (vendor_dnc === null || vendor_dnc === undefined) return hold(REPLY_HOLD.VENDOR_DNC_UNKNOWN);
   const rule = vendorDncChannelRule({ channel: "sms", vendor_dnc: vendor_dnc === true });
   if (rule.action === "hold") return hold(rule.reason);
 
-  const template = deps.loadTemplate ? await deps.loadTemplate(reply.template_id) : null;
-  if (!template || template.is_active !== true) return hold(REPLY_HOLD.NO_TEMPLATE, { template_id: reply.template_id });
-  const rendered = renderCleanupTemplate(template.template_body, reply.variables || {});
-  if (rendered.unresolved.length) return hold(REPLY_HOLD.RENDER, { unresolved: rendered.unresolved });
+  // 2. Our own suppression / DNC / opt-out (sms_suppression_list, automation
+  //    suppressions, thread suppression, opt-out events). Fail closed.
+  const suppression = await safely(deps.checkSuppression, threadKey);
+  if (!suppression) return hold(REPLY_HOLD.SUPPRESSION_UNKNOWN);
+  if (suppression.suppressed) return hold(REPLY_HOLD.SUPPRESSED, { detail: suppression.reason || null });
 
+  // 3. Wrong person for THIS property (relationship-scoped). Fail closed.
+  const relationship = await safely(deps.checkRelationship, {
+    thread_key: threadKey,
+    property_id: clean(thread.property_id) || null,
+    master_owner_id: clean(thread.master_owner_id) || null,
+  });
+  if (!relationship) return hold(REPLY_HOLD.RELATIONSHIP_UNKNOWN);
+  if (relationship.not_owner) return hold(REPLY_HOLD.NOT_OWNER, { detail: relationship.reason || null });
+
+  // 4. Template: must exist; must be ACTIVE to send. A dry run reports an
+  //    inactive row (expected until the deploy window activates it), or a row
+  //    only present in the pending deploy SQL, and goes on.
+  const template = await safely(deps.loadTemplate, reply.template_id);
+  if (!template) return hold(REPLY_HOLD.NO_TEMPLATE, { template_id: reply.template_id, template_state: "missing" });
+  const template_state = template.is_active === true
+    ? "active"
+    : template.pending_deploy_sql === true
+      ? "pending_deploy_sql"
+      : "inactive_until_deploy";
+  if (template_state !== "active" && !dryRun) return hold(REPLY_HOLD.NO_TEMPLATE, { template_id: reply.template_id, template_state });
+  const rendered = renderCleanupTemplate(template.template_body, reply.variables || {});
+  if (rendered.unresolved.length) return hold(REPLY_HOLD.RENDER, { unresolved: rendered.unresolved, template_state });
+
+  // 5. Sender: the normal engine decides; nothing on the plan can pin a number.
+  const sender = await safely(deps.selectSender, { thread, ctx, language: template.language });
+  if (!sender || sender.routing_allowed !== true || !clean(sender.phone_number)) {
+    return hold(REPLY_HOLD.NO_SENDER, { detail: sender?.routing_block_reason || sender?.selection_reason || "sender_engine_unavailable", template_state });
+  }
+
+  // 6. The recipient's contact window.
   const now = deps.now ? new Date(deps.now) : new Date();
   const tz = deps.resolveTimezone ? deps.resolveTimezone(ctx) : null;
-  if (!tz) return hold(REPLY_HOLD.TIMEZONE);
-  if (deps.isWithinContactWindow && !deps.isWithinContactWindow(now, tz)) return hold(REPLY_HOLD.WINDOW, { timezone: tz });
+  if (!tz) return hold(REPLY_HOLD.TIMEZONE, { template_state });
+  // contact-window-timezone.isWithinContactWindow returns { ok, reason, ... };
+  // a bare boolean is accepted too. Anything else is "outside" (fail closed).
+  const windowCheck = deps.isWithinContactWindow ? deps.isWithinContactWindow(now, tz) : false;
+  const inWindow = windowCheck === true || windowCheck?.ok === true;
 
-  // The engine decides; nothing on the plan can pin a number.
-  const sender = deps.selectSender ? await deps.selectSender({ thread, ctx, language: template.language }) : null;
-  if (!sender || sender.routing_allowed !== true || !clean(sender.phone_number)) {
-    return hold(REPLY_HOLD.NO_SENDER, { detail: sender?.routing_block_reason || sender?.selection_reason || "sender_engine_unavailable" });
+  if (dryRun) {
+    // ZERO writes: the queue writer is never reached in a dry run.
+    return {
+      ok: true,
+      would_queue: inWindow,
+      ...(inWindow ? {} : { held: true, held_reason: REPLY_HOLD.WINDOW, passes_all_other_checks: true }),
+      window: typeof windowCheck === "object" && windowCheck ? windowCheck : { ok: inWindow },
+      thread_key: threadKey,
+      template_id: template.template_id,
+      template_state,
+      rendered_message: rendered.text,
+      sender: { phone_number: sender.phone_number, selection_reason: sender.selection_reason || null },
+      recipient_timezone: tz,
+      checks: { vendor_dnc: false, suppressed: false, not_owner: false },
+    };
   }
+  if (!inWindow) return hold(REPLY_HOLD.WINDOW, { timezone: tz });
 
   const dedupe_key = `${CLEANUP_SOURCE}:reply:${threadKey}`;
   const result = await deps.enqueueSendQueueItem({
@@ -154,7 +211,7 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
       repair_tag: CLEANUP_SOURCE,
       cleanup_category: plan.category || null,
       selected_template_id: template.template_id,
-      sender_selection: { engine: "chooseTextgridNumber", reason: sender.selection_reason || null },
+      sender_selection: { engine: "supabase_candidate_feeder.chooseTextgridNumber", reason: sender.selection_reason || null },
       recipient_timezone: tz,
     },
   }, { supabase: deps.supabase });

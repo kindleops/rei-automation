@@ -81,6 +81,11 @@ const CONFIRM = value("confirm");
 const FREEZE = value("freeze");
 // Approved re-engagement replies (one per thread), queued with --apply.
 const REPLIES = value("replies");
+// Dry run of the reply eligibility chain (reads only): --replies-dry --replies=<plan.json>
+const REPLIES_DRY = Boolean(flag("replies-dry"));
+// Dry run only: evaluate the recipient contact window AT this instant (the
+// planned send time) instead of now. --apply always uses the real clock.
+const DRY_AT = value("at");
 // Optional: reconcile against the other pending repairs (P7 placeholders,
 // not-interested nurture). JSON produced from their own read-only previews.
 const RECONCILE = value("reconcile");
@@ -366,6 +371,19 @@ function renderReport(plans, summary, meta) {
 
 async function main() {
   const startedAt = new Date().toISOString();
+  if (REPLIES_DRY) {
+    // The real eligibility chain for every reply, against production, with
+    // ZERO writes (read-only client, no queue writer). No --apply needed.
+    if (!REPLIES) {
+      console.error("--replies-dry needs --replies=<plan.json>");
+      process.exitCode = 2;
+      return;
+    }
+    await runReplies(db(), { thread_ids: new Set(), thread_keys: new Set(), deal_ids: new Set(COHORT_27_DEALS) }, { dryRun: true });
+    const pg = await import("../../src/lib/postgres/client.js");
+    if (pg.hasDatabaseUrl()) await pg.getPgPool().end().catch(() => {});
+    return;
+  }
   let threads;
   let source;
   if (FREEZE) {
@@ -476,7 +494,7 @@ async function main() {
   fs.writeFileSync(path.join(OUT, "new-replies-cleanup-apply-result.json"), JSON.stringify(results, null, 1));
   console.log(JSON.stringify({ applied: results.filter((r) => r.ok).length, failed_or_skipped: results.filter((r) => !r.ok).length }));
 
-  if (REPLIES) await applyReplies(sb, COHORT);
+  if (REPLIES) await runReplies(sb, COHORT, { dryRun: false });
 }
 
 /**
@@ -552,16 +570,24 @@ function cleanupCohort(threads) {
 async function loadVendorDnc(threadKey) {
   const pg = await import("../../src/lib/postgres/client.js");
   if (!pg.hasDatabaseUrl()) return null;
+  let client = null;
   try {
     const d10 = clean(threadKey).replace(/\D/g, "").slice(-10);
-    const res = await pg.queryWithTimeout(
+    client = await pg.getPgPool().connect();
+    // A READ ONLY transaction: this lookup can never write, in any mode.
+    await client.query("begin read only");
+    await client.query("set local statement_timeout = 15000");
+    const res = await client.query(
       "select bool_or(do_not_call) as dnc from seller.owner_phone where right(regexp_replace(phone_value, '\\D', '', 'g'), 10) = $1",
-      [d10],
-      15_000
+      [d10]
     );
+    await client.query("rollback");
     return res?.rows?.[0]?.dnc === true;
   } catch {
+    if (client) await client.query("rollback").catch(() => {});
     return null;
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -581,38 +607,145 @@ async function checkDeployWindowGates(sb) {
 }
 
 /** Queue the approved re-engagement replies (or hold them) through the normal path. */
-async function applyReplies(sb, COHORT) {
-  const plan = JSON.parse(fs.readFileSync(REPLIES, "utf8"));
-  const items = Array.isArray(plan) ? plan : plan.items || [];
-  const [{ queueCleanupReply }, { enqueueSendQueueItem }, routing, windowMod, pg] = await Promise.all([
-    import("../../src/lib/domain/inbox/new-replies-cleanup-apply.js"),
+/** The late-reply rows as written in the (not yet applied) deploy SQL, PART 1. */
+function pendingDeployTemplates() {
+  const file = path.join(path.dirname(new URL(import.meta.url).pathname), "20261001_late_reply_templates.sql");
+  const sql = fs.readFileSync(file, "utf8");
+  const part1 = sql.slice(sql.indexOf("── PART 1 ·"), sql.indexOf("── PART 2 ·"));
+  const map = new Map();
+  const re = /\('(lc-late-[a-z0-9-]+)',\s*'([a-z_]+)',\s*'(S\d)',\s*'([A-Za-z]+)',\s*'((?:[^']|'')*)'/g;
+  let m;
+  while ((m = re.exec(part1)) !== null) {
+    map.set(m[1], { template_id: m[1], use_case: m[2], language: m[4], template_body: m[5].replace(/''/g, "'"), is_active: false, pending_deploy_sql: true });
+  }
+  return map;
+}
+
+/** A Supabase client that can only READ: every write path throws (dry runs). */
+function readOnlyClient(sb, blocked) {
+  const WRITES = new Set(["insert", "update", "upsert", "delete"]);
+  return {
+    from(table) {
+      const q = sb.from(table);
+      return new Proxy(q, {
+        get(target, prop) {
+          if (WRITES.has(prop)) {
+            return () => {
+              blocked.push(`${table}.${String(prop)}`);
+              throw new Error(`dry run: write blocked (${table}.${String(prop)})`);
+            };
+          }
+          const v = target[prop];
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+      });
+    },
+    rpc(name) {
+      blocked.push(`rpc:${name}`);
+      throw new Error(`dry run: rpc blocked (${name})`);
+    },
+  };
+}
+
+/** The eligibility deps shared by --apply and --replies-dry (one chain, one truth). */
+async function buildReplyDeps(sb, COHORT, { dryRun = false, blocked = [] } = {}) {
+  const [{ enqueueSendQueueItem }, feeder, windowMod] = await Promise.all([
     import("../../src/lib/supabase/sms-engine.js"),
-    import("../../src/lib/domain/routing/choose-textgrid-number.js"),
+    // The LIVE sender engine (Supabase textgrid_numbers fleet: status, health,
+    // cooling, caps, approved routing). routing/choose-textgrid-number.js
+    // reads the retired Podio app and is not used.
+    import("../../src/lib/domain/outbound/supabase-candidate-feeder.js"),
     import("../../src/lib/domain/campaigns/contact-window-timezone.js"),
-    import("../../src/lib/postgres/client.js"),
   ]);
-  const deps = {
-    supabase: sb,
-    enqueueSendQueueItem,
-    loadVendorDnc,
+  const db = dryRun ? readOnlyClient(sb, blocked) : sb;
+  const k = (threadKey) => variants(threadKey);
+  return {
+    dryRun,
+    ...(dryRun && DRY_AT ? { now: new Date(DRY_AT).toISOString() } : {}),
+    supabase: db,
     cohort: COHORT,
+    enqueueSendQueueItem: dryRun
+      ? async () => {
+          blocked.push("enqueueSendQueueItem");
+          throw new Error("dry run: enqueue blocked");
+        }
+      : enqueueSendQueueItem,
+    loadVendorDnc,
+    checkSuppression: async (threadKey) => {
+      const keys = k(threadKey);
+      const [supp, auto, threads, optOut] = await Promise.all([
+        db.from("sms_suppression_list").select("phone_e164,is_active,suppression_type").in("phone_e164", keys),
+        db.from("automation_suppressions").select("phone_e164,suppression_type,status,expires_at").in("phone_e164", keys),
+        db.from("inbox_thread_state").select("thread_key,is_suppressed").in("thread_key", keys),
+        db.from("message_events").select("id").in("thread_key", keys).eq("is_opt_out", true).limit(1),
+      ]);
+      if (supp.error || auto.error || threads.error || optOut.error) return null;
+      const now = Date.now();
+      const activeSupp = (supp.data || []).find((r) => r.is_active !== false);
+      if (activeSupp) return { suppressed: true, reason: `sms_suppression_list:${activeSupp.suppression_type || "active"}` };
+      const contactAuto = (auto.data || []).find((r) =>
+        /opt.?out|dnc|do.?not|stop|compliance/i.test(String(r.suppression_type || "")) &&
+        (!r.expires_at || Date.parse(r.expires_at) > now));
+      if (contactAuto) return { suppressed: true, reason: `automation_suppressions:${contactAuto.suppression_type}` };
+      if ((threads.data || []).some((t) => t.is_suppressed === true)) return { suppressed: true, reason: "inbox_thread_state.is_suppressed" };
+      if ((optOut.data || []).length) return { suppressed: true, reason: "message_events.is_opt_out" };
+      return { suppressed: false };
+    },
+    checkRelationship: async ({ thread_key, property_id, master_owner_id }) => {
+      const keys = k(thread_key);
+      const [res, phones] = await Promise.all([
+        property_id
+          ? db.from("contact_property_resolution").select("contact_property_role,rejected_at,rejection_reason").eq("property_id", property_id).in("contact_phone_e164", keys)
+          : Promise.resolve({ data: [] }),
+        db.from("phones").select("master_owner_id,wrong_number_at,phone_contact_status").in("canonical_e164", keys),
+      ]);
+      if (res.error || phones.error) return null;
+      const rejected = (res.data || []).find((r) => r.rejected_at || /not_owner|wrong/i.test(String(r.contact_property_role || "")));
+      if (rejected) return { not_owner: true, reason: `contact_property_resolution:${rejected.rejection_reason || rejected.contact_property_role}` };
+      const wrong = (phones.data || []).find((p) =>
+        (!master_owner_id || String(p.master_owner_id) === String(master_owner_id)) &&
+        (p.wrong_number_at || /wrong_number/i.test(String(p.phone_contact_status || ""))));
+      if (wrong) return { not_owner: true, reason: "phones.wrong_number (this owner)" };
+      return { not_owner: false };
+    },
     loadTemplate: async (template_id) => {
-      const { data } = await sb.from("sms_templates").select("template_id,use_case,language,template_body,is_active").eq("template_id", template_id).limit(1);
-      return (data || [])[0] || null;
+      const { data, error } = await db.from("sms_templates").select("template_id,use_case,language,template_body,is_active").eq("template_id", template_id).limit(1);
+      if (error) throw error;
+      const row = (data || [])[0] || null;
+      // A dry run before the deploy: the row exists only in the deploy SQL. Use
+      // that exact text so the rest of the chain is still exercised; the
+      // result says so (template_state = pending_deploy_sql). --apply never does.
+      if (!row && dryRun) return pendingDeployTemplates().get(template_id) || null;
+      return row;
     },
     resolveTimezone: (ctx) => {
       const r = windowMod.resolveContactTimezone({ propertyState: ctx.property?.state, propertyZip: ctx.property?.zip });
       return r?.iana || null;
     },
     isWithinContactWindow: (now, tz) => windowMod.isWithinContactWindow(now, tz),
-    selectSender: async ({ ctx, language }) =>
-      routing.chooseTextgridNumber({
-        context: { ids: { market_id: ctx.market_id || null }, summary: { market_name: ctx.market || null, language_preference: language } },
-        preferred_language: language,
-        rotation_key: ctx.thread?.thread_key || null,
-        first_touch: false,
-      }),
+    selectSender: async ({ ctx }) => {
+      const r = await feeder.chooseTextgridNumber(
+        { market: ctx.market || null, state: ctx.property?.state || null, touch_number: 2, is_first_touch: false },
+        { first_touch: false },
+        { supabase: db }
+      );
+      return {
+        routing_allowed: r?.ok === true && r?.routing_allowed !== false,
+        phone_number: r?.selected_textgrid_number || r?.selected?.phone_number || null,
+        item_id: r?.selected?.id || null,
+        selection_reason: r?.selection_reason || null,
+        routing_block_reason: r?.routing_block_reason || r?.reason_code || null,
+      };
+    },
   };
+}
+
+async function runReplies(sb, COHORT, { dryRun = false } = {}) {
+  const plan = JSON.parse(fs.readFileSync(REPLIES, "utf8"));
+  const items = Array.isArray(plan) ? plan : plan.items || [];
+  const { queueCleanupReply } = await import("../../src/lib/domain/inbox/new-replies-cleanup-apply.js");
+  const blocked = [];
+  const deps = await buildReplyDeps(sb, COHORT, { dryRun, blocked });
   const results = [];
   for (const item of items) {
     // A reply is in the cohort only through its DEAL (one of the 27).
@@ -621,15 +754,41 @@ async function applyReplies(sb, COHORT) {
       continue;
     }
     const ctx = { deal_id: item.deal, thread: { thread_key: item.thread_key, master_owner_id: item.master_owner_id, property_id: item.property_id }, property: item.property || {}, market: item.market || null, market_id: item.market_id || null };
-    results.push({ deal: item.deal, thread: clean(item.thread_key).slice(-4), ...(await queueCleanupReply({ category: item.category, reply: item.reply, deal: item.deal }, { ...ctx, thread: { ...ctx.thread } }, { ...deps, cohort: { ...COHORT, thread_keys: new Set() } })) });
+    const r = await queueCleanupReply({ category: item.category, reply: item.reply, deal: item.deal }, ctx, { ...deps, cohort: { ...COHORT, thread_keys: new Set() } });
+    results.push({
+      deal: item.deal,
+      deal_short: clean(item.deal).slice(0, 8),
+      phone: `•••${clean(item.thread_key).slice(-4)}`,
+      template_id: item.reply?.template_id || null,
+      outcome: r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown",
+      passes_all_other_checks: r.passes_all_other_checks === true || r.would_queue === true,
+      window: r.window || null,
+      reason: r.held_reason || r.reason || null,
+      detail: r.detail || null,
+      template_state: r.template_state || null,
+      sender: r.sender ? { phone: `•••${clean(r.sender.phone_number).slice(-4)}`, selection_reason: r.sender.selection_reason } : null,
+      recipient_timezone: r.recipient_timezone || null,
+    });
   }
-  fs.writeFileSync(path.join(OUT, "cleanup-replies-apply-result.json"), JSON.stringify(results, null, 1));
-  console.log(JSON.stringify({
-    replies_queued: results.filter((r) => r.queued).length,
-    replies_held: results.filter((r) => r.held).length,
-    held_by_reason: results.filter((r) => r.held).reduce((acc, r) => ({ ...acc, [r.held_reason]: (acc[r.held_reason] || 0) + 1 }), {}),
-    failed: results.filter((r) => r.ok === false).length,
-  }));
+  const summary = {
+    mode: dryRun ? "replies_dry_run" : "replies_apply",
+    run_at: new Date().toISOString(),
+    window_evaluated_at: dryRun && DRY_AT ? new Date(DRY_AT).toISOString() : new Date().toISOString(),
+    writes_blocked: blocked,
+    zero_writes: dryRun ? blocked.length === 0 : null,
+    totals: results.reduce((acc, r) => ({ ...acc, [r.outcome]: (acc[r.outcome] || 0) + 1 }), {}),
+    held_by_reason: results.filter((r) => r.outcome === "held").reduce((acc, r) => ({ ...acc, [r.reason]: (acc[r.reason] || 0) + 1 }), {}),
+    template_states: results.reduce((acc, r) => (r.template_state ? { ...acc, [r.template_state]: (acc[r.template_state] || 0) + 1 } : acc), {}),
+  };
+  const file = path.join(OUT, dryRun ? "replies-dry.json" : "cleanup-replies-apply-result.json");
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ ...summary, results }, null, 1));
+  console.log(JSON.stringify({ file, ...summary }, null, 1));
+  if (dryRun && blocked.length) {
+    console.error("dry run reached a write path:", blocked);
+    process.exitCode = 3;
+  }
+  return results;
 }
 
 main().catch((error) => {

@@ -282,6 +282,8 @@ function replyDeps(overrides = {}) {
   const deps = {
     now: "2026-10-06T18:00:00.000Z", // 14:00 New York, inside 08:00-21:00
     loadVendorDnc: async () => false,
+    checkSuppression: async () => ({ suppressed: false }),
+    checkRelationship: async () => ({ not_owner: false }),
     loadTemplate: async (id) => ({
       template_id: id,
       use_case: "late_reply_identity",
@@ -427,4 +429,64 @@ test("a nurture follow-up for a vendor do_not_call number is HELD, never schedul
     assert.equal(step.held, true);
     assert.equal(step.held_reason, reason);
   }
+});
+
+test("our own suppression / opt-out and a wrong person for this property HOLD the reply; unreadable lookups hold too", async () => {
+  const cases = [
+    [{ checkSuppression: async () => ({ suppressed: true, reason: "sms_suppression_list:opt_out" }) }, REPLY_HOLD.SUPPRESSED],
+    [{ checkSuppression: async () => { throw new Error("down"); } }, REPLY_HOLD.SUPPRESSION_UNKNOWN],
+    [{ checkRelationship: async () => ({ not_owner: true, reason: "contact_property_resolution:not_owner" }) }, REPLY_HOLD.NOT_OWNER],
+    [{ checkRelationship: async () => null }, REPLY_HOLD.RELATIONSHIP_UNKNOWN],
+  ];
+  for (const [over, reason] of cases) {
+    const { deps: d, queued, senderCalls } = replyDeps(over);
+    const res = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, d);
+    assert.equal(res.held_reason, reason);
+    assert.equal(queued.length, 0);
+    assert.equal(senderCalls.length, 0, "no sender is chosen for a held reply");
+  }
+});
+
+test("DRY RUN: the full eligibility chain runs with ZERO writes; an inactive template is reported, not a failure", async () => {
+  const writes = [];
+  const noWrite = (name) => async () => {
+    writes.push(name);
+    throw new Error(`write path reached in a dry run: ${name}`);
+  };
+  const base = replyDeps({
+    dryRun: true,
+    enqueueSendQueueItem: noWrite("enqueueSendQueueItem"),
+    loadTemplate: async (id) => ({
+      template_id: id,
+      use_case: "late_reply_identity",
+      language: "English",
+      is_active: false,
+      template_body: "Hey, this is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?",
+    }),
+  });
+  const ok = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, base.deps);
+  assert.equal(ok.would_queue, true);
+  assert.equal(ok.template_state, "inactive_until_deploy");
+  assert.equal(ok.sender.phone_number, "+15550001000");
+  assert.equal(ok.rendered_message.startsWith("Hey, this is Sam."), true);
+  const dnc = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, { ...base.deps, loadVendorDnc: async () => true });
+  assert.equal(dnc.would_queue, undefined);
+  assert.equal(dnc.held_reason, "vendor_dnc_semantics_unconfirmed");
+  const night = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, { ...base.deps, now: "2026-10-06T04:00:00.000Z" });
+  assert.equal(night.would_queue, false);
+  assert.equal(night.held_reason, REPLY_HOLD.WINDOW);
+  assert.deepEqual(writes, [], "no insert / update path was reached");
+  // Live mode with the same inactive template holds instead of sending.
+  const live = replyDeps({ loadTemplate: base.deps.loadTemplate });
+  assert.equal((await queueCleanupReply(REPLY_PLAN, REPLY_CTX, live.deps)).held_reason, REPLY_HOLD.NO_TEMPLATE);
+});
+
+test("the contact window accepts the real { ok, reason } shape; a truthy object that is not ok never sends", async () => {
+  const { isWithinContactWindow } = await import("@/lib/domain/campaigns/contact-window-timezone.js");
+  const night = replyDeps({ now: "2026-10-06T04:00:00.000Z", isWithinContactWindow });
+  const res = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, night.deps);
+  assert.equal(res.held_reason, REPLY_HOLD.WINDOW);
+  assert.equal(night.queued.length, 0);
+  const day = replyDeps({ isWithinContactWindow });
+  assert.equal((await queueCleanupReply(REPLY_PLAN, REPLY_CTX, day.deps)).queued, true);
 });
