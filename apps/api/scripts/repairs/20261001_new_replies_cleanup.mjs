@@ -91,9 +91,13 @@ const REPLIES = value("replies");
 // Dry run of the reply eligibility chain (reads only): --replies-dry --replies=<plan.json>
 const REPLIES_DRY = Boolean(flag("replies-dry"));
 // rc-7.1: cancel the 16 runner-paused replies and queue them again (see header).
-const REPLIES_REQUEUE = Boolean(flag("replies-requeue")) || Boolean(flag("replies-requeue-sender"));
+const REPLIES_REQUEUE = Boolean(flag("replies-requeue")) || Boolean(flag("replies-requeue-sender")) || Boolean(flag("replies-requeue-identity"));
 // rc-7.1 pass 2: the rows refused for an operator-blocked sender (20:16Z).
-const REQUEUE_PASS = flag("replies-requeue-sender") ? "sender" : "snapshot";
+// rc-7.1 pass 3: a queued row the dispatcher refuses every cycle for want of an
+// action anchor (queue_row_identity_underivable); needs --only-deal.
+const REQUEUE_PASS = flag("replies-requeue-identity") ? "identity" : flag("replies-requeue-sender") ? "sender" : "snapshot";
+// Restrict a run to these deals (comma-separated; 8-char prefixes accepted).
+const ONLY_DEALS = String(value("only-deal") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 // The owner-locked late-reply copy (late-reply-locked-copy.js). Always on for
 // --replies-requeue; --locked-copy turns it on for --replies / --replies-dry.
 const LOCKED_COPY = Boolean(flag("locked-copy")) || REPLIES_REQUEUE;
@@ -392,7 +396,12 @@ async function main() {
       return;
     }
     const dryRun = REPLIES_DRY || !APPLY;
-    const confirmTag = REQUEUE_PASS === "sender" ? "rc71_replies_requeue_sender" : "rc71_replies_requeue";
+    if (REQUEUE_PASS === "identity" && !ONLY_DEALS.length) {
+      console.error("--replies-requeue-identity requires --only-deal=<deal> (it cancels a QUEUED row). Nothing written.");
+      process.exitCode = 2;
+      return;
+    }
+    const confirmTag = { snapshot: "rc71_replies_requeue", sender: "rc71_replies_requeue_sender", identity: "rc71_replies_requeue_identity" }[REQUEUE_PASS];
     if (!dryRun && CONFIRM !== confirmTag) {
       console.error(`re-queue --apply requires --confirm=${confirmTag}. Nothing written.`);
       process.exitCode = 2;
@@ -810,7 +819,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
   const { applyLockedLateReplyCopy } = await import("../../src/lib/domain/inbox/late-reply-locked-copy.js");
   const blocked = [];
   const deps = await buildReplyDeps(sb, COHORT, { dryRun, blocked });
-  const ROW_COLS = "id,queue_key,dedupe_key,queue_status,sent_at,provider_message_id,from_phone_number,guard_reason,paused_reason,metadata,created_at";
+  const ROW_COLS = "id,queue_key,dedupe_key,queue_status,sent_at,provider_message_id,from_phone_number,guard_reason,paused_reason,is_locked,lock_token,logical_communication_id,metadata,created_at";
   const requeueDeps = {
     source: CLEANUP_SOURCE,
     // Every row for the thread's cleanup keys (exact keys: both are indexed).
@@ -832,6 +841,9 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
         .update(patch)
         .eq("id", row.id)
         .eq("queue_status", row.queue_status)
+        // A queued row is only cancelled while no worker holds it.
+        .not("is_locked", "is", true)
+        .is("sent_at", null)
         .select("id");
       if (error) return { ok: false, reason: error.message };
       return { ok: true, changed: (data || []).length === 1 };
@@ -841,6 +853,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
   };
   const results = [];
   for (const item of items) {
+    if (ONLY_DEALS.length && !ONLY_DEALS.some((d) => clean(item.deal).startsWith(d))) continue;
     // A reply is in the cohort only through its DEAL (one of the 27).
     if (!COHORT_27_DEALS.includes(clean(item.deal))) {
       results.push({ deal: item.deal, ok: false, reason: "outside_frozen_cohort" });

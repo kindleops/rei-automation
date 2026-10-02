@@ -499,3 +499,44 @@ test("re-queue SENDER pass: cancels only the blocked row, keeps one live row per
   assert.equal(lr.reason, "live_row_exists");
   assert.deepEqual(liveThread.writes, []);
 });
+
+test("re-queue IDENTITY pass: replaces the stranded queued row once, anchored; refuses a claimed/anchored/sent row", async () => {
+  const { REQUEUE_PASSES } = await import("@/lib/domain/inbox/cleanup-reply-requeue.js");
+  const pass = REQUEUE_PASSES.identity;
+  const stranded = {
+    id: "str-1", queue_key: `${SOURCE}:reply:${THREAD_KEY}:requeue:rc71`, dedupe_key: `${SOURCE}:reply:${THREAD_KEY}`,
+    queue_status: "queued", is_locked: false, lock_token: null, sent_at: null, provider_message_id: null,
+    metadata: { source: SOURCE, skip_reason: "queue_row_identity_underivable" },
+  };
+  const w = requeueWorld([{ ...PAUSED_ROW, queue_status: "cancelled", guard_reason: REQUEUE_TAG }, stranded]);
+  const r = await requeueCleanupReply(PLAN, CTX, { ...w.deps, pass });
+  assert.equal(r.outcome, "queued", JSON.stringify(r));
+  const old = w.rows.find((x) => x.id === "str-1");
+  assert.equal(old.queue_status, "cancelled");
+  assert.equal(old.guard_reason, "rc71_replies_requeue_identity");
+  assert.ok(old.metadata.requeue_audit_rc71_replies_requeue_identity.cancelled_at);
+  const fresh = w.rows.filter((x) => x.queue_key.endsWith(":requeue:rc71:identity"));
+  assert.equal(fresh.length, 1);
+  assert.equal(fresh[0].metadata.operator_action_id, "act-1");
+  assert.equal(resolveQueueRowIdentity({ ...fresh[0], id: "n-1" }).ok, true);
+  const live = w.rows.filter((x) => !x.sent_at && LIVE_STATUSES.has(x.queue_status));
+  assert.equal(live.length, 1, "one live row per thread");
+  // Idempotent: the replacement is live and anchored -> nothing more.
+  assert.equal((await requeueCleanupReply(PLAN, CTX, { ...w.deps, pass })).reason, "live_row_exists");
+
+  for (const [label, row] of [
+    ["claimed", { ...stranded, is_locked: true, lock_token: "t" }],
+    ["anchored", { ...stranded, metadata: { ...stranded.metadata, operator_action_id: "a" } }],
+    ["provider id", { ...stranded, provider_message_id: "SM1" }],
+  ]) {
+    const x = requeueWorld([row]);
+    const res = await requeueCleanupReply(PLAN, CTX, { ...x.deps, pass });
+    assert.notEqual(res.outcome, "queued", label);
+    assert.equal(x.writes.length, 0, label);
+  }
+  // Moved between read and cancel -> refuse, no insert.
+  const moved = requeueWorld([stranded]);
+  const rm = await requeueCleanupReply(PLAN, CTX, { ...moved.deps, pass, cancelPausedRow: async () => ({ ok: true, changed: false }) });
+  assert.equal(rm.reason, "row_changed_since_read");
+  assert.equal(moved.rows.length, 1);
+});
