@@ -1,8 +1,9 @@
 /**
  * Seller portal — notifications through the canonical Brevo client.
  *
- * Only meaningful events: sign-in code, call scheduled, offer ready, message
- * from Prominent, action needed, closing scheduled. Each deep-links into the
+ * Only meaningful events: sign-in code; call scheduled, rescheduled, cancelled
+ * and reminded; offer ready; message from Prominent; action needed; document
+ * ready; closing scheduled or changed; closed. Each deep-links into the
  * authenticated portal; none asks the seller to call. Off unless
  * SELLER_PORTAL_EMAIL_ENABLED=1, and never logs codes or message bodies.
  */
@@ -21,11 +22,17 @@ export function renderSellerEmail({ kind, context = {} }, env = process.env) {
   const link = (path) => `${base}${path}`;
   const table = {
     sign_in_code: { subject: `Your Prominent sign-in code: ${context.code}`, title: 'Your sign-in code', body: `Enter this code to open your Prominent account. It expires in ${context.minutes} minutes.`, code: context.code },
-    call_scheduled: { subject: 'Prominent will call you', title: 'Your call is scheduled.', body: `Prominent will call you ${when(context.start_at, context.timezone)}, about ${clean(context.reason).toLowerCase()}.`, cta: ['View your property', link('/account/')] },
+    call_scheduled: { subject: 'Prominent will call you', title: 'Your call is scheduled.', body: `Prominent will call you ${when(context.start_at, context.timezone)}, about ${clean(context.reason).toLowerCase()}.`, cta: ['View or change your call', link('/account/schedule/')] },
+    call_rescheduled: { subject: 'Your call has a new time', title: 'Your call has a new time.', body: `Prominent will now call you ${when(context.start_at, context.timezone)}.`, cta: ['View or change your call', link('/account/schedule/')] },
+    call_cancelled: { subject: 'Your call is cancelled', title: 'Your call is cancelled.', body: `The call set for ${when(context.start_at, context.timezone)} is cancelled. You can choose another time whenever you like.`, cta: ['Choose another time', link('/account/schedule/')] },
+    call_reminder: { subject: context.offset_minutes >= 1440 ? 'Reminder: Prominent calls you tomorrow' : 'Reminder: Prominent calls you soon', title: 'A reminder about your call.', body: `Prominent will call you ${when(context.start_at, context.timezone)}, about ${clean(context.reason).toLowerCase()}.`, cta: ['View or change your call', link('/account/schedule/')] },
     offer_ready: { subject: 'Your Prominent offer is ready', title: 'Your offer is ready.', body: 'Review the written terms in your Prominent account.', cta: ['Review your offer', link('/account/offer/')] },
     message: { subject: 'A message from Prominent', title: 'You have a new message.', body: 'Prominent replied about your property.', cta: ['Read the message', link('/account/messages/')] },
     action_needed: { subject: 'We need one item from you', title: 'We need one item from you.', body: clean(context.body) || 'Open your account for the details.', cta: ['See what is needed', link('/account/')] },
+    document_ready: { subject: 'A document is ready in your account', title: 'A document is ready.', body: clean(context.label) ? `${clean(context.label)} is ready in your Prominent account.` : 'A document is ready in your Prominent account.', cta: ['View documents', link('/account/documents/')] },
     closing_scheduled: { subject: 'Your closing is scheduled', title: 'Your closing is scheduled.', body: context.start_at ? `Closing is set for ${when(context.start_at, context.timezone)}.` : 'Your closing details are ready.', cta: ['View closing', link('/account/closing/')] },
+    closing_changed: { subject: 'Your closing date changed', title: 'Your closing date changed.', body: context.start_at ? `Closing is now set for ${when(context.start_at, context.timezone)}.` : 'Your closing details were updated.', cta: ['View closing', link('/account/closing/')] },
+    closed: { subject: 'Your sale is closed', title: 'Your sale is closed.', body: 'Thank you for selling with Prominent. Your closing documents stay in your account.', cta: ['View your closing', link('/account/closing/')] },
   };
   const t = table[kind];
   if (!t) return null;

@@ -5,12 +5,15 @@ import { requireSharedSecretAuth } from '@/lib/security/shared-secret.js';
 import {
   SellerPortalError,
   bookCall,
+  cancelCall,
   documentLink,
   getPortalState,
   listCallSlots,
   listSellerMessages,
+  rescheduleCall,
   sendSellerMessage,
   signOut,
+  signOutEverywhere,
   startSignIn,
   verifySignIn,
 } from '@/lib/domain/seller-portal/seller-portal-service.js';
@@ -28,19 +31,24 @@ const MAX_BYTES = 16_384;
  *
  *   x-seller-portal-secret  SELLER_PORTAL_INTERNAL_SECRET (who may call)
  *   x-seller-session        the seller's opaque session token (whose data)
+ *   x-seller-client-ip      the seller's IP as seen by the caller; used only
+ *                           (keyed-hashed) for sign-in throttling
  *
  * The caller is trusted to relay; it is never trusted to authorize. Every
  * seller-scoped action re-resolves the session and its grants here.
  */
 const ACTIONS = {
-  'sign-in-start': (b, deps) => startSignIn({ email: b.email }, deps),
-  'sign-in-verify': (b, deps) => verifySignIn({ email: b.email, code: b.code }, deps),
+  'sign-in-start': (b, deps, token, ip) => startSignIn({ email: b.email, ip }, deps),
+  'sign-in-verify': (b, deps, token, ip) => verifySignIn({ email: b.email, code: b.code, ip }, deps),
   'sign-out': (b, deps, token) => signOut(token, deps),
+  'sign-out-everywhere': (b, deps, token) => signOutEverywhere(token, deps),
   state: (b, deps, token) => getPortalState({ token, opportunityId: b.opportunity_id }, deps),
   messages: (b, deps, token) => listSellerMessages({ token, opportunityId: b.opportunity_id }, deps),
   'messages-send': (b, deps, token) => sendSellerMessage({ token, opportunityId: b.opportunity_id, body: b.body, idempotencyKey: b.idempotency_key }, deps),
-  'call-slots': (b, deps) => listCallSlots({ from: b.from }, deps),
-  'call-book': (b, deps, token) => bookCall({ token: token || null, opportunityId: b.opportunity_id, reason: b.reason, startAt: b.start_at, contact: b.contact, note: b.note }, deps),
+  'call-slots': (b, deps, token) => listCallSlots({ token: token || null, opportunityId: b.opportunity_id, reason: b.reason, from: b.from, to: b.to, timezone: b.timezone }, deps),
+  'call-book': (b, deps, token) => bookCall({ token: token || null, opportunityId: b.opportunity_id, reason: b.reason, startAt: b.start_at, contact: b.contact, note: b.note, timezone: b.timezone, idempotencyKey: b.idempotency_key }, deps),
+  'call-reschedule': (b, deps, token) => rescheduleCall({ token, appointmentId: b.appointment_id, startAt: b.start_at, version: b.version }, deps),
+  'call-cancel': (b, deps, token) => cancelCall({ token, appointmentId: b.appointment_id }, deps),
   'document-link': (b, deps, token) => documentLink({ token, opportunityId: b.opportunity_id, documentId: b.document_id }, deps),
 };
 
@@ -55,17 +63,19 @@ export async function handleSellerPortalRequest(request, action, deps = {}) {
   if (declared > MAX_BYTES) return NextResponse.json({ ok: false, error: 'too_large' }, { status: 413 });
   const body = (await request.json().catch(() => ({}))) ?? {};
   const token = request.headers.get('x-seller-session') || '';
+  const ip = (request.headers.get('x-seller-client-ip') || '').slice(0, 64);
   const serviceDeps = {
     store: deps.store ?? createSupabaseSellerPortalStore(),
     notify: deps.notify ?? createSellerNotifier({ env }),
     env,
     now: deps.now,
     echoCode: deps.echoCode,
+    scheduling: deps.scheduling,
   };
   try {
-    return NextResponse.json(await run(body, serviceDeps, token));
+    return NextResponse.json(await run(body, serviceDeps, token, ip));
   } catch (error) {
-    if (error instanceof SellerPortalError) return NextResponse.json({ ok: false, error: error.code }, { status: error.status });
+    if (error instanceof SellerPortalError) return NextResponse.json({ ok: false, error: error.code, ...(error.slots ? { slots: error.slots } : {}) }, { status: error.status });
     logger.error('seller_portal.failed', { action, code: error?.code || 'unexpected' });
     return NextResponse.json({ ok: false, error: 'seller_portal_unavailable' }, { status: 503 });
   }

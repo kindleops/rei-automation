@@ -29,6 +29,11 @@ export function isChaseAction(row = {}) {
   return Number(row.sequence) > 1 || /followup|follow_up|reminder|nudge/.test(a)
 }
 
+// Transactional sources that are not part of a conversation thread (an
+// appointment reminder has no email thread). Every other check still applies;
+// their business revalidator decides whether the message is still wanted.
+const THREADLESS_SOURCES = new Set(['scheduling'])
+
 export function evaluateSendSafety({ row = {}, thread = null, suppression = null, sender = null, revalidation = null, alreadySent = false, compliance = null, now = Date.now(), staleAfterMs = DEFAULT_STALE_AFTER_MS } = {}) {
   const automated = clean(row.source) !== 'manual'
   const out = (decision, code, extra = {}) => ({ decision, code, ...extra })
@@ -38,7 +43,7 @@ export function evaluateSendSafety({ row = {}, thread = null, suppression = null
   if (!clean(row.subject) || !(clean(row.text_body) || clean(row.html_body) || clean(row.email_body))) return out('fail', 'content_missing')
   if (alreadySent) return out('supersede', 'duplicate_logical_message')
 
-  if (automated) {
+  if (automated && !(THREADLESS_SOURCES.has(clean(row.source)) && !row.thread_id)) {
     if (!thread) return out('fail', 'thread_unlinked')
     if (thread.automation_state === 'taken_over') return out('cancel', 'operator_took_over')
     if (thread.automation_state === 'paused') return out('cancel', 'automation_paused')

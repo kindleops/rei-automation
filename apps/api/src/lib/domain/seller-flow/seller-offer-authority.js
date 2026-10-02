@@ -27,6 +27,7 @@
 import crypto from "node:crypto";
 
 import { getDefaultSupabaseClient } from "@/lib/supabase/default-client.js";
+import { emitSellerLifecycle } from "@/lib/domain/seller-portal/seller-portal-lifecycle.js";
 import {
   resolveNewOfferTerms,
   computeScheduledClosingDate,
@@ -332,20 +333,25 @@ export async function bindOfferToQueueRow({
   send_queue_row_id = null,
   sent_at = null,
   supabase: injected = null,
+  sellerLifecycle = emitSellerLifecycle,
 } = {}) {
   const supabase = injected || getDefaultSupabaseClient();
   if (!supabase || !clean(offer_id)) return { ok: false, reason: "missing_offer_id" };
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("seller_offers")
     .update({
       send_queue_row_id: clean(send_queue_row_id) || null,
       sent_at: iso(sent_at) || new Date().toISOString(),
     })
-    .eq("offer_id", clean(offer_id));
+    .eq("offer_id", clean(offer_id))
+    .select("opportunity_id, offer_version")
+    .maybeSingle();
   if (error) {
     warn("[OFFER_QUEUE_BIND_FAILED]", { offer_id, error: error?.message || "bind_failed" });
     return { ok: false, reason: "bind_failed" };
   }
+  // The offer is now sent: a seller with a Prominent account is told it is ready.
+  if (data?.opportunity_id) await sellerLifecycle({ kind: "offer_ready", opportunityId: data.opportunity_id, dedupeKey: `offer_ready:${clean(offer_id)}` });
   return { ok: true, offer_id };
 }
 

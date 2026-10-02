@@ -101,7 +101,17 @@ const NOTIFICATION_PROJECTION_JOB_PATHS = ["/api/internal/notifications/stories/
  */
 const SCORING_BACKFILL_JOB_PATHS = ["/api/internal/acquisition/scoring-backfill"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS];
+/**
+ * Scheduling reconciliation, requested 2026-10-02 in the shared scheduling
+ * core brief ("provide reconciliation for missed webhook delivery"). Not a
+ * transport: it syncs Google Calendar busy time, renews push channels, and
+ * repairs appointment calendar copies. Customer reminders are email_queue rows
+ * that only email/dispatch can send. Registered, NOT enabled: its flag
+ * CRON_SCHEDULING_ENABLED is absent from the enabled list below.
+ */
+const SCHEDULING_JOB_PATHS = ["/api/internal/scheduling/tick"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS, ...SCORING_BACKFILL_JOB_PATHS, ...SCHEDULING_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.

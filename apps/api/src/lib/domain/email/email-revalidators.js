@@ -11,8 +11,11 @@
  *              other workflow email is still wanted unless the dispatcher's
  *              own gates (suppression, takeover, stale, counterparty replied)
  *              say otherwise.
+ *   scheduling — an appointment reminder is dropped when the appointment was
+ *              cancelled, rescheduled or moved (scheduling-reminders.js).
  */
 import { registerEmailRevalidator } from './email-dispatch.js'
+import { revalidateSchedulingEmail } from '@/lib/domain/scheduling/scheduling-reminders.js'
 
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
@@ -53,3 +56,4 @@ export async function revalidateWorkflowEmail(db, row, ctx = {}) {
 }
 
 registerEmailRevalidator('workflow', revalidateWorkflowEmail)
+registerEmailRevalidator('scheduling', revalidateSchedulingEmail)
