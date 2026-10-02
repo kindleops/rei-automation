@@ -6090,8 +6090,133 @@ export async function getCampaign(campaignId, deps = {}) {
   }
 }
 
+const hasOwn = (object, key) => Boolean(object) && typeof object === 'object' && Object.prototype.hasOwnProperty.call(object, key)
+
+/** The targeting a PATCH states explicitly, or null — never the payload itself. */
+function explicitPatchFilters(payload = {}) {
+  const metadata = metadataObject(payload.metadata)
+  if (hasOwn(payload, 'target_filters')) return metadataObject(payload.target_filters)
+  if (hasOwn(payload, 'filters')) return metadataObject(payload.filters)
+  if (hasOwn(metadata, 'target_filters')) return metadataObject(metadata.target_filters)
+  return null
+}
+
+/**
+ * Which `campaigns` columns (and metadata keys) a PATCH actually states
+ * (rc-7.1 D9). normalizeCampaignInput builds a WHOLE row — right for create,
+ * wrong for an edit: every save re-wrote auto_send_enabled / auto_reply_mode,
+ * reset metadata.template_use_case and campaign_type, and (getTargetFilters
+ * falls back to the payload itself) replaced metadata.target_filters with the
+ * patch body. An update now writes only what the request contains, through
+ * the same normalisation.
+ */
+export function campaignPatchScope(payload = {}) {
+  const filters = explicitPatchFilters(payload)
+  const carries = filters !== null
+  const viaFilter = (...keys) => carries && keys.some((key) => hasOwn(filters, key))
+  const has = (...keys) => keys.some((key) => hasOwn(payload, key))
+  const columns = new Set()
+  const add = (column, condition) => { if (condition) columns.add(column) }
+  add('name', has('name', 'campaign_name'))
+  add('description', has('description'))
+  add('objective', has('objective', 'template_use_case'))
+  add('candidate_source', has('candidate_source', 'source_view') || viaFilter('candidate_source'))
+  add('market', has('market') || carries)
+  add('state', has('state') || carries)
+  add('language_policy', has('language_policy') || viaFilter('language'))
+  add('agent_persona', has('agent_persona') || viaFilter('agent_persona'))
+  add('daily_cap', has('daily_cap') || viaFilter('daily_cap'))
+  add('total_cap', has('total_cap') || viaFilter('total_cap'))
+  add('batch_max', has('batch_max') || viaFilter('batch_max', 'max_batch_size'))
+  add('market_cap', has('market_cap') || viaFilter('market_cap'))
+  add('per_sender_cap', has('per_sender_cap') || viaFilter('per_sender_cap', 'per_number_cap'))
+  add('send_interval_seconds', has('send_interval_seconds') || viaFilter('interval_seconds', 'send_interval_seconds'))
+  add('contact_window_start', has('contact_window_start') || viaFilter('custom_window_start'))
+  add('contact_window_end', has('contact_window_end') || viaFilter('custom_window_end'))
+  add('auto_queue_enabled', has('auto_queue_enabled'))
+  add('auto_send_enabled', has('auto_send_enabled'))
+  add('auto_reply_mode', has('auto_reply_mode'))
+  add('emergency_stop_at', has('emergency_stop_at'))
+
+  const metadataKeys = new Set(Object.keys(metadataObject(payload.metadata)))
+  if (carries) metadataKeys.add('target_filters')
+  if (has('campaign_type')) metadataKeys.add('campaign_type')
+  if (has('template_use_case') || viaFilter('template_use_case')) metadataKeys.add('template_use_case')
+  if (has('stage_code') || viaFilter('stage_code')) metadataKeys.add('stage_code')
+  if (has('launch_timezone')) metadataKeys.add('launch_timezone')
+  if (has('timezone')) metadataKeys.add('timezone')
+  if (metadataKeys.size) columns.add('metadata')
+  return { columns, metadataKeys, carriesFilters: carries }
+}
+
+const AUDIT_SECRET_KEY = /secret|token|password|api[_-]?key|authorization|credential/i
+const AUDIT_VALUE_MAX = 300
+
+function auditValue(key, value) {
+  if (AUDIT_SECRET_KEY.test(String(key))) return '[redacted]'
+  if (value === undefined) return null
+  const json = JSON.stringify(value)
+  if (json && json.length > AUDIT_VALUE_MAX) {
+    return { summary: `${Array.isArray(value) ? 'list' : typeof value} (${json.length} chars)`, preview: json.slice(0, AUDIT_VALUE_MAX) }
+  }
+  return value
+}
+
+const sameValue = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+
+const CHANGE_WORDS = {
+  'metadata.target_filters': 'audience filters',
+  'metadata.template_use_case': 'message type',
+  'metadata.stage_code': 'stage',
+  'metadata.timezone': 'time zone',
+  'metadata.launch_timezone': 'time zone',
+  'metadata.planned_first_scheduled_at': 'planned start',
+  contact_window_start: 'texting hours',
+  contact_window_end: 'texting hours',
+  send_interval_seconds: 'pace',
+}
+
+/** Plain words for an activity line ("Changed: name, daily cap, audience filters"). */
+export function describeCampaignChanges(changes = {}) {
+  const words = Object.keys(changes).map((key) => CHANGE_WORDS[key] || key.replace(/^metadata\./, '').replace(/_/g, ' '))
+  return [...new Set(words)].join(', ')
+}
+
+/** Old → new for every changed column (metadata per key); values truncated, secrets redacted. */
+export function campaignPatchChanges(existing = {}, patch = {}) {
+  const changes = {}
+  for (const [column, next] of Object.entries(patch)) {
+    if (column === 'metadata') {
+      const before = metadataObject(existing.metadata)
+      const after = metadataObject(next)
+      for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (sameValue(before[key], after[key])) continue
+        changes[`metadata.${key}`] = { from: auditValue(key, before[key]), to: auditValue(key, after[key]) }
+      }
+      continue
+    }
+    if (sameValue(existing[column], next)) continue
+    changes[column] = { from: auditValue(column, existing[column]), to: auditValue(column, next) }
+  }
+  return changes
+}
+
+export const CAMPAIGN_LIFECYCLE_ROUTE_HINT = '/api/cockpit/campaigns/{id}/lifecycle'
+
 export async function updateCampaign(campaignId, payload = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
+  // Lifecycle state is owned by the state machine (validated edges, advisory
+  // lock, lifecycle timestamps). A config PATCH that carried `status` wrote it
+  // straight to the row — e.g. 'active' with no activation, lock or targets.
+  if (hasOwn(payload, 'status')) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'status_not_patchable',
+      message: `Campaign status can't be changed by an edit. Use POST ${CAMPAIGN_LIFECYCLE_ROUTE_HINT.replace('{id}', campaignId)} with an action (schedule, activate, pause, resume, archive, …) so the state machine validates it.`,
+      lifecycle_route: CAMPAIGN_LIFECYCLE_ROUTE_HINT.replace('{id}', campaignId),
+    }
+  }
   if (asBoolean(payload.auto_send_enabled, false)) {
     return { ok: false, status: 423, error: 'auto_send_live_disabled', message: 'Phase 1 does not enable live auto-send.' }
   }
@@ -6099,21 +6224,41 @@ export async function updateCampaign(campaignId, payload = {}, deps = {}) {
     return { ok: false, status: 423, error: 'auto_reply_live_disabled', message: 'Phase 1 does not enable live auto-reply.' }
   }
   const current = await getCampaign(campaignId, deps)
-  const patch = normalizeCampaignInput(payload, current.campaign)
-  delete patch.created_at
-  const { data, error } = await supabase.from('campaigns').update(patch).eq('id', campaignId).select('*').single()
+  const existing = current.campaign || {}
+  const full = normalizeCampaignInput(payload, existing)
+  const scope = campaignPatchScope(payload)
+  const patch = {}
+  for (const column of scope.columns) {
+    if (column === 'metadata') continue
+    if (hasOwn(full, column)) patch[column] = full[column]
+  }
+  if (scope.columns.has('metadata')) {
+    const metadata = { ...metadataObject(existing.metadata) }
+    for (const key of scope.metadataKeys) metadata[key] = full.metadata?.[key]
+    patch.metadata = metadata
+  }
+  const changes = campaignPatchChanges(existing, patch)
+  const changedColumns = Object.keys(patch).filter((column) => column === 'metadata'
+    ? Object.keys(changes).some((key) => key.startsWith('metadata.'))
+    : hasOwn(changes, column))
+  const write = Object.fromEntries(changedColumns.map((column) => [column, patch[column]]))
+  if (!changedColumns.length) {
+    return { ok: true, campaign: existing, campaign_id: existing.id || campaignId, changed_fields: [], unchanged: true }
+  }
+  const { data, error } = await supabase.from('campaigns').update(write).eq('id', campaignId).select('*').single()
   if (error) throw error
-  if (payload.target_filters || payload.filters || payload.metadata?.target_filters) {
-    await replaceCampaignFilters(campaignId, patch.metadata?.target_filters || {}, deps)
+  if (scope.carriesFilters) {
+    await replaceCampaignFilters(campaignId, write.metadata?.target_filters || patch.metadata?.target_filters || {}, deps)
   }
   await recordCampaignEvent({
     campaign_id: campaignId,
     event_type: 'campaign.updated',
     severity: 'info',
     title: 'Campaign updated',
-    metadata: { patch_keys: Object.keys(payload || {}) },
+    description: `Changed: ${describeCampaignChanges(changes)}`,
+    metadata: { changes, patch_keys: Object.keys(payload || {}) },
   }, deps)
-  return { ok: true, campaign: data, campaign_id: data.id }
+  return { ok: true, campaign: data, campaign_id: data.id, changed_fields: Object.keys(changes) }
 }
 
 /**

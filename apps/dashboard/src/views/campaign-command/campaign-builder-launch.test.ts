@@ -169,3 +169,12 @@ describe('the touch a saved campaign reopens with', () => {
     expect(builderStageChoice('S6B', 'first_touch')).toBe('first_touch')
   })
 })
+
+describe('RC 7.1 D9: a save never carries lifecycle status', () => {
+  it('the update payload (the PATCH body) has no status — status changes go through /lifecycle', () => {
+    const payload = buildCampaignPersistPayload(draft, launch(), serialize, true) as Record<string, unknown>
+    expect(Object.prototype.hasOwnProperty.call(payload, 'status')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(payload, 'auto_send_enabled')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(payload, 'auto_reply_mode')).toBe(false)
+  })
+})
