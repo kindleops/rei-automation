@@ -12,7 +12,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { LCActivityFeed, LCButton, LCEmpty, LCError, LCHoverCard, LCLive, LCSkeleton, LCSparkline, LCStatus, cx } from '../../../shared/lc'
+import { LCActivityFeed, LCButton, LCEmpty, LCError, LCHoverCard, LCLive, LCSkeleton, LCSparkline, LCStatus, cx, type LCRowActivationEvent } from '../../../shared/lc'
 import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import type { DeskCard, DeskFlow, DeskMove, DeskOffers, DeskOverview } from './pipeline-desk-api'
 import {
@@ -39,7 +39,7 @@ export function MovingNowPlane({ flow, loading, error, onRetry, periodLong, onOp
   error: string | null
   onRetry: () => void
   periodLong: string
-  onOpenDeal: (id: string) => void
+  onOpenDeal: (id: string, e?: LCRowActivationEvent) => void
   liveAt: number | null
   now: number
 }) {
@@ -74,7 +74,7 @@ export function MovingNowPlane({ flow, loading, error, onRetry, periodLong, onOp
           <ul>
             {flow.inFlight.slice(0, 6).map((s) => (
               <li key={`${s.opportunityId}:${s.at}`}>
-                <button type="button" onClick={() => onOpenDeal(s.opportunityId)}>
+                <button type="button" onClick={(e) => onOpenDeal(s.opportunityId, e)}>
                   <LCStatus state={s.future ? 'scheduled' : 'running'} label={s.future ? `Scheduled ${relShort(s.at, now) ?? ''}` : 'Sending'} />
                   <b>{s.kind === 'follow_up' ? 'Follow-up' : 'Reply'}{s.useCase ? ` · ${stepWords(s.useCase)}` : ''}</b>
                   <small>{s.address || s.seller || 'Deal'} · S{s.stageIndex ?? '–'}</small>
@@ -95,7 +95,7 @@ export function MovingNowPlane({ flow, loading, error, onRetry, periodLong, onOp
           <ul>
             {flow.held.slice(0, 5).map((h) => (
               <li key={`${h.opportunityId}:${h.at}`}>
-                <button type="button" onClick={() => onOpenDeal(h.opportunityId)}>
+                <button type="button" onClick={(e) => onOpenDeal(h.opportunityId, e)}>
                   <Icon name="pause" size={12} />
                   <b>{stepWords(h.useCase) || 'Message'}</b>
                   <small>{h.address || h.seller || 'Deal'} · {h.by === 'human' ? 'your bulk send' : 'autopilot draft'} · {relShort(h.at, now)}</small>
@@ -134,7 +134,7 @@ export function OwnershipPlane({ overview, rows, movedToday, owner, onOwner, onO
   movedToday: number | null
   owner: LiveOwner | null
   onOwner: (o: LiveOwner | null) => void
-  onOpenDeal: (card: DeskCard) => void
+  onOpenDeal: (card: DeskCard, e?: LCRowActivationEvent) => void
   now: number
 }) {
   const counts = overview?.ownership
@@ -181,7 +181,7 @@ export function OwnershipPlane({ overview, rows, movedToday, owner, onOwner, onO
         <span className="lc-eyebrow">Exceptions · {rows ? fmtInt(exceptions.length) : overview ? fmtInt((overview.totals.needsYou ?? 0) + (overview.totals.blocked ?? 0)) : '—'}</span>
         {!rows ? <LCSkeleton shape="rows" count={4} /> : exceptions.length ? (
           <ol>
-            {exceptions.slice(0, 12).map((c) => <ExceptionRow key={c.id} card={c} now={now} onOpen={() => onOpenDeal(c)} />)}
+            {exceptions.slice(0, 12).map((c) => <ExceptionRow key={c.id} card={c} now={now} onOpen={(e) => onOpenDeal(c, e)} />)}
           </ol>
         ) : (
           <LCEmpty title="Nothing needs you" body="Every live deal is the machine’s, the seller’s or an outside party’s." tone="calm" compact />
@@ -220,7 +220,7 @@ function exceptionTitle(card: DeskCard): string {
   return detail
 }
 
-function ExceptionRow({ card, now, onOpen }: { card: DeskCard; now: number; onOpen: () => void }) {
+function ExceptionRow({ card, now, onOpen }: { card: DeskCard; now: number; onOpen: (e: LCRowActivationEvent) => void }) {
   const meta = OWNER_META[card.owner]
   const hold = card.hold ? HOLD_META[card.hold] : null
   return (

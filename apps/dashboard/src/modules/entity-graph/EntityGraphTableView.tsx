@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import type { EntityGraphTab, EntitySearchResult } from '../../domain/entity-graph/entity-graph.types'
 import type { SelectedEntity } from '../../domain/entity-graph/selected-entity'
 import { resultMatchesSelection } from '../../domain/entity-graph/selected-entity'
@@ -9,7 +10,8 @@ type Props = {
   selectedEntity: SelectedEntity
   sortBy: string
   ascending: boolean
-  onSelect: (result: EntitySearchResult) => void
+  /** `e` carries the click's modifiers (⇧ inspect · ⌘/Ctrl open beside). */
+  onSelect: (result: EntitySearchResult, e?: MouseEvent) => void
   onSort: (column: string) => void
 }
 
@@ -54,7 +56,7 @@ export function EntityGraphTableView({
                 key={`${result.entityType}:${result.entityId}`}
                 className={isSelected ? 'is-selected' : ''}
                 data-entity-type={result.entityType}
-                onClick={() => onSelect(result)}
+                onClick={(e) => onSelect(result, e)}
               >
                 {cells.map((cell, index) => (
                   <td key={`${result.entityId}-${index}`}>

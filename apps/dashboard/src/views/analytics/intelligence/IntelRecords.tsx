@@ -14,7 +14,7 @@ import { LCButton, LCDataGrid, LCIconButton, cx } from '../../../shared/lc'
 import type { LCColumn, LCSort } from '../../../shared/lc'
 import { pushRoutePath } from '../../../app/router'
 import { sound } from '../../../shared/sound'
-import { handleObjectClick, objectMenuEntries, showOnMap, useClickGesture } from '../../../modules/desktop/objects'
+import { handleObjectClick, objectMenuEntries, showOnMap } from '../../../modules/desktop/objects'
 import { handoffPointObject, recordRowObject } from './intel-objects'
 import { useLab } from './intel-context'
 import { paths, useIntel } from './intel-data'
@@ -71,7 +71,6 @@ export function IntelRecords({ cohort, title, onClose }: { cohort: RecordCohort;
     render: (r: Row) => cell(r[c.id], c.type, ctx.tz),
   })), [d?.columns, ctx.tz])
 
-  const gesture = useClickGesture()
   const open = (r: Row) => {
     if (d?.entity === 'run') { pushRoutePath(sellerAutomationPath(r)); return }
     if (r.oppId && (d?.entity === 'transition' || d?.entity === 'opportunity' || d?.entity === 'offer' || d?.entity === 'closing')) { pushRoutePath(`/pipeline?opp=${encodeURIComponent(String(r.oppId))}`); return }
@@ -142,7 +141,7 @@ export function IntelRecords({ cohort, title, onClose }: { cohort: RecordCohort;
             <LCIconButton icon="x" label="Close records" shortcut={['Esc']} onClick={onClose} />
           </div>
         </header>
-        <div className={cx('ix-rec__grid', p1.stale && 'is-stale')} {...gesture.captureProps}>
+        <div className={cx('ix-rec__grid', p1.stale && 'is-stale')}>
           <LCDataGrid
             id={`intel-records-${d?.entity || 'x'}`}
             label={`Records: ${title}`}
@@ -152,7 +151,7 @@ export function IntelRecords({ cohort, title, onClose }: { cohort: RecordCohort;
             sort={sort}
             onSortChange={(s) => setState({ key, sort: s, pages: 1 })}
             // click opens it in its app · ⇧-click inspects · ⌘/Ctrl-click opens beside
-            onActivate={(r) => handleObjectClick(gesture.take(), rowObject(r), () => open(r))}
+            onActivate={(r, e) => handleObjectClick(e, rowObject(r), () => open(r))}
             rowMenu={(r) => [
               ...(r.thread ? [{ id: 'inbox', label: 'Open the conversation', icon: 'message' as const, onSelect: () => pushRoutePath(`/inbox?thread=${encodeURIComponent(String(r.thread))}`) }] : []),
               ...(r.oppId ? [{ id: 'pipe', label: 'Open the deal in Pipeline', icon: 'arrow-up-right' as const, onSelect: () => pushRoutePath(`/pipeline?opp=${encodeURIComponent(String(r.oppId))}`) }] : []),

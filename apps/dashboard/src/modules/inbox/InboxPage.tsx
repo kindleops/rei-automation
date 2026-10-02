@@ -7,6 +7,7 @@ import { useAuth } from '../../components/auth/AuthProvider'
 import { PaneRouteContext, pushRoutePath } from '../../app/router'
 import { useInboxData, toWorkflowThread, isInboxDebugEnabled } from './inbox.adapter'
 import { useDealDeskSelection } from './useDealDeskSelection'
+import { applyThreadReadOnSelect, type ThreadSelectIntent } from './thread-read-policy'
 import {
   describeThreadReference,
   resolveThreadRouteKey,
@@ -15,7 +16,6 @@ import {
   dealDeskThreadMatchesRef,
   resolveDealDeskSelectionKey,
   resolveDealDeskThreadReference,
-  resolveDealDeskWritableThreadKey,
 } from '../../domain/inbox/deal-desk-thread-reference'
 import { createComposerDraftStore } from '../../domain/inbox/composer-draft-store'
 import { DEAL_DESK_RESOURCES } from '../../domain/inbox/selection-request-guard'
@@ -4175,7 +4175,31 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     handleMobileBack,
   )
 
-  const handleSelect = useCallback((id: string) => {
+  /** The one place a selection may write `is_read` -- see thread-read-policy.ts. */
+  const readOnSelect = useCallback((intent: ThreadSelectIntent, threadLike: Parameters<typeof applyThreadReadOnSelect>[1]) => {
+    applyThreadReadOnSelect(intent, threadLike, {
+      patchRead: (writeKey) => callBackend('/api/cockpit/inbox/thread-state', {
+        method: 'PATCH',
+        body: JSON.stringify({ thread_key: writeKey, patch: { is_read: true } }),
+      }),
+      onWritten: () => { void refreshInboxCounts() },
+      onUnwritable: (writeKey) => {
+        // The operator opened the thread, so it will stay unread; say why.
+        lcToast({
+          title: 'Could not mark as read',
+          detail: 'This conversation has no writable canonical phone route.',
+          severity: 'warning',
+        })
+        if (DEV) {
+          console.warn('[DealDesk] read-mark skipped — no writable thread reference', {
+            reference: describeThreadReference(writeKey?.reference ?? null),
+          })
+        }
+      },
+    })
+  }, [DEV, refreshInboxCounts])
+
+  const selectThreadWithIntent = useCallback((id: string, intent: ThreadSelectIntent) => {
     setPreviewContext(null)
     const thread = findThreadByRef(threads, id)
     const threadKey = thread?.threadKey || thread?.id || id
@@ -4212,63 +4236,27 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       console.warn('[DealDesk] select ignored — no thread for ref', { ref: id })
     }
 
-    // Mark thread read. The key now comes from the shared write contract, so a composite
-    // or UUID identifier is never sent to the server's /^\+1\d{10}$/ guard (DD-003).
-    // Full mutation repair (rollback, surfaced errors) belongs to N.2; this lane only
-    // stops firing a request that is guaranteed to be rejected.
-    const writeKey = resolveDealDeskWritableThreadKey(thread ?? { thread_key: threadKey, threadKey })
-    if (writeKey?.ok) {
-      void callBackend('/api/cockpit/inbox/thread-state', {
-        method: 'PATCH',
-        body: JSON.stringify({ thread_key: writeKey.threadKey, patch: { is_read: true } }),
-      }).then((res) => {
-        /*
-         * §7 — READING IS NOT REPLYING, AND NEW REPLIES IS NOT "UNREAD".
-         *
-         * This used to hide the row from New Replies on a successful read,
-         * on the stated belief that "opening a thread marks it read, which
-         * moves it out of New Replies on the server". The canonical predicate
-         * says otherwise: in_new_replies (v_inbox_thread_state_buckets) has no
-         * is_read term at all. It means "the latest message is inbound and is
-         * newer than our last outbound" -- i.e. the seller is awaiting a
-         * REPLY. Production proves it: 5 of the first 100 rows the New Replies
-         * list returns are already read.
-         *
-         * So the row was being hidden from a set the server still counted it
-         * in. The badge never moved, and the next refetch brought the row
-         * back -- a disappearing-reappearing thread, and a count that
-         * disagreed with its own list.
-         *
-         * The read still happens and still matters: `unread` IS read-based, so
-         * refreshing the counts moves that badge. The row stays until the
-         * operator actually answers, which is the canonical rule and also the
-         * more useful one -- an unanswered seller should not leave the queue
-         * because someone glanced at it.
-         */
-        if (!res?.ok) return
-        void refreshInboxCounts()
-      })
-    } else {
-      // Surface it. The operator clicked the thread, so it will stay unread; silently
-      // skipping (DEV-only logging) left them with no way to know why. Full mutation
-      // error UX is N.2 — this is the minimum honest signal.
-      lcToast({
-        title: 'Could not mark as read',
-        detail: 'This conversation has no writable canonical phone route.',
-        severity: 'warning',
-      })
-      if (DEV) {
-        console.warn('[DealDesk] read-mark skipped — no writable thread reference', {
-          reference: describeThreadReference(writeKey?.reference ?? null),
-        })
-      }
-    }
+    // Mark thread read -- ONLY when the operator opened the conversation
+    // (thread-read-policy.ts). A Map pin, a linked property arriving in a Map
+    // pane, Show on Map, a Pipeline card or a Calendar entry select the thread
+    // with intent 'navigate' and never write.
+    //
+    // §7 -- READING IS NOT REPLYING, AND NEW REPLIES IS NOT "UNREAD".
+    // in_new_replies (v_inbox_thread_state_buckets) has no is_read term: it means
+    // "the seller is awaiting a reply". So a successful read refreshes the
+    // read-based counts but never hides the row from New Replies.
+    readOnSelect(intent, thread ?? { thread_key: threadKey, threadKey })
 
     if (isMobileInboxShell) {
       setMobileThreadOpen(true)
       setMobileIntelOpen(false)
     }
-  }, [DEV, canonicalSelectionKey, isMobileInboxShell, selectThread, setActiveContext, threads, viewFilter])
+  }, [DEV, canonicalSelectionKey, isMobileInboxShell, readOnSelect, selectThread, setActiveContext, threads, viewFilter])
+
+  /** The operator opened this conversation (Inbox row, Open conversation, Notification Open): a read. */
+  const handleSelect = useCallback((id: string) => selectThreadWithIntent(id, 'open_conversation'), [selectThreadWithIntent])
+  /** Selection from another surface (Map, Pipeline, Calendar, Queue, Entity Graph): never a read. */
+  const handleSelectInView = useCallback((id: string) => selectThreadWithIntent(id, 'navigate'), [selectThreadWithIntent])
 
   /**
    * DEEP LINK TO ONE CONVERSATION (Map, Live Activity, Campaign replies).
@@ -4311,6 +4299,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
       }
       setActiveContext(buildContextFromThread(hit, 'inbox'), { preserveCurrentViews: true })
       selectThread(hit)
+      // An explicit open (Open conversation, Notification Open) -- a read, exactly like
+      // the in-list branch above, which goes through handleSelect.
+      readOnSelect('open_conversation', hit)
       focusWorkspaceView('sms_thread')
       if (isMobileInboxShell) { setMobileThreadOpen(true); setMobileIntelOpen(false) }
     } catch {
@@ -4318,7 +4309,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     } finally {
       pendingThreadBusyRef.current = null
     }
-  }, [focusWorkspaceView, handleSelect, isMobileInboxShell, routeMode, selectThread, setActiveContext, threads])
+  }, [focusWorkspaceView, handleSelect, isMobileInboxShell, readOnSelect, routeMode, selectThread, setActiveContext, threads])
 
   useEffect(() => {
     void openPendingThread()
@@ -5336,12 +5327,12 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
     if (event.threadId) {
       const match = findThreadByRef(threads, event.threadId)
       if (match) {
-        handleSelect(match.id)
+        handleSelectInView(match.id)
         return
       }
     }
     setActiveContext(buildContextFromCalendarEvent(event), { preserveCurrentViews: true })
-  }, [handleSelect, setActiveContext, threads])
+  }, [handleSelectInView, setActiveContext, threads])
 
   const handleActivityNavigation = useCallback((event: import('../../views/map/commandMapLiveActivity').CommandMapActivityEvent) => {
     const openThread = event.targetView === 'thread' || event.type === 'new_reply' || event.type === 'positive_reply'
@@ -5982,7 +5973,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             onAction={handleEntityGraphAction}
             onSelectThreadKey={(threadKey) => {
               const match = findThreadByRef(threads, threadKey)
-              if (match) handleSelect(match.id)
+              if (match) handleSelectInView(match.id)
               else setActiveContext({ threadKey, ...activeInboxFromUniversalContext(universalEntityContext, 'entity_graph') }, { openThread: true })
             }}
           />
@@ -6009,7 +6000,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               zoomedIn
               sourceMode={mapSourceMode}
               onSourceModeChange={setMapSourceMode}
-              onSelectThreadId={handleSelect}
+              onSelectThreadId={handleSelectInView}
               onSelectSellerContext={handleMapSellerContext}
               onSelectActivity={handleActivityNavigation}
               onBackgroundClick={() => {}}
@@ -6075,7 +6066,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             selectedId={workspaceThread?.id ?? effectiveActiveContext.threadKey ?? null}
             externalContext={effectiveActiveContext}
             layoutMode={layoutMode}
-            onSelect={handleSelect}
+            onSelect={handleSelectInView}
             onAnchorThread={anchorThreadSelection}
             onEstablishContext={(ctx) => setActiveContext(ctx, { preserveCurrentViews: true })}
             onSyncOpportunity={syncOpportunityContext}
@@ -6117,7 +6108,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
               ? findThreadByRef(threads, queueItem.linkedInboxThreadId)
               : undefined
             if (linkedThread) {
-              handleSelect(linkedThread.id)
+              handleSelectInView(linkedThread.id)
               return
             }
             setActiveContext(buildContextFromQueueItem(queueItem, 'queue'), { preserveCurrentViews: true })
@@ -6144,7 +6135,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
             selectedThread={workspaceThread}
             selectedId={workspaceThread?.id ?? null}
             layoutMode={layoutMode}
-            onSelectThread={handleSelect}
+            onSelectThread={handleSelectInView}
             onSelectEvent={handleSelectCalendarEvent}
             onOpenDealIntelligence={handleOpenDealIntelligence}
           />
@@ -6629,7 +6620,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
                 zoomedIn={mapMode !== 'side'}
                 sourceMode={mapSourceMode}
                 onSourceModeChange={setMapSourceMode}
-              onSelectThreadId={handleSelect}
+              onSelectThreadId={handleSelectInView}
               onSelectSellerContext={handleMapSellerContext}
               onBackgroundClick={() => {}}
               onOpenDealIntelligence={handleOpenDealIntelligence}

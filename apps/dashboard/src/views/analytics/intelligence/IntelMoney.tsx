@@ -24,7 +24,7 @@ import { usePipelineData } from './intel-hooks'
 import type { MoneyDeal, MoneyResult, MoneyStage } from './intel-model'
 import { LANES, STAGE_SHORT } from './intel-model'
 import { fmtInt, fmtMoney } from './intel-format'
-import { handleObjectClick, objectMenuEntries, useClickGesture } from '../../../modules/desktop/objects'
+import { handleObjectClick, objectMenuEntries } from '../../../modules/desktop/objects'
 import { moneyDealObject } from './intel-objects'
 
 type BasisKey = 'record' | 'asking' | 'authorized' | 'fee' | 'presented' | 'contract' | 'expected' | 'actual'
@@ -116,7 +116,6 @@ function Basis({ label, kind, value, display, sub, tone, emphasis }: { label: st
 function MoneyDetail({ money }: { money: MoneyResult }) {
   const { act, inspect } = useLab()
   const [sort, setSort] = useState<LCSort>({ id: 'stage', dir: 'desc' })
-  const gesture = useClickGesture()
   const rows = useMemo(() => {
     const out = [...money.deals]
     if (!sort) return out
@@ -158,7 +157,7 @@ function MoneyDetail({ money }: { money: MoneyResult }) {
         </table>
       </div>
       <div className="ix-subhead"><span className="ix-eyebrow">Every deal · {fmtInt(money.deals.length)}{money.dealsTruncated ? ' (first 400)' : ''}</span><small className="ix-muted">row opens the deal in Pipeline</small></div>
-      <div className="ix-grid" {...gesture.captureProps}>
+      <div className="ix-grid">
         <LCDataGrid
           id="intel-money-deals"
           label="Deals in the active pipeline"
@@ -168,7 +167,7 @@ function MoneyDetail({ money }: { money: MoneyResult }) {
           sort={sort}
           onSortChange={setSort}
           // click explains the deal here · ⇧-click inspects it (Universal Inspector) · ⌘/Ctrl-click opens it beside
-          onActivate={(d) => handleObjectClick(gesture.take(), moneyDealObject(d), () => inspect({ kind: 'deal', deal: d }))}
+          onActivate={(d, e) => handleObjectClick(e, moneyDealObject(d), () => inspect({ kind: 'deal', deal: d }))}
           rowTone={(d) => (d.engine.state === 'authorized' ? 'exec' : null)}
           rowMenu={(d) => [
             { id: 'open', label: 'Open in Pipeline', icon: 'arrow-up-right', onSelect: () => pushRoutePath(`/pipeline?opp=${encodeURIComponent(d.id)}`) },

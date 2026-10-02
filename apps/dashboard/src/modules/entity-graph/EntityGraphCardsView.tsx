@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import type { EntityGraphTab, EntitySearchResult } from '../../domain/entity-graph/entity-graph.types'
 import type { SelectedEntity } from '../../domain/entity-graph/selected-entity'
 import { resultMatchesSelection } from '../../domain/entity-graph/selected-entity'
@@ -8,7 +9,8 @@ type Props = {
   results: EntitySearchResult[]
   selectedEntity: SelectedEntity
   compact?: boolean
-  onSelect: (result: EntitySearchResult) => void
+  /** `e` carries the click's modifiers (⇧ inspect · ⌘/Ctrl open beside). */
+  onSelect: (result: EntitySearchResult, e?: MouseEvent) => void
 }
 
 function primaryMetric(tab: EntityGraphTab, result: EntitySearchResult): string {
@@ -40,7 +42,7 @@ export function EntityGraphCardsView({ tab, results, selectedEntity, compact, on
             type="button"
             className={`eg-card${isSelected ? ' is-selected' : ''}`}
             data-entity-type={result.entityType}
-            onClick={() => onSelect(result)}
+            onClick={(e) => onSelect(result, e)}
           >
             <div className="eg-card__top">
               <div className="eg-card__type">{result.entityType.replace(/_/g, ' ')}</div>

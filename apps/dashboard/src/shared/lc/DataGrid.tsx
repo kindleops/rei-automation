@@ -48,6 +48,9 @@ export interface LCColumn<R> {
 
 export type LCSort = { id: string; dir: 'asc' | 'desc' } | null
 
+/** The DOM event that activated a row: a click or an Enter keypress. */
+export type LCRowActivationEvent = MouseEvent<Element> | KeyboardEvent<Element>
+
 export interface LCDataGridProps<R> {
   /** persists widths / visibility */
   id: string
@@ -59,7 +62,12 @@ export interface LCDataGridProps<R> {
   onSortChange?: (sort: LCSort) => void
   /** the row the inspector shows */
   activeKey?: string | null
-  onActivate?: (row: R) => void
+  /**
+   * A row was activated. `event` is the click or the Enter keypress that did it, so
+   * consumers can read modifiers (⇧-click inspect, ⌘/Ctrl-click open beside). It is
+   * absent when the activation is the inspector following the keyboard focus.
+   */
+  onActivate?: (row: R, event?: LCRowActivationEvent) => void
   /** multi-select (checkbox column) */
   selected?: ReadonlySet<string>
   onSelectedChange?: (next: Set<string>) => void
@@ -230,7 +238,7 @@ export function LCDataGrid<R>({
     else if (e.key === 'End') next = rowItems.length - 1
     else if (e.key === 'PageDown') next = Math.min(rowItems.length - 1, currentIndex + page)
     else if (e.key === 'PageUp') next = Math.max(0, currentIndex - page)
-    else if (e.key === 'Enter' && currentIndex >= 0) { e.preventDefault(); onActivate?.(rowItems[currentIndex].row); return }
+    else if (e.key === 'Enter' && currentIndex >= 0) { e.preventDefault(); onActivate?.(rowItems[currentIndex].row, e); return }
     else if (e.key === ' ' && currentIndex >= 0 && selectable) { e.preventDefault(); toggle(rowItems[currentIndex].key, e.shiftKey); return }
     else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && selectable && onSelectedChange) { e.preventDefault(); onSelectedChange(new Set(rowItems.map((r) => r.key))); return }
     if (next < 0) return
@@ -307,7 +315,7 @@ export function LCDataGrid<R>({
           setFocusKey(it.key)
           if (selectable && (e.metaKey || e.ctrlKey || e.shiftKey)) { toggle(it.key, e.shiftKey); return }
           if (renderExpanded) setExpanded((s) => { const n = new Set(s); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n })
-          onActivate?.(it.row)
+          onActivate?.(it.row, e)
         }}
       >
         {selectable ? (

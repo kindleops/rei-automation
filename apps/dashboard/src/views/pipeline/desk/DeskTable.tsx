@@ -4,7 +4,7 @@
  * row opens the deal inspector. View-only: no inline edits, no stage moves.
  */
 import { useMemo, useState } from 'react'
-import { LCButton, LCDataGrid, LCSegmented, LCStatus, type LCColumn, type LCSort } from '../../../shared/lc'
+import { LCButton, LCDataGrid, LCSegmented, LCStatus, type LCColumn, type LCRowActivationEvent, type LCSort } from '../../../shared/lc'
 import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import { sound } from '../../../shared/sound'
 import type { DeskCard } from './pipeline-desk-api'
@@ -39,7 +39,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   showDormant: boolean
   onShowDormant: (v: boolean) => void
   selectedId: string | null
-  onOpen: (card: DeskCard) => void
+  onOpen: (card: DeskCard, e?: LCRowActivationEvent) => void
   now: number
   total: number
 }) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { EntityGraphDossier, EntityGraphNode } from '../../domain/entity-graph/entity-graph.types'
 
 type PositionedNode = EntityGraphNode & { x: number; y: number }
@@ -33,7 +33,7 @@ export function EntityGraphRelationshipGraph({
 }: {
   dossier: EntityGraphDossier | null
   focusOnly?: boolean
-  onNodeSelect: (nodeId: string, nodeType: string, entityId: string) => void
+  onNodeSelect: (nodeId: string, nodeType: string, entityId: string, e?: MouseEvent) => void
 }) {
   const graph = dossier?.graph
   const [zoom, setZoom] = useState(1)
@@ -218,7 +218,7 @@ export function EntityGraphRelationshipGraph({
                 onClick={(e) => {
                   e.stopPropagation()
                   setSelectedId(node.id)
-                  onNodeSelect(node.id, node.type, entityId)
+                  onNodeSelect(node.id, node.type, entityId, e)
                 }}
                 title={node.label}
               >

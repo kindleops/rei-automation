@@ -14,7 +14,7 @@
  */
 import { useState } from 'react'
 import { Icon } from '../../../shared/icons'
-import { LCButton, LCEmpty, LCError, LCSkeleton, LCStatus, cx } from '../../../shared/lc'
+import { LCButton, LCEmpty, LCError, LCSkeleton, LCStatus, cx, type LCRowActivationEvent } from '../../../shared/lc'
 import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import type { AutonomyState, DeskCard, DeskOfferRow, DeskOffers } from './pipeline-desk-api'
 import { AUTONOMY_META, OWNER_META, REPRICES_TEXT, autonomyCause, fmtInt, groupOffers, moneyRange, relShort, stageTag } from './pipeline-desk-model'
@@ -30,7 +30,7 @@ export function DeskOffersView({ offers, loading, error, onRetry, onOpen, onDeal
   loading: boolean
   error: string | null
   onRetry: () => void
-  onOpen: (card: DeskCard) => void
+  onOpen: (card: DeskCard, e?: LCRowActivationEvent) => void
   onDealIntelligence: (card: DeskCard) => void
   now: number
 }) {
@@ -110,7 +110,7 @@ export function DeskOffersView({ offers, loading, error, onRetry, onOpen, onDeal
   )
 }
 
-function OfferCard({ row, now, onOpen, onDealIntelligence, compact }: { row: DeskOfferRow; now: number; onOpen: (card: DeskCard) => void; onDealIntelligence: (card: DeskCard) => void; compact?: boolean }) {
+function OfferCard({ row, now, onOpen, onDealIntelligence, compact }: { row: DeskOfferRow; now: number; onOpen: (card: DeskCard, e?: LCRowActivationEvent) => void; onDealIntelligence: (card: DeskCard) => void; compact?: boolean }) {
   const { card, engine, offer, autonomy, readiness } = row
   if (!autonomy) return null
   const implausible = autonomy.implausible
@@ -129,7 +129,7 @@ function OfferCard({ row, now, onOpen, onDealIntelligence, compact }: { row: Des
         <span className="pd2-offer__stage">{stageTag(card.stageIndex, card.stage)}</span>
         <span className="pd2-offer__cause">{autonomyCause(row)}</span>
       </header>
-      <button type="button" className="pd2-offer__title" onClick={() => onOpen(card)} data-pd2-deal={card.id}>
+      <button type="button" className="pd2-offer__title" onClick={(e) => onOpen(card, e)} data-pd2-deal={card.id}>
         <b>{card.address || card.seller || 'Unaddressed deal'}</b>
         <small>{[card.address ? card.seller : null, card.market].filter(Boolean).join(' · ') || OWNER_META[card.owner].label}</small>
       </button>
@@ -152,7 +152,7 @@ function OfferCard({ row, now, onOpen, onDealIntelligence, compact }: { row: Des
       ) : null}
       {!compact ? (
         <footer className="pd2-offer__foot">
-          <LCButton variant="quiet" size="sm" onClick={() => onOpen(card)}>Open deal</LCButton>
+          <LCButton variant="quiet" size="sm" onClick={(e) => onOpen(card, e)}>Open deal</LCButton>
           <LCButton variant={autonomy.state === 'exception' ? 'secondary' : 'ghost'} size="sm" trailingIcon="arrow-up-right" onClick={() => onDealIntelligence(card)} disabled={!card.threadKey && !card.propertyId}>Deal Intelligence</LCButton>
         </footer>
       ) : null}

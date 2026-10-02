@@ -14,9 +14,9 @@
  * judgement is the server's; nothing here moves a stage or sends anything.
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { LCChip, LCIconButton, LCLive, LCPopover, LCSearch, LCSegmented, LCSelect, LCTabs, cx, type LCTabItem } from '../../../shared/lc'
+import { LCChip, LCIconButton, LCLive, LCPopover, LCSearch, LCSegmented, LCSelect, LCTabs, cx, type LCRowActivationEvent, type LCTabItem } from '../../../shared/lc'
 import { PaneRouteContext, pushRoutePath } from '../../../app/router'
-import { gestureOf, inspectObject, openObjectBeside, showOnMap, useClickGesture } from '../../../modules/desktop/objects'
+import { gestureOf, inspectObject, openObjectBeside, showOnMap } from '../../../modules/desktop/objects'
 import { deskDealObject, deskPropertyObject } from './desk-objects'
 import { setPropertyLocator } from '../../../domain/locator/property-locator'
 import { sound } from '../../../shared/sound'
@@ -148,10 +148,9 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
   const isOpen = Boolean(open)
   // [8.2] the object click grammar for every deal surface (beads, table, planes):
   // click opens the deal here · ⇧-click inspects it · ⌘/Ctrl-click opens its property beside
-  const gesture = useClickGesture()
-  const openDeal = useCallback((card: DeskCard | { id: string }) => {
+  const openDeal = useCallback((card: DeskCard | { id: string }, e?: LCRowActivationEvent) => {
     const seed = 'owner' in card ? card : (rows.data?.find((c) => c.id === card.id) ?? null)
-    const g = gestureOf(gesture.take())
+    const g = gestureOf(e)
     if (g !== 'activate') {
       const deal = deskDealObject(seed ?? { id: card.id })
       const target = g === 'beside' && seed?.propertyId ? deskPropertyObject(seed) : deal
@@ -164,13 +163,13 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     // Linked panes follow the deal the operator is looking at.
     if (seed) setPropertyLocator({ propertyId: seed.propertyId, threadKey: seed.threadKey, masterOwnerId: seed.masterOwnerId, opportunityId: seed.id, address: seed.address })
     else setPropertyLocator({ opportunityId: card.id })
-  }, [isOpen, ownsUrl, rows.data, gesture])
+  }, [isOpen, ownsUrl, rows.data])
   const closeDeal = useCallback(() => {
     sound.panel.close()
     setOpen(null)
     if (ownsUrl) writeUrlParam('opp', null)
   }, [ownsUrl])
-  const openById = useCallback((id: string) => openDeal({ id }), [openDeal])
+  const openById = useCallback((id: string, e?: LCRowActivationEvent) => openDeal({ id }, e), [openDeal])
 
   // Choosing an owner anywhere on the Overview opens those deals in the Table.
   const goOwner = useCallback((o: LiveOwner | null) => {
@@ -222,7 +221,7 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
   const showChips = chips.filter((c) => mode !== 'overview' || !['owner', 'stage'].includes(c.id))
 
   return (
-    <section className={cx('pd2', `is-${mode}`)} data-ready={ready ? '1' : '0'} data-mode={mode} aria-label="Pipeline" {...gesture.captureProps}>
+    <section className={cx('pd2', `is-${mode}`)} data-ready={ready ? '1' : '0'} data-mode={mode} aria-label="Pipeline">
       <div className="pd2-field" aria-hidden="true"><i /><i /></div>
 
       <header className="pd2-head">

@@ -9,7 +9,7 @@ import { Empty, Plane, Prov, Tag } from '../di-ui'
 import { CompDistribution, CompRadar } from './EvidenceCharts'
 import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfDealComp } from '../../../../domain/comp-intelligence/comp-sale-type'
 import { CompStreetView } from '../../../comp-intelligence/desktop/CompStreetView'
-import { handleObjectClick, objectMenuEntries, propertyObject, useClickGesture } from '../../../../modules/desktop/objects'
+import { handleObjectClick, objectMenuEntries, propertyObject } from '../../../../modules/desktop/objects'
 import { SaleTypeBadge } from '../../../comp-intelligence/desktop/SaleType'
 
 
@@ -69,7 +69,6 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
   const c = d.comps
   const stats = useMemo(() => compStats(d), [d])
   const [sort, setSort] = useState<LCSort>({ id: 'weight', dir: 'desc' })
-  const gesture = useClickGesture()
   const selectedId = selection?.type === 'comp' ? selection.id : null
   const rows = useMemo(() => {
     const list = [...(c?.top ?? [])]
@@ -142,7 +141,7 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
             const mix = countSaleTypes(rows, (x) => saleTypeOfDealComp(x).type)
             return <p className="dr-quiet dr-salemix lc-num">{SALE_TYPES.filter((t) => mix[t]).map((t) => `${mix[t]} ${SALE_TYPE_LABEL[t].short}`).join(' · ')} — sale type from the recorded fields; the engine weights MLS sales ×1 and other sales ×0.92.</p>
           })()}
-          <div className="dr-grid-wrap" style={{ height: Math.min(640, 46 + rows.length * 44 + 8) }} {...gesture.captureProps}>
+          <div className="dr-grid-wrap" style={{ height: Math.min(640, 46 + rows.length * 44 + 8) }}>
             <LCDataGrid
               id="di-comps"
               label="Qualified comparable sales"
@@ -153,7 +152,7 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
               onSortChange={setSort}
               activeKey={selectedId}
               // click selects the comp here · ⇧-click inspects its property · ⌘/Ctrl-click opens it beside
-              onActivate={(x) => handleObjectClick(gesture.take(), compObject(x), () => onSelect({ type: 'comp', id: x.id ?? x.address ?? '' }))}
+              onActivate={(x, e) => handleObjectClick(e, compObject(x), () => onSelect({ type: 'comp', id: x.id ?? x.address ?? '' }))}
               rowMenu={(x) => objectMenuEntries(compObject(x), { omit: ['open'], showOnMap: { source: 'deal-intelligence' } })}
               rowTone={(x) => (x.assetMatch ? null : 'crit')}
               density="comfortable"

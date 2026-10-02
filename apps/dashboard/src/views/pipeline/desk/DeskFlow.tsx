@@ -7,7 +7,7 @@
  */
 import { useMemo, useRef } from 'react'
 import { Icon } from '../../../shared/icons'
-import { LCButton, LCEmpty, LCError, LCSkeleton, LCTooltip, cx } from '../../../shared/lc'
+import { LCButton, LCEmpty, LCError, LCSkeleton, LCTooltip, cx, type LCRowActivationEvent } from '../../../shared/lc'
 import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import type { DeskCard, DeskStage, StageFlow } from './pipeline-desk-api'
 import {
@@ -45,7 +45,7 @@ type Props = {
   showDormant: boolean
   onShowDormant: (v: boolean) => void
   selectedId: string | null
-  onOpen: (card: DeskCard) => void
+  onOpen: (card: DeskCard, e?: LCRowActivationEvent) => void
   now: number
 }
 
@@ -131,7 +131,7 @@ export function DeskFlowMatrix({ rows, loading, error, onRetry, stages, flows, p
                         type="button"
                         className={cx('pd2-bead', `is-${c.owner}`, owner && c.owner !== owner && 'is-dim', selectedId === c.id && 'is-on', c.hot && 'is-hot')}
                         style={{ ['--c' as string]: OWNER_META[c.owner].color }}
-                        onClick={() => onOpen(c)}
+                        onClick={(e) => onOpen(c, e)}
                         aria-label={`${c.address || c.seller || 'Deal'} — ${OWNER_META[c.owner].label}, ${c.daysInStage ?? '?'} days in stage`}
                         data-pd2-deal={c.id}
                       />
