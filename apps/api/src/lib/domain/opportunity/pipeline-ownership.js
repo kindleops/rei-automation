@@ -20,6 +20,8 @@
  * Nothing here writes, sends, re-prices or moves a stage.
  */
 
+import { isInternalTestPhone } from '../../config/internal-phones.js'
+
 const clean = (v) => String(v ?? '').trim()
 const lower = (v) => clean(v).toLowerCase()
 const ms = (v) => {
@@ -58,17 +60,42 @@ export function sendIsHuman(row) {
 }
 
 /**
- * Test fixtures that live in production tables. The property namespace is the
- * canonical marker (`canaryprop_…`); the address catches a fixture whose id
- * was re-keyed. Excluded from every live count, like synthetic history.
+ * Test fixtures that live in production tables. Excluded from every live
+ * count, like synthetic history. A deal is synthetic when any fixture marker
+ * holds:
+ *   - property namespace: `canaryprop_…`, `canary_…`, `fixture_…`, `selftest_…`
+ *   - owner namespace:    `mo_canary_…`, `canaryowner_…`, `selftest_…`,
+ *                         `internal-canary:…` (the canary master_key form)
+ *   - owner record (when hydrated as `master_owner` / `owner`): master_key
+ *     `internal-canary:…` or an `internal_canary` seller tag
+ *   - thread: the primary or a related thread is a registered internal test
+ *     phone (config/internal-phones.js — the one canonical list, which also
+ *     holds every canary handset). A deal created from a proof-lane reply has
+ *     no owner or property, only the thread (prod 78e4cce2, b228d1d0).
+ *   - address: "Internal Canary" catches a fixture whose id was re-keyed.
  */
+const SYNTHETIC_PROPERTY_PREFIXES = ['canaryprop_', 'canary_', 'fixture_', 'selftest_']
+const SYNTHETIC_OWNER_PREFIXES = ['mo_canary_', 'canaryowner_', 'selftest_', 'internal-canary:']
+const INTERNAL_CANARY_TAG = 'internal_canary'
+
+function ownerRecordIsCanary(owner) {
+  if (!owner || typeof owner !== 'object') return false
+  if (lower(owner.master_key).startsWith('internal-canary:')) return true
+  const tags = [owner.seller_tags, owner.seller_tags_json, owner.seller_tags_text]
+  return tags.some((t) => {
+    if (Array.isArray(t)) return t.some((x) => lower(x) === INTERNAL_CANARY_TAG)
+    return typeof t === 'string' && lower(t).split(/[\s,;|"[\]]+/).includes(INTERNAL_CANARY_TAG)
+  })
+}
+
 export function isSyntheticOpportunity(opp) {
   const pid = lower(opp?.primary_property_id)
-  if (pid.startsWith('canaryprop_') || pid.startsWith('canary_') || pid.startsWith('fixture_')) return true
-  // A thread-only canary has no property: its owner carries the marker
-  // (prod b228d1d0…: master_owner_id 'mo_canary_v2_…', no property id).
+  if (SYNTHETIC_PROPERTY_PREFIXES.some((p) => pid.startsWith(p))) return true
   const owner = lower(opp?.master_owner_id)
-  if (owner.startsWith('mo_canary_') || owner.startsWith('canaryowner_')) return true
+  if (SYNTHETIC_OWNER_PREFIXES.some((p) => owner.startsWith(p))) return true
+  if (ownerRecordIsCanary(opp?.master_owner) || ownerRecordIsCanary(opp?.owner)) return true
+  const related = Array.isArray(opp?.related_thread_keys) ? opp.related_thread_keys : []
+  if ([opp?.primary_thread_key, ...related].some((k) => isInternalTestPhone(k))) return true
   return /internal canary/i.test(clean(opp?.property_address_full))
 }
 

@@ -946,7 +946,7 @@ export async function getPipelineCommandFlow(params = {}, deps = {}) {
   // same filters, so an exit belongs to this view only if the deal would have.
   const exitIds = [...new Set((exitsRaw || []).filter((r) => !isSyntheticHistory(r)).map((r) => r.opportunity_id).filter((id) => id && !byId.has(id)))]
   const exitedRows = exitIds.length ? await inChunks(exitIds, async (part) => {
-    let q = client.from('acquisition_opportunities').select('id, acquisition_stage, primary_property_id, property_address_full, seller_display_name, market, property_type, opportunity_status')
+    let q = client.from('acquisition_opportunities').select('id, acquisition_stage, primary_property_id, master_owner_id, primary_thread_key, related_thread_keys, property_address_full, seller_display_name, market, property_type, opportunity_status')
     q = applyFilters(q, { ...params, scope: 'all' })
     return (await q.in('id', part)).data
   }) : []

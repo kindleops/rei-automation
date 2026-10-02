@@ -205,6 +205,36 @@ test('canary fixtures never count as deals', () => {
   assert.equal(excluded, 1)
 })
 
+test('internal-test-phone and self-test deals are fixtures; a real deal stays real', () => {
+  // Shape of a deal created from a proof-lane reply: no owner, no property,
+  // only a thread that is a registered internal test phone.
+  const threadOnly = { master_owner_id: null, primary_property_id: null, primary_thread_key: '+16127433952', related_thread_keys: ['+16127433952'] }
+  assert.equal(isSyntheticOpportunity(threadOnly), true)
+  // Bare-digit thread keys normalise to the same registered phone.
+  assert.equal(isSyntheticOpportunity({ primary_thread_key: '6128072000' }), true)
+  assert.equal(isSyntheticOpportunity({ primary_thread_key: '+15550001111', related_thread_keys: ['+13055376631'] }), true)
+  // Self-test fixture on a canary thread; each marker alone is enough.
+  const selftest = { master_owner_id: 'selftest_ryan', primary_property_id: 'selftest_property', primary_thread_key: '+16128072000' }
+  assert.equal(isSyntheticOpportunity(selftest), true)
+  assert.equal(isSyntheticOpportunity({ ...selftest, primary_thread_key: '+15550001111', primary_property_id: 'p1' }), true)
+  assert.equal(isSyntheticOpportunity({ ...selftest, primary_thread_key: '+15550001111', master_owner_id: 'mo_1' }), true)
+  // Canary owner keys and tags, on the id or on a hydrated owner record.
+  assert.equal(isSyntheticOpportunity({ master_owner_id: 'internal-canary:+16127433952' }), true)
+  assert.equal(isSyntheticOpportunity({ master_owner_id: 'mo_b5204dd9', master_owner: { master_key: 'internal-canary:+16127433952' } }), true)
+  assert.equal(isSyntheticOpportunity({ master_owner_id: 'mo_b5204dd9', master_owner: { seller_tags_json: ['internal_canary', 'stage1_transport_proof'] } }), true)
+  assert.equal(isSyntheticOpportunity({ master_owner_id: 'mo_b5204dd9', owner: { seller_tags_text: 'internal_canary, stage1_transport_proof' } }), true)
+  // A normal seller deal stays real.
+  const real = {
+    master_owner_id: 'mo_8a4ba81354944404ebaa47a6', primary_property_id: 'p_3622_humboldt', primary_thread_key: '+16125550142',
+    related_thread_keys: ['+16125550142'], property_address_full: '3622 Humboldt Ave N', master_owner: { master_key: 'owner:smith', seller_tags_text: 'absentee, tired_landlord' },
+  }
+  assert.equal(isSyntheticOpportunity(real), false)
+  assert.equal(isSyntheticOpportunity({ ...real, master_owner: { seller_tags_text: 'not_internal_canary_owner' } }), false)
+  const [kept, excluded] = withoutSyntheticOpportunities([threadOnly, selftest, real])
+  assert.deepEqual(kept, [real])
+  assert.equal(excluded, 2)
+})
+
 test('the thread queue summary finds the next live row and an un-superseded held draft', () => {
   const q = summarizeThreadQueue([
     row({ queue_status: 'paused_operator_review', created_at: '2026-09-11T14:20:07Z', use_case_template: 'safe_clarifier' }),
