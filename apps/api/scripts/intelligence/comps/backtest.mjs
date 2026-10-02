@@ -863,8 +863,28 @@ function renderDefects(results, engines) {
   return lines.join('\n');
 }
 
+/** Per-market paired verdict: challenger wins only where the 90% CI of (challenger - champion) APE lies below 0. */
+function crossMarketVerdict(results) {
+  const wins = [];
+  const losses = [];
+  const ties = [];
+  for (const [m, e] of Object.entries(results.marketSummary)) {
+    if (m === 'ALL') continue;
+    const p = e.paired?.challenger_vs_champion_union;
+    if (!p?.ci90_pp || e.core_n < LOW_SUPPORT_N) { ties.push(`${m} (low support)`); continue; }
+    if (p.ci90_pp[1] < 0) wins.push(m);
+    else if (p.ci90_pp[0] > 0) losses.push(m);
+    else ties.push(m);
+  }
+  const beats = wins.length > 0 && losses.length === 0;
+  return { beats, wins, losses, ties };
+}
+
 function renderModelCard({ results, manifest }) {
   const all = results.marketSummary.ALL;
+  const verdict = crossMarketVerdict(results);
+  const engines = manifest.champion?.engines ?? [];
+  const current = engines[0];
   return `# Model card: comp_micromarket ${manifest.version} (BACKTEST)
 
 - **Family:** comp_micromarket (IC8 phase 6 challenger). **Status:** BACKTEST, offline research prototype. Not wired to production; the production Decision Engine stays CHAMPION.
@@ -874,6 +894,8 @@ function renderModelCard({ results, manifest }) {
 - **Micro-market layer:** ~1 km grid, monthly as-of rebuilds from strictly earlier sales; agglomerative merging under a support-aware z-test; boundary classes from a seeded bootstrap CI of the median level gap; pooling cell -> micro-market -> ZIP -> market; effective market distance by graph shortest path.
 - **Data:** snapshot \`${manifest.dataset.snapshot_id}\` (engine pool + recorded deeds incl. the 2026-09-30 import), subjects ${manifest.as_of_window.subjects.join(' .. ')}.
 - **Headline result (all markets, like-for-like core n=${all.core_n}):** champion MdAPE ${all.core.champion_union.mdape_pct}%, challenger ${all.core.challenger.mdape_pct}%, naive baseline ${all.core.baseline.mdape_pct}%; challenger 80% interval coverage ${all.core.challenger.interval_coverage_pct ?? '-'}%. Per-market results and LOW SUPPORT flags are in report.md; a national number hides local failures.
+- **Cross-market verdict (paired challenger - champion on the combined corpus, 90% CI):** ${verdict.beats ? 'challenger BEATS the champion' : 'challenger does NOT beat the champion'}. Champion better: ${verdict.losses.join(', ') || 'none'}; challenger better: ${verdict.wins.join(', ') || 'none'}; inconclusive: ${verdict.ties.join(', ') || 'none'}.
+- **Champion version run:** ${current ? `\`${current.path}\` sha256 ${current.sha256.slice(0, 12)} (${current.working_tree_status === 'clean' ? 'committed HEAD' : `working tree, ${current.working_tree_status}; last commit ${String(current.last_commit ?? 'n/a').slice(0, 8)}`})` : 'n/a'}${engines.slice(1).map((e) => `; also ${e.label} (${e.path}, sha256 ${e.sha256.slice(0, 12)})`).join('')}. The replica imports the production engine's scoring/recency/valuation functions; only the candidate search (RPC) is re-implemented with an as-of bound.
 - **Known limitations:** Texas deed prices are vendor estimates (non-disclosure state) and are excluded as evidence and labels, so DAL / HOU / TX751 rest on few MLS sales; Jacksonville and Indianapolis deeds carry no buyer type, so their values are regime-unknown, not retail; the layer is learned from single-family sales only and reused for 2-4 unit subjects; knowledge time is event time (LeadCommand ingested the data later); subject attributes come from vendor records as of import.
 - **Fairness:** no protected characteristics or proxies; school district, demographics and income are not read.
 - **Promotion:** none. Promotion requires beating the champion across markets with documented gates; this card records evidence only.
