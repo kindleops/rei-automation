@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CommandResult, GlobalCommandSearchContext } from '../../domain/command-center/command.types'
-import { useNotificationIntelligence } from '../../domain/notifications/useNotificationIntelligence'
 import { useAuth } from '../../components/auth/AuthProvider'
 import { LeadCommandNotificationCenter } from '../notifications/LeadCommandNotificationCenter'
+import { NotificationPlane } from '../notifications/plane/NotificationPlane'
+import { startStoryStore, useStoryBadge } from '../notifications/plane/story-store'
 import { onNotificationsSurfaceRequested } from '../mobile/shell-surface-bridge'
 import { useQueueCommandState } from '../mobile/useQueueCommandState'
 import { DesktopSidebar } from './DesktopSidebar'
@@ -32,7 +33,8 @@ if (import.meta.env.DEV && typeof window !== 'undefined') (window as unknown as 
  * the same stores the phone shell reads.
  */
 
-type Panel = 'notifications' | 'profile' | null
+/** 'plane' = Notification Center 2.0 (the deck bell); 'notifications' = the Notifications app (alert settings + Signals) */
+type Panel = 'plane' | 'notifications' | 'profile' | null
 
 const ULTRAWIDE_SEEDED = 'nexus.desktop.ultrawide.seeded'
 
@@ -51,7 +53,9 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
   const [prefs] = useDesktopShellPrefs()
   const { ultrawide } = useDisplayMode()
   const queue = useQueueCommandState()
-  const { unreadCount } = useNotificationIntelligence()
+  // the badge counts meaningful unresolved stories, not raw events (one reader for badge + plane)
+  useEffect(() => startStoryStore(), [])
+  const storyBadge = useStoryBadge()
   const { user, signOut } = useAuth()
   const email = user?.email ?? null
   const name = (user?.user_metadata?.full_name as string | undefined) || null
@@ -129,9 +133,9 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
         onSearchOpen={onSearchOpen}
         onSearchClose={onSearchClose}
         onExecute={onExecute}
-        notificationsOpen={panel === 'notifications'}
-        onToggleNotifications={() => toggle('notifications')}
-        unreadCount={unreadCount}
+        notificationsOpen={panel === 'plane' || panel === 'notifications'}
+        onToggleNotifications={() => setPanel((cur) => (cur === 'plane' || cur === 'notifications' ? null : 'plane'))}
+        unreadCount={storyBadge}
         profileOpen={panel === 'profile'}
         onToggleProfile={() => toggle('profile')}
         initials={operatorInitials(email, name)}
@@ -142,6 +146,7 @@ export function DesktopCommandShell({ routePath, searchOpen, searchQuery, comman
           <DesktopProfilePanel email={email} name={name} onClose={() => setPanel(null)} onSignOut={() => { setPanel(null); void signOut() }} onOpenSettings={openSettings} />
         </div>
       ) : null}
+      <NotificationPlane open={panel === 'plane'} onClose={() => setPanel(null)} anchorTop={84} />
       <LeadCommandNotificationCenter open={panel === 'notifications'} onClose={() => setPanel(null)} anchorTop={84} />
       <UniversalInspector />
       <TimeMachine />

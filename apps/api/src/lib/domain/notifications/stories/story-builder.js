@@ -286,13 +286,15 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
     title = verb ? `${name} ${verb}` : `${name} · ${lastTrigger.label}`
     if (messages > 1) title = `${title} · ${messages} messages`
     const preview = [...triggers].reverse().map((t) => t.preview).find(Boolean)
-    summary = facts.length ? facts.slice(0, 3).join(' · ') : preview ? `“${preview}”` : null
+    const address = b.items.map((it) => it.address).find(Boolean) || null
+    summary = facts.length ? facts.slice(0, 3).join(' · ') : preview ? `“${preview}”` : address
   } else if (s.type === 'campaign') {
-    title = `${campaignName || 'Campaign'} · ${b.first.label}`
+    // a standalone outcome (completed) is carried by the state chip; the title is the campaign
+    title = b.kind === 'milestone' && b.resolver ? campaignName || 'Campaign' : `${campaignName || 'Campaign'} · ${b.first.label}`
     summary = facts.length ? facts.slice(0, 2).join(' · ') : b.first.detail || null
   } else if (s.type === 'system') {
     const labels = [...new Set(triggers.map((t) => t.label).filter(Boolean))]
-    title = b.kind === 'condition' ? `${systemLabel(s.id)} degraded` : `${systemLabel(s.id)} · ${b.first.label}`
+    title = b.kind === 'condition' ? `${systemLabel(s.id)} ${morph?.code === 'restored' ? 'restored' : 'degraded'}` : `${systemLabel(s.id)} · ${b.first.label}`
     summary = labels.length ? labels.slice(0, 3).join(' · ') + (labels.length > 3 ? ` · +${labels.length - 3} more` : '') : null
   } else if (s.type === 'workflow') {
     title = `${b.items.map((it) => it.workflow_name).find(Boolean) || capFirst(s.id.replace(/_/g, ' '))} · ${lastTrigger.label}`
@@ -347,11 +349,11 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
     primary_event: { id: b.first.id, type: b.first.event_type, at: b.first.at },
     title,
     summary,
-    reason: needs ? needsLabel || 'Needs your decision' : morph?.label || null,
+    reason: needs ? needsLabel || 'Needs your decision' : morph?.label || (resolvedBy === 'operator' ? 'Resolved by you ✓' : null),
     priority,
     peak_priority: peakPriority,
     lens,
-    state: { code: morph?.code || (resolved ? 'handled' : 'open'), label: morph?.label || null, tone: morph?.tone || null },
+    state: morph ? { code: morph.code, label: morph.label, tone: morph.tone } : resolvedBy === 'operator' ? { code: 'resolved', label: 'Resolved by you ✓', tone: 'green' } : { code: resolved ? 'handled' : 'open', label: null, tone: null },
     requires_operator: needs,
     resolved,
     resolved_by: resolvedBy,

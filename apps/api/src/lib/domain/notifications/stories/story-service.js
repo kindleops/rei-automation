@@ -91,12 +91,14 @@ export async function loadSnapshot(deps = {}) {
       readState(db, since).catch(() => ({ available: false, map: new Map() })),
     ])
     if (ev.failed && nt.failed) throw new StoryError('stories_unavailable', 'Notifications could not be read right now.', 503)
-    // the Workflow Observatory is the slowest source: when it times out, keep the runs the
-    // previous snapshot read (still true facts) instead of silently un-morphing stories
+    // a source that timed out this round (the Workflow Observatory and the message ledger are
+    // the slowest) keeps the events the previous snapshot read — still true facts — instead of
+    // silently un-morphing or dropping stories; the response still says it is degraded
     const prev = cache.snapshot
-    if (prev && ev.degraded.some((d) => d === 'workflow' || d.startsWith('workflow:'))) {
+    const down = new Set(ev.degraded.map((d) => String(d).split(':')[0]))
+    if (prev && down.size) {
       const have = new Set(ev.events.map((e) => e.event_id))
-      for (const e of prev.raw.events) if (e.event_id.startsWith('wf:') && !have.has(e.event_id)) ev.events.push(e)
+      for (const e of prev.raw.events) if (down.has(e.provenance?.adapter) && !have.has(e.event_id)) ev.events.push(e)
     }
     const snap = { raw: { events: ev.events, notifications: nt.rows }, state: st.map, stateTable: st.available, degraded: [...ev.degraded, ...nt.degraded], horizon: ev.horizon, truncated: ev.truncated, built_at: new Date(now).toISOString(), now }
     assemble(snap, now)

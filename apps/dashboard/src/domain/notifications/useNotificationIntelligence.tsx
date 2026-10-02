@@ -25,6 +25,7 @@ import type {
 } from './notification-contract'
 import { isAlertTypeEnabled, playGroupedNotificationSounds } from './notification-sound-bridge'
 import { alertTypeFor } from './alert-types'
+import { desktopSoundOwnsSurface } from '../../shared/sound/surface'
 import { emitNotification, type NotificationSeverity as ToastSeverity } from '../../shared/NotificationToast'
 import { pushRoutePath } from '../../app/router'
 import { resolveNotificationDestination } from '../../modules/notifications/notification-destination'
@@ -38,6 +39,10 @@ const arrivalSignature = (item: NotificationEvent) => `${item.status}:${item.gro
 
 /** In-app pop-up for alerts that just arrived — the centre alone was silent. */
 function announceArrivals(items: NotificationEvent[]) {
+  // Toasts are local confirmation. On the modern desktop an arrival is a
+  // Notification Center 2.0 story (badge + plane + one sound), so a toast here
+  // would be the same event emitted twice — not emitted at the source.
+  if (desktopSoundOwnsSurface()) return
   const settings = loadSettings()
   if (settings.notificationsEnabled === false || settings.notificationMasterMuted) return
   const shown = items.filter((item) => isAlertTypeEnabled(alertTypeFor(item))).slice(0, 3)
