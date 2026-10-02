@@ -5442,25 +5442,34 @@ export function InboxCommandMap({
 
   /** Fly to one place by context (property → parcel zoom), 500–900 ms, interruptible; the pin resolves on landing. */
   const cinematicTo = useCallback((coordinates: [number, number]) => {
-    const map = mapRef.current
-    if (!map || !isMappableCoord(coordinates[1], coordinates[0])) return
-    const box = map.getContainer()
-    const width = box.clientWidth || 1, height = box.clientHeight || 1
-    let distancePx = Math.hypot(width, height) * 8
-    try {
-      const p = map.project(coordinates)
-      if (Number.isFinite(p.x) && Number.isFinite(p.y)) distancePx = Math.hypot(p.x - width / 2, p.y - height / 2)
-    } catch { /* far outside the projection: treat as a long hop */ }
-    const plan = planPointFocus({ to: coordinates, fromZoom: map.getZoom(), distancePx, viewport: { width, height }, ctx: 'property', reducedMotion: reducedMotionRef.current })
-    const framer = framerRef.current
-    if (!framer) { map.jumpTo({ center: plan.center, zoom: plan.zoom }); return }
-    const host = mapOverlayTarget()
-    const land = () => {
-      setFlyingMark(host, false)
-      if (ensureFocusTreatment(map, SELECTED_STAR_SOURCE_ID, SELECTED_STAR_LAYER_ID)) pulseFocusTreatment(map, reducedMotionRef.current)
+    const fly = (attempt: number) => {
+      const map = mapRef.current
+      if (!map || !isMappableCoord(coordinates[1], coordinates[0])) return
+      const box = map.getContainer()
+      const width = box.clientWidth || 1, height = box.clientHeight || 1
+      let distancePx = Math.hypot(width, height) * 8
+      try {
+        const p = map.project(coordinates)
+        if (Number.isFinite(p.x) && Number.isFinite(p.y)) distancePx = Math.hypot(p.x - width / 2, p.y - height / 2)
+      } catch { /* far outside the projection: treat as a long hop */ }
+      const plan = planPointFocus({ to: coordinates, fromZoom: map.getZoom(), distancePx, viewport: { width, height }, ctx: 'property', reducedMotion: reducedMotionRef.current })
+      const framer = framerRef.current
+      if (!framer) { map.jumpTo({ center: plan.center, zoom: plan.zoom }); return }
+      const host = mapOverlayTarget()
+      const land = () => {
+        setFlyingMark(host, false)
+        if (ensureFocusTreatment(map, SELECTED_STAR_SOURCE_ID, SELECTED_STAR_LAYER_ID)) pulseFocusTreatment(map, reducedMotionRef.current)
+        // A programmatic move that is not the operator's (the Map's first "home"
+        // framing as pins load) can cut a flight short: look once more and finish it.
+        if (attempt < 2) window.setTimeout(() => {
+          try { if (!framerRef.current?.isFlying() && !map.getBounds().contains(coordinates)) fly(attempt + 1) } catch { /* map gone */ }
+        }, 450)
+      }
+      const key = `pt:${coordinates[0].toFixed(6)},${coordinates[1].toFixed(6)}${attempt > 1 ? `#${attempt}` : ''}`
+      const started = framer.run(plan, key, { onLand: land, onCancel: () => setFlyingMark(host, false) })
+      if (started === 'started' && framer.isFlying()) setFlyingMark(host, true)
     }
-    const started = framer.run(plan, `pt:${coordinates[0].toFixed(6)},${coordinates[1].toFixed(6)}`, { onLand: land, onCancel: () => setFlyingMark(host, false) })
-    if (started === 'started' && framer.isFlying()) setFlyingMark(host, true)
+    fly(1)
   }, [])
 
   useEffect(() => {
@@ -10088,11 +10097,12 @@ export function InboxCommandMap({
 
   useEffect(() => {
     if (!mapRef.current) return
+    // a request written by the action that opened this Map pane (consumed after mount)
     const pending = readPendingMapPropertyFocus()
-    if (pending) applyFocusRequest(pending)
+    const t = pending ? window.setTimeout(() => applyFocusRequest(pending), 0) : 0
     const onFocus = (e: Event) => { const d = (e as CustomEvent<MapPropertyFocus>).detail; if (d) applyFocusRequest(d) }
     window.addEventListener(MAP_PROPERTY_FOCUS_EVENT, onFocus)
-    return () => window.removeEventListener(MAP_PROPERTY_FOCUS_EVENT, onFocus)
+    return () => { window.clearTimeout(t); window.removeEventListener(MAP_PROPERTY_FOCUS_EVENT, onFocus) }
   }, [mapInstanceEpoch, applyFocusRequest])
 
   useEffect(() => {

@@ -56,22 +56,32 @@ export function MapFocusSet({ map, mapEpoch, reducedMotion }: { map: maplibregl.
     let grabbed = false
     const grab = (e: { originalEvent?: unknown }) => { if (e?.originalEvent) grabbed = true }
     map.on('movestart', grab)
-    const t = window.setTimeout(() => {
-      if (grabbed) return
+    const b = boundsOf(set.points)
+    const mid: [number, number] | null = b ? [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2] : null
+    let attempt = 0
+    let check = 0
+    const frame = () => {
+      if (grabbed || !mid) return
       try {
+        attempt += 1
         const box = map.getContainer()
         const width = box.clientWidth || 1, height = box.clientHeight || 1
-        const b = boundsOf(set.points)
         let distancePx = Math.hypot(width, height) * 4
-        if (b) {
-          const p = map.project([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2])
-          if (Number.isFinite(p.x)) distancePx = Math.hypot(p.x - width / 2, p.y - height / 2)
-        }
+        const p = map.project(mid)
+        if (Number.isFinite(p.x)) distancePx = Math.hypot(p.x - width / 2, p.y - height / 2)
         const plan = planSetFocus({ points: set.points, fromZoom: map.getZoom(), distancePx, viewport: { width, height }, reducedMotion, maxZoom: 15, inset: { left: 40 } })
-        if (plan) framer.run(plan, `set:${set.at}`)
+        // A programmatic move that is not the operator's (the Map's own first
+        // "home" framing landing as the pins load) can displace the set before
+        // it settles: look once more after landing and re-frame if it was.
+        if (plan) framer.run(plan, `set:${set.at}:${attempt}`, { onLand: () => { check = window.setTimeout(verify, 450) } })
       } catch { /* map not ready */ }
-    }, 350)
-    return () => { window.clearTimeout(t); map.off('movestart', grab); framer.dispose() }
+    }
+    const verify = () => {
+      if (grabbed || !mid || attempt >= 3) return
+      try { if (!map.getBounds().contains(mid)) frame() } catch { /* ignore */ }
+    }
+    const t = window.setTimeout(frame, 350)
+    return () => { window.clearTimeout(t); window.clearTimeout(check); map.off('movestart', grab); framer.dispose() }
   }, [map, set, reducedMotion])
 
   if (!set) return null

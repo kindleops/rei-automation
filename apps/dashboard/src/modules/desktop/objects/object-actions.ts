@@ -99,6 +99,8 @@ export interface ShowOnMapOptions {
   source?: string | null
   /** label for a multi-property set ("Comps for 3831 Sheridan Ave N") */
   setLabel?: string
+  /** the Universal Inspector itself is asking: it stays open beside the Map */
+  keepInspector?: boolean
 }
 
 /** Make the Map visible for a focus request, without moving the operator unless the Map was closed. */
@@ -155,7 +157,7 @@ export function showOnMap(target: ObjectRef | ObjectRef[], opts: ShowOnMapOption
       announceWorkspace(reason)
       return { ok: false, outcome: 'unavailable', reason }
     }
-    yieldInspector()
+    if (!opts.keepInspector) yieldInspector()
     writeMapPropertyFocus({
       propertyId: cap.map.propertyId,
       label: ref.type === 'property' ? ref.label ?? null : hintOf(ref, 'property_label'),
@@ -253,6 +255,8 @@ export function gestureOf(e: ModifierEvent | null | undefined): ObjectGesture {
  */
 export function handleObjectClick(e: ModifierEvent | null | undefined, ref: ObjectRef | null, onActivate?: () => void): ObjectGesture {
   const g = ref ? gestureOf(e) : 'activate'
+  // a modified click is a command, not a text selection (⇧-click extends the browser's selection)
+  if (g !== 'activate' && typeof window !== 'undefined') { try { window.getSelection?.()?.removeAllRanges() } catch { /* ignore */ } }
   if (g === 'inspect' && ref && inspectorFor(ref.type)) {
     e?.preventDefault?.()
     e?.stopPropagation?.()

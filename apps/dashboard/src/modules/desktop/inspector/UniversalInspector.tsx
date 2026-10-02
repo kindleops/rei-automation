@@ -6,6 +6,8 @@ import { pushRoutePath } from '../../../app/router'
 import { sound } from '../../../shared/sound'
 import { openApp, startMission } from '../workspace/workspace-store'
 import { missionsFor, planMission } from '../workspace/missions'
+import { propertyObject } from '../objects/object-registry'
+import { showOnMap } from '../objects/object-actions'
 import { replaySubjectOf } from '../feed/feed-model'
 import { openReplay } from '../replay/replay-store'
 import { InspectorWatch } from '../../notifications/signals/InspectorWatch'
@@ -93,6 +95,9 @@ export function UniversalInspector() {
   // Replay appears only when the event envelope can resolve this subject
   const replay = model?.replay !== undefined ? model.replay : replaySubjectOf(current)
 
+  // [8.2] Show on Map — the property this object stands on (itself, or its property)
+  const mapPid = mission?.propertyId ?? (current.type === 'property' ? current.id : null)
+  const mapTarget = mapPid ? propertyObject({ propertyId: mapPid, threadKey: mission?.threadKey ?? null, label: mission?.address ?? (current.type === 'property' ? current.label ?? null : null), source: 'inspector' }) : null
   const open = () => { if (!primary) return; pushRoutePath(primary.path); if (!pinned) closeInspector() }
   const beside = () => {
     if (!primary) return
@@ -119,6 +124,7 @@ export function UniversalInspector() {
     <div className="uinsp__foot">
       {primary ? <LCButton variant="primary" size="sm" onClick={open}>Open</LCButton> : null}
       {primary ? <LCButton variant="secondary" size="sm" icon="layout-split" onClick={beside}>Open beside</LCButton> : null}
+      {mapTarget ? <LCButton variant="ghost" size="sm" icon="map" onClick={() => { showOnMap(mapTarget, { source: 'inspector', keepInspector: true }) }}>Show on Map</LCButton> : null}
       {missions.map((m) => (
         <LCButton key={m.kind} variant="ghost" size="sm" icon="target" onClick={() => start(m.kind)}>{m.verb}</LCButton>
       ))}

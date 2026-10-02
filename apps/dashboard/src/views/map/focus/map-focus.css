@@ -8,7 +8,9 @@
 .mx-overlay-host[data-auto-flying] .smcd-tether { opacity: 0; pointer-events: none; transition-duration: 90ms; }
 
 /* the honest "unavailable" answer reuses the focus-set chip */
-.lc-map-focus-notice { max-width: min(560px, calc(100% - 32px)); }
+.lc-map-focus-notice { max-width: min(560px, calc(100% - 32px)); z-index: 61; }
+/* a highlighted set's chip owns the top slot: the notice sits just under it */
+html.is-desktop-modern .mx-overlay-host:has(> .mx-focusset:not(.lc-map-focus-notice)) > .lc-map-focus-notice { top: calc(var(--mxd-gap, 12px) + 50px); }
 .lc-map-focus-notice .mx-focusset__text { overflow: hidden; text-overflow: ellipsis; font-weight: 540; }
 .lc-map-focus-notice .mx-focusset__text b { font-weight: 640; }
 .lc-map-focus-notice__why { color: var(--lc-ink-2, rgba(242, 245, 251, 0.72)); }
