@@ -393,16 +393,23 @@ function tokenizeAmounts(text) {
   const phone_spans = phoneSpans(text);
 
   // Digit-based: $100,000 / 100k / 95.5k / 1.2m / 80 / $500.000 (dot-thousands)
-  const numRe = /\$?\s*(\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+(?!\d)|\d+(?:\.\d+)?)\s*(k|m|mil|grand|thousand|million|hundred)?\b/gi;
+  // Space-grouped thousands ("300 000", "1 250 000", NBSP too) only when
+  // EVERY group after the first is exactly 3 digits, the amount is at least
+  // 10,000 ("1 500" stays two numbers) and no further digit follows: "612 555 0188" (phone-like) and "2 300 sqft" (area, dropped by
+  // the unit guard below) never become prices.
+  const numRe = /\$?\s*(\d{1,3}(?:,\d{3})+|\d{1,3}(?:\.\d{3})+(?!\d)|(?:\d{2,3}(?:[ \u00a0\u202f]\d{3})+|\d(?:[ \u00a0\u202f]\d{3}){2,})(?![\d.,])(?![ \u00a0\u202f]?\d)|\d+(?:\.\d+)?)\s*(k|m|mil|grand|thousand|million|hundred)?\b/gi;
   let match;
   while ((match = numRe.exec(text)) !== null) {
     const dotThousands = /^\d{1,3}(?:\.\d{3})+$/.test(match[1]) && !match[1].includes(",");
-    const rawNumber = dotThousands ? match[1].replace(/\./g, "") : match[1].replace(/,/g, "");
+    const spaceThousands = /^\d{1,3}(?:[ \u00a0\u202f]\d{3})+$/.test(match[1]);
+    const rawNumber = dotThousands
+      ? match[1].replace(/\./g, "")
+      : match[1].replace(/[,\s\u00a0\u202f]/g, "");
     let value = parseFloat(rawNumber);
     if (!Number.isFinite(value)) continue;
     const suffix = lower(match[2] || "");
     const hasCurrency = match[0].includes("$");
-    const hadThousandsSeparator = match[1].includes(",") || dotThousands;
+    const hadThousandsSeparator = match[1].includes(",") || dotThousands || spaceThousands;
 
     const after = text.slice(match.index + match[0].length);
     const trailing = /^\s*([a-zà-ÿ']+)/i.exec(after);

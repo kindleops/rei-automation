@@ -254,3 +254,37 @@ test("stage 5 follows RC 7.1: a bare negotiation number is a clarification, not 
   // Once the seller has written in thousands ("175k"), "160" is $160,000.
   assert.equal(extractCounterOffer("can you do 160?", 175_000, { shorthandConvention: true }).normalized_amount, 160_000);
 });
+
+// ── Space-grouped thousands ("300 000") ─────────────────────────────────────
+
+const SPACE_CASES = [
+  ["300 000", 300_000],
+  ["300 000 dólares", 300_000],
+  ["I want 1 250 000", 1_250_000],
+  ["2 300 sqft", null], // an area, never merged into a price
+  ["612 555 0188", null], // phone-like: the last group is 4 digits
+  ["Rent is 1 800 a month", null], // under 10,000: not a grouped price
+];
+
+for (const [message, expected] of SPACE_CASES) {
+  test(`space-grouped thousands, one answer everywhere: ${JSON.stringify(message)} -> ${expected ?? "no price"}`, async () => {
+    const question = ASK_Q;
+    const signal = resolveCanonicalAskingPrice(message, { lastOutboundBody: question });
+    const answers = {
+      canonical: canonicalAskingPriceDecision(message, { lastOutboundBody: question }).value,
+      burst: resolveCanonicalBurstAskingPrice([{ body: message }], { lastOutboundBody: question }).asking_price?.value ?? null,
+      classifier: (await classifierPrice(message, question)).value,
+      stage2_extract: extractAskingPrice(message, { lastOutboundBody: question })?.value ?? null,
+      stage3: classifyStage3AskingPrice({ message, price_signal: signal, underwriting: {}, context: {} }).seller_asking_price ?? null,
+      stage5: extractCounterOffer(message, null, { lastOutboundBody: question }).normalized_amount,
+      underwriting:
+        extractUnderwritingSignals({
+          message,
+          context: { recent: { recent_events: [{ direction: "outbound", message_body: question }] } },
+        }).signals.asking_price ?? null,
+      read_model: extractPrices(message, { lastOutboundBody: question })[0] ?? null,
+      orchestrator: await orchestratorPrice(message, question),
+    };
+    assert.deepEqual(answers, Object.fromEntries(Object.keys(answers).map((k) => [k, expected])));
+  });
+}
