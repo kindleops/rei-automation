@@ -21,6 +21,7 @@ const DOMAIN_LABELS: Record<NotificationDomain, string> = {
   platform: 'Platform',
   intelligence: 'Intelligence',
   email: 'Email',
+  signals: 'Signals',
 }
 
 const SOUND_LABELS: Record<SoundCategory, string> = {

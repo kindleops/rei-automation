@@ -56,7 +56,20 @@ function pct(numerator, denominator) {
   return Number(((Number(numerator) / d) * 100).toFixed(1))
 }
 
+/**
+ * Legacy scan types a LIVE Signal Center rule has taken over (see
+ * signals/signal-rules.js LEGACY_SCAN_RETIREMENT). Loaded once per orchestrated
+ * scan; empty unless the signal gate is open and the replacing rule is armed, so
+ * the legacy check keeps running until its replacement actually runs — no double
+ * alerts, no gap.
+ */
+let _retiredBySignals = new Set()
+export function __setRetiredBySignals(set = new Set()) { _retiredBySignals = set }
+
 async function emitScanEvent(fields) {
+  if (_retiredBySignals.has(fields.event_type)) {
+    return { ok: false, skipped: 'replaced_by_signal_rule', event_type: fields.event_type }
+  }
   return upsertNotificationEvent({
     group: true,
     ...fields,
@@ -767,6 +780,13 @@ export async function runNotificationIntelligenceScan(opts = {}) {
     total_emitted: 0,
     errors: [],
   }
+
+  _retiredBySignals = opts.retired_by_signals instanceof Set
+    ? opts.retired_by_signals
+    : await import('@/lib/domain/signals/signal-service.js')
+      .then((m) => m.legacyScanSuppression())
+      .catch(() => new Set())
+  results.retired_by_signals = [..._retiredBySignals]
 
   const scanners = [
     ['campaigns', scanCampaignNotifications],

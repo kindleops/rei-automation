@@ -8,6 +8,7 @@ import { openApp, startMission } from '../workspace/workspace-store'
 import { missionsFor, planMission } from '../workspace/missions'
 import { replaySubjectOf } from '../feed/feed-model'
 import { openReplay } from '../replay/replay-store'
+import { InspectorWatch } from '../../notifications/signals/InspectorWatch'
 import { inspectorFor, type InspectorModel, type InspectorTone } from './inspector-registry'
 import { failureOfError, type InspectorFailure } from './inspector-read'
 import { closeInspector, inspectorBack, openInspector, refKey, setInspectorPinned, useInspector, type EntityRef } from './inspector-store'
@@ -23,8 +24,10 @@ import './universal-inspector.css'
  *   Start mission compose the workspace this object's job needs
  *   Pin           keep the inspector while you keep working
  *
- * Watch and Replay join when Signal Center and Time Machine can honour them —
- * a control appears only when the action exists.
+ *   Watch         Signal Center watchlist (sellers, properties; campaigns once
+ *                 the Signal Center migration is applied — the server says which)
+ *   Replay        Time Machine, when the event envelope can resolve the subject
+ * A control appears only when the action exists.
  */
 
 const TONE: Record<InspectorTone, LCTone> = { neutral: 'neutral', live: 'exec', attention: 'attn', ok: 'ok', crit: 'crit' }
@@ -120,6 +123,7 @@ export function UniversalInspector() {
         <LCButton key={m.kind} variant="ghost" size="sm" icon="target" onClick={() => start(m.kind)}>{m.verb}</LCButton>
       ))}
       {replay ? <LCButton variant="ghost" size="sm" icon="clock" onClick={() => openReplay(replay)}>Replay</LCButton> : null}
+      <InspectorWatch subject={current} replayId={replay && replay.type === current.type ? replay.id : null} label={model.title ?? current.label ?? null} />
     </div>
   ) : null
 

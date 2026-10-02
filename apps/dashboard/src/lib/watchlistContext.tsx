@@ -1,8 +1,13 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import { fetchWatchlist, toggleWatch as apiToggleWatch, type WatchlistTogglePayload } from './data/watchlistData'
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react'
+import { type WatchlistTogglePayload } from './data/watchlistData'
+import { canonicalWatchKey, toggleLegacyWatch, useWatches } from './data/watchStore'
 
+/**
+ * Inbox watchlist context — a thin view over the ONE browser watch store
+ * (lib/data/watchStore.ts), which reads and writes through apps/api.
+ */
 interface WatchlistContextValue {
-  watchedKeys: Set<string>
+  watchedKeys: ReadonlySet<string>
   isWatched: (watch_type: string, watch_key: string) => boolean
   toggleWatch: (payload: WatchlistTogglePayload) => Promise<void>
   loading: boolean
@@ -10,6 +15,7 @@ interface WatchlistContextValue {
 
 const WatchlistContext = createContext<WatchlistContextValue | null>(null)
 
+// eslint-disable-next-line react-refresh/only-export-components -- the hook belongs with its provider
 export function useWatchlist(): WatchlistContextValue {
   const ctx = useContext(WatchlistContext)
   if (!ctx) throw new Error('useWatchlist must be used within WatchlistProvider')
@@ -17,52 +23,16 @@ export function useWatchlist(): WatchlistContextValue {
 }
 
 export function WatchlistProvider({ children }: { children: ReactNode }) {
-  const [watchedKeys, setWatchedKeys] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetchWatchlist()
-      .then((entries) => {
-        const keys = new Set(entries.map((e) => `${e.watch_type}:${e.watch_key}`))
-        setWatchedKeys(keys)
-      })
-      .finally(() => setLoading(false))
-  }, [])
-
+  const watches = useWatches()
   const isWatched = useCallback(
-    (watch_type: string, watch_key: string) => watchedKeys.has(`${watch_type}:${watch_key}`),
-    [watchedKeys],
+    (watch_type: string, watch_key: string) => watches.keys.has(canonicalWatchKey(watch_type, watch_key)),
+    [watches.keys],
   )
-
-  const toggleWatch = useCallback(async (payload: WatchlistTogglePayload) => {
-    const compositeKey = `${payload.watch_type}:${payload.watch_key}`
-    // Optimistic update
-    setWatchedKeys((prev) => {
-      const next = new Set(prev)
-      if (next.has(compositeKey)) {
-        next.delete(compositeKey)
-      } else {
-        next.add(compositeKey)
-      }
-      return next
-    })
-
-    const result = await apiToggleWatch(payload)
-    // Reconcile with server result
-    setWatchedKeys((prev) => {
-      const next = new Set(prev)
-      if (result === 'added') {
-        next.add(compositeKey)
-      } else {
-        next.delete(compositeKey)
-      }
-      return next
-    })
-  }, [])
-
-  return (
-    <WatchlistContext.Provider value={{ watchedKeys, isWatched, toggleWatch, loading }}>
-      {children}
-    </WatchlistContext.Provider>
-  )
+  const value = useMemo<WatchlistContextValue>(() => ({
+    watchedKeys: watches.keys,
+    isWatched,
+    toggleWatch: toggleLegacyWatch,
+    loading: watches.status === 'idle' || watches.status === 'loading',
+  }), [watches.keys, watches.status, isWatched])
+  return <WatchlistContext.Provider value={value}>{children}</WatchlistContext.Provider>
 }

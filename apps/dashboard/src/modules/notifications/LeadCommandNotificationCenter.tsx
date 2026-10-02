@@ -16,6 +16,8 @@ import { useNotificationIntelligence } from '../../domain/notifications/useNotif
 import { Icon } from '../../shared/icons'
 import { formatRelativeTime } from '../../shared/formatters'
 import { NotificationPreferencesPanel } from './NotificationPreferencesPanel'
+import { LCSegmented } from '../../shared/lc'
+import { SignalsPanel } from './signals/SignalsPanel'
 import './notification-center.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -40,6 +42,7 @@ const DOMAIN_LABELS: Record<NotificationDomain, string> = {
   platform: 'Platform',
   intelligence: 'Intelligence',
   email: 'Email',
+  signals: 'Signals',
 }
 
 const TIME_GROUP_LABELS: Record<NotificationTimeGroup, string> = {
@@ -192,7 +195,7 @@ const NotificationCard = ({
                     {action.label}
                   </button>
                 ))}
-                <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); isUnread ? onMarkRead() : onMarkUnread() }}>
+                <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); if (isUnread) onMarkRead(); else onMarkUnread() }}>
                   {isUnread ? 'Mark read' : 'Mark unread'}
                 </button>
                 <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); onSnooze() }}>Snooze 1h</button>
@@ -265,6 +268,8 @@ export const LeadCommandNotificationCenter = ({
   const [expanded, setExpanded] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [showSettings, setShowSettings] = useState(false)
+  // Signal Center lives here as a lens of the one notification center (no new rail app)
+  const [mode, setMode] = useState<'notifications' | 'signals'>('notifications')
   const panelRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -280,12 +285,16 @@ export const LeadCommandNotificationCenter = ({
     if (!open) return
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // an LC dialog opened from this panel (e.g. arming a rule) closes first
+        if (document.querySelector('.lc-dialog')) return
         e.preventDefault()
         if (showSettings) setShowSettings(false)
         else onClose()
       }
     }
     const handleMouseDown = (e: MouseEvent) => {
+      const t = e.target as Element | null
+      if (t?.closest?.('.lc-dialog, .lc-scrim, [data-radix-popper-content-wrapper]')) return
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) onClose()
     }
     window.addEventListener('keydown', handleKey)
@@ -355,7 +364,7 @@ export const LeadCommandNotificationCenter = ({
     <>
       <section
       ref={panelRef}
-      className="lcnc-panel nx-notification-center nx-liquid-panel"
+      className={cls('lcnc-panel nx-notification-center nx-liquid-panel', mode === 'signals' && 'is-signals')}
       style={{ '--lcnc-anchor-top': `${anchorTop}px` } as React.CSSProperties}
       aria-label="LeadCommand notification center"
       role="dialog"
@@ -376,9 +385,10 @@ export const LeadCommandNotificationCenter = ({
               <span className="lcnc-count-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
             ) : null}
           </div>
-          <p className="lcnc-subtitle">Real-time operational signals across inbox, campaigns, offers, and system health.</p>
+          <p className="lcnc-subtitle">{mode === 'signals' ? 'Watches and deterministic rules over the platform event feed.' : 'Real-time operational signals across inbox, campaigns, offers, and system health.'}</p>
         </div>
         <div className="lcnc-header__actions">
+          {mode === 'notifications' ? (
           <button
             type="button"
             className="lcnc-header-btn"
@@ -389,6 +399,8 @@ export const LeadCommandNotificationCenter = ({
           >
             <Icon name="refresh-cw" size={14} />
           </button>
+          ) : null}
+          {mode === 'notifications' ? (
           <button
             type="button"
             className={cls('lcnc-header-btn', showSettings && 'is-active')}
@@ -397,13 +409,27 @@ export const LeadCommandNotificationCenter = ({
           >
             <Icon name="settings" size={14} />
           </button>
+          ) : null}
           <button type="button" className="lcnc-header-btn" onClick={onClose} aria-label="Close notifications">
             <Icon name="close" size={14} />
           </button>
         </div>
       </header>
 
-      {showSettings ? (
+      {/* outside <header>: legacy `.nx-notification-center header button/div/span` rules would restyle it */}
+      <div className="lcnc-modebar">
+        <LCSegmented
+          size="sm"
+          label="Notification center view"
+          value={mode}
+          onChange={(v) => { setMode(v); setShowSettings(false) }}
+          options={[{ value: 'notifications', label: 'Notifications' }, { value: 'signals', label: 'Signals' }]}
+        />
+      </div>
+
+      {mode === 'signals' ? (
+        <SignalsPanel />
+      ) : showSettings ? (
         <NotificationPreferencesPanel
           preferences={preferences}
           onSave={savePrefs}

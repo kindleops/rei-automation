@@ -1,0 +1,141 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   SIGNAL CENTER — Signals lens of the Notifications app (desktop).
+   LC tokens only; semantic colour by data-tone (red = critical only).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.lcsig {
+  container: lcsig / inline-size;
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  overflow: hidden;
+  color: var(--lc-ink-1);
+  /* hairlines + quiet fills: white on dark themes, ink on light */
+  --lcsig-line: var(--lc-edge-rgb);
+}
+
+:root[data-nexus-theme='light'] .lcsig { --lcsig-line: 15, 23, 42; }
+
+.lcsig [data-tone='crit'] { --t: var(--lc-crit-rgb); }
+.lcsig [data-tone='attn'] { --t: var(--lc-attn-rgb); }
+.lcsig [data-tone='exec'] { --t: var(--lc-exec-rgb); }
+.lcsig [data-tone='neutral'] { --t: var(--lc-neutral-rgb); }
+
+/* evaluator state strip */
+.lcsig-state {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: var(--lc-r-md);
+  background: rgba(var(--lcsig-line), 0.035);
+  border: 1px solid rgba(var(--lcsig-line), 0.07);
+}
+.lcsig-state__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.lcsig-state__counts { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.lcsig-state__counts b { color: var(--lc-ink-1); font-weight: 620; }
+.lcsig-state__detail { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-2); }
+
+.lcsig-tabs { flex: 0 0 auto; }
+
+.lcsig-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -4px;
+  padding: 2px 4px 4px;
+  scrollbar-width: thin;
+}
+
+/* ledger */
+.lcsig-list, .lcsig-watch, .lcsig-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+
+.lcsig-item {
+  border-radius: var(--lc-r-md);
+  background: rgba(var(--lcsig-line), 0.03);
+  border: 1px solid rgba(var(--lcsig-line), 0.06);
+  overflow: hidden;
+}
+.lcsig-item.is-new { background: rgba(var(--t), 0.06); border-color: rgba(var(--t), 0.2); }
+.lcsig-item.is-resolved { opacity: 0.72; }
+
+.lcsig-item__head {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px 10px 0;
+  cursor: pointer;
+}
+.lcsig-item__head:focus-visible { outline: var(--lc-focus-ring, 2px solid var(--lc-accent)); outline-offset: -2px; border-radius: var(--lc-r-md); }
+.lcsig-item__rail { align-self: stretch; border-radius: 0 3px 3px 0; background: rgba(var(--t), 0.85); }
+.lcsig-item.is-resolved .lcsig-item__rail { background: rgba(var(--lc-neutral-rgb), 0.4); }
+.lcsig-item__main { display: grid; gap: 3px; min-width: 0; }
+.lcsig-item__title { font: var(--lc-t-row); color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lcsig-item__body { font: var(--lc-t-meta); color: var(--lc-ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lcsig-item__meta { display: grid; justify-items: end; gap: 5px; font: var(--lc-t-stamp); color: var(--lc-ink-3); }
+
+.lcsig-item__detail { display: grid; gap: 8px; padding: 0 12px 12px 13px; }
+.lcsig-item__subject { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-2); }
+.lcsig-item__note { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.lcsig-item__err { margin: 0 0 6px; font: var(--lc-t-meta); color: var(--lc-crit); }
+.lcsig-item__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* watches */
+.lcsig-watch__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--lc-r-md);
+  background: rgba(var(--lcsig-line), 0.03);
+  border: 1px solid rgba(var(--lcsig-line), 0.06);
+}
+.lcsig-watch__type {
+  font: var(--lc-t-eyebrow);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lc-ink-3);
+}
+.lcsig-watch__name { display: grid; min-width: 0; gap: 1px; }
+.lcsig-watch__name b { font: var(--lc-t-row); color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lcsig-watch__name span { font: var(--lc-t-mono); color: var(--lc-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lcsig-watch__at { font: var(--lc-t-stamp); color: var(--lc-ink-3); white-space: nowrap; }
+
+/* rules */
+.lcsig-rule {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: var(--lc-r-md);
+  background: rgba(var(--lcsig-line), 0.025);
+  border: 1px solid rgba(var(--lcsig-line), 0.06);
+}
+.lcsig-rule.is-armed { border-color: rgba(var(--lc-exec-rgb), 0.28); background: rgba(var(--lc-exec-rgb), 0.05); }
+.lcsig-rule__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.lcsig-rule__name { font: var(--lc-t-row); color: var(--lc-ink-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lcsig-rule__src { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-2); }
+.lcsig-rule__foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 24px; font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.lcsig-rule__sev { display: inline-flex; align-items: center; gap: 6px; }
+.lcsig-rule__sev::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: rgba(var(--t), 0.9); }
+.lcsig-rule__firing { color: rgb(var(--lc-attn-rgb)); }
+.lcsig-rule__arm { margin-left: auto; }
+
+@container lcsig (max-width: 400px) {
+  .lcsig-watch__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .lcsig-watch__type, .lcsig-watch__at { display: none; }
+  .lcsig-state__counts { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lcsig * { transition: none !important; }
+}

@@ -18,6 +18,8 @@ export const NOTIFICATION_DOMAINS = Object.freeze([
   'platform',
   'intelligence',
   'email',
+  // Signal Center (Platform 7.0): watch rules → signals → this one center.
+  'signals',
 ])
 
 export const NOTIFICATION_SEVERITIES = Object.freeze([
@@ -1275,6 +1277,43 @@ export const EVENT_CATALOG = Object.freeze({
     soundCategory: 'alert',
     defaultActions: ['navigate'],
     titleTemplate: 'Email delivery degraded — {{reason}}',
+  },
+
+  // ── Signal Center (lib/domain/signals) — the signal supplies the title ──
+  signal_watch_activity: {
+    domain: 'signals',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['navigate'],
+    titleTemplate: 'Watched activity',
+  },
+  signal_campaign_health: {
+    domain: 'signals',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['inspect_campaign', 'navigate'],
+    titleTemplate: 'Campaign signal',
+  },
+  signal_sender_health: {
+    domain: 'signals',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['inspect_sender', 'navigate'],
+    titleTemplate: 'Sender number signal',
+  },
+  signal_queue_stalled: {
+    domain: 'signals',
+    defaultSeverity: 'critical',
+    soundCategory: 'alert',
+    defaultActions: ['inspect_queue', 'navigate'],
+    titleTemplate: 'Send queue stalled',
+  },
+  signal_reply_backlog: {
+    domain: 'signals',
+    defaultSeverity: 'warning',
+    soundCategory: 'ops',
+    defaultActions: ['navigate'],
+    titleTemplate: 'New Replies backlog',
   },
 })
 
