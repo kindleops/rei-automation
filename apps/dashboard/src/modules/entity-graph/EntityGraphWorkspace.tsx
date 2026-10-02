@@ -45,6 +45,8 @@ import { EntityGraphRelationshipGraph } from './EntityGraphRelationshipGraph'
 import { EntityGraphTableView } from './EntityGraphTableView'
 import { useBreakpoint } from '../mobile/useBreakpoint'
 import { EntityGraphConsole } from './console/EntityGraphConsole'
+import { gestureOf, handleObjectClick, useClickGesture } from '../desktop/objects'
+import { egObject } from './eg-objects'
 import './entity-graph.css'
 // Last: the desk recomposition (html.is-desktop-modern only) over every EG layer above.
 import './entity-graph-desktop.css'
@@ -381,21 +383,33 @@ function EntityGraphDesktopWorkspace({
     if (layoutMode !== 'peek') setInspectorOpen(true)
   }, [layoutMode, selectedEntity, universalContext])
 
+  // [8.2] the object click grammar on rows, cards and graph nodes:
+  // click selects here · ⇧-click opens the Universal Inspector · ⌘/Ctrl-click opens beside
+  const gesture = useClickGesture()
+  const objectGesture = useCallback((type: string, id: string, label?: string | null): boolean => {
+    const mods = gesture.take()
+    const ref = egObject(type, id, label)
+    if (!ref || gestureOf(mods) === 'activate') return false
+    return handleObjectClick(mods, ref, () => {}) !== 'activate'
+  }, [gesture])
+
   const handleSelectResult = useCallback((result: EntitySearchResult) => {
+    if (objectGesture(result.entityType, result.entityId, result.title)) return
     const entity = selectedEntityFromResult(result)
     setSelectedEntity(entity)
     setSelectedResult(result)
     setInspectorOpen(true)
     publishSelection(entity, result)
-  }, [publishSelection])
+  }, [publishSelection, objectGesture])
 
   const handleGraphNodeSelect = useCallback((_nodeId: string, nodeType: string, entityId: string) => {
+    if (objectGesture(nodeType, entityId)) return
     const entity = selectedEntityFromGraphNode(nodeType, entityId)
     setSelectedEntity(entity)
     setSelectedResult(null)
     setInspectorOpen(true)
     publishSelection(entity)
-  }, [publishSelection])
+  }, [publishSelection, objectGesture])
 
   const handleContactSelect = useCallback((entry: ContactLadderEntry) => {
     const entity = { type: entry.type, id: entry.id } as SelectedEntity
@@ -460,7 +474,7 @@ function EntityGraphDesktopWorkspace({
   )
 
   return (
-    <section className={`eg-app is-layout-${layoutMode} is-mode-${resolvedTheme}${inspectorOpen ? ' is-inspector-open' : ''}${showGraphMain ? ' is-graph-mode' : ''}`}>
+    <section className={`eg-app is-layout-${layoutMode} is-mode-${resolvedTheme}${inspectorOpen ? ' is-inspector-open' : ''}${showGraphMain ? ' is-graph-mode' : ''}`} {...gesture.captureProps}>
       <EntityGraphHeader
         activeTab={activeTab}
         visualMode={effectiveVisualMode}

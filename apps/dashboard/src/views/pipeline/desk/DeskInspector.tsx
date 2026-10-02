@@ -5,6 +5,8 @@
  * to the canonical surfaces; nothing here writes.
  */
 import type { ReactNode } from 'react'
+import { ObjectMenuButton } from '../../../modules/desktop/objects'
+import { deskDealObject } from './desk-objects'
 import type { IconName } from '../../../shared/icons'
 import { LCButton, LCError, LCFacts, LCIconButton, LCInspector, LCInspectorSection, LCSkeleton, LCStatus, LCTimeline, type LCTimelineItem } from '../../../shared/lc'
 import { compactMoney, type PipelineDealStory } from '../../../domain/pipeline/pipeline-command-api'
@@ -161,6 +163,8 @@ function InspectorFooter({ card, actions }: { card: DeskCard; actions: Inspector
         {card.propertyId && actions.onEntityGraph ? <LCIconButton icon="layers" label="Open in Entity Graph" size="sm" onClick={() => actions.onEntityGraph?.(card)} /> : null}
         {card.propertyId && actions.onBuyerMatch && (card.stageIndex ?? 0) >= 5 ? <LCIconButton icon="users" label="Buyer Match" size="sm" onClick={() => actions.onBuyerMatch?.(card)} /> : null}
         {card.closing && actions.onClosingDesk ? <LCIconButton icon="briefcase" label="Closing Desk" size="sm" onClick={() => actions.onClosingDesk?.(card)} /> : null}
+        {/* [8.2] the deal's full object actions: Open beside, Inspect, Show property, missions */}
+        <ObjectMenuButton object={deskDealObject(card)} omit={['open']} showOnMap={{ source: 'pipeline' }} />
       </span>
     </div>
   )

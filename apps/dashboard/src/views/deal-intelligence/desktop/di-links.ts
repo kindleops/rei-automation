@@ -1,6 +1,6 @@
 import { pushRoutePath } from '../../../app/router'
 import { setPropertyLocator } from '../../../domain/locator/property-locator'
-import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
+import { propertyObject, showOnMap, type ObjectRef } from '../../../modules/desktop/objects'
 import { openInboxThread } from '../../../modules/mobile/mobile-inbox-bridge'
 import type { DiDecision } from './di-types'
 
@@ -20,6 +20,8 @@ export interface DiLinks {
   graph: () => void
   map: (() => void) | null
   workflow: () => void
+  /** the subject as a canonical object (Inspect, Show on Map, the object menu) */
+  object: ObjectRef
 }
 
 export function diLinks(d: DiDecision): DiLinks {
@@ -32,11 +34,10 @@ export function diLinks(d: DiDecision): DiLinks {
     address: d.subject.address,
   })
   const go = (path: string) => () => { publish(); pushRoutePath(path) }
-  const subjectPoint = d.subject.lat !== null && d.subject.lng !== null ? { lat: d.subject.lat, lng: d.subject.lng, id: pid, label: d.subject.address } : null
-  const compPoints = (d.comps?.top ?? [])
-    .map((c) => (typeof c.lat === 'number' && typeof c.lng === 'number' ? { lat: c.lat, lng: c.lng, id: c.propertyId ?? c.id ?? undefined, label: c.address } : null))
-    .filter((p): p is NonNullable<typeof p> => Boolean(p))
-  const points = subjectPoint ? [subjectPoint, ...compPoints] : compPoints
+  const object = propertyObject({ propertyId: pid, threadKey, opportunityId: d.pipeline?.opportunityId ?? null, label: d.subject.address, source: 'deal-intelligence', lat: d.subject.lat, lng: d.subject.lng })
+  const comps = (d.comps?.top ?? [])
+    .filter((c) => typeof c.lat === 'number' && typeof c.lng === 'number')
+    .map((c) => propertyObject({ propertyId: c.propertyId ?? c.id ?? c.address ?? 'comp', label: c.address, source: 'deal-intelligence', lat: c.lat, lng: c.lng }))
   const street = d.subject.address ? d.subject.address.split(',')[0] : 'This property'
   return {
     conversation: threadKey ? () => { publish(); openInboxThread({ threadKey }) } : null,
@@ -44,13 +45,14 @@ export function diLinks(d: DiDecision): DiLinks {
     comps: go(`/comp-intelligence?property_id=${encodeURIComponent(pid)}`),
     buyers: go(`/buyer-match?property_id=${encodeURIComponent(pid)}`),
     graph: go(`/entity-graph/property/${encodeURIComponent(pid)}`),
-    map: points.length
-      ? () => {
-          publish()
-          writeMapFocusSet({ label: compPoints.length ? `${street} + ${compPoints.length} comps` : street, tone: 'property', points })
-          pushRoutePath('/map')
-        }
-      : null,
+    // [8.2] Show on Map: the subject (canonical selection) — or the subject with
+    // its comps framed as one set. The Map opens BESIDE; DI stays where it is.
+    map: () => {
+      publish()
+      if (comps.length) showOnMap([object, ...comps], { source: 'deal-intelligence', setLabel: `${street} + ${comps.length} comps` })
+      else showOnMap(object, { source: 'deal-intelligence' })
+    },
     workflow: go('/workflow-studio?wf=seller_inbound'),
+    object,
   }
 }

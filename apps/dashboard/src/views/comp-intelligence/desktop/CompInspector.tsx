@@ -24,10 +24,12 @@ interface Props {
   onExclude: (c: EvidenceComp) => void
   onGraph: (c: EvidenceComp) => void
   onFocusLinked: (c: EvidenceComp) => void
+  /** [8.2] Show on Map without leaving Comps */
+  onShowOnMap?: (c: EvidenceComp) => void
 }
 
 /** The refined evidence inspector (§65–70): one sale, every question about it answerable here. */
-export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, onGraph, onFocusLinked }: Props) {
+export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, onGraph, onFocusLinked, onShowOnMap }: Props) {
   if (!c || !tier) return <LCInspector open={false} onClose={onClose} id="comps-evidence" title="">{null}</LCInspector>
 
   const inSet = tier === 'set' || tier === 'added'
@@ -66,6 +68,7 @@ export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, 
       status={<LCStatus tone={inSet ? 'exec' : tier === 'excluded' ? 'neutral' : 'neutral'} hollow={tier === 'excluded' || tier === 'removed'} label={tier === 'excluded' ? 'Not evidence' : inSet ? 'In the shown set' : tier === 'removed' ? 'Out of your set' : 'Admissible'} quiet={!inSet} />}
       actions={
         <>
+          {c.propertyId && onShowOnMap ? <LCIconButton icon="map" label="Show on Map" size="sm" onClick={() => onShowOnMap(c)} /> : null}
           {c.propertyId ? <LCIconButton icon="radar" label="Open in Entity Graph" size="sm" onClick={() => onGraph(c)} /> : null}
           {c.propertyId ? <LCIconButton icon="link" label="Focus linked apps on this property" size="sm" onClick={() => onFocusLinked(c)} /> : null}
         </>

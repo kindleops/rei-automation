@@ -14,7 +14,8 @@ import { LCButton, LCDataGrid, LCIconButton, cx } from '../../../shared/lc'
 import type { LCColumn, LCSort } from '../../../shared/lc'
 import { pushRoutePath } from '../../../app/router'
 import { sound } from '../../../shared/sound'
-import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
+import { handleObjectClick, objectMenuEntries, showOnMap, useClickGesture } from '../../../modules/desktop/objects'
+import { handoffPointObject, recordRowObject } from './intel-objects'
 import { useLab } from './intel-context'
 import { paths, useIntel } from './intel-data'
 import { fmtInt } from './intel-format'
@@ -70,16 +71,21 @@ export function IntelRecords({ cohort, title, onClose }: { cohort: RecordCohort;
     render: (r: Row) => cell(r[c.id], c.type, ctx.tz),
   })), [d?.columns, ctx.tz])
 
+  const gesture = useClickGesture()
   const open = (r: Row) => {
     if (d?.entity === 'run') { pushRoutePath(sellerAutomationPath(r)); return }
     if (r.oppId && (d?.entity === 'transition' || d?.entity === 'opportunity' || d?.entity === 'offer' || d?.entity === 'closing')) { pushRoutePath(`/pipeline?opp=${encodeURIComponent(String(r.oppId))}`); return }
     if (r.thread) { pushRoutePath(`/inbox?thread=${encodeURIComponent(String(r.thread))}`); return }
     if (r.oppId) pushRoutePath(`/pipeline?opp=${encodeURIComponent(String(r.oppId))}`)
   }
+  // [8.2] Show on Map without leaving the Lab: the cohort's places are framed
+  // as one set (an open Map focuses in place; a closed one opens beside)
   const toMap = () => {
     if (!d?.handoff.points.length) return
-    if (writeMapFocusSet({ label: `Analytics · ${title}`, tone: 'property', points: d.handoff.points.map((p) => ({ lat: p.lat, lng: p.lng, id: p.id, label: p.label ?? null })) })) pushRoutePath('/map')
+    const refs = d.handoff.points.map(handoffPointObject)
+    showOnMap(refs.length === 1 && d.handoff.points[0].id ? refs[0] : refs, { source: 'analytics', setLabel: `Analytics · ${title}` })
   }
+  const rowObject = recordRowObject
   const toEntityGraph = () => {
     if (!d?.handoff.propertyIds.length) return
     const ff = JSON.stringify([{ field_key: 'properties.property_id', operator: 'in', value: d.handoff.propertyIds.slice(0, EG_MAX) }])
@@ -136,7 +142,7 @@ export function IntelRecords({ cohort, title, onClose }: { cohort: RecordCohort;
             <LCIconButton icon="x" label="Close records" shortcut={['Esc']} onClick={onClose} />
           </div>
         </header>
-        <div className={cx('ix-rec__grid', p1.stale && 'is-stale')}>
+        <div className={cx('ix-rec__grid', p1.stale && 'is-stale')} {...gesture.captureProps}>
           <LCDataGrid
             id={`intel-records-${d?.entity || 'x'}`}
             label={`Records: ${title}`}
@@ -145,12 +151,14 @@ export function IntelRecords({ cohort, title, onClose }: { cohort: RecordCohort;
             columns={columns}
             sort={sort}
             onSortChange={(s) => setState({ key, sort: s, pages: 1 })}
-            onActivate={open}
+            // click opens it in its app · ⇧-click inspects · ⌘/Ctrl-click opens beside
+            onActivate={(r) => handleObjectClick(gesture.take(), rowObject(r), () => open(r))}
             rowMenu={(r) => [
               ...(r.thread ? [{ id: 'inbox', label: 'Open the conversation', icon: 'message' as const, onSelect: () => pushRoutePath(`/inbox?thread=${encodeURIComponent(String(r.thread))}`) }] : []),
               ...(r.oppId ? [{ id: 'pipe', label: 'Open the deal in Pipeline', icon: 'arrow-up-right' as const, onSelect: () => pushRoutePath(`/pipeline?opp=${encodeURIComponent(String(r.oppId))}`) }] : []),
               ...(d?.entity === 'run' ? [{ id: 'wf', label: 'Open the run in Workflow Studio', icon: 'zap' as const, onSelect: () => pushRoutePath(sellerAutomationPath(r)) }] : []),
               ...(r.campaignId ? [{ id: 'camp', label: 'Open the campaign', icon: 'send' as const, onSelect: () => pushRoutePath(`/campaign-command?campaign=${encodeURIComponent(String(r.campaignId))}`) }] : []),
+              ...objectMenuEntries(rowObject(r), { omit: ['open'], showOnMap: { source: 'analytics' } }).map((e) => (e.kind === 'separator' ? e : { ...e, id: `obj-${e.id}` })),
             ]}
             loading={p1.loading && !d}
             error={p1.error && !d ? { what: 'The records didn’t load', onRetry: p1.reload } : null}

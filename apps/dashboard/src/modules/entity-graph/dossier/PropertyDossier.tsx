@@ -13,6 +13,7 @@
  * own public-record name is shown, and the entity pill reads "Individual buyer".
  */
 import { useMemo, useState, type ReactNode } from 'react'
+import { propertyObject, showOnMap } from '../../desktop/objects'
 import { Icon, type IconName } from '../../../shared/icons'
 import { CountUp } from '../../../shared/motion/CountUp'
 import type {
@@ -470,9 +471,15 @@ export function PropertyDossier({
   const secondary = actions.filter((a) => !PRIMARY_KEYS.has(a.key) && a.key !== 'open_workflow_studio')
   const ringPct = equityPct === null ? null : Math.max(0, Math.min(100, equityPct))
 
+  // [8.2] Show on Map focuses the Map (beside, or in place when it is open) — Entity Graph stays put
+  const showMap = () => {
+    if (!result.entityId) { onAction('open_in_map'); return }
+    showOnMap(propertyObject({ propertyId: result.entityId, label: address ?? null, source: 'entity-graph', lat: typeof lat === 'number' ? lat : null, lng: typeof lng === 'number' ? lng : null }), { source: 'entity-graph' })
+  }
+
   return (
     <div className="egd">
-      <DossierHero address={address} locality={locality || null} lat={lat} lng={lng} chips={chips} onOpenMap={() => onAction('open_in_map')} />
+      <DossierHero address={address} locality={locality || null} lat={lat} lng={lng} chips={chips} onOpenMap={showMap} />
 
       {/* ── Owner ── */}
       <div className="egd-owner egd-rise" style={{ ['--i' as string]: 1 }}>

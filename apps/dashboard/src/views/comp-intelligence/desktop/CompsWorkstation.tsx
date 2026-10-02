@@ -4,7 +4,8 @@ import { useClaimedKeys } from '../../../shared/lc/keys'
 import { pushRoutePath } from '../../../app/router'
 import { useAppInstance } from '../../../modules/desktop/workspace/instance-context'
 import { openApp } from '../../../modules/desktop/workspace/workspace-store'
-import { writeMapFocusSet } from '../../../domain/map/map-focus-set'
+import { propertyObject, showOnMap } from '../../../modules/desktop/objects'
+import { compObject } from './comp-object'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import {
   filterCount, fmtMoney, NO_FILTERS, saleAgeDays, unitValue, type CompFilters, type ExplainContext,
@@ -137,18 +138,16 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
   const handOff = useCallback((path: string) => { if (!inPane || openApp(path, 'beside') === 'refused') pushRoutePath(path) }, [inPane])
   const openDeal = useCallback(() => { if (pid) handOff(`/deal-intelligence?property_id=${encodeURIComponent(pid)}`) }, [pid, handOff])
   const openGraph = useCallback((id?: string | null) => { const target = id ?? pid; if (target) handOff(`/entity-graph/property/${encodeURIComponent(target)}`) }, [pid, handOff])
+  // [8.2] Show on Map without leaving Comps: an open Map pane is revealed in
+  // place, a closed one opens beside; the subject + the shown set frame together.
   const openMap = useCallback(() => {
     if (!m) return
     const s = m.w.subject
-    writeMapFocusSet({
-      label: `Comps for ${s.address ?? 'subject'}`,
-      tone: 'property',
-      points: [
-        ...(s.lat !== null && s.lng !== null ? [{ lat: s.lat, lng: s.lng, id: s.propertyId, label: `Subject · ${s.address ?? ''}` }] : []),
-        ...m.lensComps.filter((c) => c.lat !== null && c.lng !== null).map((c) => ({ lat: c.lat as number, lng: c.lng as number, id: c.propertyId ?? c.key, label: `${fmtMoney(c.salePrice) ?? ''} · ${c.address ?? ''}` })),
-      ],
-    })
-    pushRoutePath('/map')
+    const refs = [
+      ...(s.propertyId ? [propertyObject({ propertyId: s.propertyId, label: s.address ? `Subject · ${s.address}` : 'Subject', source: 'comp-intelligence', lat: s.lat, lng: s.lng })] : []),
+      ...m.lensComps.map(compObject).filter((r): r is NonNullable<typeof r> => Boolean(r)),
+    ]
+    if (refs.length) showOnMap(refs.length === 1 ? refs[0] : refs, { source: 'comp-intelligence', setLabel: `Comps for ${s.address ?? 'subject'}` })
   }, [m])
 
   const { setWindow: requestWindow } = ws
@@ -265,6 +264,7 @@ export function CompsWorkstation({ hostPropertyId }: { hostPropertyId: string | 
           <CompInspector
             m={m} c={inspected} tier={inspectedTier} ctx={ctx} onClose={closeInspector} onInclude={include} onExclude={exclude}
             onGraph={(c) => openGraph(c.propertyId)} onFocusLinked={(c) => { if (c.propertyId) subject.handOff(c.propertyId, c.address) }}
+            onShowOnMap={(c) => { const r = compObject(c); if (r) showOnMap(r, { source: 'comp-intelligence' }) }}
           />
         </MapStage>
 

@@ -11,6 +11,8 @@ import type { Tier } from './derive-workstation'
 import { SaleTypeBadge } from './SaleType'
 import { useFocusOf, type FocusStore } from './focus-store'
 import { displayAddress } from '../utils/comp-display'
+import { handleObjectClick, objectAttrs, ObjectMenu } from '../../../modules/desktop/objects'
+import { compObject } from './comp-object'
 
 export interface CompRowProps {
   c: EvidenceComp
@@ -69,7 +71,9 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
   const canAct = tier !== 'excluded' && c.engine?.eligible
   const sale = saleTypeOfComp(c)
 
+  const object = compObject(c)
   return (
+    <ObjectMenu object={object} omit={['open']} showOnMap={{ source: 'comp-intelligence' }}>
     <div
       role="listitem"
       data-comp-row=""
@@ -81,7 +85,9 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
       onPointerEnter={() => store.hover(c.key, 'list')}
       onPointerLeave={() => store.hover(null, null)}
       onFocus={() => store.hover(c.key, 'list')}
-      onClick={() => onOpen(c)}
+      {...objectAttrs(object)}
+      // click opens the comp here · ⇧-click inspects its property · ⌘/Ctrl-click opens it beside
+      onClick={(e) => handleObjectClick(e, object, () => onOpen(c))}
       onKeyDown={(e) => onKeyNav(e, c)}
     >
       <CompStreetView
@@ -135,5 +141,6 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
         ) : null}
       </div>
     </div>
+    </ObjectMenu>
   )
 })

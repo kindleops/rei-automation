@@ -17,6 +17,8 @@ import {
   type LCSegmentOption,
 } from '../../../shared/lc'
 import { Icon } from '../../../shared/icons'
+import { gestureOf, handleObjectClick, objectAttrs, objectMenuEntries } from '../../desktop/objects'
+import { ledgerRowObject } from './ledger-object'
 import {
   MORE_LENSES,
   PRIMARY_LENSES,
@@ -146,6 +148,9 @@ const LedgerRow = memo(function LedgerRow({
   const stageMove = signal?.kind === 'stage' ? signal : null
   const arriving = signal?.kind === 'arrival' && !signal.quiet
 
+  // the row's canonical object: the seller's thread (property as a hint), or the property alone
+  const rowObject = useMemo(() => ledgerRowObject(model), [model])
+
   const menu = useMemo<LCMenuEntry[]>(() => {
     const items: LCMenuEntry[] = [
       { id: 'open', label: 'Open conversation', icon: 'message', onSelect: () => handlers.onOpen(model.id) },
@@ -155,13 +160,14 @@ const LedgerRow = memo(function LedgerRow({
     if (model.propertyId) beside.push({ id: 'map', label: 'Open Map beside', icon: 'map', onSelect: () => handlers.onOpenBeside(thread, 'map') })
     if (model.propertyId) beside.push({ id: 'eg', label: 'Open Entity Graph beside', icon: 'link', onSelect: () => handlers.onOpenBeside(thread, 'entity-graph') })
     if (beside.length) items.push({ kind: 'separator', id: 'sep-beside' }, ...beside)
-    items.push(
-      { kind: 'separator', id: 'sep-act' },
-      { id: 'snooze', label: 'Snooze 24 hours', icon: 'clock', onSelect: () => handlers.onSnooze(model.id) },
-    )
-    if (model.unread) items.push({ id: 'read', label: 'Mark read', icon: 'check', onSelect: () => handlers.onMarkRead(model.id) })
+    // [8.2] the canonical object actions (Inspect, Show on Map, missions) — Open
+    // and Open beside stay the Inbox's own, above
+    const act: LCMenuEntry[] = [{ id: 'snooze', label: 'Snooze 24 hours', icon: 'clock', onSelect: () => handlers.onSnooze(model.id) }]
+    if (model.unread) act.push({ id: 'read', label: 'Mark read', icon: 'check', onSelect: () => handlers.onMarkRead(model.id) })
+    const object = objectMenuEntries(rowObject, { omit: ['open', 'beside'], showOnMap: { source: 'inbox' } })
+    items.push({ kind: 'separator', id: 'sep-object' }, ...object, { kind: 'separator', id: 'sep-act' }, ...act)
     return items
-  }, [handlers, model.id, model.propertyId, model.threadKey, model.unread, thread])
+  }, [handlers, model.id, model.propertyId, model.threadKey, model.unread, thread, rowObject])
 
   const stageFace = stageMove
     ? <span className="ixl-stage is-moving" aria-label={`Stage moved ${stageMove.from} to ${stageMove.to}`}>{stageMove.from}<Icon name="chevron-right" size={11} aria-hidden="true" />{stageMove.to}</span>
@@ -186,7 +192,12 @@ const LedgerRow = memo(function LedgerRow({
           arriving && 'is-arriving',
         )}
         data-thread-id={model.id}
-        onClick={() => { handlers.onCursor(model.id); handlers.onOpen(model.id) }}
+        {...objectAttrs(rowObject)}
+        onClick={(e) => {
+          // click opens the conversation · ⇧-click inspects the seller · ⌘/Ctrl-click opens Deal Intelligence beside
+          if (gestureOf(e) === 'beside' && (model.propertyId || model.threadKey)) { e.preventDefault(); handlers.onOpenBeside(thread, 'deal-intelligence'); return }
+          handleObjectClick(e, rowObject, () => { handlers.onCursor(model.id); handlers.onOpen(model.id) })
+        }}
       >
         <span className="ixl-row__lead" aria-hidden="true">
           {model.needsYou ? <i className="ixl-mark is-attn" /> : model.unread ? <i className="ixl-mark is-unread" /> : null}

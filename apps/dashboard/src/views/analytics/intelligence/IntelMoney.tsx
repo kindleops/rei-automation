@@ -24,6 +24,8 @@ import { usePipelineData } from './intel-hooks'
 import type { MoneyDeal, MoneyResult, MoneyStage } from './intel-model'
 import { LANES, STAGE_SHORT } from './intel-model'
 import { fmtInt, fmtMoney } from './intel-format'
+import { handleObjectClick, objectMenuEntries, useClickGesture } from '../../../modules/desktop/objects'
+import { moneyDealObject } from './intel-objects'
 
 type BasisKey = 'record' | 'asking' | 'authorized' | 'fee' | 'presented' | 'contract' | 'expected' | 'actual'
 const BASES: ReadonlyArray<{ key: BasisKey; label: string; kind: string; tone: string; of: (s: MoneyStage) => { sum: number; n: number } }> = [
@@ -114,6 +116,7 @@ function Basis({ label, kind, value, display, sub, tone, emphasis }: { label: st
 function MoneyDetail({ money }: { money: MoneyResult }) {
   const { act, inspect } = useLab()
   const [sort, setSort] = useState<LCSort>({ id: 'stage', dir: 'desc' })
+  const gesture = useClickGesture()
   const rows = useMemo(() => {
     const out = [...money.deals]
     if (!sort) return out
@@ -155,7 +158,7 @@ function MoneyDetail({ money }: { money: MoneyResult }) {
         </table>
       </div>
       <div className="ix-subhead"><span className="ix-eyebrow">Every deal · {fmtInt(money.deals.length)}{money.dealsTruncated ? ' (first 400)' : ''}</span><small className="ix-muted">row opens the deal in Pipeline</small></div>
-      <div className="ix-grid">
+      <div className="ix-grid" {...gesture.captureProps}>
         <LCDataGrid
           id="intel-money-deals"
           label="Deals in the active pipeline"
@@ -164,12 +167,14 @@ function MoneyDetail({ money }: { money: MoneyResult }) {
           columns={columns}
           sort={sort}
           onSortChange={setSort}
-          onActivate={(d) => inspect({ kind: 'deal', deal: d })}
+          // click explains the deal here · ⇧-click inspects it (Universal Inspector) · ⌘/Ctrl-click opens it beside
+          onActivate={(d) => handleObjectClick(gesture.take(), moneyDealObject(d), () => inspect({ kind: 'deal', deal: d }))}
           rowTone={(d) => (d.engine.state === 'authorized' ? 'exec' : null)}
           rowMenu={(d) => [
             { id: 'open', label: 'Open in Pipeline', icon: 'arrow-up-right', onSelect: () => pushRoutePath(`/pipeline?opp=${encodeURIComponent(d.id)}`) },
             ...(d.threadKey ? [{ id: 'inbox', label: 'Open the conversation', icon: 'message' as const, onSelect: () => pushRoutePath(`/inbox?thread=${encodeURIComponent(d.threadKey as string)}`) }] : []),
             ...(d.propertyId ? [{ id: 'buyers', label: 'Open Buyer Match for the property', icon: 'users' as const, onSelect: () => pushRoutePath(`/buyer-match?property_id=${encodeURIComponent(d.propertyId as string)}`) }] : []),
+            ...objectMenuEntries(moneyDealObject(d), { omit: ['open'], showOnMap: { source: 'analytics' } }).map((e) => (e.kind === 'separator' ? e : { ...e, id: `obj-${e.id}` })),
           ]}
           total={money.deals.length}
           height={420}

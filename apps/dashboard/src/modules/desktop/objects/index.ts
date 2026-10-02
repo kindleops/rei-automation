@@ -45,3 +45,4 @@ export {
 } from './object-actions'
 export { ObjectMenu, ObjectMenuButton } from './ObjectMenu'
 export { objectMenuEntries } from './object-menu-model'
+export { useClickGesture } from './use-click-gesture'

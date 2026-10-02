@@ -16,8 +16,8 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { LCChip, LCIconButton, LCLive, LCPopover, LCSearch, LCSegmented, LCSelect, LCTabs, cx, type LCTabItem } from '../../../shared/lc'
 import { PaneRouteContext, pushRoutePath } from '../../../app/router'
-import { routeEntityGraphAction } from '../../../domain/entity-graph/entity-graph-route-actions'
-import { EMPTY_UNIVERSAL_ENTITY_CONTEXT } from '../../../domain/entity-graph/universal-entity-context'
+import { gestureOf, inspectObject, openObjectBeside, showOnMap, useClickGesture } from '../../../modules/desktop/objects'
+import { deskDealObject, deskPropertyObject } from './desk-objects'
 import { setPropertyLocator } from '../../../domain/locator/property-locator'
 import { sound } from '../../../shared/sound'
 import type { PipelineCommandParams } from '../../../domain/pipeline/pipeline-command-api'
@@ -146,8 +146,17 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
   }, [ownsUrl])
 
   const isOpen = Boolean(open)
+  // [8.2] the object click grammar for every deal surface (beads, table, planes):
+  // click opens the deal here · ⇧-click inspects it · ⌘/Ctrl-click opens its property beside
+  const gesture = useClickGesture()
   const openDeal = useCallback((card: DeskCard | { id: string }) => {
     const seed = 'owner' in card ? card : (rows.data?.find((c) => c.id === card.id) ?? null)
+    const g = gestureOf(gesture.take())
+    if (g !== 'activate') {
+      const deal = deskDealObject(seed ?? { id: card.id })
+      const target = g === 'beside' && seed?.propertyId ? deskPropertyObject(seed) : deal
+      if ((g === 'inspect' ? inspectObject(deal) : openObjectBeside(target)).ok) return
+    }
     if (isOpen) sound.ui.select()
     else sound.panel.open()
     setOpen({ id: card.id, seed })
@@ -155,7 +164,7 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
     // Linked panes follow the deal the operator is looking at.
     if (seed) setPropertyLocator({ propertyId: seed.propertyId, threadKey: seed.threadKey, masterOwnerId: seed.masterOwnerId, opportunityId: seed.id, address: seed.address })
     else setPropertyLocator({ opportunityId: card.id })
-  }, [isOpen, ownsUrl, rows.data])
+  }, [isOpen, ownsUrl, rows.data, gesture])
   const closeDeal = useCallback(() => {
     sound.panel.close()
     setOpen(null)
@@ -181,10 +190,8 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
   const actions = useMemo<InspectorActions>(() => ({
     onConversation: (card) => { if (card.threadKey) onOpenCommandView(card.threadKey) },
     onDealIntelligence: toDealIntelligence,
-    onMap: (card) => {
-      if (!card.propertyId) return
-      routeEntityGraphAction('show_on_map', { ...EMPTY_UNIVERSAL_ENTITY_CONTEXT, entityType: 'property', entityId: card.propertyId, propertyId: card.propertyId, masterOwnerId: card.masterOwnerId })
-    },
+    // [8.2] Show on Map without leaving Pipeline (an open Map focuses in place; a closed one opens beside)
+    onMap: (card) => { if (card.propertyId) showOnMap(deskPropertyObject(card), { source: 'pipeline' }) },
     onEntityGraph: (card) => { if (card.propertyId) pushRoutePath(`/entity-graph/property/${encodeURIComponent(card.propertyId)}`) },
     onBuyerMatch: (card) => { if (card.propertyId) pushRoutePath(`/buyer-match?property_id=${encodeURIComponent(card.propertyId)}`) },
     onClosingDesk: (card) => {
@@ -215,7 +222,7 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
   const showChips = chips.filter((c) => mode !== 'overview' || !['owner', 'stage'].includes(c.id))
 
   return (
-    <section className={cx('pd2', `is-${mode}`)} data-ready={ready ? '1' : '0'} data-mode={mode} aria-label="Pipeline">
+    <section className={cx('pd2', `is-${mode}`)} data-ready={ready ? '1' : '0'} data-mode={mode} aria-label="Pipeline" {...gesture.captureProps}>
       <div className="pd2-field" aria-hidden="true"><i /><i /></div>
 
       <header className="pd2-head">

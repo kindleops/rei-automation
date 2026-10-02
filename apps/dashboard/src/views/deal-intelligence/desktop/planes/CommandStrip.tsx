@@ -3,6 +3,7 @@ import { cx, LCButton, LCIconButton, LCMenu, LCStatus, LCTabs, LCTooltip, lcMenu
 import { ago, humanize, phone as fmtPhone, splitAddress } from '../di-format'
 import { resolveCallAction } from '../../../../domain/compliance/call-action'
 import type { DiLinks } from '../di-links'
+import { handleObjectClick, objectAttrs, ObjectMenu } from '../../../../modules/desktop/objects'
 import { STAGE_ORDER, statusContradicted, type DecisionState, type SellerIdentity, type UnderwritingStatus } from '../di-model'
 import type { DiSubject } from '../di-subject'
 import { DI_MODES, type DiDecision, type DiMode } from '../di-types'
@@ -95,7 +96,12 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
           <div className="dr-strip__identity">
             <h1 className="dr-strip__name">{identity?.name ?? (incoming ? incoming.split(',')[0] : 'Deal Intelligence')}</h1>
             <p className="dr-strip__where">
-              {street ? <span className="dr-strip__street">{street}</span> : null}
+              {street ? (
+                // [8.2] the subject is an object: right-click for its actions, ⇧-click to inspect
+                <ObjectMenu object={links?.object ?? null} omit={['open']}>
+                  <span className="dr-strip__street" {...objectAttrs(links?.object ?? null)} onClick={(e) => { if (links?.object && e.shiftKey) handleObjectClick(e, links.object, () => {}) }}>{street}</span>
+                </ObjectMenu>
+              ) : null}
               {locality ? <span>{locality}</span> : null}
               {d?.subject.market && !(locality ?? '').toLowerCase().startsWith(d.subject.market.toLowerCase()) ? <span>{d.subject.market}</span> : null}
               {identity && identity.role !== 'unknown' ? <span className="dr-strip__role">{identity.roleLabel}</span> : null}
@@ -123,7 +129,7 @@ export function CommandStrip({ d: shown, subject, pending, identity: shownIdenti
           <LCButton size="sm" variant="primary" icon="message" disabled={!links?.conversation} onClick={() => links?.conversation?.()}>Message</LCButton>
           <span className="dr-strip__sep" aria-hidden="true" />
           <LCIconButton icon="layers" label={links?.pipeline ? 'Open deal in Pipeline' : 'No pipeline deal'} disabled={!links?.pipeline} onClick={() => links?.pipeline?.()} />
-          <LCIconButton icon="map" label={links?.map ? 'Show on Map' : 'No coordinates'} disabled={!links?.map} onClick={() => links?.map?.()} />
+          <LCIconButton icon="map" label="Show on Map" disabled={!links?.map} onClick={() => links?.map?.()} />
           <LCIconButton icon="link" label="Open in Entity Graph" disabled={!links} onClick={() => links?.graph()} />
           <LCMenu label="More actions" items={more} trigger={<LCIconButton icon="more" label="More" disabled={!links} />} />
         </div>
