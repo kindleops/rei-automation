@@ -11,6 +11,7 @@
  * targets) from audience to reply, then OPPORTUNITIES. Messages (retries,
  * conversation replies) are counted apart, in the delivery funnel.
  */
+import { missedStartAt } from '../start-now-window'
 import type { CampaignSummary } from '../campaigns.types'
 import type { CockpitRead, CockpitWindow } from './cockpit-api'
 import type { BookCampaign, CampaignIntel, FeederDigest, FleetNumber, ReplyBucketKey, ReplyBuckets, WarSystem } from './war-room-api'
@@ -265,9 +266,12 @@ export function missionOf(input: WarInput, now: number): Mission {
   if (status === 'failed') return M('needs_attention', 'attention', 'Needs attention', 'attn', { why: 'The last launch did not complete.', owner: 'operator', gate: 'schedule' })
 
   if (SCHEDULED.includes(status)) {
-    if (f.missedFor) {
+    // rc-7.1 D4: missed as soon as the start passes one activation tick
+    // unlaunched — the worker never starts it late.
+    const missedFor = missedStartAt('scheduled', f.scheduledFor, f.missedFor, now)
+    if (missedFor) {
       return M('missed_schedule', 'attention', 'Missed schedule', 'attn', {
-        why: `Did not start at ${dayClock(f.missedFor, f.tz, now) ?? 'its planned time'}. It will not send until it is rescheduled or launched.`,
+        why: `Did not start at ${dayClock(missedFor, f.tz, now) ?? 'its planned time'}. It never starts late on its own — start it now or reschedule it.`,
         gate: 'schedule', owner: 'operator',
       })
     }
@@ -492,7 +496,7 @@ export function riverOf(input: WarInput, now: number): { nodes: RiverNode[]; pin
       break
     case 'missed_schedule':
       current = 'eligible'
-      pin = { after: 'eligible', gate: 'schedule', label: 'Schedule gate', detail: `Missed start · ${clock(f.missedFor, tz)}`, tone: 'attn', state: 'blocked' }
+      pin = { after: 'eligible', gate: 'schedule', label: 'Schedule gate', detail: `Missed start · ${clock(f.missedFor ?? f.scheduledFor, tz)}`, tone: 'attn', state: 'blocked' }
       break
     case 'no_audience':
       current = 'audience'
@@ -577,7 +581,7 @@ export function gatesOf(input: WarInput, now: number): Gate[] {
   const out: Gate[] = []
 
   // SCHEDULE
-  if (mission.key === 'missed_schedule') out.push(g('schedule', 'block', `Missed · ${clock(f.missedFor, tz)}`, mission.why ?? 'Missed its start.', 'operator'))
+  if (mission.key === 'missed_schedule') out.push(g('schedule', 'block', `Missed · ${clock(f.missedFor ?? f.scheduledFor, tz)}`, mission.why ?? 'Missed its start.', 'operator'))
   else if (mission.key === 'scheduled') out.push(g('schedule', 'wait', f.scheduledFor ? dayClock(f.scheduledFor, tz, now) ?? 'Scheduled' : 'Scheduled', 'Activates automatically at this time (checked every 5 min).', 'system'))
   else if (f.status === 'paused') out.push(g('schedule', 'block', 'Paused', 'An operator paused it. New texts and queued rows wait for Resume.', 'operator'))
   else if (live) out.push(g('schedule', 'pass', 'Live', core?.lifecycle.activated_at ? `Activated ${dayClock(core.lifecycle.activated_at, tz, now)}.` : 'Live.'))
@@ -675,7 +679,7 @@ export function nextOf(input: WarInput, now: number): Next {
   const tz = f.tz
   switch (mission.key) {
     case 'scheduled': return { label: 'Campaign starts', when: dayClock(f.scheduledFor, tz, now), rel: relative(f.scheduledFor, now), tone: 'exec', expected: false, at: f.scheduledFor }
-    case 'missed_schedule': return { label: 'Requires an operator', when: 'Reschedule or launch now', rel: null, tone: 'attn', expected: false }
+    case 'missed_schedule': return { label: 'Requires an operator', when: 'Start now or reschedule', rel: null, tone: 'attn', expected: false }
     case 'paused': return { label: 'Paused', when: f.ready ? `Resume continues with ${plural(f.ready, 'ready seller')}` : 'Resume releases held rows', rel: null, tone: 'neutral', expected: false }
     case 'completed': return { label: 'Finished', when: dayClock(input.core?.lifecycle.completed_at ?? input.book?.schedule?.completed_at, tz, now), rel: null, tone: 'ok', expected: false }
     case 'audience_built': return { label: 'Ready to schedule', when: `${plural(f.eligible ?? 0, 'eligible seller')}`, rel: null, tone: 'neutral', expected: false }

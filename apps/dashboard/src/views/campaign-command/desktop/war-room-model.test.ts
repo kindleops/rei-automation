@@ -190,7 +190,7 @@ describe('next, time, pace, caps', () => {
     expect(next.label).toBe('Queue refill')
     expect(next.expected).toBe(true)
     expect(next.when).toBe('next feeder pass ≈ 5:30 AM CDT')
-    expect(nextOf({ book: missed, system }, NOW).when).toBe('Reschedule or launch now')
+    expect(nextOf({ book: missed, system }, NOW).when).toBe('Start now or reschedule')
   })
   it('the window track is in the campaign’s zone', () => {
     const w = windowTrack(closedWindow, NOW, 'America/New_York')!
@@ -250,5 +250,17 @@ describe('audience, outcomes, money', () => {
     expect(relative('2026-10-01T10:30:38.000Z', NOW)).toBe('in 38s')
     expect(relative('2026-10-01T10:26:00.000Z', NOW)).toBe('4 min ago')
     expect(counterDrift({ router_counter: 281, sent_today: 0 } as never)).toBe(true)
+  })
+})
+
+describe('rc-7.1 D4: no late auto-activation', () => {
+  it('a scheduled start past one activation tick reads as missed before the worker marks it', () => {
+    const now = Date.parse('2026-10-01T15:00:00Z')
+    const book: BookCampaign = { ...missed, schedule: { ...missed.schedule, scheduled_for: '2026-10-01T14:30:00Z', missed_for: null } }
+    const m = missionOf({ book }, now)
+    expect(m.key).toBe('missed_schedule')
+    expect(m.why).toMatch(/start it now or reschedule it/)
+    const soon: BookCampaign = { ...missed, schedule: { ...missed.schedule, scheduled_for: '2026-10-01T14:55:00Z', missed_for: null } }
+    expect(missionOf({ book: soon }, now).key).toBe('scheduled')
   })
 })

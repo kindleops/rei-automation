@@ -273,7 +273,9 @@ test("scheduled activation: real chunk (not 5) and a stale schedule is missed, n
   assert.equal(buildScheduledActivationRequest({ id: "c", scheduled_for: "2026-09-29T14:10:00Z" }).batch_max, 100);
   const now = Date.parse("2026-09-28T13:00:00Z");
   assert.equal(isScheduleMissed({ scheduled_for: "2026-09-25T17:10:00Z" }, now), true);
-  assert.equal(isScheduleMissed({ scheduled_for: "2026-09-28T12:30:00Z" }, now), false);
+  // rc-7.1: no 2h grace — 30 min late is missed; within one activation tick is due.
+  assert.equal(isScheduleMissed({ scheduled_for: "2026-09-28T12:30:00Z" }, now), true);
+  assert.equal(isScheduleMissed({ scheduled_for: "2026-09-28T12:55:00Z" }, now), false);
 });
 
 test("the day boundary is the campaign's local midnight, not the server's", () => {

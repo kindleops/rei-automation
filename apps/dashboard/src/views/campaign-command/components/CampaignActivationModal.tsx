@@ -7,6 +7,7 @@ import { mergeCampaignDetail } from '../campaign-detail-merge'
 import { CAMPAIGN_HYDRATION_CHUNK } from '../campaign-builder-launch'
 import type { CampaignSummary } from '../campaigns.types'
 import { campaignSheetHost } from '../mobile/sheet-host'
+import { startNowWindow } from '../start-now-window'
 
 type ActivationStep =
   | 'review'
@@ -178,6 +179,10 @@ export const CampaignActivationModal = ({
       ? 'Launched — messages are prepared and go out on schedule while sending is on.'
       : null
   const firstBatch = Math.min(current.ready_targets || 0, 5)
+  // rc-7.1 D4: a missed scheduled start is started here, never fired late by
+  // the worker. Say whether texting hours are open before the operator confirms.
+  const missedStart = current.status === 'scheduled' && Boolean(current.schedule_missed_for)
+  const hours = startNowWindow(current)
 
   const modal = (
     <div className="ccm-glass-overlay" onClick={onClose}>
@@ -187,7 +192,7 @@ export const CampaignActivationModal = ({
             <Icon name="zap" size={18} />
           </div>
           <div>
-            <h3>{confirmingLive ? 'Launch live?' : 'Launch campaign'}</h3>
+            <h3>{confirmingLive ? (missedStart ? 'Start now?' : 'Launch live?') : (missedStart ? 'Start now — missed start' : 'Launch campaign')}</h3>
             <p>{campaign.campaign_name}</p>
           </div>
           <button type="button" className="ccm-glass-modal__close" onClick={onClose} aria-label="Close">
@@ -202,6 +207,7 @@ export const CampaignActivationModal = ({
               {campaign.ready_targets === 1 ? ' seller' : ' sellers'}. They go out only while system-wide sending is on,
               inside texting hours, and after every suppression and sender check.
             </div>
+            <div className={`ccm-schedule-hint${hours.state === 'closed' ? ' is-warn' : ''}`}>{hours.words}</div>
           </div>
         )}
 
@@ -243,6 +249,16 @@ export const CampaignActivationModal = ({
             </div>
 
             <div className="ccm-activation-warnings">
+              {missedStart ? (
+                <div className="ccm-activation-warn-item">
+                  <Icon name="clock" size={12} />
+                  Its scheduled start passed without launching. It never starts late on its own — start it now or reschedule it.
+                </div>
+              ) : null}
+              <div className="ccm-activation-warn-item">
+                <Icon name={hours.state === 'closed' ? 'alert-circle' : 'clock'} size={12} />
+                {hours.words}
+              </div>
               <div className="ccm-activation-warn-item">
                 <Icon name="alert-circle" size={12} />
                 A test launch prepares messages that are never sent, to check everything end to end.
@@ -335,7 +351,7 @@ export const CampaignActivationModal = ({
                 disabled={!canLiveActivate || busy}
                 onClick={() => void runActivation('live')}
               >
-                Launch live
+                {missedStart ? 'Start now' : 'Launch live'}
               </button>
             </>
           )}

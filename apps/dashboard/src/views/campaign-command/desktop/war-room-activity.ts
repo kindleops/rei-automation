@@ -183,7 +183,7 @@ export function actionSpec(action: string, c: CampaignSummary, input: WarInput):
         effects: [
           { kind: 'stops', text: 'New campaign texts stop — the feeder places nothing while it is paused.' },
           { kind: 'keeps', text: (f.queueLive ?? 0) > 0 ? `${plural(f.queueLive ?? 0, 'queued text')} are held, not cancelled; Resume sends the same rows.` : 'Rows already queued are held, not cancelled; Resume sends the same rows.' },
-          { kind: 'note', text: 'Automatic replies that carry this campaign’s id also wait until you resume — conversations started by it pause with it.' },
+          { kind: 'keeps', text: 'Conversations it started keep going — seller replies and automatic responses are still handled. Pause conversation automation separately if you need it quiet.' },
           { kind: 'keeps', text: 'Inbound replies still arrive in Inbox, and execution history is kept.' },
         ],
       }

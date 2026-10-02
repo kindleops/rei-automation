@@ -36,6 +36,13 @@ export function destinations(e: DeskEvent): Destination[] {
   const q = (o: Record<string, string | null | undefined>) => { const s = new URLSearchParams(); for (const [k, v] of Object.entries(o)) if (v) s.set(k, v); const t = s.toString(); return t ? `?${t}` : '' }
   if (e.deep_link) out.push({ key: 'own', label: e.deep_link.label, app: e.deep_link.app, path: e.deep_link.path, ...(e.deep_link.app === 'inbox' && l.thread_key ? { conversation: { threadKey: l.thread_key, propertyId: l.property_id ?? null } } : {}) })
   const add = (d: Destination) => { if (!out.some((x) => x.app === d.app)) out.push(d) }
+  // A MISSED campaign start never fires late on its own (rc-7.1 D4): the two
+  // operator choices, each opening Campaign Command's own sheet — Start now
+  // (the existing activation path, texting hours shown) or Reschedule.
+  if (l.campaign_id && e.status === 'missed') {
+    out.push({ key: 'campaign_start_now', label: 'Start now', app: 'campaigns', path: `/campaign-command${q({ campaign: l.campaign_id, intent: 'start_now' })}` })
+    out.push({ key: 'campaign_reschedule', label: 'Reschedule', app: 'campaigns', path: `/campaign-command${q({ campaign: l.campaign_id, intent: 'reschedule' })}` })
+  }
   if (l.thread_key) add({ key: 'conversation', label: 'Open conversation', app: 'inbox', path: `/inbox${q({ thread: l.thread_key })}`, conversation: { threadKey: l.thread_key, propertyId: l.property_id ?? null } })
   if (l.campaign_id) add({ key: 'campaign', label: 'Open campaign', app: 'campaigns', path: `/campaign-command${q({ campaign: l.campaign_id })}` })
   if (l.closing_case_id) add({ key: 'closing', label: 'Open closing', app: 'closing', path: `/closing-desk${q({ case: l.closing_case_id })}` })

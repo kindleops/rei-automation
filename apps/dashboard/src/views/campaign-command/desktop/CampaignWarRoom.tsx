@@ -337,7 +337,7 @@ export function CampaignWarRoom({
     { key: 'source', text: sourceWords(f.sourceKind) + (f.explicit ? ` · ${nf(f.explicit)} selected` : core.data?.lineage.filters.length ? ` · ${core.data.lineage.filters.length} filter${core.data.lineage.filters.length === 1 ? '' : 's'}` : '') },
     ...(pace.dayIndex && live ? [{ key: 'day', text: `Day ${nf(pace.dayIndex)}` }] : []),
   ]
-  const pinAction = mission.key === 'missed_schedule' && summary ? { label: 'Reschedule', onClick: () => request('reschedule') } : null
+  const pinAction = mission.key === 'missed_schedule' && summary ? { label: 'Start now…', onClick: () => request('activate') } : null
   const ready = Boolean(book.data || model) && (!selectedId || Boolean(core.data || core.error)) && (!selectedId || Boolean(intel.data || intel.error))
   const inspMode: 'dock' | 'float' = dock ? 'dock' : 'float'
   const bodyDocked = inspOpen && dock && Boolean(selectedId)

@@ -179,7 +179,7 @@ test("B2: the recipient zone comes from the property, not the owner's phone", ()
 });
 
 // ── B3 ──────────────────────────────────────────────────────────────────────
-test("B3: missed = still scheduled and more than two hours past start — one rule for worker and Calendar", () => {
+test("B3: missed = still scheduled and past one activation tick (no 2h grace, rc-7.1 D4) — one rule for worker and Calendar", () => {
   const now = Date.parse("2026-09-30T18:15:00Z");
   const missed = { id: "m", name: "75+ ACQ SCORE", status: "scheduled", scheduled_for: "2026-09-30T16:11:00+00:00", contact_window_start: "08:00", contact_window_end: "21:00", metadata: { timezone: "America/New_York" } };
   const due = { ...missed, id: "d", scheduled_for: new Date(now - SCHEDULE_MISSED_GRACE_MS + 60_000).toISOString() };

@@ -2,7 +2,7 @@
  * Canonical campaign activation — shared by Activate Now and scheduled worker.
  */
 
-import { SCHEDULE_MISSED_GRACE_MS, isScheduleMissed, isCampaignStartMissed } from '@/lib/domain/campaigns/campaign-schedule-missed.js'
+import { SCHEDULE_MISSED_GRACE_MS, SCHEDULE_ACTIVATION_TOLERANCE_MS, isScheduleMissed, isScheduleMarkedMissed, isCampaignStartMissed } from '@/lib/domain/campaigns/campaign-schedule-missed.js'
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { activateCampaignWithHydration } from '@/lib/domain/campaigns/campaign-automation-service.js'
 import { evaluateCampaignLaunchReadiness, resolveLaunchReadinessContext } from '@/lib/domain/campaigns/campaign-launch-readiness.js'
@@ -271,13 +271,14 @@ function failResult(error, steps, extra = {}) {
  * send the moment a deploy lands: a missed schedule is surfaced for the operator
  * to reschedule or activate, never auto-fired.
  */
-export { SCHEDULE_MISSED_GRACE_MS, isScheduleMissed, isCampaignStartMissed }
+export { SCHEDULE_MISSED_GRACE_MS, SCHEDULE_ACTIVATION_TOLERANCE_MS, isScheduleMissed, isScheduleMarkedMissed, isCampaignStartMissed }
 
 export async function findDueScheduledCampaigns(deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const nowMs = new Date(deps.now || Date.now()).getTime()
   const now = new Date(nowMs).toISOString()
-  const graceFloor = new Date(nowMs - SCHEDULE_MISSED_GRACE_MS).toISOString()
+  // The activation tick tolerance (campaign-schedule-missed.js) — not a grace.
+  const graceFloor = new Date(nowMs - SCHEDULE_ACTIVATION_TOLERANCE_MS).toISOString()
   // Two reads, not one. A single `scheduled_for <= now ORDER BY scheduled_for
   // LIMIT 20` returns the OLDEST due rows first — which are exactly the missed
   // ones, already marked and never activated. Twenty of them would starve every
@@ -301,9 +302,11 @@ export async function findDueScheduledCampaigns(deps = {}) {
     .order('scheduled_for', { ascending: false })
     .limit(20)
   if (staleError) throw staleError
-  // Already-marked missed rows need no further work; only unmarked ones are returned.
-  const unmarked = (stale || []).filter((c) => (c.metadata && typeof c.metadata === 'object' ? c.metadata.schedule_missed_for : null) !== c.scheduled_for)
-  return [...(due || []), ...unmarked]
+  // Already-marked missed rows need no further work; only unmarked ones are
+  // returned. A due row already marked missed for this schedule (readiness
+  // refused it on an earlier tick) is NOT retried — no late activation.
+  const unmarked = (stale || []).filter((c) => !isScheduleMarkedMissed(c))
+  return [...(due || []).filter((c) => !isScheduleMarkedMissed(c)), ...unmarked]
 }
 
 /** Internal hydration chunk for the first activation; the feeder continues from there. */
@@ -326,15 +329,16 @@ export function buildScheduledActivationRequest(campaign = {}) {
   }
 }
 
-async function markScheduleMissed(campaign, deps = {}) {
+async function markScheduleMissed(campaign, deps = {}, { reason = 'start_passed_without_activation', metadataPatch = {} } = {}) {
   const supabase = deps.supabase || defaultSupabase
   const metadata = campaign.metadata && typeof campaign.metadata === 'object' ? campaign.metadata : {}
-  if (metadata.schedule_missed_for === campaign.scheduled_for) return false
+  if (isScheduleMarkedMissed(campaign)) return false
+  const at = new Date(deps.now || Date.now()).toISOString()
   await supabase
     .from('campaigns')
     .update({
-      metadata: { ...metadata, schedule_missed_at: new Date().toISOString(), schedule_missed_for: campaign.scheduled_for },
-      updated_at: new Date().toISOString(),
+      metadata: { ...metadata, ...metadataPatch, schedule_missed_at: at, schedule_missed_for: campaign.scheduled_for, schedule_missed_reason: reason },
+      updated_at: at,
     })
     .eq('id', campaign.id)
   return true
@@ -358,7 +362,7 @@ export async function runDueScheduledCampaignActivations(deps = {}) {
       })
       continue
     }
-    const result = await runCanonicalCampaignActivation(
+    const result = await (deps.runCanonicalCampaignActivation || runCanonicalCampaignActivation)(
       campaign.id,
       buildScheduledActivationRequest(campaign),
       deps,
@@ -366,7 +370,17 @@ export async function runDueScheduledCampaignActivations(deps = {}) {
     const recorded = result.ok === false
       ? await recordScheduledActivationRefusal(campaign, result, deps).catch(() => false)
       : false
-    results.push({ campaign_id: campaign.id, name: campaign.name, refusal_recorded: recorded, ...result })
+    // A refused scheduled start is MISSED now — it is not retried every five
+    // minutes and fired late when the blocker clears. The operator chooses:
+    // Start now (same activation path, contact window validated) or Reschedule.
+    // Only a REFUSAL (named blockers) marks it now; a transient failure (lock
+    // held, read error) may retry on the next tick inside the tick tolerance,
+    // after which the time rule marks it missed anyway.
+    const refused = result.ok === false && Array.isArray(result.blockers) && result.blockers.length > 0
+    const missedMarked = refused
+      ? await markScheduleMissed(campaign, deps, { reason: 'activation_refused' }).catch(() => false)
+      : false
+    results.push({ campaign_id: campaign.id, name: campaign.name, refusal_recorded: recorded, schedule_missed_marked: missedMarked, ...result })
   }
   return { ok: true, processed: results.length, results }
 }
@@ -387,8 +401,8 @@ export async function recordScheduledActivationRefusal(campaign = {}, result = {
   const signature = [clean(campaign.scheduled_for), error, ...codes, ...blockers].join('|')
   if (metadata.activation_blocked?.signature === signature) return false
   const at = new Date(deps.now || Date.now()).toISOString()
-  const scheduledMs = Date.parse(campaign.scheduled_for || '')
-  const retryUntil = Number.isFinite(scheduledMs) ? new Date(scheduledMs + SCHEDULE_MISSED_GRACE_MS).toISOString() : null
+  // No retry window any more: a refused scheduled start is marked missed.
+  const retryUntil = null
   const activationBlocked = {
     at,
     scheduled_for: campaign.scheduled_for || null,
@@ -409,7 +423,7 @@ export async function recordScheduledActivationRefusal(campaign = {}, result = {
     severity: 'warning',
     title: 'Scheduled launch held',
     description: `The scheduled launch could not start: ${blockers.join(' · ') || error}.`
-      + (retryUntil ? ' It retries every few minutes for two hours after the scheduled time, then is marked missed.' : ''),
+      + ' It will not start late on its own — start it now or reschedule it.',
     metadata: { ...activationBlocked, source: 'scheduled_activation' },
   })
   return true

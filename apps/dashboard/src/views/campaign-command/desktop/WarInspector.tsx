@@ -16,6 +16,7 @@ import {
 import { queueWordsOf } from './war-room-words'
 import { BatchCard } from './WarExecution'
 import { SenderRail } from './WarPlanes'
+import { missedStartAt } from '../start-now-window'
 
 export type InspectorCtx =
   | { kind: 'campaign' }
@@ -87,17 +88,17 @@ function GateBody({ gate, input, now, h }: { gate: Gate; input: WarInput; now: n
         <LCInspectorSection title="Schedule">
           <LCFacts rows={[
             { label: 'Scheduled start', value: dayClock(input.core?.lifecycle.scheduled_for ?? f.scheduledFor, tz, now) },
-            { label: 'Missed', value: f.missedFor ? dayClock(f.missedFor, tz, now) : 'No' },
+            { label: 'Missed', value: missedStartAt(f.status, f.scheduledFor, f.missedFor, now) ? dayClock(missedStartAt(f.status, f.scheduledFor, f.missedFor, now), tz, now) : 'No' },
             { label: 'Activated', value: dayClock(input.core?.lifecycle.activated_at, tz, now) },
             { label: 'Last change', value: input.core?.lifecycle.last_transition_reason },
           ]} />
-          {f.missedFor ? (
+          {missedStartAt(f.status, f.scheduledFor, f.missedFor, now) ? (
             <div className="cc3-doors">
-              <LCButton size="sm" variant="primary" onClick={() => h.onAction('reschedule')}>Reschedule</LCButton>
-              <LCButton size="sm" variant="secondary" onClick={() => h.onAction('activate')}>Launch now…</LCButton>
+              <LCButton size="sm" variant="primary" onClick={() => h.onAction('activate')}>Start now…</LCButton>
+              <LCButton size="sm" variant="secondary" onClick={() => h.onAction('reschedule')}>Reschedule</LCButton>
             </div>
           ) : null}
-          {f.missedFor ? <p className="cc3-foot">A start more than two hours stale is marked missed and never auto-fired — it waits for you.</p> : null}
+          {missedStartAt(f.status, f.scheduledFor, f.missedFor, now) ? <p className="cc3-foot">A start that passes without launching is marked missed and never starts late on its own — start it now or reschedule it.</p> : null}
         </LCInspectorSection>
       ) : null}
       {gate.key === 'window' ? (

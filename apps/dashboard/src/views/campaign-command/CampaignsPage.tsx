@@ -1540,6 +1540,28 @@ function readCampaignDeepLink(): { campaignId: string | null; section: CampaignD
  */
 let lastCampaignModel: CampaignModel | null = null
 
+/**
+ * `?campaign=<id>&intent=start_now|reschedule` — the Calendar's actions on a
+ * MISSED scheduled start (rc-7.1 D4). It opens the same activation sheet
+ * (contact window shown, existing activation path) or the same reschedule
+ * sheet the campaign's own buttons open; nothing new writes.
+ */
+type CampaignLinkIntent = { campaignId: string; intent: 'start_now' | 'reschedule' }
+const readCampaignIntent = (): CampaignLinkIntent | null => {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const campaignId = params.get('campaign')?.trim() || ''
+  const intent = params.get('intent')?.trim()
+  return campaignId && (intent === 'start_now' || intent === 'reschedule') ? { campaignId, intent } : null
+}
+const clearCampaignIntent = () => {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('intent')) return
+  url.searchParams.delete('intent')
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+}
+
 const readComposeIntent = () =>
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('compose') === '1'
 
@@ -1566,6 +1588,14 @@ export const CampaignsPage = () => {
   const [scheduleCampaign, setScheduleCampaign] = useState<CampaignSummary | null>(null)
   const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule')
   const [activationCampaign, setActivationCampaign] = useState<CampaignSummary | null>(null)
+  // A Calendar "Start now" / "Reschedule" hand-off, honoured once the list has the campaign.
+  const [linkIntent, setLinkIntent] = useState<CampaignLinkIntent | null>(readCampaignIntent)
+  const intentCampaign = linkIntent ? (model?.campaigns ?? []).find((c) => c.id === linkIntent.campaignId) ?? null : null
+  const shownActivation = activationCampaign ?? (linkIntent?.intent === 'start_now' ? intentCampaign : null)
+  const shownSchedule = scheduleCampaign ?? (linkIntent?.intent === 'reschedule' ? intentCampaign : null)
+  const shownScheduleMode = scheduleCampaign ? scheduleMode : 'reschedule'
+  const closeSchedule = useCallback(() => { setScheduleCampaign(null); setLinkIntent(null); clearCampaignIntent() }, [])
+  const closeActivation = useCallback(() => { setActivationCampaign(null); setLinkIntent(null); clearCampaignIntent() }, [])
   // A campaign the desktop cockpit should open (e.g. one just created).
   const [desktopFocusId, setDesktopFocusId] = useState<string | null>(null)
   const [deepLink] = useState(readCampaignDeepLink)
@@ -1831,18 +1861,18 @@ export const CampaignsPage = () => {
             }}
           />
         )}
-        {scheduleCampaign && (
+        {shownSchedule && (
           <CampaignScheduleModal
-            campaign={scheduleCampaign}
-            mode={scheduleMode}
-            onClose={() => setScheduleCampaign(null)}
+            campaign={shownSchedule}
+            mode={shownScheduleMode}
+            onClose={closeSchedule}
             onSuccess={() => load({ silent: true })}
           />
         )}
-        {activationCampaign && (
+        {shownActivation && (
           <CampaignActivationModal
-            campaign={activationCampaign}
-            onClose={() => setActivationCampaign(null)}
+            campaign={shownActivation}
+            onClose={closeActivation}
             onSuccess={(result) => {
               const isProof = result.proofHydration || result.activationMode === 'test'
               // the activation the operator launched was confirmed by the API
@@ -1858,7 +1888,7 @@ export const CampaignsPage = () => {
                     : `${result.inserted} live rows inserted · ${result.skipped} skipped · sends wait for brakes + schedule`,
                 severity: isProof ? 'warning' : 'success',
               })
-              setActivationCampaign(null)
+              closeActivation()
               void load({ silent: true })
             }}
           />
@@ -2104,19 +2134,19 @@ export const CampaignsPage = () => {
         />
       )}
 
-      {scheduleCampaign && (
+      {shownSchedule && (
         <CampaignScheduleModal
-          campaign={scheduleCampaign}
-          mode={scheduleMode}
-          onClose={() => setScheduleCampaign(null)}
+          campaign={shownSchedule}
+          mode={shownScheduleMode}
+          onClose={closeSchedule}
           onSuccess={() => load({ silent: true })}
         />
       )}
 
-      {activationCampaign && (
+      {shownActivation && (
         <CampaignActivationModal
-          campaign={activationCampaign}
-          onClose={() => setActivationCampaign(null)}
+          campaign={shownActivation}
+          onClose={closeActivation}
           onSuccess={(result) => {
             const isProof = result.proofHydration || result.activationMode === 'test'
             emitNotification({
@@ -2130,7 +2160,7 @@ export const CampaignsPage = () => {
                   : `${result.inserted} live rows inserted · ${result.skipped} skipped · sends wait for brakes + schedule`,
               severity: isProof ? 'warning' : 'success',
             })
-            setActivationCampaign(null)
+            closeActivation()
             void load({ silent: true })
           }}
         />

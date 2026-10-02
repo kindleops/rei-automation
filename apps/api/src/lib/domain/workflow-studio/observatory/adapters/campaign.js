@@ -54,7 +54,7 @@ function activationRun(ev, camp) {
   const at = ev.created_at
   push('campaign_tick', 'succeeded', at)
   push('find_due', 'succeeded', at)
-  push('schedule_missed', 'succeeded', at, { label: 'start within grace' })
+  push('schedule_missed', 'succeeded', at, { label: 'start within the activation tick' })
   push('launch_readiness', 'succeeded', at, { label: 'ready' })
   push('activate_campaign', 'succeeded', at, { label: 'scheduled → active' })
   return {
@@ -82,10 +82,10 @@ function missedRun(c) {
   const { push, events } = nodeEvents(KEY, `missed:${c.id}`, RT)
   push('campaign_tick', 'succeeded', at)
   push('find_due', 'succeeded', at)
-  push('schedule_missed', 'held', at, { reason: 'start more than 2h stale', label: 'Missed' })
+  push('schedule_missed', 'held', at, { reason: 'start passed without activation', label: 'Missed' })
   push('marked_missed', lower(c.status) === 'scheduled' ? 'human' : 'succeeded', at)
   const open = lower(c.status) === 'scheduled'
-  return { run: runRow({ run_id: `missed:${c.id}`, workflow_key: KEY, version: 'campaign-execution-v1', started_at: at, finished_at: at, subject: subject('campaign', c.id, c.name, null, href(c.id)), trigger: `Scheduled for ${c.metadata?.schedule_missed_for || '—'}`, status: open ? 'needs_you' : 'completed', human: open, final_node: 'marked_missed', result: open ? 'Missed — reschedule or activate' : 'Missed, later activated', reason: 'Start missed by more than 2 hours — never fired late' }), events, raw: c }
+  return { run: runRow({ run_id: `missed:${c.id}`, workflow_key: KEY, version: 'campaign-execution-v1', started_at: at, finished_at: at, subject: subject('campaign', c.id, c.name, null, href(c.id)), trigger: `Scheduled for ${c.metadata?.schedule_missed_for || '—'}`, status: open ? 'needs_you' : 'completed', human: open, final_node: 'marked_missed', result: open ? 'Missed — reschedule or activate' : 'Missed, later activated', reason: 'Start passed without activation — never fired late' }), events, raw: c }
 }
 
 async function campaignsById(db, ids, degraded) {
