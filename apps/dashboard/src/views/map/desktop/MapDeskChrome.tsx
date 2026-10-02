@@ -53,6 +53,7 @@ import { LensPicker, MapDeskLegend, lensSwatchStyle } from './MapDeskLegend'
 import { useInspectorOcclusion } from '../focus/useInspectorOcclusion'
 import { DESK_CARD_PRESENCE_EVENT, type DeskCardPresence } from '../seller-card/desk-card-presence'
 import { useDeskLabelTone } from './map-desk-labels'
+import { useMapBoundaryLevel } from './useMapBoundaries'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 /** Below this pane width a left inspector and a docked card can't share the map (keep in step with map-desk.css). */
@@ -70,6 +71,8 @@ export interface DeskPrefs {
   trueColor: boolean
   pinOpacity: number
   legendCollapsed: boolean
+  boundaryState: boolean
+  boundaryZip: boolean
 }
 
 /** The desk's own left tools (Filters is owned by the Command Map; Draw is a mode). */
@@ -476,6 +479,9 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
   const windowLabel = ACTIVITY_WINDOWS.find((w) => w.key === p.activityWindow)?.label ?? 'Today'
   const pillSub = lensPillSub({ inView: p.inView, loading: p.loading, zoom: p.zoom, activityOn, eventCount: p.events.length, windowLabel })
   const leftOpen = tool === 'layers' || tool === 'live' || filtersOpen
+  // [8.2] administrative outlines from Census geometry we own (server-only API)
+  const boundaryState = useMapBoundaryLevel(map, mapEpoch, 'state', p.prefs.boundaryState, p.styleMode)
+  const boundaryZip = useMapBoundaryLevel(map, mapEpoch, 'zip', p.prefs.boundaryZip, p.styleMode)
 
   const sensorInput = {
     pins: p.prefs.pins, everyProperty: p.prefs.everyProperty, filterActive: p.filterCount > 0,
@@ -484,6 +490,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
     daylight: p.living.daylight, localTime: p.living.localTime, zones: p.living.zones, livingEnabled: p.living.enabled,
     buildings: p.living.buildings, tilted: p.dimension === '3d', vectorBuildings,
     relief: p.prefs.relief, activityOn, streamLive: p.streamLive, orbs: p.prefs.liveOrbs,
+    boundaryState, boundaryZip,
   }
 
   const onPick = (l: MapLens) => { p.onPickLens(l); setPicker(null) }
@@ -580,6 +587,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
             pickerOpen={picker === 'legend'}
             collapsed={p.prefs.legendCollapsed}
             onCollapse={(v) => p.setPref('legendCollapsed', v)}
+            boundaries={[boundaryState, boundaryZip]}
           />
           {picker === 'legend' ? <LensPicker active={lens} placement="up" onPick={onPick} onClose={() => setPicker(null)} /> : null}
         </div>
@@ -649,6 +657,8 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
               compsTotal={p.prefs.comps && !p.comps.loading ? fmtCount(p.comps.total) : null}
               onCompFilters={p.onOpenCompFilters}
               onMarket={(v) => p.setPref('market', v)}
+              onBoundaryState={(v) => p.setPref('boundaryState', v)}
+              onBoundaryZip={(v) => p.setPref('boundaryZip', v)}
               onDaylight={(v) => p.onLiving({ daylight: v })}
               onLocalTime={(v) => p.onLiving({ localTime: v })}
               onZones={(v) => p.onLiving({ zones: v })}

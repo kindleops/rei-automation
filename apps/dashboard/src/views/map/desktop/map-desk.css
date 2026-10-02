@@ -468,17 +468,38 @@ html.is-desktop-modern .mx.is-desk .mxd-cards {
   transition: opacity 0.22s var(--mxg-ease), transform 0.3s var(--mxg-ease);
 }
 html.is-desktop-modern .mx.is-desk .mxd-cards > * { pointer-events: auto; }
-html.is-desktop-modern .mx.is-desk.has-left .mxd-cards,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-areacard) .mxd-cards,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-area-sheet) .mxd-cards,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .smcd.is-full) .mxd-cards {
   opacity: 0;
   transform: translateY(8px);
 }
-html.is-desktop-modern .mx.is-desk.has-left .mxd-cards *,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-areacard) .mxd-cards *,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-area-sheet) .mxd-cards *,
 html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .smcd.is-full) .mxd-cards * { pointer-events: none !important; }
+
+/* [8.2] an open left inspector (Layers / Live / Filters) no longer hides the
+   legend: the key steps right of the inspector and stays readable, so a layer
+   switched on in Layers shows its key at once. Only a pane too small to hold
+   both (the narrowest container query below) still yields the legend. */
+html.is-desktop-modern .mx.is-desk.has-left .mxd-cards {
+  left: calc(var(--mxd-col-x) + var(--mxd-insp-w) + 10px);
+  max-width: calc(100% - var(--mxd-col-x) - var(--mxd-insp-w) - 10px - var(--mxd-gap) - 56px);
+}
+html.is-desktop-modern .mx.is-desk.has-left[data-occluded][data-occluded] .mxd-cards {
+  max-width: calc(100% - var(--mxd-col-x) - var(--mxd-insp-w) - 10px - var(--mxd-gap) - 56px - var(--mxd-occlude-right, 0px));
+}
+
+/* the boundary key: the same strokes the map draws */
+html.is-desktop-modern .mx.is-desk .mxd-legend__bounds { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; flex-basis: 100%; margin: 0; font-size: 11px; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i { flex: none; width: 18px; height: 0; border-top: 1.6px solid currentColor; opacity: 0.85; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound.is-zip > i { border-top: 1.2px dashed currentColor; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > em { font-style: normal; color: var(--mxg-ink-4); font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound.is-quiet { color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound-src { color: var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound-src::before { content: '·'; margin-right: 8px; }
+html.is-desktop-modern .mx.is-desk .mxd-legend.is-collapsed .mxd-legend__bounds { display: none; }
 
 /* the legend: one slim strip — the lens (Color by), its key, a fold */
 html.is-desktop-modern .mx.is-desk .mxd-legend { position: relative; max-width: 100%; animation: mxd-rise 0.45s var(--mxg-ease) 60ms both; }
@@ -1383,6 +1404,8 @@ html.is-desktop-modern .mx.is-desk > .mx-draw-bar {
   html.is-desktop-modern .mx.is-desk .mxd-toasts { top: auto; bottom: var(--mxd-gap); left: calc(var(--mxd-gap) + 100px); right: calc(var(--mxd-gap) + 44px); }
 }
 @container mxd ((max-width: 540px) or (max-height: 380px)) {
+  html.is-desktop-modern .mx.is-desk.has-left .mxd-cards { opacity: 0; transform: translateY(8px); }
+  html.is-desktop-modern .mx.is-desk.has-left .mxd-cards * { pointer-events: none !important; }
   html.is-desktop-modern .mx.is-desk .mxd-lens__title b { max-width: 110px; }
   html.is-desktop-modern .mx.is-desk .mxd-capsule > span { max-width: 120px; }
 }

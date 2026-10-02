@@ -137,7 +137,7 @@ export function resolveDeskPinClick({ sameProperty, cardState }: { sameProperty:
 
 // ── The sensor array (Layers) ───────────────────────────────────────────────
 
-export type SensorGroupId = 'properties' | 'market' | 'world' | 'operations'
+export type SensorGroupId = 'properties' | 'market' | 'boundaries' | 'world' | 'operations'
 export type SensorStatus = 'live' | 'on' | 'waiting' | 'off' | 'unavailable'
 
 export interface SensorRow {
@@ -181,6 +181,21 @@ export interface SensorInput {
   activityOn: boolean
   streamLive: boolean
   orbs: boolean
+  /** Boundary overlay levels: on, and the server's answer for the current view. */
+  boundaryState?: BoundaryRowInput
+  boundaryZip?: BoundaryRowInput
+}
+
+/** What the boundary hook knows about one level (useMapBoundaries). */
+export interface BoundaryRowInput { on: boolean; state: 'off' | 'loading' | 'on' | 'waiting' | 'unavailable'; count: number; reason: string | null }
+
+function boundaryRow(id: 'boundaryState' | 'boundaryZip', label: string, sub: string, b: BoundaryRowInput | undefined): SensorRow {
+  const on = Boolean(b?.on)
+  const status: SensorStatus = !on ? 'off' : b?.state === 'on' ? 'on' : b?.state === 'unavailable' ? 'unavailable' : 'waiting'
+  return {
+    id, label, sub: on && b?.state === 'on' ? `${b.count.toLocaleString('en-US')} in view · ${sub}` : sub,
+    status, on, available: true, reason: on && b?.reason ? b.reason : undefined, supports: S(true),
+  }
 }
 
 const S = (visibility: boolean, opacity = false, style = false, time = false) => ({ visibility, opacity, style, time })
@@ -221,6 +236,16 @@ export function buildSensorArray(s: SensorInput): SensorGroup[] {
           id: 'market', label: 'Market panel', sub: 'Census, HUD rent, price growth and flood for the ZIP at the centre', status: s.market ? 'on' : 'off', on: s.market,
           available: true, supports: S(true),
         },
+      ],
+    },
+    {
+      id: 'boundaries',
+      label: 'Boundaries',
+      rows: [
+        boundaryRow('boundaryState', 'State lines', 'US Census state outlines · context over every lens', s.boundaryState),
+        boundaryRow('boundaryZip', 'ZIP outlines', `US Census ZCTA outlines and codes · from zoom 9`, s.boundaryZip),
+        // County, city and market outlines join this group when a real polygon
+        // source exists; the database has none today (8.2 audit), so no row.
       ],
     },
     {

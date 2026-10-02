@@ -101,8 +101,20 @@ describe('clicking a property on the desk', () => {
 })
 
 describe('sensor array', () => {
-  it('has the four groups, in order', () => {
-    expect(buildSensorArray(BASE).map((g) => g.id)).toEqual(['properties', 'market', 'world', 'operations'])
+  it('has the five groups, in order', () => {
+    expect(buildSensorArray(BASE).map((g) => g.id)).toEqual(['properties', 'market', 'boundaries', 'world', 'operations'])
+  })
+  it('boundaries: only state and ZIP (the only polygons we own); status and reason come from the server answer', () => {
+    const ids = buildSensorArray(BASE).find((g) => g.id === 'boundaries')!.rows.map((r) => r.id)
+    expect(ids).toEqual(['boundaryState', 'boundaryZip'])
+    expect(row(buildSensorArray(BASE), 'boundaryZip')).toMatchObject({ on: false, status: 'off' })
+    const zipOut = row(buildSensorArray({ ...BASE, boundaryZip: { on: true, state: 'waiting', count: 0, reason: 'Zoom in to see ZIP outlines (from z9)' } }), 'boundaryZip')
+    expect(zipOut).toMatchObject({ on: true, status: 'waiting', reason: 'Zoom in to see ZIP outlines (from z9)' })
+    const states = row(buildSensorArray({ ...BASE, boundaryState: { on: true, state: 'on', count: 3, reason: null } }), 'boundaryState')
+    expect(states.status).toBe('on')
+    expect(states.sub).toMatch(/^3 in view/)
+    const missing = row(buildSensorArray({ ...BASE, boundaryState: { on: true, state: 'unavailable', count: 0, reason: 'Waiting on the boundary migration' } }), 'boundaryState')
+    expect(missing).toMatchObject({ status: 'unavailable', reason: 'Waiting on the boundary migration' })
   })
   it('no camera row while no camera source is connected (the Map does not advertise a dead sensor)', () => {
     const ids = buildSensorArray(BASE).flatMap((g) => g.rows.map((r) => r.id))

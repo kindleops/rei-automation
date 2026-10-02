@@ -18,6 +18,7 @@ import { UNIVERSAL_STAGE_RING_COLORS } from '../universal-stage-colors'
 import { LENS_FAMILIES, MAP_LENSES, formatLensValue, type LensStyle, type MapLens } from '../mobile/map-lenses'
 import { rampGradient } from '../mobile/MapIntelCards'
 import type { LensLook, LensState } from '../mobile/useMapLens'
+import type { BoundaryStatus } from './useMapBoundaries'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -82,7 +83,30 @@ export function LensPicker({ active, onPick, onClose, placement }: { active: Map
   )
 }
 
-export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pickerOpen, collapsed, onCollapse }: {
+/**
+ * [8.2] The boundary key: one entry per overlay that is on, drawn with the same
+ * stroke as the map (solid state lines, dashed ZIP outlines), its count in view
+ * or the reason nothing is drawn, and the source.
+ */
+export function BoundaryKey({ items }: { items: BoundaryStatus[] }) {
+  const on = items.filter((b) => b.on)
+  if (!on.length) return null
+  const source = on.map((b) => b.source).find(Boolean) ?? 'US Census'
+  return (
+    <div className="mxd-legend__bounds" data-legend="boundaries">
+      {on.map((b) => (
+        <span key={b.level} className={cls('mxd-legend__bound', `is-${b.level}`, b.state !== 'on' && 'is-quiet')} title={b.reason ?? undefined}>
+          <i aria-hidden="true" />
+          {b.level === 'state' ? 'State lines' : 'ZIP outlines'}
+          <em>{b.state === 'on' ? b.count.toLocaleString('en-US') : b.state === 'loading' ? 'reading…' : b.reason ?? 'not drawn'}</em>
+        </span>
+      ))}
+      <span className="mxd-legend__bound-src">{source}</span>
+    </div>
+  )
+}
+
+export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pickerOpen, collapsed, onCollapse, boundaries = [] }: {
   lens: MapLens
   state: LensState
   zoom: number
@@ -92,6 +116,7 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
   pickerOpen: boolean
   collapsed: boolean
   onCollapse: (v: boolean) => void
+  boundaries?: BoundaryStatus[]
 }) {
   const valueLens = Boolean(lens.source) && !lens.ambient
   const [a, b] = lens.domain ?? [0, 1]
@@ -139,6 +164,7 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
                 {STAGE_KEY.map(([label, c]) => <span key={label}><i style={{ borderColor: c }} />{label}</span>)}
               </div>
               <p className="mxd-legend__src"><span>{note}</span></p>
+              <BoundaryKey items={boundaries} />
             </>
           ) : (
             <>
@@ -162,6 +188,7 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
                 {lens.attribution ? <span>{lens.attribution}</span> : null}
                 <span>click the colour to read it</span>
               </p>
+              <BoundaryKey items={boundaries} />
             </>
           )}
         </div>

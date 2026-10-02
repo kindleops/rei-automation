@@ -112,8 +112,8 @@ const readActivityPref = (): { on: boolean; scope: ActivityScope; window: Activi
 const LENS_STORE = 'nexus.map.mobileLens'
 interface LensPrefs { lens: string; mapKey: boolean; market: boolean; modePill: boolean; labels: boolean; relief: boolean; trueColor: boolean; everyProperty: boolean; comps: boolean; compFilters: CompFilters; lensStyle: LensStyle; lensBlend: number; liveOrbs: boolean; pins: boolean
   /** Desktop only (the phone never reads these): pin and lens opacity, the legend folded, the lens to restore. */
-  pinOpacity: number; lensOpacity: number; legendCollapsed: boolean; lastLens: string }
-const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true, pins: true, pinOpacity: 1, lensOpacity: 1, legendCollapsed: false, lastLens: 'radar' }
+  pinOpacity: number; lensOpacity: number; legendCollapsed: boolean; lastLens: string; boundaryState: boolean; boundaryZip: boolean }
+const LENS_DEFAULTS: LensPrefs = { lens: 'radar', mapKey: true, market: false, modePill: true, labels: true, relief: false, trueColor: true, everyProperty: true, comps: false, compFilters: DEFAULT_COMP_FILTERS, lensStyle: 'surface', lensBlend: 0.7, liveOrbs: true, pins: true, pinOpacity: 1, lensOpacity: 1, legendCollapsed: false, lastLens: 'radar', boundaryState: false, boundaryZip: false }
 const readLensPrefs = (): LensPrefs => {
   try { return { ...LENS_DEFAULTS, ...JSON.parse(localStorage.getItem(LENS_STORE) || '{}') } } catch { return LENS_DEFAULTS }
 }

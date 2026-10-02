@@ -111,6 +111,9 @@ export interface MapDeskLayersProps {
   compsTotal: string | null
   onCompFilters: () => void
   onMarket: (v: boolean) => void
+  // boundaries
+  onBoundaryState: (v: boolean) => void
+  onBoundaryZip: (v: boolean) => void
   // world
   onDaylight: (v: boolean) => void
   onLocalTime: (v: boolean) => void
@@ -181,6 +184,8 @@ export function MapDeskLayers(p: MapDeskLayersProps) {
           </Plate>
         )
       case 'market': return <Plate key={row.id} row={row} onToggle={p.onMarket} />
+      case 'boundaryState': return <Plate key={row.id} row={row} onToggle={p.onBoundaryState} />
+      case 'boundaryZip': return <Plate key={row.id} row={row} onToggle={p.onBoundaryZip} />
       case 'daylight': return <Plate key={row.id} row={row} onToggle={p.onDaylight} />
       case 'localTime': return <Plate key={row.id} row={row} onToggle={p.onLocalTime} />
       case 'zones': return <Plate key={row.id} row={row} onToggle={p.onZones} />
