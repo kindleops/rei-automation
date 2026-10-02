@@ -1,0 +1,35 @@
+/* CINEMATIC MAP FOCUS (8.2 §3) — only what the focus adds; the Map's own glass is untouched. */
+
+/* During an automatic flight the pin-anchored preview steps aside instead of
+   chasing the camera every frame; it settles back the moment the pin lands. */
+.mx-overlay-host .smcd.is-preview,
+.mx-overlay-host .smcd-tether { transition: opacity 160ms ease; }
+.mx-overlay-host[data-auto-flying] .smcd.is-preview,
+.mx-overlay-host[data-auto-flying] .smcd-tether { opacity: 0; pointer-events: none; transition-duration: 90ms; }
+
+/* the honest "unavailable" answer reuses the focus-set chip */
+.lc-map-focus-notice { max-width: min(560px, calc(100% - 32px)); }
+.lc-map-focus-notice .mx-focusset__text { overflow: hidden; text-overflow: ellipsis; font-weight: 540; }
+.lc-map-focus-notice .mx-focusset__text b { font-weight: 640; }
+.lc-map-focus-notice__why { color: var(--lc-ink-2, rgba(242, 245, 251, 0.72)); }
+.lc-map-focus-notice__glyph { display: grid; place-items: center; opacity: 0.75; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-overlay-host .smcd.is-preview, .mx-overlay-host .smcd-tether { transition: none; }
+}
+html[data-lc-motion='off'] .mx-overlay-host .smcd.is-preview,
+html[data-lc-motion='off'] .mx-overlay-host .smcd-tether { transition: none; }
+
+/* The Universal Inspector floats over the right of the workspace. Where it
+   covers this Map pane, the legend narrows and the zoom stack steps left of it
+   (--mxd-occlude-right is measured by useInspectorOcclusion; 0 when clear). */
+html.is-desktop-modern .mx.is-desk[data-occluded][data-occluded] .mxd-cards {
+  max-width: calc(100% - var(--mxd-col-x) - var(--mxd-gap) - 56px - var(--mxd-occlude-right, 0px));
+}
+html.is-desktop-modern .mx.is-desk[data-occluded][data-occluded] .mxd-zoom {
+  right: calc(var(--mxd-gap) + var(--mxd-occlude-right, 0px));
+  transition: right 0.24s var(--mxg-ease, ease);
+}
+html.is-desktop-modern .mx.is-desk[data-occluded][data-occluded]:is(.has-dock, :has(> .mx-overlay-host > .smc-dock), :has(> .mx-overlay-host > .mx-comp), :has(> .mx-evt)) .mxd-zoom {
+  right: calc(max(var(--mxd-dock-w, 408px) + var(--mxd-gap), var(--mxd-occlude-right, 0px)) + var(--mxd-gap));
+}

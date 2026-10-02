@@ -1,4 +1,14 @@
 import { clearActiveContext } from '../../domain/locator/active-context'
+import { PROPERTY_LOCATOR_EVENT, type PropertyLocator } from '../../domain/locator/property-locator'
+import { MAP_PROPERTY_FOCUS_EVENT, ackMapPropertyFocus, readPendingMapPropertyFocus, type MapPropertyFocus } from '../../domain/map/map-property-focus'
+import { useAppInstance } from '../../modules/desktop/workspace/instance-context'
+import { focusedInstance } from '../../modules/desktop/workspace/layout'
+import { getWorkspace } from '../../modules/desktop/workspace/workspace-store'
+import { handleObjectClick, gestureOf, openObjectBeside, propertyObject } from '../../modules/desktop/objects'
+import { createAutoFramer, planPointFocus, type AutoFramer } from './focus/focus-camera'
+import { ensureFocusTreatment, fetchCanonicalCoordinates, pulseFocusTreatment, resolveFocusRequest, setFlyingMark } from './focus/map-focus-runtime'
+import { MapFocusKeys, MapFocusNotice } from './focus/MapFocusControls'
+import { mapOverlayTarget } from './map-overlay-host'
 import { installTileRetry } from './map-tile-retry'
 import { PROPERTY_TILES_SOURCE_ID } from './map-property-tile-source'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -4097,9 +4107,29 @@ export function InboxCommandMap({
    */
   const deskClaimClick = useCallback((event: unknown): boolean => {
     if (!isModernDesktopRef.current) return true
-    const e = event as { _deskPropertyClaimed?: boolean }
+    const e = event as { _deskPropertyClaimed?: boolean; originalEvent?: MouseEvent; features?: Array<{ properties?: Record<string, unknown> | null; geometry?: unknown }> }
     if (e._deskPropertyClaimed) return false
     e._deskPropertyClaimed = true
+    // [8.2 §2] the object click grammar on every pin family: ⇧-click inspects,
+    // ⌘/Ctrl-click opens the property beside. A plain click keeps the Map's own
+    // PREVIEW → HALF contract below.
+    const gesture = gestureOf(e.originalEvent)
+    if (gesture !== 'activate') {
+      const props = e.features?.[0]?.properties ?? {}
+      const propertyId = text(props.property_id || props.propertyId)
+      if (propertyId) {
+        const coords = (e.features?.[0]?.geometry as Point | undefined)?.coordinates
+        const ref = propertyObject({
+          propertyId,
+          threadKey: text(props.thread_key || props.threadKey) || null,
+          label: text(props.property_address_full || props.address) || null,
+          source: 'map',
+          lng: Number(coords?.[0]),
+          lat: Number(coords?.[1]),
+        })
+        if (handleObjectClick(e.originalEvent, ref, () => {}) !== 'activate') return false
+      }
+    }
     return true
   }, [])
   const deskClaimClickRef = useRef(deskClaimClick)
@@ -5386,12 +5416,59 @@ export function InboxCommandMap({
     }
   }, [activeSellerCardHydrationKey, hydrateSellerMapCard])
 
+  /**
+   * [8.2 §3] CINEMATIC FOCUS. One auto-framer per map instance runs every
+   * automatic camera move (arrival, Show on Map, linked selection, F) and
+   * yields the instant the operator drags, wheels, pinches, rotates or tilts.
+   */
+  const framerRef = useRef<AutoFramer | null>(null)
+  /** the property the last focus selected (linked-context echoes of our own selection are ignored) */
+  const lastFocusedPropertyRef = useRef<string | null>(null)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const framer = createAutoFramer(map as unknown as Parameters<typeof createAutoFramer>[0])
+    framerRef.current = framer
+    // the underlight/halo ride on the selected-star source; (re)attach once the style has it
+    const ensure = () => { ensureFocusTreatment(map, SELECTED_STAR_SOURCE_ID, SELECTED_STAR_LAYER_ID) }
+    map.on('idle', ensure)
+    return () => {
+      map.off('idle', ensure)
+      framer.dispose()
+      if (framerRef.current === framer) framerRef.current = null
+      setFlyingMark(mapOverlayTarget(), false)
+    }
+  }, [mapInstanceEpoch])
+
+  /** Fly to one place by context (property → parcel zoom), 500–900 ms, interruptible; the pin resolves on landing. */
+  const cinematicTo = useCallback((coordinates: [number, number]) => {
+    const map = mapRef.current
+    if (!map || !isMappableCoord(coordinates[1], coordinates[0])) return
+    const box = map.getContainer()
+    const width = box.clientWidth || 1, height = box.clientHeight || 1
+    let distancePx = Math.hypot(width, height) * 8
+    try {
+      const p = map.project(coordinates)
+      if (Number.isFinite(p.x) && Number.isFinite(p.y)) distancePx = Math.hypot(p.x - width / 2, p.y - height / 2)
+    } catch { /* far outside the projection: treat as a long hop */ }
+    const plan = planPointFocus({ to: coordinates, fromZoom: map.getZoom(), distancePx, viewport: { width, height }, ctx: 'property', reducedMotion: reducedMotionRef.current })
+    const framer = framerRef.current
+    if (!framer) { map.jumpTo({ center: plan.center, zoom: plan.zoom }); return }
+    const host = mapOverlayTarget()
+    const land = () => {
+      setFlyingMark(host, false)
+      if (ensureFocusTreatment(map, SELECTED_STAR_SOURCE_ID, SELECTED_STAR_LAYER_ID)) pulseFocusTreatment(map, reducedMotionRef.current)
+    }
+    const started = framer.run(plan, `pt:${coordinates[0].toFixed(6)},${coordinates[1].toFixed(6)}`, { onLand: land, onCancel: () => setFlyingMark(host, false) })
+    if (started === 'started' && framer.isFlying()) setFlyingMark(host, true)
+  }, [])
+
   useEffect(() => {
     const map = mapRef.current
     const containerEl = containerRef.current
     if (!map || !containerEl) return
 
-    const syncMapCardAnchors = () => {
+    const syncAnchorsNow = () => {
       const containerBounds = containerEl.getBoundingClientRect()
       const containerSize = { width: containerBounds.width, height: containerBounds.height }
       const projectAnchor = (coordinates: [number, number]) => {
@@ -5420,10 +5497,16 @@ export function InboxCommandMap({
       setSelectedMapCard(next)
     }
 
+    // During an automatic flight the anchored preview is faded (see
+    // focus/map-focus.css) and re-anchors once on landing (moveend): no
+    // per-frame state update re-renders the whole Map while the camera travels.
+    const syncMapCardAnchors = () => { if (!framerRef.current?.isFlying()) syncAnchorsNow() }
     map.on('move', syncMapCardAnchors)
+    map.on('moveend', syncAnchorsNow)
     map.on('resize', syncMapCardAnchors)
     return () => {
       map.off('move', syncMapCardAnchors)
+      map.off('moveend', syncAnchorsNow)
       map.off('resize', syncMapCardAnchors)
     }
     // mapInstanceEpoch, not mapRef.current: this effect early-returns when the map
@@ -9756,6 +9839,12 @@ export function InboxCommandMap({
     ].join(':')
     if (lastAutoNavSelectionRef.current === selectionKey) return
     lastAutoNavSelectionRef.current = selectionKey
+    if (isModernDesktopRef.current) {
+      // [8.2 §3] the same cinematic focus as arrival — keyed by the target, so an
+      // arrival that already flew here is not flown twice
+      cinematicTo([focusPin.lng, focusPin.lat])
+      return
+    }
     if (isMobile) {
       // Phone: the map keeps its zoom. Move only when the pin would be hidden
       // by the property card (lower ~45% of the canvas) or off-screen, and then
@@ -9779,7 +9868,7 @@ export function InboxCommandMap({
       duration: 680,
       offset: dockTier === 'full' ? [150, 0] : [0, 0],
     })
-  }, [dockTier, focusPin?.conversation_id, focusPin?.lat, focusPin?.lng, selectedThread?.id, zoomedIn, isMobile, prefersReducedMotion])
+  }, [dockTier, focusPin?.conversation_id, focusPin?.lat, focusPin?.lng, selectedThread?.id, zoomedIn, isMobile, prefersReducedMotion, cinematicTo])
 
   const selectedUnmapped = useMemo(
     () => selectedHydratedThread ? buildMapPin(selectedHydratedThread).unmapped : null,
@@ -9820,7 +9909,7 @@ export function InboxCommandMap({
    * Returns true when it selected something, so the caller can tell "not found yet"
    * (data still loading) from "found and selected".
    */
-  const selectPropertyOnMap = useCallback((propertyId: string): boolean => {
+  const selectPropertyOnMap = useCallback((propertyId: string, fallback?: { coordinates: [number, number]; label: string | null }): boolean => {
     const map = mapRef.current
     if (!map || !propertyId) return false
 
@@ -9830,15 +9919,25 @@ export function InboxCommandMap({
       ? allPins.find((pin) => pin.conversation_id === matchedThread.id)
       : allPins.find((pin) => pin.property_id === propertyId)
 
-    const lat = Number(sellerPin?.lat ?? conversationPin?.lat)
-    const lng = Number(sellerPin?.lng ?? conversationPin?.lng)
+    let lat = Number(sellerPin?.lat ?? conversationPin?.lat)
+    let lng = Number(sellerPin?.lng ?? conversationPin?.lng)
+    // [8.2 §3] canonical coordinates the caller/subject read supplied (never a geocode)
+    if (!isMappableCoord(lat, lng) && fallback && isMappableCoord(fallback.coordinates[1], fallback.coordinates[0])) {
+      lng = fallback.coordinates[0]
+      lat = fallback.coordinates[1]
+    }
     if (!isMappableCoord(lat, lng)) return false
 
     const coordinates: [number, number] = [lng, lat]
+    lastFocusedPropertyRef.current = propertyId
 
     // Mirrors the property-tile tap: fly first so the card anchors over the pin
     // rather than over wherever the camera happened to be.
-    if (isMobileRef.current) {
+    if (isModernDesktopRef.current) {
+      // [8.2 §3] desktop: the cinematic fly-to (distance-scaled, interruptible),
+      // then the pin resolves and the lightweight PREVIEW appears over it.
+      cinematicTo(coordinates)
+    } else if (isMobileRef.current) {
       // Phone: a property the operator just tapped is already on screen — the
       // camera stays. One arriving from elsewhere (deep link, another app) is
       // brought into the upper map at neighbourhood zoom, not street level.
@@ -9870,7 +9969,7 @@ export function InboxCommandMap({
       ? { ...(sellerPin as unknown as Record<string, unknown>) }
       : conversationPin
         ? commandMapPinToSellerCardRecord(conversationPin, null)
-        : { property_id: propertyId }
+        : { property_id: propertyId, latitude: lat, longitude: lng, ...(fallback?.label ? { property_address_full: fallback.label } : {}) }
     if (matchedThread) Object.assign(feature, matchedThread as unknown as Record<string, unknown>)
 
     setSelectedClusterSummary(null)
@@ -9901,7 +10000,7 @@ export function InboxCommandMap({
     if (matchedThread) onSelectThreadIdRef.current?.(matchedThread.id)
     return true
     // allPins is the only reactive input; the rest are refs that always read current.
-  }, [allPins])
+  }, [allPins, cinematicTo])
 
   /**
    * Arrival. Runs when the globally active property changes, and retries while the
@@ -9945,6 +10044,88 @@ export function InboxCommandMap({
     // Seller pins arrive in two stages; re-running as they land is what lets a
     // first-pass miss resolve without waiting out the whole poll budget.
   }, [activePropertyId, mapInstanceEpoch, selectPropertyOnMap, sellerPins.length])
+
+  /**
+   * ── [8.2 §3] SHOW ON MAP + LINKED FOCUS ─────────────────────────────────
+   *
+   * Show on Map (any app, the Command Deck, a notification) sends one canonical
+   * property id; a linked workspace selection does the same through the
+   * locator. Both end in selectPropertyOnMap — the same canonical selection a
+   * pin tap makes — with the fallback chain in focus/map-focus-runtime:
+   * pin index → caller's canonical coordinates → the property subject read →
+   * an honest "unavailable" (never an invented location).
+   *
+   * Linked focus only applies while this pane follows the selection (not
+   * pinned, workspace linked) and never echoes a selection made in the Map
+   * itself. An explicit Show on Map is gated in the shell (a pinned Map is
+   * refused there with the reason).
+   */
+  const { instanceId: paneInstanceId, follows: paneFollows } = useAppInstance()
+  const [focusNotice, setFocusNotice] = useState<{ label: string | null; reason: string } | null>(null)
+  const selectPropertyOnMapRef = useRef(selectPropertyOnMap)
+  useEffect(() => { selectPropertyOnMapRef.current = selectPropertyOnMap }, [selectPropertyOnMap])
+  const focusRunRef = useRef<{ seq: number; ctl: AbortController } | null>(null)
+  const applyFocusRequest = useCallback((req: MapPropertyFocus, quiet = false) => {
+    if (focusRunRef.current && focusRunRef.current.seq >= req.seq) return
+    focusRunRef.current?.ctl.abort()
+    const ctl = new AbortController()
+    focusRunRef.current = { seq: req.seq, ctl }
+    if (!quiet) setFocusNotice(null)
+    void resolveFocusRequest(req, {
+      selectFromPins: (id) => selectPropertyOnMapRef.current(id),
+      selectAt: (id, at, label) => { selectPropertyOnMapRef.current(id, { coordinates: at, label }) },
+      fetchCanonical: fetchCanonicalCoordinates,
+      wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+    }, ctl.signal).then((outcome) => {
+      if (ctl.signal.aborted) return
+      if (outcome.status === 'focused') arrivedPropertyRef.current = outcome.propertyId
+      if (quiet) return
+      if (outcome.status === 'unavailable') setFocusNotice({ label: req.label, reason: outcome.reason })
+      ackMapPropertyFocus(outcome)
+    })
+  }, [])
+  useEffect(() => () => focusRunRef.current?.ctl.abort(), [])
+
+  useEffect(() => {
+    if (!mapRef.current) return
+    const pending = readPendingMapPropertyFocus()
+    if (pending) applyFocusRequest(pending)
+    const onFocus = (e: Event) => { const d = (e as CustomEvent<MapPropertyFocus>).detail; if (d) applyFocusRequest(d) }
+    window.addEventListener(MAP_PROPERTY_FOCUS_EVENT, onFocus)
+    return () => window.removeEventListener(MAP_PROPERTY_FOCUS_EVENT, onFocus)
+  }, [mapInstanceEpoch, applyFocusRequest])
+
+  useEffect(() => {
+    if (!paneInstanceId || !paneFollows || !isModernDesktop) return
+    const onLocator = (e: Event) => {
+      const loc = (e as CustomEvent<PropertyLocator | null>).detail
+      const pid = loc?.propertyId ?? null
+      if (!pid || pid === lastFocusedPropertyRef.current) return
+      // a selection made IN the Map (its pane is the one being acted in) is not a new focus
+      const ws = getWorkspace().layout
+      if (focusedInstance(ws)?.id === paneInstanceId) return
+      const now = Date.now()
+      applyFocusRequest({ seq: now, propertyId: pid, label: loc?.address ?? null, threadKey: loc?.threadKey ?? null, lat: null, lng: null, source: 'linked', at: now }, true)
+    }
+    window.addEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
+    return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, onLocator)
+  }, [paneInstanceId, paneFollows, isModernDesktop, applyFocusRequest])
+
+  /** F — fly back to the selected property. */
+  const focusSelected = useCallback(() => {
+    const card = selectedMapCardRef.current
+    const coords = card?.kind === 'seller' ? card.coordinates : null
+    if (coords && isMappableCoord(coords[1], coords[0])) cinematicTo(coords)
+  }, [cinematicTo])
+  /** ⌘/Ctrl+Enter — open the selected property beside. */
+  const openSelectedBeside = useCallback(() => {
+    const card = selectedMapCardRef.current
+    if (card?.kind !== 'seller') return
+    const f = (card.feature ?? {}) as Record<string, unknown>
+    const pid = text(f.property_id || f.propertyId)
+    if (!pid) return
+    openObjectBeside(propertyObject({ propertyId: pid, threadKey: text(f.thread_key || f.threadKey) || null, label: text(f.property_address_full || f.address) || null, source: 'map' }))
+  }, [])
 
   const openActivityTarget = (event: LiveActivityEvent, center: [number, number] | null) => {
     if (event.targetType === 'seller' && event.targetId) {
@@ -10860,6 +11041,13 @@ export function InboxCommandMap({
           </button>
         ))}
       </div>}
+
+      {!commandMode && isModernDesktop ? (
+        <>
+          <MapFocusKeys enabled onFocusSelected={focusSelected} onOpenBeside={openSelectedBeside} />
+          <MapFocusNotice notice={focusNotice} onDismiss={() => setFocusNotice(null)} />
+        </>
+      ) : null}
 
       {!commandMode && (
         <LivingMap

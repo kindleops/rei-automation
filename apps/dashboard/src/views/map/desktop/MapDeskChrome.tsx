@@ -50,6 +50,7 @@ import type { LivingSettings } from '../world/living-settings'
 import { DESK_TOOLS, filterCapsuleLabel, fmtCount, lensPillSub, liveSignal, clampOpacity, type DeskTool } from './map-desk-model'
 import { DeskSeg, DeskSwitch, MapDeskLayers } from './MapDeskLayers'
 import { LensPicker, MapDeskLegend, lensSwatchStyle } from './MapDeskLegend'
+import { useInspectorOcclusion } from '../focus/useInspectorOcclusion'
 import { DESK_CARD_PRESENCE_EVENT, type DeskCardPresence } from '../seller-card/desk-card-presence'
 import { useDeskLabelTone } from './map-desk-labels'
 
@@ -486,6 +487,8 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
   }
 
   const onPick = (l: MapLens) => { p.onPickLens(l); setPicker(null) }
+  // [8.2] the floating inspector never covers the legend or the zoom stack
+  useInspectorOcclusion(railRef)
 
   return (
     <>

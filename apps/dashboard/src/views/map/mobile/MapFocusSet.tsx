@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom'
 import { Icon } from '../../../shared/icons'
 import { clearMapFocusSet, MAP_FOCUS_SET_EVENT, readMapFocusSet, type MapFocusSet as FocusSet } from '../../../domain/map/map-focus-set'
 import { mapOverlayTarget } from '../map-overlay-host'
+import { boundsOf, createAutoFramer, planSetFocus } from '../focus/focus-camera'
 
 const SRC = 'nx-focus-set'
 const TONE: Record<FocusSet['tone'], string> = { property: '#5ee7ff', buyer: '#34e8c4', portfolio: '#f7c75b' }
@@ -46,19 +47,31 @@ export function MapFocusSet({ map, mapEpoch, reducedMotion }: { map: maplibregl.
     paint(map, set)
   }, [map, mapEpoch, set])
 
-  // Frame the set once when it arrives.
+  // Frame the set once when it arrives — the bounds of EVERY point (never the
+  // first pin), 500–900 ms by distance, and the operator's first drag / wheel /
+  // pinch stops it (8.2 §3). Reduced motion jumps.
   useEffect(() => {
     if (!map || !set?.points.length) return
-    let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity
-    for (const p of set.points) { w = Math.min(w, p.lng); e = Math.max(e, p.lng); s = Math.min(s, p.lat); n = Math.max(n, p.lat) }
-    if (!Number.isFinite(w)) return
+    const framer = createAutoFramer(map as unknown as Parameters<typeof createAutoFramer>[0])
+    let grabbed = false
+    const grab = (e: { originalEvent?: unknown }) => { if (e?.originalEvent) grabbed = true }
+    map.on('movestart', grab)
     const t = window.setTimeout(() => {
+      if (grabbed) return
       try {
-        if (set.points.length === 1) map.easeTo({ center: [w, s], zoom: 16, duration: reducedMotion ? 0 : 900 })
-        else map.fitBounds([[w, s], [e, n]], { padding: { top: 150, bottom: 220, left: 40, right: 60 }, maxZoom: 15, duration: reducedMotion ? 0 : 1100 })
+        const box = map.getContainer()
+        const width = box.clientWidth || 1, height = box.clientHeight || 1
+        const b = boundsOf(set.points)
+        let distancePx = Math.hypot(width, height) * 4
+        if (b) {
+          const p = map.project([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2])
+          if (Number.isFinite(p.x)) distancePx = Math.hypot(p.x - width / 2, p.y - height / 2)
+        }
+        const plan = planSetFocus({ points: set.points, fromZoom: map.getZoom(), distancePx, viewport: { width, height }, reducedMotion, maxZoom: 15, inset: { left: 40 } })
+        if (plan) framer.run(plan, `set:${set.at}`)
       } catch { /* map not ready */ }
     }, 350)
-    return () => window.clearTimeout(t)
+    return () => { window.clearTimeout(t); map.off('movestart', grab); framer.dispose() }
   }, [map, set, reducedMotion])
 
   if (!set) return null
