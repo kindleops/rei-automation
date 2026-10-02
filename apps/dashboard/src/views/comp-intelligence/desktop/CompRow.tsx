@@ -5,7 +5,10 @@ import {
   fmtAge, fmtDate, fmtInt, fmtMiles, fmtMoney, fmtUnitValue, saleAgeDays, unitValue, weaknesses, whyExcluded, whyIncluded,
   type AssetKind, type ExplainContext, type UnitMetric,
 } from '../../../domain/comp-intelligence/comps-workstation-model'
+import { saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type'
+import { CompStreetView } from './CompStreetView'
 import type { Tier } from './derive-workstation'
+import { SaleTypeBadge } from './SaleType'
 import { useFocusOf, type FocusStore } from './focus-store'
 
 export interface CompRowProps {
@@ -63,6 +66,7 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
     : weak.find((w) => w.tone === 'crit')?.text ?? null
   const stateLabel = tier === 'set' ? 'Priced by the engine' : tier === 'added' ? 'Added by you' : tier === 'removed' ? 'Removed by you' : tier === 'excluded' ? 'Excluded' : 'Candidate'
   const canAct = tier !== 'excluded' && c.engine?.eligible
+  const sale = saleTypeOfComp(c)
 
   return (
     <div
@@ -79,7 +83,17 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
       onClick={() => onOpen(c)}
       onKeyDown={(e) => onKeyNav(e, c)}
     >
-      <span className="ciw-row__glyph" aria-hidden="true">{rank !== null ? <b>{rank}</b> : null}</span>
+      <CompStreetView
+        className="ciw-row__photo"
+        size="thumb"
+        photo={c.photo}
+        lat={c.lat}
+        lng={c.lng}
+        address={c.address}
+        load={tier === 'excluded' ? 'intent' : 'visible'}
+        active={hot || selected}
+        badge={<span className="ciw-row__glyph" aria-hidden="true">{rank !== null ? <b>{rank}</b> : null}</span>}
+      />
       <div className="ciw-row__main">
         <div className="ciw-row__title">
           <span className="ciw-row__addr">{c.address ?? 'Address not recorded'}</span>
@@ -88,7 +102,8 @@ export const CompRow = memo(function CompRow({ c, tier, rank, weightShare, maxSh
           {c.corpus === 'transaction_corpus' ? <LCTooltip content="Recorded deed from the transaction corpus — reviewed with the engine's rules, but not in the engine's own pricing pool."><span className="ciw-pill is-deed">Deed</span></LCTooltip> : null}
         </div>
         <div className="ciw-row__meta lc-num">
-          {[fmtMiles(c.distanceMiles), c.saleDate ? `${fmtDate(c.saleDate, 'long')}${days !== null ? ` · ${fmtAge(days)}` : ''}` : 'Undated sale', c.source].filter(Boolean).join(' · ')}
+          <SaleTypeBadge v={sale} withBuyer />
+          <span>{[fmtMiles(c.distanceMiles), c.saleDate ? `${fmtDate(c.saleDate)}${days !== null ? ` · ${fmtAge(days)}` : ''}` : 'Undated sale'].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="ciw-row__spec lc-num">{specLine(c, kind)}</div>
         {headline ? <div className={cx('ciw-row__headline', tier === 'excluded' ? 'is-excluded' : 'is-crit')}>{headline}</div> : null}

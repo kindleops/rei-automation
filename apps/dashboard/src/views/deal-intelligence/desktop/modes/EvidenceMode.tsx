@@ -7,6 +7,9 @@ import { compStats, debtGroups, factsDiffer, familyCount, type EvidenceFamily } 
 import type { DiComp, DiDecision, DiSelection } from '../di-types'
 import { Empty, Plane, Prov, Tag } from '../di-ui'
 import { CompDistribution, CompRadar } from './EvidenceCharts'
+import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfDealComp } from '../../../../domain/comp-intelligence/comp-sale-type'
+import { CompStreetView } from '../../../comp-intelligence/desktop/CompStreetView'
+import { SaleTypeBadge } from '../../../comp-intelligence/desktop/SaleType'
 
 
 const FAMILIES: Array<{ id: EvidenceFamily; label: string; icon: IconName }> = [
@@ -76,6 +79,7 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
         case 'sqft': return x.sqft ?? 0
         case 'ppsf': return x.ppsf ?? 0
         case 'score': return x.score ?? 0
+        case 'saletype': return SALE_TYPES.indexOf(saleTypeOfDealComp(x).type)
         default: return x.weight ?? 0
       }
     }
@@ -89,7 +93,9 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
   }, [c, sort])
   if (!c) return <Empty icon="stats" title="Comp evidence unavailable" body="This property has no analysis, so no comparable sales were selected." />
   const columns: LCColumn<DiComp>[] = [
+    { id: 'photo', header: '', width: 66, render: (x) => <CompStreetView size="cell" load="visible" photo={x.photo} lat={x.lat} lng={x.lng} address={x.address} /> },
     { id: 'address', header: 'Address', minWidth: 210, sortable: true, render: (x) => <span className="dr-cell-addr"><b>{x.address?.split(',')[0] ?? '—'}</b>{x.assetMatch ? null : <em className="dr-off">different asset</em>}</span> },
+    { id: 'saletype', header: 'Sale type', width: 150, sortable: true, hint: 'How the sale happened — MLS, investor purchase, off-market or public record — from the recorded fields', render: (x) => <SaleTypeBadge v={saleTypeOfDealComp(x)} withBuyer /> },
     { id: 'sale', header: 'Sale', width: 96, align: 'right', sortable: true, render: (x) => usd(x.salePrice) ?? '—' },
     { id: 'adjusted', header: 'Adjusted', width: 100, align: 'right', sortable: true, hint: 'Sale price after the engine’s feature adjustments', render: (x) => <b>{usd(x.adjustedValue) ?? '—'}</b> },
     { id: 'distance', header: 'Dist.', width: 74, align: 'right', sortable: true, render: (x) => (x.distanceMiles !== null ? `${x.distanceMiles.toFixed(2)} mi` : '—') },
@@ -100,7 +106,7 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
     { id: 'type', header: 'Type', width: 112, hideable: true, hiddenByDefault: true, render: (x) => x.propertyType ?? '—' },
     { id: 'weight', header: 'Weight', width: 84, align: 'right', sortable: true, hint: 'The engine’s weight for this comp in the valuation', render: (x) => (x.weight !== null ? <span className="dr-weight"><span className="dr-weight__bar" aria-hidden="true"><i style={{ width: `${Math.min(100, x.weight * 100)}%` }} /></span>{Math.round(x.weight * 100)}%</span> : '—') },
     { id: 'score', header: 'Match', width: 72, align: 'right', sortable: true, hint: 'Engine comp score (0–100)', render: (x) => (x.score !== null ? Math.round(x.score) : '—') },
-    { id: 'source', header: 'Source', width: 104, hideable: true, hiddenByDefault: true, render: (x) => x.saleSource ?? (x.source ? SOURCE_LABEL[x.source] ?? x.source : '—') },
+    { id: 'source', header: 'Engine source', width: 112, hideable: true, hiddenByDefault: true, hint: 'How the engine weighed the source: MLS ×1, other ×0.92', render: (x) => (x.source ? SOURCE_LABEL[x.source] ?? humanize(x.source) : '—') },
     { id: 'included', header: 'Inclusion', width: 92, hideable: true, hiddenByDefault: true, render: () => <span className="dr-incl">Priced</span> },
   ]
   return (
@@ -127,7 +133,11 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
       </Plane>
       {c.top.length ? (
         <Plane id="comps-grid" eyebrow="Comp grid" title="Every qualified comp, as the engine weighted it" depth={1}>
-          <div className="dr-grid-wrap" style={{ height: Math.min(560, 46 + rows.length * 36 + 8) }}>
+          {(() => {
+            const mix = countSaleTypes(rows, (x) => saleTypeOfDealComp(x).type)
+            return <p className="dr-quiet dr-salemix lc-num">{SALE_TYPES.filter((t) => mix[t]).map((t) => `${mix[t]} ${SALE_TYPE_LABEL[t].short}`).join(' · ')} — sale type from the recorded fields; the engine weights MLS sales ×1 and other sales ×0.92.</p>
+          })()}
+          <div className="dr-grid-wrap" style={{ height: Math.min(640, 46 + rows.length * 44 + 8) }}>
             <LCDataGrid
               id="di-comps"
               label="Qualified comparable sales"
@@ -139,7 +149,7 @@ function CompsEvidence({ d, selection, onSelect, links, now }: { d: DiDecision; 
               activeKey={selectedId}
               onActivate={(x) => onSelect({ type: 'comp', id: x.id ?? x.address ?? '' })}
               rowTone={(x) => (x.assetMatch ? null : 'crit')}
-              density="standard"
+              density="comfortable"
             />
           </div>
         </Plane>

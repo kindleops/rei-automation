@@ -1,11 +1,12 @@
-import { useState } from 'react'
 import { LCButton, LCFacts, LCIconButton, LCInspector, LCInspectorSection, LCStatus, cx } from '../../../shared/lc'
 import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import {
   fmtAge, fmtDate, fmtInt, fmtMiles, fmtMoney, fmtUnitValue, saleAgeDays, transactionsOfProperty, unitValue, weaknesses, whyExcluded, whyIncluded,
   type ExplainContext,
 } from '../../../domain/comp-intelligence/comps-workstation-model'
-import { staticStreetViewUrl } from '../../../modules/entity-graph/mobile/EntityGraphPropertyVisual'
+import { saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type'
+import { CompStreetView } from './CompStreetView'
+import { SaleTypeBadge, SaleTypeEvidence } from './SaleType'
 import type { Tier, Workstation } from './derive-workstation'
 
 const CATEGORY: Record<string, string> = { core: 'Property', location_context: 'Location', quality_condition: 'Quality & condition', amenities_structure: 'Amenities & structure', utility_mechanical: 'Utilities' }
@@ -27,7 +28,6 @@ interface Props {
 
 /** The refined evidence inspector (§65–70): one sale, every question about it answerable here. */
 export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, onGraph, onFocusLinked }: Props) {
-  const [photoFailed, setPhotoFailed] = useState<string | null>(null)
   if (!c || !tier) return <LCInspector open={false} onClose={onClose} id="comps-evidence" title="">{null}</LCInspector>
 
   const inSet = tier === 'set' || tier === 'added'
@@ -38,8 +38,9 @@ export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, 
   const why = tier === 'excluded' ? whyExcluded(c, ctx) : whyIncluded(c, ctx)
   const weak = tier === 'excluded' ? [] : weaknesses(c, ctx)
   const unit = unitValue(c, m.metric)
-  const photo = c.photo ?? staticStreetViewUrl(c.address, c.lat, c.lng)
-  const history = transactionsOfProperty(m.w.comps, c)
+  const sale = saleTypeOfComp(c)
+  const recorded = transactionsOfProperty(m.w.comps, c)
+  const history = recorded.length ? recorded : [c]
   const e = c.engine
   const s = m.w.subject
   const stateLabel = tier === 'set' ? `Priced by the engine · #${rank} by weight` : tier === 'added' ? `Added by you · #${rank} by weight` : tier === 'removed' ? 'Removed by you from the system set' : tier === 'excluded' ? 'Excluded' : 'Candidate'
@@ -72,15 +73,20 @@ export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, 
       footer={action ? <div className="ciw-insp__foot">{action}</div> : undefined}
       className="ciw-insp"
     >
-      {photo && photoFailed !== photo ? (
-        <div className="ciw-insp__photo"><img src={photo} alt="" loading="lazy" onError={() => setPhotoFailed(photo)} /></div>
-      ) : null}
+      <div className="ciw-insp__media">
+        <CompStreetView size="hero" load="eager" photo={c.photo} lat={c.lat} lng={c.lng} address={c.address} />
+        <div className="ciw-insp__media-tags"><SaleTypeBadge v={sale} withBuyer /></div>
+      </div>
 
       <div className="ciw-insp__hero lc-num">
         <div><span className="lc-eyebrow">Sold</span><b>{fmtMoney(c.salePrice, { exact: true }) ?? '—'}</b><em>{fmtDate(c.saleDate, 'long') ?? 'undated'}{days !== null ? ` · ${fmtAge(days)} ago` : ''}</em></div>
         <div><span className="lc-eyebrow">{m.metric.label}</span><b>{unit !== null ? fmtUnitValue(unit, m.metric) : '—'}</b><em>{c.sqft ? `${fmtInt(c.sqft)} sf` : m.kind === 'multifamily' && c.units ? `${c.units} units` : ' '}</em></div>
         {e?.eligible && e.adjustedPrice ? <div><span className="lc-eyebrow">Adjusted to subject</span><b>{fmtMoney(e.adjustedPrice, { exact: true })}</b><em>{share !== null ? `${(share * 100).toFixed(1)}% of the set’s weight` : 'engine adjustment'}</em></div> : null}
       </div>
+
+      <LCInspectorSection title="How it sold">
+        <SaleTypeEvidence v={sale} engineSource={e?.saleSource} rules={m.rules?.weight} weighted={Boolean(e?.eligible)} />
+      </LCInspectorSection>
 
       <LCInspectorSection title={tier === 'excluded' ? 'Why excluded' : 'Why it is evidence'}>
         <ul className="ciw-reasons">{why.map((r) => <li key={r.code} data-tone={r.tone}>{r.text}</li>)}</ul>
@@ -164,13 +170,12 @@ export function CompInspector({ m, c, tier, ctx, onClose, onInclude, onExclude, 
         ]} />
       </LCInspectorSection>
 
-      {history.length > 1 ? (
-        <LCInspectorSection title="Recorded sales of this property · in this search">
-          <ol className="ciw-history lc-num">
-            {history.map((h) => <li key={h.key} className={cx(h.key === c.key && 'is-this')}><b>{fmtDate(h.saleDate, 'long')}</b><span>{fmtMoney(h.salePrice, { exact: true })}</span><em>{h.corpus === 'transaction_corpus' ? h.docType ?? 'deed' : h.source}</em></li>)}
-          </ol>
-        </LCInspectorSection>
-      ) : null}
+      <LCInspectorSection title="Sale history · in this search">
+        <ol className="ciw-history lc-num">
+          {history.map((h) => <li key={h.key} className={cx(h.key === c.key && 'is-this')}><b>{fmtDate(h.saleDate, 'long') ?? 'undated'}</b><span>{fmtMoney(h.salePrice, { exact: true }) ?? '—'}</span><em>{saleTypeOfComp(h).short}{h.corpus === 'transaction_corpus' && h.docType ? ` · ${h.docType}` : ''}</em></li>)}
+        </ol>
+        {history.length <= 1 ? <p className="ciw-muted">The only recorded sale of this property within the loaded search ({m.w.query.radiusMiles} mi · {m.w.query.months} mo).</p> : null}
+      </LCInspectorSection>
 
       <LCInspectorSection title="Provenance">
         <p className="ciw-muted">{c.corpus === 'engine_pool' ? 'Engine pool — the sold-comp records the acquisition engine prices from.' : 'Transaction corpus — a recorded deed, reviewed here with the engine’s rules.'} Evidence read {fmtDate(m.w.generatedAt, 'long')}.</p>

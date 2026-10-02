@@ -7,6 +7,7 @@
  * a statement about recorded data or a stated engine rule.
  */
 import type { CompsWorkspace, EngineRules, EvidenceComp } from './comps-evidence-api'
+import { SALE_TYPE_LABEL, saleTypeOfComp, type SaleType } from './comp-sale-type'
 
 /* ── formatting (UTC-safe) ─────────────────────────────────────────────── */
 
@@ -309,9 +310,11 @@ export interface CompFilters {
   sameZip: boolean
   armsLengthOnly: boolean
   corpus: 'all' | 'engine_pool' | 'transaction_corpus'
+  /** how the sale happened (see comp-sale-type.ts) — 'all' keeps every type */
+  saleType: 'all' | SaleType
 }
 
-export const NO_FILTERS: CompFilters = { maxDistance: null, maxAgeMonths: null, sizePct: null, bedsDelta: null, yearDelta: null, sameZip: false, armsLengthOnly: false, corpus: 'all' }
+export const NO_FILTERS: CompFilters = { maxDistance: null, maxAgeMonths: null, sizePct: null, bedsDelta: null, yearDelta: null, sameZip: false, armsLengthOnly: false, corpus: 'all', saleType: 'all' }
 
 export type PresetId = 'strict' | 'balanced' | 'broad'
 /** Presets are visible, deterministic filter definitions — not a scoring opinion. */
@@ -333,6 +336,7 @@ export function describeFilters(f: CompFilters, kind: AssetKind): string[] {
   if (f.armsLengthOnly) out.push('arm’s-length only')
   if (f.corpus === 'engine_pool') out.push('engine pool only')
   if (f.corpus === 'transaction_corpus') out.push('recorded deeds only')
+  if (f.saleType !== 'all') out.push(`${SALE_TYPE_LABEL[f.saleType].short} sales only`)
   return out
 }
 
@@ -367,6 +371,7 @@ export function passesFilters(c: EvidenceComp, f: CompFilters, subject: CompsWor
   if (f.sameZip && !(c.zip && subject.zip && c.zip.slice(0, 5) === subject.zip.slice(0, 5))) return false
   if (f.armsLengthOnly && c.armsLength === false) return false
   if (f.corpus !== 'all' && c.corpus !== f.corpus) return false
+  if (f.saleType && f.saleType !== 'all' && saleTypeOfComp(c).type !== f.saleType) return false
   return true
 }
 

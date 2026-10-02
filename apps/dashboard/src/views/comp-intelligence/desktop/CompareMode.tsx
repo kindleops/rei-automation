@@ -5,6 +5,9 @@ import { fmtAge, fmtDate, fmtInt, fmtMiles, fmtMoney, fmtUnitValue, saleAgeDays,
 import type { Workstation } from './derive-workstation'
 import { useFocus, type FocusStore } from './focus-store'
 import { DeviationRows } from './charts/DeviationRows'
+import { saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type'
+import { CompStreetView } from './CompStreetView'
+import { SaleTypeBadge } from './SaleType'
 
 type Cell = { text: ReactNode; tone?: 'attn' | 'ok' | null }
 interface MatrixRow { id: string; label: string; subject: ReactNode; cell: (c: EvidenceComp) => Cell }
@@ -55,7 +58,8 @@ export function CompareMode({ m, store, onOpen }: { m: Workstation; store: Focus
     { id: 'pool', label: 'Pool', subject: s.pool ?? '—', cell: (c) => ({ text: c.features?.pool ?? '—', tone: c.features?.pool && s.pool && !same(c.features.pool, s.pool) ? 'attn' : null }) },
     { id: 'stories', label: 'Stories', subject: s.stories ?? '—', cell: (c) => ({ text: c.features?.stories ?? '—' }) },
     { id: 'subdivision', label: 'Subdivision', subject: s.subdivision ?? '—', cell: (c) => ({ text: c.features?.subdivision ?? '—', tone: c.features?.subdivision && s.subdivision && same(c.features.subdivision, s.subdivision) ? 'ok' : null }) },
-    { id: 'source', label: 'Source', subject: '—', cell: (c) => ({ text: c.corpus === 'transaction_corpus' ? 'Recorded deed' : c.source ?? '—' }) },
+    { id: 'saletype', label: 'Sale type', subject: '—', cell: (c) => ({ text: <SaleTypeBadge v={saleTypeOfComp(c)} withBuyer /> }) },
+    { id: 'source', label: 'Record', subject: '—', cell: (c) => ({ text: c.corpus === 'transaction_corpus' ? 'Recorded deed' : 'Engine pool' }) },
     { id: 'arms', label: 'Arm’s-length', subject: '—', cell: (c) => ({ text: c.armsLength === true ? 'Yes' : c.armsLength === false ? 'No' : 'Not recorded' }) },
   ]
 
@@ -86,6 +90,7 @@ export function CompareMode({ m, store, onOpen }: { m: Workstation; store: Focus
                   <th key={c.key} scope="col" className={cx('ciw-matrix__comp', (focus.hover === c.key || focus.selected === c.key) && 'is-hot')}
                     onPointerEnter={() => store.hover(c.key, 'matrix')} onPointerLeave={() => store.hover(null, null)}>
                     <button type="button" onClick={() => onOpen(c)} title={c.address ?? undefined}>
+                      <CompStreetView size="header" load="visible" photo={c.photo} lat={c.lat} lng={c.lng} address={c.address} />
                       <b>{i + 1}</b><span>{(c.address ?? 'Comp').split(',')[0]}</span>
                     </button>
                   </th>

@@ -11,6 +11,9 @@ import {
 import type { DiSubject } from '../di-subject'
 import type { DiDecision, DiMode, DiSelection } from '../di-types'
 import { Facts, Prov, Tag } from '../di-ui'
+import { saleTypeOfDealComp } from '../../../../domain/comp-intelligence/comp-sale-type'
+import { CompStreetView } from '../../../comp-intelligence/desktop/CompStreetView'
+import { SaleTypeBadge, SaleTypeEvidence } from '../../../comp-intelligence/desktop/SaleType'
 
 export interface DiInspectorProps {
   d: DiDecision
@@ -599,6 +602,7 @@ function compView(p: DiInspectorProps, id: string): View | null {
   if (!c) return null
   const s = d.subject
   const adj = c.adjustedValue && c.salePrice ? c.adjustedValue - c.salePrice : null
+  const sale = saleTypeOfDealComp(c)
   const row = (label: string, subj: ReactNode, comp: ReactNode, differs: boolean) => (
     <tr className={cx(differs && 'is-differ')}><th>{label}</th><td>{subj ?? '—'}</td><td>{comp ?? '—'}</td></tr>
   )
@@ -610,7 +614,10 @@ function compView(p: DiInspectorProps, id: string): View | null {
     status: <LCStatus label={c.weight !== null ? `${Math.round(c.weight * 100)}% weight` : 'weight not recorded'} tone="exec" />,
     body: (
       <>
-        {c.photo ? <img className="dr-comp__photo" src={c.photo} alt={`Street View of ${c.address ?? 'the comp'}`} decoding="async" /> : null}
+        <div className="dr-comp__media">
+          <CompStreetView size="hero" load="eager" photo={c.photo} lat={c.lat} lng={c.lng} address={c.address} />
+          <div className="dr-comp__media-tags"><SaleTypeBadge v={sale} withBuyer /></div>
+        </div>
         <Facts rows={[
           ['Sold', <span key="s">{usd(c.salePrice, { exact: true }) ?? '—'} · {dateShort(c.saleDate, p.now) ?? '—'}</span>],
           ['Adjusted value', c.adjustedValue ? <span key="a">{usd(c.adjustedValue, { exact: true })}{adj ? <em className="dr-delta"> {usd(adj, { signed: true })} adj.</em> : null}</span> : null],
@@ -619,10 +626,12 @@ function compView(p: DiInspectorProps, id: string): View | null {
           ['Match score', c.score !== null ? `${Math.round(c.score)} / 100` : null],
           ['Comp confidence', c.confidence !== null ? Math.round(c.confidence) : null],
           ['Data completeness', c.completeness !== null ? `${Math.round(c.completeness)}%` : null],
-          ['Source', c.saleSource ?? humanize(c.source)],
           ['Buyer', c.buyerKind === 'company' ? c.buyerLabel : c.buyerKind === 'individual' ? 'Individual (not named)' : 'Not recorded'],
           ['AVM at sale', usd(c.avmAtSale)],
         ]} />
+        <LCInspectorSection title="How it sold">
+          <SaleTypeEvidence v={sale} engineSource={c.source} weighted />
+        </LCInspectorSection>
         <LCInspectorSection title="Against the subject">
           <table className="dr-vs">
             <thead><tr><th /><th>Subject</th><th>Comp</th></tr></thead>

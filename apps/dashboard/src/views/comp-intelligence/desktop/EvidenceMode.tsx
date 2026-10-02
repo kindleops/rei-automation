@@ -5,6 +5,7 @@ import type { EvidenceComp } from '../../../domain/comp-intelligence/comps-evide
 import {
   describeFilters, filterCount, fmtMoney, fmtPct, matchesPreset, PRESETS, type CompFilters, type ExplainContext, type PresetId,
 } from '../../../domain/comp-intelligence/comps-workstation-model'
+import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfComp } from '../../../domain/comp-intelligence/comp-sale-type'
 import { CompRow } from './CompRow'
 import type { Lens, Tier, Workstation } from './derive-workstation'
 import type { FocusStore } from './focus-store'
@@ -68,6 +69,10 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
     <CompRow key={c.key} c={c} tier={tier} rank={rank} weightShare={shares.get(c.key) ?? null} maxShare={maxShare} kind={m.kind} metric={m.metric}
       ctx={ctx} store={store} onOpen={onOpen} onInclude={onInclude} onExclude={onExclude} tabStop={tabKey === c.key} onKeyNav={onKeyNav} />
   )
+
+  const saleMix = countSaleTypes(m.w.comps, (c) => saleTypeOfComp(c).type)
+  const setMix = countSaleTypes(m.lensComps, (c) => saleTypeOfComp(c).type)
+  const setMixText = SALE_TYPES.filter((t) => setMix[t]).map((t) => `${setMix[t]} ${SALE_TYPE_LABEL[t].short}`).join(' · ')
 
   const lensReplay = m.lensReplay.result
   const sysReplay = m.systemReplay.result
@@ -145,6 +150,21 @@ export function EvidenceMode({ m, ctx, store, filters, onFilters, filtersOpen, o
           {filterPanel}
         </LCPopover>
         <span className="ciw-filterbar__count lc-num">{m.candidates.length.toLocaleString('en-US')} of {Math.max(0, m.universeCount - m.lensKeys.size).toLocaleString('en-US')} candidates shown</span>
+      </div>
+      <div className="ciw-saletypes" role="radiogroup" aria-label="Sale type">
+        <span className="ciw-saletypes__label lc-eyebrow">Sale type</span>
+        <button type="button" role="radio" aria-checked={filters.saleType === 'all'} className={cx('ciw-saletype', filters.saleType === 'all' && 'is-on')} onClick={() => onFilters({ ...filters, saleType: 'all' })}>
+          All <b className="lc-num">{m.w.comps.length.toLocaleString('en-US')}</b>
+        </button>
+        {SALE_TYPES.filter((t) => saleMix[t] > 0 || filters.saleType === t).map((t) => (
+          <LCTooltip key={t} content={`${SALE_TYPE_LABEL[t].label} — ${saleMix[t]} of the ${m.w.comps.length} sales in this search. Filters candidates and excluded sales; the priced set is never filtered.`}>
+            <button type="button" role="radio" aria-checked={filters.saleType === t} data-type={t} className={cx('ciw-saletype', filters.saleType === t && 'is-on')}
+              onClick={() => onFilters({ ...filters, saleType: filters.saleType === t ? 'all' : t })}>
+              <i aria-hidden="true" />{SALE_TYPE_LABEL[t].short} <b className="lc-num">{saleMix[t].toLocaleString('en-US')}</b>
+            </button>
+          </LCTooltip>
+        ))}
+        {setMixText ? <span className="ciw-saletypes__set lc-num">{m.lens === 'operator' ? 'Your set' : 'System set'}: {setMixText}</span> : null}
       </div>
       {filterCount(filters) ? (
         <div className="ciw-chips">

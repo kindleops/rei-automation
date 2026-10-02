@@ -1,6 +1,7 @@
 import type { LCFilterSection } from '../../../shared/lc'
 import { FilterChoice as Choice } from './FilterChoice'
 import type { AssetKind, CompFilters } from '../../../domain/comp-intelligence/comps-workstation-model'
+import { SALE_TYPE_LABEL, SALE_TYPES } from '../../../domain/comp-intelligence/comp-sale-type'
 
 const num = (v: string): number | null => (v === 'any' ? null : Number(v))
 const str = (v: number | null) => (v === null ? 'any' : String(v))
@@ -52,14 +53,16 @@ export function buildFilterSections(f: CompFilters, set: (f: CompFilters) => voi
       ),
     },
     {
-      id: 'transaction', label: 'Transaction & source', keywords: ['arms', 'deed', 'mls', 'pool', 'corpus'],
-      active: (f.armsLengthOnly ? 1 : 0) + (f.corpus !== 'all' ? 1 : 0),
+      id: 'transaction', label: 'Transaction & source', keywords: ['arms', 'deed', 'mls', 'pool', 'corpus', 'investor', 'off-market', 'public record', 'sale type'],
+      active: (f.armsLengthOnly ? 1 : 0) + (f.corpus !== 'all' ? 1 : 0) + (f.saleType !== 'all' ? 1 : 0),
       render: () => (
         <>
           <Choice label="Arm’s-length" value={f.armsLengthOnly ? 'only' : 'any'} onChange={(v) => set({ ...f, armsLengthOnly: v === 'only' })}
             options={[{ value: 'any', label: 'Any' }, { value: 'only', label: 'Exclude non-arm’s-length' }]} />
           <Choice label="Source" value={f.corpus} onChange={(v) => set({ ...f, corpus: v as CompFilters['corpus'] })}
             options={[{ value: 'all', label: 'All' }, { value: 'engine_pool', label: 'Engine pool' }, { value: 'transaction_corpus', label: 'Recorded deeds' }]} />
+          <Choice label="Sale type" value={f.saleType} onChange={(v) => set({ ...f, saleType: v as CompFilters['saleType'] })}
+            options={[{ value: 'all', label: 'All' }, ...SALE_TYPES.map((t) => ({ value: t, label: SALE_TYPE_LABEL[t].short }))]} />
         </>
       ),
     },

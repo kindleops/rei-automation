@@ -274,12 +274,15 @@ function shapePoolRow(row, detail, subjectView) {
     ppsf: round(d.ppsf ?? d.computed_ppsf, 0),
     ppu: round(d.ppu, 0),
     source: saleLabel(detail?.sale_source ?? (pos(d.mls_sold_price) ? 'MLS Sold' : 'Public Record Sold')),
+    // the record's own sale_source, only when the sold-comp detail row was read (never inferred)
+    saleSourceRaw: clean(detail?.sale_source) || null,
     mls: pos(d.mls_sold_price) !== null,
     buyerKind: buyer.kind === 'company' ? 'company' : buyer.kind === 'individual' ? 'person' : null,
     buyerCompany: buyer.kind === 'company' ? displayableCompanyName(buyer.label) : null,
     buyerId: null,
     buyerAcquisitions: null,
     buyerActivity: null,
+    buyerArchetype: null,
     sellerKind: null,
     armsLength: null,
     cash: null,
@@ -333,6 +336,7 @@ function shapeCorpusRow(r, subjectView) {
     buyerId: clean(r.buyer_id) || null,
     buyerAcquisitions: num(r.buyer_acquisitions),
     buyerActivity: clean(r.buyer_activity) || null,
+    buyerArchetype: clean(r.buyer_archetype) || null,
     sellerKind: clean(r.seller_kind) || null,
     armsLength: r.is_arms_length === true ? true : r.is_arms_length === false ? false : null,
     cash: r.is_cash_purchase === true ? true : r.is_cash_purchase === false ? false : null,
@@ -511,7 +515,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
       Object.assign(twin, {
         armsLength: c.armsLength, cash: c.cash, docType: c.docType, sellerKind: c.sellerKind,
         buyerKind: twin.buyerKind ?? c.buyerKind, buyerCompany: twin.buyerCompany ?? c.buyerCompany,
-        buyerId: c.buyerId, buyerAcquisitions: c.buyerAcquisitions, buyerActivity: c.buyerActivity, txnId: c.txnId,
+        buyerId: c.buyerId, buyerAcquisitions: c.buyerAcquisitions, buyerActivity: c.buyerActivity, buyerArchetype: c.buyerArchetype, txnId: c.txnId,
       })
       continue
     }

@@ -1,0 +1,128 @@
+/* ══ COMP EVIDENCE MEDIA — Street View frames + sale-type badges ═══════════
+ * Shared by Comp Intelligence (rows, compare, inspector) and the Deal
+ * Intelligence comp grid / inspector. Desktop surfaces only.
+ */
+
+.csv {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(120% 90% at 30% 0%, rgba(var(--lc-edge-rgb), 0.06), transparent 60%),
+    var(--lc-inner-bg);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+}
+.csv img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transform: scale(1.015);
+  transition: opacity 260ms var(--lc-ease-standard, ease), transform 420ms var(--lc-ease-standard, ease);
+}
+.csv.is-ok img { opacity: 1; transform: none; }
+.csv::after {
+  /* a glass lip so the frame reads as an object, not a pasted rectangle */
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.08), inset 0 1px 0 rgba(var(--lc-edge-rgb), 0.1);
+}
+
+.csv--thumb { width: 72px; height: 54px; border-radius: 9px; }
+.csv--cell { width: 52px; height: 34px; border-radius: 7px; }
+.csv--header { width: 100%; height: 64px; border-radius: 8px; margin-bottom: 6px; }
+.csv--hero { width: 100%; aspect-ratio: 16 / 10; border-radius: 14px; }
+.csv--hero::before {
+  /* bottom scrim so overlaid facts stay legible on any frame */
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(4, 8, 16, 0.62), transparent);
+  opacity: 0;
+  transition: opacity 260ms var(--lc-ease-standard, ease);
+}
+.csv--hero.is-ok::before { opacity: 1; }
+
+.csv__wait {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(var(--lc-edge-rgb), 0.05) 45%, transparent 70%) 0 0 / 220% 100%;
+  animation: csv-sheen 1.6s linear infinite;
+}
+@keyframes csv-sheen { to { background-position: -220% 0; } }
+
+.csv__none {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  color: var(--lc-ink-4);
+  text-align: center;
+  padding: 8px;
+}
+.csv__none svg { width: 14px; height: 14px; opacity: 0.8; }
+.csv__none em { font: 500 11.5px/1.35 var(--lc-font-ui); font-style: normal; color: var(--lc-ink-3); max-width: 24ch; }
+.csv.is-none { background: repeating-linear-gradient(135deg, rgba(var(--lc-edge-rgb), 0.025) 0 6px, transparent 6px 12px), var(--lc-inner-bg); }
+
+.csv__badge {
+  position: absolute;
+  z-index: 3;
+  left: 5px;
+  top: 5px;
+}
+
+/* ── sale-type badge ────────────────────────────────────────────────────── */
+.cst {
+  --cst-rgb: var(--lc-neutral-rgb);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 7px 0 6px;
+  border-radius: 6px;
+  font: 650 10px/1 var(--lc-font-ui);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--lc-ink-1);
+  background: rgba(var(--cst-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--cst-rgb), 0.28);
+  cursor: help;
+}
+.cst::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--cst-rgb)); }
+.cst[data-type='mls'] { --cst-rgb: var(--lc-cobalt-rgb); }
+.cst[data-type='investor'] { --cst-rgb: var(--lc-attn-rgb); }
+.cst[data-type='off_market'], .cst[data-type='public_record'] { color: var(--lc-ink-2); }
+.cst[data-type='off_market']::before, .cst[data-type='public_record']::before { background: transparent; box-shadow: inset 0 0 0 1.4px rgb(var(--cst-rgb)); }
+.cst[data-type='unknown'] { color: var(--lc-ink-3); background: transparent; box-shadow: inset 0 0 0 1px rgba(var(--lc-edge-rgb), 0.12); }
+.cst[data-type='unknown']::before { background: transparent; box-shadow: inset 0 0 0 1px var(--lc-ink-4); }
+.cst__buyer { margin-left: 2px; padding-left: 6px; border-left: 1px solid rgba(var(--cst-rgb), 0.3); font-weight: 560; color: var(--lc-ink-2); }
+
+/* the sale-type evidence block in inspectors */
+.cst-evidence { display: flex; flex-direction: column; gap: 8px; }
+.cst-evidence__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cst-evidence ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.cst-evidence li { position: relative; padding-left: 13px; font: 500 11.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-2); }
+.cst-evidence li::before { content: ''; position: absolute; left: 1px; top: 6px; width: 5px; height: 5px; border-radius: 50%; background: var(--lc-ink-4); }
+.cst-evidence__engine { font: 500 11.5px/1.4 var(--lc-font-ui); color: var(--lc-ink-3); }
+.cst-evidence__engine b { color: var(--lc-ink-1); font-weight: 620; }
+
+:root[data-lc-motion='off'] .csv img, :root[data-lc-motion='off'] .csv--hero::before { transition: none; }
+:root[data-lc-motion='off'] .csv__wait { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .csv img, .csv--hero::before { transition: none; }
+  .csv__wait { animation: none; }
+}

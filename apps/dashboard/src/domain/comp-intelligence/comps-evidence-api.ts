@@ -91,12 +91,16 @@ export type EvidenceComp = {
   ppsf: number | null
   ppu: number | null
   source: string | null
+  /** the sold-comp record's own sale_source ("MLS Sold" | "Public Record Sold" | "Off-Market Sold"); null when not recorded */
+  saleSourceRaw?: string | null
   mls: boolean
   buyerKind: 'company' | 'person' | null
   buyerCompany: string | null
   buyerId: string | null
   buyerAcquisitions: number | null
   buyerActivity: string | null
+  /** eg_buyer_index.archetype of the resolved buyer (recorded deeds) */
+  buyerArchetype?: string | null
   sellerKind: string | null
   armsLength: boolean | null
   cash: boolean | null

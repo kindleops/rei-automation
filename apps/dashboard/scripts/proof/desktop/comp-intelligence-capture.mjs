@@ -42,6 +42,9 @@ for (const theme of THEMES) {
     const page = await ctx.newPage()
     const errors = []
     page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 220)))
+    // fan-out proof: every Street View image request the page makes
+    let streetview = 0
+    page.on('request', (q) => { if (q.url().includes('/maps/api/streetview')) streetview += 1 })
     await page.route('**/*', (r) => {
       const req = r.request()
       const u = new URL(req.url())
@@ -96,11 +99,15 @@ for (const theme of THEMES) {
         else if (scene === 'inspector') { await tab('Evidence'); await page.locator('[data-section="set"] [data-comp-row]').nth(1).click(); await page.waitForTimeout(1200) }
         else if (scene === 'hover') {
           await page.locator('[data-section="set"] [data-comp-row]').nth(2).hover(); await page.waitForTimeout(700)
+        } else if (scene === 'saletype') {
+          await tab('Evidence')
+          await page.locator('.ciw-saletype[data-type="investor"]').first().click({ timeout: 8000 }); await page.waitForTimeout(900)
+          await page.locator('[data-section="candidates"]').first().scrollIntoViewIfNeeded(); await page.waitForTimeout(1500)
         } else if (scene === 'strict') { await tab('Evidence'); await page.locator('[data-preset="strict"]').click(); await page.waitForTimeout(900) }
         else if (scene === 'mode-ppsf') { await page.locator('.ciw-maplens [data-seg="ppsf"]').click(); await page.waitForTimeout(1200) }
         else if (scene === 'mode-recency') { await page.locator('.ciw-maplens [data-seg="recency"]').click(); await page.waitForTimeout(1200) }
         await page.screenshot({ path: name(scene) })
-        results.push({ theme, W, scene })
+        results.push({ theme, W, scene, streetviewSoFar: streetview, rows: await page.locator('[data-comp-row]').count() })
       } catch (e) {
         results.push({ theme, W, scene, failed: String(e.message).slice(0, 200) })
       }
