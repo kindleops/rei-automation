@@ -60,7 +60,7 @@ html.is-desktop-modern .cd {
 }
 .cd-ws:hover, .cd-ws[data-state='open'] { color: var(--lc-ink-1); background: rgba(255, 255, 255, 0.05); }
 .cd-ws:focus-visible { box-shadow: var(--lc-focus-ring); }
-.cd-ws b { font-weight: 640; letter-spacing: 0.01em; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-ws b { font-weight: 640; letter-spacing: 0.01em; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cd-ws__count { font: 650 10px/1 var(--lc-font-ui); font-variant-numeric: tabular-nums; color: var(--lc-ink-3); }
 .cd-ws.is-dirty b::after { content: ''; display: inline-block; width: 4px; height: 4px; margin-left: 5px; border-radius: 50%; vertical-align: middle; background: rgb(var(--lc-select-rgb)); }
 /* a mission in progress: one quiet capsule beside the workspace — tap to end and go home */

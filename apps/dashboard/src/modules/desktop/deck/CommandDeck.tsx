@@ -34,6 +34,14 @@ import './command-deck.css'
 
 const appMeta = (app: string | null | undefined) => { if (!app) return null; try { return getApp(app as AppId) } catch { return null } }
 
+/** Campaign Command publishes its open campaign (nexus:campaign-subject:v1); read only its id + name. */
+function readCampaignSubjectName(): { campaignId: string; name: string | null } | null {
+  try {
+    const v = JSON.parse(window.sessionStorage.getItem('nexus:campaign-subject:v1') || 'null') as { campaignId?: string; name?: string | null } | null
+    return v?.campaignId ? { campaignId: v.campaignId, name: v.name ?? null } : null
+  } catch { return null }
+}
+
 function useLocatorAddress(): string | null {
   return useSyncExternalStore(
     (l) => { window.addEventListener(PROPERTY_LOCATOR_EVENT, l); return () => window.removeEventListener(PROPERTY_LOCATOR_EVENT, l) },
@@ -112,7 +120,7 @@ export function CommandDeck(p: CommandDeckProps) {
   const hasSelection = address !== null
   // recomputed per keystroke inside the bar's own memo — cheap, so no manual memo here
   const extra = (q: string) => {
-    const subject = missionSubject({ locator: hasSelection ? readPropertyLocator() : null, focusedPath, focusedTitle })
+    const subject = missionSubject({ locator: hasSelection ? readPropertyLocator() : null, focusedPath, focusedTitle, campaignSubject: readCampaignSubjectName() })
     return [...machineCommands(q, { subject }), ...missionCommands(q, { subject, active: missionTitle ? { title: missionTitle } : null }), ...workspaceCommands(q, { saved, multi, hasFocus })]
   }
 

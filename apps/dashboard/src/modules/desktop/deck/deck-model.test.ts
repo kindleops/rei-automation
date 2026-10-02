@@ -68,6 +68,9 @@ describe('mission commands', () => {
     expect(missionSubject({ locator: null, focusedPath: '/queue?campaign=C1', focusedTitle: null })).toBeNull()
     expect(missionSubject({ locator: loc, focusedPath: '/inbox', focusedTitle: null })).toMatchObject({ propertyId: 'P1', threadKey: 'T1', label: '3025 Sunbeam Ave' })
     expect(missionSubject({ locator: null, focusedPath: '/closing-desk?case=K1', focusedTitle: '3025 Sunbeam' })).toMatchObject({ closingId: 'K1' })
+    // Campaign Command's published name wins for its own campaign; never another campaign's name
+    expect(missionSubject({ locator: null, focusedPath: '/campaign-command?campaign=C1', focusedTitle: null, campaignSubject: { campaignId: 'C1', name: 'Map area · Dallas, TX' } })?.label).toBe('Map area · Dallas, TX')
+    expect(missionSubject({ locator: null, focusedPath: '/campaign-command?campaign=C1', focusedTitle: null, campaignSubject: { campaignId: 'C2', name: 'Other' } })?.label).toBe('This subject')
   })
 
   it('offers the missions a subject supports, by verb or all at once', () => {

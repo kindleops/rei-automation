@@ -110,6 +110,8 @@ export function missionSubject(opts: {
   locator: { propertyId: string | null; threadKey: string | null; prospectId: string | null; masterOwnerId: string | null; opportunityId: string | null; address: string | null } | null
   focusedPath: string | null
   focusedTitle: string | null
+  /** the campaign Campaign Command last published (id + name), so a mission names it */
+  campaignSubject?: { campaignId: string; name: string | null } | null
 }): MissionSubject | null {
   const q = new URLSearchParams((opts.focusedPath ?? '').split('?')[1] ?? '')
   const path = (opts.focusedPath ?? '').split('?')[0]
@@ -117,7 +119,8 @@ export function missionSubject(opts: {
   const closingId = path === '/closing-desk' ? (q.get('case') || q.get('closing') || q.get('closing_id')) : null
   const loc = opts.locator
   const s: MissionSubject = {
-    label: (campaignId || closingId ? opts.focusedTitle : null) ?? loc?.address ?? opts.focusedTitle ?? 'This subject',
+    label: (campaignId && opts.campaignSubject?.campaignId === campaignId ? opts.campaignSubject.name : null)
+      ?? (campaignId || closingId ? opts.focusedTitle : null) ?? loc?.address ?? opts.focusedTitle ?? 'This subject',
     propertyId: loc?.propertyId ?? null,
     threadKey: loc?.threadKey ?? null,
     prospectId: loc?.prospectId ?? null,
