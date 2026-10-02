@@ -10,8 +10,12 @@
  *   follow-ups    cancelPendingFollowUpsForThread, scheduleFollowUp
  *   compliance    applyInboundSuppression     (opt-out only)
  *
- * What it NEVER does: send or queue a message to a new contact, send a
- * clarification, change a lifecycle stage, write the global DNC list for a
+ * Replies (owner decision 2026-10-02): `queue_late_reply` queues ONE reply to
+ * the seller on this thread through the normal queue (see queueCleanupReply:
+ * active template, sender engine, contact window, vendor-DNC hold).
+ *
+ * What it NEVER does: send or queue a message to a new contact, pin a sending
+ * number, change a lifecycle stage, write the global DNC list for a
  * wrong person, or write raw SQL. A next contact is RECORDED as a plan on the
  * thread; contacting them is a separate, approved campaign action. Email is
  * recorded as pending-email (sending is off).
@@ -24,6 +28,139 @@
 import { CLEANUP_SOURCE, CLEANUP_CATEGORY } from "./new-replies-cleanup.js";
 
 const clean = (v) => String(v ?? "").trim();
+
+// ─── Cleanup replies (owner decision 2026-10-02) ────────────────────────────
+//
+// A cleanup reply goes through the NORMAL queue / send path only:
+//   template   an ACTIVE sms_templates row, stamped by template_id
+//   sender     the normal sender-selection engine (chooseTextgridNumber:
+//              routing, health, cooling, caps). NEVER a pinned number: a
+//              from-number on the plan is ignored, and there is no override.
+//   window     the recipient's contact window (08:00-21:00 local)
+//   vendor DNC seller.owner_phone.do_not_call -> HOLD (semantics unconfirmed)
+// Anything that fails is HELD with a reason and reported, never forced.
+
+export const REPLY_HOLD = Object.freeze({
+  VENDOR_DNC: "vendor_dnc_semantics_unconfirmed",
+  VENDOR_DNC_UNKNOWN: "vendor_dnc_lookup_unavailable",
+  NO_TEMPLATE: "template_missing_or_inactive",
+  RENDER: "template_render_incomplete",
+  WINDOW: "outside_contact_window",
+  TIMEZONE: "recipient_timezone_unresolved",
+  NO_SENDER: "no_eligible_sender",
+  REVIEW: "needs_review",
+});
+
+/**
+ * THE COHORT GATE (deploy runbook): the cleanup acts ONLY on the frozen
+ * 2026-10-01 New Replies cohort (111 threads) and the 27 unanswered
+ * active-deal sellers. A thread / deal outside it is refused, and a run with
+ * no cohort at all is refused (fail closed).
+ *   cohort = { thread_ids: Set, thread_keys: Set, deal_ids: Set }
+ */
+export function isInCleanupCohort(cohort, { thread_id = null, thread_key = null, deal_id = null } = {}) {
+  if (!cohort) return false;
+  const has = (set, v) => Boolean(v) && set instanceof Set && set.has(String(v));
+  return has(cohort.thread_ids, thread_id) || has(cohort.thread_keys, thread_key) || has(cohort.deal_ids, deal_id);
+}
+
+/**
+ * TODO(vendor-dnc-semantics): once the source of seller.owner_phone.do_not_call
+ * is confirmed (federal DNC registry scrub? voice-only? carrier data?), encode
+ * the per-channel rule here: e.g. { sms: "allow_reply_to_inbound", voice:
+ * "block" }. Until then the flag is NEITHER SMS suppression NOR ignored: every
+ * channel holds, with a reason an operator can see.
+ */
+export function vendorDncChannelRule({ channel = "sms", vendor_dnc = false } = {}) {
+  if (!vendor_dnc) return { action: "allow", reason: null };
+  void channel;
+  return { action: "hold", reason: REPLY_HOLD.VENDOR_DNC };
+}
+
+const TOKEN_RE = /\{\{\s*([a-z_]+)\s*\}\}/gi;
+
+export function renderCleanupTemplate(body, variables = {}) {
+  const text = clean(body).replace(TOKEN_RE, (m, key) => {
+    const v = clean(variables[key]);
+    return v || m;
+  });
+  return { text, unresolved: [...text.matchAll(TOKEN_RE)].map((m) => m[1]) };
+}
+
+/**
+ * Queue ONE cleanup reply, or hold it. Idempotent: the dedupe key is per
+ * thread, so a second run finds the first row instead of sending twice.
+ */
+export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
+  const thread = ctx.thread || {};
+  const threadKey = clean(thread.thread_key);
+  const reply = plan?.reply || null;
+  const hold = (reason, extra = {}) => ({ ok: true, held: true, held_reason: reason, thread_key: threadKey, ...extra });
+  if (!isInCleanupCohort(deps.cohort, { thread_key: threadKey, deal_id: ctx.deal_id || plan?.deal || null })) {
+    return { ok: false, reason: deps.cohort ? "outside_frozen_cohort" : "cohort_gate_missing", thread_key: threadKey };
+  }
+  if (!reply?.template_id) return hold(REPLY_HOLD.REVIEW, { detail: reply?.review_reason || "no_template_for_this_reply" });
+
+  // Fail closed: an unreadable vendor flag is not a clear flag.
+  let vendor_dnc = null;
+  try {
+    vendor_dnc = deps.loadVendorDnc ? await deps.loadVendorDnc(threadKey) : null;
+  } catch {
+    vendor_dnc = null;
+  }
+  if (vendor_dnc === null || vendor_dnc === undefined) return hold(REPLY_HOLD.VENDOR_DNC_UNKNOWN);
+  const rule = vendorDncChannelRule({ channel: "sms", vendor_dnc: vendor_dnc === true });
+  if (rule.action === "hold") return hold(rule.reason);
+
+  const template = deps.loadTemplate ? await deps.loadTemplate(reply.template_id) : null;
+  if (!template || template.is_active !== true) return hold(REPLY_HOLD.NO_TEMPLATE, { template_id: reply.template_id });
+  const rendered = renderCleanupTemplate(template.template_body, reply.variables || {});
+  if (rendered.unresolved.length) return hold(REPLY_HOLD.RENDER, { unresolved: rendered.unresolved });
+
+  const now = deps.now ? new Date(deps.now) : new Date();
+  const tz = deps.resolveTimezone ? deps.resolveTimezone(ctx) : null;
+  if (!tz) return hold(REPLY_HOLD.TIMEZONE);
+  if (deps.isWithinContactWindow && !deps.isWithinContactWindow(now, tz)) return hold(REPLY_HOLD.WINDOW, { timezone: tz });
+
+  // The engine decides; nothing on the plan can pin a number.
+  const sender = deps.selectSender ? await deps.selectSender({ thread, ctx, language: template.language }) : null;
+  if (!sender || sender.routing_allowed !== true || !clean(sender.phone_number)) {
+    return hold(REPLY_HOLD.NO_SENDER, { detail: sender?.routing_block_reason || sender?.selection_reason || "sender_engine_unavailable" });
+  }
+
+  const dedupe_key = `${CLEANUP_SOURCE}:reply:${threadKey}`;
+  const result = await deps.enqueueSendQueueItem({
+    queue_key: dedupe_key,
+    queue_id: dedupe_key,
+    dedupe_key,
+    thread_key: threadKey,
+    to_phone_number: threadKey,
+    from_phone_number: sender.phone_number,
+    textgrid_number_id: sender.item_id || sender.textgrid_number_id || null,
+    queue_status: "queued",
+    type: "outbound",
+    message_type: "reengagement",
+    message_body: rendered.text,
+    rendered_message: rendered.text,
+    template_id: template.template_id,
+    template_source: "sms_templates",
+    use_case_template: template.use_case,
+    language: template.language,
+    master_owner_id: clean(thread.master_owner_id) || null,
+    property_id: clean(thread.property_id) || null,
+    source: CLEANUP_SOURCE,
+    metadata: {
+      source: CLEANUP_SOURCE,
+      repair_tag: CLEANUP_SOURCE,
+      cleanup_category: plan.category || null,
+      selected_template_id: template.template_id,
+      sender_selection: { engine: "chooseTextgridNumber", reason: sender.selection_reason || null },
+      recipient_timezone: tz,
+    },
+  }, { supabase: deps.supabase });
+  if (result?.ok === false) return { ok: false, reason: result.reason || "enqueue_failed", thread_key: threadKey };
+  return { ok: true, queued: true, idempotent_replay: result?.idempotent_replay === true, template_id: template.template_id, thread_key: threadKey };
+}
 
 const BUCKET_BY_CATEGORY = Object.freeze({
   [CLEANUP_CATEGORY.WRONG_PERSON]: "dead",
@@ -55,7 +192,13 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
   const threadKey = clean(thread.thread_key);
   const steps = [];
   const record = (step, result) => {
-    steps.push({ step, ok: result?.ok !== false, reason: result?.reason || null, skipped: result?.skipped === true });
+    steps.push({
+      step,
+      ok: result?.ok !== false,
+      reason: result?.reason || null,
+      skipped: result?.skipped === true,
+      ...(result?.held ? { held: true, held_reason: result.held_reason } : {}),
+    });
     return result;
   };
   const meta = (reason) => ({
@@ -68,6 +211,9 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
   });
 
   if (!threadKey) return { ok: false, reason: "missing_thread_key", steps };
+  if (!isInCleanupCohort(deps.cohort, { thread_id: thread.id, thread_key: threadKey })) {
+    return { ok: false, reason: deps.cohort ? "outside_frozen_cohort" : "cohort_gate_missing", steps };
+  }
 
   for (const action of plan?.apply || []) {
     switch (action) {
@@ -186,11 +332,30 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
           meta: meta(plan.why),
         }));
         break;
-      case "schedule_nurture_followup":
+      case "schedule_nurture_followup": {
+        // Vendor do_not_call holds a cleanup send of ANY kind (owner decision
+        // 2026-10-02); an unreadable flag holds too (fail closed).
+        let vendor_dnc = null;
+        try {
+          vendor_dnc = deps.loadVendorDnc ? await deps.loadVendorDnc(threadKey) : null;
+        } catch {
+          vendor_dnc = null;
+        }
+        if (vendor_dnc !== false) {
+          record(action, { ok: true, skipped: true, held: true, held_reason: vendor_dnc === true ? REPLY_HOLD.VENDOR_DNC : REPLY_HOLD.VENDOR_DNC_UNKNOWN });
+          break;
+        }
         // The canonical nurture scheduler: deferred row, template resolved at
-        // send time, every send-time guard still applies, dedupe-keyed.
-        record(action, await deps.scheduleFollowUp("not_interested", threadKey, {}, deps.supabase));
+        // send time, every send-time guard still applies, dedupe-keyed. The
+        // repair tag lands in send_queue.metadata.source for the verifier.
+        record(action, await deps.scheduleFollowUp("not_interested", threadKey, {
+          source: CLEANUP_SOURCE,
+          repair_tag: CLEANUP_SOURCE,
+          master_owner_id: thread.master_owner_id || null,
+          property_id: thread.property_id || null,
+        }, deps.supabase));
         break;
+      }
       case "clear_stale_decline":
         record(action, await deps.patchUniversalLeadState({
           threadKey,
@@ -206,9 +371,13 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
         break;
       case "record_next_contact_plan": {
         const next = ctx.next_contact_plan || null;
+        // A next-contact phone carrying the vendor DNC flag is held exactly
+        // like a reply (owner decision 2026-10-02), never treated as clear.
+        const nextHeld = next?.channel === "phone" && next?.vendor_dnc !== false;
         record(action, {
           ok: true,
           skipped: true,
+          ...(nextHeld ? { held: true, held_reason: next?.vendor_dnc === true ? REPLY_HOLD.VENDOR_DNC : REPLY_HOLD.VENDOR_DNC_UNKNOWN } : {}),
           reason: next
             ? next.channel === "email"
               ? "pending_email_recorded_email_sending_off"
@@ -217,6 +386,9 @@ export async function applyNewRepliesCleanupPlan(plan, ctx = {}, deps = {}) {
         });
         break;
       }
+      case "queue_late_reply":
+        record(action, await queueCleanupReply(plan, ctx, deps));
+        break;
       case "suppress_opt_out":
         record(action, await deps.applyInboundSuppression({
           supabaseClient: deps.supabase,

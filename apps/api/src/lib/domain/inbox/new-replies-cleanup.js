@@ -410,7 +410,8 @@ export function planThreadCleanup({
         new_replies: "remove",
         follow_up: "none",
         next_contact: next_contact || { channel: "none", why: "next contact not evaluated" },
-        proposed_send: next_contact && next_contact.channel === "phone" ? "yes, after approval (queue)" : "no",
+        // The cleanup never contacts a new person: the next contact is recorded only.
+        proposed_send: "no (next contact recorded only; contacting them is a separate campaign action)",
         why: "the reply says we reached someone other than the owner; the number is invalid for this owner only, never globally",
         apply: ["write_reclassification", "mark_relationship_not_owner", "archive_thread", "record_next_contact_plan"],
       });
@@ -440,9 +441,7 @@ export function planThreadCleanup({
         new_replies: "remove",
         follow_up: "30-day",
         next_contact: { channel: "none", why: "same seller stays in nurture; never suppressed" },
-        proposed_send: julyCohort
-          ? "yes, after approval AND the owner's July-cohort decision (30-day nurture, scheduled)"
-          : "yes, after approval (30-day nurture, scheduled)",
+        proposed_send: "yes (one 30-day nurture follow-up via scheduleFollowUp: normal queue, send-time guards, vendor-DNC hold)",
         why: intent === "need_time" ? "a not-now answer: 30-day nurture" : "a decline is a 30-day follow-up (owner rule), never a suppression",
         apply: ["write_reclassification", "set_not_interested_nurture", "schedule_nurture_followup"],
       });
@@ -481,7 +480,11 @@ export function planThreadCleanup({
         new_replies: "keep",
         follow_up: useCase ? "clarify" : "other",
         next_contact: { channel: "none", why: "same contact" },
-        proposed_send: useCase ? `yes, after approval (sms_templates ${useCase}, English; other languages go to review)` : "no (review)",
+        // Not sent by the cleanup (deploy runbook, 2026-10-02): a confirmation
+        // question about a months-old emoji would read as a fake continuation.
+        // The thread stays in New Replies; the live path still clarifies NEW
+        // emoji with the emoji_confirm_* rows.
+        proposed_send: "no (stays in New Replies for an operator; not sent by the cleanup)",
         why: useCase
           ? "an emoji/reaction to our question is LIKELY an answer, never a fact: one confirmation question, same stage"
           : "an emoji/reaction whose meaning needs a person (confusion, laughter, or no known question)",
@@ -521,9 +524,10 @@ export function planThreadCleanup({
         new_replies: "keep",
         follow_up: "other",
         next_contact: { channel: "none", why: "same contact" },
-        proposed_send: lang.preferred_language
-          ? `yes, after approval (resend of our last question in ${lang.preferred_language} through the existing template path; review if no ${lang.preferred_language} row)`
-          : `no: stop ${lang.avoid_language || "the current language"}; no preferred language is known yet (review)`,
+        // Not resent by the cleanup (deploy runbook, 2026-10-02): the language
+        // is recorded; the reply is an approved late-reply row where one applies
+        // (the 27-deal reply plan), otherwise an operator answers.
+        proposed_send: `no (language recorded${lang.avoid_language ? `; stop ${lang.avoid_language}` : ""}; not resent by the cleanup)`,
         why: lang.preferred_language
           ? `explicit request for ${lang.preferred_language}`
           : `the seller cannot read ${lang.avoid_language || "our language"}; that does not by itself name the language to use`,

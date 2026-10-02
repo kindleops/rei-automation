@@ -22,11 +22,30 @@
  * REPAIR (--apply --confirm=classifier_cleanup_20261001): executes each row's
  * plan through the canonical authorities (new-replies-cleanup-apply.js).
  * Compare-and-set per thread; a thread that changed since the preview is
- * skipped. Never sends, never queues a contact, never writes raw SQL.
+ * skipped. Never pins a number, never contacts a new person, never writes raw SQL.
+ *
+ * DEPLOY WINDOW ONLY (owner decision 2026-10-02). Run order:
+ *   P7 -> canaries -> not-interested nurture -> THIS (New Replies) -> smoke test
+ * --apply refuses unless:
+ *   --completed=p7,canaries,nurture        the earlier steps are done
+ *   --classifier-live=<CLASSIFY_VERSION>   the deployed classifier version
+ *                                          (must equal this build's constant)
+ *   the New Replies view 20261001160000 is live (its f_reply_resolved column
+ *   answers through the API).
+ *
+ * REPLIES (--replies=<plan.json>, with --apply): queues the approved re-engagement
+ * replies (one per thread) through the NORMAL queue: active sms_templates row by
+ * template_id, the normal sender engine (chooseTextgridNumber; no pinned number,
+ * no override), the recipient's contact window, and a vendor-DNC HOLD
+ * (seller.owner_phone.do_not_call -> held_reason=vendor_dnc_semantics_unconfirmed).
+ * Anything that cannot pass is HELD and listed, never forced. Idempotent: one
+ * dedupe key per thread (classifier_cleanup_20261001:reply:<thread>).
  *
  * Usage (from apps/api):
  *   node --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261001_new_replies_cleanup.mjs [--freeze=<file>] [--out=<dir>]
- *   node --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261001_new_replies_cleanup.mjs --apply --confirm=classifier_cleanup_20261001
+ *   node --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261001_new_replies_cleanup.mjs --apply \
+ *     --confirm=classifier_cleanup_20261001 --completed=p7,canaries,nurture \
+ *     --classifier-live=classify_js_context_v3_reply_disposition [--replies=<plan.json>]
  */
 
 import fs from "node:fs";
@@ -60,6 +79,8 @@ const value = (name, fallback = null) => {
 const APPLY = Boolean(flag("apply"));
 const CONFIRM = value("confirm");
 const FREEZE = value("freeze");
+// Approved re-engagement replies (one per thread), queued with --apply.
+const REPLIES = value("replies");
 // Optional: reconcile against the other pending repairs (P7 placeholders,
 // not-interested nurture). JSON produced from their own read-only previews.
 const RECONCILE = value("reconcile");
@@ -67,6 +88,21 @@ const RECONCILE = value("reconcile");
 const GOLD = value("gold");
 // Outputs are derived from production data: they default OUTSIDE the repo.
 const OUT = value("out", path.join(os.tmpdir(), "new-replies-cleanup"));
+
+// The 27 unanswered active-deal sellers (owner decision A, 2026-10-01). With the
+// frozen 111-thread New Replies cohort this is the WHOLE cleanup cohort: the
+// executor refuses anything else (new-replies-cleanup-apply.js isInCleanupCohort).
+const COHORT_27_DEALS = Object.freeze([
+  "0d43521a-be75-4423-b034-c53a26ef33de", "1f4e064c-080a-488d-bae9-0d9ce544c87c", "23701d1b-8486-4234-9abb-e02577606b83",
+  "3a36f0bc-3254-44a2-a4a5-0e9b6c676593", "421a24a3-3ca8-4a44-9168-438d85466afa", "94a9bdd5-9d3d-4aca-a26e-2ced4523b81b",
+  "a09e8ebc-8e9b-4dad-8bc6-f1123011d343", "a2dca29d-af1f-4f80-9808-77fc60eb0e66", "a8a68af2-7016-487b-ab72-6c27cf51c523",
+  "ab74d8c6-66e5-4a84-885b-91e0f23f97ba", "b1461563-1f01-4d50-a88e-63d908b1e322", "c0851dee-2ee9-4e20-ac89-c3de165264c8",
+  "cd5a81f8-59ee-4da7-abe6-c2aa44df34ea", "e4a5d3b6-e731-47f3-8f9c-ffbeae814b07", "e740c6d8-3286-42f2-9f1d-a0ca405a7d8f",
+  "f0e14ad8-d138-4ef2-8bc5-ff29e677fa22", "f9eb92fa-0b36-44b7-b344-c05230ea48e6", "fd9dd740-001e-49fc-8975-2388de51f4b6",
+  "08fd5cb5-7e1d-4992-8787-8f6c980a67dd", "0d86afcf-181f-4d6a-b474-b944aee07c21", "537d5fcf-d81a-4005-9b80-21b2741c1aee",
+  "55604a28-42ad-49cf-bf13-dca211ed6ac9", "a07b0e9b-04da-4033-88d0-7f3dab9bb65c", "b5ad155c-11b6-484b-95ff-3b9932da27b5",
+  "1ae5b9de-8802-45a5-b7fb-65f1ffa8b184", "73672599-5bb6-4b33-bf5b-423a511a0348", "c35ccd00-e272-46f3-8f5d-8d2a1e3246e1",
+]);
 
 const clean = (v) => String(v ?? "").trim();
 const variants = (k) => {
@@ -376,12 +412,25 @@ async function main() {
     },
   });
   fs.writeFileSync(path.join(OUT, "new-replies-eval-export.jsonl"), evalRows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  const expected = buildExpectedEffects(plans, byIdEarly, REPLIES && fs.existsSync(REPLIES) ? JSON.parse(fs.readFileSync(REPLIES, "utf8")) : null);
+  fs.writeFileSync(path.join(OUT, "new-replies-expected-effects.json"), JSON.stringify(expected, null, 1));
 
   console.log(JSON.stringify({ mode: APPLY ? "apply" : "preview", source, ...summary }, null, 2));
 
   if (!APPLY) return;
   if (CONFIRM !== CLEANUP_SOURCE) {
     console.error(`--apply requires --confirm=${CLEANUP_SOURCE} (owner approval). Nothing written.`);
+    process.exitCode = 2;
+    return;
+  }
+  if (!FREEZE) {
+    console.error("--apply requires --freeze=<the 2026-10-01 frozen cohort>: the cleanup acts only on the frozen 111 threads (+ the 27 deals). Nothing written.");
+    process.exitCode = 2;
+    return;
+  }
+  const gate = await checkDeployWindowGates(sb);
+  if (!gate.ok) {
+    console.error(`--apply refused: ${gate.reason}. Nothing written.`);
     process.exitCode = 2;
     return;
   }
@@ -393,6 +442,7 @@ async function main() {
     import("../../src/lib/domain/opportunity/opportunity-service.js"),
     import("../../src/lib/domain/seller-flow/seller-followup-scheduler.js"),
   ]);
+  const COHORT = cleanupCohort(threads);
   const results = [];
   for (const plan of plans) {
     const item = byId.get(String(plan.thread_id));
@@ -418,11 +468,168 @@ async function main() {
         transitionOpportunityStage,
         cancelPendingFollowUpsForThread: scheduler.cancelPendingFollowUpsForThread,
         scheduleFollowUp: scheduler.scheduleFollowUp,
+        loadVendorDnc,
+        cohort: COHORT,
       })),
     });
   }
   fs.writeFileSync(path.join(OUT, "new-replies-cleanup-apply-result.json"), JSON.stringify(results, null, 1));
   console.log(JSON.stringify({ applied: results.filter((r) => r.ok).length, failed_or_skipped: results.filter((r) => !r.ok).length }));
+
+  if (REPLIES) await applyReplies(sb, COHORT);
+}
+
+/**
+ * DRY RUN for the verifier: what --apply should change, keyed exactly like
+ * scripts/repairs/rc71-repair-verify.mjs sections (diff the verifier's
+ * --mode=after snapshot against --mode=before, then against these numbers).
+ * Counts are upper bounds where a send-time hold can lower them (vendor DNC,
+ * no eligible sender, contact window); holds never raise them.
+ */
+function buildExpectedEffects(plans, byId, repliesPlan) {
+  const has = (p, a) => (p.apply || []).includes(a);
+  const ARCHIVE_FIELDS = ["disposition", "operational_status", "next_action", "is_archived", "archived_at", "archive_scope", "archive_reason"];
+  const NURTURE_FIELDS = ["disposition", "operational_status", "next_action", "next_action_at", "follow_up_at"];
+  const byField = {};
+  const bump = (f) => (byField[f] = (byField[f] || 0) + 1);
+  for (const p of plans) {
+    if (has(p, "archive_thread")) ARCHIVE_FIELDS.forEach(bump);
+    if (has(p, "set_not_interested_nurture")) NURTURE_FIELDS.forEach(bump);
+    if (has(p, "clear_stale_decline")) bump("disposition");
+  }
+  const leadStateMax = Object.values(byField).reduce((a, b) => a + b, 0);
+  const closes = plans.filter((p) => {
+    const item = byId.get(String(p.thread_id));
+    const opp = (item?.opportunities || [])[0];
+    return has(p, "close_opportunity_lost") && opp?.id && String(opp.acquisition_stage) !== "closed";
+  }).length;
+  const nurtureRows = plans.filter((p) => has(p, "schedule_nurture_followup")).length;
+  const replies = (repliesPlan?.items || []).filter((i) => i.reply?.template_id);
+  const repliesEligible = replies.filter((i) => !String(i.expected || "").startsWith("held")).length;
+  const leave = plans.filter((p) => p.new_replies === "remove").length;
+  return {
+    tag: CLEANUP_SOURCE,
+    harness: "apps/api/scripts/repairs/rc71-repair-verify.mjs",
+    diff_rule: "after.sections.<section>.<key> - before.sections.<section>.<key> must equal `delta` (or be <= `delta_max`)",
+    cohort: { new_replies_threads: plans.length, active_deals: COHORT_27_DEALS.length },
+    sections: {
+      new_replies: {
+        threads_with_cleanup_marker: { delta: plans.filter((p) => has(p, "write_reclassification")).length },
+        view_in_new_replies: { delta: -leave, note: "the frozen cohort leaving New Replies; new inbound in the window adds to it" },
+        parity_ok: { equals: true },
+        cleanup_events_by_field: { delta_max: byField },
+      },
+      audit: {
+        "repair_tag_totals.nr_lead_state": { delta_max: leadStateMax, note: "one row per CHANGED field; an unchanged field writes none" },
+        "repair_tag_totals.nr_history": { delta: closes },
+        dup_nr_thread_field: { equals: 0 },
+      },
+      extra_outbound: {
+        "totals.new_replies_cleanup": {
+          delta_max: nurtureRows + repliesEligible,
+          parts: { nurture_followups_max: nurtureRows, replies_max: repliesEligible, replies_held_by_plan: replies.length - repliesEligible },
+          note: "nurture rows are scheduled +30 days; replies are queued now unless held (vendor DNC / no eligible sender / window)",
+        },
+      },
+      queue_window: { threads_with_2plus_live_rows_in_window: { equals: 0 } },
+    },
+  };
+}
+
+/** The whole cleanup cohort: the frozen New Replies threads + the 27 deals. */
+function cleanupCohort(threads) {
+  const thread_ids = new Set();
+  const thread_keys = new Set();
+  for (const t of threads) {
+    const row = t.thread || t;
+    if (row.id) thread_ids.add(String(row.id));
+    if (row.thread_key) thread_keys.add(String(row.thread_key));
+  }
+  return { thread_ids, thread_keys, deal_ids: new Set(COHORT_27_DEALS) };
+}
+
+/** seller.owner_phone is not exposed through PostgREST: direct read; null on failure (callers HOLD). */
+async function loadVendorDnc(threadKey) {
+  const pg = await import("../../src/lib/postgres/client.js");
+  if (!pg.hasDatabaseUrl()) return null;
+  try {
+    const d10 = clean(threadKey).replace(/\D/g, "").slice(-10);
+    const res = await pg.queryWithTimeout(
+      "select bool_or(do_not_call) as dnc from seller.owner_phone where right(regexp_replace(phone_value, '\\D', '', 'g'), 10) = $1",
+      [d10],
+      15_000
+    );
+    return res?.rows?.[0]?.dnc === true;
+  } catch {
+    return null;
+  }
+}
+
+/** The cleanup only runs in the deploy window, after the code and the view are live. */
+async function checkDeployWindowGates(sb) {
+  const completed = new Set(clean(value("completed")).split(",").map((x) => clean(x).toLowerCase()).filter(Boolean));
+  for (const step of ["p7", "canaries", "nurture"]) {
+    if (!completed.has(step)) return { ok: false, reason: `run order is P7 -> canaries -> nurture -> New Replies; --completed is missing "${step}"` };
+  }
+  const { CLASSIFY_VERSION } = await import("../../src/lib/domain/classification/classify.js");
+  if (clean(value("classifier-live")) !== CLASSIFY_VERSION) {
+    return { ok: false, reason: `--classifier-live must equal the deployed classifier version ${CLASSIFY_VERSION}` };
+  }
+  const { error } = await sb.from("v_inbox_thread_state_buckets").select("thread_key,f_reply_resolved").limit(1);
+  if (error) return { ok: false, reason: `New Replies view 20261001160000 is not live (${error.message})` };
+  return { ok: true };
+}
+
+/** Queue the approved re-engagement replies (or hold them) through the normal path. */
+async function applyReplies(sb, COHORT) {
+  const plan = JSON.parse(fs.readFileSync(REPLIES, "utf8"));
+  const items = Array.isArray(plan) ? plan : plan.items || [];
+  const [{ queueCleanupReply }, { enqueueSendQueueItem }, routing, windowMod, pg] = await Promise.all([
+    import("../../src/lib/domain/inbox/new-replies-cleanup-apply.js"),
+    import("../../src/lib/supabase/sms-engine.js"),
+    import("../../src/lib/domain/routing/choose-textgrid-number.js"),
+    import("../../src/lib/domain/campaigns/contact-window-timezone.js"),
+    import("../../src/lib/postgres/client.js"),
+  ]);
+  const deps = {
+    supabase: sb,
+    enqueueSendQueueItem,
+    loadVendorDnc,
+    cohort: COHORT,
+    loadTemplate: async (template_id) => {
+      const { data } = await sb.from("sms_templates").select("template_id,use_case,language,template_body,is_active").eq("template_id", template_id).limit(1);
+      return (data || [])[0] || null;
+    },
+    resolveTimezone: (ctx) => {
+      const r = windowMod.resolveContactTimezone({ propertyState: ctx.property?.state, propertyZip: ctx.property?.zip });
+      return r?.iana || null;
+    },
+    isWithinContactWindow: (now, tz) => windowMod.isWithinContactWindow(now, tz),
+    selectSender: async ({ ctx, language }) =>
+      routing.chooseTextgridNumber({
+        context: { ids: { market_id: ctx.market_id || null }, summary: { market_name: ctx.market || null, language_preference: language } },
+        preferred_language: language,
+        rotation_key: ctx.thread?.thread_key || null,
+        first_touch: false,
+      }),
+  };
+  const results = [];
+  for (const item of items) {
+    // A reply is in the cohort only through its DEAL (one of the 27).
+    if (!COHORT_27_DEALS.includes(clean(item.deal))) {
+      results.push({ deal: item.deal, ok: false, reason: "outside_frozen_cohort" });
+      continue;
+    }
+    const ctx = { deal_id: item.deal, thread: { thread_key: item.thread_key, master_owner_id: item.master_owner_id, property_id: item.property_id }, property: item.property || {}, market: item.market || null, market_id: item.market_id || null };
+    results.push({ deal: item.deal, thread: clean(item.thread_key).slice(-4), ...(await queueCleanupReply({ category: item.category, reply: item.reply, deal: item.deal }, { ...ctx, thread: { ...ctx.thread } }, { ...deps, cohort: { ...COHORT, thread_keys: new Set() } })) });
+  }
+  fs.writeFileSync(path.join(OUT, "cleanup-replies-apply-result.json"), JSON.stringify(results, null, 1));
+  console.log(JSON.stringify({
+    replies_queued: results.filter((r) => r.queued).length,
+    replies_held: results.filter((r) => r.held).length,
+    held_by_reason: results.filter((r) => r.held).reduce((acc, r) => ({ ...acc, [r.held_reason]: (acc[r.held_reason] || 0) + 1 }), {}),
+    failed: results.filter((r) => r.ok === false).length,
+  }));
 }
 
 main().catch((error) => {

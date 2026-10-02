@@ -50,6 +50,8 @@ function deps(overrides = {}) {
       transitionOpportunityStage: rec("transitionOpportunityStage"),
       cancelPendingFollowUpsForThread: rec("cancelPendingFollowUpsForThread"),
       scheduleFollowUp: rec("scheduleFollowUp"),
+      loadVendorDnc: async () => false,
+      cohort: { thread_ids: new Set([THREAD.id]), thread_keys: new Set(), deal_ids: new Set() },
       ...overrides,
     },
   };
@@ -264,4 +266,165 @@ test("the evaluation export and the regression text are de-identified and determ
   assert.deepEqual(out.map((r) => r.example_id), ["nr20261001-a", "nr20261001-b"]);
   assert.equal(JSON.stringify(out).includes("Jamie"), false);
   assert.deepEqual(buildEvaluationExport(rows, { namesFor: () => ["Jamie", "Alex", "Kim", "Lee"] }), out, "deterministic");
+});
+
+// ── Cleanup replies: normal queue, sender engine, holds (owner 2026-10-02) ──
+
+import {
+  queueCleanupReply,
+  vendorDncChannelRule,
+  REPLY_HOLD,
+} from "@/lib/domain/inbox/new-replies-cleanup-apply.js";
+
+function replyDeps(overrides = {}) {
+  const queued = [];
+  const senderCalls = [];
+  const deps = {
+    now: "2026-10-06T18:00:00.000Z", // 14:00 New York, inside 08:00-21:00
+    loadVendorDnc: async () => false,
+    loadTemplate: async (id) => ({
+      template_id: id,
+      use_case: "late_reply_identity",
+      language: "English",
+      is_active: true,
+      template_body: "Hey, this is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?",
+    }),
+    resolveTimezone: () => "America/New_York",
+    isWithinContactWindow: (now, tz) => {
+      const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hourCycle: "h23" }).format(new Date(now)));
+      return h >= 8 && h < 21;
+    },
+    selectSender: async (args) => {
+      senderCalls.push(args);
+      return { routing_allowed: true, phone_number: "+15550001000", item_id: "tg-1", selection_reason: "exact_market" };
+    },
+    enqueueSendQueueItem: async (payload) => {
+      const replay = queued.some((q) => q.dedupe_key === payload.dedupe_key);
+      if (!replay) queued.push(payload);
+      return { ok: true, idempotent_replay: replay };
+    },
+    cohort: { thread_ids: new Set(), thread_keys: new Set(["+15555550100"]), deal_ids: new Set() },
+    ...overrides,
+  };
+  return { deps, queued, senderCalls };
+}
+
+const REPLY_PLAN = {
+  category: "KEEP AS GENUINE NEW REPLY",
+  reply: {
+    template_id: "lc-late-identity-en-1",
+    variables: { agent_name: "Sam", property_address: "123 Main St" },
+    // Ignored on purpose: a plan can never pin the sending number.
+    from_phone_number: "+15559999999",
+  },
+};
+const REPLY_CTX = { thread: { thread_key: "+15555550100", master_owner_id: "mo-1", property_id: "p-1" } };
+
+test("a cleanup reply goes through the normal queue with the sender ENGINE's number, never a pinned one", async () => {
+  const { deps, queued, senderCalls } = replyDeps();
+  const res = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, deps);
+  assert.equal(res.queued, true);
+  assert.equal(senderCalls.length, 1, "the sender engine decides");
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].from_phone_number, "+15550001000");
+  assert.notEqual(queued[0].from_phone_number, REPLY_PLAN.reply.from_phone_number);
+  assert.equal(queued[0].template_id, "lc-late-identity-en-1");
+  assert.equal(queued[0].template_source, "sms_templates");
+  assert.equal(queued[0].message_body, "Hey, this is Sam. I reached out a while back about 123 Main St. Just checking back in. Are you still the owner?");
+  assert.equal(queued[0].metadata.source, "classifier_cleanup_20261001");
+  // Idempotent: a second run replays the same dedupe key, no second row.
+  const again = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, deps);
+  assert.equal(again.idempotent_replay, true);
+  assert.equal(queued.length, 1);
+});
+
+test("no eligible sender (routing / health / cooling / caps) HOLDS the reply; nothing is queued", async () => {
+  const { deps, queued } = replyDeps({
+    selectSender: async () => ({ routing_allowed: false, phone_number: "", routing_block_reason: "NO_VALID_LOCAL_TEXTGRID_NUMBER" }),
+  });
+  const res = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, deps);
+  assert.equal(res.held, true);
+  assert.equal(res.held_reason, REPLY_HOLD.NO_SENDER);
+  assert.equal(res.detail, "NO_VALID_LOCAL_TEXTGRID_NUMBER");
+  assert.equal(queued.length, 0);
+});
+
+test("outside the recipient's contact window the reply is HELD", async () => {
+  const { deps, queued } = replyDeps({ now: "2026-10-06T04:00:00.000Z" }); // 00:00 New York
+  const res = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, deps);
+  assert.equal(res.held_reason, REPLY_HOLD.WINDOW);
+  assert.equal(queued.length, 0);
+});
+
+test("vendor do_not_call HOLDS (never suppression, never ignored); an unreadable flag holds too", async () => {
+  const flagged = replyDeps({ loadVendorDnc: async () => true });
+  const res = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, flagged.deps);
+  assert.equal(res.held_reason, "vendor_dnc_semantics_unconfirmed");
+  assert.equal(flagged.queued.length, 0);
+  assert.equal(flagged.senderCalls.length, 0);
+  const unknown = replyDeps({ loadVendorDnc: async () => { throw new Error("db down"); } });
+  assert.equal((await queueCleanupReply(REPLY_PLAN, REPLY_CTX, unknown.deps)).held_reason, REPLY_HOLD.VENDOR_DNC_UNKNOWN);
+  assert.deepEqual(vendorDncChannelRule({ channel: "sms", vendor_dnc: true }), { action: "hold", reason: "vendor_dnc_semantics_unconfirmed" });
+  assert.deepEqual(vendorDncChannelRule({ channel: "sms", vendor_dnc: false }), { action: "allow", reason: null });
+});
+
+test("an inactive template or an unrendered token holds; a reply without a template goes to review", async () => {
+  const inactive = replyDeps({ loadTemplate: async (id) => ({ template_id: id, is_active: false, template_body: "x" }) });
+  assert.equal((await queueCleanupReply(REPLY_PLAN, REPLY_CTX, inactive.deps)).held_reason, REPLY_HOLD.NO_TEMPLATE);
+  const missingVar = replyDeps();
+  const res = await queueCleanupReply({ ...REPLY_PLAN, reply: { template_id: "lc-late-identity-en-1", variables: { agent_name: "Sam" } } }, REPLY_CTX, missingVar.deps);
+  assert.equal(res.held_reason, REPLY_HOLD.RENDER);
+  assert.deepEqual(res.unresolved, ["property_address"]);
+  const review = await queueCleanupReply({ category: "KEEP AS GENUINE NEW REPLY", reply: { review_reason: "language_gap_vietnamese" } }, REPLY_CTX, replyDeps().deps);
+  assert.equal(review.held_reason, REPLY_HOLD.REVIEW);
+});
+
+test("a wrong person's next-contact phone flagged vendor do_not_call is recorded as held, never contacted", async () => {
+  const res = await applyNewRepliesCleanupPlan(
+    { category: "WRONG PERSON", apply: ["record_next_contact_plan"] },
+    { thread: { thread_key: "+15555550100" }, next_contact_plan: { channel: "phone", vendor_dnc: true } },
+    { cohort: { thread_keys: new Set(["+15555550100"]) } }
+  );
+  assert.equal(res.steps[0].held, true);
+  assert.equal(res.steps[0].held_reason, "vendor_dnc_semantics_unconfirmed");
+});
+
+test("the cohort gate: only the frozen 111 threads + the 27 deals; no cohort means nothing runs", async () => {
+  const outside = deps({ cohort: { thread_ids: new Set(["someone-else"]), thread_keys: new Set(), deal_ids: new Set() } });
+  const r1 = await applyNewRepliesCleanupPlan(plan(CLEANUP_CATEGORY.SOLD, { intent: "sold_property" }), { thread: THREAD }, outside.deps);
+  assert.equal(r1.ok, false);
+  assert.equal(r1.reason, "outside_frozen_cohort");
+  assert.equal(outside.calls.length, 0, "nothing written outside the cohort");
+  const none = deps({ cohort: undefined });
+  const r2 = await applyNewRepliesCleanupPlan(plan(CLEANUP_CATEGORY.SOLD, { intent: "sold_property" }), { thread: THREAD }, none.deps);
+  assert.equal(r2.reason, "cohort_gate_missing");
+  assert.equal(none.calls.length, 0);
+  const reply = replyDeps({ cohort: { thread_ids: new Set(), thread_keys: new Set(["+19999999999"]), deal_ids: new Set() } });
+  const r3 = await queueCleanupReply(REPLY_PLAN, REPLY_CTX, reply.deps);
+  assert.equal(r3.reason, "outside_frozen_cohort");
+  assert.equal(reply.queued.length, 0);
+});
+
+test("every follow-up and send the cleanup creates carries the repair tag the verifier counts", async () => {
+  const { calls, deps: d } = deps();
+  await applyNewRepliesCleanupPlan(plan(CLEANUP_CATEGORY.NOT_INTERESTED, { intent: "not_interested" }), { thread: THREAD }, d);
+  const ctx = calls.find((c) => c.name === "scheduleFollowUp").args[2];
+  assert.equal(ctx.source, "classifier_cleanup_20261001", "send_queue.metadata.source of the nurture row");
+  const patch = calls.find((c) => c.name === "patchUniversalLeadState").args[0];
+  assert.equal(patch.meta.source_view, "classifier_cleanup_20261001", "universal_lead_state_events.source_view");
+  const { deps: rd, queued } = replyDeps();
+  await queueCleanupReply(REPLY_PLAN, REPLY_CTX, rd);
+  assert.equal(queued[0].metadata.source, "classifier_cleanup_20261001");
+  assert.equal(queued[0].metadata.repair_tag, "classifier_cleanup_20261001");
+});
+
+test("a nurture follow-up for a vendor do_not_call number is HELD, never scheduled (unreadable flag holds too)", async () => {
+  for (const [flag, reason] of [[true, "vendor_dnc_semantics_unconfirmed"], [null, "vendor_dnc_lookup_unavailable"]]) {
+    const { calls, deps: d } = deps({ loadVendorDnc: async () => flag });
+    const res = await applyNewRepliesCleanupPlan(plan(CLEANUP_CATEGORY.NOT_FOR_SALE, { intent: "not_interested" }), { thread: THREAD }, d);
+    assert.equal(calls.some((c) => c.name === "scheduleFollowUp"), false);
+    const step = res.steps.find((x) => x.step === "schedule_nurture_followup");
+    assert.equal(step.held, true);
+    assert.equal(step.held_reason, reason);
+  }
 });
