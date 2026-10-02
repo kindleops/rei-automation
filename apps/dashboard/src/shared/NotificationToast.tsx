@@ -11,60 +11,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Icon } from './icons'
 import { playSound } from './sounds'
-import type { SoundEvent } from './sounds'
+import { lcToast, subscribeToasts, type LCToastMessage, type LCToastSeverity } from './lc/toast-bus'
 
-// ── Types ─────────────────────────────────────────────────────────────────
+// ── Types + bus ──────────────────────────────────────────────────────────
+// The bus now lives in the Experience System (`shared/lc/toast-bus`, raised
+// with `lcToast`). These names stay as aliases so remaining importers keep
+// compiling; new code imports `lcToast` from `shared/lc`.
 
-export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical'
+export type NotificationSeverity = LCToastSeverity
+export type NexusNotification = LCToastMessage
 
-export interface NexusNotification {
-  id: string
-  title: string
-  detail?: string
-  severity: NotificationSeverity
-  timestamp: Date
-  sound?: SoundEvent
-  autoDismiss?: boolean     // default: true
-  dismissMs?: number        // default: 3000
-  read?: boolean
-  source?: string           // module that emitted the notification
-  /** The caller already played its own sound (server alerts pick theirs in Settings). */
-  silent?: boolean
-  action?: {
-    label: string
-    onClick: () => void
-  }
-}
+/** @deprecated use `lcToast` from `shared/lc` */
+export const emitNotification = lcToast
 
-// ── Global notification bus ───────────────────────────────────────────────
+const subscribeNotifications = subscribeToasts
 
-type NotifyListener = (notification: NexusNotification) => void
-
-const _listeners = new Set<NotifyListener>()
-let _notifCounter = 0
-
-export function emitNotification(
-  partial: Omit<NexusNotification, 'id' | 'timestamp'>,
-): void {
-  _notifCounter++
-  const isCritical = partial.severity === 'critical'
-  const notif: NexusNotification = {
-    id: `notif-${_notifCounter}-${Date.now()}`,
-    timestamp: new Date(),
-    autoDismiss: !isCritical,
-    dismissMs: 6000,
-    read: false,
-    ...partial,
-  }
-  for (const fn of _listeners) fn(notif)
-}
-
-function subscribeNotifications(fn: NotifyListener): () => void {
-  _listeners.add(fn)
-  return () => { _listeners.delete(fn) }
-}
-
-// ── Toast Stack Component ─────────────────────────────────────────────────
+// ── Legacy toast stack (mobile shell only; desktop renders LCToast) ───────
 
 const MAX_VISIBLE_TOASTS = 4
 
