@@ -25,6 +25,11 @@
  * before, and all still run after Resume.
  */
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
+import {
+  isInboundAutoReply,
+  isManualInboxSend,
+  isUnknownAutoReply,
+} from "@/lib/domain/queue/is-manual-inbox-send.js";
 
 /** The operator-readable reason a held row carries. */
 export const CAMPAIGN_PAUSED_REASON = "campaign_paused";
@@ -46,6 +51,38 @@ const BLOCKING_CAMPAIGN_STATUSES = new Set(["paused"]);
 const clean = (value) => String(value ?? "").trim();
 
 /**
+ * PAUSE ≠ SILENCE CONVERSATIONS (rc-7.1, owner decision 3).
+ *
+ * Pausing a campaign stops its NEW PROACTIVE outbound. A reply to a seller who
+ * texted us is not campaign outreach, even though the auto-reply row inherits
+ * the campaign_id of the conversation the campaign started
+ * (apply-inbound-automation-decision.js: campaign_id from the thread summary).
+ * Before this, pausing a campaign silently held every auto-reply and every
+ * operator Inbox reply on its conversations.
+ *
+ * Conversation traffic — the seller-flow inbound auto-reply, the unknown-
+ * inbound router reply, the acquisition inbound dispatcher reply, and an
+ * operator's own Inbox send — is therefore answered by the conversation's own
+ * controls, not by campaign pause: auto_reply_mode (the separate, explicit
+ * conversation-automation switch, operator plane only), plus every safety
+ * gate the dispatcher still runs after this check — opt-out/STOP, DNC,
+ * suppression, wrong number, quiet hours/contact window, sender health,
+ * emergency stop. Campaign follow-ups/nurture touches (no-reply scheduler,
+ * campaign_launch, campaign_target_one) remain proactive and stay held.
+ */
+export function isConversationResponseRow(queue_row = {}) {
+  const queue_key = clean(queue_row?.queue_key || queue_row?.metadata?.queue_key);
+  const source = clean(queue_row?.metadata?.source).toLowerCase();
+  return (
+    isInboundAutoReply(queue_row) ||
+    isUnknownAutoReply(queue_row) ||
+    isManualInboxSend(queue_row) ||
+    queue_key.startsWith("acq-inbound:") ||
+    source === "default_acquisition_inbound_dispatcher"
+  );
+}
+
+/**
  * May this queue row dispatch, given its campaign's current state?
  *
  * @returns {{ok: boolean, reason: string|null, scope: string, campaign_status?: string|null}}
@@ -62,6 +99,12 @@ export async function evaluateCampaignDispatchAuthority(queue_row = {}, deps = {
    */
   if (!campaign_id) {
     return { ok: true, reason: null, scope: "non_campaign_traffic" };
+  }
+
+  // A reply inside a conversation the campaign started is not campaign
+  // outreach: campaign pause does not hold it (see isConversationResponseRow).
+  if (isConversationResponseRow(queue_row)) {
+    return { ok: true, reason: null, scope: "conversation_traffic_not_held_by_campaign_pause" };
   }
 
   const supabase = deps.supabase || deps.supabaseClient || defaultSupabase;
