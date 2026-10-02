@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../supabaseClient'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { withDerivedSentToday } from './sender-sent-today'
 import type { InboxThread } from '../../domain/inbox/inbox-model-types'
 
 type RoutingInput = Pick<InboxThread, 'marketId' | 'market' | 'ourNumber' | 'phoneNumber' | 'textgridNumberId' | 'property_address_state' | 'propertyId' | 'threadKey'> & { allow_cluster_routing?: boolean }
@@ -368,12 +369,17 @@ export const resolveOutboundTextgridNumber = async (
     .from('textgrid_numbers')
     .select('*')
     .eq('status', 'active')
-    .lt('messages_sent_today', 150)
-    .order('messages_sent_today', { ascending: true })
     .limit(250)
 
-  const activeRows = (Array.isArray(tgRows) ? tgRows : [])
-    .map((row) => row as TextgridNumberRow)
+  // The 150/day usage ceiling and least-used ranking read TRUE sends in each
+  // sender's day (send_queue), not the never-reset messages_sent_today counter.
+  const derivedRows = await withDerivedSentToday(
+    supabase,
+    (Array.isArray(tgRows) ? tgRows : []).map((row) => row as TextgridNumberRow),
+  )
+  const activeRows = derivedRows
+    .filter((row) => Number(row.messages_sent_today ?? 0) < 150)
+    .sort((left, right) => Number(left.messages_sent_today ?? 0) - Number(right.messages_sent_today ?? 0))
     .filter((row) => row.id && normalizePhone(row.phone_number))
 
   const match = chooseBestCandidate(activeRows, routeInputMarket, routeInputState)

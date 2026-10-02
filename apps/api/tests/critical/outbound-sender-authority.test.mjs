@@ -158,14 +158,14 @@ test("rotation applies the same eligibility rules as revalidation", async () => 
   ];
   const supabase = {
     from: () => ({
-      select: () => ({
-        order: () => ({
-          order: () => ({ limit: async () => ({ data: fleet, error: null }) }),
-        }),
-      }),
+      select: () => ({ limit: async () => ({ data: fleet, error: null }) }),
     }),
   };
-  const selection = await selectAvailableTextgridNumber(rowWith(null), { supabase });
+  // Sends-today are derived from the ledger (rc-7.1); none today here.
+  const selection = await selectAvailableTextgridNumber(rowWith(null), {
+    supabase,
+    loadSenderSentToday: async () => new Map(),
+  });
   assert.equal(selection.ok, true);
   assert.equal(selection.from_phone_number, "+13055376611");
 });

@@ -5,6 +5,7 @@
 // renders through the canonical safety gates, and resolves an INDIVIDUAL
 // schedule per recipient. Produces a plan only -- it inserts nothing.
 
+import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { supabase as defaultSupabase } from "@/lib/supabase/client.js";
 import { resolveFromPhoneNumber } from "@/lib/domain/inbox/send-now-service.js";
 import {
@@ -276,10 +277,12 @@ async function loadActiveSenderNumbers(supabase) {
   try {
     const { data } = await supabase
       .from("textgrid_numbers")
-      .select("phone_number,status,daily_limit,messages_sent_today")
+      .select("phone_number,market,metadata,status,daily_limit,messages_sent_today")
       .eq("status", "active");
+    // The cap compares TRUE sends in the sender's day, not the never-reset counter.
+    const fleet = await withDerivedSentToday(supabase, data || []);
     const set = new Set();
-    for (const row of data || []) {
+    for (const row of fleet) {
       const num = clean(row.phone_number);
       if (!num) continue;
       // Respect the registry's own operational ceiling.

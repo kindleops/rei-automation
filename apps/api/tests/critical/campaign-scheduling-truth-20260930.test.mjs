@@ -322,8 +322,9 @@ test("plan: the fleet, the template pool and message history are read once per p
   assert.equal(result.schedulable_target_count, 8, JSON.stringify(result.skipped_counts_by_reason));
   assert.equal(reads.get("textgrid_numbers"), 1, "one fleet read for eight routings");
   assert.ok((reads.get("sms_templates") || 0) <= 2, `template pool read ${reads.get("sms_templates")} times`);
-  // Active-queue + prior-contact checks, then batched history (one chunk).
-  assert.ok((reads.get("send_queue") || 0) <= 3, `send_queue read ${reads.get("send_queue")} times`);
+  // Active-queue + prior-contact checks, then batched history (one chunk), plus
+  // ONE fleet sends-today ledger read (rc-7.1: derived, not the counter).
+  assert.ok((reads.get("send_queue") || 0) <= 4, `send_queue read ${reads.get("send_queue")} times`);
   assert.ok((reads.get("message_events") || 0) <= 2, `message_events read ${reads.get("message_events")} times`);
 });
 

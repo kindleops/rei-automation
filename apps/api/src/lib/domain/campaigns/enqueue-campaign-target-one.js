@@ -46,6 +46,7 @@
  * `textgrid_numbers` table the feeder ultimately selects from.
  */
 
+import { withDerivedSentToday } from '@/lib/domain/delivery/sender-sent-today.js'
 import { evaluateOutboundNumberEligibility } from '@/lib/supabase/sms-engine.js'
 import {
   validateCanaryEnqueueAuthorization,
@@ -396,10 +397,14 @@ async function resolveSender(supabase, { market, recipient, dispatchBlockedSets 
     .select('id, phone_number, market, status, daily_limit, messages_sent_today, health_score, health_state, cooling_until')
     .eq('status', 'active')
     .eq('market', market)
-    .order('messages_sent_today', { ascending: true })
     .range(0, 99)
 
   if (error) throw error
+
+  // Lowest TRUE usage first: sends in the sender's own day (send_queue), not
+  // the never-reset counter. Same policy, true number (sender-sent-today.js).
+  const fleet = (await withDerivedSentToday(supabase, Array.isArray(data) ? data : []))
+    .sort((a, b) => Number(a.messages_sent_today ?? 0) - Number(b.messages_sent_today ?? 0))
 
   /**
    * §43 — ONE ELIGIBILITY RULE, NOT THREE.
@@ -422,7 +427,7 @@ async function resolveSender(supabase, { market, recipient, dispatchBlockedSets 
    * against a number nobody has configured a ceiling for.
    */
   const now = new Date()
-  const candidates = (Array.isArray(data) ? data : []).filter((row) => {
+  const candidates = fleet.filter((row) => {
     const phone = clean(row.phone_number)
     if (!phone || phone === recipient) return false
     const limit = Number(row.daily_limit)

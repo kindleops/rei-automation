@@ -1,3 +1,4 @@
+import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import crypto from "node:crypto";
 
 import { child } from "@/lib/logging/logger.js";
@@ -3048,7 +3049,9 @@ export async function loadTextgridNumberFleet(deps = {}) {
     .select("*")
     .limit(200);
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  // Caps and least-used ordering read TRUE sends in each sender's day, not the
+  // never-reset textgrid_numbers.messages_sent_today (sender-sent-today.js).
+  return withDerivedSentToday(supabase, Array.isArray(data) ? data : [], deps);
 }
 
 function operatorBlockedSenderSet(options = {}) {

@@ -1,3 +1,4 @@
+import { withDerivedSentToday } from '@/lib/domain/delivery/sender-sent-today.js'
 import { supabase } from '@/lib/supabase/client.js'
 import { readThroughCache } from '@/lib/dashboard/ops-cache.js'
 import { createRequestTimer } from './server-timing.js'
@@ -283,7 +284,8 @@ async function loadQueuePage(opts = {}) {
   const owners = ownersResult.error ? [] : (ownersResult.data || [])
   const prospects = prospectsResult.error ? [] : (prospectsResult.data || [])
   const campaigns = campaignsResult.error ? [] : (campaignsResult.data || [])
-  const textgridNumbers = textgridResult.error ? [] : (textgridResult.data || [])
+  // "Today" on a sender card is true sends in that sender's day, not the never-reset counter.
+  const textgridNumbers = textgridResult.error ? [] : await withDerivedSentToday(supabase, textgridResult.data || [])
   timer.mark('enrichment')
 
   const response = {

@@ -18,6 +18,7 @@ import { info, warn } from "@/lib/logging/logger.js";
 import { isManualInboxSend, isUnknownAutoReply, isImmediateInboundAutoReply } from "@/lib/domain/queue/is-manual-inbox-send.js";
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
+import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
   classifyThreadFromChronology,
@@ -1487,19 +1488,37 @@ export function evaluateOutboundNumberEligibility(number_row = null, now = new D
   return { ok: true, reason: null, terminal: false };
 }
 
+/**
+ * Overlay the DERIVED sends-today on fleet rows (sender-sent-today.js): caps and
+ * least-used ordering read true sends in the sender's day, not the never-reset
+ * counter. Injected fleets (tests) are only derived when the ledger read is
+ * injected too, so a unit test never reaches a real database.
+ */
+async function deriveFleetSentToday(rows, deps = {}, { injected = false } = {}) {
+  if (injected && typeof deps.loadSenderSentToday !== "function") return rows;
+  const supabase = typeof deps.loadSenderSentToday === "function" ? null : getSupabase(deps);
+  return withDerivedSentToday(supabase, rows, deps);
+}
+
 /** The fleet record for a phone number, or null when it is not in the fleet. */
 async function loadOutboundNumberByPhone(phone_number, deps = {}) {
-  if (typeof deps.loadOutboundNumberByPhone === "function") {
-    return deps.loadOutboundNumberByPhone(phone_number);
+  let row = null;
+  const injected = typeof deps.loadOutboundNumberByPhone === "function";
+  if (injected) {
+    row = await deps.loadOutboundNumberByPhone(phone_number);
+  } else {
+    const supabase = getSupabase(deps);
+    const { data, error } = await supabase
+      .from(TEXTGRID_NUMBERS_TABLE)
+      .select("*")
+      .eq("phone_number", phone_number)
+      .limit(1);
+    if (error) throw error;
+    row = Array.isArray(data) && data.length > 0 ? data[0] : null;
   }
-  const supabase = getSupabase(deps);
-  const { data, error } = await supabase
-    .from(TEXTGRID_NUMBERS_TABLE)
-    .select("*")
-    .eq("phone_number", phone_number)
-    .limit(1);
-  if (error) throw error;
-  return Array.isArray(data) && data.length > 0 ? data[0] : null;
+  if (!row) return null;
+  const [derived] = await deriveFleetSentToday([row], deps, { injected });
+  return derived;
 }
 
 export async function selectAvailableTextgridNumber(row, deps = {}) {
@@ -1566,13 +1585,22 @@ export async function selectAvailableTextgridNumber(row, deps = {}) {
   const { data, error } = await supabase
     .from(TEXTGRID_NUMBERS_TABLE)
     .select("*")
-    .order("messages_sent_today", { ascending: true, nullsFirst: true })
-    .order("last_used_at", { ascending: true, nullsFirst: true })
-    .limit(50);
+    .limit(200);
 
   if (error) throw error;
 
-  const rows = Array.isArray(data) ? data : [];
+  // Least used first by TRUE sends today (derived), then least recently used.
+  // The DB used to order by the never-reset counter; the policy is unchanged,
+  // the number it ranks by is now the real one.
+  const rows = (await deriveFleetSentToday(Array.isArray(data) ? data : [], deps)).sort(
+    (left, right) => {
+      const usage = asNumber(left?.messages_sent_today, 0) - asNumber(right?.messages_sent_today, 0);
+      if (usage !== 0) return usage;
+      const left_ts = left?.last_used_at ? new Date(left.last_used_at).getTime() : 0;
+      const right_ts = right?.last_used_at ? new Date(right.last_used_at).getTime() : 0;
+      return left_ts - right_ts;
+    }
+  );
   // One evaluator for both branches. The rotation filter used to apply its own
   // partial rules (status + daily cap, but not cooling), so a cooling number was
   // excluded from a revalidated send and eligible for a rotated one.
@@ -1651,7 +1679,13 @@ export async function incrementTextgridNumberUsage(selection, deps = {}) {
   // number that had sent 150 messages today read as having sent 1, and the
   // usage-ascending sender ordering could never rotate. Prod evidence
   // 2026-09-08: ••2999 messages_sent_today = 1 after 150 sends.
-  let current_sent_today = asNumber(selected.messages_sent_today, NaN);
+  // A derived fleet row (sender-sent-today.js) carries the true count in
+  // messages_sent_today and the raw counter beside it; this bookkeeping keeps
+  // incrementing the raw counter (routing no longer reads it).
+  let current_sent_today = asNumber(
+    selected.sent_today_basis ? selected.messages_sent_today_counter : selected.messages_sent_today,
+    NaN
+  );
   if (!Number.isFinite(current_sent_today)) {
     const { data: live_row, error: live_error } = await supabase
       .from(TEXTGRID_NUMBERS_TABLE)
