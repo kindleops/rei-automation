@@ -18,6 +18,9 @@ import { TemporalBrief } from './TemporalBrief'
 import { TemporalCanvas } from './TemporalCanvas'
 import { TemporalStrip, type StripCounts } from './TemporalStrip'
 import { TimeScrubber } from './TimeScrubber'
+import { AppointmentsDesk } from '../scheduling/AppointmentsDesk'
+import { AppointmentDrawer } from '../scheduling/AppointmentDrawer'
+import { MyCalendarCard } from '../scheduling/MyCalendarCard'
 import {
   NO_FILTERS, SOURCES, SOURCE_LABEL, STATUSES, STATUS_LABEL, aggregatesFrom, applyFilters, briefModel, carryInto, filterCount, fitDomain, marketsOf, ownerClass,
   parseDateCommand, rangeFor, scrubberModel, searchEvents, sourceOf, statusOf, timelineDomain, zoomDomain,
@@ -34,6 +37,8 @@ import './temporal.css'
  * arranges and never invents: counts carry their basis, the attention board
  * is the server's, and the only writes are the canonical queue actions on
  * messages the operator scheduled — granted per event by the read model.
+ * Appointments is the scheduling service's own lens (booked calls, My
+ * calendar); ?appointment=<id> opens one from anywhere, e.g. the timeline.
  *
  * Pane-ready: its URL state is read from useRouteLocation() and written with
  * replaceRoutePath(), so in a secondary pane it reads and writes the pane's
@@ -41,7 +46,7 @@ import './temporal.css'
  */
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
-const MODES: Mode[] = ['today', 'timeline', 'week', 'month', 'attention']
+const MODES: Mode[] = ['today', 'timeline', 'week', 'month', 'attention', 'appointments']
 const CACHE = new Map<string, { data: DeskTimeline; at: number }>()
 const CACHE_TTL = 10 * 60_000
 const EMPTY = new Set<string>()
@@ -58,7 +63,7 @@ function readParams(location: string) {
   const q = new URLSearchParams(location.split('?')[1] || '')
   const date = q.get('date')
   const view = q.get('view') as Mode | null
-  return { date: date && DATE.test(date) ? date : null, view: view && MODES.includes(view) ? view : null, event: q.get('event'), property: q.get('property_id') }
+  return { date: date && DATE.test(date) ? date : null, view: view && MODES.includes(view) ? view : null, event: q.get('event'), property: q.get('property_id'), appointment: q.get('appointment'), connection: q.get('calendar_connection') }
 }
 function writeParams(location: string, patch: Record<string, string | null>) {
   const [path, search = ''] = location.split('?')
@@ -77,9 +82,13 @@ export function CalendarDesk() {
   const [now, setNow] = useState(() => Date.now())
   const today = dayKey(now, tz)
   const [day, setDay] = useState(() => initial.date ?? dayKey(Date.now(), tz))
-  const [mode, setMode] = useState<Mode>(() => initial.view ?? 'today')
+  // returning from Google sign-in lands on Appointments, where My calendar says how it went
+  const [mode, setMode] = useState<Mode>(() => initial.view ?? (initial.connection ? 'appointments' : 'today'))
   const [selectedId, setSelectedId] = useState<string | null>(initial.event)
   const [propertyId, setPropertyId] = useState<string | null>(initial.property)
+  const [appointmentId, setAppointmentId] = useState<string | null>(initial.appointment)
+  const [connection, setConnection] = useState<string | null>(initial.connection)
+  const [apptTick, setApptTick] = useState(0)
   const [seen, setSeen] = useState(location)
   const [mine, setMine] = useState<string[]>([])
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
@@ -118,22 +127,34 @@ export function CalendarDesk() {
       if (p.view && p.view !== mode) setMode(p.view)
       if ((p.event ?? null) !== selectedId) setSelectedId(p.event ?? null)
       if ((p.property ?? null) !== propertyId) setPropertyId(p.property ?? null)
+      if ((p.appointment ?? null) !== appointmentId) setAppointmentId(p.appointment ?? null)
     }
   }
-  const commit = (patch: { day?: string; mode?: Mode; event?: string | null }) => {
+  const commit = (patch: { day?: string; mode?: Mode; event?: string | null; appointment?: string | null }) => {
     const nd = patch.day ?? day
     const nm = patch.mode ?? mode
     const ne = patch.event !== undefined ? patch.event : selectedId
+    const na = patch.appointment !== undefined ? patch.appointment : appointmentId
     if (patch.day !== undefined && patch.day !== day) setDay(patch.day)
     if (patch.mode !== undefined && patch.mode !== mode) setMode(patch.mode)
     if (patch.event !== undefined && patch.event !== selectedId) setSelectedId(patch.event)
-    const path = writeParams(location, { date: nd === today ? null : nd, view: nm === 'today' ? null : nm, event: ne })
+    if (patch.appointment !== undefined && patch.appointment !== appointmentId) setAppointmentId(patch.appointment)
+    const path = writeParams(location, { date: nd === today ? null : nd, view: nm === 'today' ? null : nm, event: ne, appointment: na, calendar_connection: null })
     if (path !== location) { setMine((m) => [...m.slice(-8), path]); replaceRoutePath(path) }
   }
 
+  // the OAuth result (?calendar_connection=) is read once, then leaves the URL so a reload doesn't repeat it
+  const strippedRef = useRef(false)
+  useEffect(() => {
+    if (strippedRef.current || !initial.connection) return
+    strippedRef.current = true
+    replaceRoutePath(writeParams(location, { calendar_connection: null, view: initial.view ?? 'appointments' }))
+  }, [initial.connection, initial.view, location])
+
   /* ── one bounded read per anchor (§139–144) ── */
-  const anchor = mode === 'attention' || mode === 'timeline' ? today : day
-  const range = useMemo(() => rangeFor(mode === 'attention' || mode === 'timeline' ? 'today' : mode, anchor), [mode, anchor])
+  const nowModes = mode === 'attention' || mode === 'timeline' || mode === 'appointments'
+  const anchor = nowModes ? today : day
+  const range = useMemo(() => rangeFor(nowModes ? 'today' : mode, anchor), [nowModes, mode, anchor])
   const key = `${range.from}:${range.to}:${tz}:${propertyId ?? ''}`
   useEffect(() => {
     let alive = true
@@ -217,7 +238,7 @@ export function CalendarDesk() {
   const byId = useMemo(() => new Map([...(data?.events ?? []), ...(data?.attention ?? [])].map((e) => [e.id, e])), [data])
   const selected = selectedId ? byId.get(selectedId) ?? null : null
   // Timeline and Attention are about now: their brief and strip speak for today, not a scrubbed day
-  const focusDay = mode === 'timeline' || mode === 'attention' ? today : day
+  const focusDay = nowModes ? today : day
   const brief = useMemo(() => (data ? briefModel(data, events, { now, tz, day: focusDay }) : null), [data, events, now, tz, focusDay])
   const scrub = useMemo(() => (data ? scrubberModel(data.days, { from: data.range.from, to: data.range.to }) : []), [data])
   const command = useMemo(() => parseDateCommand(query, { today }), [query, today])
@@ -263,6 +284,7 @@ export function CalendarDesk() {
   /* ── keys: only while the operator is in the calendar (§160) ── */
   useClaimedKeys(CLAIMED, focusWithin)
   const step = (dir: 1 | -1) => {
+    if (mode === 'appointments') return
     setFocus(null)
     const next = mode === 'week' ? addDays(day, 7 * dir) : mode === 'month' ? monthStart(addDays(`${day.slice(0, 7)}-15`, 31 * dir)) : addDays(day, dir)
     commit({ day: next, mode: mode === 'attention' || mode === 'timeline' ? 'today' : mode })
@@ -374,6 +396,12 @@ export function CalendarDesk() {
   else if (searching) stage = <SearchResults results={results} query={query} range={data.range} tz={tz} onOpen={openEvent} />
   else if (mode === 'week') stage = <WeekView events={events} from={weekStart(day)} today={today} tz={tz} now={now} onPickDay={pickDay} />
   else if (mode === 'month') stage = <MonthView anchor={day} days={monthDays} today={today} filtered={filtered} onPickDay={pickDay} />
+  else if (mode === 'appointments') stage = (
+    <div className="sch-desk">
+      <AppointmentsDesk tz={tz} refreshKey={apptTick} onOpen={(id) => commit({ appointment: id })} />
+      <MyCalendarCard notice={connection} onDismissNotice={() => setConnection(null)} />
+    </div>
+  )
   else if (mode === 'attention') stage = <AttentionView data={data} tz={tz} now={now} filter={(e) => applyFilters([e], filters).length > 0} onOpen={openEvent} />
   else stage = (
     <>
@@ -393,7 +421,7 @@ export function CalendarDesk() {
       onOpen={openEvent} onOpenId={openId} onAttention={() => commit({ mode: 'attention' })} onCampaign={onCampaign} onDay={pickDay} />
   ) : <div className="tcc-brief is-skel" aria-busy="true"><i className="lc-skel" /><i className="lc-skel" /><i className="lc-skel" /></div>
 
-  const showSide = Boolean(selected) || (wide ? sidePref !== 'hidden' : sidePref === 'shown')
+  const showSide = Boolean(selected) || (mode !== 'appointments' && (wide ? sidePref !== 'hidden' : sidePref === 'shown'))
   return (
     <div ref={rootRef} className={cx('tcc', narrow && 'is-narrow', stale && 'is-stale', refreshing && 'is-refreshing', reduced && 'is-reduced', preview && 'is-previewing')}
       tabIndex={-1} onKeyDown={onKey} onFocus={onFocusIn} onBlur={onFocusOut} onPointerDown={onPointerDown} data-mode={mode} aria-label="Calendar">
@@ -412,7 +440,7 @@ export function CalendarDesk() {
           <span className="tcc-chips__n">{events.length.toLocaleString('en-US')} of {all.length.toLocaleString('en-US')} events</span>
         </div>
       ) : null}
-      {mode !== 'month' ? (
+      {mode === 'appointments' ? null : mode !== 'month' ? (
         <TimeScrubber days={scrub} selected={mode === 'attention' || mode === 'timeline' ? today : day} today={today} stepLabel={mode === 'week' ? 'week' : 'day'}
           onPick={pickDay} onPreview={setPreview} onStep={step} onToday={goToday} loading={!data}
           aside={mode === 'today' ? (
@@ -454,6 +482,7 @@ export function CalendarDesk() {
           ]}
           onConfirm={runConfirm} />
       ) : null}
+      {appointmentId ? <AppointmentDrawer id={appointmentId} tz={tz} onClose={() => commit({ appointment: null })} onChanged={() => setApptTick((t) => t + 1)} /> : null}
     </div>
   )
 }

@@ -265,6 +265,7 @@ export interface SheetActions {
   campaign?: (campaignId: string) => void
   closing?: () => void
   graph?: (propertyId: string) => void
+  appointment?: (appointmentId: string) => void
 }
 
 export function EventSheet({ e, tz, theme, actions, onClose }: { e: CalEvent; tz: string; theme: string; actions: SheetActions; onClose: () => void }) {
@@ -278,6 +279,8 @@ export function EventSheet({ e, tz, theme, actions, onClose }: { e: CalEvent; tz
   const counts = d.counts as Record<string, number> | undefined
   const members = (d.members || []) as CalMember[]
   const act: ReactNode[] = []
+  const apptId = (e.links as { appointment_id?: string | null }).appointment_id
+  if (apptId && actions.appointment) act.push(<button key="a" type="button" className="cal2-act is-primary" onClick={() => actions.appointment!(apptId)}><Icon name="calendar" />Open appointment</button>)
   if (e.links.thread_key && actions.conversation) act.push(<button key="c" type="button" className="cal2-act is-primary" onClick={() => actions.conversation!(e.links.thread_key as string, e.links.property_id)}><Icon name="message" />Open conversation</button>)
   if (e.links.campaign_id && actions.campaign) act.push(<button key="k" type="button" className="cal2-act is-primary" onClick={() => actions.campaign!(e.links.campaign_id as string)}><Icon name="send" />Open campaign</button>)
   if (e.links.closing_case_id && actions.closing) act.push(<button key="d" type="button" className="cal2-act is-primary" onClick={actions.closing}><Icon name="key" />Open Closing Desk</button>)

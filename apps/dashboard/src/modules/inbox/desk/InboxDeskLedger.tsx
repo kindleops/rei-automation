@@ -78,6 +78,8 @@ export interface InboxDeskLedgerProps {
   onOpenBeside: (thread: InboxWorkflowThread, app: BesideApp) => void
   /** the Scheduled lens reads send_queue, not thread rows */
   scheduledPanel?: ReactNode
+  /** the Seller portal lens reads the portal conversations, not thread rows */
+  sellerPortalPanel?: ReactNode
   density?: 'standard' | 'dense'
 }
 
@@ -308,7 +310,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   const {
     threads, hiddenIds, lens, counts, loading, error, canLoadMore, filteredTotal, filterChips, selectedId,
     onLens, onOpenFilters, onRemoveFilterChip, onClearFilters, onOpen, onLoadMore, onRetry, onSnooze, onMarkRead,
-    onOpenBeside, scheduledPanel, density = 'standard',
+    onOpenBeside, scheduledPanel, sellerPortalPanel, density = 'standard',
   } = props
   const rowHeight = ROW_HEIGHT[density]
   const now = useLedgerClock()
@@ -435,9 +437,13 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   const lensTotal = currentDef ? lensCount(counts, currentDef) : filteredTotal
   const showLoadMore = rows.length > 0 && (canLoadMore || (typeof lensTotal === 'number' && lensTotal > rows.length))
 
+  // lenses that are their own panel, not thread rows
+  const panelLens = lens === 'scheduled' || lens === 'seller_portal'
   let body: ReactNode
   if (lens === 'scheduled' && scheduledPanel) {
     body = <div className="ixl-scheduled">{scheduledPanel}</div>
+  } else if (lens === 'seller_portal' && sellerPortalPanel) {
+    body = <div className="ixl-scheduled">{sellerPortalPanel}</div>
   } else if (rows.length === 0 && loading) {
     body = <SkeletonRows count={9} rowHeight={rowHeight} />
   } else if (rows.length === 0 && error) {
@@ -527,7 +533,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
       </header>
 
       <div className="ixl-plane">
-        {rows.length > 0 && lens !== 'scheduled' ? (
+        {rows.length > 0 && !panelLens ? (
           <div className="ixl-colhead" aria-hidden="true">
             <span />
             <span>Seller</span>
@@ -538,7 +544,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
           </div>
         ) : null}
         <div className="ixl-body">{body}</div>
-        {showLoadMore && lens !== 'scheduled' ? (
+        {showLoadMore && !panelLens ? (
           <footer className="ixl-foot">
             <span className="ixl-foot__count">
               {lens === 'filtered'

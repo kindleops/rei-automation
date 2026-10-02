@@ -42,7 +42,7 @@ export interface StripProps {
 }
 
 const MODES: Array<{ id: Mode; label: string }> = [
-  { id: 'today', label: 'Today' }, { id: 'timeline', label: 'Timeline' }, { id: 'week', label: 'Week' }, { id: 'month', label: 'Month' }, { id: 'attention', label: 'Attention' },
+  { id: 'today', label: 'Today' }, { id: 'timeline', label: 'Timeline' }, { id: 'week', label: 'Week' }, { id: 'month', label: 'Month' }, { id: 'attention', label: 'Attention' }, { id: 'appointments', label: 'Appointments' },
 ]
 
 function Seg({ k, label, value, basis, tone, onDrill, children }: { k: 'day' | 'system' | 'you' | 'attention'; label: string; value: number | null; basis?: string; tone?: string; onDrill: (k: 'day' | 'system' | 'you' | 'attention') => void; children?: ReactNode }) {
@@ -60,7 +60,7 @@ function Seg({ k, label, value, basis, tone, onDrill, children }: { k: 'day' | '
 export const TemporalStrip = memo(function TemporalStrip(p: StripProps) {
   const shown = p.preview ?? p.day
   const isToday = shown === p.today
-  const title = p.mode === 'month' ? monthTitle(shown) : p.mode === 'week' ? `Week of ${monthDay(weekStart(shown))} – ${monthDay(addDays(weekStart(shown), 6))}` : p.mode === 'timeline' ? `Timeline · ${monthDay(addDays(p.today, -1))} – ${monthDay(addDays(p.today, 7))}` : p.mode === 'attention' ? 'Attention · what needs time' : fullDay(shown).replace(/, \d{4}$/, '')
+  const title = p.mode === 'month' ? monthTitle(shown) : p.mode === 'week' ? `Week of ${monthDay(weekStart(shown))} – ${monthDay(addDays(weekStart(shown), 6))}` : p.mode === 'timeline' ? `Timeline · ${monthDay(addDays(p.today, -1))} – ${monthDay(addDays(p.today, 7))}` : p.mode === 'attention' ? 'Attention · what needs time' : p.mode === 'appointments' ? 'Appointments · booked calls' : fullDay(shown).replace(/, \d{4}$/, '')
   const dayWord = isToday ? 'Today' : `${weekday(shown)} ${Number(shown.slice(8, 10))}`
   const c = p.counts
   return (

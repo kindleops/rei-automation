@@ -1,0 +1,77 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   SELLER PORTAL lens — the portal conversations list and one thread, inside
+   the ledger plane (.ixl-scheduled). Styled from its own root (.spx) with
+   the LC tokens; gold marks unread, nothing else is coloured.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.spx { display: flex; flex-direction: column; gap: 10px; min-width: 0; font: var(--lc-t-body); color: var(--lc-ink-1); }
+.spx :is(button, input, select, textarea) { font: inherit; color: inherit; }
+.spx :focus-visible { outline: none; box-shadow: var(--lc-focus-ring); }
+.spx-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.spx-title { display: flex; align-items: baseline; gap: 8px; margin: 0; font: var(--lc-t-section); letter-spacing: var(--lc-track-tight); }
+.spx-count { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.spx-toggle { display: inline-flex; align-items: center; gap: 6px; font: var(--lc-t-meta); color: var(--lc-ink-2); cursor: pointer; }
+.spx-muted { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); line-height: 1.5; }
+.spx-error { display: flex; align-items: center; gap: 4px; margin: 0; font: var(--lc-t-meta); color: rgb(var(--lc-crit-rgb)); }
+.spx-eyebrow { font: var(--lc-t-eyebrow); letter-spacing: var(--lc-track-eyebrow); text-transform: uppercase; color: var(--lc-ink-3); }
+.spx-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+/* list */
+.spx-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.spx-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--lc-r-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.spx-row:hover { background: var(--lc-inner-bg-hover); }
+.spx-row__dot { width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; }
+.spx-row.is-unread .spx-row__dot { background: rgb(var(--lc-attn-rgb)); box-shadow: 0 0 0 3px rgba(var(--lc-attn-rgb), 0.14); }
+.spx-row__main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.spx-row__main b { font-weight: 560; }
+.spx-row.is-unread .spx-row__main b { font-weight: 680; }
+.spx-row__addr, .spx-row__preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--lc-t-meta); }
+.spx-row__addr { color: var(--lc-ink-3); }
+.spx-row__preview { color: var(--lc-ink-2); }
+.spx-row__meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font: var(--lc-t-meta); color: var(--lc-ink-3); white-space: nowrap; }
+
+/* thread */
+.spx-thread__head { display: flex; align-items: flex-start; gap: 8px; }
+.spx-thread__title { min-width: 0; }
+.spx-thread__body { display: flex; flex-direction: column; gap: 14px; }
+.spx-msgs { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.spx-msg { max-width: 88%; padding: 8px 11px; border-radius: var(--lc-r-md); background: var(--lc-inner-bg); box-shadow: inset 0 0 0 1px var(--lc-inner-edge); }
+.spx-msg.is-operator { align-self: flex-end; background: rgba(var(--lc-accent-rgb), 0.1); }
+.spx-msg.is-system { align-self: center; background: none; box-shadow: none; color: var(--lc-ink-3); }
+.spx-msg p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.spx-msg__who { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.spx-reply, .spx-share { display: flex; flex-direction: column; gap: 6px; }
+.spx-share { flex-basis: 100%; padding: 8px 0 2px; }
+.spx-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.spx-field > span { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.spx-input {
+  width: 100%;
+  min-height: var(--lc-ctl-h-sm);
+  padding: 5px 9px;
+  border: 0;
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-inner-bg);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+}
+.spx-input:focus-visible { box-shadow: inset 0 0 0 1px var(--lc-accent-border), var(--lc-focus-ring); }
+textarea.spx-input { resize: vertical; min-height: 64px; }
+.spx-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.spx-sec { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid var(--lc-hairline); }
+.spx-docs { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; padding: 0; list-style: none; }
+.spx-docs li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 6px 8px; border-radius: var(--lc-r-sm); background: var(--lc-inner-bg); }
+.spx-docs li > span:first-child { display: flex; flex-direction: column; min-width: 0; }
+.spx-docs b { font-weight: 560; overflow-wrap: anywhere; }
+.spx-docs em { font: var(--lc-t-meta); font-style: normal; color: var(--lc-ink-3); }
+.spx-docs li.is-revoked { opacity: 0.6; }

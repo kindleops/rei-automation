@@ -9,6 +9,9 @@ import {
   type CalApp, type CalEvent, type CalendarTimeline,
 } from '../../../domain/calendar/calendar-timeline-api'
 import { AttentionList, DayStrip, DayTimeline, EventSheet, MonthGrid, WeekList, cls } from './CalendarParts'
+import { AppointmentsDesk } from '../scheduling/AppointmentsDesk'
+import { AppointmentDrawer } from '../scheduling/AppointmentDrawer'
+import { MyCalendarCard } from '../scheduling/MyCalendarCard'
 import './calendar-surface.css'
 import './calendar-desktop.css'
 
@@ -23,11 +26,13 @@ import './calendar-desktop.css'
  * canonical records read-only; this surface never derives an event, a count or
  * a deadline. Times read in the operator's zone, except market-defined times
  * (campaign windows / starts), which are stated in the market's zone.
+ * Appointments (booked calls, My calendar) come from the scheduling service;
+ * ?appointment=<id> opens one in its drawer from any view.
  */
 
-type View = 'agenda' | 'week' | 'month' | 'attention'
+type View = 'agenda' | 'week' | 'month' | 'attention' | 'appointments'
 const VIEWS: Array<{ key: View; label: string }> = [
-  { key: 'agenda', label: 'Agenda' }, { key: 'week', label: 'Week' }, { key: 'month', label: 'Month' }, { key: 'attention', label: 'Attention' },
+  { key: 'agenda', label: 'Agenda' }, { key: 'week', label: 'Week' }, { key: 'month', label: 'Month' }, { key: 'attention', label: 'Attention' }, { key: 'appointments', label: 'Appointments' },
 ]
 type Source = 'all' | CalApp
 const readTheme = () => (typeof document === 'undefined' ? 'dark' : document.documentElement.getAttribute('data-nexus-theme') || 'dark')
@@ -42,6 +47,8 @@ function readUrl() {
     view: view && VIEWS.some((v) => v.key === view) ? view : null,
     event: q.get('event'),
     property: q.get('property_id'),
+    appointment: q.get('appointment'),
+    connection: q.get('calendar_connection'),
   }
 }
 
@@ -84,7 +91,11 @@ function CalendarPhoneSurface() {
   const [now, setNow] = useState(() => Date.now())
   const today = dayKey(now, tz)
   const [selected, setSelected] = useState(initial.date || today)
-  const [view, setView] = useState<View>(initial.view || 'agenda')
+  // returning from Google sign-in lands on Appointments, where My calendar says how it went
+  const [view, setView] = useState<View>(initial.view || (initial.connection ? 'appointments' : 'agenda'))
+  const [appointmentId, setAppointmentId] = useState<string | null>(initial.appointment)
+  const [connection, setConnection] = useState<string | null>(initial.connection)
+  const [apptTick, setApptTick] = useState(0)
   const [source, setSource] = useState<Source>('all')
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -142,6 +153,7 @@ function CalendarPhoneSurface() {
 
   useEffect(() => { writeUrl({ date: selected === today ? null : selected, view: view === 'agenda' ? null : view }) }, [selected, view, today])
   useEffect(() => { writeUrl({ event: openId }) }, [openId])
+  useEffect(() => { writeUrl({ appointment: appointmentId, calendar_connection: null }) }, [appointmentId])
 
   const all = useMemo(() => data?.events ?? [], [data])
   const filtered = useMemo(() => {
@@ -193,6 +205,7 @@ function CalendarPhoneSurface() {
     campaign: (id: string) => { setOpenId(null); pushRoutePath(`/campaign-command?campaign=${encodeURIComponent(id)}`) },
     closing: () => { setOpenId(null); pushRoutePath('/closing-desk') },
     graph: (pid: string) => { setOpenId(null); pushRoutePath(`/entity-graph/property/${encodeURIComponent(pid)}`) },
+    appointment: (id: string) => { setOpenId(null); setAppointmentId(id) },
   }
 
   const automationLine = s && s.system > 0 && s.operator === 0 && s.attention === 0
@@ -230,7 +243,7 @@ function CalendarPhoneSurface() {
         ))}
       </nav>
 
-      {view !== 'attention' ? (
+      {view !== 'attention' && view !== 'appointments' ? (
         <div className="cal2-tools">
           <div className="cal2-chips" role="group" aria-label="Source">
             <button type="button" className={cls('cal2-chip', source === 'all' && 'is-on')} onClick={() => setSource('all')}>All</button>
@@ -239,7 +252,7 @@ function CalendarPhoneSurface() {
           <button type="button" className={cls('cal2-icon-btn', (searchOpen || query) && 'is-on')} onClick={() => setSearchOpen((o) => !o)} aria-label="Search"><Icon name="search" /></button>
         </div>
       ) : null}
-      {searchOpen && view !== 'attention' ? (
+      {searchOpen && view !== 'attention' && view !== 'appointments' ? (
         <label className="cal2-search">
           <Icon name="search" />
           <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Seller, property, campaign…" aria-label="Search events" />
@@ -248,7 +261,7 @@ function CalendarPhoneSurface() {
       ) : null}
 
       {failed.length ? <p className="cal2-degraded"><Icon name="alert" />Some events couldn’t load ({failed.join(', ').replace(/_/g, ' ')}). Everything else is current.</p> : null}
-      {error && !data ? (
+      {error && !data && view !== 'appointments' ? (
         <div className="cal2-error">
           <b>Calendar couldn’t load</b>
           <p>{error.replace(/_/g, ' ')}</p>
@@ -256,7 +269,7 @@ function CalendarPhoneSurface() {
         </div>
       ) : null}
 
-      {!data && !error ? <Skeleton /> : null}
+      {!data && !error && view !== 'appointments' ? <Skeleton /> : null}
 
       {data && view === 'agenda' ? (
         <>
@@ -304,6 +317,14 @@ function CalendarPhoneSurface() {
       ) : null}
 
       {data && view === 'attention' ? <AttentionList events={attention} tz={tz} onOpen={(e) => setOpenId(e.id)} /> : null}
+
+      {view === 'appointments' ? (
+        <div className="cal2-appts">
+          <AppointmentsDesk tz={tz} compact refreshKey={apptTick} onOpen={setAppointmentId} />
+          <MyCalendarCard notice={connection} onDismissNotice={() => setConnection(null)} />
+        </div>
+      ) : null}
+      {appointmentId ? <AppointmentDrawer id={appointmentId} tz={tz} onClose={() => setAppointmentId(null)} onChanged={() => setApptTick((t) => t + 1)} /> : null}
 
       {openEvent ? <EventSheet e={openEvent} tz={tz} theme={theme} actions={actions} onClose={() => setOpenId(null)} /> : null}
     </div>
