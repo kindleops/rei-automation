@@ -86,6 +86,10 @@ const HOLD_WORDS: Record<string, string> = {
   likely_renter: 'Likely a renter',
   owner_identity_not_verified: 'Owner not verified',
   missing_to_phone_number: 'No phone number',
+  // Template holds (rc-7.1 D2/D8): released automatically when templates change.
+  'template_hold:NO_TEMPLATE': 'No approved message for their language — waiting for one',
+  'template_hold:TEMPLATE_RENDER_LINT_FAILURE': 'Message failed the template check — waiting for a template change',
+  'template_hold:TEMPLATE_GOVERNANCE_PAUSED': 'Every fitting message is paused — waiting for an approved one',
 }
 
 const RELEASE_WORDS: Record<string, string> = {
@@ -104,6 +108,8 @@ const FEEDER_SKIP_WORDS: Record<string, string> = {
   local_senders_unavailable: 'their market’s numbers are paused or cooling',
   no_local_sender_number: 'no sender number in their market',
   TEMPLATE_RENDER_LINT_FAILURE: 'the message failed the template check',
+  NO_TEMPLATE: 'no approved message for their language',
+  TEMPLATE_GOVERNANCE_PAUSED: 'every fitting message is paused by template governance',
   per_sender_cap_reached: 'sender daily limit reached',
   per_market_cap_reached: 'market cap reached',
   schedule_window_full: 'today’s window is full',

@@ -40,6 +40,7 @@ import { normalizeCampaignStageCode } from '@/lib/domain/campaigns/campaign-stag
 import { canonicalLanguageLabel, resolveLanguage } from '@/lib/domain/campaigns/campaign-canonical-language.js'
 import { resolveTargetMessageLanguage } from '@/lib/domain/campaigns/campaign-target-template-assignment.js'
 import { loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
+import { governanceApplies, governanceExcludedTemplateIds, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
 import {
   asBoolean,
   isEmergencyStopActive,
@@ -109,6 +110,7 @@ const SENDER_STATE_LABELS = {
 
 const RENDER_FAILURE_LABELS = {
   NO_TEMPLATE: 'no approved message',
+  TEMPLATE_GOVERNANCE_PAUSED: 'every fitting message is paused by template governance',
   TEMPLATE_RENDER_LINT_FAILURE: 'the message failed the template check',
   TEMPLATE_RENDER_FAILED: 'the message could not be rendered',
   NAME_HYDRATION_FAILURE: 'the seller name is missing',
@@ -360,6 +362,7 @@ async function evaluateLanguageCoverage(routingReady, campaign, deps, context) {
         campaign_template_assignment: true,
         allow_identity_unknown: true,
         blocked_template_ids: context.blockedTemplates,
+        governance_excluded_template_ids: context.governanceExcluded,
         campaign_session_id: campaign.id,
       }, renderDeps).catch((error) => ({ ok: false, reason_code: 'TEMPLATE_RENDER_FAILED', reason: error?.message }))
       const code = clean(result.reason_code || result.reason) || 'render_failed'
@@ -523,12 +526,18 @@ export async function evaluateCampaignLaunchReadiness(campaignId, deps = {}, opt
   }
 
   // ── templates: the plan's own renderer, per language ───────────────────────
+  // Same governance exclusion the plan applies (rc-7.1 D8). Readiness is
+  // advisory, so an unreadable table excludes nothing here; the plan refuses.
+  const governanceExcluded = governanceApplies(templateUseCase)
+    ? await (deps.loadGovernance || loadGovernance)(supabase).then(governanceExcludedTemplateIds).catch(() => new Set())
+    : new Set()
   const languageCoverage = routingReadyTotal
     ? await evaluateLanguageCoverage(routingReadyTargets, campaign, deps, {
         supabase,
         stageCode,
         templateUseCase,
         blockedTemplates: dispatchBlocked.template_ids,
+        governanceExcluded,
       })
     : { languages: [], rendered: 0, failed: 0 }
   const languageGaps = languageCoverage.languages.filter((entry) => entry.renders === false)

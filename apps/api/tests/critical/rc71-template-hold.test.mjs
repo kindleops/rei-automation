@@ -63,6 +63,7 @@ function fakeSupabase(store) {
         gte(col, v) { filters.push((r) => String(r[col]) >= v); return b; },
         order() { return b; },
         limit(n) { limitN = n; return b; },
+        range() { return b; },
         maybeSingle: async () => ({ data: run().data?.[0] || null, error: null }),
         then(resolve, reject) { return Promise.resolve(run()).then(resolve, reject); },
       };

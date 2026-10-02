@@ -218,3 +218,33 @@ export async function loadGovernance(supabase) {
   if (error) throw error;
   return indexGovernance(Array.isArray(data) ? data : []);
 }
+
+/**
+ * Templates governance has REVIEWED and does not permit (rc-7.1 D8).
+ *
+ * The bulk campaign planner (createCampaignQueuePlan) never consulted
+ * governance: 151 campaign sends 2026-09-28→09-30 used five templates paused
+ * since 2026-05-16 (one of them "Paused: opt-out over cap"). This is the set it
+ * now excludes: every template with a rotation-control row whose own verdict is
+ * not OK — pause / an unknown status / a zero, unmeasurable or exhausted cap.
+ * Template-level checks (inactive, empty body) are left to the renderer.
+ *
+ * DELIBERATELY NOT INCLUDED: templates with no rotation-control row at all.
+ * Governance covers 21 of 8,784 templates, so on the bulk path "ungoverned"
+ * means "never reviewed", not "rejected"; excluding them would hold almost
+ * every non-English seller. Whether the bulk path should fail closed on
+ * ungoverned templates (as target assignment and target-one enqueue do) is an
+ * owner decision, reported with RC 7.1 D8.
+ */
+export function governanceExcludedTemplateIds(governanceById = new Map()) {
+  const excluded = new Set();
+  for (const [templateId, row] of governanceById) {
+    const verdict = evaluateTemplateGovernance(
+      { template_id: templateId, is_active: true, template_body: "governance-only check" },
+      row,
+      { applies: true }
+    );
+    if (!verdict.ok) excluded.add(String(templateId));
+  }
+  return excluded;
+}

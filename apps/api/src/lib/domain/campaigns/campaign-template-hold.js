@@ -33,11 +33,17 @@ import crypto from 'node:crypto'
 export const TEMPLATE_HOLD_PREFIX = 'template_hold:'
 
 /** Reason codes that mean "the template check itself failed" (seller-independent of capacity). */
-export const TEMPLATE_HOLD_REASONS = new Set(['TEMPLATE_RENDER_LINT_FAILURE', 'NO_TEMPLATE'])
+export const TEMPLATE_HOLD_REASONS = new Set([
+  'TEMPLATE_RENDER_LINT_FAILURE',
+  'NO_TEMPLATE',
+  // rc-7.1 D8: every template that fits the seller is paused by governance.
+  'TEMPLATE_GOVERNANCE_PAUSED',
+])
 
 const HOLD_WORDS = {
   NO_TEMPLATE: 'No approved message exists for this seller’s language and situation.',
   TEMPLATE_RENDER_LINT_FAILURE: 'The message failed the template check for this seller.',
+  TEMPLATE_GOVERNANCE_PAUSED: 'Every message that fits this seller is paused by template governance.',
 }
 
 const clean = (value) => (value === null || value === undefined ? '' : String(value).trim())
@@ -58,22 +64,33 @@ export function describeTemplateHold(reasonCode) {
 
 /**
  * Cheap catalogue fingerprint. Changes whenever a template is added/removed,
- * activated/deactivated, quarantined/released, or edited (updated_at).
+ * activated/deactivated, quarantined/released, or edited (updated_at) — and,
+ * since governance holds (D8), whenever template governance changes
+ * (ownership_template_rotation_control: tens of rows, read whole).
  */
 export async function loadTemplateCatalogFingerprint(supabase) {
   const head = (build) => build(supabase.from('sms_templates').select('id', { count: 'exact', head: true }))
-  const [total, active, quarantined, newest] = await Promise.all([
+  const [total, active, quarantined, newest, governance] = await Promise.all([
     head((q) => q),
     head((q) => q.eq('is_active', true)),
     head((q) => q.not('quarantined_at', 'is', null)),
     supabase.from('sms_templates').select('updated_at').order('updated_at', { ascending: false, nullsFirst: false }).limit(1),
+    supabase
+      .from('ownership_template_rotation_control')
+      .select('template_id,rotation_status,daily_cap,last_40d_total_sent')
+      .order('template_id', { ascending: true })
+      .range(0, 999),
   ])
-  for (const r of [total, active, quarantined, newest]) if (r?.error) throw r.error
+  for (const r of [total, active, quarantined, newest, governance]) if (r?.error) throw r.error
+  const governanceRows = (Array.isArray(governance.data) ? governance.data : [])
+    .map((g) => [clean(g.template_id), clean(g.rotation_status), clean(g.daily_cap), clean(g.last_40d_total_sent)].join(':'))
+    .sort()
   const parts = [
     Number(total.count || 0),
     Number(active.count || 0),
     Number(quarantined.count || 0),
     clean(Array.isArray(newest.data) ? newest.data[0]?.updated_at : ''),
+    governanceRows.join(','),
   ]
   return crypto.createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16)
 }

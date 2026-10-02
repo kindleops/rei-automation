@@ -86,6 +86,9 @@ const REASON_CODES = Object.freeze({
   COLD_OUTBOUND_TOUCH_CAP: "COLD_OUTBOUND_TOUCH_CAP",
   PHONE_LEVEL_COOLDOWN: "PHONE_LEVEL_COOLDOWN",
   NO_TEMPLATE: "NO_TEMPLATE",
+  // rc-7.1 D8: every template that could serve this seller is excluded by
+  // template governance (rotation control says pause); held, not dropped.
+  TEMPLATE_GOVERNANCE_PAUSED: "TEMPLATE_GOVERNANCE_PAUSED",
   TEMPLATE_RENDER_FAILED: "TEMPLATE_RENDER_FAILED",
   NO_VALID_TEXTGRID_NUMBER: "NO_VALID_TEXTGRID_NUMBER",
   ROUTING_BLOCKED: "ROUTING_BLOCKED",
@@ -3314,10 +3317,51 @@ export async function chooseTextgridNumber(candidate = {}, options = {}, deps = 
     };
 }
 
+function templateIdSet(value) {
+  if (value instanceof Set) return value;
+  return new Set(Array.isArray(value) ? value.map((id) => String(id)) : []);
+}
+
+/**
+ * TEMPLATE GOVERNANCE ON THE BULK CAMPAIGN PATH (rc-7.1 D8).
+ *
+ * `options.governance_excluded_template_ids` (the campaign planner supplies it
+ * from ownership_template_rotation_control) removes governed-but-not-sendable
+ * templates from the pool BEFORE the fallback cascade, so a seller whose
+ * preferred level held only paused templates falls through to a sendable
+ * sibling exactly as any other empty level does. When nothing sendable is
+ * left, the result says so — TEMPLATE_GOVERNANCE_PAUSED, not a generic
+ * NO_TEMPLATE — but only if governance is the reason: the same render without
+ * the exclusion must have found a template. Absent the option (every other
+ * caller), behaviour is unchanged.
+ */
 export async function renderOutboundTemplate(candidate = {}, options = {}, deps = {}) {
   if (typeof deps.renderOutboundTemplate === "function") {
     return deps.renderOutboundTemplate(candidate, options);
   }
+  const excluded = templateIdSet(options.governance_excluded_template_ids);
+  if (!excluded.size) return renderOutboundTemplateCore(candidate, options, deps);
+
+  const gated = await renderOutboundTemplateCore(candidate, options, deps);
+  if (gated?.ok || gated?.reason_code !== REASON_CODES.NO_TEMPLATE) return gated;
+  const ungated = await renderOutboundTemplateCore(
+    candidate,
+    { ...options, governance_excluded_template_ids: null },
+    deps
+  );
+  if (ungated?.reason_code === REASON_CODES.NO_TEMPLATE) return gated;
+  return {
+    ...gated,
+    reason_code: REASON_CODES.TEMPLATE_GOVERNANCE_PAUSED,
+    reason: "only_governance_paused_templates",
+    render_error_message: "Every template that fits this seller is paused by template governance",
+    governance_paused_template_id: clean(
+      ungated?.template_id || getTemplateReferenceId(ungated?.template) || ""
+    ) || null,
+  };
+}
+
+async function renderOutboundTemplateCore(candidate = {}, options = {}, deps = {}) {
 
   /**
    * A policy token ('auto') is not a language. Reading it as one made
@@ -3443,6 +3487,15 @@ export async function renderOutboundTemplate(candidate = {}, options = {}, deps 
       }
       templates = fallback_rows;
     }
+  }
+
+  // Template governance (rc-7.1 D8): governed-but-paused templates leave the
+  // pool before the cascade. Supplied only by the campaign planner.
+  const governance_excluded = templateIdSet(options.governance_excluded_template_ids);
+  if (governance_excluded.size) {
+    const before = templates.length;
+    templates = templates.filter((t) => !governance_excluded.has(String(getTemplateReferenceId(t) ?? "")));
+    fetch_diagnostics.governance_excluded_template_count = before - templates.length;
   }
 
   // Save all fetched templates before language filter for English universal fallback

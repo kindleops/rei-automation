@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { isTemplateHoldReason } from '@/lib/domain/campaigns/campaign-template-hold.js'
+import { governanceApplies, governanceExcludedTemplateIds, loadGovernance } from '@/lib/domain/campaigns/template-governance.js'
 import { effectivePerSenderCap, loadConfiguredPerSenderCap } from '@/lib/domain/campaigns/sender-capacity.js'
 import { isSenderDispatchBlocked, isTemplateDispatchBlocked, loadDispatchBlockedSets } from '@/lib/domain/delivery/sms-health-guard.js'
 import { evaluateRecontactOverride } from '@/lib/domain/campaigns/recontact-override-authority.js'
@@ -7500,6 +7501,7 @@ const PLAN_SKIP_LABELS = Object.freeze({
   NO_VALID_TEXTGRID_NUMBER: 'no active sender number',
   TEMPLATE_RENDER_LINT_FAILURE: 'message failed the template check',
   NO_TEMPLATE: 'no approved message',
+  TEMPLATE_GOVERNANCE_PAUSED: 'every fitting message is paused by template governance',
   template_blocked_by_operator: 'message blocked by operator',
   active_queue_row_exists: 'already queued',
   prior_contacted_suppression: 'already contacted',
@@ -7910,6 +7912,30 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
   // chooseTextgridNumber) instead of every target dead-ending on the block.
   launchOptions.blocked_sender_numbers = dispatchBlocked.sender_numbers
   /**
+   * TEMPLATE GOVERNANCE (rc-7.1 D8). Target assignment and target-one enqueue
+   * consulted ownership_template_rotation_control; this bulk path did not, and
+   * 151 campaign sends (09-28→09-30) used templates governance paused in May.
+   * Governed-but-not-sendable templates now leave the render pool, so rotation
+   * lands on a sendable sibling; a seller with nothing sendable left is held
+   * (TEMPLATE_GOVERNANCE_PAUSED → campaign-template-hold.js), not dropped.
+   * Ungoverned (never reviewed) templates stay usable here — see
+   * governanceExcludedTemplateIds. An unreadable governance table writes no
+   * rows (blocker), because no send-time check backs this one up.
+   */
+  let governanceExcluded = new Set()
+  let governanceApplied = false
+  if (governanceApplies(launchOptions.template_use_case)) {
+    try {
+      const governanceById = await (deps.loadGovernance || loadGovernance)(supabase)
+      governanceExcluded = governanceExcludedTemplateIds(governanceById)
+      governanceApplied = true
+    } catch (governanceError) {
+      blockers.push('template_governance_unreadable')
+      console.warn('campaign_plan.template_governance_unreadable', { campaign_id: campaignId, error: governanceError?.message || String(governanceError) })
+    }
+  }
+  launchOptions.governance_excluded_template_ids = governanceExcluded
+  /**
    * FULL-COHORT PREFLIGHT (dry run only). The Launch screen asks "will every
    * ready seller get a message, and how long will it take?" — not "what fits
    * in one worker batch". It evaluated one batch (batch_max 50/100) and then
@@ -8068,6 +8094,13 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     const messageBody = renderedMessageBody(rendered)
     if (templateId && (isTemplateDispatchBlocked(templateId, dispatchBlocked) || targetExcluded.includes(String(templateId)))) {
       recordSkip('template_blocked_by_operator', target, { template_id: templateId })
+      continue
+    }
+    // Backstop: a renderer that ignored the exclusion (an injected one) must
+    // still never place a governance-paused template.
+    if (templateId && governanceExcluded.has(String(templateId))) {
+      templateHolds.push({ target, reason: 'TEMPLATE_GOVERNANCE_PAUSED', detail: 'rendered_governance_paused_template', template_id: templateId })
+      recordSkip('TEMPLATE_GOVERNANCE_PAUSED', target, { template_id: templateId })
       continue
     }
     if (!rendered.ok || !templateId || !messageBody) {
@@ -8569,6 +8602,11 @@ export async function createCampaignQueuePlan(campaignId, input = {}, deps = {})
     skipped_count: launchSummary.skipped_count,
     skipped_counts_by_reason: skippedCounts,
     sample_skips: sampleSkips,
+    template_governance: {
+      applied: governanceApplied,
+      excluded_template_ids: [...governanceExcluded],
+      ungoverned_templates_allowed: true,
+    },
     template_holds: templateHolds.map((hold) => ({
       campaign_target_id: hold.target.id || null,
       reason: hold.reason,

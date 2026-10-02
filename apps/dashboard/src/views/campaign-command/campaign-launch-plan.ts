@@ -142,6 +142,7 @@ const SKIP_REASON_COPY: Record<string, string> = {
   missing_selected_sender_number: 'No sender number',
   TEMPLATE_RENDER_LINT_FAILURE: 'No first name on file — the greeting can’t be personalized',
   NO_TEMPLATE: 'No approved message for their language',
+  TEMPLATE_GOVERNANCE_PAUSED: 'Every fitting message is paused by template governance',
   MISSING_FIRST_NAME: 'Seller first name missing',
   template_blocked_by_operator: 'Message blocked by an operator',
   OUTREACH_HISTORY_UNAVAILABLE: 'Message history couldn’t be read',
