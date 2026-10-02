@@ -23,6 +23,7 @@
  *     --snapshot=<dir> [--out=<dir>] [--max-subjects-per-market=800] [--regions=MSP,JAX] \
  *     [--pinned-engine=<abs path to an extracted acquisitionDecisionEngine.js> --pinned-label=<label> --pinned-commit=<sha>]
  *   Re-render only (after writing findings): --render-only --out=<dir> --notes=<findings.md>
+ *   Sensitivity runs: --subject-from / --subject-to / --challenger-params='{...}' / --layer-params='{...}'
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -50,6 +51,7 @@ const DEFAULT_OUT = '/Users/ryankindle/.claude/jobs/c39b0175/tmp/ic8/models/comp
 const DEFAULT_SUBJECT_WINDOW = ['2025-07-01', '2026-09-30'];
 let SUBJECT_WINDOW = DEFAULT_SUBJECT_WINDOW;
 let CHALLENGER_RUN_PARAMS = CHALLENGER_PARAMS;
+let LAYER_RUN_PARAMS = MICRO_MARKET_PARAMS;
 const SUBJECT_FAMILIES = new Set(['sfr', 'mf_2_4']);
 const CASE_PROPERTY_ID = '273312064';
 const CASE_PRODUCTION = { '2026-09-30': 362500, '2026-10-01': 327900 };
@@ -132,7 +134,7 @@ function championGeography(selected, subject, layer, dist, assignment) {
   for (const c of selected) {
     if (!Number.isFinite(c.lat)) continue;
     const rel = dist.to(c.lat, c.lng);
-    tiers.set(c.id, microMarketTier(assignment.micro_market_id, rel, layer, CHALLENGER_PARAMS).tier);
+    tiers.set(c.id, microMarketTier(assignment.micro_market_id, rel, layer, CHALLENGER_RUN_PARAMS).tier);
   }
   return {
     other_zip_w: round(weightShare(selected, (c) => c.zip !== subject.zip), 3),
@@ -261,6 +263,7 @@ async function main() {
   const cap = Number(args['max-subjects-per-market'] ?? 800);
   SUBJECT_WINDOW = [args['subject-from'] ?? DEFAULT_SUBJECT_WINDOW[0], args['subject-to'] ?? DEFAULT_SUBJECT_WINDOW[1]];
   CHALLENGER_RUN_PARAMS = Object.freeze({ ...CHALLENGER_PARAMS, ...(args['challenger-params'] ? JSON.parse(args['challenger-params']) : {}) });
+  LAYER_RUN_PARAMS = Object.freeze({ ...MICRO_MARKET_PARAMS, ...(args['layer-params'] ? JSON.parse(args['layer-params']) : {}) });
   const seed = args.seed ?? 'ic8-comp-v0';
   fs.mkdirSync(outDir, { recursive: true });
   const manifestIn = JSON.parse(fs.readFileSync(path.join(snapshotDir, 'manifest.json'), 'utf8'));
@@ -293,7 +296,7 @@ async function main() {
     const idxPoolRecords = new PointIndex(poolRecords, { refLat, bucketKm: 2 });
     const layers = new Map();
     const layerFor = (asOf) => {
-      if (!layers.has(asOf)) layers.set(asOf, buildMicroMarketModel(unionSales, { asOf, refLat }));
+      if (!layers.has(asOf)) layers.set(asOf, buildMicroMarketModel(unionSales, { asOf, refLat, params: LAYER_RUN_PARAMS }));
       return layers.get(asOf);
     };
     densityByRegion[file.region] = densityProfile(unionSales, refLat);
@@ -638,7 +641,7 @@ function buildManifest({ manifestIn, snapshotDir, code, engines, sampling, marke
     },
     params: {
       challenger: CHALLENGER_RUN_PARAMS,
-      micro_market: MICRO_MARKET_PARAMS,
+      micro_market: LAYER_RUN_PARAMS,
       market_context: MARKET_CONTEXT_PARAMS,
       baseline: { version: BASELINE_VERSION, radius_miles: 1, months_back: 12, min_comps: 3 },
       sampling: { cap_per_market: cap, seed, method: 'lowest FNV-1a hash of seed|record id', per_market: sampling },
@@ -842,7 +845,9 @@ function renderDefects(results, engines) {
   if (cs.available) lines.push(`   Case replica (10-01): centre ${fmt(arm('champion_pool @ 2026-10-01')?.outlier?.median)}, allowed deviation +/-${fmt(arm('champion_pool @ 2026-10-01')?.outlier?.allowed_deviation)}: wide enough to admit both price regimes. The challenger screens outliers inside each regime's selected set instead.`);
   lines.push(`3. **Linear size scaling.** \`adjustedCompPrice\` blends sale price x (subject sqft / comp sqft) at 55% weight (+35% raw price, +10% bed ratio). The challenger learns a log-size elasticity per market and as-of month from within-cell variation: ${Object.entries(results.layerSummaries).map(([r, l]) => `${r} ${l.length ? l[l.length - 1].beta : 'n/a'}`).join(', ')} (latest layer). The naive baseline, which scales PPSF linearly, overstates large subjects (North Minneapolis: ${cs.available ? fmt(cs.baseline.value) : 'n/a'}).`);
   lines.push('4. **Deal Intelligence\'s comp grid is a separate live re-score**, not the engine\'s stored selected set (`apps/api/src/lib/cockpit/deal-intelligence-dossier.js:740-880`, "usable" = eligible and comp_confidence >= 45 at `:781`); only the value range is the stored ADE range (`:1566-1578`). Operators can see a grid that is not the set that priced the deal. (From the Phase 0 audit; not re-measured here.)');
-  lines.push(`5. **Feeding the recorded deeds to today\'s search makes the North Minneapolis case worse.** Champion replica on the combined corpus (10-01): ${v('champion_union @ 2026-10-01')} with ${arm('champion_union @ 2026-10-01') ? pct(round(100 * arm('champion_union @ 2026-10-01').east_bank_weight, 1)) : 'n/a'} east-bank weight, vs ${v('champion_pool @ 2026-10-01')} / ${arm('champion_pool @ 2026-10-01') ? pct(round(100 * arm('champion_pool @ 2026-10-01').east_bank_weight, 1)) : 'n/a'} on the pool: more structurally similar east-bank sales reach the top 100. With the micro-market guard: ${v('champion_union_guarded @ 2026-10-01')} (${arm('champion_union_guarded @ 2026-10-01') ? pct(round(100 * arm('champion_union_guarded @ 2026-10-01').east_bank_weight, 1)) : 'n/a'} east-bank weight).`);
+  const eastW = (key) => (arm(key) ? pct(round(100 * arm(key).east_bank_weight, 1)) : 'n/a');
+  const pair5 = (suffix) => `pool ${v(`champion_pool${suffix} @ 2026-10-01`)} (${eastW(`champion_pool${suffix} @ 2026-10-01`)} east-bank weight) -> combined ${v(`champion_union${suffix} @ 2026-10-01`)} (${eastW(`champion_union${suffix} @ 2026-10-01`)})`;
+  lines.push(`5. **Feeding the recorded deeds to today\'s search raises the North Minneapolis value further.** Point-in-time replica, 10-01: before-fix engine ${before ? pair5(before) : 'n/a'}; engine as run ${pair5('')}. More structurally similar east-bank sales reach the top 100. With the micro-market guard (exploratory): ${v('champion_union_guarded @ 2026-10-01')} (${eastW('champion_union_guarded @ 2026-10-01')} east-bank weight).`);
   lines.push('6. **No as-of bound in the candidate RPC** (`sale_date >= current_date - interval`, no upper bound; future ages clamp to 0): the production engine cannot be replayed historically. This backtest re-implements only the search.');
   lines.push('7. **No price-provenance check.** The engine would treat Texas deed prices marked "Estimated Sales Price" (vendor estimates; Texas is a non-disclosure state) as transactions if they reached its pool.');
   lines.push('');
