@@ -20,7 +20,7 @@ function buildPriceContext() {
   };
 }
 
-test("underwriting extraction normalizes shorthand asking prices in price context", () => {
+test("underwriting extraction reads asking prices from the ONE money path", () => {
   const shorthand = extractUnderwritingSignals({
     message: "I'd take 80k.",
     context: buildPriceContext(),
@@ -31,7 +31,9 @@ test("underwriting extraction normalizes shorthand asking prices in price contex
   });
 
   assert.equal(shorthand.signals.asking_price, 80000);
-  assert.equal(bare.signals.asking_price, 80000);
+  // ONE money path (RC 7.2 B): a bare "80" states no scale. The legacy
+  // "x1000 in a price context" rule contradicted RC 7.1 and is gone.
+  assert.equal(bare.signals.asking_price, null);
 });
 
 test("underwriting extraction avoids bare-number price false positives", () => {

@@ -159,6 +159,7 @@ function runStageEngine(universal_stage, input) {
         universal_stage,
         stage_decision: classifyStage3AskingPrice({
           message: input.message,
+          price_signal: input.price_signal ?? null,
           context: {
             ...input.context,
             // Seller-signal driven, never gap-driven. See resolveCreativeAllowed.
@@ -350,6 +351,9 @@ export function resolveStageDomainRecommendation({
   route = null,
   underwriting = null,
   deal_state = null,
+  // The orchestrator's canonical price_signal (one money path, RC 7.2 B):
+  // every stage engine reads it instead of re-parsing the message.
+  price_signal = null,
 } = {}) {
   const engine_stage = resolveEngineStage({
     resting_stage:
@@ -374,6 +378,7 @@ export function resolveStageDomainRecommendation({
     seller_message: message,
     underwriting,
     deal_state,
+    price_signal,
   });
 
   const recommendation = buildRecommendationFromEngine({

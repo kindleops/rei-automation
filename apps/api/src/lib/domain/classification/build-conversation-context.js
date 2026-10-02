@@ -20,6 +20,8 @@ import {
   CONTEXT_VERSION,
   isCanonicalE164,
 } from "./conversation-context.js";
+import { extractAddresseeName, extractSenderName, detectMessageLanguage } from "./reply-disposition-signals.js";
+import { describeLastQuestion } from "./last-question.js";
 
 /**
  * Maps a persisted send_queue.message_type onto an approved outbound use case.
@@ -82,6 +84,13 @@ const BODY_QUESTION_PATTERNS = [
   [/\bhow\s+soon|timeline|when\s+(?:would|do)\s+you\s+want\s+to\s+close|closing\s+timeline/i, "timeline_check"],
   [/\b(?:still\s+the\s+owner|are\s+you\s+the\s+owner|do\s+you\s+(?:still\s+)?own|is\s+.{0,60}\s+yours)\b/i, "ownership_check"],
   [/\bopen\s+to\s+(?:a\s+)?(?:proposal|offer)|consider\s+(?:a\s+)?(?:proposal|offer)|would\s+you\s+consider\s+selling|interested\s+in\s+selling/i, "proposal_interest"],
+  // Our multilingual first touches (2026-10-01 corpus). Without these a reply
+  // to a Spanish / Portuguese / Vietnamese / French / Arabic-transliterated
+  // question had no context at all, so "No" or "Không phải" could not be read
+  // against the question that produced it.
+  [/precio\s+en\s+mente|prix\s+(?:demand[eé]|en\s+t[eê]te)/i, "asking_price"],
+  [/(?:eres|es\s+usted|sigues\s+siendo|todav[ií]a\s+eres|todav[ií]a\s+es)\s+(?:el\s+|la\s+)?due[ñn][oa]|\bes\s+(?:tu|su)\s+propiedad|voc[eê]\s+ainda\s+[eé]\s+(?:o|a)\s+(?:propriet[aá]ri[oa]|don[oa])|\b[eé]\s+sua\s+propriedade|c[oó]\s+ph[aả]i\s+l[aà]\s+c[uủ]a\s+b[aạ]n|\bhal\s+.{1,80}\s+lak\b/i, "ownership_check"],
+  [/abiert[oa]\s+a\s+(?:una\s+)?(?:propuesta|oferta)|considerar[ií]a\s+(?:una\s+)?(?:propuesta|oferta)|discutir\s+n[uú]meros|abert[oa]\s+(?:a|para)\s+(?:uma\s+)?(?:proposta|discutir)/i, "proposal_interest"],
 ];
 
 /**
@@ -216,6 +225,15 @@ export async function buildConversationContext({
     question_status,
     unanswered_question: question_status === "unanswered",
     language: language || null,
+    // Read from the body we actually sent (7.2): who we greeted, and in which
+    // language. "Not James" answers "Hey James, ..."; "I don't understand"
+    // answers a message written in another language.
+    last_outbound_addressee: extractAddresseeName(last_outbound.message_body),
+    last_outbound_language: detectMessageLanguage(last_outbound.message_body),
+    last_outbound_agent: extractSenderName(last_outbound.message_body),
+    // What a bare number in the reply can mean (the ONE money path reads it):
+    // "$240k?" sets the thousands scale, "how many square feet?" un-prices it.
+    last_outbound_question: describeLastQuestion(last_outbound.message_body),
   };
 }
 

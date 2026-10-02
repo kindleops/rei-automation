@@ -31,11 +31,11 @@ import {
   persistSellerTransitionArtifacts,
   loadSellerDealState,
 } from "@/lib/domain/seller-flow/persist-seller-transition.js";
+import { establishesThousandsShorthand } from "@/lib/domain/seller-flow/monetary-understanding.js";
 import {
-  resolveAskingPriceSignal,
-  establishesThousandsShorthand,
-} from "@/lib/domain/seller-flow/monetary-understanding.js";
-import { resolveBurstAskingPriceSignal } from "@/lib/domain/seller-flow/seller-inbound-burst-policy.js";
+  resolveCanonicalAskingPrice,
+  resolveCanonicalBurstAskingPrice,
+} from "@/lib/domain/seller-flow/canonical-asking-price.js";
 import {
   extractSellerFacts,
   extractionToResolverFacts,
@@ -1019,6 +1019,12 @@ export async function processSellerInboundMessage({
   // whether the route is a first reveal or a counter, so the parser and the
   // workflow cannot disagree about whether a negotiation is under way.
   const negotiation_active = hasRevealedOffer(prior_negotiation_state);
+  // The question WE asked last (7.2). The monetary parser never saw it: a bare
+  // "250" answering "Would you take $240k?" is our thousands; answering "how
+  // many square feet?" it is not a price at all.
+  const last_outbound_body = clean(
+    recentOutbound?.message_body || recentOutbound?.message || recentOutbound?.body || ""
+  );
   const price_signal_options = {
     reference:
       prior_negotiation_state?.current_asking_price ??
@@ -1035,6 +1041,10 @@ export async function processSellerInboundMessage({
         : []),
       deal_state?.known_facts?.asking_price || null,
     ]),
+    // Our own "$240k?" also sets the scale; "how many square feet?" un-prices a
+    // bare number. Read by the canonical path, never re-derived downstream.
+    lastOutboundBody: last_outbound_body,
+    classification,
     sourceMessageId: providerMessageId || inboundEventId,
   };
   // Finalized-burst turns carry their raw constituents: the burst-aware
@@ -1045,10 +1055,17 @@ export async function processSellerInboundMessage({
   const burst_constituents = Array.isArray(burstContext?.constituent_messages)
     ? burstContext.constituent_messages.filter((m) => clean(m?.body))
     : [];
+  // THE ONE MONEY PATH (RC 7.2 B) -- the ONE slot. canonical-asking-price.js =
+  // monetary understanding + factual commitment. price_signal is the only input
+  // to the fact extraction, temperature, canonical promotion, negotiation
+  // preview, the stage engines and persistence below, so a NON_LITERAL ("sure,
+  // give me a million 😂") or AMBIGUOUS price is demoted here and can neither
+  // persist nor move the stage. A burst runs every fragment through the same
+  // single-message path before the latest-explicit-value fold.
   const price_signal =
     burst_constituents.length > 1
-      ? resolveBurstAskingPriceSignal(burst_constituents, price_signal_options)
-      : resolveAskingPriceSignal(message, price_signal_options);
+      ? resolveCanonicalBurstAskingPrice(burst_constituents, price_signal_options)
+      : resolveCanonicalAskingPrice(message, price_signal_options);
 
   // ── Deterministic evidence-backed fact extraction (not a classifier —
   // classify.js remains the only intent classifier). Every fact carries
@@ -1124,6 +1141,8 @@ export async function processSellerInboundMessage({
 
   const intelligence = await runtimeDeps.runInboundIntelligencePhase({
     context_resolution,
+    // The stage engines read this turn's canonical price; they never re-parse.
+    price_signal,
     message,
     threadKey: threadKey || inboundFrom,
     propertyId,
@@ -1349,28 +1368,20 @@ export async function processSellerInboundMessage({
       summary.occupancy_status || deal_state?.known_facts?.occupancy_status || null,
   };
 
-  // Monetary authority is absolute: when resolveAskingPriceSignal refuses an
-  // amount as ambiguous, the raw classifier mention (seller_state.price_mentioned)
+  // Monetary authority is absolute: when the canonical path refuses an amount
+  // as ambiguous, the raw classifier mention (seller_state.price_mentioned)
   // must NOT be promoted into a canonical asking price. It survives only as
   // evidence on the extraction record. No "assume thousands" rule exists.
   const price_clarification_required =
     price_signal.needs_clarification === true && price_signal.asking_price == null;
-  // The fallbacks below (stage engine / classifier) never carry scale
-  // provenance: the classifier qualifies a bare "65" as 65. A sub-$1,000
-  // figure is never a property price, so it can never become the canonical
-  // ask through a fallback (it would persist as a $65 asking price).
-  const plausibleFallbackPrice = (value) => {
-    const amount = Number(
-      value && typeof value === "object" ? value.value ?? value.amount : value
-    );
-    return Number.isFinite(amount) && amount >= 1000 ? value : null;
-  };
+  // ONE money path (RC 7.2 B): price_signal is the only source of this turn's
+  // asking price. The stage engines read the same signal and the classifier
+  // delegates to the same resolver, so there is no second opinion to fall back
+  // on (the old stage-engine / classifier fallbacks were exactly that). A null
+  // here never clears a known ask: mergeSellerFacts skips null.
   const resolved_asking_price = price_clarification_required
     ? null
-    : price_signal.asking_price ??
-      plausibleFallbackPrice(stage_engine_decision?.seller_asking_price) ??
-      plausibleFallbackPrice(extracted.asking_price) ??
-      null;
+    : price_signal.asking_price ?? null;
 
   const canonical_new_facts = {
     ...extraction_facts,

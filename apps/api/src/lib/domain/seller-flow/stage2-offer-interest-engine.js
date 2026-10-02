@@ -28,6 +28,10 @@ import { SELLER_FLOW_STAGES } from "@/lib/domain/seller-flow/canonical-seller-fl
 import { SELLER_FLOW_SAFETY_TIERS } from "@/lib/domain/seller-flow/seller-flow-safety-policy.js";
 import { CONVERSATION_STAGES } from "@/lib/domain/communications-engine/state-machine.js";
 import {
+  canonicalAskingPriceDecision,
+  isCommittedAskingPrice,
+} from "@/lib/domain/seller-flow/canonical-asking-price.js";
+import {
   ACQUISITION_LIFECYCLE_EVENTS as EV,
   buildLifecycleEvent,
 } from "@/lib/domain/seller-flow/acquisition-lifecycle-events.js";
@@ -83,79 +87,38 @@ function wordCount(text) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// ASKING PRICE EXTRACTION (multilingual, deterministic)
+// ASKING PRICE (delegated: ONE money path, RC 7.2 B)
 // ══════════════════════════════════════════════════════════════════════════
 //
-// Handles English ("185k", "$185,000", "2 million") and Spanish ("200 mil" =
-// 200,000 — NOT 200 million). We deliberately do NOT reuse classify.js'
-// extractPrice() here because that helper treats a "mil" suffix as millions
-// (English bias). Keeping a focused normalizer avoids changing/weakening the
-// shared classifier while staying correct for multilingual asking prices.
-
-const PRICE_MULTIPLIERS = [
-  // Order matters: million-family variants must be tried before the Spanish
-  // "mil" (= thousand). `m` is matched as a standalone token via \b so it does
-  // not steal the leading "m" of "mil".
-  { tokens: ["millones", "millón", "millon", "million", "millions", "mill", "mm"], factor: 1e6 },
-  { tokens: ["m"], factor: 1e6, standalone: true },
-  { tokens: ["k", "grand", "thousand", "mil"], factor: 1e3 },
-  { tokens: ["hundred", "cien"], factor: 1e2 },
-];
-
-const TIME_UNIT_TOKENS = [
-  "day", "days", "week", "weeks", "month", "months", "year", "years",
-  "día", "dias", "días", "semana", "semanas", "mes", "meses", "año", "anos", "años",
-];
+// This engine no longer parses money. It asks the canonical path
+// (canonical-asking-price.js = monetary-understanding + factual commitment),
+// or reads the price_signal the orchestrator already resolved for this turn.
+// Stage 3 and Stage 5 reuse this function, so all three engines agree with
+// the orchestrator, the burst reduction and the classifier: "185k",
+// "$185,000", "2 million", "200 mil" (= 200,000) are prices; "30 days",
+// "2 houses", a bare "65", a joke ("a million 😂") are not.
 
 /**
- * Extract a normalized USD asking price from free text.
- * Returns { value, raw } or null. Guards against time expressions ("30 days")
- * and implausibly small bare numbers so it never mistakes a non-price reply.
+ * @param {string} message
+ * @param {object} [options]  canonical options (reference, negotiationActive,
+ *   shorthandConvention, lastOutboundBody / lastQuestion), or `price_signal`:
+ *   the orchestrator's resolved signal for this very turn, used as-is.
+ * @returns {{ value: number, raw: string, commitment: string } | null}
  */
-export function extractAskingPrice(message) {
-  const text = lower(message);
-  if (!text) return null;
-
-  const numRe = /\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?/g;
-  let match;
-  while ((match = numRe.exec(text)) !== null) {
-    const integer = match[1].replace(/,/g, "");
-    const decimal = match[2] ? `.${match[2]}` : "";
-    let value = parseFloat(integer + decimal);
-    if (!Number.isFinite(value)) continue;
-
-    const tail = text.slice(match.index + match[0].length);
-    const trailing = /^\s*([a-zà-ÿ]+)/i.exec(tail);
-    const trailing_word = trailing ? trailing[1].toLowerCase() : "";
-
-    // Skip time expressions ("check back in 30 days").
-    if (TIME_UNIT_TOKENS.includes(trailing_word)) continue;
-
-    let factor = 1;
-    let matched_token = null;
-    for (const entry of PRICE_MULTIPLIERS) {
-      const hit = entry.tokens.find((tok) => {
-        if (entry.standalone) return trailing_word === tok;
-        return trailing_word === tok;
-      });
-      if (hit) {
-        factor = entry.factor;
-        matched_token = hit;
-        break;
-      }
-    }
-
-    value *= factor;
-
-    const has_currency = /\$/.test(match[0]);
-    // A bare number with no multiplier and no currency must be large enough to
-    // be a real asking price (avoids "I have 2 houses" / "unit 4").
-    if (!matched_token && !has_currency && value < 1000) continue;
-
-    return { value: Math.round(value), raw: clean(match[0]) + (matched_token ? ` ${matched_token}` : "") };
+export function extractAskingPrice(message, options = {}) {
+  const { price_signal = null, ...canonical_options } = options || {};
+  if (price_signal && typeof price_signal === "object" && "asking_price" in price_signal) {
+    if (!isCommittedAskingPrice(price_signal)) return null;
+    const ask = price_signal.asking_price;
+    const value = Number(ask.value);
+    return Number.isFinite(value)
+      ? { value: Math.round(value), raw: clean(ask.extracted_text ?? ask.raw ?? message), commitment: price_signal.commitment }
+      : null;
   }
-
-  return null;
+  const decision = canonicalAskingPriceDecision(message, canonical_options);
+  return decision.value != null
+    ? { value: decision.value, raw: decision.raw || clean(message), commitment: decision.commitment }
+    : null;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -313,7 +276,7 @@ function detectAsksOffer(text, classification) {
  * The deterministic outcome ladder. Order encodes priority and guarantees we
  * never regress: stronger / more actionable signals win.
  */
-function detectStage2Outcome(text, classification) {
+function detectStage2Outcome(text, classification, price_options = {}) {
   // 1. Compliance is absolute.
   if (detectOptOut(text, classification)) return STAGE2_OUTCOMES.HOSTILE_OR_COMPLIANCE;
 
@@ -324,7 +287,7 @@ function detectStage2Outcome(text, classification) {
   if (detectHostile(text, classification)) return STAGE2_OUTCOMES.HOSTILE_OR_COMPLIANCE;
 
   // 4. Explicit asking price (most actionable interest signal — jump capable).
-  if (extractAskingPrice(text)) return STAGE2_OUTCOMES.SELLER_PROVIDES_ASKING_PRICE;
+  if (extractAskingPrice(text, price_options)) return STAGE2_OUTCOMES.SELLER_PROVIDES_ASKING_PRICE;
 
   // 5. Seller requests our offer.
   if (detectAsksOffer(text, classification)) return STAGE2_OUTCOMES.SELLER_REQUESTS_OFFER;
@@ -713,14 +676,17 @@ export function classifyStage2OfferInterest({
   message = "",
   classification = {},
   context = {},
+  // The orchestrator's canonical price_signal for this turn (one money path).
+  price_signal = null,
 } = {}) {
   const text = lower(message);
   const language = clean(classification?.language) || null;
   const entities = context?.entities || {};
   const source_message_id = context?.source_message_id ?? null;
   const now = context?.now ?? null;
+  const price_options = price_signal ? { price_signal } : {};
 
-  const outcome = detectStage2Outcome(text, classification);
+  const outcome = detectStage2Outcome(text, classification, price_options);
 
   // ── Compliance / opt-out: ABSOLUTE override ──────────────────────────────
   if (outcome === STAGE2_OUTCOMES.HOSTILE_OR_COMPLIANCE) {
@@ -781,7 +747,7 @@ export function classifyStage2OfferInterest({
 
   // ── Seller provides asking price (jump-capable; runs acquisition engine) ──
   if (outcome === STAGE2_OUTCOMES.SELLER_PROVIDES_ASKING_PRICE) {
-    const price = extractAskingPrice(text);
+    const price = extractAskingPrice(text, price_options);
     const decision = runAcquisitionDecision(price?.value ?? 0, context?.underwriting || {});
     const route = routeAskingPrice(decision);
     route.event_type = EV.SELLER_ASKING_PRICE_CAPTURED;

@@ -1175,6 +1175,31 @@ export function resolveSafeFallbackClarifierDispatch({
   if (decision.should_mark_human_review !== true) return null;
   if (decision.should_suppress_contact) return null;
 
+  // 7.2 EMOJI CONFIRMATION (2026-10-01). The classifier itself authorized ONE
+  // confirmation question for an emoji-only likely yes / likely no to a known
+  // question: its automation_decision says reply_kind=clarification and names
+  // the sms_templates use case. The copy is an sms_templates row -- never code
+  // -- so the send carries a real template_id; a language without a row fails
+  // closed to review in selectSafeAutoReplyTemplate. The stage does not move.
+  // Any other pure-emoji message stays review (the guard below).
+  const emoji_clarification_use_case =
+    classification?.automation_decision?.reply_kind === "clarification"
+      ? lower(clean(classification.automation_decision.clarification_use_case))
+      : "";
+  if (emoji_clarification_use_case) {
+    if (classification?.compliance_flag) return null;
+    if (lower(classification?.primary_intent) !== "unclear") return null;
+    const emoji_reason = lower(decision.human_review_reason || decision.audit_reason || "");
+    if (!CLARIFIER_REVIEW_REASONS.has(emoji_reason)) return null;
+    return {
+      template_use_case: emoji_clarification_use_case,
+      uncertainty_type: "emoji_confirmation",
+      stage_bucket: classification?.emoji_interpretation?.answers?.stage_bucket || null,
+      strategy: classification?.emoji_interpretation?.clarification?.strategy || null,
+      suggested_text: null,
+    };
+  }
+
   const message_text = clean(message);
   const message_words = message_text.split(/\s+/).filter(Boolean).length;
   if (message_words === 0 || message_words > CLARIFIER_MAX_MESSAGE_WORDS) {
@@ -1992,6 +2017,9 @@ export async function applyInboundSuppression({
   supabaseClient = null,
   phoneNumber = "",
   phoneId = null,
+  // Owner the wrong-number fact belongs to (7.2: wrong person is scoped to
+  // the owner<->phone relationship, never the number for every owner).
+  ownerId = null,
   reason = "opt_out",
   threadKey = "",
   dryRun = false,
@@ -2013,19 +2041,26 @@ export async function applyInboundSuppression({
 
   try {
     if (reason === "wrong_number") {
-      let query = supabase.from("phones").update({
-        phone_contact_status: "wrong_number",
-        wrong_number_at: new Date().toISOString(),
-        wrong_number_source_thread_key: clean(threadKey) || normalized_phone,
-      });
-
-      if (clean(phoneId)) {
-        query = query.eq("id", phoneId);
-      } else {
-        query = query.eq("canonical_e164", normalized_phone);
+      // RELATIONSHIP-SCOPED (7.2, 2026-10-01). This updated every phones row
+      // carrying the number -- i.e. marked it wrong for EVERY owner who lists it
+      // -- and, when a phoneId was supplied, filtered on `id`, a column phones
+      // does not have (its key is phone_id), so that branch always errored.
+      // The fact is "this number is not <owner>'s": scope it to the owner, and
+      // refuse rather than widen when the owner is unknown (the thread's own
+      // disposition and contact_property_resolution still record it).
+      void phoneId;
+      if (!clean(ownerId)) {
+        return { ok: false, reason: "wrong_number_owner_scope_missing", phone_number: normalized_phone };
       }
-
-      const { error } = await query;
+      const { error } = await supabase
+        .from("phones")
+        .update({
+          phone_contact_status: "wrong_number",
+          wrong_number_at: new Date().toISOString(),
+          wrong_number_source_thread_key: clean(threadKey) || normalized_phone,
+        })
+        .eq("canonical_e164", normalized_phone)
+        .eq("master_owner_id", clean(ownerId));
       if (error) throw error;
     } else {
       // DURABLE COMPLIANCE WRITE (repaired 2026-09-09).
@@ -2561,6 +2596,7 @@ export async function executeInboundAutomationDecision({
           supabaseClient: supabase,
           phoneNumber: inboundFrom || threadKey,
           phoneId,
+          ownerId,
           reason: suppression_reason,
           threadKey,
           dryRun: compliance_dry_run,
@@ -2688,8 +2724,12 @@ export async function executeInboundAutomationDecision({
         human_review_reason: null,
         next_action: "send_safe_clarifier",
         route_hint: "safe_clarifier",
-        allowed_template_stages: ["safe_clarifier"],
-        required_template_use_case: null,
+        // An emoji confirmation names its sms_templates use case; the
+        // code-authored clarifier (suggested_text) keeps the legacy path.
+        allowed_template_stages: clarifier_dispatch.template_use_case
+          ? [clarifier_dispatch.template_use_case]
+          : ["safe_clarifier"],
+        required_template_use_case: clarifier_dispatch.template_use_case || null,
         audit_reason: "safe_fallback_clarifier",
         clarifier_dispatch,
       };

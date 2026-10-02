@@ -549,6 +549,10 @@ export function resolveBurstAskingPriceSignal(constituents = [], {
   negotiationActive = false,
   shorthandConvention = false,
   now = null,
+  // The ONE money path (canonical-asking-price.js) injects its single-message
+  // resolver here so each fragment carries its factual commitment; the default
+  // keeps this module's own tests on the bare monetary authority.
+  resolveFragment = resolveAskingPriceSignal,
 } = {}) {
   // A fragment that states its price as "110k" establishes the thousands
   // convention for the fragments after it in the same burst.
@@ -563,7 +567,7 @@ export function resolveBurstAskingPriceSignal(constituents = [], {
   for (const fragment of ordered) {
     const body = clean(fragment?.body ?? fragment?.message);
     if (!body) continue;
-    const signal = resolveAskingPriceSignal(body, {
+    const signal = resolveFragment(body, {
       reference,
       negotiationActive,
       shorthandConvention: convention,
@@ -605,6 +609,7 @@ export function resolveBurstAskingPriceSignal(constituents = [], {
     is_counter: false,
     needs_clarification: Boolean(clarification),
     clarification_reason: clarification?.clarification_reason || null,
+    ...(clarification?.commitment ? { commitment: clarification.commitment } : {}),
     informational_mentions,
     all_mentions,
     burst_reduced: true,

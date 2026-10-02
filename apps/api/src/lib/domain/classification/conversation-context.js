@@ -194,6 +194,35 @@ export function validateConversationContext(raw) {
         ? raw.existing_active_facts
         : {},
     language: raw.language != null ? String(raw.language) : null,
+    // Derived from OUR last outbound body by the builder (7.2): the first name
+    // we greeted ("Hey James, ...") and the language we wrote in. Used only to
+    // read the reply ("Not James", "I don't understand"), never to assert a fact.
+    last_outbound_addressee:
+      raw.last_outbound_addressee != null && String(raw.last_outbound_addressee).trim()
+        ? String(raw.last_outbound_addressee).trim()
+        : null,
+    last_outbound_language:
+      raw.last_outbound_language != null && String(raw.last_outbound_language).trim()
+        ? String(raw.last_outbound_language).trim()
+        : null,
+    last_outbound_agent:
+      raw.last_outbound_agent != null && String(raw.last_outbound_agent).trim()
+        ? String(raw.last_outbound_agent).trim()
+        : null,
+    // What a bare number in the reply can mean ({kind, k_amount}; see
+    // last-question.js). Read by the ONE money path through the classifier.
+    last_outbound_question:
+      raw.last_outbound_question && typeof raw.last_outbound_question === 'object' &&
+      typeof raw.last_outbound_question.kind === 'string'
+        ? {
+            kind: raw.last_outbound_question.kind,
+            k_amount:
+              raw.last_outbound_question.k_amount != null &&
+              Number.isFinite(Number(raw.last_outbound_question.k_amount))
+                ? Number(raw.last_outbound_question.k_amount)
+                : null,
+          }
+        : null,
   };
 
   return {
@@ -235,12 +264,12 @@ function inferQuestionType(useCase) {
 // got no reply. An owner answers "I am" as often as "I do"; a yes followed by
 // a curious or selling tail is still a yes.
 const AFFIRMATIVE_HEAD =
-  "(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|👍|👍🏻|👍🏼|👍🏽|👍🏾|👍🏿|✅)";
+  "(?:yes|yep|yeah|yup|yea|ya|yah|yes i do|yeah i do|i do|i still do|still do|still own it|i own it|sure|sure do|absolutely|definitely|correct|correcto|that is right|thats right|right|affirmative|confirmed|si|sí|claro|claro que si|claro que sí|asi es|así es|i am|yes i am|yeah i am|yep i am|i am the owner|yes i am the owner|i'm the owner|yes it is|yeah it is|it is|it is mine|yes it is mine|its mine|that is me|yes that is me|thats me|sim|vâng|vang|dạ|đúng|đúng rồi|dung roi|phải rồi|phai roi)";
 const AFFIRMATIVE_TAIL =
   "(?:\\s+(?:is\\s+)?(?:what'?s up|whats up|why|what about it|what do you want|who is this|who'?s this|who are you)|\\s+and\\s+(?:i am|i'm|im)\\s+(?:selling it now|selling it|selling|looking to sell|trying to sell))?";
 const AFFIRMATIVE_TOKENS = `(?:${AFFIRMATIVE_HEAD}${AFFIRMATIVE_TAIL})`;
 const NEGATIVE_TOKENS =
-  '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|no i dont|i do not|no i am not|not really|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|👎|👎🏻|👎🏼|👎🏽|👎🏾|👎🏿|❌)';
+  '(?:no|nope|nah|nel|not anymore|no longer|not any more|no i do not|no i dont|i do not|no i am not|not really|do not own it|sold it|i sold it|already sold|sold already|wrong number|wrong house|wrong property|never owned it|never owned|not mine|not my house|ya no|no ya no|không|không phải|khong|khong phai|ko phải|ko phai|não|nao)';
 
 // ABSENCE OF A VALUE IS NOT DISINTEREST. "No I don't have one" answering "do you
 // have an asking price in mind?" says the seller has no number yet -- they are
@@ -258,6 +287,10 @@ const NO_VALUE_TOKENS =
   "nothing in mind|no set price|no asking price|i do not have a price|do not have a price|" +
   "no i have not|i have not thought about it|have not thought about it|" +
   "i do not know yet|do not know yet|not yet|no idea|i have no idea|no not really)";
+
+// Negative tokens that EXPLICITLY disown the property: not a bare "no".
+const EXPLICIT_DISOWN_RE =
+  /^(?:wrong number|wrong house|wrong property|not mine|not my house|never owned(?: it)?|do not own it|sold it|i sold it|already sold|sold already)$/u;
 
 /** Normalizes punctuation, contractions and spacing before token matching. */
 function normalizeShortReply(text) {
@@ -374,6 +407,14 @@ export function applyContextualShortReply(messageText, validated) {
   }
 
   if (isNo) {
+    if ((useCase === 'ownership_check' || qType === 'ownership') && EXPLICIT_DISOWN_RE.test(t)) {
+      // "Wrong number" / "Not mine" / "I sold it" / "Never owned it" ANSWER the
+      // ownership question explicitly. Binding them to the clarification rule
+      // below held every explicit denial as `unclear` whenever the live path had
+      // built the context (2026-10-01: they sat in New Replies). Unbound, the
+      // classifier's own wrong-number / sold detectors decide.
+      return { applied: false };
+    }
     if (useCase === 'ownership_check' || qType === 'ownership') {
       return {
         applied: true,

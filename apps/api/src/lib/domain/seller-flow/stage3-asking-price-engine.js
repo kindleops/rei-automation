@@ -475,6 +475,8 @@ export function classifyStage3AskingPrice({
   message = "",
   underwriting = {},
   context = {},
+  // The orchestrator's canonical price_signal for this turn (one money path).
+  price_signal = null,
 } = {}) {
   const entities = context?.entities || {};
   const source_message_id = context?.source_message_id ?? null;
@@ -485,7 +487,8 @@ export function classifyStage3AskingPrice({
   // 1. Accept the asking price from Stage 2; fall back to extracting from text.
   let ask = numberOrNull(seller_asking_price);
   if (ask === null) {
-    const extracted = extractAskingPrice(message);
+    // Delegated to the ONE money path (Stage 2's extractAskingPrice).
+    const extracted = extractAskingPrice(message, price_signal ? { price_signal } : {});
     ask = extracted ? extracted.value : null;
   }
 

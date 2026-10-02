@@ -48,6 +48,23 @@ const OWNERSHIP_CONFIRM_PHRASES = [
   "yes that is my property",
   "i own the property",
   "i own this property",
+  // Spanish / Portuguese parity (one money path, RC 7.2 B): "Sí, soy el
+  // propietario y quiero 150000" now carries a canonical price, so the
+  // classifier's primary is the price; the ownership statement must be read
+  // here exactly as "Yes, I own it and want 120k" is. Negatives ("no soy el
+  // dueño") are checked first.
+  "soy el propietario",
+  "soy la propietaria",
+  "soy el dueño",
+  "soy el dueno",
+  "soy la dueña",
+  "soy la duena",
+  "sou o proprietario",
+  "sou o proprietário",
+  "sou a proprietaria",
+  "sou a proprietária",
+  "sou o dono",
+  "sou a dona",
 ];
 
 const ACTUAL_WRONG_NUMBER_PHRASES = [
@@ -277,6 +294,14 @@ const NEGATIVE_OWNERSHIP_PHRASES = [
   "no soy el dueno",
   "no soy la dueña",
   "no soy la duena",
+  "no soy el propietario",
+  "no soy la propietaria",
+  "nao sou o dono",
+  "não sou o dono",
+  "nao sou a dona",
+  "não sou a dona",
+  "nao sou o proprietario",
+  "não sou o proprietário",
 ];
 
 function detectOwnershipConfirmation(message = "", classifier_intent = null) {

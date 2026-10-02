@@ -303,8 +303,8 @@ test("asking-price semantic role guards", async () => {
   const accepts = [
     "I want 250k",
     "Asking 275k",
-    "No less than 250",
-    "Between 240 and 260",
+    "No less than 250k",
+    "Between 240k and 260k",
     "Bottom line for me is 265k",
   ];
   for (const text of accepts) {
@@ -313,6 +313,17 @@ test("asking-price semantic role guards", async () => {
     assert.equal(p.qualifies_as_seller_asking_price, true, text);
     const c = await classify(text, null, { heuristicOnly: true });
     assert.equal(c.primary_intent, "asking_price_provided", text);
+  }
+  // ONE money path (RC 7.2 B): "No less than 250" is still a price ANSWER
+  // (asking_price_provided, so the turn asks for the scale), but the canonical
+  // path cannot commit to a scale: no value, commitment AMBIGUOUS.
+  for (const text of ["No less than 250", "Between 240 and 260"]) {
+    assert.equal(parseSellerAskingPrice(text).qualifies_as_seller_asking_price, true, text);
+    const c = await classify(text, null, { heuristicOnly: true });
+    assert.equal(c.primary_intent, "asking_price_provided", text);
+    assert.equal(c.price_parse.value, null, text);
+    assert.equal(c.price_parse.commitment, "AMBIGUOUS", text);
+    assert.equal(c.factual_commitment, "AMBIGUOUS", text);
   }
 });
 

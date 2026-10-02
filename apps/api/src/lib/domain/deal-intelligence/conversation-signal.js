@@ -74,6 +74,8 @@
  * the app's 'Eastern'/'Central'/… labels); otherwise in UTC, labelled so.
  */
 
+import { resolveCanonicalAskingPrice, isCommittedAskingPrice } from '@/lib/domain/seller-flow/canonical-asking-price.js'
+
 export const CONVERSATION_SIGNAL_VERSION = 'conversation_signal_v1'
 
 const MIN = 60_000
@@ -271,24 +273,23 @@ function localParts(ms, tz) {
   return { hour: Number(p.hour) % 24, weekday: wd, date: `${p.year}-${p.month}-${p.day}` }
 }
 
-/** Seller-stated prices: $-prefixed, k/m/mil-suffixed, or comma/dot-grouped ≥ 10,000. */
-export function extractPrices(text) {
-  const out = []
-  const s = clean(text)
-  if (/\b(a|one) million\b/i.test(s)) out.push(1_000_000)
-  const re = /(\$)?\s?(\d{1,3}(?:[,.]\d{3})+|\d+(?:\.\d+)?)\s?(k|m|mil|million|thousand)?(?![\w])/gi
-  for (const m of s.matchAll(re)) {
-    const [, dollar, numRaw, suffixRaw] = m
-    const suffix = (suffixRaw || '').toLowerCase()
-    const grouped = /[,.]\d{3}$/.test(numRaw) && /^\d{1,3}([,.]\d{3})+$/.test(numRaw)
-    let n = grouped ? Number(numRaw.replace(/[,.]/g, '')) : Number(numRaw)
-    if (!Number.isFinite(n)) continue
-    if (suffix === 'k' || suffix === 'mil' || suffix === 'thousand') n *= 1000
-    else if (suffix === 'm' || suffix === 'million') n *= 1_000_000
-    if (!dollar && !suffix && !grouped) continue
-    if (n >= 10_000 && n <= 50_000_000) out.push(Math.round(n))
-  }
-  return [...new Set(out)]
+/**
+ * Seller-stated prices in one message, decided by the ONE money path (RC 7.2
+ * B: seller-flow/canonical-asking-price.js). This read model no longer parses
+ * money on its own: "sure, give me a million 😂" used to score "Named a price
+ * $1,000,000" here while the orchestrator demoted it as non-literal. A
+ * committed asking price contributes its value (and both ends of a stated
+ * range); anything the canonical path did not commit to contributes nothing.
+ */
+export function extractPrices(text, { lastOutboundBody = null } = {}) {
+  const signal = resolveCanonicalAskingPrice(clean(text), { lastOutboundBody })
+  if (!isCommittedAskingPrice(signal)) return []
+  const ask = signal.asking_price
+  const values = [ask.value, ask.range?.low, ask.range?.high]
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => Math.round(n))
+  return [...new Set(values)]
 }
 
 function normalize(messages) {
@@ -459,7 +460,9 @@ export function analyzeConversation(messages, opts = {}) {
     for (const [cat, re] of Object.entries(DISTRESS)) {
       if (matchUnnegated(re, t)) { lang.distress[cat]++; if (!hits.distress[cat]) hits.distress[cat] = r }
     }
-    const prices = extractPrices(t)
+    // The question we asked last sets a bare number's scale ("$240k?" -> "250")
+    // or un-prices it ("how many square feet?"), exactly as on the live path.
+    const prices = extractPrices(t, { lastOutboundBody: outbound.filter((o) => o.at <= r.at).at(-1)?.body ?? null })
     if (prices.length) { lang.priceMentions.push(...prices); if (!hits.price) hits.price = r }
     const asks = ASKS_OFFER.test(t)
     if (!hits.asksOffer && asks) hits.asksOffer = r

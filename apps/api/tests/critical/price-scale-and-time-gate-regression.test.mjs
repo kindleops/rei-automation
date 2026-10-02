@@ -94,7 +94,7 @@ const MONEY_PHRASES = [
   "at least 85k", "meet me at 200k", "around 200k", "about 150,000", "at $200k",
   "between $90,000 and $100,000", "between 90k and 100k", "between 90000 and 100000",
   "$500,000", "1.2 million", "i want 250k", "asking 300k", "minimum 180000",
-  "no less than 250", "150k firm", "300k obo", "at 250000", "around $175,000",
+  "no less than 250k", "150k firm", "300k obo", "at 250000", "around $175,000",
   "about 2 million", "want 90k", "asking for 120k", "at 1.5 million",
   "between 100k and 120k", "min 95k", "350,000",
 ];
@@ -147,19 +147,22 @@ test("a between-range is a clock only when BOTH sides are bare 1-2 digit numbers
   assert.equal(await priceOf("between 90000 and 100000"), 90_000);
 });
 
-test("REI bare-hundreds ranges are prices, not clock windows", async () => {
-  // Regression guard on my own first attempt at the rule above. Requiring the
-  // range to "look like money" was too strict: "Between 240 and 260" is REI
-  // shorthand for a 240k-260k range — the same convention scalePriceToken notes
-  // for a bare "250" — and rejecting it silently dropped a stated asking price.
-  // The distinguisher is smallness, not money-shape.
+test("REI bare-hundreds ranges are ambiguous on the ONE money path; a stated scale makes them prices", async () => {
+  // RC 7.2 B: "Between 240 and 260" carries no scale (240k? 240?). The
+  // canonical path (canonical-asking-price.js) asks for clarification instead
+  // of guessing thousands, exactly as it does for a bare "250" (RC 7.1); it is
+  // still never a clock window. Written with its scale, it is a price range.
   for (const text of ["Between 240 and 260", "between 240 and 260", "between 100 and 120"]) {
     const result = await classify(text, null, { heuristicOnly: true });
-    assert.equal(
-      result.primary_intent,
-      "asking_price_provided",
-      `${text} must remain a stated price range`
-    );
-    assert.ok((result.price_parse?.value ?? 0) > 0, `${text} must carry a price value`);
+    // Still a price ANSWER (the turn asks for the scale), never a clock window,
+    // and never a guessed value.
+    assert.equal(result.primary_intent, "asking_price_provided", text);
+    assert.equal(result.price_parse?.value ?? null, null, text);
+    assert.equal(result.price_parse?.commitment, "AMBIGUOUS", text);
+  }
+  for (const [text, low] of [["Between 240k and 260k", 240000], ["entre 240 y 260 mil", 240000], ["240 to 260k", 240000]]) {
+    const result = await classify(text, null, { heuristicOnly: true });
+    assert.equal(result.primary_intent, "asking_price_provided", text);
+    assert.equal(result.price_parse?.value, low, text);
   }
 });

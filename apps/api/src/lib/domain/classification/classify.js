@@ -15,12 +15,27 @@ import {
   findHighConfidenceAddressSpans,
   isIndexInsideAddressSpan,
 } from "@/lib/domain/classification/extract-address-signals.js";
+import {
+  interpretEmojiReply,
+  carriesLaughter,
+  FACTUAL_COMMITMENT,
+} from "@/lib/domain/classification/emoji-interpretation.js";
+import { detectReplyDispositionSignals, foldReplyLines } from "@/lib/domain/classification/reply-disposition-signals.js";
+import {
+  resolveCanonicalAskingPrice,
+  isCommittedAskingPrice,
+  CANONICAL_ASKING_PRICE_VERSION,
+} from "@/lib/domain/seller-flow/canonical-asking-price.js";
 
 /**
  * Provenance identifier recorded on every state mutation this classifier's
  * output produces. Bump when classification semantics change materially.
  */
-export const CLASSIFY_VERSION = "classify_js_context_v2";
+// v3 (2026-10-01, New Replies 7.2): emoji/reaction interpretation layer,
+// multilingual wrong-person / sold / not-for-sale / hostile / auto-reply
+// detectors, explicit denials no longer held by ownership context, factual
+// commitment and the language triple on every result.
+export const CLASSIFY_VERSION = "classify_js_context_v3_reply_disposition";
 export { CONTEXT_VERSION, validateConversationContext };
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -515,6 +530,12 @@ const COMPLIANCE_PHRASES = [
   "agrégame al no llamar", "ponme en la lista de no llamar",
   "ya te dije que pares", "ya te dije que no me contactes",
   "párate", "ya basta", "suficiente",
+  // "Don't talk to me" family (2026-10-01 New Replies corpus: "Tu no nesesitas
+  // saver nada ni te conozco ya ni me ables" sat in New Replies as who_is_this).
+  // Misspelled "ables" for "hables" is how it is actually typed.
+  "no me hables", "ni me hables", "ya no me hables", "ya ni me hables",
+  "no me ables", "ni me ables", "ya no me ables", "ya ni me ables",
+  "no me vuelvas a escribir", "no me vuelva a escribir", "no me vuelvas a hablar",
 
   // ── Portuguese ────────────────────────────────────────────────────────────
   "pare de me mandar mensagem", "pare de me mandar mensagens",
@@ -1073,6 +1094,8 @@ const OBJECTION_MAP = [
       "accepting offers", "offer accepted",
       // Spanish
       "ya está listada", "ya está en el mercado",
+      "está publicada", "esta publicada", "publicada en el mercado",
+      "está listada", "esta listada",
       "tengo agente", "trabajo con un agente",
       "ya tiene comprador", "está en el mercado",
       "con un agente", "ya acepté una oferta",
@@ -3518,6 +3541,44 @@ function matchesAnyPattern(text, patterns = []) {
 }
 
 /**
+ * The classifier's price output, decided by the canonical money path
+ * (seller-flow/canonical-asking-price.js). The classifier's own parse is kept
+ * as evidence (`classifier_parse_*`); `qualifies_as_seller_asking_price`,
+ * `value` and `confidence` are the canonical verdict. A price the canonical
+ * path did not commit to carries no value, so no reader can mistake the old
+ * parse for a decision.
+ */
+function toCanonicalPriceParse(classifierParse, canonical) {
+  const committed = isCommittedAskingPrice(canonical);
+  const ask = committed ? canonical.asking_price : null;
+  return {
+    ...classifierParse,
+    value: ask ? Math.round(Number(ask.value)) : null,
+    range: committed ? classifierParse.range ?? null : null,
+    confidence: ask ? Number(ask.confidence) || classifierParse.confidence : 0,
+    evidence_span: ask ? ask.extracted_text ?? classifierParse.evidence_span : classifierParse.evidence_span,
+    semantic_role: committed ? "seller_asking_price" : classifierParse.semantic_role,
+    qualifies_as_seller_asking_price: committed,
+    classifier_parse_value: classifierParse.value,
+    classifier_parse_qualified: classifierParse.qualifies_as_seller_asking_price === true,
+    commitment: canonical?.commitment ?? null,
+    needs_clarification: canonical?.needs_clarification === true,
+    clarification_reason: canonical?.clarification_reason ?? null,
+    non_literal: canonical?.commitment === "NON_LITERAL",
+    // The seller STATED a price whose scale the canonical path cannot commit
+    // to ("I'd want 285.", "No less than 250"): still a price answer, so the
+    // turn asks for the scale (RC 7.1 clarify) instead of going to review --
+    // but with NO value, so nothing downstream can mistake 285 for $285.
+    scale_ambiguous_statement:
+      !committed &&
+      canonical?.needs_clarification === true &&
+      ["ambiguous_price_scale", "low_confidence_monetary_extraction"].includes(canonical?.clarification_reason) &&
+      classifierParse.qualifies_as_seller_asking_price === true,
+    canonical_version: CANONICAL_ASKING_PRICE_VERSION,
+  };
+}
+
+/**
  * Structured seller asking-price parse. Only semantic_role = seller_asking_price
  * may qualify for future authority (never assigned here without blind v3).
  */
@@ -4453,6 +4514,10 @@ const PURPOSE_OR_IDENTITY_QUESTION_PATTERNS = [
   /^what(?:'s|s|\s+is)\s+(?:it|this|that)\s+(?:about|regarding|in\s+reference\s+to|for)[\s?.!]*$/,
 ];
 
+// An affirmative head with more after it (see 14b in resolveIntents).
+const OWNERSHIP_YES_WITH_MORE_RE =
+  /^(?:(?:lol|lmao|haha+|ha|well|um+|uh+|oh)[\s,.!]+)*(?:yes|yeah|yea|yep|yup|si|sim|correct|i\s+do|it\s+is|that'?s\s+(?:me|right|correct))\b(?=[\s,.!]*\S)/;
+
 export function matchesPurposeOrIdentityQuestion(text = "") {
   const t = lower(text).replace(/[’‘`]/g, "'").trim();
   if (!t || wordCount(t) > 12) return false;
@@ -4569,6 +4634,9 @@ function resolveIntents(
     objection = null,
     positive_signals = [],
     conversation_context = null,
+    // 7.2 layers, computed once in classifyHeuristic and passed in.
+    emoji_interpretation = null,
+    reply_signals = null,
   } = {}
 ) {
   const text = lower(message);
@@ -4576,11 +4644,58 @@ function resolveIntents(
   const normalized_objection = cleanMessage(objection);
   const matched_rule_ids = [];
   const suppressed_rule_ids = [];
+  // Rule ids of the 7.2 reply-disposition detectors, kept apart so a message
+  // the legacy rules already explained keeps its calibrated rule family.
+  const reply_rule_ids = [];
+  // Descriptive tags on legacy matches (which hostility lane). Never used as a
+  // calibrated rule family.
+  const rule_tags = [];
   let price_parse = null;
   let calibrated_rule_family_id = null;
 
   const intents = [];
   const ctxValidation = validateConversationContext(conversation_context);
+  // ── LAYER 3 (7.2): emoji-only replies and platform reactions ─────────────
+  // Read against the question they answer (validated context, or the
+  // reaction's own quoted target). An emoji is never a fact: a likely yes/no
+  // becomes ONE confirmation question, a hostile emoji the hostile lane, a
+  // thumbs-up on "I'll follow up next month" an acknowledgement that leaves
+  // nothing open. Compliance has already run -- classify() returns on a STOP
+  // compliance flag before this -- and an emoji-only message has no words that
+  // could opt out. This runs BEFORE short-reply binding so 👍 can never bind to
+  // ownership_confirmed.
+  if (
+    !compliance_flag &&
+    emoji_interpretation &&
+    (emoji_interpretation.emoji_only || emoji_interpretation.reaction_type === "platform_reaction")
+  ) {
+    const signal = emoji_interpretation.semantic_signal;
+    const emoji_primary =
+      signal === "hostile"
+        ? "hostile_or_legal"
+        : signal === "acknowledgement" && !emoji_interpretation.needs_review
+          ? "acknowledgement"
+          : "unclear";
+    const emoji_label = signal && signal !== emoji_primary ? signal : null;
+    return finalizeIntentResult({
+      primary_intent: emoji_primary,
+      secondary_intents: emoji_label ? [emoji_label] : [],
+      matched_intents: [emoji_primary],
+      matched_rule_ids: [emoji_interpretation.rule_id || "emoji_interpretation"],
+      context_status: ctxValidation.context_status,
+      evidence_spans: [rawMessage],
+      precedence_result: "emoji_interpretation",
+      ambiguity_flags: emoji_interpretation.requires_clarification
+        ? ["needs_clarification"]
+        : emoji_interpretation.needs_review
+          ? ["needs_review"]
+          : [],
+      calibrated_rule_family_id: emoji_interpretation.rule_id || null,
+      confidence_rationale: emoji_interpretation.rule_id || null,
+      contextual_confidence: emoji_interpretation.confidence,
+    });
+  }
+
   const shortCtx = applyContextualShortReply(rawMessage, ctxValidation);
   if (shortCtx.applied) {
     matched_rule_ids.push(shortCtx.rule_id);
@@ -4740,16 +4855,42 @@ function resolveIntents(
     });
   }
 
+  // 1b. LAYER 2 (7.2): provider / system auto-responses and stray noise.
+  // "I'm Driving - Sent from My Car", vacation and business auto-replies,
+  // carrier notices, a single stray letter. Not engagement: the event and this
+  // classification are kept, no New Replies item is created.
+  if (reply_signals?.non_engagement) {
+    return finalizeIntentResult({
+      primary_intent: "reaction_only",
+      matched_rule_ids: [...matched_rule_ids, reply_signals.non_engagement_rule],
+      context_status: ctxValidation.context_status,
+      calibrated_rule_family_id: reply_signals.non_engagement_rule,
+      evidence_spans: [rawMessage],
+      precedence_result: "non_engagement_auto_response",
+      contextual_confidence: 0.9,
+    });
+  }
+
   // 2. SOLD / TRANSFERRED — property-scoped disposition, checked BEFORE the
   // wrong-number fold so "already sold" can never become a contact-scope
   // suppression. A true wrong-person claim at this phone still outranks.
-  const is_sold_transfer = matchesSoldTransfer(text);
-  if (is_sold_transfer && !is_true_wrong) {
+  //
+  // 7.2: a bare "Sold" / "Vendida" / "Đã bán" and a named wrong person
+  // ("Not James", "Sorry, this isn't Derik", "Disculpa no soy Dan",
+  // "I am not on Vincent Ave") are explicit -- see reply-disposition-signals.js.
+  const legacy_sold_transfer = matchesSoldTransfer(text);
+  const is_sold_transfer = legacy_sold_transfer || reply_signals?.sold === true;
+  if (!legacy_sold_transfer && reply_signals?.sold === true) reply_rule_ids.push("sold_short_multilingual");
+  const is_wrong_person_claim = reply_signals?.wrong_person?.matched === true;
+  if (is_sold_transfer && !is_true_wrong && !is_wrong_person_claim) {
     intents.push("sold_property");
-  } else if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect) {
+  } else if (normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect || is_wrong_person_claim) {
     // WRONG NUMBER / WRONG PERSON / NOT OWNER / DISCONNECTED CONTACT
     // (never-owned / not-owner identity disconnects stay phone-scoped).
     intents.push("wrong_number");
+    if (is_wrong_person_claim && !(normalized_objection === "wrong_number" || is_true_wrong || is_ownership_disconnect)) {
+      reply_rule_ids.push(reply_signals.wrong_person.rule_id);
+    }
   }
 
   // 2.4 UNDER CONTRACT / PENDING SALE (closure pass 2026-08-26): a
@@ -4788,17 +4929,29 @@ function resolveIntents(
   }
 
   // 3. HOSTILE OR LEGAL
-  if (includesAny(text, [
+  // The rule id records WHICH: a legal threat keeps the human lane; hostility
+  // without opt-out language (7.2, owner decision) is archived/cooled with no
+  // automatic nurture and no DNC. Opt-out language never reaches here.
+  const hostile_legal_threat = includesAny(text, [
     "sue", "attorney", "lawyer", "legal", "court", "harassment", "fcc", "report",
-    "fuck", "shit", "bitch", "asshole", "f***", "lawsuit", "police", "sheriff",
-    "damn business", "drop dead", "vete a", "chingaos", "mames",
+    "lawsuit", "police", "sheriff",
     "stop harassing", "don't ever text", "dont ever text", "never contact",
-  ])) {
+  ]);
+  const hostile_profanity = includesAny(text, [
+    "fuck", "shit", "bitch", "asshole", "f***",
+    "damn business", "drop dead", "vete a", "chingaos", "mames",
+  ]);
+  const hostile_insult = reply_signals?.hostile?.matched === true;
+  const hostile_emoji = emoji_interpretation?.semantic_signal === "hostile";
+  if (hostile_legal_threat || hostile_profanity || hostile_insult || hostile_emoji) {
     intents.push("hostile_or_legal");
+    if (hostile_legal_threat) rule_tags.push("hostile_legal_threat");
+    else if (hostile_profanity) rule_tags.push("hostile_profanity");
+    else reply_rule_ids.push(hostile_insult ? reply_signals.hostile.rule_id : "emoji_hostile_with_text");
   }
 
   // 4. NOT INTERESTED / SOFT OBJECTIONS (Capture negations before positive keywords)
-  if (
+  const legacy_not_interested_match =
     normalized_objection === "not_interested" ||
     includesAny(text, [
       "not interested", "no interest", "no thanks", "no thank you",
@@ -4819,14 +4972,22 @@ function resolveIntents(
       // Spanish
 
       "no me interesa", "no quiero vender", "no está en venta", "no esta en venta",
-    ])
-  ) {
+    ]);
+  const not_for_sale_signal = !legacy_not_interested_match && reply_signals?.not_for_sale?.matched === true;
+  if (not_for_sale_signal) reply_rule_ids.push(reply_signals.not_for_sale.rule_id);
+  // "Tengo otra propiedad de venta": a DIFFERENT property is for sale. Never
+  // an intent of its own (no new label); the rule id sends it to a person
+  // (deriveAutomationDecision) whatever this property's answer was.
+  if (reply_signals?.other_property?.matched === true) reply_rule_ids.push(reply_signals.other_property.rule_id);
+  if (legacy_not_interested_match || not_for_sale_signal) {
     // Check for "unless" or "but" which might indicate price or latent interest.
     // The structured parse (not the raw pattern list) decides whether a number
     // is really a price, so "not for sale but I'm at 1503 Maple Drive" cannot
     // become an asking price.
-    if (includesAny(text, ["unless", "but", "except", "if you", "pero"])) {
-       if (parseSellerAskingPrice(text).qualifies_as_seller_asking_price) {
+    // A price FLOOR ("I won't sell for less than 300k", "no menos de 200 mil")
+    // is a number, not a decline: the structured parse decides.
+    if (includesAny(text, ["unless", "but", "except", "if you", "pero", "less than", "at least", "no less", "minimum", "below", "por menos de", "menos de", "no menos de"])) {
+       if (isCommittedAskingPrice(resolveCanonicalAskingPrice(text))) {
          intents.push("asking_price_provided");
        } else {
          intents.push("not_interested");
@@ -4953,12 +5114,48 @@ function resolveIntents(
       intents.push("seller_interested");
     }
   }
+  // 7.2: "It's for sale right now" is the seller announcing it is for sale.
+  if (
+    reply_signals?.engagement?.seller_interested &&
+    !intents.includes("not_interested") &&
+    !intents.includes("need_time") &&
+    !intents.includes("seller_interested")
+  ) {
+    intents.push("seller_interested");
+    reply_rule_ids.push("for_sale_now");
+  }
 
-  // 7. PRICE PROVIDED — structured semantic role required
-  price_parse = parseSellerAskingPrice(rawMessage);
-  if (price_parse.qualifies_as_seller_asking_price) {
+  // 7. PRICE PROVIDED — the ONE money path decides (RC 7.2 B).
+  // parseSellerAskingPrice still finds the mention and its semantic role
+  // (evidence, address / rent / time guards for the audit trail), but it no
+  // longer DECIDES: "65" was asking_price_provided @0.88 with auto-reply
+  // allowed while the orchestrator's canonical parser called it ambiguous.
+  // The canonical resolver (monetary understanding + factual commitment, with
+  // the question we asked when the context is valid) is the only verdict.
+  price_parse = toCanonicalPriceParse(
+    parseSellerAskingPrice(rawMessage),
+    resolveCanonicalAskingPrice(rawMessage, {
+      lastQuestion:
+        ctxValidation.context_status === "valid"
+          ? ctxValidation.context?.last_outbound_question || null
+          : null,
+    })
+  );
+  // 7.2 NON-LITERAL: laughter beside a number ("Sure, I'll take a million
+  // dollars 😂", "lol 5 bucks") is ridicule or disbelief, never an asking
+  // price. The parse is kept for audit, flagged non-literal, and does not
+  // become an intent.
+  const laughter_present = carriesLaughter(rawMessage);
+  if (price_parse.non_literal || (price_parse.classifier_parse_qualified && laughter_present)) {
+    price_parse = { ...price_parse, qualifies_as_seller_asking_price: false, non_literal: true };
+    suppressed_rule_ids.push("price_non_literal_laughter");
+    reply_rule_ids.push("non_literal_laughter");
+  } else if (price_parse.qualifies_as_seller_asking_price) {
     intents.push("asking_price_provided");
-    matched_rule_ids.push(price_parse.price_rule_id || "seller_asking_price");
+    matched_rule_ids.push(price_parse.price_rule_id || "canonical_asking_price");
+  } else if (price_parse.scale_ambiguous_statement) {
+    intents.push("asking_price_provided");
+    matched_rule_ids.push("asking_price_scale_ambiguous");
   } else if (price_parse.price_rule_id) {
     suppressed_rule_ids.push(price_parse.price_rule_id);
   }
@@ -5008,6 +5205,7 @@ function resolveIntents(
     !agent_handles_proposal &&
     !proposal_rejected &&
     (normalized_objection === "send_offer_first" ||
+    reply_signals?.engagement?.asks_offer === true ||
     includesAny(text, [
       "how much",
       "what are you offering",
@@ -5205,10 +5403,13 @@ function resolveIntents(
       "call whenever", "call anytime", "call any time",
       "when can you call", "when can we talk", "good time to call",
       "programar una llamada", "agendar una llamada",
-      "en qué te puedo ayudar", "en que te puedo ayudar",
+      // "¿En qué te puedo ayudar?" ("how can I help you?") is a purpose
+      // question, not a call request: reply-disposition-signals.js
+      // IDENTITY_QUESTION_PATTERNS (2026-10-01 active-deal review).
     ]) ||
     have_a_call_request_re.test(text) ||
-    call_at_request_re.test(text)
+    call_at_request_re.test(text) ||
+    reply_signals?.call_request?.matched === true
   ) {
     intents.push("callback_requested");
   }
@@ -5621,9 +5822,10 @@ function resolveIntents(
     intents.push("requests_email");
     matched_rule_ids.push("requests_email");
   }
-  if (matchesLanguageSwitchRequest(text)) {
+  if (matchesLanguageSwitchRequest(text) || reply_signals?.language?.matched === true) {
     intents.push("language_switch");
-    matched_rule_ids.push("language_switch_request");
+    if (matchesLanguageSwitchRequest(text)) matched_rule_ids.push("language_switch_request");
+    else reply_rule_ids.push(reply_signals.language.rule_id);
   }
 
   // 12.7 "IS THE BUYER STILL INTERESTED" — the ask_offer detector already
@@ -5685,13 +5887,28 @@ function resolveIntents(
      intents.push("acknowledgement");
   }
 
+  // 14b. OWNERSHIP ANSWERED, MORE TO SAY (7.2, 2026-10-01 active-deal review).
+  // Under an OWNERSHIP question an affirmative head answers it even when more
+  // follows: "Lol yes, why?", "Yes but I've owned it 20 years and am a
+  // lifer!!". The rest of the message still decides the primary intent (a
+  // decline, an explicit who-is-this); a bare "yes" is the contextual
+  // short-reply rule's job. "ya" is left out on purpose ("ya la vendí").
+  if (
+    reply_signals?.ownership_question === true &&
+    !intents.some((i) => ["opt_out", "wrong_number", "sold_property", "ownership_confirmed"].includes(i)) &&
+    OWNERSHIP_YES_WITH_MORE_RE.test(foldReplyLines(rawMessage)[0] || "")
+  ) {
+    intents.push("ownership_confirmed");
+    reply_rule_ids.push("ownership_yes_with_more");
+  }
+
   // 15. WHO IS THIS
   if (normalized_objection === "who_is_this" || includesAny(text, [
     "who is this", "who's this", "whos this", "who be this", "how do you know my name",
     "who are you", "do i know you", "conozco", "quien es", "quien habla",
     "how did you get my number", "where did you get my number",
     "identification", "identify",
-  ]) || matchesPurposeOrIdentityQuestion(rawMessage)) {
+  ]) || matchesPurposeOrIdentityQuestion(rawMessage) || reply_signals?.engagement?.identity_question === true) {
     // matchesPurposeOrIdentityQuestion: whole-message purpose questions
     // ("What can I do for you?", "Which company r u with") -- see its
     // definition for the 2026-09-30 production cases.
@@ -5757,6 +5974,34 @@ function resolveIntents(
     intents.push("info_request");
   }
 
+  // 16b. PROOF OF FUNDS (7.2, 2026-10-01): "Ok. What's the easiest way for you
+  // to send proof of funds" is a seller doing diligence on us -- engagement,
+  // not an "ok" acknowledgement (it left New Replies as one).
+  if (normalized_objection === "wants_proof_of_funds" && !intents.includes("info_request")) {
+    intents.push("info_request");
+    reply_rule_ids.push("asks_proof_of_funds");
+  }
+
+  // 17. COMPETITOR / FELLOW INVESTOR (7.2). "We're in the same business, I
+  // buy houses too" is not a seller conversation today: not-interested lane
+  // (30-day nurture, never suppression) unless the same message also shows
+  // sale interest, a price, an offer ask, a call request or a contract ask.
+  if (
+    reply_signals?.competitor === true &&
+    !intents.some((intent) =>
+      ["seller_interested", "asking_price_provided", "asks_offer", "callback_requested", "contract_requested", "latent_interest"].includes(intent)
+    )
+  ) {
+    if (!intents.includes("not_interested")) intents.push("not_interested");
+    reply_rule_ids.push("competitor_investor");
+  }
+
+  // 18. NON-LITERAL laughter with no other content stays unclear (a human
+  // reads tone) -- it is never an acceptance or a price.
+  if (laughter_present && reply_rule_ids.includes("non_literal_laughter") && intents.length === 0) {
+    intents.push("unclear");
+  }
+
   // Final dedupe and resolve with explicit priority (wrong_number beats property_correction)
   const unique_intents = [...new Set(intents)];
   let primary = pickPrimaryIntent(unique_intents);
@@ -5804,6 +6049,7 @@ function resolveIntents(
 
   const ambiguous = [];
   if (primary === "unclear") ambiguous.push("no_confident_intent");
+  if (reply_rule_ids.includes("non_literal_laughter")) ambiguous.push("non_literal");
   if (
     ctxValidation.context_status !== "valid" &&
     /^(yes|yep|yeah|yup|si|sí|no|nope)[\s.!?]*$/i.test(text.trim())
@@ -5816,7 +6062,7 @@ function resolveIntents(
     secondary_intent: secondary,
     secondary_intents,
     matched_intents: unique_intents.length ? unique_intents : ["unclear"],
-    matched_rule_ids,
+    matched_rule_ids: [...matched_rule_ids, ...reply_rule_ids, ...rule_tags],
     suppressed_rule_ids,
     context_status: ctxValidation.context_status,
     context_source_id:
@@ -5834,6 +6080,7 @@ function resolveIntents(
     calibrated_rule_family_id:
       calibrated_rule_family_id ||
       matched_rule_ids[0] ||
+      reply_rule_ids[0] ||
       (primary === "unclear" ? "unclear_fallback" : primary),
     evidence_spans: price_parse?.evidence_span
       ? [price_parse.evidence_span]
@@ -5845,8 +6092,8 @@ function resolveIntents(
     confidence_rationale:
       primary === "unclear"
         ? "no_deterministic_rule_with_sufficient_evidence"
-        : matched_rule_ids.length
-          ? `matched_rules:${matched_rule_ids.join(",")}`
+        : matched_rule_ids.length || reply_rule_ids.length
+          ? `matched_rules:${[...matched_rule_ids, ...reply_rule_ids].join(",")}`
           : "intent_priority_without_named_rule",
     price_parse,
   });
@@ -6131,15 +6378,54 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
   if (language === "English" && matchesSpanishTargetSwitch(message)) {
     language = "Spanish";
   }
-  const objection        = compliance_flag ? null : detectObjection(message);
-  const emotion          = detectEmotion(message);
-  const positive_signals = detectPositiveSignals(message);
-  const stage_hint       = detectStageHint(message, brain_item, objection);
+  // 7.2 layers 2-4: computed once against the VALIDATED context only (a stale
+  // or conflicting context contributes nothing -- no guessed question).
+  const conversation_context = options.conversation_context ?? options.context ?? null;
+  const validated_context = validateConversationContext(conversation_context);
+  const signal_context = validated_context.context_status === "valid" ? validated_context.context : null;
+  // The names / language of OUR last outbound are facts about what we sent,
+  // not about an open question: a reply to an older or already-answered
+  // question can still say "Not James" or "who is Chris?". A STALE context
+  // lends only those fields; an invalid or conflicting one lends nothing.
+  const names_context = signal_context || (
+    validated_context.context_status === "stale" && conversation_context && typeof conversation_context === "object"
+      ? {
+          last_outbound_addressee: conversation_context.last_outbound_addressee || null,
+          last_outbound_agent: conversation_context.last_outbound_agent || null,
+          last_outbound_language: conversation_context.last_outbound_language || null,
+        }
+      : null
+  );
+  // Was OUR last outbound an ownership question? Read from what we sent, so a
+  // stale context still answers it ("Never have" hours later); an invalid or
+  // conflicting context does not.
+  const ownership_question = Boolean(
+    conversation_context &&
+      typeof conversation_context === "object" &&
+      (validated_context.context_status === "valid" || validated_context.context_status === "stale") &&
+      (conversation_context.last_outbound_use_case === "ownership_check" ||
+        conversation_context.last_outbound_question_type === "ownership")
+  );
+  const emoji_interpretation = interpretEmojiReply(message, signal_context);
+  const reply_signals    = detectReplyDispositionSignals(
+    message,
+    names_context || ownership_question ? { ...(names_context || {}), ownership_question } : null
+  );
+  // A platform reaction quotes OUR message ("👍 to “… real estate investor …”").
+  // Objection / emotion / signal detectors must read only what the seller
+  // wrote, or our own words become a probate objection or an interest signal.
+  const authored         = emoji_interpretation?.reaction_type === "platform_reaction" ? "" : message;
+  const objection        = compliance_flag ? null : detectObjection(authored);
+  const emotion          = detectEmotion(authored);
+  const positive_signals = detectPositiveSignals(authored);
+  const stage_hint       = detectStageHint(authored, brain_item, objection);
   const intents          = resolveIntents(message, {
     compliance_flag,
     objection,
     positive_signals,
-    conversation_context: options.conversation_context ?? options.context ?? null,
+    conversation_context,
+    emoji_interpretation,
+    reply_signals,
   });
 
   let confidence = computeHeuristicConfidence({
@@ -6158,6 +6444,11 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
     intents.ambiguity_flags?.includes("short_reply_without_validated_context")
   ) {
     confidence = Math.min(confidence, 0.72);
+  }
+  // "Estás mal informado" denies our premise; it does not SAY "not the owner".
+  // LIKELY at best, and a person confirms it (deriveAutomationDecision).
+  if (intents.matched_rule_ids?.includes("wrong_person_premise_denied")) {
+    confidence = Math.min(confidence, 0.75);
   }
   // Confidence remains uncalibrated for authority until blind v3
   const confidence_calibrated = false;
@@ -6201,7 +6492,131 @@ function classifyHeuristic(message, brain_item = null, options = {}) {
     // to preserve the second clause of compound messages — a new-property
     // signal must survive a leading negative intent.
     address_signals: extractAddressCandidates(message),
+    // 7.2: interpretation kept SEPARATE from facts. emoji_interpretation is
+    // null when the message carries no emoji/reaction.
+    emoji_interpretation,
+    factual_commitment: deriveFactualCommitment({
+      message,
+      primary_intent: intents.primary_intent,
+      matched_intents: intents.matched_intents || [],
+      matched_rule_ids: intents.matched_rule_ids || [],
+      secondary_intents: intents.secondary_intents || [],
+      confidence,
+      price_parse: intents.price_parse || null,
+      emoji_interpretation,
+    }),
+    language_preference: deriveLanguagePreference({ message, language, reply_signals }),
+    call_request: reply_signals.call_request?.matched
+      ? {
+          state: reply_signals.call_request.state,
+          requested_time_text: reply_signals.call_request.requested_time_text,
+          // Never invented: an operator schedules the call.
+          scheduled_at: null,
+        }
+      : null,
+    reply_signals: summarizeReplySignals(reply_signals),
     classifier_version: CLASSIFY_VERSION,
+  };
+}
+
+/**
+ * FACTUAL COMMITMENT (7.2) -- how strongly this message commits the seller to
+ * a fact. Only CONFIRMED may become a canonical fact downstream; an emoji is
+ * LIKELY at most, laughter beside a number is NON_LITERAL.
+ */
+// An amount in words or digits ("a million", "5k", "300000").
+const AMOUNT_TOKEN_RE = /\d|\b(?:million|thousand|grand|hundred|mil|millones|mil\s+d[oó]lares|k)\b/i;
+
+function deriveFactualCommitment({
+  message = "",
+  primary_intent,
+  matched_intents = [],
+  matched_rule_ids = [],
+  secondary_intents = [],
+  confidence = 0,
+  price_parse = null,
+  emoji_interpretation = null,
+} = {}) {
+  if (
+    matched_rule_ids.includes("non_literal_laughter") ||
+    price_parse?.non_literal === true ||
+    (carriesLaughter(message) && AMOUNT_TOKEN_RE.test(String(message || "")))
+  ) {
+    return FACTUAL_COMMITMENT.NON_LITERAL;
+  }
+  if (emoji_interpretation && (emoji_interpretation.emoji_only || emoji_interpretation.reaction_type === "platform_reaction")) {
+    return emoji_interpretation.factual_commitment || FACTUAL_COMMITMENT.UNKNOWN;
+  }
+  if (matched_intents.includes("ownership_confirmed") && matched_intents.includes("wrong_number")) {
+    return FACTUAL_COMMITMENT.CONTRADICTED;
+  }
+  if (secondary_intents.includes("ownership_denial_needs_clarification")) return FACTUAL_COMMITMENT.AMBIGUOUS;
+  if (matched_rule_ids.includes("wrong_person_premise_denied")) return FACTUAL_COMMITMENT.LIKELY;
+  if (primary_intent === "asking_price_provided") {
+    // The ONE money path decides (RC 7.2 B): its commitment is the answer.
+    if (price_parse?.commitment) return price_parse.commitment;
+    // A bare "65" / "250" has no stated scale (RC 7.1): ambiguous, never a fact.
+    const value = Number(price_parse?.value);
+    if (Number.isFinite(value) && value > 0 && value < 1000) return FACTUAL_COMMITMENT.AMBIGUOUS;
+    return Number(price_parse?.confidence) >= 0.82 ? FACTUAL_COMMITMENT.CONFIRMED : FACTUAL_COMMITMENT.AMBIGUOUS;
+  }
+  if (["unclear", "reaction_only", "acknowledgement", "who_is_this", "info_request"].includes(primary_intent)) {
+    return FACTUAL_COMMITMENT.UNKNOWN;
+  }
+  return Number(confidence) >= 0.82 ? FACTUAL_COMMITMENT.CONFIRMED : FACTUAL_COMMITMENT.LIKELY;
+}
+
+/**
+ * LANGUAGE (7.2) -- three things, separately: the language this message is
+ * written in, the language the seller asked for, and a language they told us
+ * to stop using. "I don't speak Spanish" sets avoid=Spanish and leaves the
+ * preference empty; it does not mean English by itself.
+ */
+function deriveLanguagePreference({ message = "", language = null, reply_signals = null } = {}) {
+  const signal = reply_signals?.language || {};
+  if (signal.matched) {
+    return {
+      detected_language: signal.detected_language || language || null,
+      preferred_language: signal.preferred_language || null,
+      avoid_language: signal.avoid_language || null,
+      candidate_language: signal.candidate_language || null,
+      preference_confidence: signal.preference_confidence || "low",
+      rule_id: signal.rule_id || null,
+    };
+  }
+  if (matchesSpanishTargetSwitch(message)) {
+    return {
+      detected_language: language || null,
+      preferred_language: "Spanish",
+      avoid_language: null,
+      candidate_language: "Spanish",
+      preference_confidence: "high",
+      rule_id: "language_switch_request_spanish",
+    };
+  }
+  return {
+    detected_language: language || null,
+    preferred_language: null,
+    avoid_language: null,
+    candidate_language: null,
+    // One message in a language is never a preference.
+    preference_confidence: "none",
+    rule_id: null,
+  };
+}
+
+/** Compact, audit-friendly view of the reply-disposition detectors. */
+function summarizeReplySignals(signals = null) {
+  if (!signals) return null;
+  return {
+    non_engagement_rule: signals.non_engagement_rule || null,
+    wrong_person_rule: signals.wrong_person?.matched ? signals.wrong_person.rule_id : null,
+    sold: signals.sold === true,
+    not_for_sale: signals.not_for_sale?.matched === true,
+    hostile_without_opt_out: signals.hostile?.matched === true,
+    competitor_investor: signals.competitor === true,
+    language_rule: signals.language?.matched ? signals.language.rule_id : null,
+    call_request: signals.call_request?.matched === true,
   };
 }
 
@@ -6307,10 +6722,49 @@ function deriveAutomationDecision({
   objection = null,
   compliance_flag = null,
   confidence = 0,
+  emoji_interpretation = null,
+  matched_rule_ids = [],
 } = {}) {
   const intent = cleanMessage(primary_intent) || "unclear";
   const normalized_objection = cleanMessage(objection);
   const confident = Number(confidence) >= 0.82;
+
+  // A seller offering a DIFFERENT property for sale is a person's lead: no
+  // template about this property answers it. Compliance still wins below.
+  if (
+    !compliance_flag &&
+    intent !== "opt_out" &&
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("other_property_for_sale")
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "medium",
+    };
+  }
+
+  // 7.2 LAYER 7: an emoji-only likely yes/no to a known question earns ONE
+  // confirmation question in the SAME stage (sms_templates use case named by
+  // the interpretation) -- never an advance, never a fact. Compliance first.
+  if (
+    !compliance_flag &&
+    intent === "unclear" &&
+    emoji_interpretation?.requires_clarification === true &&
+    cleanMessage(emoji_interpretation?.clarification?.template_use_case)
+  ) {
+    return {
+      auto_reply_allowed: true,
+      queue_action: "queue_clarification",
+      suppression_action: "none",
+      human_review_required: false,
+      risk_level: "low",
+      reply_kind: "clarification",
+      clarification_use_case: emoji_interpretation.clarification.template_use_case,
+    };
+  }
 
   if (compliance_flag === "stop_texting" || intent === "opt_out") {
     return {
@@ -6332,6 +6786,22 @@ function deriveAutomationDecision({
       suppression_action: "none",
       human_review_required: false,
       risk_level: "medium",
+    };
+  }
+
+  // A denied premise ("you're misinformed") is a LIKELY wrong person: a person
+  // confirms before any wrong-number mark is written.
+  if (
+    intent === "wrong_number" &&
+    Array.isArray(matched_rule_ids) &&
+    matched_rule_ids.includes("wrong_person_premise_denied")
+  ) {
+    return {
+      auto_reply_allowed: false,
+      queue_action: "none",
+      suppression_action: "none",
+      human_review_required: true,
+      risk_level: "high",
     };
   }
 

@@ -473,8 +473,29 @@ function tokenizeAmounts(text) {
       // asking prices at confidence 0.75. Size is not a statement of magnitude.
       has_explicit_magnitude: Boolean(suffix) || hadThousandsSeparator || hasCurrency,
       from_words: false,
+      scale_suffix: suffix && !(suffix === "mil" && (hadThousandsSeparator || value >= 1_000_000)) ? suffix : null,
+      bare: !suffix && !hasCurrency && !hadThousandsSeparator,
     });
   }
+
+  // A RANGE CARRIES ONE SCALE: "entre 240 y 260 mil", "240 to 260k" - the
+  // seller wrote the magnitude once, after the second number. A bare number
+  // joined to a scaled one by a range connector inherits that scale. Two bare
+  // numbers ("between 240 and 260") stay bare: RC 7.1, the scale is unknown.
+  for (let i = 0; i < amounts.length - 1; i += 1) {
+    const a = amounts[i];
+    const b = amounts[i + 1];
+    if (!a.bare || !b.scale_suffix || !SCALE_WORDS[b.scale_suffix] || a.value >= 1000) continue;
+    const between = text.slice(a.end, b.index);
+    if (!/^\s*(?:y|and|to|a|or|o|-|–|—)\s*\$?\s*$/i.test(between)) continue;
+    a.value = Math.round(a.value * SCALE_WORDS[b.scale_suffix]);
+    a.raw = `${a.raw} ${b.scale_suffix}`;
+    a.has_scale = true;
+    a.has_explicit_magnitude = true;
+    a.bare = false;
+    a.range_scale_inherited = true;
+  }
+  const digitSpans = amounts.map((a) => [a.index, a.end]);
 
   // Word-based: "one hundred thousand", "half a million". A spelled-out
   // amount must START with a quantity word — a stray scale token ("k" left
@@ -487,6 +508,14 @@ function tokenizeAmounts(text) {
 
   for (let i = 0; i < tokens.length; i += 1) {
     if (SMALL_WORDS[tokens[i]] === undefined) continue;
+    // A word already read as the scale of a digit amount ("240 MIL y 260 mil")
+    // is not a second, spelled-out number: "mil" alone was emitted as $1,000
+    // and made every Spanish range a "conflicting price statement".
+    const at = positions[i] ?? -1;
+    if (digitSpans.some(([start, end]) => at >= start && at < end)) continue;
+    // A connector ("y" in "ciento veinte y cinco") never STARTS a number:
+    // "240 mil y 260 mil" read "y mil" as $1,000.
+    if (SMALL_WORDS[tokens[i]] === 0 && tokens[i] !== "zero" && tokens[i] !== "cero") continue;
     const parsed = parseNumberWords(tokens, i);
     if (parsed && parsed.value >= 1000) {
       const index = positions[i] ?? 0;
@@ -755,6 +784,18 @@ function classifyByNearestCue(text, amount, { negotiationActive = false } = {}) 
       }
       const cueMid = windowStart + start + cue.length / 2;
       const dist = Math.min(Math.abs(cueMid - amount.index), Math.abs(cueMid - amount.end));
+      // A rent cue in ANOTHER SENTENCE does not make a house-sized figure
+      // monthly: "For the duplex alone 130,000. It is newly renovated, 2 units
+      // rented." is a $130,000 ask (the one money path read it as $130,000 a
+      // month and dropped it). Small figures keep the old reach ("3 units.
+      // 1500 each, rented") because rents are what they usually are.
+      if (kind === MONETARY_KINDS.MONTHLY_AMOUNT && amount.value >= 20_000) {
+        const absStart = windowStart + start;
+        const gap = absStart >= amount.end
+          ? lowerText.slice(amount.end, absStart)
+          : lowerText.slice(windowStart + end, amount.index);
+        if (/[.!?](?:\s|$)|\n/.test(gap)) continue;
+      }
       matches.push({ kind, dist, start, end });
     }
   };
@@ -985,7 +1026,8 @@ export function extractMonetaryMentions(message, {
     // acquisition engine a $650 asking price off the "low end" rule.
     const ratio = Math.max(a.value, b.value) / Math.max(1, Math.min(a.value, b.value));
     if (ratio > 2) continue;
-    if (/^\s*(to|-|–|and|or)\s*$/.test(betweenText) || /between/.test(precedingWindow(text, { index: text.toLowerCase().indexOf(a.raw.toLowerCase()), end: 0 }, 20))) {
+    // Spanish ranges too: "entre 240 y 260 mil", "de 240 a 260 mil".
+    if (/^\s*(to|-|–|and|or|y|a|o)\s*$/.test(betweenText) || /\b(?:between|entre)\b/.test(precedingWindow(text, { index: text.toLowerCase().indexOf(a.raw.toLowerCase()), end: 0 }, 20))) {
       a.qualifiers.range = true;
       a.range = { low: Math.min(a.value, b.value), high: Math.max(a.value, b.value) };
       a.value = a.range.low; // negotiate from the seller's low end

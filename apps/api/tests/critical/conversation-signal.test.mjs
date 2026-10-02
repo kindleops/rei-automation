@@ -52,7 +52,9 @@ test('fast, engaged seller with distress language reads hot with quoted evidence
   assert.ok(factor(s, 'urgency'))
   assert.ok(factor(s, 'asks_offer'))
   assert.ok(factor(s, 'commitment'))
-  assert.deepEqual(s.language.priceMentions, [180000, 210000])
+  // ONE money path (RC 7.2 B): "I owe about $180k" is a mortgage payoff, not a
+  // price; only the $210,000 the seller would take is a named price.
+  assert.deepEqual(s.language.priceMentions, [210000])
   assert.equal(s.language.distress.financial, 1)
   // Every point is attributable: non-cap factor points sum to the raw score.
   assert.equal(s.factors.filter((f) => f.cap === undefined).reduce((a, f) => a + f.points, 0), s.rawScore)

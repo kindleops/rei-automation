@@ -77,7 +77,7 @@ test("seller rejects offer → SELLER_REJECTED_OFFER", () => {
 // ── Counter offers ───────────────────────────────────────────────────────────
 
 test("seller counters above range → counter_above_range, too-high event", () => {
-  const d = run("I need at least 200");
+  const d = run("I need at least 200k");
   assert.equal(d.outcome, STAGE5_OUTCOMES.COUNTER_ABOVE_RANGE);
   assert.equal(d.counter_offer, 200000);
   assert.ok(has(d, EV.SELLER_COUNTER_OFFERED));
@@ -93,8 +93,11 @@ test("seller counters within range → counter_within_range, acceptable event", 
   assert.ok(has(d, EV.COUNTER_OFFER_ACCEPTABLE));
 });
 
-test('bare negotiation number "can you do 180" → within range → narrow', () => {
-  const d = run("can you do 180");
+test('a bare negotiation number needs a stated scale (ONE money path); "can you do 180k" → within range → narrow', () => {
+  // RC 7.1/7.2 B: "can you do 180" alone is scale-ambiguous; it is never
+  // guessed into $180,000 from the deal reference.
+  assert.equal(run("can you do 180").counter_offer ?? null, null);
+  const d = run("can you do 180k");
   assert.equal(d.counter_offer, 180000);
   assert.equal(d.outcome, STAGE5_OUTCOMES.COUNTER_WITHIN_RANGE);
   assert.equal(d.route, "narrow_gap_negotiation"); // > RCO, <= MAO
@@ -281,12 +284,21 @@ test("offer justification packet is reusable + computes gap", () => {
   assert.equal(pkt.justification_basis, "mixed");
 });
 
-test("extractCounterOffer normalizes variants", () => {
+test("extractCounterOffer normalizes variants through the ONE money path (RC 7.1 scale rules)", () => {
   assert.equal(extractCounterOffer("I'd take 175k", RCO).normalized_amount, 175000);
-  assert.equal(extractCounterOffer("can you do 160?", RCO).normalized_amount, 160000);
-  assert.equal(extractCounterOffer("meet me at 150", RCO).normalized_amount, 150000);
   assert.equal(extractCounterOffer("lo dejo en 180 mil", RCO).normalized_amount, 180000);
   assert.equal(extractCounterOffer("give me a week", RCO).normalized_amount, null);
+  // A bare negotiation number is thousands only once the conversation set the
+  // scale (the seller wrote "175k", or we asked "$240k?"); a deal reference
+  // alone no longer turns "160" into $160,000 (RC 7.1, owner-approved). Before
+  // the one money path, Stage 5 guessed $160k here while the orchestrator's
+  // canonical price was "ambiguous - clarify": two answers for one message.
+  const bare = extractCounterOffer("can you do 160?", RCO);
+  assert.equal(bare.normalized_amount, null);
+  assert.equal(bare.needs_clarification, true);
+  assert.equal(extractCounterOffer("meet me at 150", RCO).normalized_amount, null);
+  assert.equal(extractCounterOffer("can you do 160?", RCO, { shorthandConvention: true }).normalized_amount, 160000);
+  assert.equal(extractCounterOffer("meet me at 150", RCO, { shorthandConvention: true }).normalized_amount, 150000);
 });
 
 test("negotiation/offer routes never auto-send", () => {

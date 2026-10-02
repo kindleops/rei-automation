@@ -36,10 +36,17 @@ function captureSupabase() {
           return Promise.resolve({ data: [row], error: null });
         },
         update(patch) {
+          // One recorded update per call, with every .eq() filter it was
+          // scoped by (the 7.2 wrong-number write chains phone AND owner).
+          const entry = { table, patch, filters: [] };
+          calls.updates.push(entry);
           const chain = {
             eq(column, value) {
-              calls.updates.push({ table, patch, column, value });
-              return Promise.resolve({ data: [], error: null });
+              entry.filters.push([column, value]);
+              return chain;
+            },
+            then(resolve, reject) {
+              return Promise.resolve({ data: [], error: null }).then(resolve, reject);
             },
           };
           return chain;
@@ -116,20 +123,40 @@ test("a PostgREST error is surfaced, not swallowed into ok:true", async () => {
   assert.equal(result.ok, false, "a failed compliance write must never report success");
 });
 
-test("wrong_number still routes to the phones table, unchanged", async () => {
+test("wrong_number still routes to the phones table, scoped to the owner (7.2)", async () => {
   const { client, calls } = captureSupabase();
   const result = await applyInboundSuppression({
     supabaseClient: client,
     phoneNumber: "+13055550188",
     phoneId: "ph_1",
+    ownerId: "owner_1",
     reason: "wrong_number",
     dryRun: false,
   });
   assert.equal(result.ok, true);
-  assert.equal(calls.upserts.length, 0);
+  assert.equal(calls.upserts.length, 0, "a wrong number never writes the global suppression list");
   assert.equal(calls.updates.length, 1);
   assert.equal(calls.updates[0].table, "phones");
   assert.equal(calls.updates[0].patch.phone_contact_status, "wrong_number");
+  assert.deepEqual(
+    calls.updates[0].filters,
+    [["canonical_e164", "+13055550188"], ["master_owner_id", "owner_1"]],
+    "only THIS owner's row for this number: a wrong person is relationship-scoped"
+  );
+});
+
+test("wrong_number without a known owner refuses rather than flag the number for every owner (7.2)", async () => {
+  const { client, calls } = captureSupabase();
+  const result = await applyInboundSuppression({
+    supabaseClient: client,
+    phoneNumber: "+13055550188",
+    reason: "wrong_number",
+    dryRun: false,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "wrong_number_owner_scope_missing");
+  assert.equal(calls.updates.length, 0);
+  assert.equal(calls.upserts.length, 0);
 });
 
 test("an explicit dry run still writes nothing", async () => {

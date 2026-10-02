@@ -27,6 +27,7 @@ import {
   buildLifecycleEvent,
 } from "@/lib/domain/seller-flow/acquisition-lifecycle-events.js";
 import { extractAskingPrice } from "@/lib/domain/seller-flow/stage2-offer-interest-engine.js";
+import { canonicalAskingPriceDecision } from "@/lib/domain/seller-flow/canonical-asking-price.js";
 
 const T = SELLER_FLOW_SAFETY_TIERS;
 const S = SELLER_FLOW_STAGES;
@@ -102,47 +103,56 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-const TIME_UNIT_WORDS = [
-  "day", "days", "week", "weeks", "month", "months", "year", "years",
-  "día", "dias", "días", "semana", "semanas", "mes", "meses", "año", "años",
-];
-
 // ══════════════════════════════════════════════════════════════════════════
 // COUNTER-OFFER EXTRACTION
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * Normalize a seller counter offer. Handles "175k", "$180,000", "200 mil"
- * (via the Stage 2 extractor) and bare negotiation numbers ("160", "meet me at
- * 150") which are interpreted as thousands relative to a reference price.
+ * The seller's counter offer, from the ONE money path (RC 7.2 B): the
+ * orchestrator's price_signal for this turn when supplied, otherwise the
+ * canonical resolver (via Stage 2's delegate) with this negotiation's
+ * reference. "175k", "$180,000", "lo dejo en 180 mil" are counters. A bare
+ * "160" / "meet me at 150" is NOT inferred as thousands from the reference
+ * any more (RC 7.1, owner-approved: a bare number is ambiguous unless the
+ * seller, or our own "$240k?", established the thousands shorthand); it
+ * comes back as a clarification, never as a guessed counter.
  *
- * @returns {{ counter_offer: string|null, normalized_amount: number|null, confidence: number }}
+ * @returns {{ counter_offer: string|null, normalized_amount: number|null, confidence: number,
+ *             commitment: string|null, needs_clarification: boolean, clarification_reason: string|null }}
  */
-export function extractCounterOffer(message, reference = null) {
+export function extractCounterOffer(message, reference = null, options = {}) {
   const text = lower(message);
-  if (!text) return { counter_offer: null, normalized_amount: null, confidence: 0 };
+  const none = (signal = null) => ({
+    counter_offer: null,
+    normalized_amount: null,
+    confidence: 0,
+    commitment: signal?.commitment ?? null,
+    needs_clarification: signal?.needs_clarification === true,
+    clarification_reason: signal?.clarification_reason ?? null,
+  });
+  if (!text) return none();
 
-  const direct = extractAskingPrice(text);
-  if (direct) {
-    return { counter_offer: direct.raw, normalized_amount: direct.value, confidence: 0.9 };
+  const { price_signal = null, ...canonical_options } = options || {};
+  if (price_signal && typeof price_signal === "object" && "asking_price" in price_signal) {
+    const direct = extractAskingPrice(text, { price_signal });
+    return direct
+      ? { counter_offer: direct.raw, normalized_amount: direct.value, confidence: 0.9, commitment: direct.commitment, needs_clarification: false, clarification_reason: null }
+      : none(price_signal);
   }
-
-  const ref = numberOrNull(reference);
-  const re = /(?:^|[^\d.$])(\d{2,3})(?![\d.])/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const value = parseInt(m[1], 10);
-    const after = text.slice(m.index + m[0].length);
-    const trailing = /^\s*([a-zà-ÿ]+)/i.exec(after);
-    const word = trailing ? trailing[1].toLowerCase() : "";
-    if (TIME_UNIT_WORDS.includes(word)) continue;
-    // Negotiation numbers are written in thousands ("160" = $160k). Only infer
-    // when we have a reference price in the same order of magnitude.
-    if (value >= 30 && value < 1000 && ref !== null && ref >= 1000) {
-      return { counter_offer: m[1], normalized_amount: value * 1000, confidence: 0.7 };
-    }
-  }
-  return { counter_offer: null, normalized_amount: null, confidence: 0 };
+  const decision = canonicalAskingPriceDecision(text, {
+    reference: numberOrNull(reference),
+    negotiationActive: true,
+    ...canonical_options,
+  });
+  if (decision.value == null) return none(decision);
+  return {
+    counter_offer: decision.raw,
+    normalized_amount: decision.value,
+    confidence: decision.commitment === "CONFIRMED" ? 0.9 : 0.7,
+    commitment: decision.commitment,
+    needs_clarification: false,
+    clarification_reason: null,
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -389,7 +399,7 @@ export function classifyStage5Negotiation(input = {}) {
 
   // ── Signals ──────────────────────────────────────────────────────────────
   const flags = buildFlags(text);
-  const counter = extractCounterOffer(text, reference);
+  const counter = extractCounterOffer(text, reference, input.price_signal ? { price_signal: input.price_signal } : {});
   const has_counter = counter.normalized_amount !== null && (flags.counter_verb || !flags.accept);
 
   // ── Counter metrics ──────────────────────────────────────────────────────

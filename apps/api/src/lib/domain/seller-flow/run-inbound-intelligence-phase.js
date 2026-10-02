@@ -205,6 +205,8 @@ export async function runInboundIntelligencePhase({
   supabaseClient = null,
   // §6 ContextResolutionResult from the orchestrator (status/confidence/evidence)
   context_resolution = null,
+  // The canonical price_signal for this turn (one money path, RC 7.2 B).
+  price_signal = null,
 } = {}) {
   const relationship = resolveInboundRelationship({
     message,
@@ -388,6 +390,7 @@ export async function runInboundIntelligencePhase({
     route,
     underwriting,
     deal_state,
+    price_signal,
   });
 
   const domain_recommendation = stage_domain.recommendation;

@@ -1,4 +1,6 @@
 // ─── extract-underwriting-signals.js ─────────────────────────────────────
+import { canonicalAskingPriceDecision } from "@/lib/domain/seller-flow/canonical-asking-price.js";
+
 function clean(value) {
   return String(value ?? "").trim();
 }
@@ -20,31 +22,8 @@ function toNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-function parseScaledNumber(value, scale_suffix = "") {
-  const base = toNumber(value);
-  if (base === null) return null;
-
-  const suffix = lower(scale_suffix);
-  if (suffix === "k") return Math.round(base * 1_000);
-  if (suffix === "m") return Math.round(base * 1_000_000);
-  return base;
-}
-
 function unique(list = []) {
   return [...new Set((list || []).filter(Boolean))];
-}
-
-function extractDollarAmounts(message = "") {
-  const matches = [
-    ...String(message).matchAll(
-      /\$?\s?(\d{1,3}(?:,\d{3})+|\d{2,7})(?:\.\d+)?\s*([kKmM])?\b/g
-    ),
-  ];
-  const values = matches
-    .map((match) => parseScaledNumber(match[1], match[2] || ""))
-    .filter((value) => Number.isFinite(value) && value >= 1_000);
-
-  return unique(values);
 }
 
 function extractUnitCount(message = "") {
@@ -267,165 +246,31 @@ function extractDistressSignals(message = "") {
   return unique(tags);
 }
 
-function deriveLatestOutboundUseCase(context = null) {
+// ONE money path (RC 7.2 B): this module no longer parses asking prices. The
+// canonical resolver (seller-flow/canonical-asking-price.js) decides, reading
+// the question we asked last when the context carries our outbound text. The
+// old local rules (any 4+ digit number; a bare 2-3 digit number x1000 "in a
+// price context") contradicted RC 7.1: "80" alone is ambiguous, "80k" is
+// $80,000. Every reader of signals.asking_price (Podio underwriting, the
+// legacy router, the acquisition dispatcher) now sees the canonical verdict.
+function latestOutboundBody(context = null) {
   const recent_events = Array.isArray(context?.recent?.recent_events)
     ? context.recent.recent_events
     : [];
-
   const latest_outbound = recent_events.find(
     (event) => lower(event?.direction) === "outbound"
   );
-
-  return lower(
-    latest_outbound?.selected_use_case ||
-      latest_outbound?.metadata?.selected_use_case ||
-      ""
+  return (
+    clean(latest_outbound?.message_body || latest_outbound?.body || latest_outbound?.message || "") ||
+    null
   );
 }
 
-function isLikelyPriceContext({
-  message = "",
-  classification = null,
-  route = null,
-  context = null,
-} = {}) {
-  const text = lower(message);
-  const last_use_case = deriveLatestOutboundUseCase(context);
-
-  if (
-    [
-      "asking_price",
-      "price_works_confirm_basics",
-      "price_high_condition_probe",
-      "offer_reveal",
-      "offer_reveal_cash",
-      "offer_reveal_lease_option",
-      "offer_reveal_subject_to",
-      "offer_reveal_novation",
-      "mf_offer_reveal",
-    ].includes(
-      last_use_case
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    ["send_offer_first", "need_more_money", "wants_retail"].includes(
-      lower(classification?.objection)
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    lower(route?.stage) === "offer" ||
-    [
-      "offer_reveal",
-      "offer_reveal_cash",
-      "offer_reveal_lease_option",
-      "offer_reveal_subject_to",
-      "offer_reveal_novation",
-      "mf_offer_reveal",
-    ].includes(lower(route?.use_case))
-  ) {
-    return true;
-  }
-
-  return includesAny(text, [
-    "ask",
-    "asking",
-    "take",
-    "want",
-    "would do",
-    "i'd do",
-    "id do",
-    "for it",
-    "cash",
-    "number",
-    "price",
-  ]);
-}
-
-function extractContextualBareAskingPrice({
-  message = "",
-  classification = null,
-  route = null,
-  context = null,
-} = {}) {
-  if (
-    !isLikelyPriceContext({
-      message,
-      classification,
-      route,
-      context,
-    })
-  ) {
-    return [];
-  }
-
-  const text = clean(message);
-  const normalized = lower(text);
-
-  if (
-    includesAny(normalized, [
-      "unit",
-      "units",
-      "door",
-      "doors",
-      "tenant",
-      "tenants",
-      "occupied",
-      "vacant",
-      "rent",
-      "rents",
-      "expense",
-      "expenses",
-      "bed",
-      "beds",
-      "bath",
-      "baths",
-      "built in",
-      "year built",
-      "month",
-      "monthly",
-      "year",
-      "years",
-      "days",
-      "%",
-    ])
-  ) {
-    return [];
-  }
-
-  const direct_match = text.match(
-    /^(?:i(?:'d| would)?\s*(?:do|take)|want|need|asking|ask|at|for)?\s*\$?\s*(\d{2,3})(?:\s*(?:cash|all cash))?\s*$/i
-  );
-
-  if (!direct_match?.[1]) return [];
-
-  const numeric = Number(direct_match[1]);
-  if (!Number.isFinite(numeric) || numeric < 10) return [];
-
-  return [numeric * 1_000];
-}
-
-function pickAskingPrice(message = "", classification = null, route = null, context = null) {
-  const amounts = extractDollarAmounts(message);
-  const contextual_amounts = extractContextualBareAskingPrice({
-    message,
+function pickAskingPrice(message = "", classification = null, context = null) {
+  return canonicalAskingPriceDecision(message, {
+    lastOutboundBody: latestOutboundBody(context),
     classification,
-    route,
-    context,
-  });
-  const candidates = unique([...amounts, ...contextual_amounts]);
-  if (!candidates.length) return null;
-
-  if (classification?.objection === "need_more_money" || classification?.objection === "wants_retail") {
-    return Math.max(...candidates);
-  }
-
-  return candidates[0];
+  }).value;
 }
 
 function matchFirstNumber(message = "", patterns = []) {
@@ -781,7 +626,7 @@ export function extractUnderwritingSignals({
     };
   }
 
-  const asking_price = pickAskingPrice(text, classification, route, context);
+  const asking_price = pickAskingPrice(text, classification, context);
   const unit_count = extractUnitCount(text);
   const property_type = extractPropertyType(text);
   const timeline = extractTimeline(text);
