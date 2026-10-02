@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { pushRoutePath } from '../../../app/router'
 import { LCButton, LCConfirm, LCEmpty, LCError, LCFacts, LCSkeleton, LCStatus, LCTabs, cx } from '../../../shared/lc'
 import { formatRelativeTime } from '../../../shared/formatters'
 import { setWatched, useWatches } from '../../../lib/data/watchStore'
 import type { WatchEntityType } from '../../../lib/data/watchlistData'
-import { acknowledgeSignal, fetchSignalCenter, resolveSignal, setRuleArmed } from './signals-api'
+import { acknowledgeSignal, resolveSignal, setRuleArmed } from './signals-api'
+import { useSignalCenter } from './useSignalCenter'
 import {
   evaluatorState, evidenceFacts, ledgerEmpty, ruleSource, SEVERITY_LABEL, SEVERITY_TONE, SIGNAL_SORT, SUBJECT_LABEL,
   type SignalCenterModel, type SignalRow, type SignalRule,
@@ -20,26 +21,6 @@ import './signals-panel.css'
  */
 
 type Lens = 'signals' | 'watches' | 'rules'
-type Load = { status: 'loading' | 'ready' | 'error'; model: SignalCenterModel | null; error: string | null; at: number | null }
-
-const REFRESH_MS = 60_000
-
-function useSignalCenter() {
-  const [load, setLoad] = useState<Load>({ status: 'loading', model: null, error: null, at: null })
-  const [tick, setTick] = useState(0)
-  const refresh = useCallback(() => setTick((t) => t + 1), [])
-  useEffect(() => {
-    let alive = true
-    fetchSignalCenter().then((r) => {
-      if (!alive) return
-      if (r.ok) setLoad({ status: 'ready', model: r, error: null, at: Date.now() })
-      else setLoad((prev) => ({ ...prev, status: 'error', error: r.message }))
-    })
-    const t = window.setTimeout(() => setTick((x) => x + 1), REFRESH_MS)
-    return () => { alive = false; window.clearTimeout(t) }
-  }, [tick])
-  return { ...load, refresh }
-}
 
 export function SignalsPanel() {
   const { status, model, error, at, refresh } = useSignalCenter()
@@ -149,7 +130,7 @@ function SignalItem({ s, onChanged }: { s: SignalRow; onChanged: () => void }) {
 
 /* ── watches ────────────────────────────────────────────────────────── */
 
-function Watches({ model, onChanged }: { model: SignalCenterModel; onChanged: () => void }) {
+export function Watches({ model, onChanged }: { model: SignalCenterModel; onChanged: () => void }) {
   const store = useWatches()
   const [err, setErr] = useState<string | null>(null)
   const items = model.watches.items
@@ -189,13 +170,13 @@ function Watches({ model, onChanged }: { model: SignalCenterModel; onChanged: ()
 
 /* ── rules ──────────────────────────────────────────────────────────── */
 
-function Rules({ model, onChanged }: { model: SignalCenterModel; onChanged: () => void }) {
+export function Rules({ model, onChanged, focusRule = null }: { model: SignalCenterModel; onChanged: () => void; focusRule?: string | null }) {
   const [confirm, setConfirm] = useState<SignalRule | null>(null)
   return (
     <>
       <ul className="lcsig-rules" aria-label="Signal rules">
         {model.rules.map((r) => (
-          <li key={r.rule_key} className={cx('lcsig-rule', r.is_enabled && 'is-armed')}>
+          <li key={r.rule_key} className={cx('lcsig-rule', r.is_enabled && 'is-armed', focusRule === r.rule_key && 'is-focus')} data-rule={r.rule_key} ref={focusRule === r.rule_key ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}>
             <div className="lcsig-rule__head">
               <span className="lcsig-rule__name">{r.label}</span>
               <LCStatus label={r.is_enabled ? 'Armed' : 'Disarmed'} tone={r.is_enabled ? 'exec' : 'neutral'} quiet={!r.is_enabled} />

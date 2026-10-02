@@ -8,8 +8,15 @@
  * universal object registry (Open, Open beside, Inspect, Missions); Replay
  * opens the Time Machine where a subject has one.
  *
- * Not an app-rail item. The Notifications app (alert settings + Signals) stays
- * reachable from the plane's settings control.
+ * Not an app-rail item. Alert settings + Signal Center open INSIDE the plane
+ * (PlaneSettings); the legacy Notifications panel is a rollback flag only
+ * (plane-host.ts).
+ *
+ * Instant: the plane renders the last-known stories (session cache) at once and
+ * reconciles; the badge is the server's cheap summary until stories load.
+ * Keyboard (scoped to the plane, never window-level): ↑/↓ Home/End move through
+ * stories, Enter opens, Shift+Enter inspects, ⌘/Ctrl+Enter opens beside,
+ * →/← expand/collapse, Esc steps back (settings → stories → closed).
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -18,13 +25,17 @@ import { Icon } from '../../../shared/icons'
 import { handleObjectClick, inspectObject, MOD_KEY, openObject, openObjectBeside, startObjectMission, type ObjectRef } from '../../desktop/objects'
 import { openReplay } from '../../desktop/replay/replay-store'
 import { requestNotificationsSurface } from '../../mobile/shell-surface-bridge'
+import { resolveSignal } from '../signals/signals-api'
 import {
   clearArrivals, loadMoreStories, markStories, retryStories, setPlaneOpen, useStoryStore,
 } from './story-store'
 import {
-  clockTime, defaultLens, degradedText, EMPTY_COPY, LENS_LABEL, LENS_ORDER, relTime, runObject, storyObject, storyTone, visibleOrder,
+  clockTime, defaultLens, degradedText, EMPTY_COPY, LENS_LABEL, LENS_ORDER, nextStoryIndex, relTime, runObject, storyObject, storyTone, visibleOrder,
   type Story, type StoryLens,
 } from './story-model'
+import { legacyNotificationsPanel, registerPlaneHost } from './plane-host'
+import { PlaneSettings } from './PlaneSettings'
+import { useSettingsFace } from './settings-face'
 import './notification-plane.css'
 
 export interface NotificationPlaneProps {
@@ -37,6 +48,8 @@ export interface NotificationPlaneProps {
 const READING_PX = 24
 
 export function NotificationPlane({ open, onClose, anchorTop = 84 }: NotificationPlaneProps) {
+  // while mounted, every "notifications" request on this desktop opens the plane (plane-host.ts)
+  useEffect(() => registerPlaneHost(), [])
   if (!open || typeof document === 'undefined') return null
   return createPortal(<Plane onClose={onClose} anchorTop={anchorTop} />, document.body)
 }
@@ -47,10 +60,14 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
   const [expanded, setExpanded] = useState<string | null>(null)
   const [frozen, setFrozen] = useState<string[] | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [view, setView] = useState<'stories' | 'settings'>('stories')
+  const settings = useSettingsFace()
   const planeRef = useRef<HTMLElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setPlaneOpen(true); return () => setPlaneOpen(false) }, [])
+  // the plane takes focus so ↑/↓ work at once (Esc returns the operator to the workspace)
+  useEffect(() => { planeRef.current?.focus({ preventScroll: true }) }, [])
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t) }, [])
 
   // outside press closes — except the deck's own bell (it toggles) and portaled LC layers
@@ -90,17 +107,55 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
   const unreadInLens = list.filter((s) => !s.read && !s.resolved).map((s) => s.id)
   const needs = counts?.needs_you ?? 0
 
+  const openSettings = (rule: string | null = null) => {
+    // rollback flag: the legacy Notifications panel (alert settings + Signals) instead
+    if (legacyNotificationsPanel()) { onClose(); requestNotificationsSurface(); return }
+    settings.setFocusRule(rule)
+    settings.setFace('rules')
+    if (!rule) settings.setFocusRule(null)
+    setView('settings')
+  }
+
+  // keyboard, scoped to the plane: ↑/↓ Home/End through the visible stories; Esc steps back
+  const onPlaneKey = (e: KeyboardEvent<HTMLElement>) => {
+    if (document.querySelector('.lc-dialog')) return // an LC dialog (arming a rule) owns its keys
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation()
+      if (view === 'settings') { setView('stories'); requestAnimationFrame(() => planeRef.current?.focus({ preventScroll: true })) }
+      else onClose()
+      return
+    }
+    if (view !== 'stories' || e.altKey || e.metaKey || e.ctrlKey) return
+    const t = e.target as HTMLElement
+    if (t.closest('input, textarea, select, [contenteditable="true"], .lc-seg')) return
+    const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('.ncs__main') ?? [])]
+    const cur = rows.findIndex((r) => r === t)
+    const next = nextStoryIndex(cur, e.key, rows.length)
+    if (next === null) return
+    e.preventDefault()
+    rows[next].focus()
+    rows[next].scrollIntoView({ block: 'nearest' })
+  }
+
+  const subtitle = counts ? (needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : counts.badge ? `${counts.badge} to look at` : 'Nothing waiting on you') : 'Reading…'
+
   return (
-    <section ref={planeRef} className="ncp" role="dialog" aria-label="Notifications" style={{ ['--ncp-top' as string]: `${anchorTop}px` }}>
+    <section ref={planeRef} className={cx('ncp', view === 'settings' && 'is-settings')} role="dialog" aria-label="Notifications" tabIndex={-1} onKeyDown={onPlaneKey} style={{ ['--ncp-top' as string]: `${anchorTop}px` }}>
       <span className="ncp__env" aria-hidden="true" />
+      {view === 'settings' ? (
+        <PlaneSettings face={settings.face} onFace={settings.setFace} focusRule={settings.focusRule} onBack={() => setView('stories')} />
+      ) : (<>
       <header className="ncp__head">
         <div className="ncp__titles">
           <h2>Notifications</h2>
-          <p>{counts ? (needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : counts.badge ? `${counts.badge} to look at` : 'Nothing waiting on you') : 'Reading…'}</p>
+          <p>
+            {subtitle}
+            {st.reconciling ? <span className="ncp__sync" role="status"> · Updating</span> : null}
+          </p>
         </div>
         <div className="ncp__tools">
           {unreadInLens.length ? <LCButton variant="quiet" size="sm" onClick={() => void markStories(unreadInLens, 'read')}>Mark read</LCButton> : null}
-          <LCIconButton icon="settings" label="Alert settings & Signals" size="sm" onClick={() => { onClose(); requestNotificationsSurface() }} />
+          <LCIconButton icon="settings" label="Alerts & Signals" size="sm" onClick={() => openSettings()} />
         </div>
       </header>
 
@@ -123,7 +178,7 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
           </button>
         ) : null}
 
-        {st.status === 'loading' || st.status === 'idle' ? (
+        {(st.status === 'loading' || st.status === 'idle') && !all.length ? (
           <div className="ncp__loading"><LCSkeleton shape="lines" count={5} label="Loading notifications" /></div>
         ) : st.status === 'error' && !all.length ? (
           <div className="ncp__pad"><LCError what={st.error || 'Notifications could not be read right now.'} onRetry={retryStories} /></div>
@@ -142,10 +197,12 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
                 divider={lens === 'resolved' && s.aged && (i === 0 || !list[i - 1].aged)}
                 onToggle={() => setExpanded((cur) => (cur === s.id ? null : s.id))}
                 onDone={onClose}
+                onRuleSettings={(rule) => openSettings(rule)}
               />
             ))}
           </ol>
         )}
+        {st.reconciling && list.length ? <div className="ncp__reconcile" aria-hidden="true"><LCSkeleton shape="lines" count={2} label="Updating notifications" /></div> : null}
 
         {st.nextCursor && list.length ? (
           <div className="ncp__more">
@@ -156,8 +213,9 @@ function Plane({ onClose, anchorTop }: { onClose: () => void; anchorTop: number 
 
       <footer className="ncp__foot">
         <span>{st.horizon ? `Since ${clockTime(st.horizon)}` : 'Last 7 days'}{st.truncated ? ' · older activity in the Machine Feed' : ''}</span>
-        {st.error && all.length ? <span className="ncp__stale">Not refreshed · {st.error}</span> : <span>Resolved stories age into history after a day</span>}
+        {st.error && all.length ? <span className="ncp__stale">Not refreshed · {st.error}</span> : <span className="ncp__keys">↑↓ move · ↵ open · ⇧↵ inspect</span>}
       </footer>
+      </>)}
     </section>
   )
 }
@@ -170,7 +228,7 @@ function lensCount(l: StoryLens, c: ReturnType<typeof useStoryStore>['counts']) 
 
 /* ── one story ───────────────────────────────────────────────────────────── */
 
-function StoryRow({ story: s, now, expanded, divider, onToggle, onDone }: { story: Story; now: number; expanded: boolean; divider: boolean; onToggle: () => void; onDone: () => void }) {
+function StoryRow({ story: s, now, expanded, divider, onToggle, onDone, onRuleSettings }: { story: Story; now: number; expanded: boolean; divider: boolean; onToggle: () => void; onDone: () => void; onRuleSettings: (rule: string | null) => void }) {
   const ref = useMemo(() => storyObject(s), [s])
   const run = useMemo(() => runObject(s), [s])
   const tone = storyTone(s)
@@ -178,20 +236,27 @@ function StoryRow({ story: s, now, expanded, divider, onToggle, onDone }: { stor
   // the chip says why it matters — unless the title already says exactly that
   const showReason = Boolean(s.reason) && !s.title.toLowerCase().endsWith((s.reason || '').replace(/\s*✓$/, '').toLowerCase())
 
-  const act = (fn: (r: ObjectRef) => { ok: boolean }, target: ObjectRef | null = ref) => {
+  const signalRule = s.signal?.rule_keys?.[0] ?? null
+  // Open marks the story read; Inspect is a look, not a read (the registry owns any object-side effects)
+  const act = (fn: (r: ObjectRef) => { ok: boolean }, target: ObjectRef | null = ref, { reads = true } = {}) => {
     if (!target) return
-    if (!s.read) void markStories([s.id], 'read')
+    if (reads && !s.read) void markStories([s.id], 'read')
     const r = fn(target)
     if (r.ok) onDone()
   }
   const activate = (e: MouseEvent | KeyboardEvent) => {
     if (!ref) { onToggle(); return }
-    if (!s.read) void markStories([s.id], 'read')
     const g = handleObjectClick(e, ref)
+    if (g !== 'inspect' && !s.read) void markStories([s.id], 'read')
     if (g) onDone()
   }
+  const resolve = () => {
+    void markStories([s.id], 'resolve')
+    // a story that carries Signal Center firings also clears their ledger rows (canonical signals API)
+    for (const id of s.signal?.signal_ids ?? []) void resolveSignal(id).catch(() => { /* the ledger keeps it open; the story is resolved */ })
+  }
   const onKey = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (e.key === 'Enter') { e.preventDefault(); activate(e) }
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); activate(e) }
     else if (e.key === 'ArrowRight' && !expanded) { e.preventDefault(); onToggle() }
     else if (e.key === 'ArrowLeft' && expanded) { e.preventDefault(); onToggle() }
   }
@@ -216,7 +281,12 @@ function StoryRow({ story: s, now, expanded, divider, onToggle, onDone }: { stor
                 <time dateTime={s.updated_at} title={clockTime(s.updated_at)}>{relTime(s.updated_at, now)}</time>
               </span>
               {summary ? <span id={`ncs-${s.id}-sum`} className="ncs__summary">{summary}</span> : null}
-              {showReason ? <span key={s.state.code} className={cx('ncs__reason', `is-${s.state.tone || (s.requires_operator ? 'gold' : 'neutral')}`)}>{s.reason}</span> : null}
+              {showReason || signalRule ? (
+                <span className="ncs__tags">
+                  {showReason ? <span key={s.state.code} className={cx('ncs__reason', `is-${s.state.tone || (s.requires_operator ? 'gold' : 'neutral')}`)}>{s.reason}</span> : null}
+                  {signalRule ? <span className="ncs__signal">Signal</span> : null}
+                </span>
+              ) : null}
             </span>
           </button>
           <button type="button" className="ncs__toggle" aria-expanded={expanded} aria-label={expanded ? 'Hide what happened' : `Show what happened (${s.chain.length})`} onClick={onToggle}>
@@ -236,14 +306,15 @@ function StoryRow({ story: s, now, expanded, divider, onToggle, onDone }: { stor
             </ol>
             <div className="ncs__actions">
               {ref ? <LCButton size="sm" variant="secondary" icon="layout-split" onClick={() => act(openObjectBeside)}>Open beside</LCButton> : null}
-              {ref ? <LCButton size="sm" variant="quiet" icon="eye" onClick={() => act(inspectObject)}>Inspect</LCButton> : null}
+              {ref ? <LCButton size="sm" variant="quiet" icon="eye" onClick={() => act(inspectObject, ref, { reads: false })}>Inspect</LCButton> : null}
+              {signalRule ? <LCButton size="sm" variant="quiet" icon="radar" onClick={() => onRuleSettings(signalRule)}>Rule settings</LCButton> : null}
               {run ? <LCButton size="sm" variant="quiet" icon="activity" onClick={() => act(openObject, run)}>Review run</LCButton> : null}
               {ref ? s.missions.map((m) => <LCButton key={m.kind} size="sm" variant="quiet" icon="target" onClick={() => act((r) => startObjectMission(r, m.kind))}>{m.label}</LCButton>) : null}
               {s.replay ? <LCButton size="sm" variant="quiet" icon="clock" onClick={() => { if (!s.read) void markStories([s.id], 'read'); openReplay(s.replay!); onDone() }}>Replay</LCButton> : null}
               <span className="ncs__spacer" />
               {!s.resolved ? <LCButton size="sm" variant="ghost" onClick={() => void markStories([s.id], s.read ? 'unread' : 'read')}>{s.read ? 'Mark unread' : 'Mark read'}</LCButton> : null}
               {s.resolved && s.resolved_by === 'operator' ? <LCButton size="sm" variant="ghost" onClick={() => void markStories([s.id], 'reopen')}>Reopen</LCButton> : null}
-              {!s.resolved ? <LCButton size="sm" variant="ghost" icon="check" onClick={() => void markStories([s.id], 'resolve')}>Resolve</LCButton> : null}
+              {!s.resolved ? <LCButton size="sm" variant="ghost" icon="check" onClick={resolve}>Resolve</LCButton> : null}
             </div>
           </div>
         ) : null}

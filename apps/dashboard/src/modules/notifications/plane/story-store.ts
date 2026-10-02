@@ -11,12 +11,17 @@
 import { useSyncExternalStore } from 'react'
 import { callBackend } from '../../../lib/api/backendClient'
 import { sound, type OperationalCue } from '../../../shared/sound'
-import { applyLocal, countLocal, mergeStories, type LocalMarks, type StoriesResponse, type Story, type StoryCounts } from './story-model'
+import { applyLocal, countLocal, mergeStories, parseCache, serializeCache, type LocalMarks, type StoriesResponse, type Story, type StoryCounts } from './story-model'
 
 const PATH = '/api/cockpit/notifications/stories'
 const CLOSED_MS = 60_000
 const OPEN_MS = 20_000
 const LOCAL_KEY = 'lc.notifications.story-marks'
+/** last-known stories for this tab session: the plane renders them instantly, then reconciles */
+const CACHE_KEY = 'lc.notifications.stories.v1'
+/** a hover on the bell refreshes only when the last read is older than this */
+const PREFETCH_STALE_MS = 15_000
+const BELL = 'button.cd-btn[aria-label^="Notifications"]'
 
 export interface StoryStoreState {
   status: 'idle' | 'loading' | 'ready' | 'error'
@@ -32,15 +37,43 @@ export interface StoryStoreState {
   loadingMore: boolean
   /** ids that arrived while the plane was open (the "N new" pill decides whether to show them) */
   arrivals: string[]
+  /** showing last-known stories (session cache) until the server answers this session */
+  reconciling: boolean
+  /** where the server read came from: the persisted projection or the snapshot builder */
+  source: 'projection' | 'snapshot' | null
 }
 
-let state: StoryStoreState = { status: 'idle', error: null, stories: new Map(), counts: null, generatedAt: null, horizon: null, truncated: false, degraded: [], stateStore: null, nextCursor: null, loadingMore: false, arrivals: [] }
+const EMPTY: StoryStoreState = { status: 'idle', error: null, stories: new Map(), counts: null, generatedAt: null, horizon: null, truncated: false, degraded: [], stateStore: null, nextCursor: null, loadingMore: false, arrivals: [], reconciling: false, source: null }
 const listeners = new Set<() => void>()
 let marks: LocalMarks = readMarks()
+let state: StoryStoreState = hydrate()
 let timer: ReturnType<typeof setTimeout> | null = null
 let open = false
 let started = 0
 let inflight = false
+let lastReadAt = 0
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+function storage(): Storage | null {
+  try { return typeof window !== 'undefined' ? window.sessionStorage : null } catch { return null }
+}
+
+/** Last-known stories (this tab session) — rendered at once; the first server read reconciles them. */
+function hydrate(): StoryStoreState {
+  const c = parseCache(storage()?.getItem(CACHE_KEY) ?? null)
+  if (!c || !c.stories.length) return { ...EMPTY, counts: c?.counts ?? null }
+  const { map } = mergeStories(new Map(), c.stories.map((x) => applyLocal(x, marks)))
+  return { ...EMPTY, status: 'ready', stories: map, counts: countLocal([...map.values()]), generatedAt: c.incremental ? c.generated_at : null, horizon: c.horizon, nextCursor: c.next_cursor, reconciling: true }
+}
+
+function saveCache() {
+  if (saveTimer) return
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    if (state.reconciling) return // never re-save what we have not confirmed
+    try { storage()?.setItem(CACHE_KEY, serializeCache(state.stories.values(), { generatedAt: state.generatedAt, horizon: state.horizon, counts: state.counts, nextCursor: state.nextCursor })) } catch { /* quota / private mode: render from the network */ }
+  }, 400)
+}
 
 function readMarks(): LocalMarks {
   try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}') as LocalMarks } catch { return {} }
@@ -57,13 +90,14 @@ function writeMarks() {
 function emit() { for (const l of listeners) l() }
 function set(patch: Partial<StoryStoreState>) {
   state = { ...state, ...patch }
-  if (patch.stories) state.counts = countLocal([...state.stories.values()])
+  if (patch.stories) { state.counts = countLocal([...state.stories.values()]); saveCache() }
   emit()
 }
 
 const overlay = (list: Story[]) => list.map((s) => applyLocal(s, marks))
 
 async function read(qs: string): Promise<StoriesResponse | string> {
+  lastReadAt = Date.now()
   const res = await callBackend<StoriesResponse>(`${PATH}?${qs}`, { timeoutMs: 45_000 })
   if (!res.ok) return res.status === 401 ? 'Sign in again to see notifications.' : 'Notifications could not be read right now.'
   const data = res.data as StoriesResponse | undefined
@@ -88,7 +122,14 @@ async function loadFirst() {
   inflight = false
   if (typeof r === 'string') { set({ status: state.stories.size ? 'ready' : 'error', error: r }); return }
   const { map } = mergeStories(new Map(), overlay(r.stories || []))
-  set({ status: 'ready', error: null, stories: map, generatedAt: r.generated_at, horizon: r.horizon, truncated: r.truncated, degraded: r.degraded, stateStore: r.state_store, nextCursor: r.next_cursor ?? null })
+  set({ status: 'ready', error: null, stories: map, generatedAt: r.generated_at, horizon: r.horizon, truncated: r.truncated, degraded: r.degraded, stateStore: r.state_store, nextCursor: r.next_cursor ?? null, reconciling: false, source: r.source ?? null })
+}
+
+/** The badge before any story is loaded: the server's cheap summary count. */
+async function loadSummary() {
+  const r = await read('summary=1')
+  if (typeof r === 'string' || state.stories.size) return
+  set({ counts: r.counts, degraded: r.degraded, source: r.source ?? null })
 }
 
 async function refresh() {
@@ -101,8 +142,10 @@ async function refresh() {
   // ids the server no longer holds aged out of its window; keep paged-in history (not in `ids`) only if older than the horizon
   const { map, arrived, changed } = mergeStories(state.stories, overlay(r.stories || []), null)
   if (r.ids) { const live = new Set(r.ids); for (const [id, s] of map) if (!live.has(id) && r.horizon && s.updated_at >= r.horizon) map.delete(id) }
-  voice([...arrived, ...changed.filter((s) => s.sound && s.sound.id !== state.stories.get(s.id)?.sound?.id)])
-  set({ error: null, stories: map, generatedAt: r.generated_at, horizon: r.horizon, truncated: r.truncated, degraded: r.degraded, stateStore: r.state_store, arrivals: open ? [...state.arrivals, ...arrived.map((s) => s.id)] : state.arrivals })
+  // reconciling a session cache: what "arrived" since the cache is not new to the operator — no sounds, no pill
+  const fromCache = state.reconciling
+  if (!fromCache) voice([...arrived, ...changed.filter((s) => s.sound && s.sound.id !== state.stories.get(s.id)?.sound?.id)])
+  set({ error: null, stories: map, generatedAt: r.generated_at, horizon: r.horizon, truncated: r.truncated, degraded: r.degraded, stateStore: r.state_store, arrivals: open && !fromCache ? [...state.arrivals, ...arrived.map((s) => s.id)] : state.arrivals, reconciling: false, source: r.source ?? null })
 }
 
 export async function loadMoreStories() {
@@ -119,13 +162,39 @@ function schedule() {
   timer = setTimeout(async () => { await refresh(); schedule() }, open ? OPEN_MS : CLOSED_MS)
 }
 
-/** Start reading (the shell mounts this once). Returns the stop function. */
+const idle = (fn: () => void) => {
+  const w = typeof window !== 'undefined' ? (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }) : null
+  if (w?.requestIdleCallback) w.requestIdleCallback(fn, { timeout: 1500 })
+  else setTimeout(fn, 200)
+}
+
+/** Refresh ahead of the operator (bell hover) — only when the last read is stale; never a burst. */
+export function prefetchStories() {
+  if (inflight || Date.now() - lastReadAt < PREFETCH_STALE_MS) return
+  void refresh()
+}
+
+const onBellHover = (e: PointerEvent) => { if ((e.target as Element | null)?.closest?.(BELL)) prefetchStories() }
+
+/**
+ * Start reading (the shell mounts this once). Returns the stop function.
+ *   with last-known stories: they render now; one reconciling read on idle
+ *   without: the cheap summary first (the badge), page one on idle (the plane is ready before it opens)
+ */
 export function startStoryStore(): () => void {
   started += 1
-  if (started === 1) { void loadFirst(); schedule() }
+  if (started === 1) {
+    if (state.stories.size) idle(() => void refresh())
+    else { void loadSummary(); idle(() => void loadFirst()) }
+    schedule()
+    if (typeof document !== 'undefined') document.addEventListener('pointerover', onBellHover, { passive: true })
+  }
   return () => {
     started -= 1
-    if (started === 0 && timer) { clearTimeout(timer); timer = null }
+    if (started === 0) {
+      if (timer) { clearTimeout(timer); timer = null }
+      if (typeof document !== 'undefined') document.removeEventListener('pointerover', onBellHover)
+    }
   }
 }
 
@@ -192,4 +261,4 @@ export const useStoryStore = () => useSyncExternalStore(subscribe, get, get)
 const badge = () => state.counts?.badge ?? 0
 export const useStoryBadge = () => useSyncExternalStore(subscribe, badge, badge)
 
-export const __storyStore = { get, reset: () => { state = { ...state, status: 'idle', stories: new Map(), counts: null, generatedAt: null, arrivals: [] }; marks = {}; emit() } }
+export const __storyStore = { get, hydrate: () => { state = hydrate(); emit() }, reset: () => { state = { ...EMPTY }; marks = {}; emit() } }

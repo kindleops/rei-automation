@@ -58,6 +58,8 @@ export interface Story {
   replay: { type: 'seller' | 'property' | 'campaign' | 'closing' | 'workflow'; id: string; label: string | null } | null
   missions: Array<{ kind: 'work_seller' | 'move_deal'; label: string }>
   sound: StorySound | null
+  /** Signal Center firings folded into this story (rule settings + the ledger rows a Resolve also clears) */
+  signal?: { rule_keys: string[]; signal_ids: string[]; severity: string | null } | null
 }
 
 export interface StoryCounts { badge: number; needs_you: number; now: number; now_unread: number; resolved: number; system: number; system_active: number }
@@ -74,6 +76,43 @@ export interface StoriesResponse {
   next_cursor?: string | null
   incremental?: boolean
   ids?: string[]
+  /** 'projection' = persisted story rows; 'snapshot' = the builder fallback (migration not applied) */
+  source?: 'projection' | 'snapshot'
+}
+
+/* ── last-known stories (session cache: the plane renders before the network answers) ── */
+
+export interface StoryCache { v: 1; saved_at: string; generated_at: string | null; horizon: string | null; counts: StoryCounts | null; stories: Story[]; next_cursor: string | null }
+export const CACHE_MAX_STORIES = 120
+/** older than this, the cache still renders but reconciles with a full first page (not `since`) */
+export const CACHE_INCREMENTAL_MS = 10 * 60e3
+
+export function serializeCache(stories: Iterable<Story>, meta: { generatedAt: string | null; horizon: string | null; counts: StoryCounts | null; nextCursor: string | null }, now = Date.now()): string {
+  const list = [...stories].sort(byActivity).slice(0, CACHE_MAX_STORIES)
+  const c: StoryCache = { v: 1, saved_at: new Date(now).toISOString(), generated_at: meta.generatedAt, horizon: meta.horizon, counts: meta.counts, stories: list, next_cursor: meta.nextCursor }
+  return JSON.stringify(c)
+}
+
+export function parseCache(raw: string | null, now = Date.now()): (StoryCache & { incremental: boolean }) | null {
+  if (!raw) return null
+  try {
+    const c = JSON.parse(raw) as StoryCache
+    if (!c || c.v !== 1 || !Array.isArray(c.stories)) return null
+    const age = now - Date.parse(c.saved_at || '')
+    if (!Number.isFinite(age) || age < 0 || age > 8 * 864e5) return null
+    return { ...c, incremental: age <= CACHE_INCREMENTAL_MS && Boolean(c.generated_at) }
+  } catch { return null }
+}
+
+/* ── keyboard: ↑/↓ through the visible stories (clamped; Home/End jump) ── */
+
+export function nextStoryIndex(cur: number, key: string, len: number): number | null {
+  if (!len) return null
+  if (key === 'ArrowDown') return cur < 0 ? 0 : Math.min(len - 1, cur + 1)
+  if (key === 'ArrowUp') return cur < 0 ? 0 : Math.max(0, cur - 1)
+  if (key === 'Home') return 0
+  if (key === 'End') return len - 1
+  return null
 }
 
 export const LENS_ORDER: StoryLens[] = ['needs_you', 'now', 'resolved', 'system']

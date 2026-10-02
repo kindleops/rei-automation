@@ -18,6 +18,8 @@ import { formatRelativeTime } from '../../shared/formatters'
 import { NotificationPreferencesPanel } from './NotificationPreferencesPanel'
 import { LCSegmented } from '../../shared/lc'
 import { SignalsPanel } from './signals/SignalsPanel'
+import { NotificationPlane } from './plane/NotificationPlane'
+import { planeOwnsNotifications } from './plane/plane-host'
 import './notification-center.css'
 
 const cls = (...tokens: Array<string | false | null | undefined>) =>
@@ -238,7 +240,14 @@ const EmptyState = ({ loading, error }: { loading: boolean; error: string | null
  * gone rather than left dormant: a second mobile centre nobody mounts is one more
  * thing that looks like truth to whoever edits this next.
  */
-export const LeadCommandNotificationCenter = ({
+export const LeadCommandNotificationCenter = (props: { open: boolean; onClose: () => void; anchorTop?: number }) => {
+  // On the modern desktop the plane answers every "notifications" request (sidebar, Home widgets);
+  // this panel stays as the rollback (lc.notifications.legacy-panel = '1') and for the legacy shells.
+  if (props.open && planeOwnsNotifications()) return <NotificationPlane open onClose={props.onClose} anchorTop={84} />
+  return <LegacyNotificationCenter {...props} />
+}
+
+const LegacyNotificationCenter = ({
   open,
   onClose,
   anchorTop = 58,

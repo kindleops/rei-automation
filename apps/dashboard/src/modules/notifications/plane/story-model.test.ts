@@ -5,7 +5,7 @@ vi.mock('../../desktop/objects', () => {
   return { sellerObject: mk('seller'), campaignObject: mk('campaign'), closingObject: mk('closing'), dealObject: mk('deal'), propertyObject: mk('property'), workflowObject: mk('workflow') }
 })
 
-import { applyLocal, countLocal, defaultLens, degradedText, mergeStories, relTime, runObject, storyObject, storyTone, visibleOrder, type Story } from './story-model'
+import { applyLocal, CACHE_INCREMENTAL_MS, CACHE_MAX_STORIES, countLocal, defaultLens, degradedText, mergeStories, nextStoryIndex, parseCache, relTime, runObject, serializeCache, storyObject, storyTone, visibleOrder, type Story } from './story-model'
 
 const story = (id: string, over: Partial<Story> = {}): Story => ({
   id, subject: { type: 'seller', id: '+1612', thread_key: '+1612', property_id: 'p1', label: 'Gale' }, subject_key: 'seller:+1612|p1', kind: 'message',
@@ -94,5 +94,30 @@ describe('notification plane model', () => {
     expect(relTime('2026-10-02T12:00:00Z', now)).toBe('3h')
     expect(degradedText(['workflow'])).toContain('automation runs')
     expect(degradedText([])).toBeNull()
+  })
+
+  it('session cache: newest stories round-trip; a fresh cache reconciles incrementally, an old one with page one; junk is ignored', () => {
+    const now = Date.parse('2026-10-02T16:00:00.000Z')
+    const list = Array.from({ length: CACHE_MAX_STORIES + 5 }, (_, i) => story(`s${i}`, { updated_at: new Date(now - i * 60e3).toISOString() }))
+    const raw = serializeCache(list, { generatedAt: '2026-10-02T15:59:00.000Z', horizon: null, counts: countLocal(list), nextCursor: 'c1' }, now)
+    const back = parseCache(raw, now + 1000)
+    expect(back?.stories.length).toBe(CACHE_MAX_STORIES)
+    expect(back?.stories[0].id).toBe('s0')
+    expect(back?.incremental).toBe(true)
+    expect(parseCache(raw, now + CACHE_INCREMENTAL_MS + 1)?.incremental).toBe(false)
+    expect(parseCache(raw, now + 9 * 864e5)).toBeNull()
+    expect(parseCache('{nope', now)).toBeNull()
+    expect(parseCache(JSON.stringify({ v: 2, stories: [] }), now)).toBeNull()
+  })
+
+  it('arrow keys: ↓ from nothing lands on the first story, clamps at the ends, Home/End jump; other keys are not ours', () => {
+    expect(nextStoryIndex(-1, 'ArrowDown', 3)).toBe(0)
+    expect(nextStoryIndex(0, 'ArrowDown', 3)).toBe(1)
+    expect(nextStoryIndex(2, 'ArrowDown', 3)).toBe(2)
+    expect(nextStoryIndex(0, 'ArrowUp', 3)).toBe(0)
+    expect(nextStoryIndex(1, 'End', 3)).toBe(2)
+    expect(nextStoryIndex(2, 'Home', 3)).toBe(0)
+    expect(nextStoryIndex(1, 'Enter', 3)).toBeNull()
+    expect(nextStoryIndex(-1, 'ArrowDown', 0)).toBeNull()
   })
 })
