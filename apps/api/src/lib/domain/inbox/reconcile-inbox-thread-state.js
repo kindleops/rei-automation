@@ -163,3 +163,68 @@ export async function reconcileStaleInboxBuckets(
     waiting_transitioned: waitingTransitioned,
   };
 }
+/**
+ * CLASSIFIER CORRECTION (New Replies 7.2 repair, 2026-10-01).
+ *
+ * Writes a corrected classification onto ONE thread's presentation/triage
+ * columns -- last_intent, inbox_bucket, classifier_version, classified_at --
+ * and nothing decision-owned (disposition / status / archive go through
+ * patchUniversalLeadState). The old values are preserved, never destroyed:
+ * previous_inbox_bucket gets the old bucket and metadata[source] records the
+ * old and new classification, the reason and the time.
+ *
+ * Compare-and-set on updated_at: if the thread changed after the preview was
+ * computed (a new reply, an operator action), nothing is written and the
+ * caller reports a conflict instead of overwriting newer state. Re-running is
+ * a no-op once metadata[source].applied_at exists.
+ */
+export async function applyClassifierCorrection(
+  supabase,
+  { thread = {}, correction = {}, source = "classifier_correction", now = new Date().toISOString() } = {},
+) {
+  const thread_key = String(thread.thread_key || "").trim();
+  if (!supabase || !thread_key) return { ok: false, reason: "missing_supabase_or_thread" };
+  const metadata = thread.metadata && typeof thread.metadata === "object" && !Array.isArray(thread.metadata)
+    ? thread.metadata
+    : {};
+  if (metadata[source]?.applied_at) {
+    return { ok: true, skipped: true, reason: "already_applied", applied_at: metadata[source].applied_at };
+  }
+
+  const patch = {
+    last_intent: correction.last_intent ?? thread.last_intent ?? null,
+    classifier_version: correction.classifier_version || thread.classifier_version || null,
+    classified_at: now,
+    previous_inbox_bucket: thread.inbox_bucket ?? null,
+    reason_codes: [...new Set([...(Array.isArray(thread.reason_codes) ? thread.reason_codes : []), source])],
+    metadata: {
+      ...metadata,
+      [source]: {
+        applied_at: now,
+        old: {
+          last_intent: thread.last_intent ?? null,
+          inbox_bucket: thread.inbox_bucket ?? null,
+          disposition: thread.disposition ?? null,
+          classifier_version: thread.classifier_version ?? null,
+        },
+        new: {
+          last_intent: correction.last_intent ?? null,
+          inbox_bucket: correction.inbox_bucket === undefined ? thread.inbox_bucket ?? null : correction.inbox_bucket,
+          classifier_version: correction.classifier_version ?? null,
+          category: correction.category ?? null,
+        },
+        reason: correction.reason ?? null,
+        ...(correction.extra && typeof correction.extra === "object" ? correction.extra : {}),
+      },
+    },
+    updated_at: now,
+  };
+  if (correction.inbox_bucket !== undefined) patch.inbox_bucket = correction.inbox_bucket;
+
+  let query = supabase.from("inbox_thread_state").update(patch).eq("thread_key", thread_key);
+  if (thread.updated_at) query = query.eq("updated_at", thread.updated_at);
+  const { data, error } = await query.select("thread_key");
+  if (error) return { ok: false, reason: "update_failed", error: error.message };
+  if (!Array.isArray(data) || data.length === 0) return { ok: false, reason: "conflict_thread_changed_since_preview" };
+  return { ok: true, written: true };
+}
