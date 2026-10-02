@@ -116,8 +116,52 @@ export function realReviewHoldOf(decision = null) {
 async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, now }) {
   const outcome = { gap: "stale_active_without_next_action", scanned: 0, repaired: 0, results: [] };
 
+  // Per-PAGE lookups (rc-7.1 P7). A thread with no review reason is now left
+  // untouched, so it stays a candidate and is re-walked every 5-minute run;
+  // two reads per page instead of two per row keep that walk cheap.
+  let pageOpps = new Map();
+  let pageHolds = new Map();
+  const prefetchPage = async (rows) => {
+    pageOpps = new Map();
+    pageHolds = new Map();
+    const keys = [...new Set(rows.map((r) => clean(r.thread_key)).filter(Boolean))];
+    if (!keys.length) return;
+    const [opps, decisions] = await Promise.all([
+      supabase
+        .from("acquisition_opportunities")
+        .select("id,primary_thread_key,next_action,next_action_due,updated_at")
+        .in("primary_thread_key", keys)
+        .order("updated_at", { ascending: false })
+        .limit(1000),
+      supabase
+        .from("seller_automation_decisions")
+        .select("conversation_id,action,action_reason,lineage,observed_at")
+        .in("conversation_id", keys)
+        .order("observed_at", { ascending: false })
+        // Newest first: a truncated tail can only drop OLDER turns, and a
+        // missing hold means no stamp (fail-safe), never a wrong one.
+        .limit(1000),
+    ]);
+    // A failed read leaves the map empty for that page: no canonical action
+    // copied and NO review stamped — never a guess (see processRow).
+    if (!opps.error) {
+      for (const opp of opps.data || []) {
+        const key = clean(opp.primary_thread_key);
+        const prev = pageOpps.get(key);
+        if (!prev || String(opp.updated_at || "") > String(prev.updated_at || "")) pageOpps.set(key, opp);
+      }
+    }
+    if (!decisions.error) {
+      for (const d of decisions.data || []) {
+        const key = clean(d.conversation_id);
+        const prev = pageHolds.get(key);
+        if (!prev || String(d.observed_at || "") > String(prev.observed_at || "")) pageHolds.set(key, d);
+      }
+    }
+  };
+
   const fetchError = await walkSweepPages({
-    fetchPage: (cursor) => {
+    fetchPage: async (cursor) => {
       let query = supabase
         .from("inbox_thread_state")
         .select("thread_key,lifecycle_stage,operational_status,next_action,updated_at,is_archived,is_suppressed")
@@ -131,7 +175,9 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
         .lt("updated_at", hoursAgoIso(STALE_ACTIVE_HOURS, now))
         .eq("is_archived", false);
       if (cursor) query = query.gt("thread_key", cursor);
-      return query.order("thread_key", { ascending: true }).limit(limit);
+      const page = await query.order("thread_key", { ascending: true }).limit(limit);
+      if (!page.error && Array.isArray(page.data) && page.data.length) await prefetchPage(page.data);
+      return page;
     },
     cursorOf: (row) => row.thread_key,
     pageSize: limit,
@@ -151,13 +197,7 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
       let nextAction = null;
       let nextActionDue = null;
       let reviewReason = null;
-      const { data: opps, error: opps_error } = await supabase
-        .from("acquisition_opportunities")
-        .select("id,next_action,next_action_due")
-        .eq("primary_thread_key", row.thread_key)
-        .order("updated_at", { ascending: false })
-        .limit(1);
-      const canonical = !opps_error && opps?.[0] ? opps[0] : null;
+      const canonical = pageOpps.get(clean(row.thread_key)) || null;
       const canonicalHasNextAction = Boolean(clean(canonical?.next_action));
       const canonicalIsReview = clean(canonical?.next_action) === NEXT_ACTIONS.HUMAN_REVIEW;
       if (canonicalHasNextAction && !canonicalIsReview) {
@@ -165,7 +205,7 @@ async function recoverStaleActiveWithoutNextAction(supabase, { limit, dryRun, no
         nextActionDue = canonical.next_action_due || null;
       } else {
         // A failed ledger read is not a review reason either.
-        const hold = await loadRealReviewHold(supabase, row.thread_key).catch(() => null);
+        const hold = realReviewHoldOf(pageHolds.get(clean(row.thread_key)) || null);
         if (hold) {
           nextAction = NEXT_ACTIONS.HUMAN_REVIEW;
           nextActionDue = hold.deadline || canonical?.next_action_due || null;
