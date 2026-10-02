@@ -63,18 +63,22 @@ const PINNED = Object.freeze({
   "property.asset_family@1": "bf31e4d5415a6560fc70fa9a4a4dee462cac779f5cab3ccb3f59a380efdc8e64",
   "property.bathrooms@1": "66005279575f37610877b75c1e7c5dc93da64e116413d84ab8da147c390e7c45",
   "property.bedrooms@1": "2ecf42cc7a9c5efd125ff8c48455fb9e750778e1d78139a805d3b33269794bbb",
+  "property.equity_estimate_ratio@1": "4b294aa2bf3f10e413c24e59226943347e2634b79a0683de8b0a05a0ba907104",
   "property.living_sqft@1": "71198fc23936847e170ef024628aa3288986c477ab2d3f8b69db31c3d0a832d1",
   "property.market@1": "4c229205f964192103bbd8c7f4ac348a808afe73132912d3819557e457192cdf",
   "property.recorded_lien_count@1": "a66b6d27c9c28f00d453bf776f305ecf26f93d29a14c04e0196bcac79c1b6288",
   "property.recorded_mortgage_count@1": "637a653339f3cb908d8c3e07f7e3a147f53f96b322779ae39f08c3f6f5071b72",
+  "property.school_district@1": "4d85664c98309a143597051e53d6bfa6acff7f15b8dfdd39813d5a98c3c4ab62",
   "property.unit_count@1": "7c9b83d57696e59b4e594be053551dc3d5cd5a8e5a3757889155d2e7ff234617",
   "property.year_built@1": "fa9f01842e8e9cfb690a5872e281de3972a392e15ac71cd16c52d53d99a6e4da",
   "property.years_since_last_recorded_sale@1": "4ea5f46ff60fc89cfd37340eb7958ba19b57773a966a544e84a351f37de357df",
   "prospect.age_band@1": "2fb9706aa974626b422dac83df83c93bc3ee5033fdd5d76a81d78729e0d08e22",
+  "prospect.buying_power_band@1": "5f7680d31fa907d03bdfff978efe2388b5432e5aa306e4ec1b471cc57cc7a61c",
   "prospect.education_level@1": "3d2f2abdfb6f13b2e4890177b734b509582e38909b0b9832feb672d67425afe9",
   "prospect.gender@1": "d82782d34014749fee6fedb1a70cee83a2416f77c63dd0de211d1da6433eaa50",
   "prospect.household_income_band@1": "96e756dc4590eb7e334de22a3aed84ee11f0116859426e232bde262b36454697",
   "prospect.marital_status@1": "29081f6a91b02d40411a16d26c18df11e7f347d92b7b0c69a7c81749343e6b1b",
+  "prospect.net_asset_value_band@1": "2aa90af9bd767541d2ee582ffbe624b293fd64f1a7ef0e4731d99debc5e2da78",
   "prospect.occupation_group@1": "60e5466331ad91db9d8b3eeba865d4f9fc7d68ffa54b5ebeebe66f81809209c3",
   "seller.days_since_last_touch@1": "a0426b9769e427b96b77532654e7c7b8d344d297516df87adf6fb43bb6152818",
   "seller.prior_delivered_count@1": "a13c2ace9dedbba630a3a5a1ec618012e9c126aa2f8ffefe486b2a1c6fbada64",
@@ -85,8 +89,10 @@ const PINNED = Object.freeze({
   "template.use_case@1": "dff9686727563fcb4ed7b0737b999b2f75e1f665c76899f8536eb38a4d6d68bd",
   "seller_first_touch_all@1": "31d2359631897149375a7c5655d534f97b28ff36848d712091ac81f50851d900",
   "seller_first_touch_all@2": "2ede9ba6d8dc8f3da70777c78071b8ec2403c73b99ca3568b5d2c5a1711ab849",
+  "seller_first_touch_all@3": "4db1018512e29b8f6a63e218d1919835b8d112cca68db90ca6c5e786dcb447ed",
   "seller_first_touch@1": "3ce39382ab59530b96ea1bf9093005a0cbf31cbeee7cf2655f6167a10df4e280",
   "seller_first_touch@2": "4918e0e0fd04c687323c521e02b136073792a92094adc7e3dd30ae93b4e50d78",
+  "seller_first_touch@3": "1f25fda91dfa9482daffc866465029591b695c6ffab2830e0d144d6d3a417e03",
 });
 
 test("v1 definition hashes are pinned: a changed hash under the same version fails", () => {
@@ -170,5 +176,5 @@ test("mirror rows carry domain and fairness class for intelligence.feature_defin
   assert.equal(toFeatureDefinitionRow(registry.get("prospect.gender", 1)).fairness_class, "personal_attribute");
   const absentee = toFeatureDefinitionRow(registry.get("owner.absentee", 1));
   assert.equal(absentee.freshness_sla, "300 seconds");
-  assert.equal(registry.toFeatureSetRows().length, 4);
+  assert.equal(registry.toFeatureSetRows().length, 6);
 });

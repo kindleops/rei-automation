@@ -45,6 +45,30 @@ export class LeakageError extends Error {
   }
 }
 
+/**
+ * Tri-state missingness (IC 8.1): a feature that has no value says WHY.
+ *   missing         no data reached us (default for null/undefined)
+ *   unknown         data exists but cannot be resolved (ambiguous zone, conflicting sources)
+ *   not_applicable  the concept does not apply (e.g. units for vacant land)
+ * Values are never zero-filled: the vector carries `missingness` per key.
+ */
+export const MISSINGNESS = Object.freeze(["missing", "unknown", "not_applicable"]);
+const MISSING_MARK = Symbol.for("ic8.feature.missing");
+const QUALITY_MARK = Symbol.for("ic8.feature.quality");
+
+/** Return from compute() for a value that exists in principle but cannot be resolved. */
+export function unknownValue(reason = null) {
+  return { [MISSING_MARK]: "unknown", reason };
+}
+/** Return from compute() when the feature does not apply to this entity. */
+export function notApplicable(reason = null) {
+  return { [MISSING_MARK]: "not_applicable", reason };
+}
+/** Return from compute() to attach declared quality companions to a value (or a missing marker). */
+export function withQuality(value, quality) {
+  return { [QUALITY_MARK]: true, value, quality: quality || {} };
+}
+
 /** How long a decision-time capture stays usable for the decision it was taken for. */
 export const DECISION_CAPTURE_TOLERANCE_MS = 5 * MINUTE_MS;
 
@@ -111,6 +135,7 @@ export const PIT_COLLECTIONS = Object.freeze({
       lot_square_feet: "value",
       latitude: "value",
       longitude: "value",
+      school_district_name: "value",
     },
   },
   market_sales: {
@@ -154,6 +179,8 @@ export const PIT_COLLECTIONS = Object.freeze({
       gender: "value",
       marital_status: "value",
       language_preference: "value",
+      net_asset_value: "value",
+      buying_power: "value",
     },
   },
   owner_person: {
@@ -211,6 +238,13 @@ export const PIT_COLLECTIONS = Object.freeze({
       property_address_zip: "value",
       lien_count: "value",
       active_lien: "value",
+      estimated_value: "value",
+      value_source: "value",
+      value_as_of: "value",
+      open_mortgage_balance: "value",
+      mortgage_source: "value",
+      mortgage_as_of: "value",
+      lien_source: "value",
     },
   },
 });
@@ -432,6 +466,8 @@ export function computeFeatureVector({
   const projected = projectEntity(entityType, entity);
   const values = {};
   const missing = [];
+  const missingness = {};
+  const qualityOut = {};
   const errors = [];
   let maxInputTime = null;
   for (const member of set.members) {
@@ -451,6 +487,20 @@ export function computeFeatureVector({
       errors.push({ feature: def.key, code: "compute_error", message: String(error?.message || error).slice(0, 200) });
       value = null;
     }
+    let quality = null;
+    if (value && typeof value === "object" && value[QUALITY_MARK]) {
+      quality = {};
+      for (const [field, q] of Object.entries(value.quality)) {
+        if (def.qualityFields.includes(field)) quality[field] = q;
+        else errors.push({ feature: def.key, code: "undeclared_quality_field", field });
+      }
+      value = value.value;
+    }
+    let missingKind = null;
+    if (value && typeof value === "object" && value[MISSING_MARK]) {
+      missingKind = value[MISSING_MARK];
+      value = null;
+    }
     if (value && typeof value.then === "function") {
       errors.push({ feature: def.key, code: "async_compute_not_supported" });
       value = null;
@@ -459,8 +509,13 @@ export function computeFeatureVector({
       errors.push({ feature: def.key, code: "invalid_value_type", valueType: def.valueType });
       value = null;
     }
-    if (value === null || value === undefined) missing.push(def.key);
-    else values[def.key] = value;
+    if (value === null || value === undefined) {
+      missing.push(def.key);
+      missingness[def.key] = missingKind || "missing";
+    } else {
+      values[def.key] = value;
+    }
+    if (quality && Object.keys(quality).length) qualityOut[def.key] = quality;
     const readerMax = reader.maxInputTime;
     if (readerMax !== null && (maxInputTime === null || readerMax > maxInputTime)) maxInputTime = readerMax;
   }
@@ -472,6 +527,8 @@ export function computeFeatureVector({
     max_input_time: toIso(maxInputTime),
     values,
     missing,
+    missingness,
+    quality: qualityOut,
     errors,
   };
 }
@@ -486,6 +543,8 @@ export function toFeatureSnapshotRow(vector, { entityType, entityId, origin = "o
     max_input_time: vector.max_input_time,
     values: vector.values,
     missing: vector.missing,
+    missingness: vector.missingness || {},
+    quality: vector.quality || {},
     origin,
   };
 }

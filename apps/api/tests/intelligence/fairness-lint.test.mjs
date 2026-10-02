@@ -67,7 +67,6 @@ const PROHIBITED_SOURCES = [
   "seller.owner.in_owner_family",
   "seller.property_lien.date_of_divorce",
   "seller.property_lien.date_of_death",
-  "properties.school_district",
   // anything read from the phones table is treated as phone identity (conservative)
   "phones.linked_languages",
 ];
@@ -201,17 +200,17 @@ test("conversation_only features are rejected in every non-conversation family",
 test("personal_attribute is granted to targeting_response families; other defined families must not declare it", () => {
   const registry = createV1Registry();
   assert.deepEqual(registry.lintSetForFamily("seller_first_touch_all@1", "seller_first_touch_reply"), []);
-  for (const family of ["send_carrier_filtering", "send_opt_out_risk", "campaign_controller", "conversation_understanding"]) {
+  for (const family of ["send_carrier_filtering", "send_opt_out_risk", "campaign_controller", "conversation_understanding", "comp_valuation", "buyer_match"]) {
     assert.ok(registry.lintSetForFamily("seller_first_touch_all@1", family).some((v) => v.violation === "fairness_class_not_allowed_for_family"), family);
   }
-  for (const familyType of ["delivery_risk", "campaign_allocation", "conversation_understanding"]) {
+  for (const familyType of ["delivery_risk", "campaign_allocation", "conversation_understanding", "valuation", "buyer_selection"]) {
     assert.throws(
       () => defineFamilyPolicy({ family: `x_${familyType}`, familyType, allowedFairnessClasses: ["permitted", "personal_attribute"] }),
       /granted to targeting_response families/,
     );
   }
-  // valuation/offer/negotiation/buyer_selection are not defined in this phase
-  for (const familyType of ["valuation", "offer", "negotiation", "buyer_selection"]) {
+  // offer / negotiation are not defined in this phase
+  for (const familyType of ["offer", "negotiation"]) {
     assert.throws(() => defineFamilyPolicy({ family: `x_${familyType}`, familyType }), /not defined in this phase/);
   }
 });
@@ -224,7 +223,7 @@ test("v1 sets: identity never present; the eight personal attributes only in sel
   assert.equal(all.containsPersonal, true);
   assert.deepEqual([...all.personalMembers].sort(), [...V1_PERSONAL_MEMBERS].sort());
   assert.equal(V1_PERSONAL_MEMBERS.length, 8);
-  assert.deepEqual(registry.listSets().map((s) => s.featureSetId).sort(), ["seller_first_touch@1", "seller_first_touch@2", "seller_first_touch_all@1", "seller_first_touch_all@2"]);
+  assert.deepEqual(registry.listSets().map((s) => s.featureSetId).sort(), ["seller_first_touch@1", "seller_first_touch@2", "seller_first_touch@3", "seller_first_touch_all@1", "seller_first_touch_all@2", "seller_first_touch_all@3"]);
   assert.equal(registry.getSet("seller_first_touch@2").containsPersonal, false);
   for (const def of registry.list()) {
     for (const source of def.lineage.sources) {

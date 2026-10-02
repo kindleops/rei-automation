@@ -26,12 +26,15 @@
  *                       characteristics the owner did not address (race /
  *                       ethnicity, religion, national origin, disability,
  *                       familial status, veteran status, sexual orientation,
- *                       dates of death/divorce) and school district (pending
- *                       owner review) stay prohibited under the brief's
- *                       stricter-reading rule.
+ *                       dates of death/divorce) stay prohibited under the
+ *                       brief's stricter-reading rule. School district is a
+ *                       PROPERTY/geography fact and is permitted (IC 8.1).
  *
- * Valuation / offer / negotiation / buyer_selection families are not defined
- * in this phase; their input policy is set with the owner when they are.
+ * Per-model feature contracts (IC 8.1): every family also declares the
+ * feature GROUPS it may consume (first-text reply: prospect, property, market,
+ * contact, campaign, investor; valuation: property, market, transaction, comp,
+ * public_record, seller_provided; buyer: buyer, company, purchase, market,
+ * property_relationship). Offer / negotiation families remain undefined.
  *
  * The lint is name-based and conservative: an unknown `*_name` column is a
  * person's name until it is allowlisted here.
@@ -51,8 +54,53 @@ export const FEATURE_DOMAINS = Object.freeze([
   "operational",
 ]);
 
-/** Family types defined in this phase (valuation/offer/negotiation/buyer_selection come later, with the owner). */
-export const FAMILY_TYPES = Object.freeze(["targeting_response", "conversation_understanding", "campaign_allocation", "delivery_risk"]);
+/** Family types defined so far (offer / negotiation come later, with the owner). */
+export const FAMILY_TYPES = Object.freeze([
+  "targeting_response",
+  "conversation_understanding",
+  "campaign_allocation",
+  "delivery_risk",
+  "valuation",
+  "buyer_selection",
+]);
+
+/** Feature groups: the vocabulary of the per-model feature contracts (IC 8.1). */
+export const FEATURE_GROUPS = Object.freeze([
+  "prospect",
+  "property",
+  "market",
+  "contact",
+  "campaign",
+  "investor",
+  "transaction",
+  "comp",
+  "public_record",
+  "seller_provided",
+  "buyer",
+  "company",
+  "purchase",
+  "property_relationship",
+  "conversation",
+]);
+
+/**
+ * The group of a feature: its explicit `group` declaration, else derived
+ * deterministically from its declarations (pinned by a test, so a change here
+ * is visible).
+ */
+export function featureGroupOf(def) {
+  if (def.group) return def.group;
+  if (def.lineage?.group === "market_investor_activity") return "investor";
+  if (def.fairnessClass === "conversation_only") return "conversation";
+  if (def.statedFact) return "seller_provided";
+  if (def.domain === "financial_title") return "public_record";
+  if (def.domain === "company_relationship") return "company";
+  if (def.domain === "ownership_prospect") return def.scope === "property" ? "public_record" : "prospect";
+  if (def.scope === "market") return "market";
+  if (def.domain === "property") return "property";
+  if (def.scope === "seller") return "contact";
+  return "campaign";
+}
 /** personal_attribute inputs are granted to these family types. */
 export const PERSONAL_ATTRIBUTE_FAMILY_TYPES = Object.freeze(["targeting_response"]);
 
@@ -72,7 +120,7 @@ export const PERSON_TABLES = Object.freeze([
 export const PROPERTY_TABLES = Object.freeze(["properties", "property", "seller.property", "v_recent_sold_comps"]);
 
 const NON_PERSON_NAME_RE =
-  /(^|_)(market|county|city|state|template|campaign|stage|use_case|metric|feature|subdivision|zip|file|bucket|schema|table|column|event|field)_name$/;
+  /(^|_)(market|county|city|state|template|campaign|stage|use_case|metric|feature|subdivision|zip|file|bucket|schema|table|column|event|field|school_district)_name$/;
 const PERSONA_RE = /persona|agent_family|agent_name|agent_display/;
 
 /**
@@ -123,7 +171,6 @@ export const SOURCE_RULES = Object.freeze([
         t,
       ),
   },
-  { id: "school_district_pending_review", effect: "prohibited", category: "pending_owner_review", test: (t) => /school_district|school_rating/.test(t) },
   // ── prohibited: legacy opaque scores (the retired interpretation layer) ─
   {
     id: "legacy_score",
@@ -314,8 +361,10 @@ export function formatViolations(violations) {
  * A family declares its type and the fairness classes its inputs may use.
  * The registry rejects any feature set that violates the declaration.
  */
-export function defineFamilyPolicy({ family, familyType, allowedFairnessClasses = ["permitted"], description = null } = {}) {
+export function defineFamilyPolicy({ family, familyType, allowedFairnessClasses = ["permitted"], allowedGroups = null, description = null } = {}) {
   const problems = [];
+  const groups = allowedGroups === null ? null : [...new Set(allowedGroups)];
+  for (const g of groups || []) if (!FEATURE_GROUPS.includes(g)) problems.push(`unknown feature group ${g}`);
   if (!/^[a-z][a-z0-9_]*$/.test(String(family || ""))) problems.push("family must be snake_case");
   if (!FAMILY_TYPES.includes(familyType)) problems.push(`familyType must be one of ${FAMILY_TYPES.join(", ")} (others are not defined in this phase)`);
   const classes = [...new Set(allowedFairnessClasses)];
@@ -332,7 +381,7 @@ export function defineFamilyPolicy({ family, familyType, allowedFairnessClasses 
   if (problems.length) {
     throw new FairnessLintError(`invalid family policy ${family}: ${problems.join("; ")}`, problems.map((p) => ({ violation: p })));
   }
-  return Object.freeze({ family, familyType, allowedFairnessClasses: Object.freeze(classes), description });
+  return Object.freeze({ family, familyType, allowedFairnessClasses: Object.freeze(classes), allowedGroups: groups ? Object.freeze(groups) : null, description });
 }
 
 /** Validate a feature set (array of feature definitions) for a family policy. */
@@ -345,6 +394,9 @@ export function lintFeatureSetForFamily(features, policy) {
     if (!policy.allowedFairnessClasses.includes(def.fairnessClass)) {
       violations.push({ feature: id, violation: "fairness_class_not_allowed_for_family", fairnessClass: def.fairnessClass, familyType: policy.familyType });
     }
+    if (policy.allowedGroups && !policy.allowedGroups.includes(featureGroupOf(def))) {
+      violations.push({ feature: id, violation: "feature_group_not_in_family_contract", group: featureGroupOf(def) });
+    }
   }
   return violations;
 }
@@ -355,7 +407,10 @@ export const DEFAULT_FAMILY_POLICIES = Object.freeze({
     family: "seller_first_touch_reply",
     familyType: "targeting_response",
     allowedFairnessClasses: ["permitted", "personal_attribute"],
-    description: "P(reply within 72h | delivered first touch). Models using personal_attribute inputs ship a fairness report.",
+    // IC 8.1 contract plus public_record: the 2026-10-01 decision already put recorded
+    // sale/mortgage facts (ownership duration, recorded mortgage count) in this model.
+    allowedGroups: ["prospect", "property", "market", "contact", "campaign", "investor", "public_record"],
+    description: "First-text reply. Models using personal_attribute inputs ship a fairness report.",
   }),
   send_carrier_filtering: defineFamilyPolicy({ family: "send_carrier_filtering", familyType: "delivery_risk" }),
   send_opt_out_risk: defineFamilyPolicy({ family: "send_opt_out_risk", familyType: "delivery_risk" }),
@@ -365,4 +420,16 @@ export const DEFAULT_FAMILY_POLICIES = Object.freeze({
     allowedFairnessClasses: ["permitted", "conversation_only"],
   }),
   campaign_controller: defineFamilyPolicy({ family: "campaign_controller", familyType: "campaign_allocation" }),
+  comp_valuation: defineFamilyPolicy({
+    family: "comp_valuation",
+    familyType: "valuation",
+    allowedGroups: ["property", "market", "transaction", "comp", "public_record", "seller_provided"],
+    description: "Valuation / comp similarity / micro-market. Property, market, transaction, comp, public-record and seller-provided property facts only.",
+  }),
+  buyer_match: defineFamilyPolicy({
+    family: "buyer_match",
+    familyType: "buyer_selection",
+    allowedGroups: ["buyer", "company", "purchase", "market", "property_relationship"],
+    description: "Buyer selection: buyer, company, purchase, market and property-relationship facts.",
+  }),
 });

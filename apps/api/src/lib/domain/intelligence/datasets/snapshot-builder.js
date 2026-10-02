@@ -161,6 +161,7 @@ export function assertNoPii(record, { conversationText = false } = {}) {
   scanValue(record.features, "features", problems);
   scanValue(record.strata, "strata", problems);
   scanValue(record.outcomes, "outcomes", problems);
+  scanValue(record.quality, "quality", problems);
   if (!conversationText && /"(message_body|message_text|rendered_message)"/.test(JSON.stringify(record))) {
     problems.push("message text in a non-conversation dataset");
   }
@@ -412,6 +413,8 @@ export async function buildDatasetSnapshot(rawSpec, deps = {}) {
       max_input_time: vector.max_input_time,
       features: vector.values,
       missing: vector.missing,
+      missingness: vector.missingness,
+      quality: vector.quality,
       outcomes,
       annotations: exclusion.annotations,
       strata,

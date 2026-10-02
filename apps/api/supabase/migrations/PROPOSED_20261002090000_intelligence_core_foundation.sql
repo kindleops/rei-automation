@@ -14,9 +14,11 @@
 --   are the source of truth; these tables mirror and record.
 --
 -- TABLES (schema intelligence; all new)
---    1 feature_definitions   code-registry mirror, PK (feature_key, version); a definition cannot change in place
+--    1 feature_definitions   code-registry mirror, PK (feature_key, version); a definition cannot change in place;
+--                            carries feature_group (per-model contracts) and declared quality_fields (IC 8.1)
 --    2 feature_sets          PK feature_set_id ("name@v"), members + hash
---    3 feature_snapshots     decision-time feature values; CHECK max_input_time < as_of
+--    3 feature_snapshots     decision-time feature values; CHECK max_input_time < as_of; tri-state
+--                            missingness and quality companions per feature (IC 8.1)
 --    4 outcome_definitions   taxonomy mirror, PK (outcome_key, version)
 --      outcomes              labels, UNIQUE (outcome_key, outcome_version, subject_type, subject_id);
 --                            the ONE mutable label table (pending -> mature/censored)
@@ -160,6 +162,8 @@ create table if not exists intelligence.feature_definitions (
   mode            text not null check (mode in ('online','offline','both')),
   pit_class       text not null check (pit_class in ('event_time','history_reconstructed','static_fact','decision_snapshot_only')),
   fairness_class  text not null check (fairness_class in ('permitted','conversation_only','personal_attribute','prohibited')),
+  feature_group   text not null default 'campaign' check (feature_group in ('prospect','property','market','contact','campaign','investor','transaction','comp','public_record','seller_provided','buyer','company','purchase','property_relationship','conversation')),
+  quality_fields  text[] not null default '{}',
   stated_fact     boolean not null default false,
   source_lineage  jsonb not null,
   owner           text not null,
@@ -194,6 +198,8 @@ create table if not exists intelligence.feature_snapshots (
   max_input_time timestamptz,
   "values"       jsonb not null default '{}'::jsonb check (jsonb_typeof("values") = 'object'),
   missing        text[] not null default '{}',
+  missingness    jsonb not null default '{}'::jsonb,   -- key -> missing | unknown | not_applicable (never zero-filled)
+  quality        jsonb not null default '{}'::jsonb,   -- key -> declared quality companions (source, vintage, confidence, ...)
   origin         text not null check (origin in ('online','offline_materialization','dataset_builder')),
   created_at     timestamptz not null default now(),
   constraint feature_snapshots_point_in_time check (max_input_time is null or max_input_time < as_of)

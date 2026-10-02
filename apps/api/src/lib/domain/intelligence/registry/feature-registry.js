@@ -20,6 +20,8 @@ import { hashObject } from "../util/hash.js";
 import { parseDurationMs } from "../util/time.js";
 import {
   DEFAULT_FAMILY_POLICIES,
+  FEATURE_GROUPS,
+  featureGroupOf,
   FAIRNESS_CLASSES,
   FEATURE_DOMAINS,
   FairnessLintError,
@@ -83,8 +85,28 @@ export function featureDefinitionHash(spec) {
     statedFact: spec.statedFact === true,
     lineage: spec.lineage,
     compute: String(spec.compute),
+    // IC 8.1 declarations: hashed only when declared, so earlier definitions keep their hashes
+    group: spec.group || undefined,
+    qualityFields: spec.qualityFields && spec.qualityFields.length ? spec.qualityFields : undefined,
   });
 }
+
+/** Companion data-quality fields a feature may carry next to its value (IC 8.1). */
+export const QUALITY_FIELDS = Object.freeze([
+  "price_source_confidence",
+  "mortgage_freshness",
+  "lien_source",
+  "contact_confidence",
+  "dedupe_confidence",
+  "geocode_precision",
+  "source",
+  "vintage",
+  "value_source",
+  "value_as_of",
+  "mortgage_source",
+  "mortgage_as_of",
+  "is_estimate",
+]);
 
 function requireOneOf(problems, field, value, allowed) {
   if (!allowed.includes(value)) problems.push(`${field} must be one of ${allowed.join(", ")} (got ${JSON.stringify(value)})`);
@@ -134,6 +156,10 @@ export function defineFeature(spec = {}) {
     }
   }
   if (typeof spec.compute !== "function") problems.push("compute must be a function");
+  if (spec.group !== undefined && !FEATURE_GROUPS.includes(spec.group)) problems.push(`group must be one of ${FEATURE_GROUPS.join(", ")}`);
+  if (spec.qualityFields !== undefined && (!Array.isArray(spec.qualityFields) || spec.qualityFields.some((f) => !QUALITY_FIELDS.includes(f)))) {
+    problems.push(`qualityFields must be a subset of ${QUALITY_FIELDS.join(", ")}`);
+  }
   if (problems.length) {
     throw new FeatureRegistryError(`invalid feature ${spec.key}@${spec.version}: ${problems.join("; ")}`, "INVALID_FEATURE");
   }
@@ -152,6 +178,8 @@ export function defineFeature(spec = {}) {
     owner: spec.owner,
     freshnessSla: spec.freshnessSla ?? null,
     description: typeof spec.description === "string" ? spec.description : null,
+    group: spec.group || null,
+    qualityFields: Object.freeze(Array.isArray(spec.qualityFields) ? [...spec.qualityFields] : []),
     compute: spec.compute,
   };
   const violations = lintFeatureDefinition(normalized);
@@ -160,8 +188,9 @@ export function defineFeature(spec = {}) {
   }
   return Object.freeze({
     ...normalized,
+    group: normalized.group || featureGroupOf(normalized),
     id: featureId(normalized.key, normalized.version),
-    definitionHash: featureDefinitionHash(normalized),
+    definitionHash: featureDefinitionHash({ ...normalized, group: spec.group, qualityFields: normalized.qualityFields }),
   });
 }
 
@@ -184,6 +213,8 @@ export function toFeatureDefinitionRow(def, { status = "active" } = {}) {
     mode: def.mode,
     pit_class: def.pitClass,
     fairness_class: def.fairnessClass,
+    feature_group: def.group,
+    quality_fields: def.qualityFields,
     stated_fact: def.statedFact,
     source_lineage: def.lineage,
     owner: def.owner,

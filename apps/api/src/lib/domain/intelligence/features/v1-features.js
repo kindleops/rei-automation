@@ -38,6 +38,7 @@ import {
 import { createFeatureRegistry } from "../registry/feature-registry.js";
 import { MARKET_INVESTOR_ACTIVITY_MEMBERS, MARKET_INVESTOR_ACTIVITY_SPECS } from "./market-investor-activity.js";
 import { DAY_MS, dateOnlyEndMs, toMs } from "../util/time.js";
+import { notApplicable, unknownValue, withQuality } from "./pit.js";
 
 /** Version of the helper functions below; part of every lineage that uses them. */
 export const V1_HELPERS_VERSION = "ic8_v1_feature_helpers@1";
@@ -774,6 +775,130 @@ export const V1_FEATURE_SPECS = Object.freeze([
   },
 ]);
 
+// ── IC 8.1 additions ──
+export const IC81_FEATURE_SPECS = Object.freeze([
+  {
+    key: "property.school_district",
+    version: 1,
+    scope: "property",
+    domain: "property",
+    group: "property",
+    valueType: "categorical",
+    mode: "both",
+    pitClass: "static_fact",
+    fairnessClass: "permitted",
+    qualityFields: ["source", "vintage"],
+    lineage: {
+      sources: ["properties.school_district_name"],
+      keys: ["send_queue.property_id"],
+      calc: "school district of the PROPERTY (geography/market fact), normalised to snake_case",
+      as_of: "properties.school_district_name: vendor property import re-written 2026-08 (523 districts, 99.99% filled); district boundaries change rarely, documented vintage caveat",
+      alternate_source: "seller.property.school_district (2026-08-31 snapshot, 525 districts)",
+      helpers: V1_HELPERS_VERSION,
+    },
+    owner: "intelligence",
+    freshnessSla: null,
+    compute: ({ read }) => {
+      const [property] = read("property");
+      if (!property) return null;
+      const district = normalizeCategory(property.school_district_name, 80);
+      return withQuality(district, { source: "properties.school_district_name", vintage: "2026-08" });
+    },
+  },
+  {
+    key: "prospect.net_asset_value_band",
+    version: 1,
+    scope: "seller",
+    domain: "ownership_prospect",
+    valueType: "categorical",
+    mode: "both",
+    pitClass: "static_fact",
+    fairnessClass: "personal_attribute",
+    lineage: {
+      sources: ["prospects.net_asset_value"],
+      keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
+      calc: "vendor modeled net asset value band (10 bands), normalised to snake_case",
+      as_of: "prospects import 2026-04-24/25; frozen since",
+      helpers: V1_HELPERS_VERSION,
+    },
+    owner: "intelligence",
+    freshnessSla: null,
+    compute: ({ read }) => {
+      const [person] = read("prospect_person");
+      return person ? normalizeCategory(person.net_asset_value) : null;
+    },
+  },
+  {
+    key: "prospect.buying_power_band",
+    version: 1,
+    scope: "seller",
+    domain: "ownership_prospect",
+    valueType: "categorical",
+    mode: "both",
+    pitClass: "static_fact",
+    fairnessClass: "personal_attribute",
+    lineage: {
+      sources: ["prospects.buying_power"],
+      keys: ["phones.primary_prospect_id", "phones.canonical_e164"],
+      calc: "vendor modeled buying power band (9 bands), normalised to snake_case",
+      as_of: "prospects import 2026-04-24/25; frozen since",
+      helpers: V1_HELPERS_VERSION,
+    },
+    owner: "intelligence",
+    freshnessSla: null,
+    compute: ({ read }) => {
+      const [person] = read("prospect_person");
+      return person ? normalizeCategory(person.buying_power) : null;
+    },
+  },
+  {
+    key: "property.equity_estimate_ratio",
+    version: 1,
+    scope: "property",
+    domain: "financial_title",
+    group: "public_record",
+    valueType: "number",
+    mode: "online",
+    pitClass: "decision_snapshot_only",
+    fairnessClass: "permitted",
+    qualityFields: ["value_source", "value_as_of", "mortgage_source", "mortgage_as_of", "mortgage_freshness", "lien_source", "is_estimate"],
+    lineage: {
+      sources: [
+        "properties.estimated_value",
+        "seller.property.total_loan_balance",
+        "seller.property.lien_count",
+      ],
+      keys: ["send_queue.property_id"],
+      calc: "(estimated value - open mortgage balance) / estimated value at decision time; always an ESTIMATE carrying the provenance of value, mortgage and lien inputs",
+      pit_note: "value and balances are current-state vendor estimates: captured at decision time only, never reconstructed",
+    },
+    owner: "intelligence",
+    freshnessSla: "5m",
+    compute: ({ asOf, read }) => {
+      const [state] = read("decision_state");
+      if (!state) return null;
+      const value = boundedNumber(state.estimated_value, { min: 1, max: 1e9 });
+      const balance = boundedNumber(state.open_mortgage_balance, { min: 0, max: 1e9 });
+      const mortgageAsOf = toMs(state.mortgage_as_of);
+      const quality = {
+        value_source: state.value_source ?? null,
+        value_as_of: state.value_as_of ?? null,
+        mortgage_source: state.mortgage_source ?? null,
+        mortgage_as_of: state.mortgage_as_of ?? null,
+        mortgage_freshness: mortgageAsOf === null ? "unknown" : asOf - mortgageAsOf > 365 * DAY_MS ? "stale" : "current",
+        lien_source: state.lien_source ?? null,
+        is_estimate: true,
+      };
+      if (value === null) return withQuality(unknownValue("no_value_estimate"), quality);
+      if (balance === null) return withQuality(unknownValue("open_mortgage_balance_unknown"), quality);
+      return withQuality(Math.round(((value - balance) / value) * 1e4) / 1e4, quality);
+    },
+  },
+]);
+
+/** Exported so builders can mark a concept that does not apply (e.g. units for vacant land). */
+export { notApplicable };
+
 export const SELLER_FIRST_TOUCH_FAMILY = "seller_first_touch_reply";
 
 export const V1_BASE_MEMBERS = Object.freeze([
@@ -795,6 +920,9 @@ export const V1_BASE_MEMBERS = Object.freeze([
   "property.years_since_last_recorded_sale@1",
   "property.recorded_mortgage_count@1",
 ]);
+
+/** Modeled wealth (IC 8.1 locked decision): personal_attribute, targeting experiments only. */
+export const V1_WEALTH_MEMBERS = Object.freeze(["prospect.net_asset_value_band@1", "prospect.buying_power_band@1"]);
 
 export const V1_PERSONAL_MEMBERS = Object.freeze([
   "prospect.age_band@1",
@@ -845,7 +973,32 @@ export function registerV1Features(registry) {
     family: SELLER_FIRST_TOUCH_FAMILY,
     description: "seller_first_touch_all@1 plus the market_investor_activity group. Models built on it ship a fairness report.",
   });
-  return { base, all, baseV2, allV2 };
+  // IC 8.1: school district (permitted property fact) joins the base contract;
+  // the two modeled-wealth bands join the personal_attribute arm. New set versions.
+  for (const spec of IC81_FEATURE_SPECS) registry.register(spec);
+  const baseV3 = registry.defineSet({
+    name: "seller_first_touch",
+    version: 3,
+    members: [...V1_BASE_MEMBERS, ...MARKET_INVESTOR_ACTIVITY_MEMBERS, "property.school_district@1"],
+    purpose: "historical_training",
+    family: SELLER_FIRST_TOUCH_FAMILY,
+    description: "seller_first_touch@2 plus school district.",
+  });
+  const allV3 = registry.defineSet({
+    name: "seller_first_touch_all",
+    version: 3,
+    members: [
+      ...V1_BASE_MEMBERS,
+      ...MARKET_INVESTOR_ACTIVITY_MEMBERS,
+      "property.school_district@1",
+      ...V1_PERSONAL_MEMBERS,
+      ...V1_WEALTH_MEMBERS,
+    ],
+    purpose: "historical_training",
+    family: SELLER_FIRST_TOUCH_FAMILY,
+    description: "seller_first_touch_all@2 plus school district and the modeled-wealth bands. Models built on it ship a fairness report.",
+  });
+  return { base, all, baseV2, allV2, baseV3, allV3 };
 }
 
 export function createV1Registry() {
