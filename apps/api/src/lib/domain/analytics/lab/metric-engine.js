@@ -256,6 +256,7 @@ export function dimValue(model, kind, e, dim) {
     case 'market': { const id = p?.market || null; v = label(id, id ? model.markets.get(id)?.display_name || id : null); break }
     case 'state': v = label(p?.state || null); break
     case 'county': v = label(p?.county ? `${p.county}|${p.state || ''}` : null, p?.county ? `${p.county}${p.state ? `, ${p.state}` : ''}` : null); break
+    case 'city': v = label(p?.city ? `${p.city}|${p.state || ''}` : null, p?.city ? `${p.city}${p.state ? `, ${p.state}` : ''}` : null); break
     case 'zip': v = label(p?.zip || null); break
     case 'property_type': v = label(p?.propertyType || null); break
     case 'owner_type': v = label(p?.ownerType || null); break
@@ -727,7 +728,7 @@ export function breakdown(id, pf, dim, { limit = 50 } = {}) {
   rows.sort((a, b) => Number(a.test) - Number(b.test) || Number(a.key === UNRESOLVED) - Number(b.key === UNRESOLVED) || (b.n ?? 0) - (a.n ?? 0))
   return { dim, rows: rows.slice(0, limit), total: rows.length, truncated: rows.length > limit }
 }
-const GEO_DIMS = new Set(['market', 'state', 'county', 'zip'])
+const GEO_DIMS = new Set(['market', 'state', 'county', 'city', 'zip'])
 
 /**
  * Several metrics × one dimension, merged by group key (campaign comparison,

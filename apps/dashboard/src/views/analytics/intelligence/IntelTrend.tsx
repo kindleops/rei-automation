@@ -8,10 +8,13 @@
  * the next dataset — metric switch, range change, filter — instead of
  * redrawing. It is implemented here rather than reused because the shared
  * component draws a missing value as zero; in Analytics a day with no
- * sellers reached has NO reply rate, so it must be a gap, not a 0% dip.
+ * sellers reached has NO reply rate — never a 0% dip.
  *
  * Honesty layer:
- *   · gaps stay gaps (null buckets break the line; nothing is interpolated)
+ *   · one continuous trend, no invented values (intel-trend-path.ts): a count
+ *     with no activity is a real 0; a rate with no denominator has no value,
+ *     and the line BRIDGES it with a faint dashed connector whose empty days
+ *     read "no sellers that day" on hover — the connector is never a value
  *   · rates carry their Wilson 95% band; buckets under the sample floor are
  *     hollow and the band says how little they know
  *   · the newest seller cohorts are "maturing" (less time to reply) — shaded
@@ -21,12 +24,13 @@
  * Geometry is computed in data units once per dataset; a resize only
  * re-projects it (no recomputation per pixel, no remount).
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent } from 'react'
 import { animate } from 'framer-motion'
 import { LC_DUR, lcEase, useLcReducedMotion } from '../../../shared/lc'
 import type { IntelEvent, TrendPoint } from './intel-model'
 import { clamp, fmtBucket, labelIndices, niceTicks } from './intel-format'
+import { trendSegments } from './intel-trend-path'
 
 type Unit = 'count' | 'rate' | 'ratio' | 'duration_min'
 type Props = {
@@ -80,12 +84,14 @@ function trendGeometry(points: TrendPoint[], unit: Unit, showCompare: boolean, m
   const isRate = unit === 'rate'
   const cur = points.map((p) => (p.value === null || p.value === undefined ? null : p.value))
   const prev = points.map((p) => (showCompare && p.prev && p.prev.value !== null && p.prev.value !== undefined ? p.prev.value : null))
-  const lo = points.map((p) => (isRate && p.ci && (p.den ?? 0) > 0 ? p.ci.low : null))
-  const hi = points.map((p) => (isRate && p.ci && (p.den ?? 0) > 0 ? p.ci.high : null))
+  const floorOf = isRate ? Math.max(5, Math.ceil((minSample || 30) / 3)) : 0
+  // the interval travels with the line: credible buckets only (a 1-of-1 day's 20–100% band is not a trend)
+  const lo = points.map((p) => (isRate && p.ci && (p.den ?? 0) >= floorOf ? p.ci.low : null))
+  const hi = points.map((p) => (isRate && p.ci && (p.den ?? 0) >= floorOf ? p.ci.high : null))
   // a rate's scale is set by buckets with enough sample: one seller who replied
   // (1 of 1 = 100%) must not flatten every meaningful day into the floor; such a
   // bucket is drawn clipped at the top edge, hollow, and the readout says so
-  const floor = isRate ? Math.max(5, Math.ceil((minSample || 30) / 3)) : 0
+  const floor = floorOf
   const vals: number[] = []
   for (let i = 0; i < points.length; i += 1) {
     const sure = !isRate || (points[i].den ?? 0) >= floor
@@ -96,6 +102,8 @@ function trendGeometry(points: TrendPoint[], unit: Unit, showCompare: boolean, m
   }
   if (!vals.length) for (let i = 0; i < points.length; i += 1) if (cur[i] !== null) vals.push(cur[i] as number)
   const sure = cur.map((v, i) => (v !== null && (!isRate || (points[i].den ?? 0) >= floor) ? v : null))
+  // the comparison line runs through its credible buckets only (a 1-of-2 day is not a trend)
+  for (let i = 0; i < prev.length; i += 1) if (isRate && prev[i] !== null && (points[i].prev?.den ?? 0) < floor) prev[i] = null
   const top = vals.length ? Math.max(...vals) : 0
   const { ticks, hi: max } = niceTicks(0, top > 0 ? top * 1.06 : isRate ? 0.1 : 4, 4)
   const denMax = isRate ? Math.max(0, ...points.map((p) => p.den ?? 0)) : 0
@@ -118,6 +126,17 @@ function resample(values: Array<number | null>, n: number): Array<number | null>
   })
 }
 const lerpSeries = (a: Array<number | null>, b: Array<number | null>, p: number) => b.map((v, i) => (v === null ? null : a[i] === null ? v : (a[i] as number) + (v - (a[i] as number)) * p))
+
+/**
+ * Rates: the trend runs through the CREDIBLE buckets (sample ≥ floor), bridged
+ * across empty and small-sample days alike; a small-sample day stays a hollow
+ * dot beside the line, so one 1-of-1 day can't yank the trend to 100%. When
+ * fewer than two buckets are credible, every observed bucket carries it.
+ */
+function lineSegments(cur: Array<number | null>, sure: Array<number | null>, unit: Unit) {
+  if (unit === 'rate' && sure.filter((v) => v !== null).length >= 2) return trendSegments(sure, sure)
+  return trendSegments(cur, sure)
+}
 
 type Frame = { cur: Array<number | null>; sure: Array<number | null>; prev: Array<number | null>; lo: Array<number | null>; hi: Array<number | null>; max: number }
 
@@ -152,6 +171,7 @@ export function IntelTrend({
   /* ── the imperative painter: paths + scale follow the animated frame ── */
   const curRef = useRef<SVGPathElement>(null)
   const allRef = useRef<SVGPathElement>(null)
+  const bridgeRef = useRef<SVGPathElement>(null)
   const areaRef = useRef<SVGPathElement>(null)
   const prevRef = useRef<SVGPathElement>(null)
   const bandRef = useRef<SVGPathElement>(null)
@@ -163,16 +183,12 @@ export function IntelTrend({
   const draw = useCallback((f: Frame) => {
     shown.current = f
     const y = (v: number) => M.t + ih - (clamp(v, 0, f.max) / (f.max || 1)) * ih
-    const line = (vals: Array<number | null>) => {
-      let d = ''
-      let pen = false
-      vals.forEach((v, i) => {
-        if (v === null) { pen = false; return }
-        d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`
-        pen = true
-      })
-      return d
-    }
+    const pt = (vals: Array<number | null>, i: number) => `${x(i).toFixed(1)},${y(vals[i] as number).toFixed(1)}`
+    const runs = (vals: Array<number | null>, list: number[][]) => list.map((r) => `M${r.map((i) => pt(vals, i)).join('L')}`).join('')
+    // the current series as one trend: solid where sure, thin under the floor, dashed across empty buckets
+    const seg = lineSegments(f.cur, f.sure, unit)
+    // the comparison is recessed: one quiet polyline through its observed buckets
+    const prevObs = f.prev.flatMap((v, i) => (v === null ? [] : [i]))
     // the area under each continuous run of the current series (never across a gap)
     const area = (vals: Array<number | null>) => {
       let d = ''
@@ -199,10 +215,11 @@ export function IntelTrend({
       flush()
       return d
     }
-    curRef.current?.setAttribute('d', line(f.sure))
-    allRef.current?.setAttribute('d', unit === 'rate' ? line(f.cur) : '')
+    curRef.current?.setAttribute('d', runs(f.cur, seg.solid))
+    allRef.current?.setAttribute('d', runs(f.cur, seg.thin))
+    bridgeRef.current?.setAttribute('d', runs(f.cur, seg.bridge))
     areaRef.current?.setAttribute('d', unit === 'rate' ? '' : area(f.cur))
-    prevRef.current?.setAttribute('d', line(f.prev))
+    prevRef.current?.setAttribute('d', prevObs.length > 1 ? runs(f.prev, [prevObs]) : '')
     bandRef.current?.setAttribute('d', unit === 'rate' ? band() : '')
     gridRef.current?.querySelectorAll<SVGLineElement>('line[data-v]').forEach((el) => {
       const yy = Math.round(y(Number(el.dataset.v))) + 0.5
@@ -266,6 +283,12 @@ export function IntelTrend({
   const isRate = unit === 'rate'
   const thinFloor = minSample ? Math.min(10, minSample) : 0
   const matIdx = maturingFrom ? points.findIndex((p) => p.start >= maturingFrom) : -1
+  const segs = useMemo(() => lineSegments(geo.cur, geo.sure, unit), [geo, unit])
+  const prevLone = useMemo(() => trendSegments(geo.prev).lone, [geo])
+  // the maturing tail keeps the line but wears its own (receding) ink: a hard stop in the stroke
+  const gid = `ixt-mat-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const matStop = matIdx > 0 ? clamp((x(matIdx - 0.5) - M.l) / Math.max(1, iw), 0, 1) : matIdx === 0 ? 0 : null
+  const inkStyle = matStop !== null ? { stroke: `url(#${gid})` } : undefined
   const start = points[0]?.start ?? 0
   const end = points.length ? points[points.length - 1].end : 0
   const ex = (t: number) => M.l + ((t - start) / Math.max(1, end - start)) * iw
@@ -280,10 +303,14 @@ export function IntelTrend({
   const groupTone = (list: IntelEvent[]) => (list.some((e) => e.tone === 'crit') ? 'crit' : list.some((e) => e.tone === 'attn') ? 'attn' : list[0]?.tone || 'neutral')
   const stripTop = M.t + ih + M.b + 6
   const bw = clamp((iw / Math.max(1, n)) * 0.6, 1.5, 12)
-  const valueText = hp ? `${fmtBucket(hp.start, grain, tz, true)}: ${format(hp.value)}${hp.prev ? `, previous period ${format(hp.prev.value)}` : ''}` : `${label}. ${n} ${grain} buckets.`
+  const valueText = hp ? `${fmtBucket(hp.start, grain, tz, true)}: ${hp.value === null && isRate ? `no ${sampleLabel || 'sample'}, no rate` : format(hp.value)}${hp.prev ? `, previous period ${format(hp.prev.value)}` : ''}` : `${label}. ${n} ${grain} buckets.`
   const last = [...points].reverse().find((p) => p.value !== null) || null
   const summary = `${label}, ${n} ${grain} buckets${last ? `, latest ${format(last.value)}` : ''}${pins.length ? `, ${pins.length} marked event${pins.length === 1 ? '' : 's'}` : ''}.`
   const tipLeft = idx !== null ? clamp(x(idx) + 14, 4, W - 212) : 0
+  // a bucket without a value says why (and that the dashed connector across it is not a value)
+  const emptyNote = idx !== null && hp && hp.value === null
+    ? `${isRate ? `No ${sampleLabel || 'sample'} that ${grain}` : `Nothing recorded that ${grain}`}${segs.bridged.has(idx) ? ' — the dashed line only connects the days either side' : ''}`
+    : null
 
   return (
     <div className={['ixt', className, loading && 'is-loading'].filter(Boolean).join(' ')} ref={measure}>
@@ -318,10 +345,28 @@ export function IntelTrend({
           </g>
           <path ref={bandRef} className="ixt__band" />
           <path ref={areaRef} className="ixt__area" />
+          {matStop !== null ? (
+            <defs>
+              <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1={M.l} x2={M.l + iw} y1={0} y2={0}>
+                <stop offset={0} className="ixt__ink" />
+                <stop offset={matStop} className="ixt__ink" />
+                <stop offset={matStop} className="ixt__ink is-maturing" />
+                <stop offset={1} className="ixt__ink is-maturing" />
+              </linearGradient>
+            </defs>
+          ) : null}
           <path ref={prevRef} className="ixt__prev" />
-          <path ref={allRef} className="ixt__line is-all" />
-          <path ref={curRef} className="ixt__line" />
-          {isRate && n <= 120 ? points.map((p, i) => (p.value !== null && ((thinFloor && (p.den ?? 0) > 0 && (p.den ?? 0) < thinFloor) || p.value > geo.max)
+          <path ref={bridgeRef} className="ixt__line is-bridge" style={inkStyle} />
+          <path ref={allRef} className="ixt__line is-all" style={inkStyle} />
+          <path ref={curRef} className="ixt__line" style={inkStyle} />
+          {n <= 400 ? segs.lone.map((i) => (geo.cur[i] !== null && (geo.cur[i] as number) <= geo.max
+            ? <circle key={`lone-${points[i]?.start ?? i}`} className={matIdx >= 0 && i >= matIdx ? 'ixt__lone is-maturing' : 'ixt__lone'} cx={x(i)} cy={y(geo.cur[i] as number)} r={2.75} />
+            : null)) : null}
+          {isRate && n <= 400 ? segs.lone.map((i) => (geo.lo[i] !== null && geo.hi[i] !== null
+            ? <line key={`w-${points[i]?.start ?? i}`} className="ixt__whisker" x1={x(i)} x2={x(i)} y1={y(geo.hi[i] as number)} y2={y(geo.lo[i] as number)} />
+            : null)) : null}
+          {showCompare && n <= 400 ? prevLone.map((i) => (geo.prev[i] !== null ? <circle key={`pl-${points[i]?.start ?? i}`} className="ixt__prevdot" cx={x(i)} cy={y(geo.prev[i] as number)} r={2.25} /> : null)) : null}
+          {isRate && n <= 120 ? points.map((p, i) => (p.value !== null && (((p.den ?? 0) > 0 && (p.den ?? 0) < geo.floor) || p.value > geo.max)
             ? <circle key={p.start} className={p.value > geo.max ? 'ixt__thin is-clipped' : 'ixt__thin'} cx={x(i)} cy={y(p.value)} r={3} />
             : null)) : null}
           <circle ref={endRef} className="ixt__end" r={4} />
@@ -384,7 +429,7 @@ export function IntelTrend({
           <div className="ixt__tip" style={{ left: tipLeft }} role="status">
             <b>{fmtBucket(hp.start, grain, tz, true)}{matIdx >= 0 && idx !== null && idx >= matIdx ? <em> · maturing</em> : null}</b>
             <span><i className="ixt__key" />{currentLabel}<strong>{format(hp.value)}</strong></span>
-            {isRate && hp.den !== undefined ? <small>{hp.num ?? 0} / {hp.den}{hp.den > 0 && hp.den < thinFloor ? ' · small sample' : ''}</small> : null}
+            {emptyNote ? <small>{emptyNote}</small> : isRate && hp.den !== undefined ? <small>{hp.num ?? 0} / {hp.den}{hp.den > 0 && hp.den < thinFloor ? ' · small sample' : ''}</small> : null}
             {hp.prev ? <span className="is-prev"><i className="ixt__key is-prev" />{compareLabel || 'Previous'}<strong>{format(hp.prev.value)}</strong></span> : null}
           </div>
         ) : null}

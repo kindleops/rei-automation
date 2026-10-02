@@ -62,7 +62,7 @@ const SAE = 'seller_automation_executions'
 const CANARY = 'Internal test phones (INTERNAL_TEST_PHONE_SET, 5 numbers) and rows flagged internal_canary / exclude_from_kpis are excluded.'
 
 /** Dimension ids by entity. The engine resolves each through the canonical joins below. */
-const GEO = ['market', 'state', 'county', 'zip']
+const GEO = ['market', 'state', 'county', 'city', 'zip']
 const PROPERTY = ['property_type', 'owner_type']
 const OUTREACH = ['campaign', 'campaign_source', 'sender', 'template', 'template_use_case', 'touch', 'origin', 'language']
 const DIMS = {
@@ -435,6 +435,7 @@ export const DIMENSION_REGISTRY = Object.freeze({
   market: { label: 'Market', family: 'GEOGRAPHY', kind: 'category', source: 'properties.canonical_market_id → canonical_markets (the canonical geography resolver; replies inherit the property of the send that prompted them)' },
   state: { label: 'State', family: 'GEOGRAPHY', kind: 'category', source: 'properties.property_address_state' },
   county: { label: 'County', family: 'GEOGRAPHY', kind: 'category', source: 'properties.property_address_county_name / property_county_name' },
+  city: { label: 'City', family: 'GEOGRAPHY', kind: 'category', source: 'properties.property_address_city (keyed with the state: one Springfield per state)' },
   zip: { label: 'ZIP', family: 'GEOGRAPHY', kind: 'category', source: 'left(properties.property_address_zip, 5)' },
   property_type: { label: 'Property type', family: 'PROPERTY', kind: 'category', source: 'properties.property_type' },
   owner_type: { label: 'Owner type', family: 'OWNER', kind: 'category', source: 'properties.owner_type (casing normalised)' },

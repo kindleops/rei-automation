@@ -356,6 +356,7 @@ button.ix-callout:hover { background: rgba(var(--lc-attn-rgb), 0.12); }
 .ix-key.is-prev { background: repeating-linear-gradient(90deg, var(--ix-compare) 0 4px, transparent 4px 7px); }
 .ix-key.is-band { height: 9px; background: rgba(var(--ix-series-rgb), 0.16); }
 .ix-key.is-thin { width: 8px; height: 8px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px var(--ix-series); }
+.ix-key.is-bridge { background: repeating-linear-gradient(90deg, rgba(var(--ix-series-rgb), 0.55) 0 2px, transparent 2px 6px); }
 .ix-key.is-pin { width: 8px; height: 8px; transform: rotate(45deg); border-radius: 2px; background: var(--ix-attn); }
 .ix-key.is-lane { width: 10px; height: 10px; border-radius: 3px; background: rgb(var(--lc-st-rgb)); }
 .ix-key.is-n { width: 9px; height: 10px; border-radius: 0; background: linear-gradient(rgba(var(--ix-series-rgb), 0.55), rgba(var(--ix-series-rgb), 0.55)) left bottom / 3px 10px no-repeat, linear-gradient(rgba(var(--ix-series-rgb), 0.55), rgba(var(--ix-series-rgb), 0.55)) right bottom / 3px 6px no-repeat; }
@@ -462,7 +463,16 @@ button.ix-callout:hover { background: rgba(var(--lc-attn-rgb), 0.12); }
 .ixt__prev { fill: none; stroke: var(--ix-compare); stroke-width: 1.5; stroke-dasharray: 4 5; stroke-linecap: round; stroke-linejoin: round; }
 .ixt__line { fill: none; stroke: var(--ix-series); stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 6px rgba(var(--ix-series-rgb), 0.28)); }
 :root[data-nexus-theme='light'] .ixt__line { filter: none; }
-.ixt__line.is-all { stroke-width: 1.25; stroke-dasharray: 1 4; opacity: 0.55; filter: none; }
+.ixt__line.is-all { stroke-width: 1.5; opacity: 0.5; filter: none; }
+/* across buckets with no value: a connector, not a value — faint, dashed, never glowing */
+.ixt__line.is-bridge { stroke-width: 1.25; stroke-dasharray: 2 5; opacity: 0.42; filter: none; }
+.ixt__whisker { stroke: rgba(var(--ix-series-rgb), 0.38); stroke-width: 3; stroke-linecap: round; }
+.ixt__prevdot { fill: var(--ix-compare); }
+.ixt__lone { fill: var(--ix-series); stroke: var(--lc-mat-float-bg); stroke-width: 1.5; }
+.ixt__lone.is-maturing { fill-opacity: 0.55; }
+/* the maturing tail keeps the line; its ink recedes from the boundary on */
+.ixt__ink { stop-color: var(--ix-series); stop-opacity: 1; }
+.ixt__ink.is-maturing { stop-opacity: 0.5; }
 .ixt__thin { fill: var(--lc-mat-float-bg); stroke: var(--ix-series); stroke-width: 1.5; }
 .ixt__thin.is-clipped { stroke-dasharray: 2 2; }
 .ixt__end { fill: var(--ix-series); stroke: var(--lc-mat-float-bg); stroke-width: 2; transition: opacity var(--lc-dur-fast) var(--lc-ease-standard); }
@@ -656,9 +666,49 @@ button.ix-callout:hover { background: rgba(var(--lc-attn-rgb), 0.12); }
   border-radius: 16px;
   background: radial-gradient(120% 90% at 50% 30%, rgba(var(--lc-exec-rgb), 0.05), transparent 70%), var(--ix-well);
   box-shadow: inset 0 0 0 1px var(--ix-hair);
-  cursor: crosshair;
+  cursor: default;
 }
-.ix-geo__canvas { display: block; width: 100%; height: auto; aspect-ratio: 975 / 610; }
+/* the heat map: Census polygons (state, county), centre marks (city, ZIP) */
+.ix-geo__svg { display: block; width: 100%; height: auto; aspect-ratio: 975 / 610; overflow: hidden; }
+.ix-geo__land { fill: rgba(var(--ixg-dot-rgb), 0.035); stroke: rgba(var(--ixg-dot-rgb), 0.12); stroke-width: 0.6; }
+.ix-geo__land.is-focus { fill: rgba(var(--ixg-dot-rgb), 0.05); stroke: rgba(var(--ixg-dot-rgb), 0.3); stroke-width: 1; }
+.ix-geo__area { fill: rgba(var(--ixg-dot-rgb), 0.055); stroke: rgba(var(--ixg-dot-rgb), 0.2); stroke-width: 0.7; outline: none; transition: fill var(--lc-dur-surface) var(--lc-ease-standard), opacity var(--lc-dur-fast) var(--lc-ease-standard); }
+.ix-geo__area.is-empty { fill: rgba(var(--ixg-dot-rgb), 0.03); stroke: rgba(var(--ixg-dot-rgb), 0.12); }
+.ix-geo__area.is-drill, .ix-geo__pt.is-drill { cursor: pointer; }
+/* at state zoom a hot county is a few pixels: it glows so it is found, not hunted */
+.ix-geo__area.is-hot { filter: drop-shadow(0 0 5px rgba(var(--lc-exec-rgb), 0.55)); }
+:root[data-nexus-theme='light'] .ix-geo__area.is-hot { filter: drop-shadow(0 0 3px rgba(var(--lc-exec-rgb), 0.45)); }
+.ix-geo__hl { fill: none; stroke: rgb(var(--lc-exec-rgb)); stroke-width: 1.8; pointer-events: none; filter: drop-shadow(0 0 6px rgba(var(--lc-exec-rgb), 0.45)); }
+:root[data-nexus-theme='light'] .ix-geo__hl { filter: none; }
+.ix-geo__ctx { fill: rgba(var(--ixg-dot-rgb), 0.03); stroke: rgba(var(--ixg-dot-rgb), 0.14); stroke-width: 0.6; pointer-events: none; }
+.ix-geo__ctx.is-focus { fill: rgba(var(--lc-exec-rgb), 0.05); stroke: rgba(var(--lc-exec-rgb), 0.65); stroke-width: 1.4; }
+.ix-geo__pt { fill: rgba(var(--ixg-dot-rgb), 0.08); stroke: rgba(var(--ixg-dot-rgb), 0.55); stroke-width: 1; outline: none; transition: opacity var(--lc-dur-fast) var(--lc-ease-standard); }
+.ix-geo__pt.is-thin { stroke-dasharray: 2 2; }
+.ix-geo__pt.is-on { stroke: rgb(var(--lc-exec-rgb)); stroke-width: 2; }
+.ix-geo__pt.is-sib { opacity: 0.5; }
+.ix-geo__leader { stroke: rgba(var(--ixg-dot-rgb), 0.35); stroke-width: 1; pointer-events: none; }
+.ix-geo__home { fill: rgba(var(--ixg-dot-rgb), 0.6); pointer-events: none; }
+.ix-geo__ctx { opacity: 0.85; }
+.ix-geo__stage.is-city .ix-geo__ctx, .ix-geo__stage.is-zip .ix-geo__ctx { opacity: 0.6; }
+.ix-geo__buyer { fill: none; stroke: rgb(var(--ixg-buyer-rgb)); stroke-width: 1.2; stroke-dasharray: 3 2; pointer-events: none; }
+.ix-geo__hatchbg { fill: rgba(var(--lc-exec-rgb), 0.04); }
+.ix-geo__hatch { stroke: rgba(var(--lc-exec-rgb), 0.5); }
+.ix-geo__labels text { font-family: var(--lc-font-ui); font-weight: 620; letter-spacing: 0.01em; fill: var(--ix-ink-2); stroke: var(--lc-mat-float-bg); stroke-linejoin: round; paint-order: stroke; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.ix-geo__mapcol { display: grid; gap: 8px; min-width: 0; }
+.ix-geo__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; padding: 0 4px; }
+.ix-geo__foot .ix-geo__key { position: static; pointer-events: auto; }
+.ix-geo__src { margin: 0; font: var(--lc-t-stamp); color: var(--ix-ink-3); text-align: right; }
+.ix-geo__tip.is-left { transform: translate(calc(-100% - 12px), 12px); }
+.ix-geo__tip.is-up { transform: translate(12px, calc(-100% - 12px)); }
+.ix-geo__tip.is-left.is-up { transform: translate(calc(-100% - 12px), calc(-100% - 12px)); }
+.ix-geo__ramp { display: inline-flex; align-items: center; gap: 2px; }
+.ix-geo__ramp i { width: 12px !important; height: 8px !important; border-radius: 2px !important; }
+.ix-geo__ramp em { margin-left: 6px; font-style: normal; font-variant-numeric: tabular-nums; }
+.ix-geo__key i.is-hatch { width: 12px; height: 8px; border-radius: 2px; background: repeating-linear-gradient(45deg, rgba(var(--lc-exec-rgb), 0.55) 0 1.5px, rgba(var(--lc-exec-rgb), 0.05) 1.5px 4px); }
+.ix-geo__key i.is-none { width: 12px; height: 8px; border-radius: 2px; background: rgba(var(--ixg-dot-rgb), 0.06); box-shadow: inset 0 0 0 1px rgba(var(--ixg-dot-rgb), 0.16); }
+.ix-geo__tip strong { font: 650 18px/1.15 var(--lc-font-ui); color: var(--ix-ink); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.ix-geo__tip em.is-thin { color: var(--ix-attn, var(--ix-ink-3)); }
+@media (prefers-reduced-motion: reduce) { .ix-geo__area, .ix-geo__pt { transition: none; } }
 .ix-geo__tip {
   position: absolute;
   z-index: 2;

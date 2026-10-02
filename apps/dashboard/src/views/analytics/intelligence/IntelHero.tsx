@@ -122,6 +122,7 @@ export function IntelHero({ variant = 'overview', metrics = HERO_METRICS, height
             {denom ? <span>{denom}</span> : null}
             {!point && pair?.cur.ci && isRate ? <span>95% interval {format(pair.cur.ci.low)} – {format(pair.cur.ci.high)}</span> : null}
             {!point && compareRange ? <span>vs {compareRange}</span> : null}
+            {point && point.value === null && def?.unit !== 'count' ? <em className="ix-thin">{isRate && def?.denominator?.label ? `no ${def.denominator.label} this ${grain} — no rate` : `nothing recorded this ${grain}`}</em> : null}
             {thin ? <em className="ix-thin">small sample — below {Math.min(10, def?.min_sample || 10)}; read it as noise</em> : null}
             {!point && pair?.cur.status === 'insufficient_sample' ? <em className="ix-thin">below the {def?.min_sample} this rate needs to be a finding</em> : null}
             {pair?.cur.status === 'not_applicable' || pair?.cur.status === 'unavailable' ? <em className="ix-thin">{pair.cur.reason}</em> : null}
@@ -190,6 +191,7 @@ export function IntelHero({ variant = 'overview', metrics = HERO_METRICS, height
           {overview?.compare.available ? <span><i className="ix-key is-prev" />{compareRange}</span> : null}
           {isRate && view === 'line' ? <span><i className="ix-key is-band" />95% interval</span> : null}
           {isRate && view === 'line' ? <span><i className="ix-key is-thin" />small sample</span> : null}
+          {view === 'line' && def?.unit !== 'count' && points.some((p) => p.value === null) ? <span title="Days with no value are connected, never filled in"><i className="ix-key is-bridge" />{isRate && def?.denominator?.label ? `bridged · no ${def.denominator.label} or small sample` : 'bridged · nothing recorded'}</span> : null}
           {isRate && view === 'line' && def?.denominator?.label ? <span><i className="ix-key is-n" />{def.denominator.label} per {grain}</span> : null}
           {events.length && view === 'line' ? <span><i className="ix-key is-pin" />{events.length} event{events.length === 1 ? '' : 's'}</span> : null}
         </div>

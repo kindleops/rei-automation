@@ -88,9 +88,9 @@ function fixture() {
     run('succeeded', null, '2026-09-09T00:00:00Z', { replay_only: true }),
   ]
   const properties = new Map([
-    ['p1', { property_id: 'p1', canonical_market_id: 'mpls', property_address_state: 'MN', property_address_zip: '55401', property_address_county_name: 'Hennepin', property_address_full: '1 Main St, Minneapolis, MN', latitude: 44.98, longitude: -93.27, property_type: 'Single Family', equity_percent: 60, owner_type: 'Individual' }],
-    ['p2', { property_id: 'p2', canonical_market_id: 'mpls', property_address_state: 'MN', property_address_zip: '55402', property_address_county_name: 'Hennepin', property_address_full: '2 Main St, Minneapolis, MN', latitude: 44.97, longitude: -93.26, property_type: 'Multi-Family', equity_percent: 20, owner_type: 'INDIVIDUAL | ABSENTEE' }],
-    ['p3', { property_id: 'p3', canonical_market_id: 'mpls', property_address_state: 'MN', property_address_zip: '55403', property_address_county_name: 'Hennepin', property_address_full: '3 Main St, Minneapolis, MN', latitude: 44.96, longitude: -93.28, property_type: 'Single Family', equity_percent: 75, owner_type: 'Corporate' }],
+    ['p1', { property_id: 'p1', canonical_market_id: 'mpls', property_address_state: 'MN', property_address_city: 'Minneapolis', property_address_zip: '55401', property_address_county_name: 'Hennepin', property_address_full: '1 Main St, Minneapolis, MN', latitude: 44.98, longitude: -93.27, property_type: 'Single Family', equity_percent: 60, owner_type: 'Individual' }],
+    ['p2', { property_id: 'p2', canonical_market_id: 'mpls', property_address_state: 'MN', property_address_city: 'Minneapolis', property_address_zip: '55402', property_address_county_name: 'Hennepin', property_address_full: '2 Main St, Minneapolis, MN', latitude: 44.97, longitude: -93.26, property_type: 'Multi-Family', equity_percent: 20, owner_type: 'INDIVIDUAL | ABSENTEE' }],
+    ['p3', { property_id: 'p3', canonical_market_id: 'mpls', property_address_state: 'MN', property_address_city: 'Edina', property_address_zip: '55403', property_address_county_name: 'Hennepin', property_address_full: '3 Main St, Minneapolis, MN', latitude: 44.96, longitude: -93.28, property_type: 'Single Family', equity_percent: 75, owner_type: 'Corporate' }],
   ])
   return {
     window: { start: P.start, end: W.end, basis: 'attempt' },
@@ -383,4 +383,19 @@ test('stage matrix: entries, forward share of exits, dwell, and who moved them',
   const s10 = m.find((x) => x.code === 'closed')
   assert.equal(s10.backward, 1)
   assert.equal(s10.forwardShare, 0)
+})
+
+test('city: a canonical geography step between county and ZIP — keyed with its state, additive, placed, and a breadcrumb narrows to it', () => {
+  const pf = periodFacts(model(), W)
+  const total = val('sellers_reached', pf).value
+  const b = breakdown('sellers_reached', pf, 'city')
+  const named = b.rows.filter((r) => !r.key.startsWith('__'))
+  assert.ok(named.some((r) => r.key === 'Minneapolis|MN' && r.label === 'Minneapolis, MN'))
+  assert.equal(b.rows.reduce((a, r) => a + r.value, 0), total, 'city rows add up to the period')
+  for (const r of named) assert.ok(r.centroid && Number.isFinite(r.centroid.lat), `${r.key} has a centroid`)
+  const mpls = named.find((r) => r.key === 'Minneapolis|MN')
+  const narrowed = periodFacts(model(), W, { segment: [{ dim: 'city', value: 'Minneapolis|MN' }] })
+  assert.equal(val('sellers_reached', narrowed).value, mpls.value)
+  const rate = breakdown('reply_rate', pf, 'city')
+  for (const r of rate.rows) assert.equal(r.insufficient, r.den < 30, 'rates under the registry min_sample are flagged')
 })
