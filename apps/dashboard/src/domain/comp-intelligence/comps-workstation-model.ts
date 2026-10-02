@@ -239,6 +239,22 @@ export function whyIncluded(c: EvidenceComp, ctx: ExplainContext): Reason[] {
   return out
 }
 
+/**
+ * A stored comp has "aged" only when today's engine weight is at least 5% below
+ * the weight it was priced with. Recency is continuous (RC 7.1), so every weight
+ * drifts down slowly: about 0.1–0.2% a day for a typical priced comp, and at
+ * most 0.97% a day (the engine's proven bound). Under the old calendar rule a
+ * month roll cut a weight by about 15% at once (273312064: 0.6398 → 0.5418). A
+ * 5% threshold therefore ignores day-to-day drift. It flags a comp after about
+ * a month of normal aging, or about a third of the old step.
+ */
+export const WEIGHT_AGED_MIN_RELATIVE_DROP = 0.05
+
+export function weightAgedMaterially(storedWeight: number | null | undefined, todayWeight: number | null | undefined): boolean {
+  if (!storedWeight || !(storedWeight > 0) || todayWeight === null || todayWeight === undefined || !Number.isFinite(todayWeight)) return false
+  return todayWeight <= storedWeight * (1 - WEIGHT_AGED_MIN_RELATIVE_DROP)
+}
+
 /** Real weaknesses of an admissible sale — never invented, never a guess about condition. */
 export function weaknesses(c: EvidenceComp, ctx: ExplainContext): Reason[] {
   const out: Reason[] = []
@@ -260,7 +276,7 @@ export function weaknesses(c: EvidenceComp, ctx: ExplainContext): Reason[] {
   if (c.outsideSearch) out.push({ code: 'outside_search', text: 'Outside the current search radius / window', tone: 'neutral' })
   if (c.state === 'system' && c.today) {
     if (!c.today.eligible) out.push({ code: 'today_rejects', text: `The engine’s rules reject it today: ${c.today.reasons.map((r) => r.replace(/_/g, ' ')).join(', ')}`, tone: 'crit' })
-    else if (c.engine?.weight && c.today.weight !== null && c.today.weight < c.engine.weight - 0.0001) out.push({ code: 'aged', text: `Weight has aged since the engine ran (${c.engine.weight.toFixed(4)} → ${c.today.weight.toFixed(4)})`, tone: 'neutral' })
+    else if (weightAgedMaterially(c.engine?.weight, c.today.weight)) out.push({ code: 'aged', text: `Weight has aged since the engine ran (${(c.engine?.weight ?? 0).toFixed(4)} → ${(c.today.weight ?? 0).toFixed(4)})`, tone: 'neutral' })
   }
   if (c.reasons.some((r) => r.code === 'outside_top_comp_limit')) out.push({ code: 'outside_top', text: 'Eligible, but outside the engine’s top 12 by weight', tone: 'neutral' })
   if (c.reasons.some((r) => r.code === 'adjusted_price_outlier')) out.push({ code: 'stored_outlier', text: 'The engine rejected it as a price outlier when it ran', tone: 'attn' })

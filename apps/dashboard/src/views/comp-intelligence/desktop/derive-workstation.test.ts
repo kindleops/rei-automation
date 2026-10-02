@@ -92,6 +92,13 @@ describe('the workstation derivation', () => {
     expect(m.parity).toEqual({ state: 'not_comparable', reason: 'fallback_valuation' })
   })
 
+  it('drift counts a system comp as aged only after a material (>=5%) weight drop', () => {
+    const today = (weight: number) => ({ eligible: true, reasons: [], weight, adjustedPrice: 263300, recency: 90 })
+    const drifting = { ...w, comps: [{ ...s1, today: today(0.7760) }, { ...s2, today: today(0.7120) }, c1, c2, x1] } as CompsWorkspace
+    const m = deriveWorkstation(drifting, null, null, 'system', NO_FILTERS)
+    // s1 drifted 0.4% (continuous recency, a few days): not aged. s2 dropped 5.0%: aged.
+    expect(m.drift.aged).toBe(1)
+  })
   it('ages are measured from when the evidence was read', () => {
     const m = deriveWorkstation(w, null, null, 'system', NO_FILTERS)
     expect(m.now).toBe(Date.parse('2026-10-01T15:00:00Z'))

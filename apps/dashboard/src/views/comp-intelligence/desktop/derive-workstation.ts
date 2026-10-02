@@ -1,6 +1,7 @@
 import type { CompsWorkspace, EngineRules, EngineRun, EvidenceComp } from '../../../domain/comp-intelligence/comps-evidence-api'
 import { outlierBand, parityWithStored, replaySet, type Parity, type ReplayOfSet } from '../../../domain/comp-intelligence/comps-valuation-replay'
 import {
+  weightAgedMaterially,
   assetKind, evidenceDepth, passesFilters, unitMetricFor, type AssetKind, type CompFilters, type EvidenceDepth, type UnitMetric,
 } from '../../../domain/comp-intelligence/comps-workstation-model'
 import type { OperatorState } from './use-operator-set'
@@ -114,7 +115,7 @@ export function deriveWorkstation(w: CompsWorkspace, operator: OperatorState | n
     comparableValuation: Boolean(w.conclusion?.valueMid && (!w.conclusion.method || w.conclusion.method === 'weighted_adjusted_comp_value') && systemKeys.size),
     runAgeDays: Number.isFinite(computedAt) && now ? Math.max(0, Math.floor((now - computedAt) / 86_400_000)) : null,
     drift: {
-      aged: system.filter((c) => c.today?.eligible && c.engine?.weight && c.today.weight !== null && c.today.weight < c.engine.weight - 0.0001).length,
+      aged: system.filter((c) => c.today?.eligible && weightAgedMaterially(c.engine?.weight, c.today.weight)).length,
       rejected: system.filter((c) => c.today && !c.today.eligible).length,
     },
   }

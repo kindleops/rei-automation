@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CompsWorkspace, EngineRules, EvidenceComp } from './comps-evidence-api'
 import {
   assetKind, describeFilters, evidenceDepth, filterCount, fmtDate, fmtMiles, matchesPreset, NO_FILTERS, passesFilters, PRESETS,
-  engineAgeMonths, engineRecencyFor, recencyStepOf, recencySteps, sameSet, setDiff, subjectImplied, unitMetricFor, unitValue, weaknesses, whyExcluded, whyIncluded,
+  engineAgeMonths, engineRecencyFor, WEIGHT_AGED_MIN_RELATIVE_DROP, weightAgedMaterially, recencyStepOf, recencySteps, sameSet, setDiff, subjectImplied, unitMetricFor, unitValue, weaknesses, whyExcluded, whyIncluded,
 } from './comps-workstation-model'
 
 const NOW = Date.parse('2026-10-01T15:00:00Z')
@@ -85,6 +85,19 @@ describe('explanations', () => {
     expect(mf[0].text).toBe('Multi-Family · 4 units — the subject is Single family')
     const deed = whyExcluded(comp({ state: 'excluded', docType: 'Quit Claim Deed', reasons: [{ code: 'distress_or_transfer_deed', label: 'x' }] }), ctx)
     expect(deed[0].text).toBe('Quit Claim Deed — a foreclosure / transfer deed, not a market sale')
+  })
+  it('"aged" needs a material weight drop, not continuous-recency drift (RC 7.1)', () => {
+    expect(WEIGHT_AGED_MIN_RELATIVE_DROP).toBe(0.05)
+    // A day of drift (worst case under the engine bound, about 0.97%) is not aged.
+    expect(weightAgedMaterially(0.7794, 0.7719)).toBe(false)
+    expect(weightAgedMaterially(0.7794, 0.7794 * 0.951)).toBe(false)
+    expect(weightAgedMaterially(0.7794, 0.7794 * 0.95)).toBe(true)
+    // The old calendar step (273312064: 0.6398 → 0.5418) is aged.
+    expect(weightAgedMaterially(0.6398, 0.5418)).toBe(true)
+    expect(weightAgedMaterially(null, 0.5)).toBe(false)
+    expect(weightAgedMaterially(0.5, null)).toBe(false)
+    const drift = weaknesses(comp({ today: { eligible: true, reasons: [], weight: 0.7700, adjustedPrice: 263300, recency: 93 } }), ctx)
+    expect(drift.some((r) => r.code === 'aged')).toBe(false)
   })
   it('weaknesses flag drift, the outlier band and deed-only evidence', () => {
     const rejectsToday = weaknesses(comp({ today: { eligible: false, reasons: ['sale_too_old'], weight: null, adjustedPrice: null, recency: null } }), ctx)
