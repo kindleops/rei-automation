@@ -727,7 +727,7 @@ export function searchEvents(events: DeskEvent[], raw: string): DeskEvent[] {
 
 /* ══ RANGE ════════════════════════════════════════════════════════════════ */
 
-export type Mode = 'today' | 'timeline' | 'week' | 'month' | 'attention'
+export type Mode = 'today' | 'timeline' | 'week' | 'month' | 'attention' | 'appointments'
 /** One bounded read per anchor (§139–141): five weeks around it, or the six-week month grid. */
 export function rangeFor(mode: Mode, anchor: string) {
   if (mode === 'month') { const s = weekStart(monthStart(anchor)); return { from: s, to: addDays(s, 41) } }

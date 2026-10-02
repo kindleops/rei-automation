@@ -4,6 +4,8 @@ export type InboxStageSelectValue =
 
 export type InboxViewSelectValue =
   | 'new_replies'
+  // the Seller portal lens: its own panel, never sent to /inbox/live
+  | 'seller_portal'
   | 'all'
   | 'priority'
   | 'negotiating'

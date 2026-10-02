@@ -1,0 +1,131 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   SCHEDULING · appointments, the appointment drawer, My calendar.
+   Lives inside the Calendar (desk stage and phone view) and in an LCSheet
+   portal, so it styles from its own root (.sch), never from .tcc / .cal2.
+   Colour is meaning: gold = needs a person, red = a real sync failure,
+   green = done or connected. Composition follows the container.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.sch { container: sch / inline-size; font: var(--lc-t-body); color: var(--lc-ink-1); font-variant-numeric: tabular-nums; }
+.sch :is(button, input, select, textarea) { font: inherit; color: inherit; }
+.sch :focus-visible { outline: none; box-shadow: var(--lc-focus-ring); }
+.sch-title { display: flex; align-items: center; gap: 6px; margin: 0; font: var(--lc-t-section); letter-spacing: var(--lc-track-tight); }
+.sch-eyebrow { display: flex; align-items: center; gap: 8px; font: var(--lc-t-eyebrow); letter-spacing: var(--lc-track-eyebrow); text-transform: uppercase; color: var(--lc-ink-3); }
+.sch-eyebrow em { font-style: normal; text-transform: none; letter-spacing: 0; color: var(--lc-ink-4); }
+.sch-muted { margin: 0; font: var(--lc-t-meta); color: var(--lc-ink-3); line-height: 1.5; }
+.sch-muted code, .sch code { font: var(--lc-t-mono); color: var(--lc-ink-2); }
+.sch-error { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0; font: var(--lc-t-meta); color: rgb(var(--lc-crit-rgb)); }
+.sch-ok { margin: 6px 0 0; font: var(--lc-t-meta); color: rgb(var(--lc-ok-rgb)); }
+.sch .is-attn { color: rgb(var(--lc-attn-rgb)); }
+.sch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+/* fields */
+.sch-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sch-field > span { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.sch-input {
+  width: 100%;
+  min-height: var(--lc-ctl-h-sm);
+  padding: 5px 9px;
+  border: 0;
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-inner-bg);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+  color: var(--lc-ink-1);
+  font: var(--lc-t-body);
+}
+.sch-input:hover { background: var(--lc-inner-bg-hover); }
+.sch-input:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--lc-accent-border), var(--lc-focus-ring); }
+.sch-input[aria-invalid='true'] { box-shadow: inset 0 0 0 1px rgba(var(--lc-crit-rgb), 0.6); }
+textarea.sch-input { resize: vertical; min-height: 72px; }
+.sch-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+/* ══ APPOINTMENTS ═══════════════════════════════════════════════════════ */
+.sch-desk { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 14px; align-items: start; padding: 12px var(--tcc-pad, 16px) 24px; }
+@container tcc (max-width: 860px) { .sch-desk { grid-template-columns: minmax(0, 1fr); } }
+/* the phone: one column under the view tabs */
+.cal2-appts { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 24px; }
+.sch-appts, .sch-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: var(--lc-r-plane);
+  background: var(--lc-sheen-wash), var(--tcc-plane, var(--lc-inner-bg));
+  box-shadow: inset 0 0 0 1px var(--tcc-plane-edge, var(--lc-inner-edge)), var(--lc-sheen-top);
+}
+.sch-appts__head { display: flex; flex-direction: column; gap: 8px; }
+.sch-tabs { max-width: 100%; }
+.sch-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sch-appts__body { margin-top: 10px; }
+.sch-rows { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; transition: opacity var(--lc-dur-fast) var(--lc-ease-standard); }
+.sch-rows.is-refreshing { opacity: 0.6; }
+.sch-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--lc-r-md);
+  background: var(--lc-inner-bg);
+  box-shadow: inset 0 0 0 1px var(--lc-inner-edge);
+}
+.sch-row[data-status='cancelled'], .sch-row[data-status='no_show'] { opacity: 0.72; }
+.sch-row__main {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--lc-r-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.sch-row__main:hover { background: var(--lc-inner-bg-hover); }
+.sch-row__when { display: flex; flex-direction: column; gap: 2px; }
+.sch-row__when b { font-weight: 650; letter-spacing: -0.01em; }
+.sch-row__when small { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.sch-row__when span { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.sch-row__what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sch-row__what b { font-weight: 600; }
+.sch-row__ctx { font: var(--lc-t-meta); color: var(--lc-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-row__who { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font: var(--lc-t-meta); color: var(--lc-ink-2); }
+.sch-row__who > span { display: inline-flex; align-items: center; gap: 4px; }
+.sch-sync { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--lc-r-pill); font: var(--lc-t-meta); color: var(--lc-ink-2); background: rgba(var(--lc-neutral-rgb), 0.14); }
+.sch-sync.is-bad { color: rgb(var(--lc-crit-rgb)); background: rgba(var(--lc-crit-rgb), 0.12); }
+@container sch (max-width: 520px) {
+  .sch-row__main { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .sch-row__who { flex-direction: row; flex-wrap: wrap; align-items: center; }
+}
+
+/* ══ MY CALENDAR ════════════════════════════════════════════════════════ */
+.sch-card { display: flex; flex-direction: column; gap: 14px; }
+.sch-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sch-card__conn { display: flex; flex-direction: column; gap: 8px; }
+.sch-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 8px 10px; border-radius: var(--lc-r-md); font: var(--lc-t-meta); }
+.sch-notice.is-ok { color: rgb(var(--lc-ok-rgb)); background: rgba(var(--lc-ok-rgb), 0.1); }
+.sch-notice.is-attn { color: rgb(var(--lc-attn-rgb)); background: rgba(var(--lc-attn-rgb), 0.1); }
+.sch-form { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--lc-hairline); }
+.sch-days { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: 0; }
+.sch-days legend { margin-bottom: 4px; padding: 0; }
+.sch-day { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 8px; }
+.sch-day > span { font: var(--lc-t-meta); color: var(--lc-ink-2); }
+
+/* ══ APPOINTMENT DRAWER ═════════════════════════════════════════════════ */
+.sch-drawer { overflow: hidden; }
+.sch-drawer__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 16px 16px 10px 20px; border-bottom: 1px solid var(--lc-hairline); }
+.sch-drawer__head .sch-title { margin-top: 4px; font: var(--lc-t-surface); }
+.sch-drawer__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 4px 20px 20px; }
+.sch-sec { display: flex; flex-direction: column; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--lc-hairline); }
+.sch-sec:last-child { border-bottom: 0; }
+.sch-when { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.sch-when span { font: var(--lc-t-meta); color: var(--lc-ink-3); }
+.sch-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sch-phone { font-weight: 600; user-select: all; }
+.sch-ctx { margin: 0; color: var(--lc-ink-1); }
+.sch-lines { margin: 0; padding-left: 18px; font: var(--lc-t-meta); color: var(--lc-ink-2); line-height: 1.55; }
+.sch-move { display: flex; align-items: flex-end; gap: 8px; }
+.sch-move .sch-field { flex: 1 1 auto; }
+.sch-slots { display: inline-flex; flex-wrap: wrap; gap: 6px; color: var(--lc-ink-2); }
+.sch-history { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.sch-history li { display: flex; flex-direction: column; gap: 1px; padding-left: 10px; border-left: 2px solid var(--lc-hairline); }
+.sch-history span, .sch-history em { font: var(--lc-t-meta); color: var(--lc-ink-3); font-style: normal; }

@@ -22,7 +22,7 @@ import type { LCTone } from '../../../shared/lc'
 /* ── lenses ─────────────────────────────────────────────────────────────── */
 
 export type DeskPrimaryLens = 'priority' | 'new_replies' | 'needs_review' | 'waiting' | 'follow_up'
-export type DeskMoreLens = 'scheduled' | 'snoozed' | 'suppressed' | 'cold' | 'dead' | 'archived' | 'all_conversations'
+export type DeskMoreLens = 'scheduled' | 'seller_portal' | 'snoozed' | 'suppressed' | 'cold' | 'dead' | 'archived' | 'all_conversations'
 export type DeskLens = DeskPrimaryLens | DeskMoreLens
 /** `filtered` is its own lens: advanced filters never borrow a bucket's name or count. */
 export type DeskLensKey = DeskLens | 'filtered'
@@ -71,6 +71,12 @@ export const MORE_LENSES: readonly DeskLensDef[] = [
     id: 'scheduled', label: 'Scheduled', countKey: 'scheduled', view: 'scheduled',
     definition: 'Messages queued to send later (counts sends, not conversations)',
     empty: { title: 'Nothing scheduled', body: 'No message is queued to send later.' },
+  },
+  {
+    // its own panel (/api/cockpit/seller-portal), like Scheduled; no thread-count key exists, so it shows —
+    id: 'seller_portal', label: 'Seller portal', countKey: 'seller_portal', view: 'seller_portal',
+    definition: 'Messages sellers sent from their portal, unread first — with shared documents and booked calls',
+    empty: { title: 'No portal conversations', body: 'When a seller writes from their portal, it appears here.' },
   },
   {
     id: 'snoozed', label: 'Snoozed', countKey: 'snoozed', view: 'snoozed',

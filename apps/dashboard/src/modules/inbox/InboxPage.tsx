@@ -159,6 +159,7 @@ import type { LinkedApplyContext } from '../../domain/locator/linked-property-bu
 import { lookupThreadKeyForProperty, openLinkedThread } from './inbox-linked-open'
 import { LCPaneLoading, lcConfirm, lcToast, useLcReducedMotion } from '../../shared/lc'
 import { InboxDeskLedger, type BesideApp } from './desk/InboxDeskLedger'
+import { SellerPortalPanel } from './desk/SellerPortalPanel'
 import { DeskComposer } from './desk/DeskComposer'
 import { lensDef, resolveDeskLens, splitAddress, type DeskLens } from './desk/ledger-model'
 import { mergeQueueBubbles, queueRowToBubble, readReplyMarker, QUEUE_COLUMNS } from './desk/composer-phase'
@@ -5151,7 +5152,9 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
   const { instanceId: inboxInstanceId } = useAppInstance()
   const [multiInbox, updateMultiInbox] = useMultiInboxState(inboxInstanceId)
   const multiActive = isDeskInbox && multiInbox.count > 1
-  const deskLens = resolveDeskLens(viewFilter, hasActiveAdvancedFilters(advancedFilters) || stageFilter !== 'all_stages')
+  // Seller portal is its own panel and its own API: while it is open the thread list and its view filter stay as they were
+  const [deskPortal, setDeskPortal] = useState(false)
+  const deskLens = deskPortal ? 'seller_portal' : resolveDeskLens(viewFilter, hasActiveAdvancedFilters(advancedFilters) || stageFilter !== 'all_stages')
 
   /** Open a row with the same side effects as a click: locator, read mark, the room. */
   const handleDeskOpen = useCallback((threadId: string) => {
@@ -5200,6 +5203,8 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
    * name or count).
    */
   const handleDeskLens = useCallback((lens: DeskLens) => {
+    if (lens === 'seller_portal') { setDeskPortal(true); return }
+    setDeskPortal(false)
     const view = lensDef(lens).view
     const cleared = hasActiveAdvancedFilters(advancedFilters) ? clearAllAdvancedFilters() : advancedFilters
     if (cleared !== advancedFilters) setAdvancedFilters(cleared)
@@ -6079,6 +6084,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
           scheduledPanel={deskLens === 'scheduled'
             ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => openInboxThread({ threadKey })} />
             : undefined}
+          sellerPortalPanel={deskLens === 'seller_portal' ? <SellerPortalPanel /> : undefined}
           headerExtra={isDeskInbox ? (
             <MultiInboxCountControl count={multiInbox.count} onChange={(n) => updateMultiInbox((st) => setMultiCount(st, n))} />
           ) : undefined}
