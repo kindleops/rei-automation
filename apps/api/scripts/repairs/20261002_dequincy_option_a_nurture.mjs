@@ -34,8 +34,8 @@
  *   - no live nurture follow-up already exists (then only step 1 runs).
  *
  * DRY RUN BY DEFAULT. Usage (from apps/api, RC_SHA checkout, after deploy):
- *   node --import ./tests/register-aliases.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs
- *   node --import ./tests/register-aliases.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs --apply
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repairs/20261002_dequincy_option_a_nurture.mjs --apply
  * --apply needs SUPABASE_DB_URL / DATABASE_URL (atomic write) and the service key.
  */
 

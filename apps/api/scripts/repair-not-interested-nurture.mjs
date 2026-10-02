@@ -38,9 +38,9 @@
  * therefore needs SUPABASE_DB_URL / DATABASE_URL; the dry run does not.
  *
  * Usage (from apps/api):
- *   node --import ./tests/register-aliases.mjs scripts/repair-not-interested-nurture.mjs
- *   node --import ./tests/register-aliases.mjs scripts/repair-not-interested-nurture.mjs --json
- *   node --import ./tests/register-aliases.mjs scripts/repair-not-interested-nurture.mjs --apply [--include-legacy] [--limit=N]
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs --json
+ *   node --no-warnings --import ./scripts/register-aliases-ops.mjs scripts/repair-not-interested-nurture.mjs --apply [--include-legacy] [--limit=N]
  */
 
 import { createClient } from "@supabase/supabase-js";
