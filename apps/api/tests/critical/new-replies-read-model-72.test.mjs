@@ -148,3 +148,29 @@ test("the migration and the JS mirror carry the same lists", () => {
   assert.match(sql, /create or replace view public\.v_inbox_thread_state_buckets/);
   assert.equal(/\bdrop\s+view\b/i.test(sql), false, "replace in place; v_inbox_bucket_counts depends on it");
 });
+
+test("the view rollback restores the pre-7.2 predicates and keeps the 4 new columns as inert stubs (no DROP)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.join(here, "../../../..");
+  const sql = fs.readFileSync(path.join(root, "supabase/migrations/20261001160000_new_replies_genuine_engagement.sql"), "utf8");
+  const rb = fs.readFileSync(path.join(root, "supabase/rollbacks/20261001160000_new_replies_genuine_engagement_ROLLBACK.sql"), "utf8");
+  const outputColumns = (text) => {
+    const body = text.slice(text.indexOf("create or replace view"), text.lastIndexOf("from i;"));
+    const finalSelect = body.slice(body.lastIndexOf("\nselect\n") + 8);
+    return finalSelect
+      .split(/,\n/)
+      .map((chunk) => chunk.replace(/--[^\n]*\n/g, "").trim())
+      .map((chunk) => (/ as ([a-z_0-9]+)\s*$/i.exec(chunk) || [null, chunk.trim()])[1]);
+  };
+  const forward = outputColumns(sql);
+  const back = outputColumns(rb);
+  assert.deepEqual(back, forward, "same names in the same order: CREATE OR REPLACE VIEW accepts it");
+  assert.equal(forward.length, 129, "125 production columns + 4 appended (prod information_schema, 2026-10-02)");
+  assert.deepEqual(forward.slice(-4), ["f_last_intent", "f_reply_resolved", "f_nonengagement_latest", "f_closed_disposition"]);
+  assert.match(rb, /''::text as f_last_intent,\s*false as f_reply_resolved,\s*false as f_nonengagement_latest,\s*false as f_closed_disposition/);
+  assert.equal(/\bdrop\s+view\b/i.test(rb.replace(/--[^\n]*/g, "")), false, "no DROP (v_inbox_bucket_counts, v_inbox_zero_counts depend on it)");
+  const code = rb.replace(/--[^\n]*/g, "");
+  for (const gone of ["and not f_reply_resolved", "or f_closed_disposition", "f_nonengagement_latest and", "array['sold','unqualified']"]) {
+    assert.equal(code.includes(gone), false, `rollback still contains 7.2 logic: ${gone}`);
+  }
+});
