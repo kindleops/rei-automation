@@ -39,6 +39,8 @@ function stepsOf(seq, execId = 'x1', extra = {}) {
     return { id: `${execId}-${i}`, execution_id: execId, action_key, execution_status, created_at: at(i * 0.001), block_reason: execution_status === 'blocked' && ['contactability_checked', 'automation_blocked'].includes(action_key) ? extra.block || 'execution_gated' : execution_status === 'needs_review' ? 'automation_review' : null, queue_id: action_key === 'message_queued' ? extra.queue_id || 'q1' : null, output_summary: action_key === 'decision_intelligence_evaluated' ? { stage_before: 'ownership_confirmation', stage_after: 'offer_interest' } : action_key === 'follow_up_scheduled' ? { follow_up_at: at(60 * 24 * 30) } : {} }
   })
 }
+/** message_events.id is a uuid in production (a provider SID is read by provider_message_sid instead) */
+const MID = (id) => `00000000-0000-4000-8000-${Buffer.from(String(id)).toString('hex').padStart(12, '0').slice(-12)}`
 const EXEC = (id = 'x1') => ({ id, workflow_id: 'seller-inbound-v1', thread_id: '+15550000001', property_id: 'p1', source_message_id: 'm1', started_at: at(0), completed_at: at(1) })
 
 test('every system topology is structurally valid (stable keys, one trigger, reachable, unique evidence)', () => {
@@ -177,7 +179,7 @@ test('studio workflow: the pinned graph is the topology and the run path matches
 })
 
 function seed() {
-  const exec = (id, thread, mins) => ({ id, workflow_id: 'seller-inbound-v1', status: 'blocked', thread_id: thread, property_id: 'p1', source_message_id: `m-${id}`, lifecycle_stage: 'offer_interest', started_at: at(mins), completed_at: at(mins + 0.1) })
+  const exec = (id, thread, mins) => ({ id, workflow_id: 'seller-inbound-v1', status: 'blocked', thread_id: thread, property_id: 'p1', source_message_id: MID(id), lifecycle_stage: 'offer_interest', started_at: at(mins), completed_at: at(mins + 0.1) })
   return {
     seller_automation_executions: [exec('e1', '+15550000011', -30), exec('e2', '+15550000012', -90)],
     seller_automation_execution_steps: [...stepsOf(REAL.review, 'e1').map((s) => ({ ...s, created_at: at(-30), thread_id: '+15550000011' })), ...stepsOf(REAL.clear_queued, 'e2', { queue_id: 'q2' }).map((s) => ({ ...s, created_at: at(-90) }))],
@@ -185,7 +187,7 @@ function seed() {
     v_inbox_thread_state_buckets: [{ thread_key: '+15550000011', in_needs_review: true, in_new_replies: false }],
     inbox_thread_state: [{ thread_key: '+15550000011', seller_display_name: 'Test Seller One', property_id: 'p1' }],
     properties: [{ property_id: 'p1', property_address_full: '1 Test St' }],
-    message_events: [{ id: 'm-e1', intent: 'unclear', confidence: '0.41', emotion: 'neutral', language: 'English' }],
+    message_events: [{ id: MID('e1'), intent: 'unclear', confidence: '0.41', emotion: 'neutral', language: 'English' }],
     system_control: [{ key: 'queue_processor_heartbeat_at', value: at(-1) }, { key: 'email_dispatch_heartbeat_at', value: at(-1) }, { key: 'email_enabled', value: 'false' }],
     campaign_runs: [], campaign_events: [], campaigns: [], closing_cases: [], closing_email_requests: [], closing_activity_events: [], wf_workflows: [], wf_versions: [], wf_runs: [], wf_run_steps: [], wf_waits: [], workflow_definitions: [],
     universal_lead_state_events: [], notification_events: [], workflow_events: [], automation_events: [], acquisition_score_snapshots: [], buyer_match_runs: [], sms_suppression_list: [],
@@ -255,7 +257,7 @@ test('unmapped-event monitor reports ledger keys no node claims', async () => {
 
 test('an open conversation needs a person once — on its latest run, not on every earlier review', async () => {
   const s = seed()
-  s.seller_automation_executions.push({ id: 'e0', workflow_id: 'seller-inbound-v1', status: 'blocked', thread_id: '+15550000011', property_id: 'p1', source_message_id: 'm-e0', lifecycle_stage: 'offer_interest', started_at: at(-300), completed_at: at(-299.9) })
+  s.seller_automation_executions.push({ id: 'e0', workflow_id: 'seller-inbound-v1', status: 'blocked', thread_id: '+15550000011', property_id: 'p1', source_message_id: MID('e0'), lifecycle_stage: 'offer_interest', started_at: at(-300), completed_at: at(-299.9) })
   s.seller_automation_execution_steps.push(...stepsOf(REAL.review, 'e0').map((x) => ({ ...x, created_at: at(-300) })))
   const deps = { supabase: makeEmailDb(s), now: () => NOW }
   const runs = await listRuns('seller_inbound', { period: '24h' }, deps)

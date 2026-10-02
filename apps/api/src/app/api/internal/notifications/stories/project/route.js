@@ -28,6 +28,10 @@ export async function POST(request) {
     const result = rebuild ? await rebuildProjection() : await projectStories()
     const ms = Date.now() - started
     if (result.available) logger.info('notifications.stories.projected', { rebuild, ms, inputs: result.inputs, partitions: result.partitions, upserts: result.upserts, deletes: result.deletes })
+    if (result.refused) {
+      logger.warn('notifications.stories.rebuild_refused', { degraded: result.degraded })
+      return NextResponse.json({ route: ROUTE_NAME, rebuild, ms, ...result, message: 'A source is degraded; nothing was written. Retry when it reads clean.' }, { status: 409 })
+    }
     return NextResponse.json({ ok: true, route: ROUTE_NAME, rebuild, ms, ...result })
   } catch (error) {
     logger.error('notifications.stories.project_failed', { rebuild, error: error?.message || 'unknown' })

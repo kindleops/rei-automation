@@ -141,6 +141,15 @@ export function projectSellerRun(ex, steps, { queue = null, open = false, negoti
   }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Pure: a run's source message refs → message_events ids (uuid, pkey) and provider SIDs (unique sid index). */
+export function splitMessageRefs(refs = []) {
+  const ids = []
+  const sids = []
+  for (const r of refs) { const v = clean(r); if (!v) continue; (UUID.test(v) ? ids : sids).push(v) }
+  return { ids, sids }
+}
+
 /** The inbound ledger row that started a run: same conversation, received ≤ 10 min before it began. */
 export function matchIngress(ex, rows = []) {
   const start = Date.parse(ex.started_at)
@@ -164,11 +173,18 @@ async function context(db, execs, steps, degraded, { since = null } = {}) {
   const nm = await sellerNames(db, threads, execs.map((e) => e.property_id), degraded)
   const from = since || iso(Math.min(...execs.map((e) => Date.parse(e.started_at))) - 60e3)
   const neg = threads.length ? await inChunks(db, 'automation_events', 'id, event_type, conversation_thread_id, created_at, status', 'conversation_thread_id', threads, degraded, (q) => q.eq('source', 'seller_negotiation_engine').gte('created_at', from).limit(600)) : []
-  const inbound = [...new Set(execs.map((e) => e.source_message_id).filter(Boolean))]
-  const intel = inbound.length ? await inChunks(db, 'message_events', 'id, intent:metadata->>detected_intent, confidence:metadata->>classification_confidence, emotion:metadata->payload->metadata->>emotion, language:metadata->>language, next_action:metadata->automation_decision->>next_action, reply_mode:metadata->automation_decision->>reply_mode, message_body', 'id', inbound, degraded) : []
+  const inbound = [...new Set(execs.map((e) => e.source_message_id).filter(Boolean).map(String))]
+  // source_message_id is text: usually the message_events uuid, sometimes the provider SID. One SID in a
+  // uuid `in()` fails the WHOLE chunk (22P02) and degraded the source — so each shape reads its own index.
+  const { ids: inboundIds, sids: inboundSids } = splitMessageRefs(inbound)
+  const INTEL = 'id, provider_message_sid, intent:metadata->>detected_intent, confidence:metadata->>classification_confidence, emotion:metadata->payload->metadata->>emotion, language:metadata->>language, next_action:metadata->automation_decision->>next_action, reply_mode:metadata->automation_decision->>reply_mode, message_body'
+  const [intelById, intelBySid] = await Promise.all([
+    inboundIds.length ? inChunks(db, 'message_events', INTEL, 'id', inboundIds, degraded) : [],
+    inboundSids.length ? inChunks(db, 'message_events', INTEL, 'provider_message_sid', inboundSids, degraded) : [],
+  ])
   // real end-to-end inbound latency lives in the inbound ledger (the step recorder's timings are not runtime timings)
   const ingress = threads.length ? await inChunksPaged(db, 'inbound_processing_ledger', 'id, thread_key, received_at, latency_ms, status, completed_at', 'thread_key', threads, degraded, { chunk: 150, extra: (q) => q.gte('received_at', iso(Date.parse(from) - 10 * 60e3)), perChunk: 3000 }) : []
-  return { queue: new Map(queue.map((q) => [String(q.id), q])), open, nm, neg, intel: new Map(intel.map((m) => [String(m.id), m])), ingress }
+  return { queue: new Map(queue.map((q) => [String(q.id), q])), open, nm, neg, intel: new Map([...intelById.map((m) => [String(m.id), m]), ...intelBySid.map((m) => [String(m.provider_message_sid), m])]), ingress }
 }
 
 function assemble(execs, steps, ctx) {

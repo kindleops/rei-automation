@@ -355,3 +355,41 @@ test('Signal Center in the plane: a seller signal (seller_thread) is the seller 
   assert.equal(inbox.deep_link, '/inbox')
   assert.equal(got.every((s) => s.subject.type !== 'system'), true)
 })
+
+test('applied but EMPTY (not backfilled) projection: the endpoint serves the builder, never zero stories, and triggers write nothing', async () => {
+  __resetStoryCache()
+  __resetProjector()
+  // the migration is applied: every table exists, all empty (no cursor row yet)
+  const db = memDb({ notification_events: [], notification_stories: [], notification_story_inputs: [], notification_story_projector: [], notification_story_state: [] })
+  const r = await getNotificationStories({}, { supabase: db, listEvents: eventSource([inbound('m1'), run('r1', 'workflow.held', { msg: 'm1' })]), now: () => NOW, fresh: true })
+  assert.equal(r.source, 'snapshot')
+  assert.equal(r.stories.length, 1)
+  assert.equal(r.stories[0].lens, 'needs_you')
+  const p = await projectStories({ supabase: db, listEvents: eventSource([inbound('m1')]), now: () => NOW })
+  assert.equal(p.available, false)
+  assert.equal(p.reason, 'not_backfilled')
+  assert.equal(db.writes.length, 0, 'the emit / stale-read trigger never projects before a complete backfill')
+})
+
+test('a rebuild with a degraded source is refused and writes nothing (never a partial backfill)', async () => {
+  __resetProjector()
+  const db = memDb({ notification_events: [], notification_stories: [], notification_story_inputs: [], notification_story_projector: [], notification_story_state: [] })
+  const listEvents = async () => ({ ok: true, events: [inbound('m1')], next_cursor: null, degraded: ['workflow:message_events'] })
+  const r = await rebuildProjection({ supabase: db, listEvents, now: () => NOW })
+  assert.equal(r.ok, false)
+  assert.equal(r.refused, 'sources_degraded')
+  assert.deepEqual(r.degraded, ['workflow:message_events'])
+  assert.equal(db.writes.length, 0)
+  // and the endpoint still serves the builder
+  __resetStoryCache()
+  const page = await getNotificationStories({}, { supabase: db, listEvents: eventSource([inbound('m1')]), now: () => NOW, fresh: true })
+  assert.equal(page.source, 'snapshot')
+  assert.equal(page.stories.length, 1)
+})
+
+test('automation runs: a run whose source message is a provider SID no longer fails the uuid read for every run', async () => {
+  const { splitMessageRefs } = await import('../../src/lib/domain/workflow-studio/observatory/adapters/seller.js')
+  const r = splitMessageRefs(['69267caf-4251-432c-83ed-80d96e467249', 'SMIZfzQJ2Cu~gAuyfUaTPaD3g==', '', null, 'E27A6B29-5403-4609-A2C6-AC3AA43C7667'])
+  assert.deepEqual(r.ids, ['69267caf-4251-432c-83ed-80d96e467249', 'E27A6B29-5403-4609-A2C6-AC3AA43C7667'])
+  assert.deepEqual(r.sids, ['SMIZfzQJ2Cu~gAuyfUaTPaD3g=='])
+})

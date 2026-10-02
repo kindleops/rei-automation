@@ -8,14 +8,17 @@
  *                      rows), upsert those inputs, rebuild ONLY the partitions they
  *                      touch with the builder, write the changed story rows.
  *   rebuildProjection() backfill / repair: the current builder's own full-window
- *                      read (story-sources), every partition rebuilt.
+ *                      read (story-sources), every partition rebuilt. Refuses (writes
+ *                      nothing) while any source is degraded: never a partial backfill.
  *   requestProjection() debounced, single-flight trigger — called from the
  *                      notification emit points (upsert / resolve), from the read
  *                      path when the cursor is stale, and from the cron tick.
  *   readProjection()    the endpoint's read: story rows with keyset paging.
  *
- * Until the migration is applied every function reports `available: false` and
- * the endpoint keeps serving the snapshot builder. Writes touch ONLY the three
+ * Until the migration is applied AND a complete rebuild has run (the cursor row
+ * carries rebuilt_at), every function reports `available: false`: the endpoint
+ * keeps serving the snapshot builder (never an empty projection), and the
+ * emit / stale-read triggers write nothing. Writes touch ONLY the three
  * projection tables (+ nothing else); they are idempotent, so two processes
  * projecting the same window converge on the same rows.
  */
@@ -180,16 +183,18 @@ export async function rebuildProjection(deps = {}) {
     readEvents(listEvents, since, { maxPages: REBUILD_PAGES }),
     readNotifications(db, since, { limit: REBUILD_NOTIFICATIONS }),
   ])
+  // A rebuild is the projection's ground truth: with a source down it would be partial (stories missing their
+  // automation step, un-morphed). Refuse and write nothing — the snapshot builder keeps serving until it succeeds.
+  const degraded = [...ev.degraded, ...nt.degraded]
+  if (degraded.length) return { ok: false, available: true, refused: 'sources_degraded', degraded, wrote: false }
   const raw = { events: ev.events, notifications: nt.rows }
   const inputs = toInputs(raw)
-  // a source that timed out keeps the inputs it gave earlier passes (still true facts): read the partitions back
-  const degradedNow = ev.degraded.length + nt.degraded.length > 0
-  const r = await applyInputs(db, inputs, { now, since, known: degradedNow ? null : inputs })
+  const r = await applyInputs(db, inputs, { now, since, known: inputs })
   // prune: inputs and stories that aged out of the window
   await db.from(INPUTS_TABLE).delete().lt('occurred_at', since)
   await db.from(STORIES_TABLE).delete().lt('updated_at', since)
   const nowIso = new Date(now).toISOString()
-  await writeCursor(db, { events_through: nowIso, notifications_through: nowIso, rebuilt_at: nowIso, projected_at: nowIso, degraded: [...ev.degraded, ...nt.degraded], stats: { inputs: inputs.length, partitions: r.partitions, upserts: r.upserts, deletes: r.deletes, truncated: ev.truncated } })
+  await writeCursor(db, { events_through: nowIso, notifications_through: nowIso, rebuilt_at: nowIso, projected_at: nowIso, degraded: [], stats: { inputs: inputs.length, partitions: r.partitions, upserts: r.upserts, deletes: r.deletes, truncated: ev.truncated } })
   return { ok: true, available: true, rebuilt: true, inputs: inputs.length, partitions: r.partitions, upserts: r.upserts, deletes: r.deletes, truncated: ev.truncated }
 }
 
