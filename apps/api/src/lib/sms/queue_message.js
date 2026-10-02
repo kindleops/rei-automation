@@ -377,10 +377,12 @@ export async function queueMessage(params = {}) {
         safe_params?.schedule?.scheduled_local ||
         safe_params?.schedule?.scheduled_utc ||
         now,
+      // rc-7.1 D10: no recipient zone is recorded as none — never Chicago.
+      // Send time places the recipient from the property, or holds the send.
       timezone:
         safe_params?.schedule?.timezone ||
         safe_params?.context?.timezone ||
-        "America/Chicago",
+        null,
       contact_window: safe_params?.context?.contact_window || null,
       send_priority: mapSendPriorityToNumber(safe_params?.context?.send_priority),
       is_locked: false,

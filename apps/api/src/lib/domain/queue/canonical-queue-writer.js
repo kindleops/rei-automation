@@ -128,7 +128,9 @@ export async function enqueueCanonicalOutboundSms(input = {}, deps = {}) {
     }
   }
 
-  const timezone = clean(input.timezone) || 'America/New_York';
+  // rc-7.1 D10: the zone is persisted as given; an unknown zone is stored as
+  // none (send time places the recipient from the property, or holds).
+  const timezone = clean(input.timezone) || null;
   const scheduled_for = clean(input.scheduled_for) || nowIso();
   const dedupe_key = buildCanonicalQueueDedupeKey({ ...input, use_case, idempotency_key });
 

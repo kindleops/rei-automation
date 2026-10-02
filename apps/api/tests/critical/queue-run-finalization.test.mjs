@@ -29,6 +29,8 @@ function makeRow(id, overrides = {}) {
     queue_row_id: id,
     queue_status: "queued",
     scheduled_for: "2026-04-28T14:00:00.000Z",
+    // rc-7.1 D10: the recipient zone is explicit (no Chicago default any more).
+    timezone: "America/Chicago",
     retry_count: 0,
     max_retries: 3,
     message_body: "Hey John, this is Chris. Do you still own 123 Main St?",

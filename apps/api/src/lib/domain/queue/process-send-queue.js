@@ -30,6 +30,7 @@ import { dispatchSellerQueueRow } from "@/lib/domain/communications/dispatch-sel
 import { buildDispatchRefusalBackoff } from "@/lib/domain/queue/dispatch-refusal-backoff.js";
 import { classifyTextGridProviderError } from "@/lib/domain/messaging/textgrid-provider-error-classifier.js";
 import { evaluateSmsHealthGuard } from "@/lib/domain/delivery/sms-health-guard.js";
+import { loadPropertyGeography, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
 import {
   governanceApplies,
   governanceExcludedTemplateIds,
@@ -1615,9 +1616,21 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       };
     }
 
+    // rc-7.1 D10: place the recipient from the property when the row cannot.
+    let property_geography = null;
+    if (!deps.evaluateContactWindow && rowNeedsPropertyGeography(queue_row)) {
+      try {
+        const geography = await (deps.loadPropertyGeography || loadPropertyGeography)(getSupabase(deps), [queue_row.property_id]);
+        property_geography = geography.get(clean(queue_row.property_id)) || null;
+      } catch (geography_error) {
+        warn("queue.property_geography_unavailable", { queue_row_id, message: geography_error?.message || String(geography_error) });
+      }
+    }
+
     const contact_window = evaluate_contact_window(queue_row, {
       ...deps,
       now,
+      propertyGeography: property_geography,
     });
 
     console.log("CONTACT WINDOW CHECK", {
@@ -1629,6 +1642,44 @@ async function processSupabaseQueueItem(resolved_queue_row, deps = {}) {
       timezone: contact_window.timezone,
       valid_window: contact_window.valid_window,
     });
+
+    // rc-7.1 D10 — "missing timezone must never fall back to Chicago": when
+    // neither the property nor the row places the recipient, the send is HELD
+    // (paused, operator-visible), not sent on a guessed zone.
+    if (contact_window.hold === true && !fresh_manual_inbox_send && !inbound_auto_reply) {
+      await getSupabase(deps)
+        .from(QUEUE_TABLE)
+        .update({
+          queue_status: "paused_invalid_queue_row",
+          guard_status: "blocked",
+          guard_reason: "recipient_timezone_unresolved",
+          last_guard_checked_at: now,
+          paused_reason: "recipient_timezone_unresolved",
+          is_locked: false,
+          locked_at: null,
+          lock_token: null,
+          updated_at: now,
+          metadata: {
+            ...(queue_row.metadata ?? {}),
+            skip_reason: "recipient_timezone_unresolved",
+            recipient_timezone_detail: contact_window.detail || null,
+            final_queue_status: "paused_invalid_queue_row",
+            finalized_at: now,
+          },
+        })
+        .eq("id", queue_row_id);
+      warn("send.held_recipient_timezone_unresolved", { queue_row_id, property_id: queue_row.property_id || null, detail: contact_window.detail || null });
+      return {
+        ok: false,
+        skipped: true,
+        sent: false,
+        reason: "recipient_timezone_unresolved",
+        queue_status: "paused_invalid_queue_row",
+        final_queue_status: "paused_invalid_queue_row",
+        queue_row_id,
+        queue_item_id: queue_row_id,
+      };
+    }
 
     if (!contact_window.allowed && !fresh_manual_inbox_send && !inbound_auto_reply) {
       // Bounded internal-proof bypass: an exact-conjunction check (scoped

@@ -115,6 +115,9 @@ function buildQueuePayload(candidate, { campaign_id = null, touch_number = 1, us
     scheduled_for,
     scheduled_for_utc: scheduled_for,
     scheduled_for_local: scheduled_for,
+    // rc-7.1 D10: the recipient zone is explicit (no Chicago default any more);
+    // the property is in Austin, TX.
+    timezone: "America/Chicago",
     message_body,
     message_text: message_body,
     to_phone_number: candidate.canonical_e164,

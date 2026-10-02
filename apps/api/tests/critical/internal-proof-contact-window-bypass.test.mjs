@@ -72,6 +72,8 @@ function makePinnedRow(overrides = {}) {
   return normalizeSendQueueRow({
     id: PINNED_ROW,
     queue_status: "queued",
+    // rc-7.1 D10: the recipient zone is explicit (no Chicago default any more).
+    timezone: "America/Chicago",
     campaign_id: CAMPAIGN,
     to_phone_number: RECIPIENT,
     from_phone_number: SENDER,

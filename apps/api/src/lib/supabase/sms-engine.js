@@ -19,6 +19,7 @@ import { isManualInboxSend, isUnknownAutoReply, isImmediateInboundAutoReply } fr
 import { isInternalTestPhone } from "@/lib/config/internal-phones.js";
 import { isUuid } from "@/lib/utils/is-uuid.js";
 import { withDerivedSentToday } from "@/lib/domain/delivery/sender-sent-today.js";
+import { loadPropertyGeography, resolveRecipientTimezone, rowNeedsPropertyGeography } from "@/lib/domain/queue/recipient-timezone.js";
 import { enrichMessageEventContext, buildMessageEventEnrichmentUpdate } from "@/lib/domain/inbox/enrich-message-event-context.js";
 import {
   classifyThreadFromChronology,
@@ -549,8 +550,14 @@ export function normalizeSendQueueRow(row) {
     property_address: safe_row.property_address || null,
     property_type: safe_row.property_type || null,
     owner_type: safe_row.owner_type || null,
-    timezone: safe_row.timezone || "America/Chicago",
+    // rc-7.1 D10: the stored zone as stored. A blank zone is not Central —
+    // the contact window resolves the recipient's zone (recipient-timezone.js)
+    // and holds the send when it cannot.
+    timezone: safe_row.timezone || null,
     contact_window: safe_row.contact_window || null,
+    property_address_state: safe_row.property_address_state || null,
+    property_address_city: safe_row.property_address_city || null,
+    property_address_zip: safe_row.property_address_zip || null,
     touch_number: safe_row.touch_number || null,
     dnc_check: safe_row.dnc_check || null,
     current_stage: safe_row.current_stage || null,
@@ -966,6 +973,20 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
   if (error) throw error;
 
   const raw_rows = Array.isArray(data) ? data : [];
+  // rc-7.1 D10: one read places every candidate whose row carries no usable
+  // property geography (auto-replies, follow-ups, inbox rows carry only a
+  // property_id). A failed read leaves the row to its stored zone — or a hold.
+  let property_geography = new Map();
+  if (typeof deps.evaluateContactWindow !== "function") {
+    const ids = raw_rows.filter((row) => rowNeedsPropertyGeography(row)).map((row) => row.property_id);
+    if (ids.length) {
+      try {
+        property_geography = await (deps.loadPropertyGeography || loadPropertyGeography)(supabase, ids);
+      } catch (geography_error) {
+        log_warn("queue.property_geography_unavailable", { message: geography_error?.message || String(geography_error) });
+      }
+    }
+  }
   const runnable = [];
   const skipped = [];
   const seen_batch_dedupe_keys = new Set();
@@ -1057,12 +1078,24 @@ export async function loadRunnableSendQueueRows(limit = 50, deps = {}) {
       continue;
     }
 
-    const contact_window = evaluate_contact_window(decision.row, { ...deps, now });
+    const contact_window = evaluate_contact_window(decision.row, {
+      ...deps,
+      now,
+      propertyGeography: property_geography.get(clean(decision.row?.property_id)) || null,
+    });
     const manual_inbox_send = isManualInboxSend(decision.row);
     // Immediate replies to a consumer-initiated inbound are exempt from the
     // outbound quiet-hours window (same rationale as manual inbox sends), but
     // only while still FRESH — an aged/backlogged reply must respect the window.
     const inbound_auto_reply = isImmediateInboundAutoReply(decision.row, now);
+    // rc-7.1 D10: no recipient zone → HOLD (never a Chicago guess). Exempt
+    // traffic (a reply to a seller who just texted, an operator's send) does
+    // not need a window, so it is not held here.
+    if (contact_window?.hold === true && !manual_inbox_send && !inbound_auto_reply) {
+      preclaim_paused_invalid_count += 1;
+      await recordPaused(decision.row, contact_window.reason || "recipient_timezone_unresolved", "paused_invalid_queue_row");
+      continue;
+    }
     if (
       contact_window &&
       contact_window.allowed === false &&
@@ -1290,39 +1323,27 @@ function parseContactWindow(window_text = "") {
 
 export function evaluateContactWindow(row, deps = {}) {
   const normalized = normalizeSendQueueRow(row);
-  const timezone_raw = clean(normalized.timezone) || "America/Chicago";
   const current_time = deps.now ? new Date(deps.now) : new Date();
-  let resolved_timezone = timezone_raw;
 
-  // Resolve abbreviated labels (Eastern, Central, etc.) to IANA names.
-  const TIMEZONE_MAP = {
-    eastern: "America/New_York",
-    et: "America/New_York",
-    est: "America/New_York",
-    edt: "America/New_York",
-    central: "America/Chicago",
-    ct: "America/Chicago",
-    cst: "America/Chicago",
-    cdt: "America/Chicago",
-    mountain: "America/Denver",
-    mt: "America/Denver",
-    mst: "America/Denver",
-    mdt: "America/Denver",
-    pacific: "America/Los_Angeles",
-    pt: "America/Los_Angeles",
-    pst: "America/Los_Angeles",
-    pdt: "America/Los_Angeles",
-  };
-  const tz_lower = timezone_raw.toLowerCase();
-  if (TIMEZONE_MAP[tz_lower]) {
-    resolved_timezone = TIMEZONE_MAP[tz_lower];
+  // rc-7.1 D10 — the RECIPIENT's zone: the property's geography first, then
+  // the zone stored on the row; neither → HOLD. A blank or unrecognised zone
+  // used to become America/Chicago here (a 06:00 text to a Pacific seller).
+  const recipient = resolveRecipientTimezone(normalized, { propertyGeography: deps.propertyGeography || null });
+  if (!recipient.ok) {
+    return {
+      allowed: false,
+      hold: true,
+      reason: "recipient_timezone_unresolved",
+      detail: recipient.detail,
+      timezone: null,
+      valid_window: false,
+      next_open_at: null,
+      next_eligible_at: null,
+    };
   }
-
-  try {
-    buildTimeFormatter(resolved_timezone).format(current_time);
-  } catch {
-    resolved_timezone = "America/Chicago";
-  }
+  const resolved_timezone = recipient.iana;
+  const timezone_basis = recipient.basis;
+  const stored_timezone_corrected = recipient.corrected;
 
   // Hard local-time window: 08:00 ≤ local < 21:00 (8 AM – 9 PM).
   const LOCAL_SEND_START = 8 * 60;   // 480
@@ -1359,6 +1380,8 @@ export function evaluateContactWindow(row, deps = {}) {
       allowed: false,
       reason: "outside_local_send_window",
       timezone: resolved_timezone,
+      timezone_basis,
+      stored_timezone_corrected,
       valid_window: true,
       current_minutes,
       start_minutes: LOCAL_SEND_START,
@@ -1374,6 +1397,8 @@ export function evaluateContactWindow(row, deps = {}) {
       allowed: true,
       reason: "inside_local_send_window",
       timezone: resolved_timezone,
+      timezone_basis,
+      stored_timezone_corrected,
       valid_window: true,
       current_minutes,
       start_minutes: LOCAL_SEND_START,
@@ -1387,6 +1412,8 @@ export function evaluateContactWindow(row, deps = {}) {
       allowed: true,
       reason: "inside_local_send_window_contact_window_unparseable",
       timezone: resolved_timezone,
+      timezone_basis,
+      stored_timezone_corrected,
       valid_window: false,
       current_minutes,
     };
@@ -4621,7 +4648,8 @@ export function buildSendQueueInsertPayload(row = {}, now = null) {
     owner_type: normalized.owner_type || null,
     scheduled_for_local: normalized.scheduled_for_local || normalized.scheduled_for || ts,
     scheduled_for_utc: normalized.scheduled_for_utc || normalized.scheduled_for || ts,
-    timezone: normalized.timezone || "America/Chicago",
+    // rc-7.1 D10: never stamp a zone nobody resolved; send time derives it.
+    timezone: normalized.timezone || null,
     contact_window: normalized.contact_window || null,
     sent_at: normalized.sent_at || null,
     delivered_at: normalized.delivered_at || null,
