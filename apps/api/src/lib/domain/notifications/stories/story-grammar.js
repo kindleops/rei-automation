@@ -217,17 +217,20 @@ export function itemFromNotification(r) {
   // An event rule's evidence names the event that fired it (metrics.event_id): the signal joins that story.
   if (domain === 'signals') {
     const st = clean(r.source_entity_type)
-    const subject = st === 'seller' && thread ? sellerSubject(thread, r.property_id)
+    // the evaluator writes a seller subject as 'seller_thread' (the envelope's own name for it)
+    const subject = (st === 'seller' || st === 'seller_thread' || st === 'thread') && thread ? sellerSubject(thread, r.property_id)
       : st === 'campaign' && r.campaign_id ? { type: 'campaign', id: String(r.campaign_id) }
         : st === 'property' && r.property_id ? { type: 'property', id: String(r.property_id) }
-          : st === 'sender' ? { type: 'system', id: 'senders' }
-            : { type: 'system', id: st === 'platform' || !st ? 'platform' : st }
+          // New Replies backlog is operator work (NEEDS YOU / NOW), not infrastructure
+          : st === 'inbox' ? { type: 'inbox', id: 'new_replies' }
+            : st === 'sender' ? { type: 'system', id: 'senders' }
+              : { type: 'system', id: st === 'platform' || !st ? 'platform' : st }
     const ss = clean(m.signal_severity).toLowerCase() || ({ critical: 'critical', warning: 'warning', positive: 'info', neutral: 'attention' }[sev] || 'attention')
     const priority = { critical: 'critical', warning: 'action', attention: 'important', info: 'info' }[ss] || 'important'
     const needs = ss === 'critical' || ss === 'warning'
     return {
       ...base, causal: { ...base.causal, source_event_id: clean(m.source_event_id) || clean(m.event_id) || null },
-      role: 'trigger', kind: 'condition', condition: `signal:${clean(m.rule_key) || type}`, subject, signal: true,
+      role: 'trigger', kind: 'condition', condition: `signal:${clean(m.rule_key) || type}`, subject, signal: { rule_key: clean(m.rule_key) || null, signal_id: clean(m.signal_id) || null, severity: ss },
       tone: ss === 'critical' ? 'red' : needs ? 'gold' : 'cyan', priority, needs_operator: needs,
       sound: ss === 'critical' ? 'critical' : needs ? 'attention' : null,
       resolved_at: r.status === 'resolved' ? r.resolved_at || r.updated_at : null,

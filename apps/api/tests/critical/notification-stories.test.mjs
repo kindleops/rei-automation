@@ -345,6 +345,8 @@ test('degrades without the state table: alert rows persist, otherwise the client
 })
 
 test('routes are auth-only (never anonymous)', async () => {
+  // the gate is configured in every real environment; without it the auth helper is open by design
+  process.env.OPS_DASHBOARD_SECRET = process.env.OPS_DASHBOARD_SECRET || 'test-ops-secret'
   const { GET } = await import('../../src/app/api/cockpit/notifications/stories/route.js')
   const { POST } = await import('../../src/app/api/cockpit/notifications/stories/state/route.js')
   const g = await GET(new Request('http://localhost/api/cockpit/notifications/stories'))

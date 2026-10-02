@@ -194,6 +194,7 @@ const DEEP = {
   closing: (s) => `/closing-desk?case=${encodeURIComponent(s.id)}`,
   deal: (s) => `/pipeline?opp=${encodeURIComponent(s.id)}`,
   property: (s) => `/deal-intelligence?property_id=${encodeURIComponent(s.id)}`,
+  inbox: () => '/inbox',
 }
 const SYSTEM_LINK = { senders: '/queue', platform: '/queue', email: '/email-command' }
 
@@ -299,6 +300,9 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
   } else if (s.type === 'workflow') {
     title = `${b.items.map((it) => it.workflow_name).find(Boolean) || capFirst(s.id.replace(/_/g, ' '))} · ${lastTrigger.label}`
     summary = lastTrigger.detail || null
+  } else if (s.type === 'inbox') {
+    title = `New Replies · ${lastTrigger.label}`
+    summary = lastTrigger.detail || null
   } else {
     title = `${capFirst(s.type)} · ${lastTrigger.label}`
     summary = lastTrigger.detail || null
@@ -325,6 +329,8 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
     deepLink = `/workflow-studio?wf=${encodeURIComponent(s.id)}${run?.id ? `&run=${encodeURIComponent(run.id)}` : ''}`
     object = { type: 'workflow', id: s.id, label: null }
     if (run?.id) replay = { type: 'workflow', id: `${s.id}:${run.id}`, label: null }
+  } else if (s.type === 'inbox') {
+    deepLink = DEEP.inbox(s)
   } else if (s.type === 'deal' || s.type === 'property') {
     deepLink = DEEP[s.type](s); object = { type: s.type, id: s.id, label: null }
     if (s.type === 'property') replay = { type: 'property', id: s.id, label: null }
@@ -338,6 +344,10 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
   const soundItem = [...triggers].reverse().find((t) => t.sound) || null
   const cue = soundItem ? SOUND[soundItem.sound] : null
   const sound = cue && !resolved ? { id: `story:${soundItem.id}`, ...cue, at: soundItem.t, voiced_by: RAIL_VOICED.has(soundItem.event_type) ? 'rail' : 'plane' } : null
+
+  // Signal Center firings in this story (rule settings + the ledger row the Resolve also clears)
+  const signalItems = b.items.filter((it) => it.signal)
+  const signal = signalItems.length ? { rule_keys: [...new Set(signalItems.map((it) => it.signal.rule_key).filter(Boolean))], signal_ids: [...new Set(signalItems.map((it) => it.signal.signal_id).filter(Boolean))], severity: signalItems[signalItems.length - 1].signal.severity || null } : null
 
   const createdAt = b.items[0].at
   const updatedAt = [b.items[b.items.length - 1].at, machineResolvedAt].filter(Boolean).sort().pop()
@@ -375,6 +385,7 @@ export function assembleStory(b, { state = new Map(), now = Date.now(), names = 
     replay,
     missions,
     sound,
+    signal,
   }
 }
 

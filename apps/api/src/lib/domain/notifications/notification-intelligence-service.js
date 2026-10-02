@@ -271,6 +271,7 @@ export async function upsertNotificationEvent(fields = {}) {
       }
       // A new occurrence alerts like a new notification would.
       if (isOccurrence) void dispatchPushForNotification({ ...baseRow, id: data?.id ?? existing.id })
+      noteStoryInput()
       return { ok: true, id: data?.id ?? existing.id, evolved: true, reopened: reopen }
     }
 
@@ -307,12 +308,23 @@ export async function upsertNotificationEvent(fields = {}) {
      * never fail one — which is why the catch swallows.
      */
     void dispatchPushForNotification({ ...baseRow, id: data?.id ?? null })
+    noteStoryInput()
 
     return { ok: true, id: data?.id ?? null, evolved: false }
   } catch (err) {
     logger.warn('notification.upsert_exception', { error: String(err?.message ?? err) })
     return { ok: false, error: String(err?.message ?? err) }
   }
+}
+
+/**
+ * Notification Center 2.0: an alert row changed → the persisted story projection
+ * updates (debounced, single flight). Lazy import: the story service imports this
+ * module. Never awaited, never throws — a projection problem can never slow or
+ * fail an alert write; the projector's own cursor catches up on its next pass.
+ */
+function noteStoryInput() {
+  import('./stories/story-projector.js').then((m) => m.requestProjection('notification_events')).catch(() => {})
 }
 
 async function evolveGroupedNotification(db, groupingKey, baseRow) {
@@ -403,6 +415,7 @@ export async function resolveNotificationByDeduplicationKey(deduplicationKey, op
 
     if (error) return { ok: false, error: error.message }
     const resolved_count = data?.length ?? 0
+    if (resolved_count > 0) noteStoryInput()
     return { ok: true, resolved: resolved_count > 0, resolved_count }
   } catch (err) {
     return { ok: false, error: String(err?.message ?? err) }

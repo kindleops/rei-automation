@@ -21,16 +21,14 @@
 import { supabase as defaultSupabase } from '@/lib/supabase/client.js'
 import { listPlatformEvents } from '@/lib/domain/platform/events/platform-events-service.js'
 import { writeNotificationActionAudit } from '@/lib/domain/notifications/notification-intelligence-service.js'
-import { STORY_EVENT_TYPES, LENSES } from './story-grammar.js'
+import { LENSES } from './story-grammar.js'
 import { buildStories, countStories } from './story-builder.js'
+import { readEvents, readNotifications, readState, isMissingTable, WINDOW_MS, MAX_PAGES, PAGE, NOTIFICATION_LIMIT, STATE_TABLE, NOTIFICATION_COLS } from './story-sources.js'
+import { readProjection, readProjectedStories, reprojectPartitions, readProjectionCounts } from './story-projector.js'
+import { partitionOfStory, storyFromRow } from './story-projection.js'
 
-export const WINDOW_MS = 7 * 864e5
+export { WINDOW_MS, MAX_PAGES, PAGE, NOTIFICATION_LIMIT, STATE_TABLE }
 export const SNAPSHOT_TTL_MS = 45e3
-export const MAX_PAGES = 5
-export const PAGE = 200
-export const NOTIFICATION_LIMIT = 800
-export const STATE_TABLE = 'notification_story_state'
-const NOTIFICATION_COLS = 'id, event_type, domain, severity, title, description, source_entity_type, source_entity_id, property_id, campaign_id, sender_number_id, workflow_id, deal_id, closing_id, metrics_snapshot, action_state, group_count, status, read_at, dismissed_at, resolved_at, created_at, updated_at'
 const ACTIONS = new Set(['read', 'unread', 'resolve', 'reopen'])
 
 export class StoryError extends Error {
@@ -38,42 +36,26 @@ export class StoryError extends Error {
 }
 
 const clean = (v) => String(v ?? '').trim()
-const isMissingTable = (e) => /does not exist|schema cache|could not find the table|42P01|PGRST205/i.test(`${e?.code || ''} ${e?.message || e || ''}`)
 
 let cache = { at: 0, snapshot: null, inflight: null }
-export function __resetStoryCache() { cache = { at: 0, snapshot: null, inflight: null } }
+/** the projection is re-probed at most this often while it is unavailable (migration not applied / not backfilled) */
+const PROJECTION_PROBE_MS = 60e3
+let projectionDownUntil = 0
+export function __resetStoryCache() { cache = { at: 0, snapshot: null, inflight: null }; projectionDownUntil = 0 }
 
-async function readEvents(listEvents, since, now) {
-  const events = []
-  const degraded = new Set()
-  let cursor = null
-  let pages = 0
-  let horizon = null
-  do {
-    const r = await listEvents({ types: STORY_EVENT_TYPES.join(','), since, limit: PAGE, ...(cursor ? { cursor } : {}) })
-    for (const d of r.degraded || []) degraded.add(d)
-    events.push(...(r.events || []))
-    cursor = r.next_cursor || null
-    pages += 1
-    if (r.events?.length) horizon = r.events[r.events.length - 1].occurred_at
-  } while (cursor && pages < MAX_PAGES)
-  // the window actually covered: everything above `horizon` is complete
-  return { events, degraded: [...degraded], horizon: cursor ? horizon : new Date(Date.parse(since)).toISOString(), truncated: Boolean(cursor), pages }
-}
-
-async function readNotifications(db, since) {
-  const { data, error } = await db.from('notification_events').select(NOTIFICATION_COLS).gte('updated_at', since).order('updated_at', { ascending: false }).limit(NOTIFICATION_LIMIT)
-  if (error) {
-    if (isMissingTable(error)) return { rows: [], degraded: ['notification_events:missing'] }
-    throw error
+/** The persisted projection (when available) — else null and the snapshot builder serves. */
+async function fromProjection(p, deps) {
+  if (deps.projection === false) return null
+  const now = deps.now ? deps.now() : Date.now()
+  if (!deps.projection && now < projectionDownUntil) return null
+  try {
+    const r = await readProjection(p, deps)
+    if (!r) projectionDownUntil = now + PROJECTION_PROBE_MS
+    return r
+  } catch {
+    projectionDownUntil = now + PROJECTION_PROBE_MS
+    return null
   }
-  return { rows: data || [], degraded: [] }
-}
-
-async function readState(db, since) {
-  const { data, error } = await db.from(STATE_TABLE).select('story_id, read_at, unread_at, resolved_at, resolved_by, reopened, updated_at').gte('updated_at', since).limit(5000)
-  if (error) return { available: false, map: new Map(), missing: isMissingTable(error) }
-  return { available: true, map: new Map((data || []).map((r) => [r.story_id, r])) }
 }
 
 /** Build (or reuse) the process snapshot. */
@@ -86,7 +68,7 @@ export async function loadSnapshot(deps = {}) {
   const since = new Date(now - WINDOW_MS).toISOString()
   const run = (async () => {
     const [ev, nt, st] = await Promise.all([
-      readEvents(listEvents, since, now).catch((e) => ({ events: [], degraded: [`platform_events:${e?.message || 'failed'}`], horizon: null, truncated: false, failed: true })),
+      readEvents(listEvents, since).catch((e) => ({ events: [], degraded: [`platform_events:${e?.message || 'failed'}`], horizon: null, truncated: false, failed: true })),
       readNotifications(db, since).catch((e) => ({ rows: [], degraded: [`notification_events:${e?.message || 'failed'}`], failed: true })),
       readState(db, since).catch(() => ({ available: false, map: new Map() })),
     ])
@@ -132,10 +114,12 @@ export function parseStoryQuery(q = {}) {
   return { lens, limit, cursor, since, summary: q.summary === '1' || q.summary === 'true' }
 }
 
-const meta = (snap) => ({ generated_at: snap.built_at, horizon: snap.horizon, truncated: snap.truncated, degraded: snap.degraded, state_store: snap.stateTable ? 'table' : 'notification_rows', counts: snap.counts })
+const meta = (snap) => ({ generated_at: snap.built_at, horizon: snap.horizon, truncated: snap.truncated, degraded: snap.degraded, state_store: snap.stateTable ? 'table' : 'notification_rows', counts: snap.counts, source: 'snapshot' })
 
 export async function getNotificationStories(query = {}, deps = {}) {
   const p = parseStoryQuery(query)
+  const projected = await fromProjection(p, deps)
+  if (projected) return projected
   const snap = await loadSnapshot(deps)
   if (p.summary) return { ok: true, ...meta(snap) }
   if (p.since) {
@@ -148,6 +132,43 @@ export async function getNotificationStories(query = {}, deps = {}) {
   return { ok: true, ...meta(snap), lens: p.lens, stories: page, next_cursor: list.length > p.limit ? encode(page[page.length - 1]) : null }
 }
 
+/**
+ * Where the state endpoint finds stories, the persisted state and the member
+ * alert rows: the projection (cheap, by id) when it is available, else the snapshot.
+ */
+async function stateContext(ids, deps, db) {
+  const now = deps.now ? deps.now() : Date.now()
+  let rows = null
+  if (deps.projection !== false && (deps.projection || now >= projectionDownUntil)) {
+    try { rows = await readProjectedStories(ids, deps) } catch { rows = null }
+  }
+  if (rows) {
+    const byId = new Map(rows.map((r) => [r.story_id, storyFromRow(r, now)]))
+    const state = new Map()
+    const st = await db.from(STATE_TABLE).select('story_id, read_at, unread_at, resolved_at, resolved_by, reopened, updated_at').in('story_id', ids)
+    for (const r of st.data || []) state.set(r.story_id, r)
+    const memberIds = [...new Set([...byId.values()].flatMap((s) => s.notification_ids || []))]
+    const notifications = memberIds.length ? ((await db.from('notification_events').select(NOTIFICATION_COLS).in('id', memberIds)).data || []) : []
+    return {
+      mode: 'projection', byId, state, notifications,
+      async finish(patched) {
+        const parts = [...byId.values()].map(partitionOfStory)
+        const { stories } = await reprojectPartitions(parts, deps, { patchedNotifications: patched })
+        const fresh = new Map(stories.map((s) => [s.id, s]))
+        return { byId: fresh, counts: await readProjectionCounts(deps) }
+      },
+    }
+  }
+  const snap = await loadSnapshot(deps)
+  return {
+    mode: 'snapshot', byId: snap.byId, state: snap.state, notifications: snap.raw.notifications, stateTable: snap.stateTable,
+    async finish() {
+      assemble(snap, deps.now ? deps.now() : Date.now())
+      return { byId: snap.byId, counts: snap.counts }
+    },
+  }
+}
+
 /** Persist READ / RESOLVED for stories (write-through to the member alert rows). */
 export async function updateStoryState(body = {}, deps = {}) {
   const action = clean(body.action)
@@ -157,16 +178,16 @@ export async function updateStoryState(body = {}, deps = {}) {
   const db = deps.supabase || defaultSupabase
   const audit = deps.audit || writeNotificationActionAudit
   const operator = clean(body.operator_id) || clean(deps.operatorId) || 'operator'
-  const snap = await loadSnapshot(deps)
+  const ctx = await stateContext(ids, deps, db)
   const nowIso = new Date(deps.now ? deps.now() : Date.now()).toISOString()
-  const stories = ids.map((id) => snap.byId.get(id)).filter(Boolean)
-  const missing = ids.filter((id) => !snap.byId.has(id))
+  const stories = ids.map((id) => ctx.byId.get(id)).filter(Boolean)
+  const missing = ids.filter((id) => !ctx.byId.has(id))
 
   // 1. the story state table (when the migration is applied)
   let table = false
   if (stories.length) {
     const rows = stories.map((s) => {
-      const prev = snap.state.get(s.id) || {}
+      const prev = ctx.state.get(s.id) || {}
       const row = { story_id: s.id, operator_id: operator, subject_key: s.subject_key, last_trigger_at: s.last_trigger_at, updated_at: nowIso, read_at: prev.read_at || null, unread_at: prev.unread_at || null, resolved_at: prev.resolved_at || null, resolved_by: prev.resolved_by || null, reopened: false }
       if (action === 'read') { row.read_at = nowIso; row.unread_at = null }
       if (action === 'unread') { row.unread_at = nowIso; row.read_at = null }
@@ -175,15 +196,16 @@ export async function updateStoryState(body = {}, deps = {}) {
       return row
     })
     const { error } = await db.from(STATE_TABLE).upsert(rows, { onConflict: 'story_id' })
-    if (!error) { table = true; for (const r of rows) snap.state.set(r.story_id, r) }
+    if (!error) { table = true; for (const r of rows) ctx.state.set(r.story_id, r) }
     else if (!isMissingTable(error)) throw new StoryError('state_write_failed', 'Story state could not be saved.', 503)
   }
 
   // 2. write-through to the member alert rows (the old bell / phone read the same state)
   const memberIds = [...new Set(stories.flatMap((s) => s.notification_ids))]
   let rowsUpdated = 0
+  const patched = []
   if (memberIds.length) {
-    const rowsById = new Map(snap.raw.notifications.map((r) => [String(r.id), r]))
+    const rowsById = new Map(ctx.notifications.map((r) => [String(r.id), r]))
     const patchFor = (r) => {
       if (action === 'read') return r.read_at ? null : { read_at: nowIso }
       if (action === 'unread') return { read_at: null }
@@ -197,7 +219,7 @@ export async function updateStoryState(body = {}, deps = {}) {
       const patch = patchFor(r)
       if (!patch) continue
       const { error } = await db.from('notification_events').update({ ...patch, updated_at: r.updated_at }).eq('id', id)
-      if (!error) { Object.assign(r, patch); rowsUpdated += 1 }
+      if (!error) { Object.assign(r, patch); rowsUpdated += 1; patched.push(r) }
     }
   }
 
@@ -206,8 +228,8 @@ export async function updateStoryState(body = {}, deps = {}) {
     for (const s of stories) if (s.notification_ids[0]) await audit({ notification_id: s.notification_ids[0], action_type: `story_${action}`, operator_id: operator, outcome: 'ok', details: { story_id: s.id, subject_key: s.subject_key, notification_ids: s.notification_ids } })
   }
 
-  assemble(snap, deps.now ? deps.now() : Date.now())
-  const updated = ids.map((id) => snap.byId.get(id)).filter(Boolean)
+  const done = await ctx.finish(patched)
+  const updated = ids.map((id) => done.byId.get(id)).filter(Boolean)
   return {
     ok: true,
     action,
@@ -215,6 +237,6 @@ export async function updateStoryState(body = {}, deps = {}) {
     persisted: Object.fromEntries(updated.map((s) => [s.id, table ? 'table' : s.notification_ids.length ? 'notification_rows' : 'none'])),
     rows_updated: rowsUpdated,
     missing,
-    counts: snap.counts,
+    counts: done.counts,
   }
 }
