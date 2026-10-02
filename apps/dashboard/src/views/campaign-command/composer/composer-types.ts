@@ -1,0 +1,156 @@
+/**
+ * CAMPAIGN COMPOSER 2.0 — wire types of /api/cockpit/campaigns/composer
+ * (apps/api/src/lib/domain/campaigns/campaign-composer.js). The server owns
+ * every number; these types only name what it returns.
+ */
+
+export type Bucket = { value: string; label: string; count: number }
+
+export type ComposerAudience = {
+  ok: true
+  at: string
+  strategy: { use_case: string; stage_code: string }
+  matched: number | null
+  addressable: number | null
+  reachable: number | null
+  sms_eligible: number | null
+  clean: number | null
+  eligible_in_audience: number | null
+  exclusions: {
+    suppressed: number | null
+    dnc: number | null
+    wrong_number: number | null
+    no_phone: number | null
+    sms_ineligible: number | null
+    no_sender_route: number | null
+    pending_prior_touch: number | null
+    active_queue: number | null
+  }
+  build: {
+    ok: boolean
+    error?: string
+    requested_limit?: number | null
+    simulated_limit?: number | null
+    capped_by_preview?: boolean
+    rows_read?: number | null
+    recipients?: number | null
+    duplicates_collapsed?: number | null
+    built?: number | null
+    ready?: number | null
+    held?: number | null
+    held_by_reason?: Record<string, number>
+    sendable_now?: number | null
+    no_sendable_number?: number | null
+    sender_markets?: Array<{ market: string; sellers: number | null; sendable: boolean | null; route_tier: string | null; block_reason: string | null; summary: string | null }>
+  }
+  distributions: { markets: Bucket[]; languages: Bucket[]; property_types: Bucket[]; zips: Bucket[]; zones: Bucket[] }
+  zones: { scanned: number; unresolved: number }
+  inapplicable_filters: Array<Record<string, unknown>>
+  unsupported_filters: Array<Record<string, unknown>>
+  dropped_filter_count: number
+  graph_freshness: { latest_generated_at?: string; refresh_finished_at?: string; refresh_status?: string }
+  graph_unavailable: boolean
+  warnings: string[]
+  samples: ComposerSample[]
+}
+
+export type ComposerSample = {
+  id: string
+  property_id: string | null
+  recipient: string | null
+  place: string | null
+  market: string | null
+  language: string | null
+  ok: boolean
+  text: string | null
+  template_id: string | null
+  template_language?: string | null
+  reason: string | null
+}
+
+export type SenderState = 'active' | 'unverified' | 'paused' | 'blocked' | 'cooling' | 'ineligible' | 'cap_reached'
+
+export type FleetNumber = {
+  phone: string | null
+  label: string | null
+  market: string | null
+  state: string | null
+  sender_state: SenderState
+  reason: string | null
+  eligible: boolean
+  cooling_until: string | null
+  limit: number | null
+  limit_basis: 'system' | 'number' | null
+  sent_today: number
+  remaining_today: number
+}
+
+export type ComposerFleet = {
+  ok: true
+  at: string
+  numbers: FleetNumber[]
+  markets: Array<{ market: string; state: string | null; numbers: number; by_state: Record<string, number>; capacity_per_day: number; remaining_today: number; unavailable_per_day: number; unknown_limit: number }>
+  blocklist_readable: boolean
+  system: {
+    per_number_cap: number | null
+    processor_mode: string | null
+    emergency_stop_at: string | null
+    outbound_sms_enabled: boolean | null
+    contact_window: { start: string; end: string }
+    auto_reply_mode: string | null
+    followup_automation_mode: string | null
+  }
+}
+
+export type TemplateLanguage = { language: string; templates: number; sendable: number; paused: number; blocked: number; inactive: number }
+export type GovernedTemplate = {
+  template_id: string
+  name: string
+  language: string
+  rotation_status: string | null
+  selectable: boolean
+  reason: string | null
+  notes: string | null
+  daily_cap: number | null
+  performance: { sample: number; reply_rate: number | null; delivery_rate: number | null; opt_out_rate: number | null } | null
+  performance_sample: number | null
+}
+export type ComposerStrategy = {
+  use_case: string
+  stage_code: string
+  label: string
+  touch: string
+  languages: TemplateLanguage[]
+  templates: number
+  sendable: number
+  governed: GovernedTemplate[]
+}
+export type ComposerTemplates = { ok: true; at: string; governance_readable: boolean; strategies: ComposerStrategy[] }
+
+export type ServerReadiness = {
+  state: 'ready' | 'warnings' | 'blocked' | string | null
+  blockers: string[]
+  blocker_codes: string[]
+  warnings: string[]
+  launch_ready: number | null
+  ready: number | null
+  routable: number | null
+  counts: Record<string, number>
+  language_coverage: Array<{ language: string; sellers: number; renders: boolean | null; reason: string | null }>
+  sender_coverage: Array<{ market: string; sellers: number; sendable: boolean | null }>
+  template_readiness: string | null
+}
+
+export type PrepareResult = { ok: true; campaign_id: string; build: Record<string, unknown>; readiness: ServerReadiness }
+export type LaunchResult = {
+  ok: true
+  campaign_id: string
+  idempotent?: boolean
+  mode: 'now' | 'at'
+  scheduled_for: string | null
+  state: string | null
+  eligible: number
+  inserted: number | null
+  readiness?: ServerReadiness
+}
+export type ComposerFailure = { ok: false; status?: number; error: string; message?: string | null; readiness?: ServerReadiness; blockers?: string[]; missed?: string }
