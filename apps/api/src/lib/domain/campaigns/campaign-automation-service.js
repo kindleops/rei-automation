@@ -53,6 +53,7 @@ import { isValidIanaTimezone } from '@/lib/domain/acquisition-brain/shadow-burst
 import { resolveTimezone } from '@/lib/sms/latency.js'
 import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/lib/domain/campaigns/campaign-market-identity.js'
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
+import { resolveRecipientTimezone } from '@/lib/domain/queue/recipient-timezone.js'
 import { loadCanonicalMarketDirectory, resolveMarketLabel } from '@/lib/domain/geography/canonical-market.js'
 import {
   ageBucketFromMob,
@@ -366,7 +367,7 @@ async function replaceCampaignFilters(campaignId, filters = {}, deps = {}) {
   return { inserted: rows.length }
 }
 
-async function recordCampaignEvent(fields = {}, deps = {}) {
+export async function recordCampaignEvent(fields = {}, deps = {}) {
   const supabase = deps.supabase || defaultSupabase
   const { error } = await supabase.from('campaign_events').insert({
     campaign_id: fields.campaign_id || null,
@@ -4094,13 +4095,15 @@ async function summarizeCampaignGraph({ supabase, options, rowLimit, requireQueu
   }
 }
 
-function graphDistributionCounts(rows = []) {
+export function graphDistributionCounts(rows = []) {
   const counts = {
     markets: {},
     languages: {},
     propertyTypes: {},
     matchingFlags: {},
     routingTiers: {},
+    recipientZones: {},
+    zips: {},
   }
   for (const row of rows) {
     increment(counts.markets, row.market || 'unknown')
@@ -4108,6 +4111,11 @@ function graphDistributionCounts(rows = []) {
     increment(counts.propertyTypes, row.canonical_property_group || row.property_type || 'unknown')
     incrementListValues(counts.matchingFlags, row.matching_flags_text || 'unknown')
     increment(counts.routingTiers, row.routing_tier || 'unknown')
+    // The dispatch resolver's own answer (property geography first, a valid
+    // stored zone second, else unresolved = held) — never a default zone.
+    const zone = resolveRecipientTimezone({ timezone: row.timezone, property_address_state: row.state, property_address_zip: row.property_zip })
+    increment(counts.recipientZones, zone.ok ? zone.iana : 'unresolved')
+    if (row.property_zip) increment(counts.zips, String(row.property_zip).slice(0, 5))
   }
   return counts
 }
@@ -4656,6 +4664,8 @@ async function previewCampaignTargetsFromGraph(input = {}, deps = {}) {
     propertyTypes: bucketArray(distributionsCounts.propertyTypes),
     matchingFlags: bucketArray(distributionsCounts.matchingFlags),
     routingTiers: bucketArray(distributionsCounts.routingTiers),
+    recipientZones: bucketArray(distributionsCounts.recipientZones),
+    zips: bucketArray(distributionsCounts.zips),
   }
   const diagnostics = {
     receivedSource: options.received_source,

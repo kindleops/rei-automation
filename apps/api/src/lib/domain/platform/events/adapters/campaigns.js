@@ -20,7 +20,7 @@ const TYPE = {
   'campaign.targets_built': 'campaign.hydrated', 'campaign.activated': 'campaign.activated', 'campaign.converted_to_live': 'campaign.activated',
   [LAUNCH]: 'campaign.queue_planned', 'campaign.archived': 'campaign.archived',
 }
-const OPERATOR_TYPES = new Set(['campaign.created', 'campaign.cloned', 'campaign.updated', 'campaign.archived', 'campaign.converted_to_live'])
+const OPERATOR_TYPES = new Set(['campaign.created', 'campaign.cloned', 'campaign.updated', 'campaign.archived', 'campaign.converted_to_live', 'campaign.composer_launched'])
 export const TRANSITIONS = Object.freeze([
   { col: 'paused_at', type: 'campaign.paused', text: 'paused', severity: 'attention' },
   { col: 'resumed_at', type: 'campaign.resumed', text: 'resumed', severity: 'info' },
