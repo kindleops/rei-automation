@@ -157,6 +157,15 @@ export const PIT_COLLECTIONS = Object.freeze({
       raw_source: "value",
       mls: "value",
       nominal_price: "value",
+      // IC8.1 price provenance (transactions/market-sales-provenance.js): price-based
+      // features weight or exclude on these; activity counts never do.
+      price_source: "value",
+      price_confidence: "value",
+      price_verified: "value",
+      price_is_estimated: "value",
+      price_record_id: "value",
+      transaction_reliable: "value",
+      price_nominal_reliable: "value",
     },
   },
   owner_profile: {

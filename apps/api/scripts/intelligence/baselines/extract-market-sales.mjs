@@ -34,6 +34,7 @@ import path from "node:path";
 import { DEFAULT_WORK_DIR } from "./extract-first-touch.mjs";
 import { createRestReader } from "./lib/rest-reader.mjs";
 import { inTile, rootTiles, splitTile, tileCircle, tileKey, tileNearPoints } from "./lib/geo-tiles.mjs";
+import { annotateMarketSale } from "../../../src/lib/domain/intelligence/transactions/market-sales-provenance.js";
 
 export const MARKET_SALES_FROM = "2025-03-01";
 const RPC_CAP = 400;
@@ -43,7 +44,10 @@ const BUFFER_MILES = 2.5;
 
 const num = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
+// IC8.1: nominal_price is true only when the price itself is reliable (annotateMarketSale);
+// a weak (estimated / placeholder) price never removes a transaction from activity counts.
 export function mvRowToSale(r) {
+  const saleDate = r.event_date ? String(r.event_date).slice(0, 10) : null;
   return {
     sale_id: `mv:${r.txn_id}`,
     property_id: r.property_id ?? null,
@@ -57,13 +61,12 @@ export function mvRowToSale(r) {
     engine_source: null,
     raw_source: null,
     mls: null,
-    nominal_price: r.nominal_price === true,
+    ...annotateMarketSale(r, { corpus: r.corpus ?? null, saleDate }),
   };
 }
 
 export function poolRowToSale(r) {
   const date = r.sale_date || r.mls_sold_date;
-  const price = num(r.sale_price) ?? num(r.mls_sold_price);
   return {
     sale_id: `pool:${r.id}`,
     property_id: r.property_id ?? null,
@@ -77,7 +80,7 @@ export function poolRowToSale(r) {
     engine_source: r.sale_source ?? null,
     raw_source: null,
     mls: r.mls_sold_date ? true : null,
-    nominal_price: price !== null && price < 10000,
+    ...annotateMarketSale(r, { corpus: "engine_pool", saleDate: date ? String(date).slice(0, 10) : null }),
   };
 }
 
@@ -101,7 +104,7 @@ export async function runMarketSalesExtract({ workDir = DEFAULT_WORK_DIR, log = 
     query: () =>
       supabase
         .from("v_recent_sold_comps")
-        .select("id,property_id,property_address_zip,latitude,longitude,sale_date,mls_sold_date,sale_source,sale_price,mls_sold_price")
+        .select("id,property_id,property_address_state,property_address_zip,latitude,longitude,sale_date,mls_sold_date,sale_source,sale_price,mls_sold_price")
         .or(`sale_date.gte.${MARKET_SALES_FROM},mls_sold_date.gte.${MARKET_SALES_FROM}`),
     transform: (rows) => rows.map(poolRowToSale),
   });
