@@ -98,6 +98,13 @@ export function vendorDncChannelRule({ channel = "sms", vendor_dnc = false } = {
 
 const TOKEN_RE = /\{\{\s*([a-z_]+)\s*\}\}/gi;
 
+// Tokens that render the SELLER's name into the copy.
+export const FIRST_NAME_TOKENS = Object.freeze(["seller_first_name", "first_name", "owner_first_name", "seller_name"]);
+
+export function templateUsesFirstName(body) {
+  return [...clean(body).matchAll(TOKEN_RE)].some((m) => FIRST_NAME_TOKENS.includes(m[1].toLowerCase()));
+}
+
 export function renderCleanupTemplate(body, variables = {}) {
   const text = clean(body).replace(TOKEN_RE, (m, key) => {
     const v = clean(variables[key]);
@@ -149,15 +156,15 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
   if (!relationship) return hold(REPLY_HOLD.RELATIONSHIP_UNKNOWN);
   if (relationship.not_owner) return hold(REPLY_HOLD.NOT_OWNER, { detail: relationship.reason || null });
 
-  // 3b. Seller identity (canonical resolver). The runner refuses any
-  //     non-operator row without a seller first name, so an unresolved name is
-  //     held here, not queued to pause. Fail closed.
+  // 3b. Seller identity (canonical resolver): it fills the candidate
+  //     snapshot the runner requires. Unreadable -> HOLD (fail closed). An
+  //     unresolved first NAME holds only when the template greets by name
+  //     (below); copy without a name token does not need one.
   const identity = await safely(deps.loadSellerIdentity, {
     thread_key: threadKey,
     master_owner_id: clean(thread.master_owner_id) || null,
   });
   if (!identity) return hold(REPLY_HOLD.IDENTITY_UNKNOWN);
-  if (!clean(identity.seller_first_name)) return hold(REPLY_HOLD.NO_SELLER_NAME, { detail: identity.identity_alignment_status || null });
 
   // 4. Template: must exist; must be ACTIVE to send. A dry run reports an
   //    inactive row (expected until the deploy window activates it), or a row
@@ -170,7 +177,11 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
       ? "pending_deploy_sql"
       : "inactive_until_deploy";
   if (template_state !== "active" && !dryRun) return hold(REPLY_HOLD.NO_TEMPLATE, { template_id: reply.template_id, template_state });
-  const rendered = renderCleanupTemplate(template.template_body, { seller_first_name: identity.seller_first_name, ...(reply.variables || {}) });
+  if (templateUsesFirstName(template.template_body) && !clean(identity.seller_first_name)) {
+    return hold(REPLY_HOLD.NO_SELLER_NAME, { detail: identity.identity_alignment_status || null, template_state });
+  }
+  const nameVars = clean(identity.seller_first_name) ? { seller_first_name: identity.seller_first_name } : {};
+  const rendered = renderCleanupTemplate(template.template_body, { ...nameVars, ...(reply.variables || {}) });
   if (rendered.unresolved.length) return hold(REPLY_HOLD.RENDER, { unresolved: rendered.unresolved, template_state });
 
   // 5. Sender: the normal engine decides; nothing on the plan can pin a number.
@@ -208,7 +219,7 @@ export async function queueCleanupReply(plan, ctx = {}, deps = {}) {
     dedupe_key,
     queue_key,
     now: nowIso,
-    extra_metadata: deps.extraMetadata || {},
+    extra_metadata: { ...(reply.plan_template_id ? { plan_template_id: reply.plan_template_id } : {}), ...(deps.extraMetadata || {}) },
   });
 
   // 7. The runner's own invariants on the exact row (preclaim validity, seller

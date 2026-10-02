@@ -326,3 +326,53 @@ test("re-queue DRY RUN: reports would_cancel + would_queue with ZERO writes", as
   assert.deepEqual(r.cancelled, [{ id: "old-1", would_cancel: true }]);
   assert.equal(w.rows[0].queue_status, "paused_invalid_queue_row");
 });
+
+// ── Owner-locked copy (2026-10-02) ───────────────────────────────────────────
+
+import { applyLockedLateReplyCopy, LOCKED_LATE_REPLY_TEMPLATES } from "@/lib/domain/inbox/late-reply-locked-copy.js";
+import { templateUsesFirstName } from "@/lib/domain/inbox/new-replies-cleanup-apply.js";
+
+const LOCKED_EN = "This is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?";
+const LOCKED_ES = "Soy {{agent_name}}. Me comuniqué hace un tiempo por {{property_address}}. Solo quería saber si todavía eres el propietario.";
+
+test("locked copy: EN for English and wrong-language threads, ES for Spanish; other rows untouched", () => {
+  assert.equal(applyLockedLateReplyCopy({ template_id: "lc-late-identity-en-2" }).template_id, LOCKED_LATE_REPLY_TEMPLATES.English);
+  assert.equal(applyLockedLateReplyCopy({ template_id: "lc-late-wrong-language-from-es-en-1" }).template_id, LOCKED_LATE_REPLY_TEMPLATES.English);
+  const es = applyLockedLateReplyCopy({ template_id: "lc-late-listed-other-property-es-1", variables: { agent_name: "A" } });
+  assert.equal(es.template_id, LOCKED_LATE_REPLY_TEMPLATES.Spanish);
+  assert.equal(es.plan_template_id, "lc-late-listed-other-property-es-1");
+  assert.deepEqual(es.variables, { agent_name: "A" });
+  assert.deepEqual(applyLockedLateReplyCopy({ template_id: "1124" }), { template_id: "1124" });
+});
+
+test("locked copy: the SQL carries the owner's exact bodies, and both pass every runner guard", async () => {
+  const sql = fs.readFileSync(path.join(process.cwd(), "scripts/repairs/20261001_late_reply_templates.sql"), "utf8");
+  const part4 = sql.slice(sql.indexOf("── PART 4 ·"));
+  assert.ok(part4.includes(`('lc-late-checkin-en-1', 'late_reply_checkin', 'S1', 'English', '${LOCKED_EN}'`));
+  assert.ok(part4.includes(`('lc-late-checkin-es-1', 'late_reply_checkin', 'S1', 'Spanish', '${LOCKED_ES}'`));
+  for (const [body, lang] of [[LOCKED_EN, "English"], [LOCKED_ES, "Spanish"]]) {
+    assert.equal(templateUsesFirstName(body), false);
+    const { deps, queued } = replyDeps({ loadTemplate: async (id) => ({ template_id: id, use_case: "late_reply_checkin", language: lang, is_active: true, template_body: body }) });
+    const res = await queueCleanupReply({ ...PLAN, reply: applyLockedLateReplyCopy(PLAN.reply) }, CTX, deps);
+    assert.equal(res.queued, true, JSON.stringify(res));
+    assert.equal(queued[0].metadata.plan_template_id, "lc-late-identity-en-1");
+    assert.equal(validateSendQueueRowPreclaim({ ...queued[0], id: "x-1" }, NOW).ok, true);
+  }
+});
+
+test("first-name hold is token-aware: no name token -> no hold; a name token without a name -> hold", async () => {
+  assert.equal(templateUsesFirstName("Hey {{seller_first_name}}, this is {{agent_name}}."), true);
+  assert.equal(templateUsesFirstName(LOCKED_EN), false);
+  const unnamed = { ...IDENTITY, seller_first_name: null, seller_name_source: "none", identity_alignment_status: "weak" };
+  const locked = replyDeps({
+    loadSellerIdentity: async () => unnamed,
+    loadTemplate: async (id) => ({ template_id: id, use_case: "late_reply_checkin", language: "English", is_active: true, template_body: LOCKED_EN }),
+  });
+  const ok = await queueCleanupReply(PLAN, CTX, locked.deps);
+  assert.equal(ok.queued, true, JSON.stringify(ok));
+  assert.equal(locked.queued[0].message_body.startsWith("This is Sam."), true);
+  const named = replyDeps({ loadSellerIdentity: async () => unnamed });
+  const held = await queueCleanupReply(PLAN, CTX, named.deps);
+  assert.equal(held.held_reason, REPLY_HOLD.NO_SELLER_NAME);
+  assert.equal(named.queued.length, 0);
+});

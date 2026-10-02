@@ -129,3 +129,74 @@ rollback;
 --  where template_id like 'lc-late-%' and is_active = false;
 -- select count(*) as active_late_rows from public.sms_templates where template_id like 'lc-late-%' and is_active;  -- expect 15
 -- commit;
+
+-- ── PART 4 · LOCKED COPY FOR THE 16 RE-QUEUED REPLIES (owner, 2026-10-02) ───
+-- The runner paused the 16 replies (rc-7.1); every body above also opens
+-- "Hey," / "Hola,", which the send-time blank-greeting guard refuses
+-- (process-send-queue + providers/textgrid). The owner locked ONE English and
+-- ONE Spanish body for all 16 (English threads and wrong-language-from-Spanish
+-- threads get English). New template_ids, so the 16 rows are attributable to
+-- this copy and the PART 1/2 rows keep their own history; the requeue maps
+-- them (late-reply-locked-copy.js) and keeps metadata.plan_template_id.
+-- {{agent_name}} = persona ({{sender}}), {{property_address}} = property
+-- ({{address}}). No first-name token.
+-- Idempotent: UPDATE-then-INSERT-WHERE-NOT-EXISTS by template_id, then
+-- activate. Re-running changes nothing. Ends in ROLLBACK: the lead changes it
+-- to COMMIT with the owner present.
+begin;
+
+create temporary table late_reply_locked_rows on commit drop as
+select * from (values
+  ('lc-late-checkin-en-1', 'late_reply_checkin', 'S1', 'English', 'This is {{agent_name}}. I reached out a while back about {{property_address}}. Just checking back in. Are you still the owner?', null::text),
+  ('lc-late-checkin-es-1', 'late_reply_checkin', 'S1', 'Spanish', 'Soy {{agent_name}}. Me comuniqué hace un tiempo por {{property_address}}. Solo quería saber si todavía eres el propietario.', 'This is {{agent_name}}. I reached out a while back about {{property_address}}. I just wanted to know if you are still the owner.')
+) as r (template_id, use_case, stage_code, language, template_body, english_translation);
+
+update public.sms_templates t
+   set template_body = r.template_body,
+       english_translation = coalesce(r.english_translation, r.template_body),
+       use_case = r.use_case,
+       stage_code = r.stage_code,
+       language = r.language,
+       updated_at = now()
+  from late_reply_locked_rows r
+ where t.template_id = r.template_id
+   and (t.template_body is distinct from r.template_body
+        or t.english_translation is distinct from coalesce(r.english_translation, r.template_body)
+        or t.use_case is distinct from r.use_case
+        or t.stage_code is distinct from r.stage_code
+        or t.language is distinct from r.language);
+
+insert into public.sms_templates (
+  template_id, use_case, agent_persona, language, template_body, english_translation, variables,
+  is_active, version, stage_code, stage_label, property_type_scope, deal_strategy,
+  is_first_touch, is_follow_up, metadata, template_name, allowed_property_groups, prohibited_property_groups,
+  safe_for_auto_reply, reply_mode, identity_contact_mode, fallback_rank,
+  minimal_fallback, quarantine_state
+)
+select r.template_id, r.use_case, null, r.language, r.template_body, coalesce(r.english_translation, r.template_body), '[]'::jsonb,
+       false, 1, r.stage_code, 'Late Reply', 'Any Residential', null,
+       false, false,
+       jsonb_build_object(
+         'authored_by', 'rc71_replies_requeue',
+         'source', 'classifier_cleanup_20261001',
+         'owner_approved', '2026-10-02',
+         'owner_locked_copy', true,
+         'style', 'one locked re-engagement body per language for the 16 late replies',
+         'operator_or_cleanup_send_only', true
+       ),
+       null, array['sfr','duplex','triplex','fourplex','small_multifamily','multifamily_5_plus'], null,
+       false, 'manual', 'neutral', null,
+       false, 'active'
+  from late_reply_locked_rows r
+ where not exists (select 1 from public.sms_templates t where t.template_id = r.template_id);
+
+update public.sms_templates
+   set is_active = true, updated_at = now()
+ where template_id in ('lc-late-checkin-en-1', 'lc-late-checkin-es-1') and is_active is distinct from true;
+
+select template_id, language, is_active, safe_for_auto_reply, reply_mode, template_body
+  from public.sms_templates
+ where template_id in ('lc-late-checkin-en-1', 'lc-late-checkin-es-1')
+ order by template_id;  -- expect 2 rows, both active, safe_for_auto_reply = false
+
+rollback;  -- change to COMMIT to keep (lead, owner present)

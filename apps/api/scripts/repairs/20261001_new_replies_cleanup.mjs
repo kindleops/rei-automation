@@ -92,6 +92,9 @@ const REPLIES = value("replies");
 const REPLIES_DRY = Boolean(flag("replies-dry"));
 // rc-7.1: cancel the 16 runner-paused replies and queue them again (see header).
 const REPLIES_REQUEUE = Boolean(flag("replies-requeue"));
+// The owner-locked late-reply copy (late-reply-locked-copy.js). Always on for
+// --replies-requeue; --locked-copy turns it on for --replies / --replies-dry.
+const LOCKED_COPY = Boolean(flag("locked-copy")) || REPLIES_REQUEUE;
 // Dry run only: evaluate the recipient contact window AT this instant (the
 // planned send time) instead of now. --apply always uses the real clock.
 const DRY_AT = value("at");
@@ -637,7 +640,8 @@ async function checkDeployWindowGates(sb) {
 function pendingDeployTemplates() {
   const file = path.join(path.dirname(new URL(import.meta.url).pathname), "20261001_late_reply_templates.sql");
   const sql = fs.readFileSync(file, "utf8");
-  const part1 = sql.slice(sql.indexOf("── PART 1 ·"), sql.indexOf("── PART 2 ·"));
+  // PART 1 (the per-case rows) + PART 4 (the owner-locked copy for the 16).
+  const part1 = sql.slice(sql.indexOf("── PART 1 ·"), sql.indexOf("── PART 2 ·")) + sql.slice(sql.indexOf("── PART 4 ·"));
   const map = new Map();
   const re = /\('(lc-late-[a-z0-9-]+)',\s*'([a-z_]+)',\s*'(S\d)',\s*'([A-Za-z]+)',\s*'((?:[^']|'')*)'/g;
   let m;
@@ -777,6 +781,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
   const items = Array.isArray(plan) ? plan : plan.items || [];
   const { queueCleanupReply } = await import("../../src/lib/domain/inbox/new-replies-cleanup-apply.js");
   const requeueMod = await import("../../src/lib/domain/inbox/cleanup-reply-requeue.js");
+  const { applyLockedLateReplyCopy } = await import("../../src/lib/domain/inbox/late-reply-locked-copy.js");
   const blocked = [];
   const deps = await buildReplyDeps(sb, COHORT, { dryRun, blocked });
   const ROW_COLS = "id,queue_key,dedupe_key,queue_status,sent_at,guard_reason,paused_reason,metadata,created_at";
@@ -815,7 +820,7 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
       continue;
     }
     const ctx = { deal_id: item.deal, thread: { thread_key: item.thread_key, master_owner_id: item.master_owner_id, property_id: item.property_id }, property: item.property || {}, market: item.market || null, market_id: item.market_id || null };
-    const replyPlan = { category: item.category, reply: item.reply, deal: item.deal };
+    const replyPlan = { category: item.category, reply: LOCKED_COPY ? applyLockedLateReplyCopy(item.reply) : item.reply, deal: item.deal };
     const replyDeps = { ...deps, ...(requeue ? requeueDeps : {}), cohort: { ...COHORT, thread_keys: new Set() } };
     const r = requeue
       ? await requeueMod.requeueCleanupReply(replyPlan, ctx, replyDeps)
@@ -824,13 +829,15 @@ async function runReplies(sb, COHORT, { dryRun = false, requeue = false } = {}) 
       deal: item.deal,
       deal_short: clean(item.deal).slice(0, 8),
       phone: `•••${clean(item.thread_key).slice(-4)}`,
-      template_id: item.reply?.template_id || null,
+      template_id: replyPlan.reply?.template_id || null,
+      plan_template_id: item.reply?.template_id || null,
       outcome: r.outcome || (r.would_queue === true ? "would_queue" : r.queued ? "queued" : r.held ? "held" : r.ok === false ? "refused" : "unknown"),
       ...(requeue ? { cancelled: r.cancelled || [], replaces_queue_row_ids: r.replaces_queue_row_ids || [], queue_key_suffix: r.queue_key ? r.queue_key.split(":").slice(-2).join(":") : null } : {}),
       runner_window: r.runner_window || null,
       runner_failures: r.runner_failures || null,
       asset_guard: r.asset_guard || null,
       seller_first_name_source: r.seller_first_name_source || null,
+      rendered_message: r.rendered_message || null,
       passes_all_other_checks: r.passes_all_other_checks === true || r.would_queue === true,
       window: r.window || null,
       reason: r.held_reason || r.reason || null,
