@@ -361,9 +361,12 @@
   color: #fff !important;
 }
 
-/* Focus rings */
+/* Focus rings — the focus token, not the raw accent: under a reserved (red-family)
+   accent such as Red Ops the colour system swaps --lc-focus-rgb to a neutral, so a
+   focused row is never painted in the failure colour. Same colour as before
+   for every non-reserved accent (focus = accent there). */
 .nx-premium-inbox :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--nx-accent) 70%, transparent);
+  outline: 2px solid rgba(var(--lc-focus-rgb), 0.7);
   outline-offset: 2px;
 }
 
