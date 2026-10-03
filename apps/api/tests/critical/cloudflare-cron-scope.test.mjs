@@ -455,3 +455,9 @@ test("the Notification Center projector is registered on its own lane at 30 s, b
     assert.ok(!(await declaredCrons(cfg)).includes("*/1 * * * *"), "the projection lane is not a declared trigger yet");
   }
 });
+
+test("the Worker source still parses as TypeScript (a cron string inside a /** */ comment closes it)", async () => {
+  const { transform } = await import("esbuild");
+  const code = await workerCode();
+  await assert.doesNotReject(transform(code, { loader: "ts", format: "esm" }), "infra/cloudflare/worker/index.ts must compile");
+});

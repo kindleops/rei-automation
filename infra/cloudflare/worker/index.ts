@@ -754,7 +754,7 @@ const EMAIL_DISPATCH: CronJob = {
  * queues, sends and mutates no seller, campaign or alert state. A no-op that
  * says so while the projection migration is unapplied. Registered here but NOT
  * commissioned: CRON_NOTIFICATION_STORIES_PROJECT_ENABLED is absent from every
- * wrangler config, and its "*/1 * * * *" lane is not a declared trigger, until
+ * wrangler config, and its every-minute projection lane is not a declared trigger, until
  * the post-deploy enablement step. repeatEveryMs fires it at :00 and :30.
  */
 const NOTIFICATION_STORIES_PROJECT: CronJob = {
