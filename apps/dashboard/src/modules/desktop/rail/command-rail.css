@@ -40,7 +40,7 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
   overflow: hidden;
   border-radius: 22px;
   background:
-    radial-gradient(130% 40% at 0% 0%, rgba(var(--lc-exec-rgb), 0.07), transparent 70%),
+    radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%),
     linear-gradient(180deg, rgba(255, 255, 255, calc(0.045 * var(--lg-sheen, 1))) 0%, transparent 28%),
     rgb(var(--dsk-fill) / calc(0.58 * var(--lg-alpha, 1)));
   -webkit-backdrop-filter: blur(var(--lg-blur, 24px)) saturate(calc(var(--lg-sat, 1.4) * 1.1));
@@ -54,7 +54,7 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 }
 .cr.is-floating.is-peeking .cr__glass {
   background:
-    radial-gradient(130% 40% at 0% 0%, rgba(var(--lc-exec-rgb), 0.07), transparent 70%),
+    radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%),
     linear-gradient(180deg, rgba(255, 255, 255, calc(0.05 * var(--lg-sheen, 1))) 0%, transparent 28%),
     rgb(var(--dsk-fill) / calc(0.86 * var(--lg-alpha, 1)));
   box-shadow:
@@ -237,7 +237,7 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 .cr-row__glyph { position: relative; display: grid; place-items: center; width: 22px; height: 22px; color: var(--lc-ink-3); transition: color 0.15s ease; }
 .cr-row:hover .cr-row__glyph,
 .cr-row.is-active .cr-row__glyph { color: var(--lc-ink-1); }
-.cr-row.is-active .cr-row__glyph svg { filter: drop-shadow(0 0 6px rgba(var(--lc-exec-rgb), 0.35)); }
+.cr-row.is-active .cr-row__glyph svg { filter: drop-shadow(0 0 6px var(--lc-accent-glow)); }
 .cr-row.is-inpane .cr-row__glyph::before { content: ''; position: absolute; left: -7px; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--lc-ink-3); opacity: 0.6; }
 .cr-row__label {
   min-width: 0;
@@ -425,7 +425,7 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 /* ══ THEMES ═════════════════════════════════════════════════════════════════ */
 :root[data-nexus-theme='light'] .cr__glass {
   background:
-    radial-gradient(130% 40% at 0% 0%, rgba(var(--lc-exec-rgb), 0.06), transparent 70%),
+    radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 30%),
     rgb(var(--dsk-fill) / calc(0.6 * var(--lg-alpha, 1)));
   box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 26px 60px -34px rgba(24, 36, 60, 0.42);
@@ -440,7 +440,7 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 :root[data-nexus-theme='light'] .crt b { text-shadow: none; }
 :root[data-nexus-theme='light'] .cr-dock:hover { background: rgba(11, 18, 32, 0.04); }
 :root[data-nexus-theme='true_black'] .cr__glass {
-  background: radial-gradient(130% 40% at 0% 0%, rgba(var(--lc-exec-rgb), 0.06), transparent 70%), rgb(0 0 0 / calc(0.74 * var(--lg-alpha, 1)));
+  background: radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%), rgb(0 0 0 / calc(0.74 * var(--lg-alpha, 1)));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 0 0.5px rgba(255, 255, 255, 0.04);
 }
 

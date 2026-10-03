@@ -536,22 +536,23 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__bubble { font-size: 14px !important; line-height: 1.5 !important; font-weight: 400 !important; letter-spacing: -0.004em !important; padding: 9px 14px 10px !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-outbound .nx-msg__bubble {
-  color: var(--ix-out-ink) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--ix-accent) 94%, #fff 6%), color-mix(in srgb, var(--ix-accent) 84%, #000 16%)) !important;
+  /* the operator's accent (contrast-solved per theme; neutral when the accent is red-family) */
+  color: var(--lc-bubble-out-ink) !important;
+  background: var(--lc-bubble-out-fill) !important;
   border-radius: 18px 18px 6px 18px !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24), 0 1px 1px rgb(0 0 0 / 0.16), 0 12px 28px -20px color-mix(in srgb, var(--ix-accent) 80%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24), inset 0 0 0 0.5px rgb(255 255 255 / 0.08), 0 1px 1px rgb(0 0 0 / 0.16), 0 12px 28px -20px rgba(var(--lc-bubble-out-rgb), 0.8) !important;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-inbound .nx-msg__bubble,
 html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-inbound .nx-msg__bubble {
-  color: var(--dsk-ink) !important;
-  background: var(--ix-in) !important;
+  color: var(--lc-bubble-in-ink) !important;
+  background: var(--lc-bubble-in-bg) !important;
   border-radius: 18px 18px 18px 6px !important;
-  box-shadow: inset 0 0 0 1px var(--ix-in-edge), 0 1px 1px rgb(0 0 0 / 0.1) !important;
+  box-shadow: inset 0 0 0 1px var(--lc-bubble-in-edge), 0 1px 1px rgb(0 0 0 / 0.1) !important;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__meta { gap: 8px !important; margin-top: 6px !important; padding: 0 4px !important; }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__time,
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt { font-size: 11.5px !important; font-weight: 450 !important; color: var(--dsk-ink-3) !important; }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt.is-delivered > span:first-child { color: #3ddc97 !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__receipt.is-delivered > span:first-child { color: var(--lc-ok) !important; }
 /* matched words: a soft marker, not a highlighter */
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox mark.nx-keyword-highlight {
   color: inherit !important;
@@ -664,9 +665,9 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button:not(:disabled),
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button.is-ready {
-  color: var(--ix-out-ink) !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--ix-accent) 94%, #fff 6%), color-mix(in srgb, var(--ix-accent) 84%, #000 16%)) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 6px 16px -8px color-mix(in srgb, var(--ix-accent) 80%, transparent) !important;
+  color: var(--lc-primary-on) !important;
+  background: var(--lc-primary-fill) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 6px 16px -8px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 80%, transparent) !important;
   animation: none;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-send-button svg { width: 16px !important; height: 16px !important; }
@@ -708,10 +709,10 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: conic-gradient(from 0deg, var(--ix-accent), color-mix(in srgb, var(--ix-accent) 20%, transparent) 40%, var(--ix-accent) 70%, color-mix(in srgb, var(--ix-accent) 30%, #fff) 100%);
+  background: conic-gradient(from 0deg, rgb(var(--lc-primary-rgb)), color-mix(in srgb, rgb(var(--lc-primary-rgb)) 20%, transparent) 40%, rgb(var(--lc-primary-rgb)) 70%, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 30%, #fff) 100%);
   -webkit-mask: radial-gradient(circle, transparent 2.6px, #000 3.1px);
   mask: radial-gradient(circle, transparent 2.6px, #000 3.1px);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--ix-accent) 60%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 60%, transparent);
   animation: nx-trail-spin 5s linear infinite;
 }
 @keyframes nx-trail-spin { to { transform: rotate(360deg); } }
@@ -730,7 +731,7 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   top: 8px;
   bottom: 8px;
   width: 1px;
-  background: linear-gradient(to bottom, color-mix(in srgb, var(--ix-accent) 55%, transparent), var(--dsk-edge-hi) 70%, transparent);
+  background: linear-gradient(to bottom, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 55%, transparent), var(--dsk-edge-hi) 70%, transparent);
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li {
   position: relative;
@@ -745,7 +746,7 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 /* each value resolves with one sweep of light, then settles to its colour */
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li b {
   --trail-ink: var(--dsk-ink);
-  background: linear-gradient(100deg, var(--trail-ink) 0 38%, color-mix(in srgb, var(--ix-accent) 55%, #fff) 50%, var(--trail-ink) 62% 100%);
+  background: linear-gradient(100deg, var(--trail-ink) 0 38%, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 55%, #fff) 50%, var(--trail-ink) 62% 100%);
   background-size: 260% 100%;
   background-position: 0% 0;
   -webkit-background-clip: text;
@@ -775,7 +776,7 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   background: var(--dsk-ink-3);
   box-shadow: 0 0 0 3px rgb(var(--dsk-fill) / 0.9);
 }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li.is-accent i { background: var(--ix-accent); box-shadow: 0 0 0 3px rgb(var(--dsk-fill) / 0.9), 0 0 9px color-mix(in srgb, var(--ix-accent) 70%, transparent); }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li.is-accent i { background: rgb(var(--lc-primary-rgb)); box-shadow: 0 0 0 3px rgb(var(--dsk-fill) / 0.9), 0 0 9px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 70%, transparent); }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li.is-good i { background: #3ddc97; box-shadow: 0 0 0 3px rgb(var(--dsk-fill) / 0.9), 0 0 8px rgb(61 220 151 / 0.55); }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li.is-warn i { background: #f0b64a; box-shadow: 0 0 0 3px rgb(var(--dsk-fill) / 0.9), 0 0 8px rgb(240 182 74 / 0.5); }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg-trail__steps li.is-bad i { background: #ff6b78; box-shadow: 0 0 0 3px rgb(var(--dsk-fill) / 0.9), 0 0 8px rgb(255 107 120 / 0.5); }
@@ -795,10 +796,10 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-outbound.is-scheduled .nx-msg__bubble,
 html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-outbound.is-scheduled .nx-msg__bubble {
   color: var(--dsk-ink) !important;
-  background: color-mix(in srgb, var(--ix-accent) 6%, transparent) !important;
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ix-accent) 75%, transparent), 0 0 18px -8px color-mix(in srgb, var(--ix-accent) 60%, transparent) !important;
+  background: color-mix(in srgb, rgb(var(--lc-primary-rgb)) 6%, transparent) !important;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 75%, transparent), 0 0 18px -8px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 60%, transparent) !important;
 }
-html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-scheduled .nx-msg__receipt { color: var(--ix-accent) !important; font-weight: 600 !important; }
+html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-scheduled .nx-msg__receipt { color: rgb(var(--lc-primary-rgb)) !important; font-weight: 600 !important; }
 
 /* ── the composer, alive: a slow breathing glow that brightens as you type ── */
 @property --nx-glow-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
@@ -810,7 +811,7 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   z-index: -1;
   border-radius: 15px;
   pointer-events: none;
-  box-shadow: 0 0 calc(16px + 30px * var(--nx-type)) calc(-6px + 5px * var(--nx-type)) color-mix(in srgb, var(--ix-accent) calc(34% + 46% * var(--nx-type)), transparent);
+  box-shadow: 0 0 calc(16px + 30px * var(--nx-type)) calc(-6px + 5px * var(--nx-type)) color-mix(in srgb, rgb(var(--lc-primary-rgb)) calc(34% + 46% * var(--nx-type)), transparent);
   animation: nx-composer-breathe 5.4s ease-in-out infinite;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-composer-dock::after {
@@ -820,7 +821,7 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   border-radius: 14px;
   padding: 1px;
   pointer-events: none;
-  background: conic-gradient(from var(--nx-glow-a), color-mix(in srgb, var(--ix-accent) 85%, transparent), transparent 22%, color-mix(in srgb, var(--ix-accent) 35%, transparent) 50%, transparent 78%, color-mix(in srgb, var(--ix-accent) 85%, transparent));
+  background: conic-gradient(from var(--nx-glow-a), color-mix(in srgb, rgb(var(--lc-primary-rgb)) 85%, transparent), transparent 22%, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 35%, transparent) 50%, transparent 78%, color-mix(in srgb, rgb(var(--lc-primary-rgb)) 85%, transparent));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
@@ -879,7 +880,7 @@ html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile
   all: unset;
   cursor: pointer;
   font-weight: 550;
-  color: var(--ix-accent);
+  color: var(--lc-accent-text);
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg__translate button:hover { text-decoration: underline; text-underline-offset: 3px; }
 
@@ -1048,7 +1049,7 @@ html.is-desktop-modern .nx-qap-template-btn > svg {
   box-shadow: none !important;
   color: var(--dsk-ink-3) !important;
 }
-html.is-desktop-modern .nx-qap-action-btn.is-danger > svg { color: #ff6b78 !important; background: none !important; }
+html.is-desktop-modern .nx-qap-action-btn.is-danger > svg { color: var(--lc-crit) !important; background: none !important; }
 html.is-desktop-modern .nx-qap-template-btn__name { font-size: 13px !important; font-weight: 550 !important; }
 html.is-desktop-modern .nx-qap-template-btn.is-staged { min-height: 44px !important; padding: 6px 10px !important; }
 html.is-desktop-modern .nx-qap-template-btn.is-staged > svg { position: static !important; margin: 0 !important; }
@@ -1063,8 +1064,8 @@ html.is-desktop-modern.is-mobile-layout[data-nexus-theme='light'] #nx-inbox-root
   max-width: none !important;
   padding: 12px 15px !important;
   border-radius: 18px 18px 6px 18px !important;
-  color: var(--ix-accent) !important;
-  background: color-mix(in srgb, var(--ix-accent) 10%, rgb(var(--dsk-fill) / 0.55)) !important;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ix-accent) 32%, transparent), 0 0 18px -8px color-mix(in srgb, var(--ix-accent) 55%, transparent) !important;
+  color: rgb(var(--lc-primary-rgb)) !important;
+  background: color-mix(in srgb, rgb(var(--lc-primary-rgb)) 10%, rgb(var(--dsk-fill) / 0.55)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 32%, transparent), 0 0 18px -8px color-mix(in srgb, rgb(var(--lc-primary-rgb)) 55%, transparent) !important;
 }
 html.is-desktop-modern.is-mobile-layout #nx-inbox-root .nx-inbox-shell.is-mobile-inbox .nx-msg.is-typing { align-items: flex-end !important; }

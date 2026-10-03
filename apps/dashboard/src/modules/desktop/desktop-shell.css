@@ -20,7 +20,8 @@ html.is-desktop-modern {
   --dsk-ink-3: rgba(226, 232, 244, 0.46);
   --dsk-edge: rgba(255, 255, 255, 0.08);
   --dsk-edge-hi: rgba(255, 255, 255, 0.14);
-  --dsk-accent: rgb(var(--nexus-accent-rgb, 94, 234, 212));
+  /* focus / active / selection: the accent, or the theme neutral when the accent is red-family */
+  --dsk-accent: rgb(var(--lc-select-rgb, var(--nexus-accent-rgb, 94, 234, 212)));
   --dsk-fill: var(--lg-fill, 9 13 21);
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.62 * var(--lg-alpha, 1)));
   --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.86 * var(--lg-alpha, 1)));

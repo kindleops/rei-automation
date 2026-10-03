@@ -1,0 +1,35 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   R8.3 · ACCENT ROUTING — Appearance → Accent reaches every app.
+   Surfaces whose own stylesheets pinned an accent variable to a literal or
+   to execution cyan are re-pointed here at the canonical accent tokens
+   (shared/color/tokens.ts → accentSurfaceDecls; lc-tokens.css fallbacks).
+   Variables only: the components keep their own geometry.
+
+   · selection / focus / active        --lc-select-rgb (neutral if the accent is red-family)
+   · primary actions / outbound bubble --lc-primary-* · --lc-bubble-out-*
+   · semantic colour is never touched:  --lc-crit / --lc-ok / --lc-attn stay theirs
+
+   Selectors are doubled where an app's own sheet (lazy-loaded, so later in
+   the cascade) declares the same variable at equal specificity.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* INBOX — outbound bubbles, the typing bubble, scheduled outlines and the
+   ledger's selection follow the accent (they were pinned to execution cyan) */
+html.is-desktop-modern[data-nexus-theme] #nx-inbox-root.is-desk-inbox.is-desk-inbox {
+  --ix-accent: rgb(var(--lc-primary-rgb));
+  --ix-out-a: rgb(var(--lc-accent-hover-rgb));
+  --ix-out-b: rgb(var(--lc-primary-rgb));
+  --ix-out-ink: var(--lc-bubble-out-ink);
+}
+
+/* MAP — selection, switches, chips, focus and the primary action. Live
+   activity, pins and legends keep their semantic colours. */
+html.is-desktop-modern[data-nexus-theme] .mx.is-desk.is-desk {
+  --mxg-accent: rgb(var(--lc-select-rgb));
+  --mx-accent-ink: var(--lc-primary-on);
+}
+html.is-desktop-modern[data-nexus-theme] .mx.is-desk.is-desk .mxd-btn.is-primary {
+  color: var(--lc-primary-on);
+  background: var(--lc-primary-fill);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 8px 18px -10px rgba(var(--lc-primary-rgb), 0.8);
+}

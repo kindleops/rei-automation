@@ -44,12 +44,12 @@
 
 /* primary — the one action a surface is for */
 .lc-btn.is-primary {
-  color: var(--lc-accent-on);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 60%), rgb(var(--lc-select-rgb));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 8px 20px -12px rgba(var(--lc-select-rgb), 0.8);
+  color: var(--lc-primary-on);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 60%), var(--lc-primary-fill);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 8px 20px -12px rgba(var(--lc-primary-rgb), 0.8);
 }
 @media (hover: hover) and (pointer: fine) {
-  .lc-btn.is-primary:hover:not(:disabled) { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28), 0 10px 24px -12px rgba(var(--lc-select-rgb), 0.95); filter: brightness(1.05); }
+  .lc-btn.is-primary:hover:not(:disabled) { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28), 0 10px 24px -12px rgba(var(--lc-primary-rgb), 0.95); filter: brightness(1.05); }
 }
 /* A failure-red accent (Red Ops, or any red the operator picks) never paints
    the one action: selection is already neutral (--lc-select-rgb), so the
@@ -144,8 +144,8 @@
   border-radius: 8px;
   font: 700 9.5px/15px var(--lc-font-ui);
   text-align: center;
-  color: var(--lc-ink-inverse);
-  background: rgb(var(--lc-select-rgb));
+  color: var(--lc-primary-on);
+  background: rgb(var(--lc-primary-rgb));
   box-shadow: 0 0 0 2px var(--lc-mat-solid-bg);
   font-variant-numeric: tabular-nums;
 }
@@ -162,7 +162,8 @@
   cursor: pointer;
   border-radius: 4px;
 }
-:root[data-nexus-theme='light'] .lc-link { color: rgb(var(--lc-exec-rgb)); }
+:root[data-nexus-theme='light'] .lc-link { color: var(--lc-accent-text); }
+:root[data-lc-accent-reserved='crit'] .lc-link { color: rgb(var(--lc-select-rgb)); }
 .lc-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .lc-link:focus-visible { box-shadow: var(--lc-focus-ring); }
 

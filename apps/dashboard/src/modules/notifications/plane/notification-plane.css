@@ -103,11 +103,11 @@ html[data-lc-motion='off'] .ncp { animation: none; }
   background: var(--lc-mat-smoke-bg);
   -webkit-backdrop-filter: var(--lc-mat-smoke-filter);
   backdrop-filter: var(--lc-mat-smoke-filter);
-  box-shadow: inset 0 0 0 1px rgba(var(--lc-exec-rgb), 0.35), var(--lc-d2-shadow, 0 6px 18px -8px rgba(0, 0, 0, 0.5));
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.4), 0 0 18px -6px var(--lc-accent-glow), var(--lc-d2-shadow, 0 6px 18px -8px rgba(0, 0, 0, 0.5));
   cursor: pointer;
   animation: ncp-pill 0.24s var(--lc-ease-enter) both;
 }
-.ncp__new svg { color: var(--lc-exec); }
+.ncp__new svg { color: rgb(var(--lc-select-rgb)); }
 .ncp__new:focus-visible { box-shadow: var(--lc-focus-ring); }
 @keyframes ncp-pill { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 

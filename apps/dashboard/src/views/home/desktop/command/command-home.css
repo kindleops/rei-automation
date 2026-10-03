@@ -97,7 +97,7 @@ html[data-nexus-theme='red_ops'] .ch {
 }
 html[data-nexus-theme='red_ops'] .ch :is(.ch-money__value, .ch-tel.is-money b) { background: linear-gradient(180deg, #ffffff, rgba(255, 240, 241, 0.72)); -webkit-background-clip: text; background-clip: text; }
 /* the lead telemetry figure (replies today) is not a failure: never paint it in the red accent */
-html[data-nexus-theme='red_ops'] .ch .ch-tel.is-accent b { color: rgb(var(--lc-exec-rgb, 125, 211, 252)); }
+html[data-nexus-theme='red_ops'] .ch .ch-tel.is-accent b { color: rgb(var(--lc-select-rgb, 125, 211, 252)); }
 html[data-nexus-theme='red_ops'] .ch .ch-stream::before { background: linear-gradient(180deg, rgba(255, 240, 241, 0.35), var(--ch-edge) 40%, transparent); }
 
 .ch-grid {
