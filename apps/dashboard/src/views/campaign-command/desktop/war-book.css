@@ -1,0 +1,179 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   CAMPAIGN BOOK (R8.3) — the per-campaign instrument in the mission rail,
+   the lifecycle rail, the room instrument and Sender Coverage. Desktop only
+   (html.is-desktop-modern .cc3). Materials re-pointed at the canonical R8.3
+   glass + accent tokens so the war room follows the operator's Appearance
+   (Material, Edge, Sheen, accent) like every other desktop app.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.is-desktop-modern .cc3,
+html.is-desktop-modern[data-nexus-theme] .cc3 {
+  --cc3-plane-bg: var(--lc-glass-card);
+  --cc3-rail-bg: var(--lc-glass-card);
+  --cc3-plane-edge: var(--lc-glass-line);
+  --cc3-line-2: var(--lc-glass-line-hi);
+}
+html.is-desktop-modern .cc3-plane,
+html.is-desktop-modern .cc3-rail,
+html.is-desktop-modern .cc3-hero {
+  background-image: linear-gradient(180deg, var(--lc-glass-tint), transparent 42%);
+}
+html.is-desktop-modern .cc3-row.is-selected {
+  background: rgba(var(--lc-select-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.34);
+}
+
+/* ── book instrument (mission rail rows) ───────────────────────────────── */
+html.is-desktop-modern .cc3-inst {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--lc-hairline);
+  position: relative;
+}
+html.is-desktop-modern .cc3-inst::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: -1px;
+  width: 26px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--lc-neutral);
+  opacity: 0.6;
+}
+html.is-desktop-modern .cc3-inst[data-health='ok']::before { background: var(--lc-ok); opacity: 1; }
+html.is-desktop-modern .cc3-inst[data-health='attn']::before { background: var(--lc-attn); opacity: 1; }
+html.is-desktop-modern .cc3-inst[data-health='crit']::before { background: var(--lc-crit); opacity: 1; }
+html.is-desktop-modern .cc3-inst__cell { display: grid; min-width: 0; line-height: 1.15; }
+html.is-desktop-modern .cc3-inst__cell small { font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .cc3-inst__cell b { font-size: 12px; font-weight: 620; color: var(--lc-ink-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+html.is-desktop-modern .cc3-inst__cell em { font-style: normal; font-size: 10px; color: var(--lc-exec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .cc3-inst__cell[data-warn] b { color: var(--lc-attn); }
+
+/* ── lifecycle rail ────────────────────────────────────────────────────── */
+html.is-desktop-modern .cc3-life {
+  padding: 8px 14px;
+  border: 1px solid var(--lc-glass-line);
+  border-radius: var(--lc-r-lg);
+  background: var(--lc-glass-card);
+  box-shadow: var(--lc-glass-sheen);
+}
+
+/* ── room instrument ───────────────────────────────────────────────────── */
+html.is-desktop-modern .cc3-inst-room {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.9fr) minmax(0, 5fr);
+  gap: 0;
+  border: 1px solid var(--lc-glass-line);
+  border-radius: var(--lc-r-lg);
+  background: var(--lc-glass-card);
+  background-image: linear-gradient(180deg, var(--lc-glass-tint), transparent 50%);
+  box-shadow: var(--lc-glass-sheen), var(--lc-d2-shadow);
+  overflow: hidden;
+}
+html.is-desktop-modern .cc3-inst-room__health {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 4px;
+  padding: 12px 16px;
+  border-inline-end: 1px solid var(--lc-glass-line);
+  position: relative;
+}
+html.is-desktop-modern .cc3-inst-room__health::before {
+  content: '';
+  position: absolute;
+  inset-block: 12px;
+  inset-inline-start: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--lc-neutral);
+  opacity: 0.5;
+}
+html.is-desktop-modern .cc3-inst-room[data-health='ok'] .cc3-inst-room__health::before { background: var(--lc-ok); opacity: 1; }
+html.is-desktop-modern .cc3-inst-room[data-health='attn'] .cc3-inst-room__health::before { background: var(--lc-attn); opacity: 1; }
+html.is-desktop-modern .cc3-inst-room[data-health='crit'] .cc3-inst-room__health::before { background: var(--lc-crit); opacity: 1; }
+html.is-desktop-modern .cc3-inst-room__eyebrow { font-size: 10.5px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lc-ink-3); }
+html.is-desktop-modern .cc3-inst-room__health small { font-size: 11.5px; color: var(--lc-ink-3); }
+html.is-desktop-modern .cc3-inst-room__cells {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+}
+html.is-desktop-modern .cc3-inst-room__cells > li + li { border-inline-start: 1px solid var(--lc-hairline); }
+html.is-desktop-modern .cc3-inst-room__cell {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  min-width: 0;
+  outline: none;
+  border-radius: var(--lc-r-sm);
+}
+html.is-desktop-modern .cc3-inst-room__cell:focus-visible { box-shadow: var(--lc-focus-ring); }
+html.is-desktop-modern .cc3-inst-room__cell small { font-size: 11px; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .cc3-inst-room__cell b {
+  font-family: var(--lc-font-display);
+  font-size: 22px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+html.is-desktop-modern .cc3-inst-room__cell em { font-style: normal; font-size: 11px; color: var(--lc-ink-3); white-space: nowrap; }
+html.is-desktop-modern .cc3-inst-room__cells li[data-tone='attn'] b { color: var(--lc-attn); }
+html.is-desktop-modern .cc3-inst-room__cells li[data-tone='crit'] b { color: var(--lc-crit); }
+@container cc3room (max-width: 1100px) {
+  html.is-desktop-modern .cc3-inst-room { grid-template-columns: minmax(0, 1fr); }
+  html.is-desktop-modern .cc3-inst-room__health { border-inline-end: 0; border-bottom: 1px solid var(--lc-glass-line); grid-template-columns: auto auto 1fr; align-items: center; gap: 10px; padding: 8px 14px; }
+  html.is-desktop-modern .cc3-inst-room__cell b { font-size: 18px; }
+}
+@container cc3room (min-width: 1800px) {
+  html.is-desktop-modern .cc3-inst-room__cell b { font-size: 28px; }
+  html.is-desktop-modern .cc3-inst-room__cell { padding: 16px 20px; }
+}
+
+/* ── sender coverage ───────────────────────────────────────────────────── */
+html.is-desktop-modern .cc3-cov { display: grid; gap: 10px; }
+html.is-desktop-modern .cc3-cov__head { display: flex; align-items: baseline; gap: 10px; }
+html.is-desktop-modern .cc3-cov__title { font-size: 13px; font-weight: 640; }
+html.is-desktop-modern .cc3-cov__engine { font-size: 11.5px; color: var(--lc-ink-3); }
+html.is-desktop-modern .cc3-cov__sum { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+html.is-desktop-modern .cc3-cov__big { font-family: var(--lc-font-display); font-size: 20px; font-weight: 640; font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .cc3-cov__big small { font-family: var(--lc-font-ui); font-size: 11.5px; font-weight: 400; color: var(--lc-ink-3); }
+html.is-desktop-modern .cc3-cov__bar { flex: 1 1 200px; display: flex; gap: 2px; height: 6px; border-radius: 6px; overflow: hidden; background: var(--lc-inner-bg); }
+html.is-desktop-modern .cc3-cov__bar i { display: block; min-width: 3px; }
+html.is-desktop-modern [data-cov='LOCAL'] { --cc3-cov: var(--lc-ok); }
+html.is-desktop-modern [data-cov='REGIONAL'] { --cc3-cov: var(--lc-exec); }
+html.is-desktop-modern [data-cov='DEGRADED'] { --cc3-cov: var(--lc-attn); }
+html.is-desktop-modern [data-cov='UNCOVERED'] { --cc3-cov: var(--lc-crit); }
+html.is-desktop-modern .cc3-cov__bar i { background: var(--cc3-cov); }
+html.is-desktop-modern .cc3-cov__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; max-height: 280px; overflow-y: auto; }
+html.is-desktop-modern .cc3-cov__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) auto repeat(3, minmax(64px, 0.6fr));
+  align-items: center;
+  gap: 4px 14px;
+  padding: 6px 8px;
+  border-radius: var(--lc-r-sm);
+  position: relative;
+}
+html.is-desktop-modern .cc3-cov__row::before { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 0; width: 2px; border-radius: 2px; background: var(--cc3-cov); opacity: 0.8; }
+html.is-desktop-modern .cc3-cov__row:hover { background: var(--lc-inner-bg-hover); }
+html.is-desktop-modern .cc3-cov__market { display: grid; min-width: 0; line-height: 1.25; }
+html.is-desktop-modern .cc3-cov__market b { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .cc3-cov__market small { font-size: 11px; color: var(--lc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .cc3-cov__num { text-align: end; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+html.is-desktop-modern .cc3-cov__num small { font-weight: 400; font-size: 10.5px; color: var(--lc-ink-3); }
+html.is-desktop-modern .cc3-cov__why { grid-column: 1 / -1; font-size: 11px; color: var(--lc-ink-3); padding-inline-start: 2px; }
+html.is-desktop-modern .cc3-cov__note { margin: 0; font-size: 11px; color: var(--lc-ink-3); }
+@container cc3room (max-width: 760px) {
+  html.is-desktop-modern .cc3-cov__row { grid-template-columns: minmax(0, 1fr) auto; }
+  html.is-desktop-modern .cc3-cov__num { display: none; }
+}

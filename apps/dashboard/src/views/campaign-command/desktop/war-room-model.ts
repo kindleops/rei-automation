@@ -12,6 +12,7 @@
  * conversation replies) are counted apart, in the delivery funnel.
  */
 import { missedStartAt } from '../start-now-window'
+import { instrumentOf, type BookInstrument } from './war-book'
 import type { CampaignSummary } from '../campaigns.types'
 import type { CockpitRead, CockpitWindow } from './cockpit-api'
 import type { BookCampaign, CampaignIntel, FeederDigest, FleetNumber, ReplyBucketKey, ReplyBuckets, WarSystem } from './war-room-api'
@@ -327,6 +328,8 @@ export type RailRow = {
   replies: number | null
   cue: string | null
   cueTone: Tone
+  /** [R8.3] the book instrument: throughput, delivery, replies, opt-outs, held */
+  instrument: BookInstrument
 }
 
 const SOURCE_WORDS: Record<string, string> = { map_area: 'Map area', entity_graph: 'Entity Graph', filters: 'Filters', selection: 'Selected properties', none: 'Built audience' }
@@ -384,7 +387,7 @@ export function railRowOf(input: WarInput, now: number): RailRow {
     }
     default: break
   }
-  return { id: b?.id ?? input.summary?.id ?? '', title: parts.title, eyebrow: parts.eyebrow, mission, progress, replies: f.replied, cue, cueTone }
+  return { id: b?.id ?? input.summary?.id ?? '', title: parts.title, eyebrow: parts.eyebrow, mission, progress, replies: f.replied, cue, cueTone, instrument: instrumentOf(b ?? null) }
 }
 
 export function groupRail(rows: RailRow[]): Array<{ key: GroupKey; label: string; rows: RailRow[] }> {

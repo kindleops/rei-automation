@@ -26,7 +26,8 @@ import {
 import { Icon } from '../../shared/icons'
 import { resolveAssetTypeIcon } from '../../shared/asset-type-icons'
 import { formatRelativeTime } from '../../shared/formatters'
-import { lcToast } from '../../shared/lc'
+import { lcConfirm, lcToast, type LCEffect } from '../../shared/lc'
+import { QueueDesk, type DeskBasis, type DeskRange, type DeskRowAction, type DeskSection } from './desk/QueueDesk'
 import { buildContextFromQueueItem, type ActiveInboxContext } from '../../modules/inbox/active-context'
 import {
   findQueueItemForActiveContext,
@@ -1137,7 +1138,11 @@ export const QueuePage = ({
   const { isMobile: isPhone, isModernDesktop } = useBreakpoint()
   const layoutMode = layoutModeProp ?? observedLayoutMode
   const paneWidth = paneWidthProp ?? observedPaneWidth
-  const isMobileLayout = isPhone || layoutMode === 'compact'
+  // The modern desktop (any pane width) gets the Queue Desk; the phone keeps
+  // its dispatch composition; the classic desktop keeps its compact switch.
+  // (`isMobile` from useBreakpoint is the PRODUCT flag — true on the modern
+  // desktop too — which is why the desk is decided by isModernDesktop.)
+  const isMobileLayout = !isModernDesktop && (isPhone || layoutMode === 'compact')
   const [loading, setLoading] = useState(!initialData)
   const [model, setModel] = useState<QueueModel | null>(initialData ?? null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -1802,6 +1807,37 @@ export const QueuePage = ({
     if (next !== 'events') setSelectedEventItem(null)
   }, [])
 
+  // ── Desk: row actions ask first (lcConfirm), then run the existing action ──
+  const askThenAct = useCallback(async (action: string, item: QueueItem) => {
+    const who = item.sellerName || 'this seller'
+    const keeps: LCEffect = { text: 'Sender routing, suppression, contact windows and send brakes still decide whether and when anything goes out.', kind: 'keeps' }
+    const spec: Record<string, { title: string; effects: LCEffect[]; confirmLabel: string; tone: 'primary' | 'danger' }> = {
+      approve: { title: `Approve the message to ${who}?`, effects: [{ text: 'The row leaves Approval through the queue’s approve action; the runner may then send it.', kind: 'note' }, keeps], confirmLabel: 'Approve', tone: 'primary' },
+      retry: { title: `Retry the message to ${who}?`, effects: [{ text: 'The failed row is returned to the queue for another attempt.', kind: 'note' }, keeps], confirmLabel: 'Retry', tone: 'primary' },
+      'retry-routing': { title: `Retry sender routing for ${who}?`, effects: [{ text: 'Sender selection runs again for this row; it does not force a send.', kind: 'note' }, keeps], confirmLabel: 'Retry routing', tone: 'primary' },
+      hold: { title: `Hold the message to ${who}?`, effects: [{ text: 'The row stops until it is released.', kind: 'stops' }], confirmLabel: 'Hold', tone: 'primary' },
+      reschedule: { title: `Move the message to ${who} to tomorrow?`, effects: [{ text: 'The scheduled time moves 24 hours later.', kind: 'note' }, keeps], confirmLabel: 'Reschedule', tone: 'primary' },
+      cancel: { title: `Suppress the message to ${who}?`, effects: [{ text: 'This queue row will not send.', kind: 'stops' }, { text: 'The seller, the property and other rows are not changed.', kind: 'keeps' }], confirmLabel: 'Suppress', tone: 'danger' },
+    }
+    const s = spec[action]
+    if (!s) { await handleAction(action, item.id); return }
+    const ok = await lcConfirm({ ...s, nativeText: s.title })
+    if (ok) await handleAction(action, item.id)
+  }, [handleAction])
+
+  const deskDockAction = useCallback((action: string, id: string) => {
+    const item = model?.items.find(i => i.id === id) ?? eventItems.find(i => i.id === id)
+    if (item && ['approve', 'retry', 'retry-routing', 'hold', 'reschedule', 'cancel'].includes(action)) { void askThenAct(action, item); return }
+    void handleAction(action, id)
+  }, [model, eventItems, askThenAct, handleAction])
+
+  const deskRowAction = useCallback((action: DeskRowAction, item: QueueItem) => {
+    if (action === 'view-thread') { void handleAction('view-thread', item.id); return }
+    void askThenAct(action, item)
+  }, [askThenAct, handleAction])
+
+  const causeLabelOf = useCallback((c: string) => FAILURE_CAUSE_LABEL[c] ?? c.replace(/_/g, ' '), [])
+
   const isInitialLoad = loading && !model
   const kpiLoading = loading && !kpiIsRange
 
@@ -1815,6 +1851,128 @@ export const QueuePage = ({
       <div ref={rootRef} className="occ-root occ-loading is-layout-full">
         <span className="occ-spinner" />
         <p>Syncing outbound queue…</p>
+      </div>
+    )
+  }
+
+  // ── Desktop: the Queue Desk (R8.3) ───────────────────────────────────────
+  if (isModernDesktop) {
+    const deskDockOpen = section !== 'templates' && (
+      (section === 'queue' && Boolean(selectedItem && dossierOpen))
+      || (section === 'senders' && Boolean(selectedSenderDock))
+      || (section === 'market' && Boolean(selectedMarketDock))
+      || (section === 'failures' && Boolean(selectedFailureDock))
+      || (section === 'events' && Boolean(selectedEventItem))
+    )
+    const sectionBody = section === 'queue' ? null : (
+      <div className="occ-root qdk-legacy">
+        {section === 'templates' && (
+          <TemplateIntelligenceModule
+            searchParams={templateSearchParams}
+            setSearchParams={syncTemplateSearchParams}
+            globalRangeLabel={DATE_PRESET_LABELS[datePreset]}
+            isMobileLayout={false}
+            onViewQueueRows={(templateId) => { setTemplateFilter(templateId); changeSection('queue') }}
+          />
+        )}
+        {section === 'senders' && <SenderCoveragePanel />}
+        {section === 'senders' && (
+          <SenderIntelligenceModule items={items} fleet={model?.textgridFleet ?? []} selectedPhone={selectedSenderPhone} onSelectPhone={setSelectedSenderPhone} isMobileLayout={false} globalRangeLabel={DATE_PRESET_LABELS[datePreset]} />
+        )}
+        {section === 'market' && (
+          <MarketIntelligenceModule items={items} directory={model?.marketDirectory ?? []} fleet={model?.textgridFleet ?? []} selectedMarket={selectedMarketName} onSelectMarket={setSelectedMarketName} onViewRows={m => { setMarketFilter(m); changeSection('queue') }} isMobileLayout={false} globalRangeLabel={DATE_PRESET_LABELS[datePreset]} />
+        )}
+        {section === 'failures' && (
+          <FailureIntelligenceModule items={items} selectedCause={selectedFailureCause} onSelectCause={setSelectedFailureCause} onFilterCause={c => { setCauseFilter(c); setStatusFilter('failed'); changeSection('queue') }} isMobileLayout={false} globalRangeLabel={DATE_PRESET_LABELS[datePreset]} />
+        )}
+        {section === 'events' && (
+          <EventIntelligenceModule items={eventItems.length > 0 ? eventItems : items} loading={eventItemsLoading} density={timelineDensity} onDensityChange={setTimelineDensity} selectedEventId={selectedEventItem?.id ?? null} onSelectEvent={setSelectedEventItem} isMobileLayout={false} globalRangeLabel={DATE_PRESET_LABELS[datePreset]} />
+        )}
+      </div>
+    )
+    return (
+      <div ref={rootRef} className="qdk-host">
+        <QueueDesk
+          model={model}
+          items={items}
+          rows={filteredItems}
+          kpi={kpi}
+          kpiIsRange={kpiIsRange}
+          loading={loading}
+          range={datePreset as DeskRange}
+          onRange={(r) => setDatePreset(r as DatePreset)}
+          basis={dateBasis as DeskBasis}
+          onBasis={(b) => setDateBasis(b as QueueDateBasis)}
+          statusFilter={statusFilter}
+          onStatusFilter={(st) => setStatusFilter(st as StatusBucket)}
+          search={searchQuery}
+          onSearch={setSearchQuery}
+          market={marketFilter}
+          marketOptions={marketOptions}
+          onMarket={setMarketFilter}
+          sender={senderFilter}
+          senderOptions={senderOptions}
+          onSender={setSenderFilter}
+          template={templateFilter}
+          templateOptions={templateOptions}
+          onTemplate={setTemplateFilter}
+          causeFilter={causeFilter}
+          causeLabel={causeLabelOf}
+          onCause={setCauseFilter}
+          failureCause={deriveFailureCause}
+          failureLabels={FAILURE_CAUSE_LABEL}
+          section={section as DeskSection}
+          onSection={(next) => changeSection(next)}
+          sectionCounts={{ templates: templateStatsMemo.length, senders: senderFleetCount, market: marketConfiguredCount, failures: kpi.failed }}
+          sectionBody={sectionBody}
+          dockOpen={deskDockOpen}
+          dock={(
+            <div className="occ-root qdk-legacy qdk-legacy--dock">
+              <CommandIntelligenceDock
+                section={section}
+                items={items}
+                kpi={kpi}
+                model={model}
+                runnableCount={runnableCount}
+                selectedItem={section === 'queue' ? selectedItem : null}
+                selectedTemplate={null}
+                selectedSender={section === 'senders' ? selectedSenderDock : null}
+                selectedMarket={section === 'market' ? selectedMarketDock : null}
+                selectedFailure={section === 'failures' ? selectedFailureDock : null}
+                selectedEvent={section === 'events' ? selectedEventItem : null}
+                tabOverview={tabOverview}
+                onAction={deskDockAction}
+                onViewFailureRows={c => { setCauseFilter(c); changeSection('queue'); setStatusFilter('failed') }}
+              />
+            </div>
+          )}
+          selectedId={dossierOpen ? selectedId : null}
+          onActivate={handleSelectRow}
+          selected={selectedIds}
+          onSelected={setSelectedIds}
+          onRowAction={deskRowAction}
+          onGlobal={(a) => requestGlobalAction(a)}
+          busyAction={busyAction}
+          onRefresh={() => { setLoading(true); refreshData(currentPage) }}
+          paging={{ page: currentPage, pages: totalPages, total: totalCount, pageSize, pageSizes: PAGE_SIZE_OPTIONS, onPage: handlePageChange, onPageSize: (n) => { setPageSize(n); setCurrentPage(0) } }}
+          overlays={(
+            <div className="occ-root qdk-legacy qdk-legacy--overlay">
+              <QueueConfirmModal preview={confirmPreview} busy={busyAction !== null} onConfirm={() => { if (confirmPreview) void executeConfirmedAction() }} onCancel={() => setConfirmPreview(null)} />
+              <QueueBulkActionDock
+                selectedCount={selectedIds.size}
+                retryEligible={bulkRetryEligible}
+                nonRetryable={bulkNonRetryable}
+                onRetry={() => requestBulkAction('bulk-retry')}
+                onReschedule={() => requestBulkAction('bulk-reschedule')}
+                onPause={() => requestBulkAction('bulk-pause')}
+                onCancel={() => requestBulkAction('bulk-cancel')}
+                onSuppress={() => requestBulkAction('bulk-suppress')}
+                onOpenFailures={() => { changeSection('failures'); setStatusFilter('failed') }}
+                onClear={clearSelection}
+              />
+            </div>
+          )}
+        />
       </div>
     )
   }

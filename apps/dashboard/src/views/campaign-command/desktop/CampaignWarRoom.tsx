@@ -21,6 +21,7 @@ import { ActivityMode } from './WarActivity'
 import { ExecutionMode } from './WarExecution'
 import { GeoPlane } from './WarGeo'
 import { WarHero, type HeroAction } from './WarHero'
+import { CoveragePlane, LifecycleRail, RoomInstrument } from './WarBook'
 import { WarInspector, type InspectorCtx } from './WarInspector'
 import { PerformanceMode } from './WarPerformance'
 import { AudiencePlane, FleetPlane, LatestActivity, OutcomePlane, TimePlane } from './WarPlanes'
@@ -413,6 +414,9 @@ export function CampaignWarRoom({
                   showRailToggle={narrow}
                 />
 
+                <LifecycleRail status={bookRow?.status ?? summary?.status ?? null} mission={mission} book={bookRow} />
+                <RoomInstrument book={bookRow} intel={intel.data} loading={intel.loading && !intel.data} />
+
                 {core.error && !core.data ? <p className="cc3-alert" data-tone="attn">Live execution state didn’t load — showing the book’s figures. ({core.error})</p> : null}
 
                 <section className="cc3-flow" aria-label="Execution river and gates">
@@ -456,6 +460,7 @@ export function CampaignWarRoom({
                       <FleetPlane intel={intel.data} onSender={onSender} onOpen={() => openCtx({ kind: 'senders' })} />
                       <GeoPlane campaignId={selectedId} campaignName={name} demo={demoOn ? (demo?.geos[selectedId] ?? null) : undefined} />
                     </div>
+                    <CoveragePlane markets={intel.data ? (intel.data.audience?.markets ?? {}) : null} enabled={!demoOn} />
                     <LatestActivity events={activity} tz={f.tz} loading={intel.loading && !activity.length} onAll={() => setMode('activity')} />
                   </div>
                 ) : null}
