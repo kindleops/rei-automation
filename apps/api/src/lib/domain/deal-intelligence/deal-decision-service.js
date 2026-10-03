@@ -30,6 +30,7 @@ import { offerSensitivity, replayStoredOffer, computeScenarioOffer } from './dea
 import { getConversationSignal } from './conversation-signal-service.js'
 import { getMarketDemand } from './market-demand-service.js'
 import { REASON_LABELS } from '../comp-intelligence/comps-reason-labels.js'
+import { canonicalFlag, canonicalPropertyIds } from '../comp-intelligence/canonical-property-ids.js'
 import { COMP_DETAIL_COLUMNS, enrichComp, ownerSections, parcelSections, prospectCards } from './deal-record-sections.js'
 import { classifyLienDocuments, classifyMortgages, summarizeLienDocuments } from './deal-record-documents.js'
 // Namespace import on purpose: "who has the move" must read exactly as the
@@ -245,6 +246,18 @@ export function compEvidenceQuality(evidence) {
     adjustedLow: adjusted.length ? Math.min(...adjusted) : null,
     adjustedHigh: adjusted.length ? Math.max(...adjusted) : null,
   }
+}
+
+/**
+ * Mark each comp canonicalProperty true / false (null when the check failed) with
+ * ONE batched existence read for the whole decision (shared helper with Comps).
+ */
+export async function markCanonicalComps(client, comps) {
+  const list = arr(comps)
+  if (!list.length) return list
+  const canonical = await canonicalPropertyIds(client, list.map((c) => c.propertyId))
+  for (const c of list) c.canonicalProperty = canonicalFlag(canonical, c.propertyId)
+  return list
 }
 
 /** The selected comps, shaped for a phone, merged with their source record. */
@@ -896,6 +909,9 @@ export async function getDealDecision({ propertyId: rawProperty, threadKey: rawT
   } : null
 
   const compsTop = score ? topComps(score.evidence, 12, compDetails, subjectForComps) : []
+  // Comp-only parcels (sold, never entered `properties`) have no property surface to
+  // open; one batched existence read per decision marks them (null = check failed).
+  await markCanonicalComps(client, compsTop)
   const integrity = score ? assetIntegrity(compsTop, subjectForComps) : null
   const risks = deriveDealRisks({ score, props, parcel, records, ns, replay, quality, thread: threadRes.data, propertyId, ask, avm, now, integrity, lienDocs })
   const latestSnap = snapshots[0] || null

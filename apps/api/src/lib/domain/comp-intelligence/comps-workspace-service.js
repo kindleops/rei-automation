@@ -40,6 +40,7 @@ import {
   scoreComparable,
 } from '@/lib/acquisition/acquisitionDecisionEngine.js'
 import { buyerFromPurchaseInfo } from '../deal-intelligence/deal-record-sections.js'
+import { canonicalFlag, canonicalPropertyIds } from './canonical-property-ids.js'
 import { REASON_LABELS } from './comps-reason-labels.js'
 import { displayableCompanyName } from '../entity-graph/buyer-name-privacy.js'
 import { ENGINE_COMP_DETAIL_COLUMNS, engineRulesFor, engineSearchWindow } from './comps-engine-rules.js'
@@ -404,25 +405,7 @@ export function setStats(comps) {
   }
 }
 
-const CANONICAL_CHUNK = 200
-
-/** One batched `properties` existence read for a page of comp property ids (null = check failed). */
-export async function canonicalPropertyIds(client, ids) {
-  const wanted = [...new Set(arr(ids).map(clean).filter(Boolean))]
-  const found = new Set()
-  if (!wanted.length) return found
-  try {
-    for (let i = 0; i < wanted.length; i += CANONICAL_CHUNK) {
-      const chunk = wanted.slice(i, i + CANONICAL_CHUNK)
-      const { data, error } = await client.from('properties').select('property_id').in('property_id', chunk)
-      if (error) return null
-      for (const r of arr(data)) if (clean(r.property_id)) found.add(clean(r.property_id))
-    }
-  } catch {
-    return null
-  }
-  return found
-}
+export { canonicalPropertyIds }
 
 export async function getCompsWorkspace({ propertyId, radius = null, months = null } = {}, deps = {}) {
   const client = deps.supabase || defaultSupabase
@@ -551,7 +534,7 @@ export async function getCompsWorkspace({ propertyId, radius = null, months = nu
   // existence read per workspace (never per row): true / false, or null when the
   // check itself could not run (unknown is never reported as "not tracked").
   const canonical = await canonicalPropertyIds(client, all.map((c) => c.propertyId))
-  for (const c of all) c.canonicalProperty = c.propertyId ? (canonical ? canonical.has(c.propertyId) : null) : false
+  for (const c of all) c.canonicalProperty = canonicalFlag(canonical, c.propertyId)
   const inputFor = (c) => engineInputs.get(c.key) ?? engineRow(c, { source: 'transaction_corpus' })
   const packaged = detectPackageClusters(all.map(inputFor))
   for (const c of all) {

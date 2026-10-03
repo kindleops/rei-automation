@@ -37,7 +37,7 @@ export function diLinks(d: DiDecision): DiLinks {
   const object = propertyObject({ propertyId: pid, threadKey, opportunityId: d.pipeline?.opportunityId ?? null, label: d.subject.address, source: 'deal-intelligence', lat: d.subject.lat, lng: d.subject.lng })
   const comps = (d.comps?.top ?? [])
     .filter((c) => typeof c.lat === 'number' && typeof c.lng === 'number')
-    .map((c) => propertyObject({ propertyId: c.propertyId ?? c.id ?? c.address ?? 'comp', label: c.address, source: 'deal-intelligence', lat: c.lat, lng: c.lng }))
+    .map((c) => propertyObject({ propertyId: c.propertyId ?? c.id ?? c.address ?? 'comp', label: c.address, source: 'deal-intelligence', lat: c.lat, lng: c.lng, canonical: c.canonicalProperty === false ? false : null }))
   const street = d.subject.address ? d.subject.address.split(',')[0] : 'This property'
   return {
     conversation: threadKey ? () => { publish(); openInboxThread({ threadKey }) } : null,

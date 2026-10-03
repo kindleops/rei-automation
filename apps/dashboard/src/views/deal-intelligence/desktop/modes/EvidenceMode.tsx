@@ -9,7 +9,8 @@ import { Empty, Plane, Prov, Tag } from '../di-ui'
 import { CompDistribution, CompRadar } from './EvidenceCharts'
 import { countSaleTypes, SALE_TYPE_LABEL, SALE_TYPES, saleTypeOfDealComp } from '../../../../domain/comp-intelligence/comp-sale-type'
 import { CompStreetView } from '../../../comp-intelligence/desktop/CompStreetView'
-import { handleObjectClick, objectMenuEntries, propertyObject } from '../../../../modules/desktop/objects'
+import { handleObjectClick, objectMenuEntries } from '../../../../modules/desktop/objects'
+import { diCompObject } from '../di-comp-object'
 import { SaleTypeBadge } from '../../../comp-intelligence/desktop/SaleType'
 
 
@@ -23,7 +24,7 @@ const FAMILIES: Array<{ id: EvidenceFamily; label: string; icon: IconName }> = [
 ]
 
 /** A comp row as its canonical property (comps without a property id stay local rows). */
-const compObject = (x: DiComp) => (x.propertyId ? propertyObject({ propertyId: x.propertyId, label: x.address, source: 'deal-intelligence', lat: x.lat ?? null, lng: x.lng ?? null }) : null)
+const compObject = diCompObject
 
 export function EvidenceMode({ d, family, onFamily, selection, onSelect, links, now }: {
   d: DiDecision

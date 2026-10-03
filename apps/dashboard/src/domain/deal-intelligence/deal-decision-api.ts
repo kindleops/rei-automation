@@ -59,6 +59,8 @@ export type DealComp = {
   renovation: string | null; stories: string | null; pool: string | null; ppsf: number | null; ppu: number | null
   saleSource: string | null; mlsSoldPrice: number | null; avmAtSale: number | null
   buyerKind: 'company' | 'individual' | 'unknown'; buyerLabel: string | null; photo: string | null
+  /** the comp's property is a tracked (canonical) property; false = a recorded sale only; null/absent = unknown */
+  canonicalProperty?: boolean | null
 }
 
 export type ConversationSignal = {
