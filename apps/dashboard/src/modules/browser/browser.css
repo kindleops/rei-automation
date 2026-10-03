@@ -324,6 +324,10 @@
 
 .lcb--phone { display: grid; place-items: center; padding: 24px; }
 
+/* host app input styles must not paint inside the Browser's own fields */
+.lcb .lcb-start__search input,
+.lcb .lcb-addr__input { appearance: none; background: none; border: 0; box-shadow: none; padding: 0; }
+
 /* ── themes ─────────────────────────────────────────────────────────── */
 
 /* True Black: the chrome disappears into the black */
@@ -333,6 +337,10 @@
 :root[data-nexus-theme='true_black'] .lcb-state__card { background: #050505; }
 /* Red Ops: the accent may be red, but an insecure page is attention (gold), never failure */
 :root[data-nexus-theme='red_ops'] .lcb-addr__lock { color: var(--lc-ink-3); }
+/* Red Ops: red means failure — the research chip and external glyph stay neutral */
+:root[data-nexus-theme='red_ops'] .lcb-chip:not(.is-pinned) { border-color: var(--lc-inner-edge); background: var(--lc-inner-bg); color: var(--lc-ink-1); }
+:root[data-nexus-theme='red_ops'] .lcb-state__glyph { background: var(--lc-inner-bg); color: var(--lc-ink-2); }
+:root[data-nexus-theme='red_ops'] .lcb-tab__glyph.has-ctx { color: var(--lc-ink-2); }
 :root[data-nexus-theme='red_ops'] .lcb-addr.is-insecure .lcb-addr__lock { color: var(--lc-attn); }
 
 /* ── compact (narrow panes) ─────────────────────────────────────────── */
