@@ -83,8 +83,18 @@ for (const [W, H] of SIZES) for (const theme of THEMES) for (const accent of ACC
     if (FORBIDDEN.test(label)) throw new Error(`refusing to click ${label}`)
     await loc.click()
   }
+  let migrated = false
   const goto = async (route, sel) => {
     await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
+    // A fresh profile runs the one-time appearance migration (Red Ops seeds its
+    // red signal accent). Reload once so the accent under test is the one shown,
+    // exactly as an operator who picked it in Environment Studio would see it.
+    if (!migrated) {
+      migrated = true
+      await page.waitForTimeout(1500)
+      await page.evaluate((a) => { const c = JSON.parse(localStorage.getItem('nexus-settings') || '{}'); localStorage.setItem('nexus-settings', JSON.stringify({ ...c, accentPalette: a })) }, accent)
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 })
+    }
     await page.waitForSelector(sel, { timeout: 150000 })
   }
   try {

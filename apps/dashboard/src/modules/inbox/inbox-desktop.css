@@ -945,7 +945,11 @@ html.is-desktop-modern .nx-qap-anchor.nx-quick-actions-popover {
 html.is-desktop-modern .nx-qap-action-btn:hover:not(:disabled) > svg,
 html.is-desktop-modern .nx-qap-template-btn:hover:not(:disabled) > svg { color: var(--lc-accent-text) !important; }
 html.is-desktop-modern :is(.nx-qap-action-btn, .nx-qap-template-btn, .nx-qap-close):focus-visible { outline: none !important; box-shadow: var(--lc-focus-ring) !important; }
-html.is-desktop-modern .nx-qap-template-btn.is-staged { box-shadow: inset 0 0 0 1px var(--lc-accent-border) !important; background: var(--lc-accent-soft) !important; }
+/* staged templates: one calm row each — glyph, name, stage — never a boxed card */
+html.is-desktop-modern .nx-qap-template-btn.is-staged { display: flex !important; flex-direction: row !important; align-items: center !important; justify-content: flex-start !important; text-align: left !important; gap: 10px !important; border: 0 !important; box-shadow: none !important; background: transparent !important; }
+html.is-desktop-modern .nx-qap-template-btn.is-staged:hover:not(:disabled) { background: var(--lc-inner-bg-hover) !important; }
+html.is-desktop-modern .nx-qap-template-btn__text { display: flex !important; flex-direction: column !important; align-items: flex-start !important; flex: 1 1 auto !important; gap: 2px !important; min-width: 0 !important; }
+html.is-desktop-modern .nx-qap-template-btn__stage { order: 2; font-size: 11.5px !important; color: var(--lc-ink-3) !important; }
 html.is-desktop-modern .nx-qap-section-label { color: var(--lc-ink-3) !important; }
 html.is-desktop-modern :is(.nx-qap-templates, .nx-qap-actions, .nx-qap-section) { background: none !important; box-shadow: none !important; }
 html.is-desktop-modern.is-mobile-layout .nx-qap-section > :not(.nx-qap-section-label) { background: none !important; }
