@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Data-plane lockdown: anon out, operators only, no TRUNCATE
 -- STATUS: PROPOSED. NOT APPLIED. Apply only with the owner present, IMMEDIATELY AFTER
---         PROPOSED_20261003120000_operator_read_policies.sql (preflight refuses otherwise).
+--         20261003120000_operator_read_policies.sql (preflight refuses otherwise).
 -- Pretest (rollback-only): supabase/tests/operator_lockdown_test.sql
 -- Rollback:                supabase/rollbacks/PROPOSED_20261003130000_operator_lockdown.rollback.sql
 --                          (exact: it replays the snapshot this migration takes in ops_lockdown.snapshot)
@@ -118,7 +118,7 @@ declare
   already boolean;
 begin
   if to_regprocedure('public.is_ops_operator()') is null then
-    raise exception 'operator_lockdown: apply PROPOSED_20261003120000_operator_read_policies.sql first';
+    raise exception 'operator_lockdown: apply 20261003120000_operator_read_policies.sql first';
   end if;
   if not exists (select 1 from public.ops_operators) then
     raise exception 'operator_lockdown: public.ops_operators is empty; this would lock every operator out';

@@ -41,7 +41,7 @@ set local statement_timeout = '180s';
 select to_regprocedure('public.is_ops_operator()') is null as need_read_policies \gset
 \if :need_read_policies
 \echo 'operator_read_policies not applied: applying it inside this transaction first'
-\ir ../migrations/PROPOSED_20261003120000_operator_read_policies.sql
+\ir ../migrations/20261003120000_operator_read_policies.sql
 \endif
 
 \set op_uid    'a2ee0ffe-6f27-475b-a795-ee617c9472c6'

@@ -2,7 +2,7 @@
 -- Operator read policies: give allowlisted operators back their direct dashboard reads
 -- STATUS: PROPOSED. NOT APPLIED. Apply only with the owner present.
 -- Pretest (rollback-only):  supabase/tests/operator_read_policies_test.sql
--- Rollback:                 supabase/rollbacks/PROPOSED_20261003120000_operator_read_policies.rollback.sql
+-- Rollback:                 supabase/rollbacks/20261003120000_operator_read_policies.rollback.sql
 -- =============================================================================
 --
 -- WHY

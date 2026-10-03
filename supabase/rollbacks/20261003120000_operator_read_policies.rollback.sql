@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/PROPOSED_20261003120000_operator_read_policies.sql
+-- Rollback for supabase/migrations/20261003120000_operator_read_policies.sql
 -- This returns the database exactly to the pre-migration state: operators lose direct
 -- reads again (the silent-empty outage comes back). No data is touched, except that the
 -- ops_operators allowlist rows are dropped with the table.

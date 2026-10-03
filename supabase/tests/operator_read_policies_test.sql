@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Rollback-only pretest for
---   supabase/migrations/PROPOSED_20261003120000_operator_read_policies.sql
+--   supabase/migrations/20261003120000_operator_read_policies.sql
 --
 -- Run with psql as the DB owner (postgres), from the repo root:
 --   psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/operator_read_policies_test.sql
@@ -102,7 +102,7 @@ where g.property_id is not null and g.master_owner_id is not null
 limit 1;
 
 -- --------------------------------------------------- APPLY (in txn) ----
-\ir ../migrations/PROPOSED_20261003120000_operator_read_policies.sql
+\ir ../migrations/20261003120000_operator_read_policies.sql
 
 -- -------------------------------------------------------- catalog ----
 do $$
