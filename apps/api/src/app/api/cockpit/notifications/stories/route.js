@@ -20,8 +20,11 @@ export async function GET(request) {
   if (!auth.ok) return NextResponse.json({ ok: false, errorType: 'auth_error', error: 'unauthorized' }, { status: auth.response?.status || 401, headers })
   try {
     const query = Object.fromEntries(new URL(request.url).searchParams.entries())
+    const t0 = performance.now()
     const data = await getNotificationStories(query)
-    return NextResponse.json(data, { status: 200, headers: { ...headers, 'Cache-Control': 'no-store' } })
+    // the handler's own time (the read), separate from any server queueing in front of it
+    const dur = Math.round(performance.now() - t0)
+    return NextResponse.json(data, { status: 200, headers: { ...headers, 'Cache-Control': 'no-store', 'Server-Timing': `stories;desc="${data.source || 'read'}";dur=${dur}` } })
   } catch (error) {
     if (error instanceof StoryError) return NextResponse.json({ ok: false, errorType: 'bad_request', error: error.code, message: error.message }, { status: error.status, headers })
     console.error('notifications.stories_failed', error)

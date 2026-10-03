@@ -57,7 +57,10 @@ export function toInputs({ events = [], notifications = [] }, hostOf = () => nul
     if (!it || out.has(id)) continue // an envelope copy of the same row wins, exactly as the builder dedupes
     const own = partitionOfSubject(it.subject)
     if (!own) continue
-    const row = { input_id: id, kind: 'notification', partition_key: own, occurred_at: it.at, payload: r }
+    // occurred_at is the WINDOW clock, exactly as the builder reads the sources: an alert row is in the
+    // window while its own updated_at is (a grouped row created 9 days ago but re-fired today still counts)
+    const windowAt = [it.at, r.updated_at, r.created_at].filter((v) => Number.isFinite(Date.parse(v || ''))).sort().pop() || it.at
+    const row = { input_id: id, kind: 'notification', partition_key: own, occurred_at: new Date(Date.parse(windowAt)).toISOString(), payload: r }
     out.set(id, row)
     partOf.set(id, own)
     if (it.signal && it.causal?.source_event_id) pending.push([row, it.causal.source_event_id])

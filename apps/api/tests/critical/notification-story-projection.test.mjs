@@ -393,3 +393,26 @@ test('automation runs: a run whose source message is a provider SID no longer fa
   assert.deepEqual(r.ids, ['69267caf-4251-432c-83ed-80d96e467249', 'E27A6B29-5403-4609-A2C6-AC3AA43C7667'])
   assert.deepEqual(r.sids, ['SMIZfzQJ2Cu~gAuyfUaTPaD3g=='])
 })
+
+test('a read never refreshes the projection — not inline, not in the background', async () => {
+  const { db, listEvents } = await projectOneByOne([inbound('m1')], [])
+  const before = db.writes.length
+  // the cursor is now an hour old ("stale"); read every path
+  const deps = { supabase: db, listEvents, now: () => NOW + 3600e3, projection: true, debounceMs: 1 }
+  for (const q of [{}, { lens: 'needs_you' }, { summary: '1' }, { since: at(0) }]) assert.equal((await getNotificationStories(q, deps)).source, 'projection')
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(db.writes.length, before, 'no pass ran')
+})
+
+test('window clock: an alert created before the window but re-fired inside it stays (as in the builder); aged-out partitions lose their stories', async () => {
+  const old = alert('sx', 'sender_delivery_spike_failure', { domain: 'numbers', severity: 'critical', s: -9 * 86400, extra: { group_count: 1, updated_at: at(100) } })
+  const { got, db, listEvents } = await assertParity('refired-old-alert', [inbound('m1')], [old])
+  assert.equal(got.length, 2)
+  assert.ok(db.tables.get('notification_story_inputs').some((i) => i.input_id === 'ne:sx'), 'not pruned on ingest')
+  // eight days later everything has left the window: the next pass ages it all out
+  const later = T0 + 8 * 864e5
+  await projectStories({ supabase: db, listEvents: eventSource([]), now: () => later })
+  assert.equal(db.tables.get('notification_story_inputs').length, 0)
+  assert.equal(db.tables.get(STORIES_TABLE).length, 0)
+  assert.equal(buildStories({ events: [], notifications: [], now: later }).stories.length, 0)
+})

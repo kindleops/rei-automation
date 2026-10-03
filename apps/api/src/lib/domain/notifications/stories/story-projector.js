@@ -11,8 +11,8 @@
  *                      read (story-sources), every partition rebuilt. Refuses (writes
  *                      nothing) while any source is degraded: never a partial backfill.
  *   requestProjection() debounced, single-flight trigger — called from the
- *                      notification emit points (upsert / resolve), from the read
- *                      path when the cursor is stale, and from the cron tick.
+ *                      notification emit points (upsert / resolve). The cron tick
+ *                      runs passes directly. A READ NEVER TRIGGERS A PASS.
  *   readProjection()    the endpoint's read: story rows with keyset paging.
  *
  * Until the migration is applied AND a complete rebuild has run (the cursor row
@@ -33,8 +33,6 @@ export const CURSOR_TABLE = 'notification_story_projector'
 export const CURSOR_ID = 'stories'
 /** re-read this far behind the cursor: rows that land late (ledger lag, observatory) still project */
 export const OVERLAP_MS = 15 * 60e3
-/** the read path asks for a pass when the cursor is older than this (never waits for it) */
-export const STALE_MS = 20e3
 export const DEBOUNCE_MS = 1500
 const INCREMENTAL_PAGES = 10
 const REBUILD_PAGES = 60
@@ -115,13 +113,13 @@ async function hostLookup(db, inputsRaw) {
  * `known` = inputs already in memory for those partitions (the rebuild path holds
  * the whole window); otherwise partitions are loaded back from the inputs table.
  */
-async function applyInputs(db, inputs, { now, since, known = null }) {
+async function applyInputs(db, inputs, { now, since, known = null, extraPartitions = [] }) {
   const projectedAt = new Date(now).toISOString()
   for (const part of chunks(inputs, 200)) {
     const { error } = await db.from(INPUTS_TABLE).upsert(part.map((i) => ({ ...i, updated_at: projectedAt })), { onConflict: 'input_id' })
     if (error) throw error
   }
-  const partitions = [...new Set(inputs.map((i) => i.partition_key))]
+  const partitions = [...new Set([...inputs.map((i) => i.partition_key), ...extraPartitions])]
   if (!partitions.length) return { partitions: 0, upserts: 0, deletes: 0, stories: [] }
   const all = known || await loadInputs(db, partitions, since)
   const { stories } = await projectPartitions(all, { now, loadState: stateLoader(db) })
@@ -143,6 +141,17 @@ async function writeCursor(db, patch) {
   if (error) throw error
 }
 
+/**
+ * Age out: inputs whose window clock left the window are deleted and their partitions re-projected
+ * (a partition with nothing left loses its stories) — the builder simply stops reading them.
+ */
+async function ageOut(db, windowStartIso) {
+  const old = await selectAll(db.from(INPUTS_TABLE).select('input_id, partition_key').lt('occurred_at', windowStartIso).limit(5000))
+  if (!old.length) return []
+  for (const part of chunks(old.map((r) => r.input_id))) { const { error } = await db.from(INPUTS_TABLE).delete().in('input_id', part); if (error) throw error }
+  return [...new Set(old.map((r) => r.partition_key))]
+}
+
 /** Incremental pass (the normal path). */
 export async function projectStories(deps = {}) {
   const db = dbOf(deps)
@@ -161,7 +170,8 @@ export async function projectStories(deps = {}) {
   if (ev.truncated || nt.rows.length >= 2000) return rebuildProjection(deps)
   const raw = { events: ev.events, notifications: nt.rows }
   const inputs = toInputs(raw, await hostLookup(db, raw))
-  const r = await applyInputs(db, inputs, { now, since: new Date(windowStart).toISOString() })
+  const aged = await ageOut(db, new Date(windowStart).toISOString())
+  const r = await applyInputs(db, inputs, { now, since: new Date(windowStart).toISOString(), extraPartitions: aged })
   const degraded = [...ev.degraded, ...nt.degraded]
   // a source that timed out is re-read from the old cursor next pass (no gap) — for up to an hour,
   // after which a chronically-down source no longer holds every other source's cursor back
@@ -190,9 +200,11 @@ export async function rebuildProjection(deps = {}) {
   const raw = { events: ev.events, notifications: nt.rows }
   const inputs = toInputs(raw)
   const r = await applyInputs(db, inputs, { now, since, known: inputs })
-  // prune: inputs and stories that aged out of the window
+  // prune: inputs whose window clock left the window; stories the full rebuild no longer produces
   await db.from(INPUTS_TABLE).delete().lt('occurred_at', since)
-  await db.from(STORIES_TABLE).delete().lt('updated_at', since)
+  const keep = new Set(r.stories.map((x) => x.id))
+  const stale = (await selectAll(db.from(STORIES_TABLE).select('story_id').limit(COUNT_LIMIT))).map((x) => x.story_id).filter((id) => !keep.has(id))
+  for (const part of chunks(stale)) { const { error } = await db.from(STORIES_TABLE).delete().in('story_id', part); if (error) throw error }
   const nowIso = new Date(now).toISOString()
   await writeCursor(db, { events_through: nowIso, notifications_through: nowIso, rebuilt_at: nowIso, projected_at: nowIso, degraded: [], stats: { inputs: inputs.length, partitions: r.partitions, upserts: r.upserts, deletes: r.deletes, truncated: ev.truncated } })
   return { ok: true, available: true, rebuilt: true, inputs: inputs.length, partitions: r.partitions, upserts: r.upserts, deletes: r.deletes, truncated: ev.truncated }
@@ -267,14 +279,14 @@ export async function readProjection(p, deps = {}) {
   const now = nowOf(deps)
   const windowStart = new Date(now - WINDOW_MS).toISOString()
   // one round trip of latency: cursor, narrow rows (counts + live ids) and the page in parallel
-  const narrowQ = selectAll(db.from(STORIES_TABLE).select(PROJECTION_COLS).gte('updated_at', windowStart).order('updated_at', { ascending: false }).limit(COUNT_LIMIT))
+  const narrowQ = selectAll(db.from(STORIES_TABLE).select(PROJECTION_COLS).order('updated_at', { ascending: false }).limit(COUNT_LIMIT))
   let pageQ = null
   if (p.since) {
     // anything re-projected since the client's last read (5s skew: a pass may commit just after a read began)
     const since = new Date(Date.parse(p.since) - 5e3).toISOString()
-    pageQ = selectAll(db.from(STORIES_TABLE).select('story_id, story, updated_at').gt('projected_at', since).gte('updated_at', windowStart).order('updated_at', { ascending: false }).limit(500))
+    pageQ = selectAll(db.from(STORIES_TABLE).select('story_id, story, updated_at').gt('projected_at', since).order('updated_at', { ascending: false }).limit(500))
   } else if (!p.summary) {
-    let q = db.from(STORIES_TABLE).select('story_id, story, updated_at').gte('updated_at', windowStart)
+    let q = db.from(STORIES_TABLE).select('story_id, story, updated_at')
     if (p.lens !== 'all') q = q.eq('lens', p.lens)
     if (p.cursor) q = q.or(`updated_at.lt.${p.cursor.t},and(updated_at.eq.${p.cursor.t},story_id.lt.${p.cursor.id})`)
     pageQ = selectAll(q.order('updated_at', { ascending: false }).order('story_id', { ascending: false }).limit(p.limit + 1))
@@ -283,7 +295,8 @@ export async function readProjection(p, deps = {}) {
   if (cur.status !== 'fulfilled' || !cur.value.available) return null
   if (narrow.status !== 'fulfilled' || rows.status !== 'fulfilled') return null
   const row = cur.value.row
-  if (!deps.noKick && now - Date.parse(row.projected_at || 0) > STALE_MS) requestProjection('read_stale', deps)
+  // a read NEVER refreshes the projection (not inline, not in the background): passes come from the emit
+  // points and the cron tick only, so no read shares its process with a full source read it caused
   const meta = {
     generated_at: new Date(now).toISOString(),
     horizon: windowStart,
@@ -313,5 +326,5 @@ export async function readProjectedStories(ids, deps = {}) {
 export async function readProjectionCounts(deps = {}) {
   const db = dbOf(deps)
   const windowStart = new Date(nowOf(deps) - WINDOW_MS).toISOString()
-  return countRows(await selectAll(db.from(STORIES_TABLE).select(PROJECTION_COLS).gte('updated_at', windowStart).limit(COUNT_LIMIT)))
+  return countRows(await selectAll(db.from(STORIES_TABLE).select(PROJECTION_COLS).limit(COUNT_LIMIT)))
 }
