@@ -1,7 +1,7 @@
 /**
  * ONE LAUNCH PER CAMPAIGN — decided by the database, not by a server process.
  *
- * claim  public.campaign_launch_claim (PROPOSED_20261002190000): the campaign
+ * claim  public.campaign_launch_claim (supabase/migrations/20261002190000, applied 2026-10-03): the campaign
  *        row lock + status in (draft, built) + the durable ledger claim, in one
  *        transaction. Until that migration is applied, the fallback uses the
  *        ledger function already in production — public.idempotency_begin

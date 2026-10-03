@@ -4,7 +4,7 @@
 // Schema: scripts/proof/fixtures/campaign-launch-proof-schema.sql — the EXACT
 // production definitions (tables, constraints, unique indexes, the lifecycle
 // edge set, idempotency_* and campaign_transition_status, verbatim from
-// pg_get_functiondef) — plus PROPOSED_20261002190000_campaign_launch_claim.sql.
+// pg_get_functiondef) — plus supabase/migrations/20261002190000_campaign_launch_claim.sql (applied 2026-10-03).
 // Synthetic rows only; no production data.
 //
 // Engines (never production):
@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url'
 import { launchComposedCampaign, _resetComposerFlights } from '@/lib/domain/campaigns/campaign-composer.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const MIG = path.resolve(here, '../../supabase/migrations')
+const MIG = path.resolve(here, '../../../../supabase/migrations')
 const N = Math.max(24, Number(process.env.RACERS || 24))
 const BATCH = 100
 const PROD_REF = 'lcppdrmrdfblstpcbgpf'
@@ -81,7 +81,7 @@ async function engine() {
 
 async function schema(db, { withProposed }) {
   await db.exec(await fs.readFile(path.join(here, 'fixtures/campaign-launch-proof-schema.sql'), 'utf8'))
-  if (withProposed) await db.exec(await fs.readFile(path.join(MIG, 'PROPOSED_20261002190000_campaign_launch_claim.sql'), 'utf8'))
+  if (withProposed) await db.exec(await fs.readFile(path.join(MIG, '20261002190000_campaign_launch_claim.sql'), 'utf8'))
 }
 
 /* ── a supabase-shaped adapter over one connection ──────────────────────── */
