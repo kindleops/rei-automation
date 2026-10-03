@@ -516,8 +516,14 @@ export default {
     }
 
     for (const job of jobs) {
-      ctx.waitUntil(
-        forwardToApi(
+      // Sub-minute cadence: Cron Triggers fire at most once a minute, so a job
+      // with repeatEveryMs is forwarded at each offset inside the one minute
+      // (0, 30s, ...). Each run is its own POST; the API route decides.
+      const offsets = job.repeatEveryMs && job.repeatEveryMs > 0 && job.repeatEveryMs < 60_000
+        ? Array.from({ length: Math.floor(60_000 / job.repeatEveryMs) }, (_, i) => i * job.repeatEveryMs!)
+        : [0];
+      for (const offsetMs of offsets) ctx.waitUntil(
+        (offsetMs ? new Promise((resolve) => setTimeout(resolve, offsetMs)) : Promise.resolve()).then(() => forwardToApi(
           new Request(`https://internal.invalid${job.path}`, {
             method: "POST",
             headers: {
@@ -530,8 +536,8 @@ export default {
             ...(job.body ? { body: JSON.stringify(job.body) } : {}),
           }),
           env
-        ).then(
-          (r) => console.log(`cron.done cron=${event.cron} job=${job.id} path=${job.path} status=${r.status}`),
+        )).then(
+          (r) => console.log(`cron.done cron=${event.cron} job=${job.id} path=${job.path} offset_ms=${offsetMs} status=${r.status}`),
           (e) => console.error(`cron.failed cron=${event.cron} job=${job.id} path=${job.path} error=${e}`)
         )
       );
@@ -579,6 +585,8 @@ type CronJob = {
   enabledBy: string;
   path: string;
   body?: Record<string, unknown>;
+  /** Sub-minute cadence on the "* * * * *" lane (e.g. 30_000 = :00 and :30). */
+  repeatEveryMs?: number;
 };
 
 /**
@@ -739,6 +747,24 @@ const EMAIL_DISPATCH: CronJob = {
 };
 
 /**
+ * NOTIFICATION CENTER 2.0 story projector (RC 8.2), every 30 s. Incremental
+ * pass over the platform event envelope + notification_events past the
+ * projector cursor; writes ONLY notification_stories /
+ * notification_story_inputs / notification_story_projector. Send-incapable: it
+ * queues, sends and mutates no seller, campaign or alert state. A no-op that
+ * says so while the projection migration is unapplied. Registered here but NOT
+ * commissioned: CRON_NOTIFICATION_STORIES_PROJECT_ENABLED is absent from every
+ * wrangler config, and its "*/1 * * * *" lane is not a declared trigger, until
+ * the post-deploy enablement step. repeatEveryMs fires it at :00 and :30.
+ */
+const NOTIFICATION_STORIES_PROJECT: CronJob = {
+  id: "notification_stories_project",
+  enabledBy: "CRON_NOTIFICATION_STORIES_PROJECT_ENABLED",
+  path: "/api/internal/notifications/stories/project",
+  repeatEveryMs: 30_000,
+};
+
+/**
  * Workflow orchestrator (2026-09-29, operator-commissioned: "Wire the Workflow
  * Orchestrator into the canonical Cloudflare scheduler behind its explicit
  * production flag and enable it"). Ingests workflow_events past a durable
@@ -813,6 +839,11 @@ const PRODUCTION_CRON_JOBS: Record<string, CronJob[]> = {
   // touching reconciliation, and a reader must see at a glance which schedule
   // is send-capable.
   "* * * * *": [QUEUE_RUN, EMAIL_DISPATCH],
+  // Notification Center projection lane (send-incapable). Its own expression so
+  // the send lane above carries senders only. NOT declared in any wrangler
+  // trigger list yet, so Cloudflare never invokes it until the post-deploy
+  // enablement adds the trigger AND CRON_NOTIFICATION_STORIES_PROJECT_ENABLED.
+  "*/1 * * * *": [NOTIFICATION_STORIES_PROJECT],
 };
 
 /**

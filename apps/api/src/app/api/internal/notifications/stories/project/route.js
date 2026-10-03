@@ -19,13 +19,19 @@ export const maxDuration = 300
 const logger = child({ module: 'api.internal.notifications.stories.project' })
 export const ROUTE_NAME = 'internal/notifications/stories/project'
 
+// Single flight per process: the Worker fires this every 30 s, so a pass that
+// runs long must not overlap the next tick (both would read the same cursor).
+let inFlight = null
+
 export async function POST(request) {
   const auth = requireScheduledMutationAuth(request, logger)
   if (!auth.authorized) return auth.response
   const rebuild = new URL(request.url).searchParams.get('rebuild') === '1'
+  if (inFlight) return NextResponse.json({ ok: true, route: ROUTE_NAME, rebuild, skipped: 'in_flight' })
   const started = Date.now()
   try {
-    const result = rebuild ? await rebuildProjection() : await projectStories()
+    inFlight = rebuild ? rebuildProjection() : projectStories()
+    const result = await inFlight
     const ms = Date.now() - started
     if (result.available) logger.info('notifications.stories.projected', { rebuild, ms, inputs: result.inputs, partitions: result.partitions, upserts: result.upserts, deletes: result.deletes })
     if (result.refused) {
@@ -36,5 +42,7 @@ export async function POST(request) {
   } catch (error) {
     logger.error('notifications.stories.project_failed', { rebuild, error: error?.message || 'unknown' })
     return NextResponse.json({ ok: false, route: ROUTE_NAME, error: 'story_projection_failed', message: error?.message || 'failed' }, { status: 500 })
+  } finally {
+    inFlight = null
   }
 }

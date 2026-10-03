@@ -85,7 +85,15 @@ const WORKFLOW_ORCHESTRATOR_JOB_PATHS = ["/api/internal/workflow-studio/orchestr
  */
 const SIGNAL_EVALUATE_JOB_PATHS = ["/api/internal/signals/evaluate"];
 
-const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS];
+/**
+ * Notification Center 2.0 story projector (RC 8.2) — registered on its own
+ * "*\/1" lane, NOT commissioned: no wrangler trigger declares that lane and its
+ * CRON_NOTIFICATION_STORIES_PROJECT_ENABLED flag is absent everywhere.
+ * Send-incapable (writes only the notification_stor* projection tables).
+ */
+const NOTIFICATION_PROJECTION_JOB_PATHS = ["/api/internal/notifications/stories/project"];
+
+const ALLOWED_JOB_PATHS = [...RECONCILIATION_JOB_PATHS, ...SEND_CAPABLE_JOB_PATHS, ...CAMPAIGN_EXECUTION_JOB_PATHS, ...CLOSING_AUTOMATION_JOB_PATHS, ...EMAIL_SEND_CAPABLE_JOB_PATHS, ...WORKFLOW_ORCHESTRATOR_JOB_PATHS, ...SIGNAL_EVALUATE_JOB_PATHS, ...NOTIFICATION_PROJECTION_JOB_PATHS];
 
 // Every one of these can send a seller-visible message, or arm a row that a
 // later processor run would send. None may be reachable from a schedule.
@@ -426,5 +434,24 @@ test("the Signal Center evaluator is registered on the reconciliation cadence bu
     const vars = await configVars(cfg);
     assert.notEqual(vars.CRON_SIGNAL_EVALUATE_ENABLED, "true", "not commissioned: the owner flips this");
     assert.notEqual(vars.SIGNAL_CENTER_ENABLED, "true", "not commissioned: the owner flips this");
+  }
+});
+
+test("the Notification Center projector is registered on its own lane at 30 s, but not commissioned (no trigger, no flag)", async () => {
+  const code = await workerCode();
+  const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
+  const lane = table[1].match(/"\*\/1 \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(lane, "the projection lane must be declared in the job table");
+  assert.deepEqual(lane[1].split(",").map((x) => x.trim()).filter(Boolean), ["NOTIFICATION_STORIES_PROJECT"], "the projection lane carries the projector only");
+  const oneMin = table[1].match(/"\* \* \* \* \*":\s*\[([^\]]*)\]/);
+  assert.ok(!oneMin[1].includes("NOTIFICATION_STORIES_PROJECT"), "never on the send lane");
+  const block = code.match(/const NOTIFICATION_STORIES_PROJECT: CronJob = \{([\s\S]*?)\};/);
+  assert.ok(block && block[1].includes('"CRON_NOTIFICATION_STORIES_PROJECT_ENABLED"') && block[1].includes('"/api/internal/notifications/stories/project"'));
+  assert.ok(/repeatEveryMs:\s*30_000/.test(block[1]), "fires at :00 and :30");
+  assert.ok(!/body\s*:/.test(block[1]), "the projector takes no body");
+  for (const cfg of [PRODUCTION, STAGING]) {
+    const vars = await configVars(cfg);
+    assert.notEqual(vars.CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true", "not commissioned: the owner flips this");
+    assert.ok(!(await declaredCrons(cfg)).includes("*/1 * * * *"), "the projection lane is not a declared trigger yet");
   }
 });
