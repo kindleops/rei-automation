@@ -21,16 +21,16 @@ const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, '
 export function researchEvent(r) {
   if (r.action !== 'attach') return null
   const host = hostOf(r.url)
-  const title = r.detail && typeof r.detail === 'object' ? r.detail.page_title : null
   const isProperty = r.object_type === 'property'
   return envelope({
     event_id: `rsa:${r.id}`, occurred_at: r.created_at, source_system: 'search', event_type: 'research.source_saved',
     severity: 'info',
-    actor: { kind: 'operator', label: 'You' },
+    // the feed is shared: say an operator saved it, never who, and never the page itself
+    actor: { kind: 'operator', label: 'Operator' },
     entity_refs: [isProperty ? refs.property(r.object_id, null) : null],
     property_id: isProperty ? r.object_id : null,
     summary: `Source saved${host ? ` · ${host}` : ''}`,
-    details: { host, page_title: title || null, destination_type: r.detail?.destination_type || null, object_type: r.object_type },
+    details: { host, destination_type: r.destination_type || null, object_type: r.object_type },
     deep_link: isProperty && r.object_id ? `/deal-intelligence?property_id=${encodeURIComponent(r.object_id)}` : null,
     provenance: { table: 'research_source_audit', row_id: r.id, adapter: 'research' },
   })
@@ -44,7 +44,7 @@ export const researchAdapter = {
   supports: (subject) => !subject || subject.type === 'property',
   async read(scope, { db }) {
     const build = () => {
-      let q = db.from('research_source_audit').select('id, action, object_type, object_id, url, detail, created_at').eq('action', 'attach')
+      let q = db.from('research_source_audit').select('id, action, object_type, object_id, url, destination_type, created_at').eq('action', 'attach')
       if (scope.subject?.type === 'property') q = q.eq('object_type', 'property').in('object_id', scope.subject.property_ids)
       return q
     }

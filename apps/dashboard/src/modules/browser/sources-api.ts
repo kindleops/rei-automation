@@ -4,6 +4,8 @@ import { guardUrl } from './registry'
 
 /**
  * SAVE SOURCE — attach a research page to a property/company as evidence.
+ * Provenance only (URL, title, source type, linked object, time, operator);
+ * operator-private on the server.
  *
  * OBSERVATIONAL ONLY: a saved source is a pointer (URL + title + where it
  * came from). It never changes an owner, value, tax amount or any property
@@ -23,7 +25,6 @@ export interface SavedSource {
   url: string
   page_title: string | null
   destination_type: DestinationType | null
-  notes: string | null
   captured_at: string
   /** where it lives: the server, or this device only */
   where: 'server' | 'device'
@@ -35,7 +36,6 @@ export interface SaveSourceInput {
   url: string
   pageTitle: string | null
   destinationType: DestinationType | null
-  notes?: string | null
 }
 
 export type SaveResult = { ok: true; source: SavedSource } | { ok: false; reason: 'invalid' | 'unauthorized' | 'failed'; message: string }
@@ -44,7 +44,7 @@ export interface SourcesApi {
   save(input: SaveSourceInput): Promise<SaveResult>
   list(objectType: string, objectId: string): Promise<SavedSource[]>
   /** An operator flags a registry destination as broken (audit only; local until the store exists). */
-  report(input: { destinationId: string; url: string | null; note?: string | null }): Promise<{ where: 'server' | 'device' }>
+  report(input: { destinationId: string; url: string | null }): Promise<{ where: 'server' | 'device' }>
 }
 
 const PATH = '/api/cockpit/research/sources'
@@ -82,7 +82,6 @@ export function createSourcesApi(call: typeof callBackend = callBackend, now: ()
         url: v.url,
         page_title: input.pageTitle?.slice(0, 300) ?? null,
         destination_type: input.destinationType,
-        notes: input.notes?.slice(0, 2000) ?? null,
       }
       const res = await call<Body>(PATH, { method: 'POST', body: JSON.stringify({ source: payload }), headers: { 'content-type': 'application/json' }, timeoutMs: 20_000 })
       if (res.ok && res.data?.source) return { ok: true, source: { ...res.data.source, where: 'server' } }
@@ -102,7 +101,7 @@ export function createSourcesApi(call: typeof callBackend = callBackend, now: ()
       return [...server, ...local.filter((r) => !seen.has(r.url))]
     },
     async report(input) {
-      const res = await call<Body>(PATH, { method: 'POST', body: JSON.stringify({ report: { destination_id: input.destinationId, url: input.url, note: input.note ?? null } }), headers: { 'content-type': 'application/json' }, timeoutMs: 20_000 })
+      const res = await call<Body>(PATH, { method: 'POST', body: JSON.stringify({ report: { destination_id: input.destinationId, url: input.url } }), headers: { 'content-type': 'application/json' }, timeoutMs: 20_000 })
       if (res.ok) return { where: 'server' }
       try {
         const prev = JSON.parse(window.localStorage.getItem(REPORT_KEY) || '[]')

@@ -19,11 +19,16 @@
 --     page_title            the title the Browser showed (untrusted, display only)
 --     destination_type      registry kind (ASSESSOR, GIS, …) when known
 --     captured_at / captured_by   captured_by = the Worker-verified operator
---     notes                 optional, ≤ 2000 chars
---     removed_at / removed_by     soft remove (the audit keeps the history)
+--     removed_at            soft remove (the audit keeps the history)
+--
+--   PROVENANCE ONLY: URL, title, source type, linked object, timestamp,
+--   operator. No page content, no notes, no browsing history.
+--   OPERATOR-PRIVATE: every read and write is filtered by captured_by; one
+--   operator never sees another's saved sources.
 --
 --   research_source_audit   attach / remove / report_broken / registry_edit
---                           (navigation is NEVER audited — no browsing history)
+--                           — the same provenance columns plus the action;
+--                           no free-form payload (navigation is NEVER audited)
 --
 -- ACCESS: same posture as operator_home_layouts. RLS on; anon and
 -- authenticated hold nothing (self-signup exists on this project, so an "own
@@ -34,9 +39,7 @@
 -- MACHINE FEED: the platform-events `research` adapter reads
 -- research_source_audit (action = 'attach') → `research.source_saved`.
 --
--- ROLLBACK:
---   drop table if exists public.research_source_audit;
---   drop table if exists public.research_sources;
+-- ROLLBACK: 20261002230000_research_sources.rollback.sql (same folder)
 -- ════════════════════════════════════════════════════════════════════════════
 
 create table if not exists public.research_sources (
@@ -48,22 +51,20 @@ create table if not exists public.research_sources (
   destination_type   text        null check (destination_type is null or destination_type in (
                                    'WEB_SEARCH', 'ASSESSOR', 'TAX', 'RECORDER', 'GIS', 'PERMITS', 'CODE', 'ZILLOW',
                                    'REDFIN', 'REALTOR', 'GOOGLE_MAPS', 'STREET_VIEW', 'COUNTY_PROPERTY_SEARCH', 'STATE_CORPORATE')),
-  notes              text        null check (notes is null or char_length(notes) <= 2000),
   captured_at        timestamptz not null default now(),
   captured_by        text        not null check (char_length(captured_by) between 1 and 128),
-  removed_at         timestamptz null,
-  removed_by         text        null
+  removed_at         timestamptz null
 );
 
 comment on table public.research_sources is
   'Browser 1.0: research pages an operator attached to a property/company. Observational pointers only — never facts. Written only by the API (service role).';
 
--- one live attachment per (object, url)
+-- one live attachment per (operator, object, url) — sources are operator-private
 create unique index if not exists research_sources_live_unique
-  on public.research_sources (object_type, object_id, url) where removed_at is null;
+  on public.research_sources (captured_by, object_type, object_id, url) where removed_at is null;
 
-create index if not exists research_sources_object_recent
-  on public.research_sources (object_type, object_id, captured_at desc) where removed_at is null;
+create index if not exists research_sources_operator_object_recent
+  on public.research_sources (captured_by, object_type, object_id, captured_at desc) where removed_at is null;
 
 create table if not exists public.research_source_audit (
   id                 bigint      generated always as identity primary key,
@@ -73,7 +74,8 @@ create table if not exists public.research_source_audit (
   object_id          text        null,
   url                text        null check (url is null or char_length(url) <= 4000),
   destination_id     text        null check (destination_id is null or char_length(destination_id) <= 80),
-  detail             jsonb       not null default '{}'::jsonb check (octet_length(detail::text) <= 4000),
+  destination_type   text        null check (destination_type is null or char_length(destination_type) <= 40),
+  page_title         text        null check (page_title is null or char_length(page_title) <= 300),
   actor              text        not null check (char_length(actor) between 1 and 128),
   created_at         timestamptz not null default now()
 );

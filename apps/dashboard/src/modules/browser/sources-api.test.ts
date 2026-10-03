@@ -27,11 +27,11 @@ describe('Save Source client', () => {
   })
 
   it('posts the pointer only (no facts) and reports a server save', async () => {
-    const f = fakeCall(() => ({ ok: true, status: 201, data: { ok: true, source: { research_source_id: 'u1', object_type: 'property', object_id: 'p-1', url: input.url, page_title: 'Assessor', destination_type: 'ASSESSOR', notes: null, captured_at: '2026-10-02T00:00:00Z' } } }))
+    const f = fakeCall(() => ({ ok: true, status: 201, data: { ok: true, source: { research_source_id: 'u1', object_type: 'property', object_id: 'p-1', url: input.url, page_title: 'Assessor', destination_type: 'ASSESSOR', captured_at: '2026-10-02T00:00:00Z' } } }))
     const r = await createSourcesApi(f.fn).save(input)
     expect(r.ok && r.source.where).toBe('server')
     const body = JSON.parse(f.calls[0].init!.body!)
-    expect(Object.keys(body.source).sort()).toEqual(['destination_type', 'notes', 'object_id', 'object_type', 'page_title', 'url'])
+    expect(Object.keys(body.source).sort()).toEqual(['destination_type', 'object_id', 'object_type', 'page_title', 'url'])
     expect(f.calls[0].init!.method).toBe('POST')
   })
 

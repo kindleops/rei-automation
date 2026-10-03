@@ -134,6 +134,26 @@ test('rejects unsafe or malformed sources', async () => {
   assert.equal((await res.json()).error, 'invalid_source')
 })
 
+test('operator-private: another operator never sees or removes my sources', async () => {
+  const { routes, db } = setup()
+  const mine = await (await routes.POST(req('POST', { body: { source: source() } }))).json()
+  const theirs = await (await routes.GET(req('GET', { operator: 'op-2', query: '?object_type=property&object_id=273312064' }))).json()
+  assert.deepEqual(theirs.sources, [])
+  const del = await routes.DELETE(req('DELETE', { operator: 'op-2', query: `?research_source_id=${mine.source.research_source_id}` }))
+  assert.equal(del.status, 404)
+  assert.equal(db.tables.research_sources[0].removed_at, undefined)
+  // a second operator saving the same page gets their own row
+  const r2 = await routes.POST(req('POST', { operator: 'op-2', body: { source: source() } }))
+  assert.equal(r2.status, 201)
+})
+
+test('stores provenance only: no notes, no page content, no free-form payload', async () => {
+  const { routes, db } = setup()
+  await routes.POST(req('POST', { body: { source: { ...source(), notes: 'private', content: '<html>…</html>' } } }))
+  assert.deepEqual(Object.keys(db.tables.research_sources[0]).sort(), ['captured_at', 'captured_by', 'destination_type', 'object_id', 'object_type', 'page_title', 'research_source_id', 'url'])
+  assert.deepEqual(Object.keys(db.tables.research_source_audit[0]).sort(), ['action', 'actor', 'created_at', 'destination_type', 'id', 'object_id', 'object_type', 'page_title', 'research_source_id', 'url'])
+})
+
 test('lists live sources for one object; remove is soft and audited', async () => {
   const { routes, db } = setup()
   const created = await (await routes.POST(req('POST', { body: { source: source() } }))).json()
@@ -164,10 +184,11 @@ test('until the migration is applied: research_store_unavailable (503)', async (
 })
 
 test('Machine Feed: attach → research.source_saved; other actions never appear', async () => {
-  const ev = researchEvent({ id: 7, action: 'attach', object_type: 'property', object_id: '273312064', url: 'https://www.hennepin.us/x', detail: { page_title: 'Assessor', destination_type: 'ASSESSOR' }, created_at: '2026-10-02T20:00:00Z' })
+  const ev = researchEvent({ id: 7, action: 'attach', object_type: 'property', object_id: '273312064', url: 'https://www.hennepin.us/x?pid=1', destination_type: 'ASSESSOR', created_at: '2026-10-02T20:00:00Z' })
   assert.equal(ev.event_type, 'research.source_saved')
   assert.equal(ev.summary, 'Source saved · hennepin.us')
   assert.equal(ev.property_id, '273312064')
+  assert.equal(JSON.stringify(ev).includes('pid=1'), false) // the shared feed shows the host, never the page URL
   assert.equal(researchEvent({ id: 8, action: 'remove', created_at: '2026-10-02T20:00:00Z' }), null)
   assert.equal(researchEvent({ id: 9, action: 'report_broken', created_at: '2026-10-02T20:00:00Z' }), null)
   // a store that does not exist yet is quiet, not a degraded feed

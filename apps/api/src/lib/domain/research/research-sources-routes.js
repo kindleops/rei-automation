@@ -2,7 +2,7 @@
  * Route handlers for /api/cockpit/research/sources, built from injected
  * dependencies so they can be tested without a network or a database.
  *
- *   GET     ?object_type&object_id → { ok, sources: [row…] }
+ *   GET     ?object_type&object_id → { ok, sources: [row…] }   this operator's only
  *   POST    { source }  → { ok, source, created }        attach (+ audit row)
  *   POST    { report }  → { ok, destination_id }         report a broken destination (audit only)
  *   DELETE  ?research_source_id=  → { ok, research_source_id }   soft remove (+ audit row)
@@ -41,7 +41,7 @@ export function createResearchSourcesRoutes({ service, authorize, cors }) {
       if (g.denied) return g.denied
       try {
         const q = new URL(request.url).searchParams
-        return json({ ok: true, sources: await service.list(q.get('object_type'), q.get('object_id')) }, 200, g.headers)
+        return json({ ok: true, sources: await service.list(g.operatorId, q.get('object_type'), q.get('object_id')) }, 200, g.headers)
       } catch (error) {
         return fail(error, g.headers)
       }
