@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server.js'
 import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../_shared.js'
+import { operatorIdFromHeaders } from '@/lib/domain/intelligence/corrections/corrections.js'
 import { previewMarketRoutes, readSenderCoverage, saveMarketRoutes } from '@/lib/domain/routing/sender-routing/sender-routing-service.js'
 
 export const runtime = 'nodejs'
@@ -40,7 +41,8 @@ export async function POST(request) {
   if (!auth.ok) return auth.response
   const body = await parseJsonSafe(request)
   const action = String(body?.action || '')
-  const operator = auth.auth?.email || auth.auth?.user_id || auth.auth?.operator || null
+  // The Worker-verified operator (x-ops-user-id) first; without it a gated save is refused operator_required.
+  const operator = operatorIdFromHeaders(request.headers) || auth.auth?.email || auth.auth?.user_id || auth.auth?.operator || null
   try {
     let result
     if (action === 'preview') result = await previewMarketRoutes(body)

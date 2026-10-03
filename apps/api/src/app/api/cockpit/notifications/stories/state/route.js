@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server.js'
 import { updateStoryState, StoryError } from '@/lib/domain/notifications/stories/story-service.js'
 import { corsHeaders, ensureMutationAuth, parseJsonSafe } from '../../../_shared.js'
+import { operatorIdFromHeaders } from '@/lib/domain/intelligence/corrections/corrections.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,7 +22,7 @@ export async function POST(request) {
   if (!auth.ok) return auth.response
   try {
     const body = await parseJsonSafe(request)
-    const data = await updateStoryState(body, { operatorId: auth.auth?.operator_id || auth.auth?.user_id || null })
+    const data = await updateStoryState(body, { operatorId: operatorIdFromHeaders(request.headers) || auth.auth?.operator_id || auth.auth?.user_id || null })
     return NextResponse.json(data, { status: 200, headers: { ...headers, 'Cache-Control': 'no-store' } })
   } catch (error) {
     if (error instanceof StoryError) return NextResponse.json({ ok: false, errorType: 'bad_request', error: error.code, message: error.message }, { status: error.status, headers })

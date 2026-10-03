@@ -177,7 +177,7 @@ export async function updateStoryState(body = {}, deps = {}) {
   if (!ids.length) throw new StoryError('story_ids_required', 'story_ids is required.')
   const db = deps.supabase || defaultSupabase
   const audit = deps.audit || writeNotificationActionAudit
-  const operator = clean(body.operator_id) || clean(deps.operatorId) || 'operator'
+  const operator = clean(deps.operatorId) || clean(body.operator_id) || 'operator'
   const ctx = await stateContext(ids, deps, db)
   const nowIso = new Date(deps.now ? deps.now() : Date.now()).toISOString()
   const stories = ids.map((id) => ctx.byId.get(id)).filter(Boolean)
