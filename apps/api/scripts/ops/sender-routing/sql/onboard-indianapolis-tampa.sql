@@ -9,8 +9,8 @@
 --                     pool. ONLY via scripts/ops/sender-routing/activate-number.mjs, which re-reads the
 --                     TextGrid campaign + webhook and re-verifies inbound immediately before printing
 --                     the guarded activation SQL. This file never activates.
--- CONFIGURING sets daily_limit NULL (the legacy evaluator reads NULL as 0 = refused, and
--- textgrid_numbers_dashboard divides by daily_limit, so 0 would raise division by zero).
+-- CONFIGURING sets daily_limit 25 (column is NOT NULL in prod; verified 2026-10-03). Safe while
+-- paused: every picker filters status='active' (rc-7.1 textgridRouting.ts .eq('status','active')).
 -- Paused / pre-production stages are refused by BOTH routers (legacy: status paused;
 -- Sender Routing 2.0: onboarding_incomplete), so no seller traffic before WARMING.
 --
@@ -50,11 +50,11 @@ select :'step' = 'configuring' as is_configuring \gset
 \if :is_configuring
 insert into public.textgrid_numbers (phone_number, friendly_name, market, status, health_state, registration_status, daily_limit, messages_sent_today, metadata)
 values
-  ('+13173494612', 'INDIANAPOLIS', 'Indianapolis, IN', 'paused', 'unverified', 'registered', null, 0,
+  ('+13173494612', 'INDIANAPOLIS', 'Indianapolis, IN', 'paused', 'unverified', 'registered', 25, 0,
    jsonb_build_object('market', 'Indianapolis, IN', 'friendly_name', 'INDIANAPOLIS', 'campaign_id_10dlc', 'CHM4NL2',
      'onboarding_stage', 'configuring', 'sms_webhook_status', 'configured', 'provider_checked_at', '2026-10-02',
      'onboarded_by', :actor, 'provider_purchased_at', '2026-06-04')),
-  ('+18138947553', 'TAMPA, FL', 'Tampa, FL', 'paused', 'unverified', 'registered', null, 0,
+  ('+18138947553', 'TAMPA, FL', 'Tampa, FL', 'paused', 'unverified', 'registered', 25, 0,
    jsonb_build_object('market', 'Tampa, FL', 'friendly_name', 'TAMPA, FL', 'campaign_id_10dlc', 'CHM4NL2',
      'onboarding_stage', 'configuring', 'sms_webhook_status', 'configured', 'provider_checked_at', '2026-10-02',
      'onboarded_by', :actor, 'provider_purchased_at', '2026-06-04'))
