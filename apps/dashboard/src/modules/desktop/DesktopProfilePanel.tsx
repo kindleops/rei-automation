@@ -61,7 +61,7 @@ export function DesktopProfilePanel({ email, name, onSignOut, onClose, onOpenSet
         ) : null}
 
         {tab === 'sound' ? (
-          <div className="dsk-prof__sound">
+          <div className="dsk-prof__soundtab">
             {/* Sound & Alerts: the desktop Sound System (interface sounds and
                 operational alerts), then which notifications appear at all. */}
             <SoundSettings />
