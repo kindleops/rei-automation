@@ -32,8 +32,9 @@
 --      hashed, so the call really runs). The non-operator is refused by the gate (-2)
 --      and anon is refused EXECUTE (-1). Pin RPC timing
 --      before and after is printed.
---   F. The rollback restores ACLs, policies, view and function definitions, RLS
---      flags and default ACLs exactly.
+--   F. The rollback restores ACLs, policies, function definitions, RLS flags,
+--      default ACLs and view columns exactly. View text must be exact or equal to
+--      its deparse normal form; see t_viewnorm for why.
 -- =============================================================================
 
 \set ON_ERROR_STOP on
@@ -103,6 +104,11 @@ returns table (k text, o text, v text) language sql as $$
   select 'view', c.relname, md5(pg_get_viewdef(c.oid))
   from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'v'
   union all
+  select 'viewcols', c.relname,
+         (select string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod), ',' order by a.attnum)
+            from pg_attribute a where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped)
+  from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'v'
+  union all
   select 'defacl', pg_get_userbyid(defaclrole) || '.' || defaclobjtype::text,
          (select string_agg(x::text, ',' order by x::text) from unnest(defaclacl) x)
   from pg_default_acl where defaclnamespace = 'public'::regnamespace
@@ -132,6 +138,31 @@ select rel,
        pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', rel), null, null)                 as svc,
        pg_temp.probe(format('select count(*) from (select 1 from public.%I limit 1000) s', rel), 'authenticated', :'op_uid') as op_pre
 from t_rel;
+
+-- Deparse normal form of the 13 gated views. The rollback can only restore a view
+-- from its deparsed text, and deparse is not always a fixpoint. Prod 2026-10-03:
+-- number_performance_kpis_v / template_performance_kpis_v have a CTE whose later
+-- UNION ALL arms carry no alias. Re-parsing the deparsed text names them after the
+-- cast (`'24h'::text AS text`). That alias is ignored: a UNION takes its column names
+-- from the first arm. So the restored view is the same query with different text.
+-- F accepts a view definition that equals either the original text or its
+-- one-round-trip normal form. Column names and types are compared exactly.
+create temp table t_viewnorm (relname text primary key, norm_md5 text) on commit drop;
+do $$
+declare r record; d text;
+begin
+  for r in select c.oid, c.relname from pg_class c
+           where c.relnamespace = 'public'::regnamespace and c.relkind = 'v'
+             and c.relname = any (array['v_command_map_seller_pin_feed','v_map_property_pins','v_operator_inbox_threads',
+               'v_recent_sold_comps','v_seller_work_items','v_universal_inbox_threads','property_participant_graph',
+               'performance_message_events_v','number_performance_kpis_v','template_performance_kpis_v',
+               'top_buyer_profiles','buyer_profiles_computed','recently_sold_properties_computed']) loop
+    d := regexp_replace(pg_get_viewdef(r.oid), ';\s*$', '');
+    execute format('create temp view _ops_vn as %s', d);
+    insert into t_viewnorm values (r.relname, md5(pg_get_viewdef('pg_temp._ops_vn'::regclass)));
+    drop view pg_temp._ops_vn;
+  end loop;
+end $$;
 
 create temp table t_keys on commit drop as
 select g.property_id, g.master_owner_id
@@ -329,20 +360,35 @@ select round(extract(epoch from clock_timestamp() - :'t1'::timestamptz) * 1000) 
 \ir ../rollbacks/PROPOSED_20261003130000_operator_lockdown.rollback.sql
 
 do $$
-declare n int;
+declare n int; cosmetic text;
 begin
+  create temp table t_state_post on commit drop as select * from pg_temp.catalog_state();
+  -- Views whose restored text is the one-round-trip normal form of the original.
+  select string_agg(p.o, ', ') into cosmetic
+  from t_state_pre p join t_state_post q on q.k = p.k and q.o = p.o
+  join t_viewnorm v on v.relname = p.o
+  where p.k = 'view' and q.v <> p.v and q.v = v.norm_md5;
+  if cosmetic is not null then
+    raise notice 'F: restored as deparse normal form (same query, same columns; alias-only text change): %', cosmetic;
+  end if;
   select count(*) into n from (
-    (select * from t_state_pre except select * from pg_temp.catalog_state())
+    (select * from t_state_pre except select * from t_state_post)
     union all
-    (select * from pg_temp.catalog_state() except select * from t_state_pre)
-  ) d;
+    (select * from t_state_post except select * from t_state_pre)
+  ) d
+  where not (d.k = 'view' and exists (
+          select 1 from t_viewnorm v join t_state_post q on q.k = 'view' and q.o = v.relname
+          where v.relname = d.o and q.v = v.norm_md5));
   if n > 0 then
     raise warning 'rollback diff: %', (select string_agg(k || ':' || o, ', ') from (
-      (select * from t_state_pre except select * from pg_temp.catalog_state())
-      union all (select * from pg_temp.catalog_state() except select * from t_state_pre)) d);
+      (select * from t_state_pre except select * from t_state_post)
+      union all (select * from t_state_post except select * from t_state_pre)) d
+      where not (d.k = 'view' and exists (
+          select 1 from t_viewnorm v join t_state_post q on q.k = 'view' and q.o = v.relname
+          where v.relname = d.o and q.v = v.norm_md5)));
     raise exception 'FAIL F: rollback left % catalog differences', n;
   end if;
-  raise notice 'PASS F: rollback restores the exact pre-lockdown catalog';
+  raise notice 'PASS F: rollback restores the pre-lockdown catalog (ACLs, policies, RLS, functions, view columns exact; view text exact or deparse-normal)';
 end $$;
 
 do $$ begin raise notice 'ALL PASS (rolling back; nothing persists)'; end $$;
