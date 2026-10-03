@@ -52,7 +52,8 @@ export function LivingMap({ map, mapEpoch, theme, tilted, selected, reducedMotio
   const on = living(settings)
   /** [desk] the chip is a one-line local-time pill in the Map's command row. */
   const { isModernDesktop: desk } = useBreakpoint()
-  const light = useWorldLight(map, mapEpoch, { enabled: on.daylight, theme, tilted, reducedMotion })
+  // Dynamic (sun) is a desktop appearance mode; the phone keeps ambient daylight.
+  const light = useWorldLight(map, mapEpoch, { enabled: on.daylight, theme, tilted, reducedMotion, mode: desk && on.dynamicSun ? 'dynamic' : 'ambient' })
   useBuildings3D(map, mapEpoch, { enabled: on.buildings, tilted, theme, night: Boolean(light && (light.phase === 'night' || light.phase === 'twilight')), selected })
 
   // ── where are we looking ──

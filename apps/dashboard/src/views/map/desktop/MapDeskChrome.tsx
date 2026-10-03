@@ -45,7 +45,9 @@ import type { CompFilters } from '../mobile/useSoldComps'
 import { MarketPanel } from '../mobile/MapIntelCards'
 import { MapSearch, MAP_OPEN_AREA_EVENT } from '../mobile/MapSearch'
 import { HYBRID_THEMES } from '../mobile/useMapImagery'
-import { lightState } from '../world/solar'
+import { lightState, nextSunEvent } from '../world/solar'
+import { sunAt } from '../world/sun-clock'
+import { SUN_MODE_OPTIONS, sunEventHint } from '../world/sun-dynamic'
 import type { LivingSettings } from '../world/living-settings'
 import { DESK_TOOLS, filterCapsuleLabel, fmtCount, lensPillSub, liveSignal, clampOpacity, type DeskTool } from './map-desk-model'
 import { DeskSeg, DeskSwitch, MapDeskLayers } from './MapDeskLayers'
@@ -179,7 +181,11 @@ function useCentreLight(map: maplibregl.Map | null, epoch: number, clock: number
     map.on('moveend', read)
     return () => { map.off('moveend', read) }
   }, [map, epoch])
-  return useMemo(() => (centre ? lightState(new Date(clock), centre.lat, centre.lng) : null), [centre, clock])
+  return useMemo(() => {
+    if (!centre) return null
+    const at = sunAt(clock)
+    return { ...lightState(at, centre.lat, centre.lng), hint: sunEventHint(nextSunEvent(at, centre.lat, centre.lng), at) }
+  }, [centre, clock])
 }
 
 // ── the Live inspector ───────────────────────────────────────────────────────
@@ -263,7 +269,7 @@ function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () =>
           <DeskSeg label="Perspective" value={p.dimension} onChange={p.onDimension} options={[{ key: '2d', label: '2D · Flat' }, { key: '3d', label: '3D · Tilted' }]} />
         </div>
         <div className="mxd-block">
-          <div className="mxd-block__head"><h3>Light & world</h3>{light ? <em>{light.label} here · sun {Math.round(light.altitude)}°</em> : null}</div>
+          <div className="mxd-block__head"><h3>Light & world</h3>{light ? <em>{[`${light.label} here`, light.hint ?? `sun ${Math.round(light.altitude)}°`].join(' · ')}</em> : null}</div>
           <div className="mxd-rows">
             <div className="mxd-row">
               <span className="mxd-row__copy"><strong>Living Map</strong><span>{livingOn ? 'The physical world under the glass' : 'Off — the map renders flat, as before'}</span></span>
@@ -273,6 +279,11 @@ function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () =>
               <span className="mxd-row__copy"><strong>Real daylight</strong><span>Day, golden hour, twilight and night from the sun’s real position</span></span>
               <DeskSwitch on={p.living.daylight} onChange={(v) => p.onLiving({ daylight: v })} label="Real daylight" disabled={!livingOn} />
             </div>
+            {livingOn && p.living.daylight ? (
+              <div className="mxd-row is-sub">
+                <DeskSeg size="sm" label="Daylight style" value={p.living.sun} onChange={(v) => p.onLiving({ sun: v })} options={SUN_MODE_OPTIONS} />
+              </div>
+            ) : null}
             <div className={cls('mxd-row', (!livingOn || !p.vectorBuildings) && 'is-disabled')}>
               <span className="mxd-row__copy">
                 <strong>3D buildings</strong>
@@ -487,7 +498,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
     pins: p.prefs.pins, everyProperty: p.prefs.everyProperty, filterActive: p.filterCount > 0,
     lensId: lens.id, lensLabel: lens.label, lensSub: lens.sub, lensHasSource: Boolean(lens.source), lensAmbient: Boolean(lens.ambient),
     comps: p.prefs.comps, market: p.prefs.market,
-    daylight: p.living.daylight, localTime: p.living.localTime, zones: p.living.zones, livingEnabled: p.living.enabled,
+    daylight: p.living.daylight, sunDynamic: p.living.sun === 'dynamic', localTime: p.living.localTime, zones: p.living.zones, livingEnabled: p.living.enabled,
     buildings: p.living.buildings, tilted: p.dimension === '3d', vectorBuildings,
     relief: p.prefs.relief, activityOn, streamLive: p.streamLive, orbs: p.prefs.liveOrbs,
     boundaryState, boundaryZip,
@@ -588,6 +599,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
             collapsed={p.prefs.legendCollapsed}
             onCollapse={(v) => p.setPref('legendCollapsed', v)}
             boundaries={[boundaryState, boundaryZip]}
+            sun={p.living.enabled && p.living.daylight && p.living.sun === 'dynamic'}
           />
           {picker === 'legend' ? <LensPicker active={lens} placement="up" onPick={onPick} onClose={() => setPicker(null)} /> : null}
         </div>
@@ -660,6 +672,8 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
               onBoundaryState={(v) => p.setPref('boundaryState', v)}
               onBoundaryZip={(v) => p.setPref('boundaryZip', v)}
               onDaylight={(v) => p.onLiving({ daylight: v })}
+              sunMode={p.living.sun}
+              onSunMode={(m) => p.onLiving({ sun: m })}
               onLocalTime={(v) => p.onLiving({ localTime: v })}
               onZones={(v) => p.onLiving({ zones: v })}
               onBuildings={(v) => p.onLiving({ buildings: v })}

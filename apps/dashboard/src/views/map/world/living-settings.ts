@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { SunMode } from './sun-dynamic'
 
 /**
  * LIVING MAP settings — the physical world under the glass. One master
@@ -16,9 +17,14 @@ export interface LivingSettings {
   buildings: boolean
   /** Zone clocks + market contact state at national zoom. */
   zones: boolean
+  /**
+   * How daylight is drawn: 'ambient' breathes under the theme; 'dynamic'
+   * (desktop) makes the real night side dark and the day side light.
+   */
+  sun: SunMode
 }
 
-export const LIVING_DEFAULTS: LivingSettings = { enabled: true, daylight: true, localTime: true, buildings: true, zones: true }
+export const LIVING_DEFAULTS: LivingSettings = { enabled: true, daylight: true, localTime: true, buildings: true, zones: true, sun: 'ambient' }
 const KEY = 'nexus.map.living'
 const EVT = 'nexus:living-map'
 
@@ -51,4 +57,5 @@ export const living = (s: LivingSettings) => ({
   localTime: s.enabled && s.localTime,
   buildings: s.enabled && s.buildings,
   zones: s.enabled && s.zones,
+  dynamicSun: s.enabled && s.daylight && s.sun === 'dynamic',
 })

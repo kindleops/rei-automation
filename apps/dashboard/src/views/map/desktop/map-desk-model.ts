@@ -170,6 +170,8 @@ export interface SensorInput {
   comps: boolean
   market: boolean
   daylight: boolean
+  /** Daylight drawn as Dynamic (sun): real night dark, real day light. */
+  sunDynamic?: boolean
   localTime: boolean
   zones: boolean
   livingEnabled: boolean
@@ -253,7 +255,7 @@ export function buildSensorArray(s: SensorInput): SensorGroup[] {
       label: 'Live world',
       rows: [
         {
-          id: 'daylight', label: 'Real daylight', sub: 'Day, golden hour, twilight and night from the sun’s real position',
+          id: 'daylight', label: 'Real daylight', sub: s.sunDynamic ? 'Dynamic (sun) · night is dark and day is light where they really are now' : 'Day, golden hour, twilight and night from the sun’s real position',
           status: living(s.daylight) ? 'on' : 'off', on: s.daylight, available: s.livingEnabled,
           reason: s.livingEnabled ? undefined : 'Living Map is off (Appearance)', supports: S(true),
         },

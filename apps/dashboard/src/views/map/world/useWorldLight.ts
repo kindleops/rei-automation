@@ -13,11 +13,17 @@
  * (light basemaps darken more at night, dark themes barely deepen), and the
  * tilted sky + building light follow the real sun at the map centre.
  * Updates once a minute, and not at all while the page is hidden.
+ *
+ * [8.3] mode 'dynamic' (desktop "Dynamic (sun)") swaps only the DATA for
+ * sun-dynamic.ts's night side + twilight falloff + day lift; same source, same
+ * layers, so the minute tick is one setData and pins are never re-rendered.
  */
 import { useEffect, useRef, useState } from 'react'
 import type maplibregl from 'maplibre-gl'
 import { darkRegion, LIGHT_BANDS, lightState, terminatorLine, type LightState } from './solar'
 import { getMapVisualPreset } from '../map-visual-presets'
+import { buildDynamicSun, type SunMode } from './sun-dynamic'
+import { sunNow } from './sun-clock'
 
 const SRC = 'nx-world-light'
 const LAYER = 'nx-world-light'
@@ -99,8 +105,12 @@ export function lightFor(ls: LightState) {
 
 const DEFAULT_LIGHT = { anchor: 'viewport' as const, position: [1.15, 210, 30] as [number, number, number], color: '#ffffff', intensity: 0.5 }
 
-export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: { enabled: boolean; theme: string; tilted: boolean; reducedMotion: boolean }) {
+/** [dev] Cost of the last minute tick (build + setData), for the frame-cost proof. */
+type SunCost = { buildMs: number; setDataMs: number; features: number; vertices: number; mode: SunMode }
+
+export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: { enabled: boolean; theme: string; tilted: boolean; reducedMotion: boolean; mode?: SunMode }) {
   const { enabled, theme, tilted, reducedMotion } = opts
+  const mode: SunMode = opts.mode ?? 'ambient'
   const [center, setCenter] = useState<LightState | null>(null)
   const last = useRef<string>('')
 
@@ -120,18 +130,25 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
     }
     const readCenter = () => {
       const c = map.getCenter()
-      const ls = lightState(new Date(), c.lat, c.lng)
+      const ls = lightState(sunNow(), c.lat, c.lng)
       setCenter((prev) => (prev && prev.phase === ls.phase && Math.abs(prev.altitude - ls.altitude) < 0.25 ? prev : ls))
       return ls
     }
     const apply = () => {
       if (cancelled || !map.style || document.visibilityState === 'hidden') return
       try {
-        const now = new Date()
-        const data = buildLightBands(now, theme)
+        const now = sunNow()
+        const t0 = performance.now()
+        const data = mode === 'dynamic' ? buildDynamicSun(now, theme) : buildLightBands(now, theme)
+        const t1 = performance.now()
         const src = map.getSource(SRC) as maplibregl.GeoJSONSource | undefined
+        // Only this one source changes each minute: pins, labels and every other layer are untouched.
         if (src) src.setData(data as never)
         else map.addSource(SRC, { type: 'geojson', data: data as never, tolerance: 0.6 })
+        if (import.meta.env.DEV) {
+          const vertices = data.features.reduce((n, f) => n + JSON.stringify(f.geometry).split('],[').length, 0)
+          ;(window as unknown as { __nxSunCost?: SunCost }).__nxSunCost = { buildMs: t1 - t0, setDataMs: performance.now() - t1, features: data.features.length, vertices, mode }
+        }
         if (!map.getLayer(LAYER)) {
           map.addLayer({
             id: LAYER, type: 'fill', source: SRC, filter: ['==', ['get', 'kind'], 'band'],
@@ -203,7 +220,7 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
       map.off('moveend', onMove)
       document.removeEventListener('visibilitychange', onVis)
     }
-  }, [map, epoch, enabled, theme, tilted, reducedMotion])
+  }, [map, epoch, enabled, theme, tilted, reducedMotion, mode])
 
   // Leaving (or turning the world off) restores the untouched map.
   useEffect(() => () => {

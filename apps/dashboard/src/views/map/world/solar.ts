@@ -16,29 +16,39 @@
 
 const RAD = Math.PI / 180
 const DAY_MS = 86400000
-const J1970 = 2440588
-const J2000 = 2451545
-const OBLIQUITY = RAD * 23.4397
 
-const toDays = (date: Date) => date.valueOf() / DAY_MS - 0.5 + J1970 - J2000
-const meanAnomaly = (d: number) => RAD * (357.5291 + 0.98560028 * d)
-const eclipticLongitude = (M: number) => {
-  const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M))
-  return M + C + RAD * 102.9372 + Math.PI
+/**
+ * NOAA solar model (Meeus, "Astronomical Algorithms" — the equations behind
+ * the NOAA Solar Calculator): apparent solar declination and the equation of
+ * time for an instant. Sunrise/sunset from it match NOAA's published tables to
+ * the minute (solar.test.ts).
+ */
+export function solarEphemeris(date: Date): { declination: number; eqTimeMin: number } {
+  const jd = date.valueOf() / DAY_MS + 2440587.5
+  const T = (jd - 2451545) / 36525
+  const L0 = (((280.46646 + T * (36000.76983 + T * 0.0003032)) % 360) + 360) % 360
+  const M = 357.52911 + T * (35999.05029 - 0.0001537 * T)
+  const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T)
+  const Mr = M * RAD
+  const C = Math.sin(Mr) * (1.914602 - T * (0.004817 + 0.000014 * T)) + Math.sin(2 * Mr) * (0.019993 - 0.000101 * T) + Math.sin(3 * Mr) * 0.000289
+  const omega = (125.04 - 1934.136 * T) * RAD
+  const lambda = (L0 + C - 0.00569 - 0.00478 * Math.sin(omega)) * RAD
+  const eps0 = 23 + (26 + (21.448 - T * (46.815 + T * (0.00059 - T * 0.001813))) / 60) / 60
+  const eps = (eps0 + 0.00256 * Math.cos(omega)) * RAD
+  const declination = Math.asin(Math.sin(eps) * Math.sin(lambda)) / RAD
+  const y = Math.tan(eps / 2) ** 2
+  const L = L0 * RAD
+  const eqTime = y * Math.sin(2 * L) - 2 * e * Math.sin(Mr) + 4 * e * y * Math.sin(Mr) * Math.cos(2 * L)
+    - 0.5 * y * y * Math.sin(4 * L) - 1.25 * e * e * Math.sin(2 * Mr)
+  return { declination, eqTimeMin: (4 * eqTime) / RAD }
 }
-const declination = (L: number) => Math.asin(Math.sin(OBLIQUITY) * Math.sin(L))
-const rightAscension = (L: number) => Math.atan2(Math.sin(L) * Math.cos(OBLIQUITY), Math.cos(L))
-const siderealTime = (d: number, lw: number) => RAD * (280.16 + 360.9856235 * d) - lw
 
-function sunCoords(d: number) {
-  const L = eclipticLongitude(meanAnomaly(d))
-  return { dec: declination(L), ra: rightAscension(L) }
-}
+const utcMinutes = (date: Date) => ((((date.valueOf() % DAY_MS) + DAY_MS) % DAY_MS) / 60000)
 
 const wrapLng = (lng: number) => ((((lng + 180) % 360) + 360) % 360) - 180
 
 export interface SolarPosition {
-  /** Degrees above the horizon (negative = below). */
+  /** Degrees above the horizon (negative = below). Geometric, no refraction. */
   altitude: number
   /** Compass bearing of the sun, degrees clockwise from north. */
   azimuth: number
@@ -47,28 +57,57 @@ export interface SolarPosition {
 }
 
 export function solarPosition(date: Date, lat: number, lng: number): SolarPosition {
-  const lw = RAD * -lng
+  const { declination, eqTimeMin } = solarEphemeris(date)
+  const dec = declination * RAD
   const phi = RAD * lat
-  const d = toDays(date)
-  const c = sunCoords(d)
-  const H = siderealTime(d, lw) - c.ra
+  // True solar time → hour angle (0 at local solar noon, negative in the morning).
+  const tst = utcMinutes(date) + eqTimeMin + 4 * lng
+  const haDeg = ((((tst / 4 - 180) % 360) + 540) % 360) - 180
+  const H = haDeg * RAD
   // Clamped: directly under the sun rounding lands a hair past 1 and asin → NaN.
-  const altitude = Math.asin(Math.min(1, Math.max(-1, Math.sin(phi) * Math.sin(c.dec) + Math.cos(phi) * Math.cos(c.dec) * Math.cos(H))))
+  const altitude = Math.asin(Math.min(1, Math.max(-1, Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H))))
   // atan2 form measured from south, westward → convert to a compass bearing.
-  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(c.dec) * Math.cos(phi))
-  const hourAngle = ((H / RAD) % 360 + 540) % 360 - 180
-  return { altitude: altitude / RAD, azimuth: ((az / RAD + 180) % 360 + 360) % 360, rising: hourAngle < 0 }
+  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi))
+  return { altitude: altitude / RAD, azimuth: ((az / RAD + 180) % 360 + 360) % 360, rising: haDeg < 0 }
 }
 
-/** The point where the sun is directly overhead. */
+/**
+ * The point where the sun is directly overhead: latitude = declination,
+ * longitude where true solar time is noon (UTC 12:00 shifted by the equation
+ * of time — the sun runs up to ~16 minutes ahead of or behind the clock).
+ */
 export function subsolarPoint(date: Date): { lat: number; lng: number } {
-  const d = toDays(date)
-  const c = sunCoords(d)
-  // Hour angle H = GMST + lng − RA (solarPosition's convention) is zero where
-  // lng = RA − GMST. The reverse sign mirrors the sun about 0/180° longitude —
-  // invisible near 00:00 UTC, ~20° wrong by evening in the Americas.
-  const lng = (c.ra - RAD * (280.16 + 360.9856235 * d)) / RAD
-  return { lat: c.dec / RAD, lng: wrapLng(lng) }
+  const { declination, eqTimeMin } = solarEphemeris(date)
+  return { lat: declination, lng: wrapLng((720 - utcMinutes(date) - eqTimeMin) / 4) }
+}
+
+/**
+ * Sunrise, solar noon and sunset (NOAA convention: sun's upper limb on the
+ * horizon with standard refraction, altitude −0.833°) for the UTC calendar day
+ * of `day`, at a place. Each event is refined against the ephemeris at that
+ * event's own instant. Null under polar day/night.
+ */
+export function sunTimes(day: Date, lat: number, lng: number, altitude = -0.833): { sunrise: Date; noon: Date; sunset: Date } | null {
+  const midnight = Math.floor(day.valueOf() / DAY_MS) * DAY_MS
+  const at = (min: number) => new Date(midnight + min * 60000)
+  const noonAt = (guessMin: number) => 720 - 4 * lng - solarEphemeris(at(guessMin)).eqTimeMin
+  const noon = noonAt(noonAt(720 - 4 * lng))
+  const event = (sign: 1 | -1) => {
+    let t = noon
+    for (let i = 0; i < 3; i++) {
+      const dec = solarEphemeris(at(t)).declination * RAD
+      const phi = lat * RAD
+      const cosH = (Math.sin(altitude * RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec))
+      if (cosH < -1 || cosH > 1) return null
+      const ha = Math.acos(cosH) / RAD
+      t = 720 - 4 * (lng - sign * ha) - solarEphemeris(at(t)).eqTimeMin
+    }
+    return at(t)
+  }
+  const sunrise = event(-1)
+  const sunset = event(1)
+  if (!sunrise || !sunset) return null
+  return { sunrise, noon: at(noon), sunset }
 }
 
 /** Point at angular distance `r` (degrees) and bearing `theta` (degrees) from a centre. */
@@ -93,7 +132,20 @@ export type DarkGeometry = GeoJSON.Polygon
  * with no hard-coded seasons.
  */
 export function darkRegion(date: Date, altitude: number, step = 3): DarkGeometry {
-  const sun = subsolarPoint(date)
+  return regionBelow(subsolarPoint(date), altitude, step)
+}
+
+/**
+ * Everywhere the sun is ABOVE `altitude` degrees — the lit side. The sun's
+ * altitude at a place is minus the altitude of the antisolar point there, so
+ * the lit side is the "dark region" of the antisolar point at −altitude.
+ */
+export function litRegion(date: Date, altitude: number, step = 3): DarkGeometry {
+  const s = subsolarPoint(date)
+  return regionBelow({ lat: -s.lat, lng: wrapLng(s.lng + 180) }, -altitude, step)
+}
+
+function regionBelow(sun: { lat: number; lng: number }, altitude: number, step: number): DarkGeometry {
   const radius = 90 - altitude
   const northDark = sun.lat < altitude
   const southDark = -sun.lat < altitude

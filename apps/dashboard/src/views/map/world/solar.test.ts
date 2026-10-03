@@ -158,3 +158,58 @@ describe('next sunrise / sunset', () => {
     expect(Math.abs(e.at.valueOf() - Date.parse('2026-06-21T10:26:00Z'))).toBeLessThan(4 * 60_000)
   })
 })
+
+describe('[8.3] NOAA ephemeris: declination, equation of time, sunrise/sunset', () => {
+  it('equinoxes and solstices: subsolar latitude 0 / ±23.44°', async () => {
+    const { subsolarPoint } = await import('./solar')
+    // 2026 March equinox 14:46Z, June solstice 08:24Z, Sept equinox 00:05Z, Dec solstice 20:50Z
+    expect(Math.abs(subsolarPoint(new Date('2026-03-20T14:46:00Z')).lat)).toBeLessThan(0.02)
+    expect(Math.abs(subsolarPoint(new Date('2026-09-23T00:05:00Z')).lat)).toBeLessThan(0.02)
+    expect(Math.abs(subsolarPoint(new Date('2026-06-21T08:24:00Z')).lat - 23.436)).toBeLessThan(0.01)
+    expect(Math.abs(subsolarPoint(new Date('2026-12-21T20:50:00Z')).lat + 23.436)).toBeLessThan(0.01)
+  })
+
+  it('equation of time: ~+16.4 min early November, ~−14.2 min mid February', async () => {
+    const { solarEphemeris } = await import('./solar')
+    expect(Math.abs(solarEphemeris(new Date('2026-11-03T12:00:00Z')).eqTimeMin - 16.43)).toBeLessThan(0.1)
+    expect(Math.abs(solarEphemeris(new Date('2026-02-11T12:00:00Z')).eqTimeMin + 14.22)).toBeLessThan(0.1)
+  })
+
+  it('the subsolar longitude carries the equation of time (12:00Z on Nov 3: Greenwich noon was 11:44Z, so the sun is ~4.1°W)', () => {
+    const s = subsolarPoint(new Date('2026-11-03T12:00:00Z'))
+    expect(Math.abs(s.lng + 16.43 / 4)).toBeLessThan(0.05)
+  })
+
+  // NOAA Solar Calculator tables (gml.noaa.gov/grad/solcalc/table.php), 2026, converted to UTC.
+  const NOAA: Array<[string, number, number, string, string, string]> = [
+    ['Minneapolis', 44.9778, -93.265, '2026-10-03', '2026-10-03T12:14:00Z', '2026-10-03T23:50:00Z'],
+    ['Minneapolis', 44.9778, -93.265, '2026-06-21', '2026-06-21T10:26:00Z', '2026-06-22T02:03:00Z'],
+    ['Dallas', 32.7767, -96.797, '2026-10-03', '2026-10-03T12:23:00Z', '2026-10-04T00:09:00Z'],
+    ['Dallas', 32.7767, -96.797, '2026-06-21', '2026-06-21T11:20:00Z', '2026-06-22T01:38:00Z'],
+    ['Los Angeles', 34.0522, -118.2437, '2026-10-03', '2026-10-03T13:49:00Z', '2026-10-04T01:34:00Z'],
+    ['Los Angeles', 34.0522, -118.2437, '2026-06-21', '2026-06-21T12:42:00Z', '2026-06-22T03:08:00Z'],
+  ]
+  for (const [city, lat, lng, day, rise, set] of NOAA) {
+    it(`${city} ${day}: sunrise and sunset within ±2 min of NOAA`, async () => {
+      const { sunTimes } = await import('./solar')
+      const t = sunTimes(new Date(`${day}T00:00:00Z`), lat, lng)!
+      const riseErr = Math.abs(t.sunrise.valueOf() - Date.parse(rise)) / 60000
+      const setErr = Math.abs(t.sunset.valueOf() - Date.parse(set)) / 60000
+      expect(riseErr, `sunrise ${t.sunrise.toISOString()}`).toBeLessThanOrEqual(2)
+      expect(setErr, `sunset ${t.sunset.toISOString()}`).toBeLessThanOrEqual(2)
+    })
+  }
+
+  it('nextSunEvent agrees with sunTimes (Dallas, Oct 3 afternoon → sunset)', async () => {
+    const { nextSunEvent, sunTimes } = await import('./solar')
+    const e = nextSunEvent(new Date('2026-10-03T20:00:00Z'), 32.7767, -96.797)!
+    const t = sunTimes(new Date('2026-10-03T00:00:00Z'), 32.7767, -96.797)!
+    expect(e.kind).toBe('sunset')
+    expect(Math.abs(e.at.valueOf() - t.sunset.valueOf())).toBeLessThan(60_000)
+  })
+
+  it('polar night has no sunrise', async () => {
+    const { sunTimes } = await import('./solar')
+    expect(sunTimes(new Date('2026-12-21T00:00:00Z'), 80, 15)).toBeNull()
+  })
+})

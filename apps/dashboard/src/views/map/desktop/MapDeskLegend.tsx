@@ -106,7 +106,23 @@ export function BoundaryKey({ items }: { items: BoundaryStatus[] }) {
   )
 }
 
-export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pickerOpen, collapsed, onCollapse, boundaries = [] }: {
+/**
+ * [8.3] The day/night key, shown while daylight is drawn as Dynamic (sun):
+ * the same ramp the map uses, from full day through civil, nautical and
+ * astronomical twilight to night. The source is the sun itself.
+ */
+export function SunKey() {
+  return (
+    <div className="mxd-legend__sun" data-legend="sun">
+      <span className="mxd-legend__sun-end">Day</span>
+      <span className="mxd-legend__sun-ramp" aria-hidden="true"><i style={{ left: '24%' }} /><i style={{ left: '52%' }} /><i style={{ left: '78%' }} /></span>
+      <span className="mxd-legend__sun-end">Night</span>
+      <span className="mxd-legend__bound-src" title="Sunset line, then civil (−6°), nautical (−12°) and astronomical (−18°) twilight">Sun’s real position · now</span>
+    </div>
+  )
+}
+
+export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pickerOpen, collapsed, onCollapse, boundaries = [], sun = false }: {
   lens: MapLens
   state: LensState
   zoom: number
@@ -117,6 +133,8 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
   collapsed: boolean
   onCollapse: (v: boolean) => void
   boundaries?: BoundaryStatus[]
+  /** Daylight is drawn as Dynamic (sun): show the day/night key. */
+  sun?: boolean
 }) {
   const valueLens = Boolean(lens.source) && !lens.ambient
   const [a, b] = lens.domain ?? [0, 1]
@@ -165,6 +183,7 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
               </div>
               <p className="mxd-legend__src"><span>{note}</span></p>
               <BoundaryKey items={boundaries} />
+              {sun ? <SunKey /> : null}
             </>
           ) : (
             <>
@@ -189,6 +208,7 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
                 <span>click the colour to read it</span>
               </p>
               <BoundaryKey items={boundaries} />
+              {sun ? <SunKey /> : null}
             </>
           )}
         </div>

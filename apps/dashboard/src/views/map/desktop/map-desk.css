@@ -1432,3 +1432,18 @@ html.is-desktop-modern .mx.is-desk > .mx-draw-bar {
 html.is-desktop-modern[data-lc-motion='off'] .mx.is-desk :is(.mxd-rail, .mxd-stack__search, .mxd-stack__lens, .mxd-worldslot, .mxd-capsule, .mxd-legend, .mxd-legend__panel, .mxd-zoom, .mxd-insp, .mxd-pop, .mxd-toast, .mx-evt),
 html.is-desktop-modern[data-lc-motion='off'] .mx.is-desk :is(.mxd-livebadge i, .mxd-tool__live) { animation: none !important; }
 html.is-desktop-modern[data-lc-motion='off'] .mx.is-desk .mxd-stack__search { transition: none; }
+
+/* [8.3] Dynamic (sun): the daylight style control, and the day/night key.
+   Chrome sits on the shared glass/ink tokens; only the ramp's stops are physical (they mirror the overlay). */
+html.is-desktop-modern .mx.is-desk .mxd-row.is-sub { padding-top: 0; box-shadow: none; }
+html.is-desktop-modern .mx.is-desk .mxd-row.is-sub > .mxd-seg { flex: 1; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__sun { display: flex; align-items: center; gap: 8px; flex-basis: 100%; margin: 0; font-size: 11px; color: var(--mxg-ink-3); white-space: nowrap; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__sun-ramp {
+  position: relative; flex: 0 1 96px; min-width: 56px; height: 6px; border-radius: 999px;
+  /* day → sunset line → civil → nautical → astronomical night (the map's own curve) */
+  background: linear-gradient(90deg, #e9eef6 0%, #e9eef6 18%, #f2a25c 24%, #5d6a8c 52%, #1b2440 78%, #04060d 100%);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line, var(--mxg-rule));
+}
+html.is-desktop-modern .mx.is-desk .mxd-legend__sun-ramp > i { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--mxg-ink-4); opacity: 0.6; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__sun-end { color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .mxd-legend.is-collapsed .mxd-legend__sun { display: none; }

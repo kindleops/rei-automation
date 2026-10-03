@@ -14,6 +14,7 @@ import { ACTIVITY_SCOPES, ACTIVITY_WINDOWS, type ActivityScope, type ActivityWin
 import type { LensStyle } from '../mobile/map-lenses'
 import type { CompFilters } from '../mobile/useSoldComps'
 import { buildSensorArray, groupTally, pctLabel, type SensorInput, type SensorRow, type SensorStatus } from './map-desk-model'
+import { SUN_MODE_OPTIONS, type SunMode } from '../world/sun-dynamic'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -116,6 +117,8 @@ export interface MapDeskLayersProps {
   onBoundaryZip: (v: boolean) => void
   // world
   onDaylight: (v: boolean) => void
+  sunMode: SunMode
+  onSunMode: (m: SunMode) => void
   onLocalTime: (v: boolean) => void
   onZones: (v: boolean) => void
   onBuildings: (v: boolean) => void
@@ -186,7 +189,12 @@ export function MapDeskLayers(p: MapDeskLayersProps) {
       case 'market': return <Plate key={row.id} row={row} onToggle={p.onMarket} />
       case 'boundaryState': return <Plate key={row.id} row={row} onToggle={p.onBoundaryState} />
       case 'boundaryZip': return <Plate key={row.id} row={row} onToggle={p.onBoundaryZip} />
-      case 'daylight': return <Plate key={row.id} row={row} onToggle={p.onDaylight} />
+      case 'daylight':
+        return (
+          <Plate key={row.id} row={row} onToggle={p.onDaylight}>
+            <DeskSeg size="sm" label="Daylight style" value={p.sunMode} onChange={p.onSunMode} options={SUN_MODE_OPTIONS} />
+          </Plate>
+        )
       case 'localTime': return <Plate key={row.id} row={row} onToggle={p.onLocalTime} />
       case 'zones': return <Plate key={row.id} row={row} onToggle={p.onZones} />
       case 'buildings':
