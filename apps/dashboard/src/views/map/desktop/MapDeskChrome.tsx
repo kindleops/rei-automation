@@ -56,6 +56,9 @@ import { useInspectorOcclusion } from '../focus/useInspectorOcclusion'
 import { DESK_CARD_PRESENCE_EVENT, type DeskCardPresence } from '../seller-card/desk-card-presence'
 import { useDeskLabelTone } from './map-desk-labels'
 import { useMapBoundaryLevel } from './useMapBoundaries'
+import { useMapContextOverlays } from './context/useMapContextOverlays'
+import { ContextKey, ContextPlate, ContextPreview } from './context/MapContextUI'
+import './context/map-context.css'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 /** Below this pane width a left inspector and a docked card can't share the map (keep in step with map-desk.css). */
@@ -284,6 +287,12 @@ function AppearancePopover(p: MapDeskChromeProps & { top: number; onClose: () =>
                 <DeskSeg size="sm" label="Daylight style" value={p.living.sun} onChange={(v) => p.onLiving({ sun: v })} options={SUN_MODE_OPTIONS} />
               </div>
             ) : null}
+            {livingOn && p.living.daylight && p.living.sun === 'dynamic' ? (
+              <div className="mxd-row">
+                <span className="mxd-row__copy"><strong>City lights</strong><span>Real night lights on the night side · NASA Black Marble</span></span>
+                <DeskSwitch on={p.living.cityLights} onChange={(v) => p.onLiving({ cityLights: v })} label="City lights" />
+              </div>
+            ) : null}
             <div className={cls('mxd-row', (!livingOn || !p.vectorBuildings) && 'is-disabled')}>
               <span className="mxd-row__copy">
                 <strong>3D buildings</strong>
@@ -493,6 +502,8 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
   // [8.2] administrative outlines from Census geometry we own (server-only API)
   const boundaryState = useMapBoundaryLevel(map, mapEpoch, 'state', p.prefs.boundaryState, p.styleMode)
   const boundaryZip = useMapBoundaryLevel(map, mapEpoch, 'zip', p.prefs.boundaryZip, p.styleMode)
+  // [8.4] context overlays: traffic cameras, reported crime, investor presence
+  const ctx = useMapContextOverlays(map, mapEpoch, p.styleMode)
 
   const sensorInput = {
     pins: p.prefs.pins, everyProperty: p.prefs.everyProperty, filterActive: p.filterCount > 0,
@@ -502,6 +513,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
     buildings: p.living.buildings, tilted: p.dimension === '3d', vectorBuildings,
     relief: p.prefs.relief, activityOn, streamLive: p.streamLive, orbs: p.prefs.liveOrbs,
     boundaryState, boundaryZip,
+    context: ctx.group,
   }
 
   const onPick = (l: MapLens) => { p.onPickLens(l); setPicker(null) }
@@ -588,6 +600,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
       {!p.drawing ? (
         <div className="mxd-cards">
           {p.prefs.market ? <MarketPanel map={map} epoch={mapEpoch} onClose={() => p.setPref('market', false)} /> : null}
+          <ContextPreview ctx={ctx} />
           <MapDeskLegend
             lens={lens}
             state={p.lensState}
@@ -600,6 +613,8 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
             onCollapse={(v) => p.setPref('legendCollapsed', v)}
             boundaries={[boundaryState, boundaryZip]}
             sun={p.living.enabled && p.living.daylight && p.living.sun === 'dynamic'}
+            sunLights={p.living.cityLights}
+            context={<ContextKey ctx={ctx} />}
           />
           {picker === 'legend' ? <LensPicker active={lens} placement="up" onPick={onPick} onClose={() => setPicker(null)} /> : null}
         </div>
@@ -686,6 +701,7 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
               onActivityScope={p.onScope}
               scopeCounts={p.scopeCounts}
               onOrbs={(v) => p.setPref('liveOrbs', v)}
+              renderContext={(row) => <ContextPlate key={row.id} row={row} ctx={ctx} />}
             />
           </div>
         </section>

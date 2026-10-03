@@ -24,18 +24,26 @@ import { darkRegion, LIGHT_BANDS, lightState, terminatorLine, type LightState } 
 import { getMapVisualPreset } from '../map-visual-presets'
 import { buildDynamicSun, type SunMode } from './sun-dynamic'
 import { sunNow } from './sun-clock'
+import { LIGHTS_ATTRIBUTION, LIGHTS_MAXZOOM, lightsBucket, lightsTileUrl, registerCityLightsProtocol } from './city-lights'
 
 const SRC = 'nx-world-light'
 const LAYER = 'nx-world-light'
 const TICK_MS = 60_000
 const LINE = 'nx-world-terminator'
+const LIGHTS = 'nx-world-lights'
+/**
+ * City lights are country/region context: the source tops out at z8 (~500 m
+ * pixels), so past it they would only smear over the streets — they recede
+ * through metro zoom and are gone by z12, leaving the night tint.
+ */
+const LIGHTS_OPACITY = ['interpolate', ['linear'], ['zoom'], 0, 0.92, 7, 0.88, 9, 0.45, 10.5, 0.16, 12, 0]
 
 /** Earliest of: the first basemap label, or the first LeadCommand layer. */
 export function worldUnderlay(map: maplibregl.Map): string | undefined {
   const layers = map.getStyle()?.layers ?? []
   const ours = /^(command-|census-|buyer-demand-|sold-comps-|prop-|map-agg-|map-market|seller-pins-|nx-lens|nx-live|nx-area|nx-comp|nx-dots|nx-focus|nx-world-markets|nx-world-sel)/
   for (const l of layers) {
-    if (l.id === LAYER || l.id === LINE || l.id.startsWith('nx-world-bld') || l.id.startsWith('nx-relief') || l.id.startsWith('nx-hybrid')) continue
+    if (l.id === LAYER || l.id === LINE || l.id === LIGHTS || l.id.startsWith('nx-world-bld') || l.id.startsWith('nx-relief') || l.id.startsWith('nx-hybrid')) continue
     if (l.type === 'symbol' || ours.test(l.id)) return l.id
   }
   return undefined
@@ -108,16 +116,23 @@ const DEFAULT_LIGHT = { anchor: 'viewport' as const, position: [1.15, 210, 30] a
 /** [dev] Cost of the last minute tick (build + setData), for the frame-cost proof. */
 type SunCost = { buildMs: number; setDataMs: number; features: number; vertices: number; mode: SunMode }
 
-export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: { enabled: boolean; theme: string; tilted: boolean; reducedMotion: boolean; mode?: SunMode }) {
+export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: { enabled: boolean; theme: string; tilted: boolean; reducedMotion: boolean; mode?: SunMode; cityLights?: boolean }) {
   const { enabled, theme, tilted, reducedMotion } = opts
   const mode: SunMode = opts.mode ?? 'ambient'
+  /** Real night lights (NASA Black Marble), Dynamic mode only. */
+  const lightsOn = mode === 'dynamic' && Boolean(opts.cityLights)
   const [center, setCenter] = useState<LightState | null>(null)
   const last = useRef<string>('')
 
   useEffect(() => {
     if (!map) return
     let cancelled = false
+    const removeLights = () => {
+      try { if (map.getLayer(LIGHTS)) map.removeLayer(LIGHTS) } catch { /* ignore */ }
+      try { if (map.getSource(LIGHTS)) map.removeSource(LIGHTS) } catch { /* ignore */ }
+    }
     const remove = () => {
+      removeLights()
       try { if (map.getLayer(LINE)) map.removeLayer(LINE) } catch { /* ignore */ }
       try { if (map.getLayer(LAYER)) map.removeLayer(LAYER) } catch { /* ignore */ }
       try { if (map.getSource(SRC)) map.removeSource(SRC) } catch { /* ignore */ }
@@ -172,6 +187,22 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
             },
           } as never, worldUnderlay(map))
         }
+        // City lights: above the night tint, below labels and every LeadCommand layer.
+        // The tile URL carries the (2-minute) sun instant; a new instant re-masks
+        // the decoded tiles in place (setTiles reloads without dropping them).
+        if (lightsOn) {
+          registerCityLightsProtocol()
+          const url = lightsTileUrl(lightsBucket(now.valueOf()))
+          const ls0 = map.getSource(LIGHTS) as (maplibregl.RasterTileSource & { tiles?: string[] }) | undefined
+          if (!ls0) map.addSource(LIGHTS, { type: 'raster', tiles: [url], tileSize: 256, maxzoom: LIGHTS_MAXZOOM, attribution: LIGHTS_ATTRIBUTION })
+          else if (ls0.tiles?.[0] !== url) ls0.setTiles([url])
+          if (!map.getLayer(LIGHTS)) {
+            map.addLayer({
+              id: LIGHTS, type: 'raster', source: LIGHTS,
+              paint: { 'raster-opacity': LIGHTS_OPACITY, 'raster-fade-duration': reducedMotion ? 0 : 400, 'raster-resampling': 'linear' },
+            } as never, worldUnderlay(map))
+          }
+        } else removeLights()
         const ls = readCenter()
         try { map.setLight(lightFor(ls) as never) } catch { /* old style */ }
         const setSky = (map as unknown as { setSky?: (s: unknown) => void }).setSky
@@ -220,11 +251,13 @@ export function useWorldLight(map: maplibregl.Map | null, epoch: number, opts: {
       map.off('moveend', onMove)
       document.removeEventListener('visibilitychange', onVis)
     }
-  }, [map, epoch, enabled, theme, tilted, reducedMotion, mode])
+  }, [map, epoch, enabled, theme, tilted, reducedMotion, mode, lightsOn])
 
   // Leaving (or turning the world off) restores the untouched map.
   useEffect(() => () => {
     if (!map) return
+    try { if (map.getLayer(LIGHTS)) map.removeLayer(LIGHTS) } catch { /* ignore */ }
+    try { if (map.getSource(LIGHTS)) map.removeSource(LIGHTS) } catch { /* ignore */ }
     try { if (map.getLayer(LINE)) map.removeLayer(LINE) } catch { /* ignore */ }
     try { if (map.getLayer(LAYER)) map.removeLayer(LAYER) } catch { /* ignore */ }
     try { if (map.getSource(SRC)) map.removeSource(SRC) } catch { /* ignore */ }

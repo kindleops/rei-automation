@@ -36,7 +36,7 @@ describe('the overlay at a fixed instant', () => {
     expect(darknessAt(-118.24, 34.05)).toBe(0)
   })
   it('deep night (Europe · Africa) reaches the full theme darkness; noon (Pacific) has none', () => {
-    expect(darknessAt(10, 0)).toBeCloseTo(0.6, 2)
+    expect(darknessAt(10, 0)).toBeCloseTo(0.76, 2)
     expect(darknessAt(-170, 0)).toBe(0)
   })
   it('darkness rises monotonically across the terminator (W → E along 40°N)', () => {

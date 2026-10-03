@@ -54,10 +54,11 @@ export interface DynamicPalette {
 
 export function dynamicPalette(theme: string): DynamicPalette {
   const p = getMapVisualPreset(theme)
-  if (p.basemap.isLight) return { night: 0.6, nightColor: '#0a1433', day: 0, dayColor: '#ffffff', golden: 0.07 }
-  if (p.basemap.family === 'satellite') return { night: 0.66, nightColor: '#01030a', day: 0.06, dayColor: '#fff6e8', golden: 0.06 }
-  if (p.basemap.family === 'terrain') return { night: 0.58, nightColor: '#050b1c', day: 0.06, dayColor: '#dfe9f7', golden: 0.06 }
-  return { night: 0.66, nightColor: '#000208', day: 0.13, dayColor: '#b8cbe6', golden: 0.05 }
+  // [8.4] owner: night must read as night — deep tint; labels keep their halos above it.
+  if (p.basemap.isLight) return { night: 0.76, nightColor: '#08112b', day: 0, dayColor: '#ffffff', golden: 0.07 }
+  if (p.basemap.family === 'satellite') return { night: 0.8, nightColor: '#01030a', day: 0.06, dayColor: '#fff6e8', golden: 0.06 }
+  if (p.basemap.family === 'terrain') return { night: 0.76, nightColor: '#050b1c', day: 0.06, dayColor: '#dfe9f7', golden: 0.06 }
+  return { night: 0.82, nightColor: '#000208', day: 0.13, dayColor: '#b8cbe6', golden: 0.05 }
 }
 
 /** Target composite (0–1 of the theme's max) at a solar altitude below the horizon. */

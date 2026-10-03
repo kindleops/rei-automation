@@ -22,9 +22,11 @@ export interface LivingSettings {
    * (desktop) makes the real night side dark and the day side light.
    */
   sun: SunMode
+  /** Real night lights (NASA Black Marble) on the night side, in Dynamic mode. */
+  cityLights: boolean
 }
 
-export const LIVING_DEFAULTS: LivingSettings = { enabled: true, daylight: true, localTime: true, buildings: true, zones: true, sun: 'ambient' }
+export const LIVING_DEFAULTS: LivingSettings = { enabled: true, daylight: true, localTime: true, buildings: true, zones: true, sun: 'ambient', cityLights: true }
 const KEY = 'nexus.map.living'
 const EVT = 'nexus:living-map'
 
@@ -58,4 +60,5 @@ export const living = (s: LivingSettings) => ({
   buildings: s.enabled && s.buildings,
   zones: s.enabled && s.zones,
   dynamicSun: s.enabled && s.daylight && s.sun === 'dynamic',
+  cityLights: s.enabled && s.daylight && s.sun === 'dynamic' && s.cityLights,
 })

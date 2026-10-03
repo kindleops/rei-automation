@@ -12,13 +12,14 @@
  * pane (map-desk.css container queries) it folds to a "Legend" chip that opens
  * the same key on demand.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../../../shared/icons'
 import { UNIVERSAL_STAGE_RING_COLORS } from '../universal-stage-colors'
 import { LENS_FAMILIES, MAP_LENSES, formatLensValue, type LensStyle, type MapLens } from '../mobile/map-lenses'
 import { rampGradient } from '../mobile/MapIntelCards'
 import type { LensLook, LensState } from '../mobile/useMapLens'
 import type { BoundaryStatus } from './useMapBoundaries'
+import { LIGHTS_ATTRIBUTION } from '../world/city-lights'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 
@@ -111,18 +112,19 @@ export function BoundaryKey({ items }: { items: BoundaryStatus[] }) {
  * the same ramp the map uses, from full day through civil, nautical and
  * astronomical twilight to night. The source is the sun itself.
  */
-export function SunKey() {
+export function SunKey({ lights = false }: { lights?: boolean }) {
   return (
     <div className="mxd-legend__sun" data-legend="sun">
       <span className="mxd-legend__sun-end">Day</span>
       <span className="mxd-legend__sun-ramp" aria-hidden="true"><i style={{ left: '24%' }} /><i style={{ left: '52%' }} /><i style={{ left: '78%' }} /></span>
       <span className="mxd-legend__sun-end">Night</span>
       <span className="mxd-legend__bound-src" title="Sunset line, then civil (−6°), nautical (−12°) and astronomical (−18°) twilight">Sun’s real position · now</span>
+      {lights ? <span className="mxd-legend__sun-attr" title="We acknowledge the use of imagery provided by services from NASA’s Global Imagery Browse Services (GIBS), part of NASA’s Earth Science Data and Information System (ESDIS).">{LIGHTS_ATTRIBUTION}</span> : null}
     </div>
   )
 }
 
-export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pickerOpen, collapsed, onCollapse, boundaries = [], sun = false }: {
+export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pickerOpen, collapsed, onCollapse, boundaries = [], sun = false, sunLights = false, context = null }: {
   lens: MapLens
   state: LensState
   zoom: number
@@ -135,6 +137,10 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
   boundaries?: BoundaryStatus[]
   /** Daylight is drawn as Dynamic (sun): show the day/night key. */
   sun?: boolean
+  /** City lights are drawn (their source is credited in the key). */
+  sunLights?: boolean
+  /** [8.4] Context overlay entries (context/MapContextUI ContextKey). */
+  context?: ReactNode
 }) {
   const valueLens = Boolean(lens.source) && !lens.ambient
   const [a, b] = lens.domain ?? [0, 1]
@@ -183,7 +189,8 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
               </div>
               <p className="mxd-legend__src"><span>{note}</span></p>
               <BoundaryKey items={boundaries} />
-              {sun ? <SunKey /> : null}
+              {context}
+              {sun ? <SunKey lights={sunLights} /> : null}
             </>
           ) : (
             <>
@@ -208,7 +215,8 @@ export function MapDeskLegend({ lens, state, zoom, look, onLook, onColorBy, pick
                 <span>click the colour to read it</span>
               </p>
               <BoundaryKey items={boundaries} />
-              {sun ? <SunKey /> : null}
+              {context}
+              {sun ? <SunKey lights={sunLights} /> : null}
             </>
           )}
         </div>

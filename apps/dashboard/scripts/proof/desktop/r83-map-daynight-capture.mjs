@@ -2,7 +2,8 @@ import { chromium } from 'playwright'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 /**
- * R8.3 MAP DYNAMIC DAY/NIGHT capture (READ ONLY).
+ * R8.3/8.4 MAP DYNAMIC DAY/NIGHT capture (READ ONLY) — 8.4 adds city lights
+ * (NASA Black Marble via GIBS; plain GETs to gibs.earthdata.nasa.gov).
  *
  * The sun is pinned to a fixed instant with the DEV-only `?sun_at=` override
  * (world/sun-clock.ts — shifts the sun only, ignored in production builds):
@@ -79,6 +80,7 @@ await shot('world')
 await jump([-73.98, 40.73], 10.2); await shot('metro-east-newyork')
 await jump([-118.3, 34.05], 10.2); await shot('metro-west-losangeles')
 await jump([-87.65, 41.88], 9.4); await shot('metro-terminator-chicago')
+await jump([-76, 40.2], 6.6, 9000); await shot('region-east-lights')
 // street
 await jump([-73.985, 40.748], 15.2); await shot('street-east-newyork')
 await jump([-96.80, 32.78], 15.2); await shot('street-west-dallas')
@@ -113,7 +115,7 @@ const perf = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 4000))
   const baseline = await frames(6000, false)
   const updating = await frames(6000, true)
-  return { baseline, updating, lastTick: window.__nxSunCost ?? null }
+  return { baseline, updating, lastTick: window.__nxSunCost ?? null, lights: window.__nxLightsCost ?? null }
 })
 console.log('PERF', JSON.stringify(perf))
 console.log('ERRORS', JSON.stringify(errors.slice(0, 10)))

@@ -1447,3 +1447,5 @@ html.is-desktop-modern .mx.is-desk .mxd-legend__sun-ramp {
 html.is-desktop-modern .mx.is-desk .mxd-legend__sun-ramp > i { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--mxg-ink-4); opacity: 0.6; }
 html.is-desktop-modern .mx.is-desk .mxd-legend__sun-end { color: var(--mxg-ink-3); }
 html.is-desktop-modern .mx.is-desk .mxd-legend.is-collapsed .mxd-legend__sun { display: none; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__sun { flex-wrap: wrap; row-gap: 2px; }
+html.is-desktop-modern .mx.is-desk .mxd-legend__sun-attr { flex-basis: 100%; color: var(--mxg-ink-4); white-space: normal; }
