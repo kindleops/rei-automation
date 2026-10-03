@@ -131,6 +131,9 @@ html.is-desktop-modern .ccz-col-b { display: grid; gap: var(--ccz-gap); min-widt
 }
 @container ccz (min-width: 2600px) {
   html.is-desktop-modern .ccz { --ccz-pad: 36px; --ccz-gap: 18px; }
+  /* ultrawide: every layer gets its own column — audience | strategy | delivery | schedule | readiness */
+  html.is-desktop-modern .ccz-grid { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(320px, 0.7fr); }
+  html.is-desktop-modern .ccz-col-b { display: contents; }
   html.is-desktop-modern .ccz-grid, html.is-desktop-modern .ccz-spine, html.is-desktop-modern .ccz-head, html.is-desktop-modern .ccz-dock { max-width: 3400px; width: calc(100% - 2 * var(--ccz-pad)); margin-left: auto; margin-right: auto; }
   html.is-desktop-modern .ccz-grid { width: 100%; }
 }

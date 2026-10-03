@@ -405,6 +405,8 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
 
   const stateTone = readiness.state === 'ready' ? 'ok' : readiness.state === 'warning' ? 'attn' : readiness.state === 'blocked' ? 'crit' : 'neutral'
   const layerState = (layer: Layer) => {
+    // the launch step reads the whole composition's readiness
+    if (layer === 'launch') return readiness.state === 'ready' ? 'ok' as const : readiness.state === 'warning' ? 'warn' as const : readiness.state === 'blocked' ? 'block' as const : 'checking' as const
     const xs = readiness.checks.filter((c) => c.layer === layer)
     if (!xs.length) return 'idle' as const
     if (xs.some((c) => c.state === 'block')) return 'block' as const

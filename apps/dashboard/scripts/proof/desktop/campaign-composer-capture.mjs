@@ -87,6 +87,8 @@ for (const [W, H] of SIZES) for (const theme of THEMES) for (const kase of CASES
       return big && /\d/.test(big.textContent || '') || document.querySelector('.ccz-aud .ccz-err')
     }, null, { timeout: 240000 }).catch(() => console.log(tag, 'note: audience did not settle'))
     await page.waitForSelector('.ccz-strat', { timeout: 120000 }).catch(() => {})
+    // the authoritative whole-cohort count (the build's own pipeline) lands after the sample
+    await page.waitForFunction(() => /Whole cohort/.test(document.querySelector('.ccz-aud')?.textContent || ''), null, { timeout: 240000 }).catch(() => console.log(tag, 'note: whole cohort not counted'))
     await page.waitForTimeout(2500)
     if (kase !== 'nosender') await page.fill('.ccz-name', kase === 'dallas' ? 'Dallas · first touch' : `${kase} · QA`)
     await page.waitForTimeout(1800)
