@@ -1,6 +1,7 @@
 import type { InspectorModel, InspectorRenderer } from '../inspector-registry'
 import type { EntityRef } from '../inspector-store'
-import { count, enc, joinParts, money, present, readInspector, text, when } from '../inspector-read'
+import { InspectorReadError, count, enc, joinParts, money, present, readInspector, text, when } from '../inspector-read'
+import { shapeSaleRecord, type PropertySaleRecord } from './property-sale'
 
 /**
  * PROPERTY — GET /api/cockpit/properties/:id/subject (the Comps subject
@@ -97,7 +98,17 @@ export const propertyInspector: InspectorRenderer = {
   glyph: 'home',
   load: async (ref, signal) => {
     const id = text(ref.hint?.property_id) ?? ref.id
-    const body = await readInspector<{ data: PropertySubject }>(`/api/cockpit/properties/${enc(id)}/subject`, signal)
-    return shapeProperty(body.data ?? {}, ref)
+    try {
+      const body = await readInspector<{ data: PropertySubject }>(`/api/cockpit/properties/${enc(id)}/subject`, signal)
+      return shapeProperty(body.data ?? {}, ref)
+    } catch (e) {
+      // Not a canonical property: a comp-derived id is often a parcel that was sold
+      // but never entered the property universe. Show its recorded sales instead,
+      // labelled as such; with no sale on record either, the original "not on record" stands.
+      if (!(e instanceof InspectorReadError) || e.kind !== 'not_found') throw e
+      const sale = await readInspector<{ data: PropertySaleRecord }>(`/api/cockpit/properties/${enc(id)}/sale-record`, signal).catch(() => null)
+      if (!sale?.data) throw e
+      return shapeSaleRecord(sale.data, ref)
+    }
   },
 }
