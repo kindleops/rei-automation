@@ -115,8 +115,55 @@ interface RealComp {
   latitude?: number | null
   longitude?: number | null
   property_type?: string
-  source_type: 'BUYER_PURCHASE' | 'RECENTLY_SOLD' | 'UNKNOWN'
+  source_type: 'BUYER_PURCHASE' | 'CANONICAL_SALE' | 'UNKNOWN'
+  /** canonical sales only: an MLS close vs a recorded deed */
+  sale_source?: 'mls' | 'public_record'
   distance_miles?: number | null
+}
+
+/**
+ * Current canonical sold comps (mv_map_market_sales via the shared Buyer Match
+ * sales adapter; deduped, price > 0 only). Used only when the engine returned
+ * no comps. Never reads the frozen legacy recently-sold import.
+ */
+async function fetchCanonicalComps(subject: { lat: number | null; lng: number | null; zip: string | null }): Promise<RealComp[]> {
+  const qs = new URLSearchParams({ priced: 'only', limit: '20', months: '24' })
+  if (subject.lat != null && subject.lng != null) {
+    qs.set('lat', String(subject.lat))
+    qs.set('lng', String(subject.lng))
+  } else if (subject.zip) {
+    qs.set('zip', subject.zip)
+  } else {
+    return []
+  }
+  try {
+    const res = await callBackend<{ ok: boolean; data?: { sales?: Array<Record<string, any>> } }>(`/api/cockpit/buyer-match/sales?${qs.toString()}`)
+    if (!res.ok) return []
+    const sales = res.data?.data?.sales ?? []
+    return sales
+      .filter((s) => typeof s.price === 'number' && s.price > 0)
+      .map((s) => ({
+        id: String(s.comp_id),
+        address: s.address || 'Address Unknown',
+        city: s.city ?? undefined,
+        state: s.state ?? undefined,
+        zip: s.zip ?? undefined,
+        sold_price: s.price,
+        sold_date: s.sold_on ?? null,
+        beds: s.beds ?? null,
+        baths: s.baths ?? null,
+        sqft: s.sqft ?? null,
+        ppsf: s.ppsf ?? null,
+        latitude: s.lat ?? null,
+        longitude: s.lng ?? null,
+        property_type: s.property_type ?? undefined,
+        source_type: 'CANONICAL_SALE' as const,
+        sale_source: s.sale_source === 'mls' ? 'mls' as const : 'public_record' as const,
+        distance_miles: s.distance_miles ?? null,
+      }))
+  } catch {
+    return []
+  }
 }
 
 interface DebugData {
@@ -1483,7 +1530,8 @@ function CompsTab({ propertySnapshot, realComps }: { propertySnapshot: PropertyS
   const hasRealComps = realComps.length > 0
 
   const RealCompCard = ({ comp }: { comp: RealComp }) => {
-    const typeTag = comp.source_type === 'BUYER_PURCHASE' ? 'PR' : 'MLS'
+    // Only an MLS close is labelled MLS; a recorded deed is a public record (PR).
+    const typeTag = comp.source_type === 'BUYER_PURCHASE' || comp.sale_source === 'public_record' ? 'PR' : 'MLS'
     const daysSold = comp.sold_date ? Math.round((Date.now() - new Date(comp.sold_date).getTime()) / 86_400_000) : null
     return (
       <div className={`aic-comp-card is-${typeTag === 'PR' ? 'pr' : 'mls'}`}>
@@ -2408,87 +2456,12 @@ export function BuyerMatchWorkspace({
           }
         }
 
-        // ── 4. Real comps from recently_sold_properties ──────────────────────
+        // ── 4. Sold comps: current canonical sales (deduped, price > 0) from the
+        //    shared Buyer Match sales adapter — via the engine below, or
+        //    /api/cockpit/buyer-match/sales when the engine returns none.
         let comps: RealComp[] = []
         let compRows = 0
-        if (resolvedZip) {
-          const { data: compData } = await supabase.from('recently_sold_properties')
-            .select('*')
-            .eq('property_address_zip', resolvedZip)
-            .not('sale_price', 'is', null)
-            .order('sale_date', { ascending: false })
-            .limit(20)
-          if (compData && compData.length > 0) {
-            compRows = compData.length
-            comps = compData.map((c: any) => ({
-              id: c.id || c.property_id || String(Math.random()),
-              address: c.property_address_full || c.address || 'Unknown',
-              city: c.property_city || c.city,
-              state: c.property_address_state || c.state,
-              zip: c.property_address_zip || c.zip,
-              sold_price: c.sale_price ?? c.sold_price ?? c.purchase_price,
-              sold_date: c.sale_date ?? c.sold_date,
-              beds: c.total_bedrooms ?? c.beds,
-              baths: c.total_baths ?? c.baths,
-              sqft: c.building_square_feet ?? c.sqft,
-              ppsf: (c.sale_price && c.building_square_feet) ? Math.round(c.sale_price / c.building_square_feet) : c.ppsf,
-              latitude: c.latitude,
-              longitude: c.longitude,
-              property_type: c.property_type,
-              source_type: 'RECENTLY_SOLD' as const,
-            }))
-          } else if (resolvedMarket && resolvedMarket !== 'Market Unknown') {
-            const { data: mktComps } = await supabase.from('recently_sold_properties')
-              .select('*')
-              .eq('market', resolvedMarket)
-              .not('sale_price', 'is', null)
-              .order('sale_date', { ascending: false })
-              .limit(20)
-            if (mktComps && mktComps.length > 0) {
-              compRows = mktComps.length
-              comps = mktComps.map((c: any) => ({
-                id: c.id || c.property_id || String(Math.random()),
-                address: c.property_address_full || c.address || 'Unknown',
-                city: c.property_city, state: c.property_address_state,
-                zip: c.property_address_zip,
-                sold_price: c.sale_price ?? c.sold_price,
-                sold_date: c.sale_date ?? c.sold_date,
-                beds: c.total_bedrooms ?? c.beds, baths: c.total_baths ?? c.baths,
-                sqft: c.building_square_feet ?? c.sqft,
-                ppsf: (c.sale_price && c.building_square_feet) ? Math.round(c.sale_price / c.building_square_feet) : undefined,
-                property_type: c.property_type,
-                source_type: 'RECENTLY_SOLD' as const,
-              }))
-            }
-          }
-        }
-        // Also pull from buyer purchase events as additional comps
-        if (comps.length < 5 && resolvedZip) {
-          const { data: evComps } = await supabase.from('buyer_purchase_events_v2')
-            .select('property_address_full,property_city,property_state,property_zip,purchase_price,purchase_date,sqft,property_type,latitude,longitude')
-            .eq('property_zip', resolvedZip)
-            .not('purchase_price', 'is', null)
-            .order('purchase_date', { ascending: false })
-            .limit(20)
-          if (evComps && evComps.length > 0) {
-            const evMapped: RealComp[] = evComps.map((c: any) => ({
-              id: String(Math.random()),
-              address: c.property_address_full || 'Unknown',
-              city: c.property_city, state: c.property_state,
-              zip: c.property_zip,
-              sold_price: c.purchase_price,
-              sold_date: c.purchase_date,
-              beds: c.beds, baths: c.baths,
-              sqft: c.sqft,
-              ppsf: (c.purchase_price && c.sqft) ? Math.round(c.purchase_price / c.sqft) : undefined,
-              latitude: c.latitude, longitude: c.longitude,
-              property_type: c.property_type,
-              source_type: 'BUYER_PURCHASE' as const,
-            }))
-            comps = [...comps, ...evMapped].slice(0, 20)
-            compRows += evMapped.length
-          }
-        }
+        let engineReturnedComps = false
 
         // ── Real intelligence: rollup + comps + demand via /api/intel/buyer-match
         //    (persist:false — a passive load must not create a run). This supersedes
@@ -2539,6 +2512,7 @@ export function BuyerMatchWorkspace({
           if (Array.isArray(ed?.comps) && ed.comps.length > 0) {
             comps = ed.comps as RealComp[]
             compRows = ed.comps.length
+            engineReturnedComps = true
           }
           fallbackFromEngine = ed?.fallback_level ?? 'none'
           liquidityFromEngine = ed?.liquidity_score ?? null
@@ -2546,6 +2520,43 @@ export function BuyerMatchWorkspace({
         } catch (e) {
           if (IS_DEV) console.warn('[BuyerMatchWorkspace] engine prefetch failed:', e)
         }
+
+        if (!engineReturnedComps) {
+          const canonical = await fetchCanonicalComps({ lat: lat ?? null, lng: lng ?? null, zip: resolvedZip || null })
+          if (canonical.length > 0) {
+            comps = canonical
+            compRows = canonical.length
+          }
+        }
+
+        // Also pull from buyer purchase events as additional comps
+        if (!engineReturnedComps && comps.length < 5 && resolvedZip) {
+          const { data: evComps } = await supabase.from('buyer_purchase_events_v2')
+            .select('property_address_full,property_city,property_state,property_zip,purchase_price,purchase_date,sqft,property_type,latitude,longitude')
+            .eq('property_zip', resolvedZip)
+            .not('purchase_price', 'is', null)
+            .order('purchase_date', { ascending: false })
+            .limit(20)
+          if (evComps && evComps.length > 0) {
+            const evMapped: RealComp[] = evComps.map((c: any) => ({
+              id: String(Math.random()),
+              address: c.property_address_full || 'Unknown',
+              city: c.property_city, state: c.property_state,
+              zip: c.property_zip,
+              sold_price: c.purchase_price,
+              sold_date: c.purchase_date,
+              beds: c.beds, baths: c.baths,
+              sqft: c.sqft,
+              ppsf: (c.purchase_price && c.sqft) ? Math.round(c.purchase_price / c.sqft) : undefined,
+              latitude: c.latitude, longitude: c.longitude,
+              property_type: c.property_type,
+              source_type: 'BUYER_PURCHASE' as const,
+            }))
+            comps = [...comps, ...evMapped].slice(0, 20)
+            compRows += evMapped.length
+          }
+        }
+
 
         if (!active) return
 

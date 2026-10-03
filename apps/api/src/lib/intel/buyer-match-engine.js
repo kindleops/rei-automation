@@ -21,6 +21,7 @@ import {
   flattenSubjectForConsumers,
 } from '@/lib/domain/comp-intelligence/canonical-subject-property.js';
 import { buildCanonicalBuyerDemand } from './buyer-match-demand.js';
+import { loadBuyerMatchComps } from '@/lib/domain/buyer-match/buyer-match-sales.js';
 import { lenderClass } from '@/lib/domain/buyer-match/buyer-identity-rules.js';
 import {
   BUYER_MATCH_MODEL_VERSION,
@@ -36,17 +37,6 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 const clamp = (v, min = 0, max = 100) => Math.min(Math.max(Number(v) || 0, min), max);
-
-function haversineMiles(lat1, lng1, lat2, lng2) {
-  if ([lat1, lng1, lat2, lng2].some((v) => v === null || v === undefined)) return null;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 3958.7559 * 2 * Math.asin(Math.min(1, Math.sqrt(a)));
-}
 
 /**
  * Normalize an arbitrary subject-property payload into the canonical filter set
@@ -114,66 +104,20 @@ async function fetchBuyerRollup(supabase, subject) {
   return { rollup: null, rollup_level: null };
 }
 
-/** Nearby sold comps from recently_sold_properties (zip-first, then distance-ranked). */
+/**
+ * Nearby PRICED sold comps from the shared Buyer Match sales adapter
+ * (mv_map_market_sales = deduped canonical transactions; price > 0 only).
+ */
 async function fetchComps(supabase, subject, limit = 12) {
-  const select =
-    'id,property_address_full,property_address_city,property_address_state,property_address_zip,' +
-    'sale_price,sale_date,total_bedrooms,total_baths,building_square_feet,price_per_sqft,' +
-    'latitude,longitude,property_type';
-
-  let rows = [];
-  if (subject.lat !== null && subject.lng !== null) {
-    const d = 0.4; // ~27mi bounding box
-    const { data } = await supabase
-      .from('recently_sold_properties')
-      .select(select)
-      .gte('latitude', subject.lat - d)
-      .lte('latitude', subject.lat + d)
-      .gte('longitude', subject.lng - d)
-      .lte('longitude', subject.lng + d)
-      .limit(400);
-    rows = data ?? [];
+  try {
+    const { comps } = await loadBuyerMatchComps(subject, { limit }, { db: supabase });
+    return comps;
+  } catch (error) {
+    // Comps are supporting evidence: a read failure leaves them empty rather
+    // than failing the buyer match (same tolerance the legacy read had).
+    console.warn('[BUYER_MATCH_COMPS_READ_FAILED]', { property_id: subject?.property_id, error: error?.message });
+    return [];
   }
-  if (rows.length === 0 && subject.zip) {
-    const { data } = await supabase
-      .from('recently_sold_properties')
-      .select(select)
-      .eq('property_address_zip', subject.zip)
-      .limit(200);
-    rows = data ?? [];
-  }
-
-  return rows
-    .map((r) => {
-      const distance_miles =
-        subject.lat !== null && r.latitude && r.longitude
-          ? haversineMiles(subject.lat, subject.lng, num(r.latitude), num(r.longitude))
-          : null;
-      return {
-        id: String(r.id),
-        address: r.property_address_full || 'Address Unknown',
-        city: r.property_address_city || undefined,
-        state: r.property_address_state || undefined,
-        zip: r.property_address_zip || undefined,
-        sold_price: num(r.sale_price),
-        sold_date: r.sale_date || null,
-        beds: num(r.total_bedrooms),
-        baths: num(r.total_baths),
-        sqft: num(r.building_square_feet),
-        ppsf: num(r.price_per_sqft),
-        latitude: num(r.latitude),
-        longitude: num(r.longitude),
-        property_type: r.property_type || undefined,
-        source_type: 'RECENTLY_SOLD',
-        distance_miles: distance_miles !== null ? Math.round(distance_miles * 100) / 100 : null,
-      };
-    })
-    .sort((a, b) => {
-      if (a.distance_miles === null) return 1;
-      if (b.distance_miles === null) return -1;
-      return a.distance_miles - b.distance_miles;
-    })
-    .slice(0, limit);
 }
 
 /** Compute subject-level demand / liquidity / confidence from candidates + rollup. */

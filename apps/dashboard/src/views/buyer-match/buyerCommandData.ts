@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { InboxWorkflowThread } from '../../lib/data/inboxWorkflowData'
 import { getSupabaseClient } from '../../lib/supabaseClient'
+import { callBackend } from '../../lib/api/backendClient'
 
 export type BuyerNumericFilter = number | ''
 
@@ -859,6 +860,52 @@ const deriveProfileRoleTags = (profile: BuyerProfileSummary): string[] => {
   return Array.from(tags)
 }
 
+/**
+ * Canonical sales (mv_map_market_sales via /api/cockpit/buyer-match/sales),
+ * mapped onto the purchase-row keys toRecentPurchase reads. Person buyer names
+ * are withheld server-side; an unpriced sale keeps sale_price null.
+ */
+const fetchCanonicalPurchaseRows = async (scope: {
+  lat: number | null
+  lng: number | null
+  radiusMiles: number
+  zip: string
+  state: string
+  propertyType: string
+}): Promise<{ rows: Record<string, unknown>[]; table: string | null; error: string | null }> => {
+  const qs = new URLSearchParams({ priced: 'all', limit: '500', months: '24' })
+  if (scope.lat != null && scope.lng != null) {
+    qs.set('lat', String(scope.lat))
+    qs.set('lng', String(scope.lng))
+    if (Number.isFinite(scope.radiusMiles) && scope.radiusMiles > 0) qs.set('radius', String(scope.radiusMiles))
+  } else if (scope.zip) qs.set('zip', scope.zip)
+  else if (scope.state) qs.set('state', scope.state)
+  else return { rows: [], table: null, error: null }
+  if (scope.propertyType) qs.set('property_type', scope.propertyType)
+  const res = await callBackend<{ ok: boolean; data?: { sales?: Record<string, unknown>[] } }>(`/api/cockpit/buyer-match/sales?${qs.toString()}`)
+  if (!res.ok) return { rows: [], table: 'buyer_match_sales', error: res.message || res.error }
+  const rows = (res.data?.data?.sales ?? []).map((sale) => ({
+    property_id: sale.property_id,
+    id: sale.comp_id,
+    property_address_full: sale.address,
+    property_address_city: sale.city,
+    property_address_state: sale.state,
+    property_address_zip: sale.zip,
+    property_type: sale.property_type,
+    buyer_display_name: sale.buyer ?? undefined,
+    is_corporate_buyer: sale.buyer_kind === 'company',
+    sale_date: sale.sold_on,
+    sale_price: sale.is_priced === true ? sale.price : null,
+    building_square_feet: sale.sqft,
+    total_bedrooms: sale.beds,
+    total_baths: sale.baths,
+    year_built: sale.year_built,
+    latitude: sale.lat,
+    longitude: sale.lng,
+  }))
+  return { rows, table: 'buyer_match_sales', error: null }
+}
+
 export const useBuyerCommandData = (
   selectedThread: InboxWorkflowThread | null,
   filters: BuyerMapFilters,
@@ -926,8 +973,8 @@ export const useBuyerCommandData = (
         },
       )
 
-      const purchaseResult = await fetchFirstAvailable<Record<string, unknown>>(
-        ['v_buyer_entity_purchases', 'recently_sold_properties_computed', 'recently_sold_properties'],
+      let purchaseResult = await fetchFirstAvailable<Record<string, unknown>>(
+        ['v_buyer_entity_purchases'],
         async (table) => {
           let query = supabase
             .from(table)
@@ -941,7 +988,7 @@ export const useBuyerCommandData = (
           const state = filters.state || context.state
           const propertyType = filters.propertyType || context.propertyType
 
-          if (market && table === 'v_buyer_entity_purchases') query = query.eq('market', market)
+          if (market) query = query.eq('market', market)
           else if (state) query = query.eq('property_address_state', state)
           if (filters.zip || context.zip) query = query.eq('property_address_zip', filters.zip || context.zip)
           if (propertyType) query = query.eq('property_type', propertyType)
@@ -949,6 +996,21 @@ export const useBuyerCommandData = (
           return await query
         },
       )
+
+      // The frozen legacy recently-sold import is no longer a fallback: when the
+      // purchases view is unavailable, read current canonical sales (deduped;
+      // unpriced sales count as activity but never carry a price) through the
+      // shared Buyer Match sales adapter.
+      if (purchaseResult.table === null) {
+        purchaseResult = await fetchCanonicalPurchaseRows({
+          lat: context.lat,
+          lng: context.lng,
+          radiusMiles: filters.radiusMiles,
+          zip: filters.zip || context.zip,
+          state: filters.state || context.state,
+          propertyType: filters.propertyType || context.propertyType,
+        })
+      }
 
       let matchRows: Record<string, unknown>[] = []
       let matchError: string | null = null
@@ -1028,7 +1090,8 @@ export const useBuyerCommandData = (
           const zip = filters.zip || context.zip
           const propertyType = filters.propertyType || context.propertyType
           if (zip && purchase.propertyAddressZip && purchase.propertyAddressZip !== zip) return false
-          if (market && purchase.market && lower(purchase.market) !== lower(market)) return false
+          // canonical-sale rows carry no market label (geo/zip-scoped instead): unknown is not a mismatch
+          if (market && purchase.market && purchase.market !== 'Market Unknown' && lower(purchase.market) !== lower(market)) return false
           if (!market && state && purchase.propertyAddressState && lower(purchase.propertyAddressState) !== lower(state)) return false
           if (propertyType && purchase.propertyType && lower(purchase.propertyType) !== lower(propertyType)) return false
           if (context.lat != null && context.lng != null && purchase.distanceMiles != null && purchase.distanceMiles > filters.radiusMiles) return false
