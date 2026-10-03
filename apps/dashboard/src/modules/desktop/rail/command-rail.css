@@ -39,29 +39,22 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
   flex-direction: column;
   overflow: hidden;
   border-radius: 22px;
+  /* the canonical chrome glass (same plane as the Command Deck) */
   background:
     radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, calc(0.045 * var(--lg-sheen, 1))) 0%, transparent 28%),
-    rgb(var(--dsk-fill) / calc(0.58 * var(--lg-alpha, 1)));
-  -webkit-backdrop-filter: blur(var(--lg-blur, 24px)) saturate(calc(var(--lg-sat, 1.4) * 1.1));
-  backdrop-filter: blur(var(--lg-blur, 24px)) saturate(calc(var(--lg-sat, 1.4) * 1.1));
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.095),
-    inset 0 1px 0 rgba(255, 255, 255, calc(0.13 * var(--lg-sheen, 1))),
-    0 0 0 0.5px rgba(0, 0, 0, 0.5),
-    0 26px 64px -34px rgba(0, 0, 0, 0.95);
+    linear-gradient(180deg, rgba(255, 255, 255, calc(0.045 * var(--lc-sheen))) 0%, transparent 28%),
+    var(--lc-glass-chrome);
+  -webkit-backdrop-filter: var(--lc-glass-filter-strong);
+  backdrop-filter: var(--lc-glass-filter-strong);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-chrome);
   transition: box-shadow 0.3s ease, background-color 0.3s ease;
 }
 .cr.is-floating.is-peeking .cr__glass {
   background:
     radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, calc(0.05 * var(--lg-sheen, 1))) 0%, transparent 28%),
-    rgb(var(--dsk-fill) / calc(0.86 * var(--lg-alpha, 1)));
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.11),
-    inset 0 1px 0 rgba(255, 255, 255, calc(0.14 * var(--lg-sheen, 1))),
-    0 0 0 0.5px rgba(0, 0, 0, 0.5),
-    0 36px 90px -30px rgba(0, 0, 0, 0.95);
+    linear-gradient(180deg, rgba(255, 255, 255, calc(0.05 * var(--lc-sheen))) 0%, transparent 28%),
+    var(--lc-glass-menu);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi), var(--lc-glass-sheen), var(--lc-glass-shadow-menu);
 }
 
 /* ── identity ──────────────────────────────────────────────────────────── */
@@ -423,14 +416,6 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 .crm__rtname { font: 520 12.5px/1.2 var(--lc-font-ui); color: var(--lc-ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ══ THEMES ═════════════════════════════════════════════════════════════════ */
-:root[data-nexus-theme='light'] .cr__glass {
-  background:
-    radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 30%),
-    rgb(var(--dsk-fill) / calc(0.6 * var(--lg-alpha, 1)));
-  box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 26px 60px -34px rgba(24, 36, 60, 0.42);
-}
-:root[data-nexus-theme='light'] .cr.is-floating.is-peeking .cr__glass { background: rgb(var(--dsk-fill) / 0.94); }
 :root[data-nexus-theme='light'] .cr__lens { background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.7)); box-shadow: inset 0 0 0 1px rgba(11, 18, 32, 0.08), 0 4px 12px -6px rgba(24, 36, 60, 0.3); }
 :root[data-nexus-theme='light'] .cr__lens::before { mix-blend-mode: normal; background: radial-gradient(120% 140% at 15% 110%, rgba(var(--lc-select-rgb), 0.12), transparent 55%); }
 :root[data-nexus-theme='light'] .cr-row:hover { background: rgba(11, 18, 32, 0.04); }
@@ -439,10 +424,6 @@ html.is-desktop-modern .dsk-top { left: calc(var(--dsk-side-current) + var(--cr-
 :root[data-nexus-theme='light'] .crt__count,
 :root[data-nexus-theme='light'] .crt b { text-shadow: none; }
 :root[data-nexus-theme='light'] .cr-dock:hover { background: rgba(11, 18, 32, 0.04); }
-:root[data-nexus-theme='true_black'] .cr__glass {
-  background: radial-gradient(130% 40% at 0% 0%, var(--lc-glass-tint), transparent 70%), rgb(0 0 0 / calc(0.74 * var(--lg-alpha, 1)));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 0 0 0.5px rgba(255, 255, 255, 0.04);
-}
 
 /* motion off / reduced: still glass, no travel */
 :root[data-lc-motion='off'] .cr,

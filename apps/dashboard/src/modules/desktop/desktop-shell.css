@@ -24,8 +24,8 @@ html.is-desktop-modern {
   --dsk-accent: rgb(var(--lc-select-rgb, var(--nexus-accent-rgb, 94, 234, 212)));
   --dsk-fill: var(--lg-fill, 9 13 21);
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.62 * var(--lg-alpha, 1)));
-  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.86 * var(--lg-alpha, 1)));
-  --dsk-blur: blur(var(--lg-blur, 26px)) saturate(var(--lg-sat, 1.6));
+  --dsk-glass-strong: var(--lc-glass-menu);
+  --dsk-blur: var(--lc-glass-filter);
   --dsk-shadow: 0 30px 70px -34px rgba(0, 0, 0, 0.9), 0 10px 28px -18px rgba(0, 0, 0, 0.6);
 
   /* The phone shell's reservations, answered for a wide screen. */
@@ -43,7 +43,7 @@ html.is-desktop-modern[data-nexus-theme='light'] {
   --dsk-edge-hi: rgba(13, 21, 36, 0.14);
   --dsk-fill: var(--lg-fill, 248 250 253);
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.72 * var(--lg-alpha, 1)));
-  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.92 * var(--lg-alpha, 1)));
+  --dsk-glass-strong: var(--lc-glass-menu);
   --dsk-shadow: 0 30px 70px -34px rgba(24, 36, 60, 0.35), 0 10px 28px -18px rgba(24, 36, 60, 0.25);
 }
 html.is-desktop-modern body {
@@ -741,8 +741,8 @@ html.is-desktop-modern .nx-os.is-mobile-os .nx-stage { padding-bottom: var(--dsk
   border-radius: var(--dsk-pane-radius);
   overflow: hidden;
   isolation: isolate;
-  background: rgb(var(--dsk-fill) / calc(0.28 * var(--lg-alpha, 1)));
-  box-shadow: inset 0 0 0 1px var(--dsk-edge), 0 24px 60px -36px rgba(0, 0, 0, 0.8);
+  background: linear-gradient(var(--lc-glass-tint), var(--lc-glass-tint)), var(--lc-glass-pane);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line), var(--lc-glass-sheen), 0 24px 60px -36px rgba(0, 0, 0, 0.8);
   transition: box-shadow 0.3s ease;
 }
 .dsk-pane.is-focused {
@@ -775,7 +775,7 @@ html.is-desktop-modern .nx-os.is-mobile-os .nx-stage { padding-bottom: var(--dsk
   padding: 0 8px 0 12px;
   color: var(--dsk-ink-2);
   font-family: -apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--app, var(--dsk-accent)) 14%, transparent), transparent 55%), rgb(var(--dsk-fill) / calc(0.7 * var(--lg-alpha, 1)));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--app, var(--dsk-accent)) 14%, transparent), transparent 55%), var(--lc-glass-chrome);
   -webkit-backdrop-filter: var(--dsk-blur);
   backdrop-filter: var(--dsk-blur);
   box-shadow: inset 0 -1px 0 var(--dsk-edge);

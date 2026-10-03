@@ -438,7 +438,7 @@
   --lc-glass-pane: rgb(var(--lc-fill) / calc(0.28 * var(--lc-alpha)));
   --lc-glass-chrome: rgb(var(--lc-fill) / clamp(0.42, calc(0.62 * var(--lc-alpha)), 0.94));
   --lc-glass-card: rgb(var(--lc-fill) / calc(0.46 * var(--lc-alpha)));
-  --lc-glass-menu: rgb(var(--lc-fill) / clamp(0.8, calc(0.86 * var(--lc-alpha)), 0.97));
+  --lc-glass-menu: rgb(var(--lc-fill) / clamp(0.82, calc(0.92 * var(--lc-alpha)), 0.97));
   --lc-glass-filter: blur(var(--lc-blur)) saturate(var(--lc-sat));
   --lc-glass-filter-strong: blur(calc(var(--lc-blur) * 1.2 + 4px)) saturate(calc(var(--lc-sat) * 1.1));
   --lc-glass-line: rgba(255, 255, 255, calc(0.09 * var(--lc-glass-edge)));
@@ -478,8 +478,12 @@
   --lc-glass-sheen: inset 0 1px 0 rgba(255, 255, 255, calc(0.13 * var(--lc-sheen)));
   --lc-glass-field: rgba(255, 255, 255, 0.07);
   --lc-glass-field-line: rgba(255, 255, 255, 0.14);
+  /* OLED glass never picks up a cast (mirrors derive.ts surfaceTint) */
+  --lc-glass-tint: transparent;
 }
+:root[data-lc-accent-reserved='crit'] { --lc-glass-tint: transparent; }
 :root[data-nexus-theme='red_ops'] {
+  --lc-glass-tint: transparent;
   --lc-glass-line: rgba(255, 150, 150, calc(0.085 * var(--lc-glass-edge)));
   --lc-glass-line-hi: rgba(255, 160, 160, calc(0.14 * var(--lc-glass-edge)));
 }

@@ -16,8 +16,9 @@ html.is-desktop-modern {
   --dsk-bg: #0b0c0e;
   --dsk-fill: var(--lg-fill, 20 21 24);
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.8 * var(--lg-alpha, 1)));
-  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.95 * var(--lg-alpha, 1)));
-  --dsk-blur: blur(var(--lg-blur, 22px)) saturate(var(--lg-sat, 1.15));
+  /* menus, popovers, the Command Deck results: the canonical floored menu glass */
+  --dsk-glass-strong: var(--lc-glass-menu);
+  --dsk-blur: var(--lc-glass-filter);
   --dsk-shadow: 0 18px 44px -26px rgba(0, 0, 0, 0.85), 0 2px 8px -4px rgba(0, 0, 0, 0.5);
   --dsk-tile: rgba(255, 255, 255, 0.045);
   --dsk-tile-hi: rgba(255, 255, 255, 0.08);
@@ -36,7 +37,6 @@ html.is-desktop-modern[data-nexus-theme='light'] {
   --dsk-bg: #f4f4f5;
   --dsk-fill: var(--lg-fill, 255 255 255);
   --dsk-glass: rgb(var(--dsk-fill) / calc(0.56 * var(--lg-alpha, 1)));
-  --dsk-glass-strong: rgb(var(--dsk-fill) / calc(0.84 * var(--lg-alpha, 1)));
   --dsk-shadow: 0 18px 44px -28px rgba(20, 24, 34, 0.28), 0 2px 8px -4px rgba(20, 24, 34, 0.12);
   --dsk-tile: rgba(15, 17, 22, 0.04);
   --dsk-tile-hi: rgba(15, 17, 22, 0.07);

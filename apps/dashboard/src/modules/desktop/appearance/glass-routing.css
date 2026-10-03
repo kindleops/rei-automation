@@ -1,0 +1,29 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   R8.3 · GLASS ROUTING — Appearance → Material reaches every glass surface.
+   Surfaces that kept their own fill colour (so Material, Tint and Edge never
+   reached them) are re-pointed at the canonical glass set in lc-tokens.css.
+   Their tuned readability floors are kept: the operator moves the material,
+   LeadCommand keeps the text readable.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* MAP — chrome, legend, inspector and cards. The fill was a literal per theme;
+   it is now the operator's glass fill (Clear / Crystal / Frosted / Smoke and
+   the accent's surface tint), edges follow Edge. */
+html.is-desktop-modern[data-nexus-theme] .mx.is-desk.is-desk {
+  --mxg-l1: rgb(var(--lc-fill) / clamp(0.8, calc(0.88 * var(--lc-alpha)), 0.96));
+  --mxg-l2: rgb(var(--lc-fill) / clamp(0.82, calc(0.9 * var(--lc-alpha)), 0.96));
+  --mxg-l3: rgb(var(--lc-fill) / clamp(0.9, calc(0.95 * var(--lc-alpha)), 0.98));
+  --mxg-l4: rgb(var(--lc-fill) / clamp(0.92, calc(0.96 * var(--lc-alpha)), 0.985));
+  --mxg-edge: var(--lc-glass-line);
+  --mxg-edge-hi: var(--lc-glass-line-hi);
+  --mxg-blur: var(--lc-glass-filter) brightness(0.94);
+  --mxg-blur-3: var(--lc-glass-filter-strong) brightness(0.9);
+}
+html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk.is-desk {
+  --mxg-l1: rgb(var(--lc-fill) / clamp(0.86, calc(0.93 * var(--lc-alpha)), 0.98));
+  --mxg-l2: rgb(var(--lc-fill) / clamp(0.88, calc(0.94 * var(--lc-alpha)), 0.985));
+  --mxg-l3: rgb(var(--lc-fill) / clamp(0.93, calc(0.97 * var(--lc-alpha)), 0.99));
+  --mxg-l4: rgb(var(--lc-fill) / clamp(0.95, calc(0.98 * var(--lc-alpha)), 0.995));
+  --mxg-blur: var(--lc-glass-filter) brightness(1.04);
+  --mxg-blur-3: var(--lc-glass-filter-strong) brightness(1.06);
+}

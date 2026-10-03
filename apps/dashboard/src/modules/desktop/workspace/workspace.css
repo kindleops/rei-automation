@@ -138,8 +138,8 @@ html.lc-ws-dragging .ws .dsk-pane__body { pointer-events: none; }
   padding: 0 6px 0 7px;
   font-family: var(--lc-font-ui);
   color: var(--lc-ink-2);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent), rgb(var(--dsk-fill, 9 13 21) / calc(0.72 * var(--lg-alpha, 1)));
-  box-shadow: inset 0 -1px 0 var(--dsk-edge, rgba(255, 255, 255, 0.07));
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.035 * var(--lc-sheen))), transparent), var(--lc-glass-chrome);
+  box-shadow: inset 0 -1px 0 var(--lc-glass-line);
   cursor: default;
   user-select: none;
 }
@@ -233,7 +233,7 @@ html.lc-ws-dragging .ws .dsk-pane__body { pointer-events: none; }
 .ws-state strong, .ws-cramped strong { font: 620 15px/1.3 var(--lc-font-ui); color: var(--lc-ink-1); }
 .ws-state p, .ws-cramped span { max-width: 340px; margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--lc-ink-3); }
 .ws-state__actions, .ws-cramped__actions { display: flex; gap: 8px; margin-top: 6px; }
-.ws-cramped { background: rgb(var(--dsk-fill, 9 13 21) / 0.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.ws-cramped { background: var(--lc-glass-menu); -webkit-backdrop-filter: var(--lc-glass-filter); backdrop-filter: var(--lc-glass-filter); }
 .ws-cramped .ws-glyph { width: 30px; height: 30px; border-radius: 9px; background: rgba(255, 255, 255, 0.05); }
 .ws-cramped button {
   all: unset;
@@ -268,10 +268,10 @@ html.lc-ws-dragging .ws-pane > .ws-pane__frame { filter: saturate(0.82) brightne
   text-transform: uppercase;
   color: var(--lc-ink-2);
   border-radius: 10px;
-  background: rgb(var(--dsk-fill, 9 13 21) / 0.62);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  background: var(--lc-glass-chrome);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi);
+  -webkit-backdrop-filter: var(--lc-glass-filter);
+  backdrop-filter: var(--lc-glass-filter);
   transition: color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 .ws-drop__centre { left: 50%; top: 50%; width: 96px; height: 34px; margin: -17px 0 0 -48px; }
@@ -301,8 +301,8 @@ html.lc-ws-dragging .ws-pane > .ws-pane__frame { filter: saturate(0.82) brightne
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--lc-ink-1);
-  background: rgb(var(--dsk-fill, 9 13 21) / 0.78);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  background: var(--lc-glass-menu);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line-hi);
 }
 .ws-drop__preview.is-blocked .ws-drop__label { color: rgb(var(--lc-crit-rgb, 248 113 113)); }
 .ws-drag-chip {
@@ -317,9 +317,9 @@ html.lc-ws-dragging .ws-pane > .ws-pane__frame { filter: saturate(0.82) brightne
   border-radius: 11px;
   font: 620 12.5px/1 var(--lc-font-ui);
   color: var(--lc-ink-1);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02)), rgb(var(--dsk-fill, 9 13 21) / 0.8);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  backdrop-filter: blur(16px) saturate(1.4);
+  background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.09 * var(--lc-sheen))), rgba(255, 255, 255, 0.02)), var(--lc-glass-menu);
+  -webkit-backdrop-filter: var(--lc-glass-filter);
+  backdrop-filter: var(--lc-glass-filter);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
@@ -333,12 +333,12 @@ html.lc-ws-dragging .ws-pane > .ws-pane__frame { filter: saturate(0.82) brightne
 
 /* ── themes ───────────────────────────────────────────────────────────── */
 
-:root[data-nexus-theme='light'] .ws-head { background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.45)), rgb(var(--dsk-fill, 248 250 253) / 0.85); }
+:root[data-nexus-theme='light'] .ws-head { background: linear-gradient(180deg, rgba(255, 255, 255, calc(0.6 * var(--lc-sheen))), rgba(255, 255, 255, 0.3)), var(--lc-glass-chrome); }
 :root[data-nexus-theme='light'] .ws-tab.is-active { background: rgba(255, 255, 255, 0.9); box-shadow: inset 0 0 0 1px rgba(13, 21, 36, 0.08), 0 1px 2px rgba(13, 21, 36, 0.06); }
 :root[data-nexus-theme='light'] .ws-tab:hover, :root[data-nexus-theme='light'] .ws-tool:hover { background: rgba(13, 21, 36, 0.05); }
 :root[data-nexus-theme='light'] .ws-drop__centre, :root[data-nexus-theme='light'] .ws-drop__replace, :root[data-nexus-theme='light'] .ws-drop__label, :root[data-nexus-theme='light'] .ws-drag-chip { background: rgba(255, 255, 255, 0.86); box-shadow: inset 0 0 0 1px rgba(13, 21, 36, 0.1), 0 16px 36px -18px rgba(24, 36, 60, 0.35); }
 :root[data-nexus-theme='light'] .ws-cramped { background: rgba(248, 250, 253, 0.86); }
-:root[data-nexus-theme='true_black'] .ws-head { background: rgba(0, 0, 0, 0.9); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06); }
+:root[data-nexus-theme='true_black'] .ws-head { background: var(--lc-glass-chrome); }
 :root[data-nexus-theme='true_black'] .ws-pane__frame { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
 
 /* ── motion off / reduced: crossfade, no travel ───────────────────────── */

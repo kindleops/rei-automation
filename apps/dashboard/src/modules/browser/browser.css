@@ -26,9 +26,10 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px 7px;
-  background: var(--lc-mat-float-bg);
-  border-bottom: 1px solid var(--lc-hairline);
-  box-shadow: inset 0 1px 0 var(--lc-sheen-top, rgba(255, 255, 255, 0.04));
+  /* the canonical chrome glass (Material / Edge / Sheen) — a bar above the page, never over it */
+  background: var(--lc-glass-chrome);
+  border-bottom: 1px solid var(--lc-glass-line);
+  box-shadow: var(--lc-glass-sheen);
 }
 
 .lcb-tabs {
