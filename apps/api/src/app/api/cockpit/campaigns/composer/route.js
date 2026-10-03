@@ -8,6 +8,7 @@ import {
   readComposerCohort,
   readComposerCoverage,
   readComposerFleet,
+  readComposerGeography,
   readComposerTemplates,
   saveComposerDraft,
 } from '@/lib/domain/campaigns/campaign-composer.js'
@@ -31,6 +32,8 @@ export async function OPTIONS(request) {
  *   ?part=audience&spec=<json>      dry-run audience for a composition (sampled build)
  *   ?part=coverage&markets=<json>   sender coverage from the canonical routing engine
  *   ?part=cohort&spec=<json>        the whole cohort counted by the build's pipeline (aggregates only)
+ *   ?part=geo&spec=<json>           the eligible cohort on canonical coordinates (Campaign Map Preview;
+ *                                   shares the cohort's cache + single flight; ids and coordinates only)
  */
 export async function GET(request) {
   const auth = ensureMutationAuth(request)
@@ -54,6 +57,17 @@ export async function GET(request) {
         return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
       }
       const result = await readComposerCohort(spec)
+      return withCors(request, result, result.ok === false ? 502 : 200)
+    }
+    if (part === 'geo') {
+      let spec = {}
+      try { spec = JSON.parse(params.get('spec') || '{}') } catch {
+        return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
+      }
+      // a preview needs an audience: no filter clause at all would be the whole graph
+      const groups = spec && typeof spec === 'object' && spec.filters && typeof spec.filters === 'object' ? Object.values(spec.filters) : []
+      if (!groups.some((g) => Array.isArray(g) && g.length > 0)) return withCors(request, { ok: false, error: 'audience_required' }, 400)
+      const result = await readComposerGeography(spec)
       return withCors(request, result, result.ok === false ? 502 : 200)
     }
     if (part === 'coverage') {

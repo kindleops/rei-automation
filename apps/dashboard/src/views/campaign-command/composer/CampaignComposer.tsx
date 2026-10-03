@@ -8,6 +8,7 @@ import { sound } from '../../../shared/sound'
 import { inspectObject, propertyObject } from '../../../modules/desktop/objects'
 import { isWorkspaceRunning, openApp } from '../../../modules/desktop/workspace/workspace-store'
 import { pushRoutePath } from '../../../app/router'
+import { campaignPreviewMapPath, clearCampaignPreview, marketsOfSpec, previewSpecKey, publishCampaignPreview } from '../../../domain/campaign-preview/campaign-preview-context'
 import { getFieldCatalog, searchFieldOptions, type CampaignFieldCatalog } from '../campaignWizardAdapter'
 import { fetchCommandBook, type BookCampaign } from '../desktop/war-room-api'
 import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readCoverage, readFleet, readTemplates, saveDraft } from './composer-api'
@@ -267,6 +268,26 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
     lastState.current = readiness.state
   }, [readiness.state])
 
+  /* ── Campaign Map Preview: publish what is being composed (Map panes consume it) ── */
+  const previewSpec = useMemo(() => ({ filters: spec.filters, template_use_case: spec.template_use_case }), [spec.filters, spec.template_use_case])
+  const previewMarkets = useMemo(() => marketsOfSpec(previewSpec.filters), [previewSpec])
+  const previewSection = focus?.layer ?? null
+  useEffect(() => {
+    publishCampaignPreview({
+      key: composerKey,
+      draftId: campaignId,
+      name: composition.name.trim(),
+      markets: previewMarkets,
+      activeMarket: previewMarkets[previewMarkets.length - 1] ?? null,
+      spec: previewSpec,
+      specKey: previewSpecKey(previewSpec),
+      composerEligible: eligible,
+      section: previewSection,
+    })
+  }, [composerKey, campaignId, composition.name, previewMarkets, previewSpec, eligible, previewSection])
+  // the preview ends with this Composer (closed, or another campaign opened in its place)
+  useEffect(() => () => clearCampaignPreview(composerKey), [composerKey])
+
   /* ── actions ──────────────────────────────────────────────────────── */
   const focusLayer = (layer: Layer) => {
     setCollapsed((c) => ({ ...c, [layer]: false }))
@@ -401,7 +422,8 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
     }
   }
 
-  const besideMap = () => { if (isWorkspaceRunning()) openApp('/map', 'beside'); else pushRoutePath('/map') }
+  // Map beside opens the Map in Campaign Preview Mode, bound to THIS composition
+  const besideMap = () => { if (isWorkspaceRunning()) openApp(campaignPreviewMapPath(composerKey), 'beside'); else pushRoutePath('/map') }
 
   /* ── render ───────────────────────────────────────────────────────── */
   if (draftState?.state === 'not_editable') {

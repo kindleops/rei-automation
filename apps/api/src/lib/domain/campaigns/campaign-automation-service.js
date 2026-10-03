@@ -55,7 +55,7 @@ import { campaignMarketIdentityPatch, summarizeCampaignMarketIdentity } from '@/
 import { deriveTimezoneFromGeography } from '@/lib/domain/campaigns/contact-window-timezone.js'
 import { resolveRecipientTimezone } from '@/lib/domain/queue/recipient-timezone.js'
 import { loadCanonicalMarketDirectory, resolveMarketLabel } from '@/lib/domain/geography/canonical-market.js'
-import { isUniverseFilter, sendableAfterPersonalization, summarizePersonalization } from '@/lib/domain/campaigns/campaign-audience-funnel.js'
+import { greetingPersonalization, isUniverseFilter, sendableAfterPersonalization, summarizePersonalization } from '@/lib/domain/campaigns/campaign-audience-funnel.js'
 import {
   ageBucketFromMob,
   ageFromMob,
@@ -6595,7 +6595,17 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
     increment(zones, zone.ok ? zone.iana : 'unresolved')
     increment(markets, clean(row.market) || 'unknown')
   }
-  const personalization = await summarizeCohortPersonalization(readyRows, rows, deps).catch(() => null)
+  // [campaign map preview] per-ready-row greeting kinds, in readyRows order (only when members are asked for)
+  const greetingKinds = input.include_members === true ? [] : null
+  const personalization = await summarizeCohortPersonalization(readyRows, rows, deps, greetingKinds).catch(() => null)
+  const members = input.include_members === true
+    ? readyRows.map((row, i) => ({
+      property_id: clean(row.property_id) || null,
+      market: clean(row.market) || null,
+      // null when names were unreadable — the caller must not guess a kind
+      greeting: personalization && greetingKinds && greetingKinds.length === readyRows.length ? greetingKinds[i] : null,
+    }))
+    : undefined
   return {
     ok: true,
     queue_eligible_in_audience: total,
@@ -6616,6 +6626,8 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
     ready_by_market: markets,
     timings_ms: { read: readMs, total: Date.now() - startedAt },
     warnings: uniqueClean(warnings),
+    // [campaign map preview] the ready set's identities (server-internal; the Composer route never returns these rows)
+    ...(members ? { members } : {}),
   }
 }
 
@@ -6626,7 +6638,7 @@ export async function countCampaignAudienceCohort(input = {}, deps = {}) {
  * the rows still missing a first name only. Corporate ownership comes from the
  * graph row (the snapshot does not carry it).
  */
-async function summarizeCohortPersonalization(readyRows = [], graphRows = [], deps = {}) {
+async function summarizeCohortPersonalization(readyRows = [], graphRows = [], deps = {}, kindsOut = null) {
   if (!readyRows.length) return summarizePersonalization([])
   const corporateByProperty = new Map()
   for (const row of graphRows) if (row?.property_id) corporateByProperty.set(clean(row.property_id), row.is_corporate_owner === true)
@@ -6647,6 +6659,7 @@ async function summarizeCohortPersonalization(readyRows = [], graphRows = [], de
       is_corporate_owner: corporateByProperty.get(clean(row.property_id || snapshot.property_id)) === true,
     }
   })
+  if (Array.isArray(kindsOut)) for (const row of classified) kindsOut.push(greetingPersonalization(row))
   return summarizePersonalization(classified)
 }
 

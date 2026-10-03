@@ -1,0 +1,181 @@
+/*
+ * CAMPAIGN MAP PREVIEW — the compact glass console (top-right of the Map desk).
+ *
+ * Reuses the desk's own L2 glass (.mxd-l2 → --mxg-* per theme: Dark, Light,
+ * True Black, Red Ops; Material via --lg-*). The only colour it adds is the
+ * accent (--lc-accent-rgb; a reserved red/green/amber accent falls back to
+ * the execution cyan, as the map layer does). Pane-ready: container queries
+ * on the desk root (@container mxd), nothing escapes the pane.
+ */
+html.is-desktop-modern .mx.is-desk {
+  --cpv-accent-rgb: var(--lc-accent-rgb, 94, 234, 212);
+}
+html.is-desktop-modern[data-nexus-theme='red_ops'] .mx.is-desk {
+  --cpv-accent-rgb: var(--lc-exec-rgb, 76, 201, 240);
+}
+
+html.is-desktop-modern .mx.is-desk .lc-cpv.mxd-l2 {
+  position: absolute;
+  top: var(--mxd-gap);
+  right: var(--mxd-gap);
+  z-index: 31;
+  width: min(336px, calc(100% - var(--mxd-col-x) - var(--mxd-gap) * 2));
+  max-height: calc(100% - var(--mxd-gap) * 2 - 120px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 14px;
+  color: var(--mxg-ink);
+  font-family: var(--mxd-font);
+  overflow: hidden;
+  isolation: isolate;
+  transition: right 0.34s var(--mxg-ease), opacity 0.2s var(--mxg-ease);
+  animation: cpv-rise 0.42s var(--mxg-ease) both;
+}
+/* a thin accent line on the leading edge: "this is the campaign layer" */
+html.is-desktop-modern .mx.is-desk .lc-cpv::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 2px;
+  background: rgba(var(--cpv-accent-rgb), 0.85);
+  box-shadow: 0 0 10px rgba(var(--cpv-accent-rgb), 0.45);
+  pointer-events: none;
+}
+@keyframes cpv-rise { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+html[data-lc-motion='off'] .mx.is-desk .lc-cpv { animation: none; }
+@media (prefers-reduced-motion: reduce) { html.is-desktop-modern .mx.is-desk .lc-cpv { animation: none; } }
+
+/* a docked right inspector owns the right edge — the console steps left of it */
+html.is-desktop-modern .mx.is-desk.has-dock .lc-cpv.mxd-l2,
+html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .smc-dock) .lc-cpv.mxd-l2,
+html.is-desktop-modern .mx.is-desk:has(> .mx-overlay-host > .mx-comp) .lc-cpv.mxd-l2,
+html.is-desktop-modern .mx.is-desk:has(> .mx-evt) .lc-cpv.mxd-l2 { right: calc(var(--mxd-dock-w, 408px) + var(--mxd-gap) * 2); }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgb(var(--cpv-accent-rgb));
+  box-shadow: 0 0 0 3px rgba(var(--cpv-accent-rgb), 0.18), 0 0 12px rgba(var(--cpv-accent-rgb), 0.55);
+}
+html.is-desktop-modern .mx.is-desk .lc-cpv__title { flex: 1; min-width: 0; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__title h2 { margin: 0; font-size: 12.5px; line-height: 1.3; font-weight: 640; letter-spacing: -0.005em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__title p { margin: 1px 0 0; font-size: 11px; color: var(--mxg-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__counts { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 2px 0 0; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__count { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11px; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__count b { font-size: 13px; font-weight: 640; color: var(--mxg-ink); font-variant-numeric: tabular-nums; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__count.is-primary b { font-size: 17px; color: rgb(var(--cpv-accent-rgb)); letter-spacing: -0.01em; }
+html.is-desktop-modern[data-nexus-theme='light'] .mx.is-desk .lc-cpv__count.is-primary b { color: color-mix(in srgb, rgb(var(--cpv-accent-rgb)) 70%, #0b1220); }
+html.is-desktop-modern .mx.is-desk .lc-cpv .lc-counter > span { font: inherit; color: inherit; letter-spacing: inherit; line-height: inherit; }
+html.is-desktop-modern .mx.is-desk .lc-cpv.is-updating .lc-cpv__counts { opacity: 0.72; transition: opacity 0.2s ease; }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__state { margin: 0; font-size: 12px; line-height: 1.4; color: var(--mxg-ink-2); display: flex; align-items: center; gap: 8px; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__state.is-quiet { color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__state.is-error { justify-content: space-between; color: var(--mxg-ink-2); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__spin {
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 1.5px solid rgba(var(--cpv-accent-rgb), 0.25);
+  border-top-color: rgb(var(--cpv-accent-rgb));
+  animation: cpv-spin 0.9s linear infinite;
+}
+@keyframes cpv-spin { to { transform: rotate(360deg); } }
+html[data-lc-motion='off'] .lc-cpv__spin { animation: none; }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__note { margin: 0; font-size: 11px; color: var(--mxg-ink-3); }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__markets {
+  list-style: none;
+  margin: 0;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 10px;
+  background: var(--mxg-well);
+  box-shadow: var(--mxg-recess);
+  overflow: auto;
+  max-height: 210px;
+  overscroll-behavior: contain;
+}
+html.is-desktop-modern .mx.is-desk .lc-cpv__market {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--mxg-ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+html.is-desktop-modern .mx.is-desk .lc-cpv__market:hover:not(:disabled) { background: var(--mxg-hover); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__market:focus-visible { outline: 2px solid rgba(var(--cpv-accent-rgb), 0.8); outline-offset: -2px; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__market i { width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--cpv-accent-rgb)); box-shadow: 0 0 6px rgba(var(--cpv-accent-rgb), 0.5); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__market.is-unmapped { cursor: default; color: var(--mxg-ink-3); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__market.is-unmapped i { background: transparent; box-shadow: inset 0 0 0 1.2px var(--mxg-ink-4); }
+html.is-desktop-modern .mx.is-desk .lc-cpv__mname { min-width: 0; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__mname em { font-style: normal; font-size: 10.5px; color: var(--mxg-ink-3); overflow: hidden; text-overflow: ellipsis; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__market b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--mxg-ink-2); }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__controls { display: flex; flex-wrap: wrap; gap: 6px; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__controls > * { flex: 1 1 auto; }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__manual {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  font-size: 11px;
+  color: var(--mxg-ink-2);
+  background: rgba(var(--cpv-accent-rgb), 0.08);
+  box-shadow: inset 0 0 0 1px rgba(var(--cpv-accent-rgb), 0.22);
+}
+html.is-desktop-modern .mx.is-desk .lc-cpv__manual > span { flex: 1; min-width: 0; }
+html.is-desktop-modern .mx.is-desk .lc-cpv__manual button {
+  border: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(var(--cpv-accent-rgb), 0.16);
+  color: var(--mxg-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+html.is-desktop-modern .mx.is-desk .lc-cpv__manual button:hover { background: rgba(var(--cpv-accent-rgb), 0.26); }
+
+html.is-desktop-modern .mx.is-desk .lc-cpv__foot { margin: 0; font-size: 10.5px; line-height: 1.4; color: var(--mxg-ink-3); }
+
+/* the invisible anchor the shared object menu opens from (right-click on a point) */
+html.is-desktop-modern .mx.is-desk .lc-cpv__anchor { position: absolute; z-index: 40; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+
+/* a compact pane: the console tightens, the list shortens */
+/* below ~1200px the command stack needs the top-right too: the console sits under its rows */
+@container mxd (max-width: 1200px) {
+  html.is-desktop-modern .mx.is-desk .lc-cpv.mxd-l2 { top: calc(var(--mxd-gap) + var(--mxd-chip-h) * 2 + 18px); }
+}
+@container mxd (max-width: 900px) {
+  html.is-desktop-modern .mx.is-desk .lc-cpv.mxd-l2 { top: calc(var(--mxd-gap) + var(--mxd-chip-h) + 10px); }
+}
+@container mxd (max-width: 900px) {
+  html.is-desktop-modern .mx.is-desk .lc-cpv.mxd-l2 { width: min(300px, calc(100% - var(--mxd-col-x) - var(--mxd-gap) * 2)); padding: 8px 8px 8px 10px; gap: 6px; }
+  html.is-desktop-modern .mx.is-desk .lc-cpv__markets { max-height: 140px; }
+}
+/* ultrawide: a little more room, never a banner */
+@container mxd (min-width: 2400px) {
+  html.is-desktop-modern .mx.is-desk .lc-cpv.mxd-l2 { width: 372px; }
+  html.is-desktop-modern .mx.is-desk .lc-cpv__markets { max-height: 300px; }
+}

@@ -547,16 +547,33 @@ export async function readComposerAudience(spec = {}, deps = {}) {
  * Aggregates only. Cached briefly per spec: a composition is re-read often.
  */
 const cohortCache = new Map()
+const cohortFlights = new Map()
+/** How many cached cohorts keep their member identities (the map preview's input). */
+const MEMBER_CACHE_ENTRIES = 4
+const COHORT_TTL_MS = 60_000
+const cohortKeyOf = (s, strategy) => JSON.stringify({ f: obj(s.filters), u: strategy.use_case })
+const strategyOf = (s) => COMPOSER_STRATEGIES.find((x) => x.use_case === clean(s.template_use_case)) || COMPOSER_STRATEGIES[0]
+
 export async function readComposerCohort(spec = {}, deps = {}) {
   const s = obj(spec)
-  const strategy = COMPOSER_STRATEGIES.find((x) => x.use_case === clean(s.template_use_case)) || COMPOSER_STRATEGIES[0]
-  const key = JSON.stringify({ f: obj(s.filters), u: strategy.use_case })
+  const strategy = strategyOf(s)
+  const key = cohortKeyOf(s, strategy)
   const hit = cohortCache.get(key)
-  if (!deps.fresh && hit && Date.now() - hit.at < 60_000) return { ...hit.value, cached: true }
+  if (!deps.fresh && hit && Date.now() - hit.at < COHORT_TTL_MS) return { ...hit.value, cached: true }
+  // one run per spec at a time: the Composer and a Map preview asking together share it
+  const inFlight = cohortFlights.get(key)
+  if (inFlight) return inFlight
+  const run = runComposerCohort(s, strategy, key, deps).finally(() => cohortFlights.delete(key))
+  cohortFlights.set(key, run)
+  return run
+}
+
+async function runComposerCohort(s, strategy, key, deps) {
   const result = await (deps.countCampaignAudienceCohort || countCampaignAudienceCohort)({
     filters: obj(s.filters),
     template_use_case: strategy.use_case,
     stage_code: strategy.stage_code,
+    include_members: true,
   }, deps)
   if (!result?.ok) return { ok: false, error: clean(result?.error) || 'cohort_unavailable', message: clean(result?.message) || null }
   const value = {
@@ -582,10 +599,196 @@ export async function readComposerCohort(spec = {}, deps = {}) {
     ready_by_market: result.ready_by_market,
     timings_ms: result.timings_ms,
   }
-  cohortCache.set(key, { at: Date.now(), value })
+  // the ready set's identities stay on the server (the cohort response never carries them)
+  const members = Array.isArray(result.members) ? result.members : null
+  cohortCache.delete(key)
+  cohortCache.set(key, { at: Date.now(), value, members })
   if (cohortCache.size > 50) cohortCache.delete(cohortCache.keys().next().value)
+  // only the newest few keep their members (memory bound: ≤ build limit ids each)
+  const entries = [...cohortCache.values()]
+  for (const entry of entries.slice(0, Math.max(0, entries.length - MEMBER_CACHE_ENTRIES))) entry.members = null
   return value
 }
+
+/* ── campaign map preview: the eligible cohort's geography ─────────────── */
+
+/** Ids per coordinate statement (one indexed ANY() read; 15K ids measured at ~0.7 s). */
+const GEO_ID_CHUNK = 10_000
+const GEO_REST_CHUNK = 200
+const GEO_TTL_MS = 60_000
+const geoCache = new Map()
+const geoFlights = new Map()
+
+const usableLngLat = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(Math.abs(lat) < 0.1 && Math.abs(lng) < 0.1)
+const round6 = (v) => Math.round(v * 1e6) / 1e6
+
+/**
+ * Canonical coordinates (properties.latitude / longitude) for a batch of
+ * property ids. Direct Postgres when available — one `= ANY($1)` statement per
+ * 10K ids on the unique property_id index, 30 s statement timeout — otherwise
+ * PostgREST in 200-id slices. Never per property, never a geocode.
+ */
+export async function readPropertyCoordinates(ids = [], deps = {}) {
+  if (deps.readPropertyCoordinates) return deps.readPropertyCoordinates(ids)
+  const out = new Map()
+  const unique = [...new Set(ids.map(clean).filter(Boolean))]
+  if (!unique.length) return out
+  const pg = await import('@/lib/postgres/client.js')
+  if (pg.hasDatabaseUrl()) {
+    for (let i = 0; i < unique.length; i += GEO_ID_CHUNK) {
+      const slice = unique.slice(i, i + GEO_ID_CHUNK)
+      const { rows } = await pg.queryWithTimeout(
+        'SELECT property_id, latitude::float8 AS lat, longitude::float8 AS lng FROM public.properties WHERE property_id = ANY($1::text[])',
+        [slice],
+        30_000,
+      )
+      for (const row of rows || []) out.set(clean(row.property_id), { lat: Number(row.lat), lng: Number(row.lng) })
+    }
+    return out
+  }
+  const supabase = deps.supabase || defaultSupabase
+  for (let i = 0; i < unique.length; i += GEO_REST_CHUNK) {
+    const { data, error } = await supabase.from('properties').select('property_id,latitude,longitude').in('property_id', unique.slice(i, i + GEO_REST_CHUNK))
+    if (error) throw new Error(error.message || 'coordinates_unreadable')
+    for (const row of data || []) out.set(clean(row.property_id), { lat: Number(row.latitude), lng: Number(row.longitude) })
+  }
+  return out
+}
+
+/**
+ * Which ready members are in "Eligible" — the same rule the whole-cohort count
+ * applies (sendableAfterPersonalization): a sender carries the market
+ * (sendable === true) and the greeting renders (personalization ≠ none). The
+ * Map never decides this; it draws what this returns.
+ */
+export function eligibleMembers(members = [], senderMarkets = []) {
+  const sendable = new Map((senderMarkets || []).map((m) => [clean(m?.market), m?.sendable ?? null]))
+  const eligible = []
+  const excludedByMarket = new Map()
+  let notRoutable = 0
+  let noGreeting = 0
+  const tally = (market, reason) => {
+    const row = excludedByMarket.get(market) || { not_routable: 0, no_greeting: 0 }
+    row[reason] += 1
+    excludedByMarket.set(market, row)
+  }
+  for (const m of members || []) {
+    if (!m) continue
+    const routeKey = clean(m.market) || 'Unknown market'
+    if (sendable.get(routeKey) !== true) { notRoutable += 1; tally(routeKey, 'not_routable'); continue }
+    if (m.greeting === 'none') { noGreeting += 1; tally(routeKey, 'no_greeting'); continue }
+    eligible.push(m)
+  }
+  return { eligible, not_routable: notRoutable, no_greeting: noGreeting, excluded_by_market: excludedByMarket }
+}
+
+/**
+ * THE CAMPAIGN MAP PREVIEW's data: the eligible cohort (the same server
+ * pipeline that produces the Composer's "Eligible: N" — readComposerCohort,
+ * shared cache and single flight) placed on canonical coordinates. Eligible,
+ * mapped and without-coordinates are reported separately; nothing is guessed.
+ * Columnar points (ids / lng / lat / market index) keep 50K targets compact.
+ * Read-only. Cached briefly per spec.
+ */
+export async function readComposerGeography(spec = {}, deps = {}) {
+  const s = obj(spec)
+  const strategy = strategyOf(s)
+  const key = cohortKeyOf(s, strategy)
+  const hit = geoCache.get(key)
+  if (!deps.fresh && hit && Date.now() - hit.at < GEO_TTL_MS) return { ...hit.value, cached: true }
+  const inFlight = geoFlights.get(key)
+  if (inFlight) return inFlight
+  const run = runComposerGeography(s, key, deps).finally(() => geoFlights.delete(key))
+  geoFlights.set(key, run)
+  return run
+}
+
+async function runComposerGeography(s, key, deps) {
+  const startedAt = Date.now()
+  let entry = cohortCache.get(key)
+  let cohort = entry && Date.now() - entry.at < COHORT_TTL_MS && entry.members ? entry.value : null
+  if (!cohort) {
+    cohort = await readComposerCohort(s, { ...deps, fresh: true })
+    if (!cohort?.ok) return { ok: false, error: clean(cohort?.error) || 'cohort_unavailable', message: clean(cohort?.message) || null }
+    entry = cohortCache.get(key)
+  }
+  const members = entry?.members
+  if (!Array.isArray(members)) return { ok: false, error: 'cohort_members_unavailable', message: 'The cohort did not return its ready set' }
+  const cohortMs = Date.now() - startedAt
+  const { eligible, not_routable: notRoutable, no_greeting: noGreeting, excluded_by_market: excludedByMarket } = eligibleMembers(members, cohort.sender_markets)
+  let coords
+  try {
+    coords = await readPropertyCoordinates(eligible.map((m) => m.property_id), deps)
+  } catch (error) {
+    return { ok: false, error: 'coordinates_unavailable', message: error?.message || String(error) }
+  }
+  const marketIndex = new Map()
+  const markets = []
+  const ids = []
+  const lng = []
+  const lat = []
+  const mi = []
+  const marketRow = (label) => {
+    let idx = marketIndex.get(label)
+    if (idx === undefined) {
+      idx = markets.length
+      marketIndex.set(label, idx)
+      const ex = excludedByMarket.get(label) || { not_routable: 0, no_greeting: 0 }
+      markets.push({ market: label, eligible: 0, mapped: 0, unmapped: 0, not_routable: ex.not_routable, no_greeting: ex.no_greeting, bbox: null })
+    }
+    return idx
+  }
+  // a market whose every ready seller is excluded still appears (0 eligible, with why)
+  for (const label of excludedByMarket.keys()) marketRow(label)
+  for (const m of eligible) {
+    const idx = marketRow(clean(m.market) || 'Unknown market')
+    const row = markets[idx]
+    row.eligible += 1
+    const c = m.property_id ? coords.get(clean(m.property_id)) : null
+    if (!c || !usableLngLat(c.lat, c.lng)) { row.unmapped += 1; continue }
+    row.mapped += 1
+    const x = round6(c.lng)
+    const y = round6(c.lat)
+    row.bbox = row.bbox ? [Math.min(row.bbox[0], x), Math.min(row.bbox[1], y), Math.max(row.bbox[2], x), Math.max(row.bbox[3], y)] : [x, y, x, y]
+    ids.push(clean(m.property_id))
+    lng.push(x)
+    lat.push(y)
+    mi.push(idx)
+  }
+  markets.sort((a, b) => b.eligible - a.eligible || a.market.localeCompare(b.market))
+  const order = new Map(markets.map((m, i) => [m.market, i]))
+  const remap = [...marketIndex.entries()].reduce((acc, [label, idx]) => { acc[idx] = order.get(label); return acc }, [])
+  const serverEligible = typeof cohort.sendable_after_personalization === 'number' ? cohort.sendable_after_personalization : null
+  const mapped = ids.length
+  const value = {
+    ok: true,
+    at: new Date().toISOString(),
+    cohort_at: cohort.at,
+    eligible: eligible.length,
+    mapped,
+    unmapped: eligible.length - mapped,
+    // the Composer's number, and whether the per-target rule reproduces it exactly
+    reconciliation: {
+      composer_eligible: serverEligible,
+      matches: serverEligible === null ? null : serverEligible === eligible.length,
+      delta: serverEligible === null ? null : eligible.length - serverEligible,
+    },
+    // why ready sellers are not in the preview — server-counted, never inferred client-side
+    excluded: { held_by_build: num(cohort.held), not_routable: notRoutable, no_greeting: noGreeting },
+    ready: num(cohort.ready),
+    capped_by_build_limit: cohort.capped_by_build_limit === true,
+    build_limit: num(cohort.build_limit),
+    markets,
+    points: { ids, lng, lat, market: mi.map((i) => remap[i]) },
+    timings_ms: { cohort: cohortMs, coordinates: Date.now() - startedAt - cohortMs, total: Date.now() - startedAt },
+  }
+  geoCache.delete(key)
+  geoCache.set(key, { at: Date.now(), value })
+  while (geoCache.size > MEMBER_CACHE_ENTRIES) geoCache.delete(geoCache.keys().next().value)
+  return value
+}
+
+export function _resetComposerPreviewCaches() { cohortCache.clear(); cohortFlights.clear(); geoCache.clear(); geoFlights.clear() }
 
 /**
  * Sender coverage for an audience from the CANONICAL routing engine — the one

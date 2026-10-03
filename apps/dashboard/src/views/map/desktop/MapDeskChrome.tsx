@@ -59,6 +59,7 @@ import { useMapBoundaryLevel } from './useMapBoundaries'
 import { useMapContextOverlays } from './context/useMapContextOverlays'
 import { ContextKey, ContextPlate, ContextPreview } from './context/MapContextUI'
 import './context/map-context.css'
+import { CampaignPreviewDesk } from './campaign-preview/CampaignPreviewDesk'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 /** Below this pane width a left inspector and a docked card can't share the map (keep in step with map-desk.css). */
@@ -595,6 +596,9 @@ export function MapDeskChrome(p: MapDeskChromeProps) {
           </div>
         </div>
       ) : null}
+
+      {/* L2 — Campaign Map Preview: the Composer's live audience (only while a Composer publishes one) */}
+      <CampaignPreviewDesk map={map} mapEpoch={mapEpoch} reducedMotion={reducedMotion} styleMode={p.styleMode} />
 
       {/* L2 — legend (and the ZIP market panel) */}
       {!p.drawing ? (
