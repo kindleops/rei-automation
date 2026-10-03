@@ -243,7 +243,7 @@ test("the delivery reconciler still runs with its outbound provider call disable
 });
 
 test("production declares the reconciliation and send schedules, and only approved flags", async () => {
-  assert.deepEqual(await declaredCrons(PRODUCTION), ["*/5 * * * *", "* * * * *"]);
+  assert.deepEqual(await declaredCrons(PRODUCTION), ["*/5 * * * *", "* * * * *", "*/1 * * * *"]);
 
   const vars = await configVars(PRODUCTION);
   assert.equal(vars.DEPLOYMENT_ENV, "production");
@@ -263,6 +263,8 @@ test("production declares the reconciliation and send schedules, and only approv
       // Email Command dispatcher, operator-commissioned 2026-09-29.
       "CRON_EMAIL_DISPATCH_ENABLED",
       "CRON_ENABLED",
+      // Notification Center 2.0 projector, RC 8.2 post-deploy E1.
+      "CRON_NOTIFICATION_STORIES_PROJECT_ENABLED",
       // PRODUCTION-COMMISSIONING-1. Both send-incapable; see
       // RECONCILIATION_JOB_PATHS for the structural reason each one is.
       "CRON_QUEUE_RECONCILE_ENABLED",
@@ -437,7 +439,7 @@ test("the Signal Center evaluator is registered on the reconciliation cadence bu
   }
 });
 
-test("the Notification Center projector is registered on its own lane at 30 s, but not commissioned (no trigger, no flag)", async () => {
+test("the Notification Center projector rides its own lane at 30 s: commissioned in production only (RC 8.2 E1)", async () => {
   const code = await workerCode();
   const table = code.match(/const PRODUCTION_CRON_JOBS[^=]*=\s*\{([\s\S]*?)\n\};/);
   const lane = table[1].match(/"\*\/1 \* \* \* \*":\s*\[([^\]]*)\]/);
@@ -449,11 +451,9 @@ test("the Notification Center projector is registered on its own lane at 30 s, b
   assert.ok(block && block[1].includes('"CRON_NOTIFICATION_STORIES_PROJECT_ENABLED"') && block[1].includes('"/api/internal/notifications/stories/project"'));
   assert.ok(/repeatEveryMs:\s*30_000/.test(block[1]), "fires at :00 and :30");
   assert.ok(!/body\s*:/.test(block[1]), "the projector takes no body");
-  for (const cfg of [PRODUCTION, STAGING]) {
-    const vars = await configVars(cfg);
-    assert.notEqual(vars.CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true", "not commissioned: the owner flips this");
-    assert.ok(!(await declaredCrons(cfg)).includes("*/1 * * * *"), "the projection lane is not a declared trigger yet");
-  }
+  assert.equal((await configVars(PRODUCTION)).CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true");
+  assert.ok((await declaredCrons(PRODUCTION)).includes("*/1 * * * *"), "production declares the projection lane");
+  assert.notEqual((await configVars(STAGING)).CRON_NOTIFICATION_STORIES_PROJECT_ENABLED, "true", "staging shares the production DB: no projector");
 });
 
 test("the Worker source still parses as TypeScript (a cron string inside a /** */ comment closes it)", async () => {
