@@ -309,7 +309,7 @@ export function PipelineDesk({ onOpenCommandView, onOpenDealIntelligence }: Prop
         ) : null}
 
         {mode === 'table' ? (
-          <DeskTable rows={rows.data} loading={rows.loading} error={rows.error} onRetry={rows.retry} owner={owner} stage={stage} showDormant={showDormant || Boolean(owner)} onShowDormant={setShowDormant} selectedId={open?.id ?? null} onOpen={openDeal} now={now} total={rows.total} />
+          <DeskTable rows={rows.data} loading={rows.loading} error={rows.error} onRetry={rows.retry} owner={owner} stage={stage} showDormant={showDormant || Boolean(owner)} onShowDormant={setShowDormant} selectedId={open?.id ?? null} onOpen={openDeal} now={now} total={rows.total} onBulkChanged={rows.retry} />
         ) : null}
 
         {mode === 'offers' ? (

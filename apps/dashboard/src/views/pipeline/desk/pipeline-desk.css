@@ -593,3 +593,4 @@ html[data-lc-motion='off'] .pd2 :is(.pd2-river__stratum, .pd2-ownbar i) { transi
 @media (prefers-reduced-motion: reduce) {
   .pd2 :is(.pd2-river__stratum, .pd2-ownbar i, .pd2-bead) { transition: none; }
 }
+.pd2-bulkbar { margin: 0; flex: 0 0 auto; }

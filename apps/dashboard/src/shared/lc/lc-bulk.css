@@ -1,0 +1,66 @@
+/* LCBulkBar — selection action bar. In flow, sticky to the bottom of the
+   list's own scroll root; never position: fixed (works in any Shell pane). */
+.lc-bulkbar {
+  position: sticky;
+  bottom: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 8px 10px;
+  padding: 7px 8px 7px 14px;
+  border-radius: var(--lc-r-lg);
+  background: var(--lc-glass-chrome);
+  -webkit-backdrop-filter: var(--lc-glass-filter);
+  backdrop-filter: var(--lc-glass-filter);
+  box-shadow: inset 0 0 0 1px var(--lc-glass-line), var(--lc-glass-shadow-chrome);
+  color: var(--lc-ink-1);
+  font: var(--lc-t-body, 500 13px/1.3 var(--lc-font-ui));
+  container-type: inline-size;
+}
+.lc-bulkbar__sel { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.lc-bulkbar__count { font-weight: 640; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-bulkbar__of { color: var(--lc-ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lc-bulkbar__sel-actions { display: flex; align-items: center; gap: 2px; }
+.lc-bulkbar__sel-actions .lc-kbds { margin-left: 6px; }
+.lc-bulkbar__actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.lc-bulkbar__progress { display: flex; align-items: center; gap: 14px; flex: 1 1 260px; min-width: 0; }
+.lc-bulkbar__progress .lc-progress { flex: 1 1 auto; }
+.lc-bulkbar__outcome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 100%;
+  color: var(--lc-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.lc-bulkbar__outcome > span:first-child { margin-right: auto; }
+.lc-bulkbar__issues { list-style: none; margin: 0; padding: 4px; display: grid; gap: 2px; max-height: 320px; overflow: auto; }
+.lc-bulkbar__issue { display: grid; gap: 2px; padding: 7px 9px; border-radius: var(--lc-r-sm); }
+.lc-bulkbar__issue + .lc-bulkbar__issue { box-shadow: inset 0 1px 0 var(--lc-glass-line); }
+.lc-bulkbar__issue-who { font-weight: 600; color: var(--lc-ink-1); }
+.lc-bulkbar__issue-why { color: var(--lc-ink-2); font-size: 12px; line-height: 1.35; }
+.lc-bulkbar__issue.is-blocked .lc-bulkbar__issue-who::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 99px; background: var(--lc-attn); vertical-align: 1px; }
+.lc-bulkbar__issue.is-failed .lc-bulkbar__issue-who::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 99px; background: var(--lc-crit); vertical-align: 1px; }
+.lc-bulkbar__issue.is-more { color: var(--lc-ink-3); }
+
+@container (max-width: 520px) {
+  .lc-bulkbar__of { display: none; }
+  .lc-bulkbar__actions { margin-left: 0; }
+}
+
+/* a selectable row's checkbox (lists that are not LCDataGrid) */
+.lc-rowcheck {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: var(--lc-r-xs);
+}
+.lc-rowcheck:focus-visible { outline: 2px solid rgba(var(--lc-select-rgb), 0.6); outline-offset: 1px; }

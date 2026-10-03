@@ -36,6 +36,10 @@ import {
 import { readLedgerFacts, useLedgerFacts } from './ledger-facts'
 import { enableRowSignals, useRowArrival, useRowSignal, type RowSignal } from './live-row-signals'
 import { useLedgerClock } from './use-ledger-clock'
+import { useLcSelection } from '../../../shared/lc/selection'
+import { LCBulkBar } from '../../../shared/lc/BulkBar'
+import { useBulkArchive } from '../../../lib/data/useBulkArchive'
+import type { BulkRunReport } from '../../../lib/data/bulkArchiveData'
 import './inbox-desk.css'
 
 /**
@@ -81,9 +85,18 @@ export interface InboxDeskLedgerProps {
   /** the Scheduled lens reads send_queue, not thread rows */
   scheduledPanel?: ReactNode
   density?: 'standard' | 'dense'
+  /** [8.3] after a bulk archive / undo changed threads — refresh counts and the list */
+  onBulkChanged?: () => void
 }
 
 const ROW_HEIGHT = { standard: 64, dense: 48 } as const
+
+const EMPTY_KEYS: ReadonlySet<string> = new Set()
+const THREAD_NOUN = { one: 'conversation', many: 'conversations' }
+const THREAD_ARCHIVE_EFFECTS = [
+  { kind: 'stops' as const, text: 'They leave every Inbox lens and count, and the analytics that read archived state.' },
+  { kind: 'keeps' as const, text: 'Messages, stage and suppression are untouched.' },
+]
 
 const sortNewestFirst = (rows: InboxWorkflowThread[]) => [...rows].sort((a, b) => {
   const at = (row: InboxWorkflowThread) => {
@@ -106,6 +119,9 @@ interface RowHandlers {
   onSnooze: (threadId: string) => void
   onMarkRead: (threadId: string) => void
   onOpenBeside: (thread: InboxWorkflowThread, app: BesideApp) => void
+  /** [8.3] a selection gesture on a row (checkbox, or ⇧/⌘ while a selection is active); true = consumed */
+  onSelectGesture: (threadId: string, e: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }, onCheckbox?: boolean) => boolean
+  selectable: boolean
 }
 
 function TransientChip({ signal }: { signal: RowSignal }) {
@@ -134,12 +150,16 @@ function TransientChip({ signal }: { signal: RowSignal }) {
 }
 
 const LedgerRow = memo(function LedgerRow({
-  thread, model, selected, cursor, optionId, handlers,
+  thread, model, selected, cursor, picked, selecting, optionId, handlers,
 }: {
   thread: InboxWorkflowThread
   model: LedgerRowModel
   selected: boolean
   cursor: boolean
+  /** [8.3] in the bulk selection */
+  picked: boolean
+  /** [8.3] a bulk selection is active (checkboxes stay visible) */
+  selecting: boolean
   optionId: string
   handlers: RowHandlers
 }) {
@@ -190,17 +210,36 @@ const LedgerRow = memo(function LedgerRow({
           model.suppressed && 'is-suppressed',
           model.direction === 'outbound' && 'is-outbound',
           arriving && 'is-arriving',
+          picked && 'is-picked',
+          selecting && 'is-selecting',
         )}
         data-thread-id={model.id}
         {...objectAttrs(rowObject)}
         onClick={(e) => {
+          // [8.3] while a selection is active, ⇧-click extends it and ⌘-click toggles (LCDataGrid grammar)
+          if (handlers.onSelectGesture(model.id, e)) { e.preventDefault(); return }
           // click opens the conversation · ⇧-click inspects the seller · ⌘/Ctrl-click opens Deal Intelligence beside
           if (gestureOf(e) === 'beside' && (model.propertyId || model.threadKey)) { e.preventDefault(); handlers.onOpenBeside(thread, 'deal-intelligence'); return }
           handleObjectClick(e, rowObject, () => { handlers.onCursor(model.id); handlers.onOpen(model.id) })
         }}
       >
-        <span className="ixl-row__lead" aria-hidden="true">
-          {model.needsYou ? <i className="ixl-mark is-attn" /> : model.unread ? <i className="ixl-mark is-unread" /> : null}
+        <span className="ixl-row__lead">
+          {handlers.selectable ? (
+            <button
+              type="button"
+              className="lc-rowcheck ixl-row__check"
+              role="checkbox"
+              aria-checked={picked}
+              aria-label={`Select ${model.name}`}
+              tabIndex={-1}
+              onClick={(e) => { e.stopPropagation(); handlers.onSelectGesture(model.id, e, true) }}
+            >
+              <span className={cx('lc-check', picked && 'is-on')} aria-hidden="true" />
+            </button>
+          ) : null}
+          <span className="ixl-row__marks" aria-hidden="true">
+            {model.needsYou ? <i className="ixl-mark is-attn" /> : model.unread ? <i className="ixl-mark is-unread" /> : null}
+          </span>
         </span>
 
         <span className="ixl-row__who">
@@ -266,13 +305,14 @@ interface SlotProps {
   lens: DeskLensKey
   selectedId: string | null
   cursorId: string | null
+  picked: ReadonlySet<string>
   now: number
   factsVersion: number
   idPrefix: string
   handlers: RowHandlers
 }
 
-function LedgerSlot({ index, style, rows, lens, selectedId, cursorId, now, idPrefix, handlers }: RowComponentProps<SlotProps>) {
+function LedgerSlot({ index, style, rows, lens, selectedId, cursorId, picked, now, idPrefix, handlers }: RowComponentProps<SlotProps>) {
   const thread = rows[index]
   const factsKey = thread ? factsKeyOf(thread) : ''
   const arrivedAt = useRowArrival(factsKey || null)
@@ -285,6 +325,8 @@ function LedgerSlot({ index, style, rows, lens, selectedId, cursorId, now, idPre
         model={model}
         selected={selectedId === thread.id}
         cursor={cursorId === thread.id}
+        picked={picked.has(thread.id)}
+        selecting={picked.size > 0}
         optionId={`${idPrefix}-${index}`}
         handlers={handlers}
       />
@@ -319,7 +361,7 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   const {
     threads, hiddenIds, lens, counts, loading, error, canLoadMore, filteredTotal, filterChips, selectedId,
     onLens, onOpenFilters, onRemoveFilterChip, onClearFilters, onOpen, onLoadMore, onRetry, onSnooze, onMarkRead,
-    onOpenBeside, scheduledPanel, density = 'standard',
+    onOpenBeside, scheduledPanel, density = 'standard', onBulkChanged,
   } = props
   const rowHeight = ROW_HEIGHT[density]
   const now = useLedgerClock()
@@ -331,11 +373,65 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   // The live-row store reads the Inbox channel's events only while a ledger is mounted.
   useEffect(() => enableRowSignals(), [])
 
+  // [8.3] threads a bulk run moved out of this lens leave the list at once (Undo brings them back).
+  // Scoped to the lens: a thread archived from Priority must still show in Archived.
+  const [goneHere, setGoneHere] = useState<{ lens: DeskLensKey; keys: ReadonlySet<string> }>(() => ({ lens, keys: new Set() }))
+  const goneKeys = goneHere.lens === lens ? goneHere.keys : EMPTY_KEYS
   const rows = useMemo(
-    () => sortNewestFirst(threads.filter((thread) => !hiddenIds?.has(`hidden:${thread.id}`))),
-    [hiddenIds, threads],
+    () => sortNewestFirst(threads.filter((thread) => !hiddenIds?.has(`hidden:${thread.id}`) && !goneKeys.has(factsKeyOf(thread)))),
+    [goneKeys, hiddenIds, threads],
   )
   const rowIds = useMemo(() => rows.map((row) => row.id), [rows])
+
+  /* [8.3] multi-select + bulk archive (thread rows only — the Scheduled lens is send_queue) */
+  const selectable = lens !== 'scheduled'
+  const selectionOrder = useMemo(() => (selectable ? rowIds : []), [rowIds, selectable])
+  const selection = useLcSelection(selectionOrder)
+  const rowById = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows])
+  const nameByKey = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of rows) {
+      const key = factsKeyOf(row)
+      const raw = row as unknown as Record<string, unknown>
+      if (key) map.set(key, String(raw.ownerName ?? raw.seller_display_name ?? raw.display_name ?? '').trim() || key)
+    }
+    return map
+  }, [rows])
+  const labelOf = useCallback((key: string) => nameByKey.get(key) ?? key, [nameByKey])
+  const archivedLens = lens === 'archived'
+  const onBulkReport = useCallback((report: BulkRunReport) => {
+    // archiving leaves a normal lens; restoring leaves the Archived lens
+    const leaving = (report.action === 'archive') !== archivedLens
+    setGoneHere((prev) => {
+      const next = new Set(prev.lens === lens ? prev.keys : [])
+      for (const key of report.changedIds) {
+        if (leaving) next.add(key)
+        else next.delete(key)
+      }
+      return { lens, keys: next }
+    })
+    onBulkChanged?.()
+  }, [archivedLens, lens, onBulkChanged])
+  const bulk = useBulkArchive({
+    objectType: 'inbox_thread',
+    noun: THREAD_NOUN,
+    consequences: THREAD_ARCHIVE_EFFECTS,
+    labelOf,
+    onChanged: onBulkReport,
+    source: 'inbox',
+  })
+  const { clear: clearSelection, ids: selectedIds, onRowClick: selectionRowClick } = selection
+  const { archive: bulkArchive, undo: bulkRestore } = bulk
+  const archiveSelected = useCallback(async () => {
+    const keys = selectedIds.map((id) => rowById.get(id)).map((row) => (row ? factsKeyOf(row) : '')).filter(Boolean)
+    if (archivedLens) {
+      clearSelection()
+      await bulkRestore(keys)
+      return
+    }
+    const report = await bulkArchive(keys)
+    if (report) clearSelection()
+  }, [archivedLens, bulkArchive, bulkRestore, clearSelection, rowById, selectedIds])
   const factsKeys = useMemo(() => rows.slice(0, 160).map(factsKeyOf).filter(Boolean), [rows])
   const factsVersion = useLedgerFacts(factsKeys)
 
@@ -352,11 +448,14 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
     onSnooze,
     onMarkRead,
     onOpenBeside,
-  }), [onMarkRead, onOpen, onOpenBeside, onSnooze])
+    onSelectGesture: (id, e, onCheckbox) => (selectable ? selectionRowClick(id, e, onCheckbox) : false),
+    selectable,
+  }), [onMarkRead, onOpen, onOpenBeside, onSnooze, selectable, selectionRowClick])
 
+  const picked = selection.selected
   const rowProps = useMemo<SlotProps>(() => ({
-    rows, lens, selectedId, cursorId, now, factsVersion, idPrefix, handlers,
-  }), [cursorId, factsVersion, handlers, lens, now, rows, selectedId])
+    rows, lens, selectedId, cursorId, picked, now, factsVersion, idPrefix, handlers,
+  }), [cursorId, factsVersion, handlers, lens, now, picked, rows, selectedId])
 
   /* scroll anchoring: a reply landing above the fold never moves what you are reading */
   const anchorRef = useRef<{ id: string; index: number } | null>(null)
@@ -384,6 +483,13 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
   useEffect(() => { scrollCursorIntoView(cursorId) }, [cursorId, scrollCursorIntoView])
 
   const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // [8.3] Esc clears the bulk selection first; Space toggles the cursor row into it
+    if (selection.onKeyDown(event)) return
+    if (event.key === ' ' && selectable && cursorId && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault()
+      selection.onRowClick(cursorId, event, true)
+      return
+    }
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
     const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1
       : event.key === 'PageDown' ? 10 : event.key === 'PageUp' ? -10 : 0
@@ -561,6 +667,23 @@ export function InboxDeskLedger(props: InboxDeskLedgerProps) {
           </div>
         ) : null}
         <div className="ixl-body">{body}</div>
+        {selectable ? (
+          <LCBulkBar
+            className="ixl-bulkbar"
+            count={selection.count}
+            inView={rows.length}
+            all={selection.all}
+            noun={THREAD_NOUN}
+            onSelectAll={selection.selectAll}
+            onClear={selection.clear}
+            actions={[archivedLens
+              ? { id: 'unarchive', label: 'Unarchive', icon: 'refresh-cw', onRun: () => { void archiveSelected() }, disabled: bulk.busy }
+              : { id: 'archive', label: 'Archive', icon: 'archive', onRun: () => { void archiveSelected() }, disabled: bulk.busy }]}
+            progress={bulk.progress}
+            outcome={bulk.outcome}
+            onDismissOutcome={bulk.dismissOutcome}
+          />
+        ) : null}
         {showLoadMore && lens !== 'scheduled' ? (
           <footer className="ixl-foot">
             <span className="ixl-foot__count">

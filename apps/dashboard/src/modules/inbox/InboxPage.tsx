@@ -5050,6 +5050,11 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
 
   const handleDeskSnooze = useCallback((threadId: string) => { void handleOperatorAction(threadId, 'snooze') }, [handleOperatorAction])
   const handleDeskMarkRead = useCallback((threadId: string) => { void handleThreadAction(threadId, 'read') }, [handleThreadAction])
+  /** [8.3] a bulk archive / undo moved threads: the counts and the page re-read the server's buckets. */
+  const handleDeskBulkChanged = useCallback(() => {
+    void refreshInboxCounts()
+    handleRetryInboxLoad()
+  }, [handleRetryInboxLoad, refreshInboxCounts])
 
   /** Context menu / hover: open another app on THIS seller's property, beside the Inbox. */
   const handleDeskOpenBeside = useCallback((thread: InboxWorkflowThread, app: BesideApp) => {
@@ -5968,6 +5973,7 @@ export default function InboxPage({ initialWorkspaceView, routeMode = 'workspace
         onSnooze={handleDeskSnooze}
         onMarkRead={handleDeskMarkRead}
         onOpenBeside={handleDeskOpenBeside}
+        onBulkChanged={handleDeskBulkChanged}
         scheduledPanel={deskLens === 'scheduled'
           ? <ScheduledFollowupsPanel onOpenThread={(threadKey) => openInboxThread({ threadKey })} />
           : undefined}

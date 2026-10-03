@@ -1151,3 +1151,15 @@ html.is-desktop-modern[data-nexus-theme='red_ops'] .cc3-stage[data-state='blocke
   html.is-desktop-modern .cc3-row.is-selected { transform: none; }
   html.is-desktop-modern .cc3-railslot.is-drawer { animation: none; }
 }
+
+/* [8.3] bulk selection on the mission rail — the checkbox sits top-right,
+   revealed on hover and held while a selection is active */
+html.is-desktop-modern .cc3-row__check { position: absolute; top: 7px; right: 8px; margin: 0; z-index: 1; opacity: 0; transition: opacity var(--lc-dur-fast) var(--lc-ease-standard); }
+html.is-desktop-modern .cc3-row:hover .cc3-row__check,
+html.is-desktop-modern .cc3-row.is-selecting .cc3-row__check,
+html.is-desktop-modern .cc3-row__check:focus-visible { opacity: 1; }
+html.is-desktop-modern .cc3-row:hover .cc3-row__top,
+html.is-desktop-modern .cc3-row.is-selecting .cc3-row__top { padding-right: 24px; }
+html.is-desktop-modern .cc3-row.is-picked { background: rgba(var(--lc-select-rgb), 0.08); box-shadow: inset 0 0 0 1px rgba(var(--lc-select-rgb), 0.28); }
+html.is-desktop-modern .cc3-bulkbar { margin: 6px 8px; flex: 0 0 auto; }
+html[data-lc-motion='off'] .cc3-row__check { transition: none; }

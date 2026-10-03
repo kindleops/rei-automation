@@ -1,13 +1,19 @@
 /**
  * PIPELINE DESK · TABLE — every deal in scope in the shared data grid.
  * Sortable, resizable, groupable by stage or by whose move it is; selecting a
- * row opens the deal inspector. View-only: no inline edits, no stage moves.
+ * row opens the deal inspector. No inline edits, no stage moves.
+ * [8.3] Multi-select (checkbox · ⇧ range · ⌘ toggle · ⌘A · Esc) → bulk Archive
+ * through the canonical opportunity status, with Undo.
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import { LCButton, LCDataGrid, LCSegmented, LCStatus, type LCColumn, type LCRowActivationEvent, type LCSort } from '../../../shared/lc'
 import { compactMoney } from '../../../domain/pipeline/pipeline-command-api'
 import { sound } from '../../../shared/sound'
 import type { DeskCard } from './pipeline-desk-api'
+import { useLcSelection } from '../../../shared/lc/selection'
+import { LCBulkBar } from '../../../shared/lc/BulkBar'
+import { useBulkArchive } from '../../../lib/data/useBulkArchive'
+import type { BulkRunReport } from '../../../lib/data/bulkArchiveData'
 import { HOLD_META, OWNER_META, STAGE_CODES, STAGE_SHORT_LABEL, fmtInt, relShort, stageTag, type LiveOwner } from './pipeline-desk-model'
 
 type GroupBy = 'none' | 'stage' | 'owner'
@@ -16,6 +22,14 @@ const GROUPS: ReadonlyArray<{ value: GroupBy; label: string }> = [
   { value: 'stage', label: 'By stage' },
   { value: 'owner', label: 'By whose move' },
 ]
+const DEAL_NOUN = { one: 'deal', many: 'deals' }
+const DEAL_ARCHIVE_EFFECTS = [
+  { kind: 'stops' as const, text: 'They leave the Pipeline views, stage counts and the pipeline metrics.' },
+  { kind: 'stops' as const, text: 'Automation on an archived deal is reconciled to cancelled. Won deals are refused.' },
+  { kind: 'keeps' as const, text: 'Unarchive restores the status each deal had before.' },
+]
+const EMPTY_IDS: ReadonlySet<string> = new Set()
+
 const OWNER_RANK: Record<string, number> = { blocked: 0, needs_you: 1, autopilot: 2, scheduled: 3, external: 4, seller: 5, dormant: 6, closed_out: 7, complete: 8 }
 
 const SORTERS: Record<string, (c: DeskCard) => number | string> = {
@@ -29,7 +43,7 @@ const SORTERS: Record<string, (c: DeskCard) => number | string> = {
   market: (c) => (c.market || '').toLowerCase(),
 }
 
-export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDormant, onShowDormant, selectedId, onOpen, now, total }: {
+export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDormant, onShowDormant, selectedId, onOpen, now, total, onBulkChanged }: {
   rows: DeskCard[] | null
   loading: boolean
   error: string | null
@@ -42,11 +56,16 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
   onOpen: (card: DeskCard, e?: LCRowActivationEvent) => void
   now: number
   total: number
+  /** [8.3] a bulk archive / undo changed deals — re-read the pipeline */
+  onBulkChanged?: () => void
 }) {
   const [sort, setSort] = useState<LCSort>({ id: 'owner', dir: 'asc' })
   const [group, setGroup] = useState<GroupBy>('none')
+  // [8.3] deals archived here leave the table at once; Undo brings them back
+  const [archivedHere, setArchivedHere] = useState<{ rows: DeskCard[] | null; ids: ReadonlySet<string> }>({ rows, ids: EMPTY_IDS })
+  const goneIds = archivedHere.rows === rows ? archivedHere.ids : EMPTY_IDS
   const view = useMemo(() => {
-    const list = (rows ?? []).filter((c) => c.owner !== 'closed_out' && (showDormant || c.owner !== 'dormant') && (!owner || c.owner === owner) && (!stage || c.stage === stage))
+    const list = (rows ?? []).filter((c) => !goneIds.has(c.id) && c.owner !== 'closed_out' && (showDormant || c.owner !== 'dormant') && (!owner || c.owner === owner) && (!stage || c.stage === stage))
     if (!sort) return list
     const get = SORTERS[sort.id] ?? SORTERS.owner
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -56,7 +75,31 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
       const d = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))
       return d * dir || (b.daysInStage ?? 0) - (a.daysInStage ?? 0)
     })
-  }, [rows, owner, stage, showDormant, sort])
+  }, [rows, goneIds, owner, stage, showDormant, sort])
+
+  const order = useMemo(() => view.map((c) => c.id), [view])
+  const selection = useLcSelection(order)
+  const labelById = useMemo(() => new Map((rows ?? []).map((c) => [c.id, c.address || c.seller || 'Unaddressed deal'])), [rows])
+  const labelOf = useCallback((id: string) => labelById.get(id) ?? id, [labelById])
+  const onBulkReport = useCallback((report: BulkRunReport) => {
+    setArchivedHere((prev) => {
+      const next = new Set(prev.rows === rows ? prev.ids : [])
+      for (const id of report.changedIds) {
+        if (report.action === 'archive') next.add(id)
+        else next.delete(id)
+      }
+      return { rows, ids: next }
+    })
+    onBulkChanged?.()
+  }, [onBulkChanged, rows])
+  const bulk = useBulkArchive({ objectType: 'opportunity', noun: DEAL_NOUN, consequences: DEAL_ARCHIVE_EFFECTS, labelOf, onChanged: onBulkReport, source: 'pipeline' })
+  const { archive: bulkArchive } = bulk
+  const { ids: selectedIds, clear: clearSelection, onKeyDown: selectionKeyDown } = selection
+  const archiveSelected = useCallback(async () => {
+    const report = await bulkArchive(selectedIds)
+    if (report) clearSelection()
+  }, [bulkArchive, clearSelection, selectedIds])
+  const onGridKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => { selectionKeyDown(e) }, [selectionKeyDown])
 
   const dormant = useMemo(() => (rows ?? []).filter((c) => c.owner === 'dormant').length, [rows])
   const columns = useMemo<LCColumn<DeskCard>[]>(() => [
@@ -108,7 +151,7 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
           <LCSegmented options={GROUPS} value={group} onChange={(g) => { sound.ui.select(); setGroup(g) }} label="Group deals" size="sm" />
         </span>
       </div>
-      <div className="pd2-table__grid">
+      <div className="pd2-table__grid" onKeyDown={onGridKeyDown}>
         <LCDataGrid
           id="pipeline-desk-deals"
           label="Pipeline deals"
@@ -119,6 +162,8 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
           onSortChange={setSort}
           activeKey={selectedId}
           onActivate={onOpen}
+          selected={selection.selected}
+          onSelectedChange={selection.set}
           density="standard"
           groupBy={groupBy}
           groupLabel={groupLabel}
@@ -130,6 +175,19 @@ export function DeskTable({ rows, loading, error, onRetry, owner, stage, showDor
           height="100%"
         />
       </div>
+      <LCBulkBar
+        className="pd2-bulkbar"
+        count={selection.count}
+        inView={view.length}
+        all={selection.all}
+        noun={DEAL_NOUN}
+        onSelectAll={selection.selectAll}
+        onClear={selection.clear}
+        actions={[{ id: 'archive', label: 'Archive', icon: 'archive', onRun: () => { void archiveSelected() }, disabled: bulk.busy }]}
+        progress={bulk.progress}
+        outcome={bulk.outcome}
+        onDismissOutcome={bulk.dismissOutcome}
+      />
     </section>
   )
 }
