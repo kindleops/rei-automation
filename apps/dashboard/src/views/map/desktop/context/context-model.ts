@@ -55,6 +55,8 @@ export interface CameraPoint {
   status: string
   feed: string
   media: 'still' | 'link'
+  /** The agency publishes live video for this camera (official HLS). */
+  video?: boolean
   freshness: string
   provider: string
 }
@@ -78,7 +80,7 @@ export interface CameraDetailReply {
     timezone: string | null; provider_updated_at: string | null; refreshed_at: string | null; cadence_sec: number | null
     freshness: { state: string; age_sec: number | null }
   }
-  media?: { still: { kind: 'proxy' | 'direct'; path?: string; url?: string; refresh_sec: number | null; passthrough?: boolean } | null; stream: unknown; provider_page_url: string | null }
+  media?: { still: { kind: 'proxy' | 'direct'; path?: string; url?: string; refresh_sec: number | null; passthrough?: boolean } | null; stream: { type: 'HLS' | 'VIDEO'; url: string } | null; provider_page_url: string | null }
   provider?: { id: string; name: string; attribution: string; terms_url: string | null; image_policy?: string; internal_use?: boolean }
   corridor?: { road: string; state: string; index: number; total: number } | null
 }

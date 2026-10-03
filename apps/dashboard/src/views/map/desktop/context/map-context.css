@@ -101,3 +101,20 @@ html.is-desktop-modern .mx.is-desk .mxd-ctx-internal {
   color: var(--mxg-ink-2); background: color-mix(in srgb, var(--mxg-warn) 10%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mxg-warn) 30%, transparent);
 }
+
+/* live video (click-to-play; official agency HLS, browser-direct) */
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still.is-live { background: #000; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still__state.is-over { position: absolute; inset: auto 0 12px; color: rgb(255 255 255 / 0.7); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-still__tag.is-live { color: #0b1a12; background: var(--mxg-good); box-shadow: none; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-play {
+  position: absolute; left: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 11px 0 9px; border: 0; border-radius: 999px; cursor: pointer;
+  font: 600 12px/1 var(--mxd-font); color: var(--mxg-ink);
+  background: color-mix(in srgb, var(--mxg-l4) 86%, transparent); box-shadow: inset 0 0 0 1px var(--mxg-edge-hi), var(--mxg-shadow-2);
+}
+html.is-desktop-modern .mx.is-desk .mxd-ctx-play > svg { color: var(--mxg-good); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-play:hover { background: var(--mxg-l4); }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-play:focus-visible { outline: 2px solid var(--mxg-accent); outline-offset: 2px; }
+html.is-desktop-modern .mx.is-desk .mxd-ctx-internal.is-note { background: var(--mxg-well); box-shadow: inset 0 0 0 1px var(--mxg-edge); }
+html.is-desktop-modern .mx.is-desk .mxd-legend__bound > i.mxd-ctx-swatch.is-live { background: #5cc8ff; box-shadow: 0 0 0 2px #0000, 0 0 0 3.2px #3ddc97; }

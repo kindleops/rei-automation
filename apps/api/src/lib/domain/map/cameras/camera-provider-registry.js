@@ -115,6 +115,30 @@ export const CAMERA_PROVIDERS = [
     priority: 30,
     bounds: { west: -98.2, south: 29.9, east: -97.4, north: 30.7 },
   },
+  {
+    domain: 'cameras',
+    provider_id: 'ca_caltrans_cwwp2',
+    name: 'Caltrans',
+    state: 'CA',
+    region: 'Districts 1–12',
+    provider_type: 'state_dot',
+    adapter_type: 'caltrans_cwwp2',
+    coverage_status: 'FULL',
+    enabled_by_default: true,
+    requires_api_key: false,
+    api_key_env: null,
+    image_policy: 'proxy',
+    // stills from cwwp2; live HLS referenced at Caltrans's own Wowza host (browser-direct, click-to-play)
+    image_hosts: ['cwwp2.dot.ca.gov', 'wzmedia.dot.ca.gov'],
+    metadata_hosts: ['cwwp2.dot.ca.gov'],
+    refresh_interval_sec: 6 * 3600,
+    snapshot_cadence_sec: 120,
+    attribution: 'Camera imagery: Caltrans (California Department of Transportation)',
+    terms_url: 'https://cwwp2.dot.ca.gov/documentation/cctv/cctv.htm',
+    terms_note: 'Public domain, built for integration; fair use — never degrade the streaming service: stills proxied with a short TTL, video only on click, never prefetched or re-streamed.',
+    priority: 10,
+    bounds: { west: -124.5, south: 32.4, east: -114.0, north: 42.1 },
+  },
 ]
 
 export const US_STATES = Object.freeze({

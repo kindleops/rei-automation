@@ -168,7 +168,7 @@ const cameraView = (d, p, r) => ({
   lng: Number(r.longitude),
   status: r.status,
   feed: r.feed_type,
-  video: false,
+  video: r.feed_type === 'HLS' && Boolean(r.stream_url),
   media: p.image_policy === 'link_only' || r.feed_type === 'PROVIDER_PAGE_ONLY' ? 'link' : 'still',
   freshness: cameraFreshness({ capturedAt: r.provider_updated_at, cadenceSec: r.snapshot_cadence_sec ?? p.snapshot_cadence_sec, status: r.status, now: d.now, staleAfterSec: p.stale_after_sec }).state,
   corridor: r.corridor_key,

@@ -3,13 +3,16 @@
  * glass preview for what was picked on the map (a camera, a reported
  * incident, an investor-presence area).
  *
- * Camera preview: location, direction, road, last updated and still vs
- * location-only. One still is fetched when the preview opens and again only
- * when the operator presses Refresh — nothing autoplays or polls. TxDOT
- * cameras are location-only (their imagery is not cleared for reuse) and
- * open on TxDOT's own page.
+ * Camera preview: location, direction, road, last updated and still vs live.
+ * One still is fetched when the preview opens and again only when the
+ * operator presses Refresh — nothing autoplays or polls. Where the agency
+ * publishes official live video (MnDOT streamable, Caltrans), a "Play live"
+ * control starts it — click only; it is destroyed and released when the
+ * preview closes, the pane hides or the tab goes to the background, and any
+ * failure falls back to the still. TxDOT stills are an internal-use
+ * pass-through, labelled as such.
  */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '../../../../shared/icons'
 import { callBackend, getBackendAuthHeaders, getBackendBaseUrl } from '../../../../lib/api/backendClient'
 import { DeskSeg, Plate } from '../MapDeskLayers'
@@ -19,6 +22,7 @@ import {
   type CameraDetailReply, type CrimeDays, type CrimeFamily, type PresenceMonths, type PresenceView,
 } from './context-model'
 import type { ContextPick, MapContextOverlays } from './useMapContextOverlays'
+import { startLiveVideo, type LiveSession } from './hls-player'
 
 const cls = (...t: Array<string | false | null | undefined>) => t.filter(Boolean).join(' ')
 const fmt = (n: number) => n.toLocaleString('en-US')
@@ -37,7 +41,7 @@ export function ContextPlate({ row, ctx }: { row: SensorRow; ctx: MapContextOver
     case 'ctxCameras':
       return (
         <Plate key={row.id} row={row} onToggle={(v) => setPrefs({ cameras: v })}>
-          <p className="mxd-ctl__note">Press a camera for its latest still. Solid dot = still image · ring = location only (picture on the agency’s page).</p>
+          <p className="mxd-ctl__note">Press a camera for its latest still. Solid dot = still image · green halo = live video (plays only when you press Play) · hollow ring = location only.</p>
           <Credits items={ctx.cameras.status.attributions} />
         </Plate>
       )
@@ -104,6 +108,11 @@ export function ContextKey({ ctx }: { ctx: MapContextOverlays }) {
           <em>{ctx.cameras.status.state === 'on' ? fmt(ctx.cameras.status.count) : ctx.cameras.status.reason ?? 'reading…'}</em>
         </span>
       ) : null}
+      {prefs.cameras && ctx.cameras.reply?.cameras.some((c) => c.video) ? (
+        <span className="mxd-legend__bound" title="Official agency live video — plays only when you press Play">
+          <i className="mxd-ctx-swatch is-live" aria-hidden="true" />Live video<em>{fmt(ctx.cameras.reply.cameras.filter((c) => c.video).length)}</em>
+        </span>
+      ) : null}
       {prefs.crime ? (
         ctx.crime.status.state === 'on' && fams.size ? (
           [...fams.entries()].map(([f, n]) => (
@@ -167,15 +176,58 @@ function useCameraStill(path: string | null, nonce: number) {
   return still.key === key ? still : { key, url: null, capturedAt: null, failed: false }
 }
 
+/**
+ * One live stream, started by the click that mounted it. Stops (and releases
+ * the stream) on unmount, when the element leaves the viewport (pane hidden /
+ * scrolled away) and when the tab is hidden. Any failure hands back to the still.
+ */
+function LiveVideo({ url, label, onEnd }: { url: string; label: string; onEnd: (reason: string | null) => void }) {
+  const ref = useRef<HTMLVideoElement | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const endRef = useRef(onEnd)
+  useEffect(() => { endRef.current = onEnd })
+  useEffect(() => {
+    const video = ref.current
+    if (!video) return undefined
+    let session: LiveSession | null = null
+    let done = false
+    const finish = (reason: string | null) => { if (done) return; done = true; session?.stop(); endRef.current(reason) }
+    void startLiveVideo(video, url, { onError: (r) => finish(r) }).then((s) => {
+      if (done) { s.stop(); return }
+      session = s
+      setPlaying(true)
+    }).catch(() => finish('live_unavailable'))
+    const io = typeof IntersectionObserver === 'function' ? new IntersectionObserver((entries) => { if (entries.some((e) => !e.isIntersecting)) finish(null) }) : null
+    io?.observe(video)
+    const onVis = () => { if (document.visibilityState === 'hidden') finish(null) }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      io?.disconnect()
+      document.removeEventListener('visibilitychange', onVis)
+      done = true
+      session?.stop()
+    }
+  }, [url])
+  return (
+    <>
+      <video ref={ref} className="mxd-ctx-video" muted playsInline controls={playing} preload="none" aria-label={label} />
+      {!playing ? <span className="mxd-ctx-still__state is-over">Connecting to the live stream…</span> : null}
+    </>
+  )
+}
+
 function CameraPreview({ id, name, onClose }: { id: string; name: string | null; onClose: () => void }) {
   const { detail, failed } = useCameraDetail(id)
   const [nonce, setNonce] = useState(0)
   // The clock "ago" reads against: when the preview opened, or the last Refresh.
   const [now, setNow] = useState(() => Date.now())
+  // Live video: off until the operator presses Play; a failure leaves a note and the still.
+  const [live, setLive] = useState<{ on: boolean; note: string | null }>({ on: false, note: null })
   const stillPath = detail?.media?.still?.kind === 'proxy' ? detail.media.still.path ?? null : null
   const still = useCameraStill(stillPath, nonce)
   const cam = detail?.camera
   const media = detail ? cameraMediaLabel(detail) : null
+  const stream = detail?.media?.stream && /^https:\/\//.test(detail.media.stream.url) && detail.media.stream.type === 'HLS' ? detail.media.stream : null
   const captured = still.capturedAt ? new Date(still.capturedAt).toISOString() : null
   return (
     <section className="mxd-ctx-card mxd-l3" role="dialog" aria-label={`Traffic camera: ${cam?.name ?? name ?? 'camera'}`} data-map-card="camera">
@@ -187,14 +239,21 @@ function CameraPreview({ id, name, onClose }: { id: string; name: string | null;
         </div>
         <button type="button" className="mxd-icon-btn" aria-label="Close camera" onClick={onClose}><Icon name="close" size={13} /></button>
       </header>
-      <div className={cls('mxd-ctx-still', media?.kind === 'link' && 'is-link')}>
-        {still.url ? <img src={still.url} alt={`Latest still from ${cam?.name ?? 'the camera'}`} /> : null}
-        {!still.url && media?.kind === 'still' ? <span className="mxd-ctx-still__state">{still.limited ? 'Too many stills opened in the last minute — try Refresh shortly' : still.failed ? 'The agency did not return a picture just now — location, direction and the agency’s page are below' : 'Reading the latest still…'}</span> : null}
+      <div className={cls('mxd-ctx-still', media?.kind === 'link' && 'is-link', live.on && 'is-live')}>
+        {live.on && stream ? <LiveVideo url={stream.url} label={`Live video from ${cam?.name ?? 'the camera'}`} onEnd={(reason) => setLive({ on: false, note: reason ? 'Live video unavailable right now — showing the latest still' : null })} /> : null}
+        {!live.on && still.url ? <img src={still.url} alt={`Latest still from ${cam?.name ?? 'the camera'}`} /> : null}
+        {!live.on && !still.url && media?.kind === 'still' ? <span className="mxd-ctx-still__state">{still.limited ? 'Too many stills opened in the last minute — try Refresh shortly' : still.failed ? 'The agency did not return a picture just now — location, direction and the agency’s page are below' : 'Reading the latest still…'}</span> : null}
         {media?.kind === 'link' ? <span className="mxd-ctx-still__state">{media.label}</span> : null}
         {!detail && !failed ? <span className="mxd-ctx-still__state">Reading camera…</span> : null}
         {failed ? <span className="mxd-ctx-still__state">Camera details unavailable right now</span> : null}
-        {media?.kind === 'still' ? <em className="mxd-ctx-still__tag">Still</em> : media?.kind === 'link' ? <em className="mxd-ctx-still__tag is-link">Location only</em> : null}
+        {live.on ? <em className="mxd-ctx-still__tag is-live">Live</em> : media?.kind === 'still' ? <em className="mxd-ctx-still__tag">{stream ? 'Still · live available' : 'Still'}</em> : media?.kind === 'link' ? <em className="mxd-ctx-still__tag is-link">Location only</em> : null}
+        {stream && !live.on ? (
+          <button type="button" className="mxd-ctx-play" onClick={() => setLive({ on: true, note: null })} aria-label={`Play live video from ${cam?.name ?? 'this camera'}`}>
+            <Icon name="play" size={13} /><span>Play live</span>
+          </button>
+        ) : null}
       </div>
+      {live.note ? <p className="mxd-ctx-internal is-note">{live.note}</p> : null}
       {detail?.provider?.internal_use ? <p className="mxd-ctx-internal" data-camera-use="internal">{detail.provider.attribution}</p> : null}
       {cam ? (
         <dl className="mxd-ctx-facts">
@@ -207,7 +266,8 @@ function CameraPreview({ id, name, onClose }: { id: string; name: string | null;
       <footer className="mxd-ctx-card__foot">
         <span className="mxd-ctx-credit" title={detail?.provider?.attribution}>{detail?.provider?.internal_use ? `Source: ${detail.provider.name.replace(/ ITS$/, '')}` : detail?.provider?.attribution ?? ''}</span>
         <span className="mxd-ctx-card__actions">
-          {media?.kind === 'still' ? <button type="button" className="mxd-btn is-sm" onClick={() => { setNonce((n) => n + 1); setNow(Date.now()) }}>Refresh</button> : null}
+          {live.on ? <button type="button" className="mxd-btn is-sm" onClick={() => setLive({ on: false, note: null })}>Stop live</button> : null}
+          {media?.kind === 'still' && !live.on ? <button type="button" className="mxd-btn is-sm" onClick={() => { setNonce((n) => n + 1); setNow(Date.now()) }}>Refresh</button> : null}
           {detail?.media?.provider_page_url ? <a className="mxd-btn is-sm" href={detail.media.provider_page_url} target="_blank" rel="noopener noreferrer">Open on {detail.provider?.name ?? 'agency'}</a> : null}
         </span>
       </footer>

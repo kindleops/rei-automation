@@ -9,7 +9,7 @@ import { CRIME_FAMILY, PRESENCE_COLORS, presenceFeatures, type CamerasReply, typ
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 export const CTX_IDS = {
-  camSrc: 'mxd-ctx-cam', camCells: 'mxd-ctx-cam-cells', camCellCount: 'mxd-ctx-cam-cellcount', camDots: 'mxd-ctx-cam-dots', camHit: 'mxd-ctx-cam-hit',
+  camSrc: 'mxd-ctx-cam', camCells: 'mxd-ctx-cam-cells', camCellCount: 'mxd-ctx-cam-cellcount', camDots: 'mxd-ctx-cam-dots', camLive: 'mxd-ctx-cam-live', camHit: 'mxd-ctx-cam-hit',
   crimeSrc: 'mxd-ctx-crime', crimeDots: 'mxd-ctx-crime-dots',
   presSrc: 'mxd-ctx-pres', presEntity: 'mxd-ctx-pres-entity', presBuys: 'mxd-ctx-pres-buys',
 } as const
@@ -46,7 +46,7 @@ export function cameraFeatures(r: CamerasReply | null): GeoJSON.FeatureCollectio
     type: 'FeatureCollection',
     features: r.cameras.map((c, i) => ({
       type: 'Feature', id: i, geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { cell: 0, id: c.id, name: c.name ?? '', link: c.media === 'link' ? 1 : 0, off: c.status === 'OFFLINE' ? 1 : 0 },
+      properties: { cell: 0, id: c.id, name: c.name ?? '', link: c.media === 'link' ? 1 : 0, off: c.status === 'OFFLINE' ? 1 : 0, live: c.video ? 1 : 0 },
     })),
   }
 }
@@ -88,6 +88,16 @@ export function ensureCameras(map: maplibregl.Map, fc: GeoJSON.FeatureCollection
       },
     }, before)
   }
+  // Live video: a quiet outer halo ring — the "live" badge, static (nothing pulses to look alive).
+  if (!map.getLayer(CTX_IDS.camLive)) {
+    map.addLayer({
+      id: CTX_IDS.camLive, type: 'circle', source: CTX_IDS.camSrc, filter: ['all', ['==', ['get', 'cell'], 0], ['==', ['get', 'live'], 1]],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 4.4, 12, 6.6, 15, 8.4] as never,
+        'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#3ddc97', 'circle-stroke-width': 1.2, 'circle-stroke-opacity': 0.85,
+      },
+    }, before)
+  }
   // A generous invisible target: small markers stay subtle but easy to press.
   if (!map.getLayer(CTX_IDS.camHit)) {
     map.addLayer({ id: CTX_IDS.camHit, type: 'circle', source: CTX_IDS.camSrc, filter: ['==', ['get', 'cell'], 0], paint: { 'circle-radius': 9, 'circle-color': '#000', 'circle-opacity': 0 } }, before)
@@ -95,7 +105,7 @@ export function ensureCameras(map: maplibregl.Map, fc: GeoJSON.FeatureCollection
   map.setPaintProperty(CTX_IDS.camCellCount, 'text-color', ink)
   map.setPaintProperty(CTX_IDS.camCellCount, 'text-halo-color', halo)
 }
-export const removeCameras = (map: maplibregl.Map) => drop(map, [CTX_IDS.camHit, CTX_IDS.camDots, CTX_IDS.camCellCount, CTX_IDS.camCells], CTX_IDS.camSrc)
+export const removeCameras = (map: maplibregl.Map) => drop(map, [CTX_IDS.camHit, CTX_IDS.camLive, CTX_IDS.camDots, CTX_IDS.camCellCount, CTX_IDS.camCells], CTX_IDS.camSrc)
 
 /* ── crime ────────────────────────────────────────────────────────────────── */
 

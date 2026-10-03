@@ -20,10 +20,12 @@
 import { mndotIrisAdapter } from './adapters/mndot-iris.js'
 import { txdotItsAdapter } from './adapters/txdot-its.js'
 import { austinMobilityAdapter } from './adapters/austin-mobility.js'
+import { caltransCwwp2Adapter } from './adapters/caltrans-cwwp2.js'
 
 /** @type {Record<string, { listRaw: Function, normalize: Function, snapshotRequest?: Function }>} */
 export const CAMERA_ADAPTERS = {
   mndot_iris: mndotIrisAdapter,
   txdot_its: txdotItsAdapter,
   austin_mobility: austinMobilityAdapter,
+  caltrans_cwwp2: caltransCwwp2Adapter,
 }

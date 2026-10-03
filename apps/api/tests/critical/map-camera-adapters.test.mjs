@@ -149,7 +149,8 @@ test('memory detail + snapshot: MnDOT still is proxied by canonical id; TxDOT de
   const d = await getCameraDetail('mn_mndot_iris:C001', deps)
   assert.equal(d.ok, true)
   assert.equal(d.media.still.kind, 'proxy')
-  assert.equal(d.media.stream, null, 'no undocumented HLS, no autoplay')
+  // C001 is IRIS-streamable: the official MnDOT HLS URL, for the browser to open on click
+  assert.deepEqual(d.media.stream, { type: 'HLS', url: 'https://video.dot.state.mn.us/public/C001.stream/playlist.m3u8' })
   assert.equal(d.provider.image_policy, 'proxy')
   const s = await fetchCameraSnapshot('mn_mndot_iris:C001', deps)
   assert.equal(s.ok, true)
@@ -190,4 +191,77 @@ test('boxesOverlap', () => {
   assert.equal(boxesOverlap({ west: 0, south: 0, east: 1, north: 1 }, { west: 0.5, south: 0.5, east: 2, north: 2 }), true)
   assert.equal(boxesOverlap({ west: 0, south: 0, east: 1, north: 1 }, { west: 2, south: 2, east: 3, north: 3 }), false)
   assert.equal(boxesOverlap(undefined, { west: 2, south: 2, east: 3, north: 3 }), true)
+})
+
+/* ── live video (owner-approved 2026-10-03): MnDOT streamable + Caltrans ── */
+
+import { caltransPageUrl, caltransStatus, caltransStream } from '@/lib/domain/map/cameras/adapters/caltrans-cwwp2.js'
+
+const CA_ALL = Array.from({ length: 12 }, (_, i) => i + 1).flatMap((n) => fx(`ca_caltrans_d${n}/cctv_status_d${String(n).padStart(2, '0')}.json`).data.map((r) => ({ ...r.cctv, __district: n })))
+
+test('MnDOT: HLS only for cameras IRIS marks streamable, at MnDOT’s own server', () => {
+  const cams = normalizeAll('mn_mndot_iris', MN_PUB)
+  for (const c of cams) {
+    const raw = MN_PUB.find((r) => r.name === c.external_camera_id)
+    if (raw.streamable === true) {
+      assert.equal(c.feed_type, 'HLS')
+      assert.equal(c.stream_url, `https://video.dot.state.mn.us/public/${raw.name}.stream/playlist.m3u8`)
+    } else {
+      assert.equal(c.stream_url, null)
+      assert.equal(c.feed_type, 'REFRESHING_STILL')
+    }
+  }
+  assert.ok(cams.some((c) => c.stream_url) && cams.some((c) => !c.stream_url))
+})
+
+test('Caltrans CWWP2: 12 district fixtures normalise; official HLS only; status, direction, cadence and page as published', () => {
+  const p = prov('ca_caltrans_cwwp2')
+  assert.deepEqual(validateProvider(p), [])
+  const cams = normalizeAll('ca_caltrans_cwwp2', CA_ALL)
+  assert.equal(cams.length, CA_ALL.length)
+  const d7 = cams.find((c) => c.external_camera_id === 'D7-1')
+  assert.equal(d7.name, 'I-110 : (196) Avenue 26 Off Ramp')
+  assert.equal(d7.road, 'I-110')
+  assert.equal(d7.direction, 'S')
+  assert.equal(d7.feed_type, 'HLS')
+  assert.equal(d7.stream_url, 'https://wzmedia.dot.ca.gov/D7/CCTV-196.stream/playlist.m3u8')
+  assert.equal(d7.snapshot_cadence_sec, 120)
+  assert.equal(d7.provider_page_url, 'https://cwwp2.dot.ca.gov/vm/loc/d7/i110196avenue26offramp.htm')
+  assert.equal(d7.county, null, 'county is unreliable in the feed — not carried')
+  const withStream = cams.filter((c) => c.stream_url)
+  assert.equal(withStream.length, CA_ALL.filter((r) => /^https:/.test(r.imageData?.streamingVideoURL || '')).length)
+  assert.ok(withStream.every((c) => /^https:\/\/wzmedia\.dot\.ca\.gov\/[^:]/.test(c.stream_url)), ':443 is normalised away')
+  assert.ok(cams.filter((c) => !c.stream_url).every((c) => c.feed_type === 'REFRESHING_STILL'))
+  assert.ok(cams.some((c) => c.status === 'OFFLINE'), 'inService=false is offline')
+  assert.ok(cams.some((c) => c.direction === null), '"" / "Median" is no direction')
+  assert.equal(caltransStatus('Not Reported'), 'UNKNOWN')
+  assert.equal(caltransStream('https://evil.example.com/x.m3u8'), null)
+  assert.equal(caltransStream('http://wzmedia.dot.ca.gov/D7/x.stream/playlist.m3u8'), null)
+  assert.equal(caltransPageUrl(7, ''), 'https://cwwp2.dot.ca.gov/vm/streamlist.htm')
+})
+
+test('memory: Los Angeles pulls Caltrans only; live cameras are flagged; detail exposes the official stream URL, never a proxy', async () => {
+  _resetCameraMemoryStore()
+  const calls = []
+  const deps = {
+    store: 'memory', env: {}, now: NOW,
+    fetchImpl: async (url) => {
+      calls.push(url)
+      const m = /\/data\/d(\d+)\/cctv\/cctvStatusD\d+\.json$/.exec(url)
+      if (m) return jsonRes(fx(`ca_caltrans_d${m[1]}/cctv_status_d${m[1].padStart(2, '0')}.json`))
+      throw new Error(`unexpected fetch ${url}`)
+    },
+  }
+  const v = await getCamerasInView({ bbox: '-118.6,33.7,-117.9,34.3', zoom: 11 }, deps)
+  assert.ok(v.cameras.length > 0)
+  assert.ok(v.cameras.every((c) => c.provider === 'Caltrans'))
+  assert.ok(calls.every((u) => u.startsWith('https://cwwp2.dot.ca.gov/data/')), 'metadata only — no stream or still is requested by a view')
+  const live = v.cameras.find((c) => c.video)
+  assert.ok(live, 'a live camera is flagged')
+  const d = await getCameraDetail(live.id, deps)
+  assert.equal(d.media.stream.type, 'HLS')
+  assert.match(d.media.stream.url, /^https:\/\/wzmedia\.dot\.ca\.gov\/D7\/.+\.m3u8$/)
+  assert.equal(d.media.still.kind, 'proxy')
+  assert.match(d.provider.attribution, /Caltrans/)
+  assert.ok(!calls.some((u) => u.includes('wzmedia')), 'no stream is opened server-side')
 })
