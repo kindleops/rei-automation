@@ -5,6 +5,7 @@ import { resolveAppDestination } from '../../../domain/app-registry/contextual-n
 import { PROPERTY_LOCATOR_EVENT, readPropertyLocator, setPropertyLocator, type PropertyLocator } from '../../../domain/locator/property-locator'
 import * as L from './layout'
 import type { MissionKind, MissionPlan, MissionSubject } from './missions'
+import { copyInstanceState, instanceStateKeys, isolateShared, releaseInstanceState } from './instance-state'
 
 /**
  * THE WORKSPACE STORE — one per shell.
@@ -143,7 +144,12 @@ let persistTimer = 0
 let started = false
 
 function get(): WorkspaceSnapshot {
-  if (!snap) snap = boot()
+  if (!snap) {
+    snap = boot()
+    // per-instance state (Browser tabs) is owned by ONE workspace: split any saved layouts that share it
+    const isolated = isolateShared(snap.layout, snap.saved)
+    if (isolated) { snap = { ...snap, saved: isolated }; writeSaved(isolated) }
+  }
   return snap
 }
 
@@ -498,9 +504,12 @@ function writeSaved(saved: SavedWorkspace[]) { writeJSON(local(), SAVED_KEY, { s
 export function saveWorkspace(name?: string): SavedWorkspace {
   const s = get()
   const id = s.savedId && !name ? s.savedId : L.newId('w')
-  const entry: SavedWorkspace = { id, name: (name ?? s.name ?? 'Workspace').trim() || 'Workspace', layout: { ...s.layout, maximized: null }, linked: s.linked, savedAt: Date.now() }
+  // the saved workspace owns a SNAPSHOT of per-instance state (Browser tabs); the live one keeps browsing its own
+  const entry: SavedWorkspace = { id, name: (name ?? s.name ?? 'Workspace').trim() || 'Workspace', layout: copyInstanceState({ ...s.layout, maximized: null }), linked: s.linked, savedAt: Date.now() }
+  const previous = s.saved.find((w) => w.id === id)
   const saved = [...s.saved.filter((w) => w.id !== id), entry].sort((a, b) => a.name.localeCompare(b.name))
   writeSaved(saved)
+  if (previous) releaseInstanceState(previous.layout, ownedKeys(saved, s.layout))
   set({ saved, savedId: id, name: entry.name, dirty: false })
   say(`Saved “${entry.name}”.`)
   return entry
@@ -515,10 +524,17 @@ export function renameWorkspace(id: string, name: string) {
   set({ saved, ...(s.savedId === id ? { name: clean } : {}) })
 }
 
+/** Every per-instance state key still owned by a saved workspace or the live one. */
+function ownedKeys(saved: SavedWorkspace[], live: L.Layout): Set<string> {
+  return new Set([...instanceStateKeys(live), ...saved.flatMap((w) => instanceStateKeys(w.layout))])
+}
+
 export function deleteWorkspace(id: string) {
   const s = get()
+  const gone = s.saved.find((w) => w.id === id)
   const saved = s.saved.filter((w) => w.id !== id)
   writeSaved(saved)
+  if (gone) releaseInstanceState(gone.layout, ownedKeys(saved, s.layout))
   set({ saved, ...(s.savedId === id ? { savedId: null, name: null, dirty: false } : {}) })
 }
 
@@ -526,7 +542,8 @@ export function duplicateWorkspace(id: string) {
   const s = get()
   const w = s.saved.find((x) => x.id === id)
   if (!w) return
-  const copy = { ...w, id: L.newId('w'), name: `${w.name} copy`, savedAt: Date.now() }
+  // copy-on-duplicate: the copy owns its own per-instance state, never the original's
+  const copy = { ...w, id: L.newId('w'), name: `${w.name} copy`, layout: copyInstanceState(w.layout), savedAt: Date.now() }
   const saved = [...s.saved, copy].sort((a, b) => a.name.localeCompare(b.name))
   writeSaved(saved)
   set({ saved })
@@ -542,7 +559,8 @@ export function switchWorkspace(id: string) {
   const w = get().saved.find((x) => x.id === id)
   if (!w) return
   endMissionQuietly()
-  adopt(w.layout, { name: w.name, savedId: w.id, linked: w.linked })
+  // restore a FORK: working in the restored workspace never rewrites what was saved (until saved again)
+  adopt(copyInstanceState(w.layout), { name: w.name, savedId: w.id, linked: w.linked })
   emit({ type: 'switched', name: w.name })
   say(`${w.name} workspace.`)
 }

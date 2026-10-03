@@ -135,7 +135,7 @@ export function BrowserChrome({ addressRef, ...p }: ChromeProps) {
             spellCheck={false}
             autoComplete="off"
           />
-          {p.drifted && !editing ? <span className="lcb-addr__drift" title="You followed a link inside the site; the page's own address is not visible to LeadCommand. Copy link and Open externally use the last known address.">moved within site</span> : null}
+          {p.drifted && !editing ? <span className="lcb-addr__drift" title="You followed a link inside this site. LeadCommand does not read a foreign page's address — the last known source, domain and research context are kept, and Copy link / Open externally use that last known address.">Navigated within this site</span> : null}
         </form>
         <ContextChip ctx={p.active.context} link={p.link} linkForced={p.linkForced} onToggle={p.onToggleLink} />
         <LCIconButton icon="external-link" label="Open externally" size="sm" disabled={!p.active.url} onClick={p.onExternal} className="lcb-hide-compact" />

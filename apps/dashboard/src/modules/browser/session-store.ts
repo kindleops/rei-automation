@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { guardUrl } from './registry'
 import { createSession, reviveSession, serializeSession, type BrowserSession, type Histories } from './session-model'
+import { registerSessionFlusher, SESSION_KEY } from './session-snapshot'
 
 /**
  * Browser sessions, keyed by session id (the `?s=` the Browser instance
@@ -15,7 +16,6 @@ import { createSession, reviveSession, serializeSession, type BrowserSession, ty
  * only URLs and titles the operator opened.
  */
 
-const SESSION_KEY = (sid: string) => `lc.browser.session.v1:${sid}`
 const HISTORY_KEY = (sid: string) => `lc.browser.history.v1:${sid}`
 const RECENT_KEY = 'lc.browser.recent.v1'
 const MAX_RECENT = 12
@@ -72,7 +72,10 @@ function flush() {
   }
   dirty.clear()
 }
-if (typeof window !== 'undefined') window.addEventListener('pagehide', () => { if (timer !== null) { window.clearTimeout(timer); flush() } })
+function flushNow() { if (timer !== null) { if (typeof window !== 'undefined') window.clearTimeout(timer); flush() } }
+if (typeof window !== 'undefined') window.addEventListener('pagehide', flushNow)
+// a workspace save / restore / duplicate copies the latest tabs, never a stale write-behind
+registerSessionFlusher(flushNow)
 
 export function getSession(sid: string): { s: BrowserSession; h: Histories } {
   return load(sid).snap
