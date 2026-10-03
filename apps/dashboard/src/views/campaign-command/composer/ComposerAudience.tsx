@@ -348,7 +348,11 @@ export function AudiencePlane({
                   <div className="ccz-aud__block">
                     <div className="ccz-aud__label">
                       <span className="ccz-kicker">Build</span>
-                      <span className="ccz-muted">{fmt(audience.build.rows_read)} rows read → {fmt(audience.build.recipients)} recipients{partial ? ` · first ${fmt(audience.build.simulated_limit)} of ${fmt(audience.eligible_in_audience)} (campaign size)` : ''}</span>
+                      <span className="ccz-muted">
+                        {audience.build.whole_cohort
+                          ? <>Whole cohort · {fmt(audience.build.rows_read)} rows → {fmt(audience.build.recipients)} recipients{partial ? ` · Build reads at most ${fmt(audience.build.build_limit ?? audience.build.simulated_limit)}` : ''}{audience.build.timings_ms ? ` · counted in ${(audience.build.timings_ms.total / 1000).toFixed(1)}s` : ''}</>
+                          : <>Sample · first {fmt(audience.build.rows_read)} rows → {fmt(audience.build.recipients)} recipients · counting the whole cohort…</>}
+                      </span>
                     </div>
                     <SegmentBar segments={build} total={n0(audience.build.rows_read)} label="Simulated build" />
                     {audience.build.held ? (

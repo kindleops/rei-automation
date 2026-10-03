@@ -10,11 +10,11 @@ import { isWorkspaceRunning, openApp } from '../../../modules/desktop/workspace/
 import { pushRoutePath } from '../../../app/router'
 import { getFieldCatalog, searchFieldOptions, type CampaignFieldCatalog } from '../campaignWizardAdapter'
 import { fetchCommandBook, type BookCampaign } from '../desktop/war-room-api'
-import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readFleet, readTemplates, saveDraft } from './composer-api'
-import type { ComposerAudience, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
+import { duplicateAsDraft, launch, loadCampaign, prepareLaunch, readAudience, readCohort, readFleet, readTemplates, saveDraft } from './composer-api'
+import type { ComposerAudience, ComposerCohort, ComposerFleet, ComposerTemplates, PrepareResult } from './composer-types'
 import {
   audienceSpec, capacityPlan, clauseId, clausesFromTargetFilters, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition, fmt,
-  inferSource, launchSentence, LAUNCH_ERROR_WORDS, n0, relevantFleet, zoneWaves,
+  inferSource, launchSentence, LAUNCH_ERROR_WORDS, n0, relevantFleet, withCohort, zoneWaves,
   type Composition, type FilterClause, type Layer, type ReadinessCheck,
 } from './composer-model'
 import type { DropResolution, Intake } from './composer-intake'
@@ -185,10 +185,28 @@ export function CampaignComposer({ intake, persistKey, onClose, onLaunched }: Ca
     // spec is derived from specKey
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [specKey, hasAudience])
+  // the whole cohort, counted by the build's own pipeline (slower; aggregates only)
+  const cohortKey = JSON.stringify({ f: spec.filters, u: spec.template_use_case, n: nonce })
+  const [cohort, setCohort] = useState<{ key: string; data: ComposerCohort | null; error: string | null } | null>(null)
+  useEffect(() => {
+    if (!hasAudience) return
+    const ctl = new AbortController()
+    const timer = window.setTimeout(() => {
+      readCohort({ filters: spec.filters, template_use_case: spec.template_use_case }, ctl.signal).then((r) => {
+        if (ctl.signal.aborted) return
+        setCohort(r.ok ? { key: cohortKey, data: r.data, error: null } : { key: cohortKey, data: null, error: r.message })
+      })
+    }, 650)
+    return () => { window.clearTimeout(timer); ctl.abort() }
+    // spec is derived from cohortKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohortKey, hasAudience])
+  const cohortNow = cohort?.key === cohortKey ? cohort : null
   const audLoading = hasAudience && aud?.key !== specKey
   // keep showing the last answer while the next one settles (counts move, never blank)
-  const audience = hasAudience ? aud?.data ?? null : null
-  const audError = hasAudience && aud?.key === specKey ? aud.error : null
+  const audience = hasAudience ? withCohort(aud?.data ?? null, cohortNow?.data ?? null) : null
+  const cohortError = cohortNow?.error ?? null
+  const audError = hasAudience && aud?.key === specKey ? aud.error ?? (cohortError ? `whole-cohort count failed — ${cohortError}` : null) : null
 
   /* ── autosave (only once a draft exists; never status / automation) ─── */
   const payloadKey = useMemo(() => JSON.stringify(compositionPayload(composition)), [composition])

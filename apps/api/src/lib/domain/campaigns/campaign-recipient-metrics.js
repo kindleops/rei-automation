@@ -260,21 +260,33 @@ export async function fetchEntityContactReviewBlocks(propertyIds = [], deps = {}
 
   const blocked = new Set()
   const CHUNK = 500
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK)
-    const { data, error } = await supabase.rpc('campaign_entity_contact_review_flags', { p_property_ids: chunk })
-    if (error) {
-      const message = String(error.message || '').toLowerCase()
-      const missing = error.code === 'PGRST202' || message.includes('does not exist') || message.includes('not find')
-      // A missing accessor means the flag is simply unavailable in this
-      // environment; a real error must not silently clear the block.
-      if (missing) return { blocked: new Set(), ok: true, unavailable: true }
-      throw error
-    }
-    for (const row of data || []) {
-      if (row?.requires_review) blocked.add(clean(row.property_id))
+  const chunks = []
+  for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK))
+  // Independent read-only chunks, a few at a time (a whole-cohort count reads
+  // up to 100K properties; strictly sequential calls dominated its time).
+  let missing = false
+  let failure = null
+  let next = 0
+  const worker = async () => {
+    while (next < chunks.length && !missing && !failure) {
+      const chunk = chunks[next++]
+      const { data, error } = await supabase.rpc('campaign_entity_contact_review_flags', { p_property_ids: chunk })
+      if (error) {
+        const message = String(error.message || '').toLowerCase()
+        // A missing accessor means the flag is simply unavailable in this
+        // environment; a real error must not silently clear the block.
+        if (error.code === 'PGRST202' || message.includes('does not exist') || message.includes('not find')) missing = true
+        else failure = error
+        return
+      }
+      for (const row of data || []) {
+        if (row?.requires_review) blocked.add(clean(row.property_id))
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, worker))
+  if (failure) throw failure
+  if (missing) return { blocked: new Set(), ok: true, unavailable: true }
   return { blocked, ok: true }
 }
 

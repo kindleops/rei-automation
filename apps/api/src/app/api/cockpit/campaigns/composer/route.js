@@ -4,6 +4,7 @@ import {
   launchComposedCampaign,
   prepareComposerLaunch,
   readComposerAudience,
+  readComposerCohort,
   readComposerFleet,
   readComposerTemplates,
   saveComposerDraft,
@@ -25,7 +26,8 @@ export async function OPTIONS(request) {
  * GET — Campaign Composer reads. READ-ONLY (selects and the dry-run preview).
  *   ?part=fleet                     sender fleet: router state, sent today, capacity
  *   ?part=templates                 template coverage per strategy × language
- *   ?part=audience&spec=<json>      dry-run audience for a composition
+ *   ?part=audience&spec=<json>      dry-run audience for a composition (sampled build)
+ *   ?part=cohort&spec=<json>        the whole cohort counted by the build's pipeline (aggregates only)
  */
 export async function GET(request) {
   const auth = ensureMutationAuth(request)
@@ -41,6 +43,14 @@ export async function GET(request) {
         return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
       }
       const result = await readComposerAudience(spec)
+      return withCors(request, result, result.ok === false ? 502 : 200)
+    }
+    if (part === 'cohort') {
+      let spec = {}
+      try { spec = JSON.parse(params.get('spec') || '{}') } catch {
+        return withCors(request, { ok: false, error: 'invalid_spec' }, 400)
+      }
+      const result = await readComposerCohort(spec)
       return withCors(request, result, result.ok === false ? 502 : 200)
     }
     return withCors(request, { ok: false, error: 'unknown_part' }, 400)

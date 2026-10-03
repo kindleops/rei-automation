@@ -29,6 +29,11 @@ export type ComposerAudience = {
   build: {
     ok: boolean
     error?: string
+    /** true once the whole cohort was counted by the build's own pipeline (part=cohort) */
+    whole_cohort?: boolean
+    capped_by_build_limit?: boolean
+    build_limit?: number
+    timings_ms?: { read: number; total: number }
     requested_limit?: number | null
     simulated_limit?: number | null
     capped_by_preview?: boolean
@@ -154,3 +159,23 @@ export type LaunchResult = {
   readiness?: ServerReadiness
 }
 export type ComposerFailure = { ok: false; status?: number; error: string; message?: string | null; readiness?: ServerReadiness; blockers?: string[]; missed?: string }
+
+export type ComposerCohort = {
+  ok: true
+  at: string
+  queue_eligible_in_audience: number
+  rows_read: number
+  capped_by_build_limit: boolean
+  build_limit: number
+  recipients: number
+  duplicates_collapsed: number
+  ready: number
+  held: number
+  held_by_reason: Record<string, number>
+  sendable_now: number | null
+  no_sendable_number: number | null
+  sender_markets: NonNullable<ComposerAudience['build']['sender_markets']>
+  ready_by_zone: Record<string, number>
+  ready_by_market: Record<string, number>
+  timings_ms: { read: number; total: number }
+}

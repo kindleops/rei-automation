@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSegments, capacityPlan, checkSchedule, completionEstimate, compositionDiff, compositionPayload, deriveReadiness, eligibleOf, emptyComposition,
-  launchSentence, parseCap, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
+  launchSentence, parseCap, withCohort, serializeClauses, snapVolume, universeSegments, zoneWaves, type Composition,
 } from './composer-model'
-import type { ComposerAudience, ComposerFleet, ComposerTemplates, FleetNumber } from './composer-types'
+import type { ComposerAudience, ComposerCohort, ComposerFleet, ComposerTemplates, FleetNumber } from './composer-types'
 import { intakeFromLocation, resolveDrop, COMPOSER_OBJECTS_MIME } from './composer-intake'
 import { composerCommands } from './composer-commands'
 import { isLegacyBuilderForced } from './composer-flag'
@@ -56,6 +56,22 @@ describe('audience', () => {
   })
 })
 
+describe('whole cohort', () => {
+  const cohort: ComposerCohort = { ok: true, at: '', queue_eligible_in_audience: 4525, rows_read: 4525, capped_by_build_limit: false, build_limit: 100000, recipients: 3816, duplicates_collapsed: 709, ready: 3323, held: 493, held_by_reason: { entity_contact_requires_review: 432 }, sendable_now: 3323, no_sendable_number: 0, sender_markets: [], ready_by_zone: { 'America/Chicago': 3300, unresolved: 23 }, ready_by_market: {}, timings_ms: { read: 4500, total: 7900 } }
+  it('replaces the sampled build with the authoritative count, zones included', () => {
+    const merged = withCohort(audience(), cohort)!
+    expect(eligibleOf(merged)).toBe(3323)
+    expect(merged.build.whole_cohort).toBe(true)
+    expect(merged.zones.unresolved).toBe(23)
+    expect(merged.distributions.zones.map((z) => z.value)).toEqual(['America/Chicago'])
+  })
+  it('a sampled count alone never reads as ready', () => {
+    const waves = zoneWaves([{ value: 'America/Chicago', count: 1 }], { start: '08:00', end: '21:00' }, NOW, 48)
+    const r = deriveReadiness({ composition: dallas(), audience: audience(), audienceError: null, audienceLoading: false, templates: templates(), fleet: fleet([num()]), online: true, now: NOW, waves })
+    expect(r.checks.find((c) => c.key === 'audience')?.state).toBe('checking')
+  })
+})
+
 describe('readiness', () => {
   const base = { audienceError: null, audienceLoading: false, online: true, now: NOW, waves: zoneWaves([{ value: 'America/Chicago', count: 1000 }], { start: '08:00', end: '21:00' }, NOW, 48) }
   it('zero eligible disables launch', () => {
@@ -65,7 +81,8 @@ describe('readiness', () => {
     expect(r.checks.find((c) => c.key === 'audience')?.text).toBe('Zero eligible prospects')
   })
   it('a ready Dallas composition reads ready', () => {
-    const r = deriveReadiness({ ...base, composition: dallas(), audience: audience(), templates: templates(), fleet: fleet([num()]) })
+    const whole = { ...audience(), build: { ...audience().build, whole_cohort: true } }
+    const r = deriveReadiness({ ...base, composition: dallas(), audience: whole, templates: templates(), fleet: fleet([num()]) })
     expect(r.blockers).toBe(0)
     expect(['ready', 'warning']).toContain(r.state)
   })

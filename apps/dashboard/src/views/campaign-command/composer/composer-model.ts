@@ -7,7 +7,7 @@
  * those numbers to readiness lines. Anything the server has not answered is
  * `checking` or `unavailable` — never a zero, never a guess.
  */
-import type { ComposerAudience, ComposerFleet, ComposerTemplates, FleetNumber, ServerReadiness } from './composer-types'
+import type { ComposerAudience, ComposerCohort, ComposerFleet, ComposerTemplates, FleetNumber, ServerReadiness } from './composer-types'
 import { reasonWords } from './composer-format'
 
 /* ── composition ─────────────────────────────────────────────────────────── */
@@ -209,10 +209,45 @@ export function eligibleOf(a: ComposerAudience | null): number | null {
   return Math.max(0, n0(b.ready) - n0(b.no_sendable_number))
 }
 
+/**
+ * Fold the whole-cohort count (the build's pipeline over every readable row)
+ * into the audience: eligible, holds, routes and recipient zones become
+ * authoritative; the preview keeps its samples and graph exclusions.
+ */
+export function withCohort(a: ComposerAudience | null, cohort: ComposerCohort | null): ComposerAudience | null {
+  if (!a || !cohort) return a
+  const zones = Object.entries(cohort.ready_by_zone).map(([value, count]) => ({ value, label: value, count }))
+  return {
+    ...a,
+    build: {
+      ok: true,
+      whole_cohort: true,
+      capped_by_build_limit: cohort.capped_by_build_limit,
+      build_limit: cohort.build_limit,
+      timings_ms: cohort.timings_ms,
+      requested_limit: cohort.build_limit,
+      simulated_limit: cohort.build_limit,
+      rows_read: cohort.rows_read,
+      recipients: cohort.recipients,
+      duplicates_collapsed: cohort.duplicates_collapsed,
+      built: cohort.recipients,
+      ready: cohort.ready,
+      held: cohort.held,
+      held_by_reason: cohort.held_by_reason,
+      sendable_now: cohort.sendable_now,
+      no_sendable_number: cohort.no_sendable_number,
+      sender_markets: cohort.sender_markets,
+    },
+    distributions: { ...a.distributions, zones: zones.filter((z) => z.value !== 'unresolved') },
+    zones: { scanned: cohort.ready, unresolved: cohort.ready_by_zone.unresolved ?? 0 },
+  }
+}
+
 /** True when the simulated build read fewer rows than the audience holds (the count is a sample of the cohort). */
 export function buildIsPartial(a: ComposerAudience | null): boolean {
   const b = a?.build
   if (!b?.ok) return false
+  if (b.whole_cohort) return Boolean(b.capped_by_build_limit)
   return n0(a?.eligible_in_audience) > n0(b.rows_read) && n0(b.rows_read) >= n0(b.simulated_limit)
 }
 
@@ -453,6 +488,7 @@ export function deriveReadiness(i: ReadinessInput): ReadinessView {
   else {
     const eligible = eligibleOf(a)
     if (a.graph_unavailable) add('audience', 'Audience', 'audience', 'block', 'The target graph is unavailable')
+    else if (!a.build.whole_cohort && eligible !== null && eligible > 0) add('audience', 'Audience', 'audience', 'checking', `Counting the whole cohort — ${fmt(eligible)} eligible in the first ${fmt(a.build.rows_read)} read`)
     else if (eligible === null) add('audience', 'Audience', 'audience', 'block', `Build simulation failed${a.build.error ? ` — ${a.build.error}` : ''}`)
     else if (eligible === 0) add('audience', 'Audience', 'audience', 'block', 'Zero eligible prospects')
     else add('audience', 'Audience', 'audience', 'ok', `${fmt(eligible)} eligible`)

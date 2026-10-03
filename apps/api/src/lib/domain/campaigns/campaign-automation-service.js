@@ -6497,6 +6497,96 @@ export async function planCampaignTargetRows({ campaign = null, options = {}, gr
 }
 
 /**
+ * THE WHOLE COHORT, COUNTED THE WAY BUILD COUNTS IT (Campaign Composer 2.0).
+ *
+ * Reach's build simulation reads at most CAMPAIGN_TARGET_GRAPH_PREVIEW_LIMIT
+ * rows, so its "ready" is a sample of a large audience. This runs the SAME
+ * pipeline Build runs — the queue-eligible graph rows under the same filters
+ * and total order, planCampaignTargetRows (entity-review holds, phone dedupe,
+ * resolveCampaignTargetReadiness) — over every row Build could read
+ * (CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT), then the planner's router per market and
+ * the recipient-timezone resolver per ready seller. One predicate, no SQL copy
+ * to drift. Returns aggregates only; no target row leaves the server.
+ * Read-only: keyset pages over disjoint graph_id partitions; nothing is written.
+ */
+export async function countCampaignAudienceCohort(input = {}, deps = {}) {
+  const startedAt = Date.now()
+  const supabase = deps.supabase || defaultSupabase
+  const baseOptions = previewOptionsFromInput(input, null)
+  const population = await resolveGraphColumnPopulation(deps)
+  const options = { ...baseOptions, catalog_filters: resolveCatalogFiltersForTargetGraph(baseOptions.catalog_filters, { population }) }
+  const eligibleCount = await countCampaignGraphRows({ supabase, options, requireQueueEligible: true })
+  if (!eligibleCount.ok) return { ok: false, error: 'cohort_count_unavailable', warnings: eligibleCount.warnings }
+  const total = eligibleCount.count
+  const readable = Math.min(total, CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT)
+  const area = drawnAreaFromFilters(options.catalog_filters?.supported)
+  // Keyset pages over 16 disjoint graph_id partitions (graph_id is the primary
+  // key, a hex digest): no deep OFFSET sort, so a 100K cohort reads in bounded
+  // statements. Order is irrelevant to a whole-cohort count (nothing is
+  // sliced; the dedupe picks a primary by comparator, not by position).
+  const HEX = '0123456789abcdef'
+  const partitions = [...HEX].map((ch, i) => ({ lo: ch, hi: HEX[i + 1] ?? null }))
+  const pages = []
+  const warnings = []
+  let failure = null
+  let fetched = 0
+  let next = 0
+  const worker = async () => {
+    while (next < partitions.length && !failure) {
+      const part = partitions[next++]
+      let last = null
+      for (;;) {
+        if (failure || fetched >= readable) return
+        let query = campaignGraphQuery(supabase, { area, table: CAMPAIGN_TARGET_GRAPH_TABLE, columns: CAMPAIGN_TARGET_GRAPH_SELECT })
+          .gte('graph_id', part.lo)
+        if (part.hi) query = query.lt('graph_id', part.hi)
+        if (last) query = query.gt('graph_id', last)
+        query = applyCampaignGraphFilters(query.order('graph_id', { ascending: true }).limit(CAMPAIGN_TARGET_GRAPH_PAGE_SIZE), options, warnings, { requireQueueEligible: true })
+        const { data, error } = await query
+        if (error) { failure = errorMessage(error); return }
+        const page = Array.isArray(data) ? data : []
+        if (!page.length) break
+        pages.push(page)
+        fetched += page.length
+        last = page[page.length - 1].graph_id
+        if (page.length < CAMPAIGN_TARGET_GRAPH_PAGE_SIZE) break
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Number(deps.cohortConcurrency) || 6, partitions.length) }, worker))
+  if (failure) return { ok: false, error: 'cohort_rows_unavailable', message: failure }
+  const rows = pages.flat().slice(0, readable)
+  const readMs = Date.now() - startedAt
+  const planned = await planCampaignTargetRows({ campaign: null, options, graph: { rows }, targetLimit: CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT, deps, resolveLanguages: false })
+  const readyRows = planned.rows.filter((row) => row.target_status === 'ready')
+  const { evaluateAudienceSenderCoverage } = await import('@/lib/domain/campaigns/campaign-launch-readiness.js')
+  const senders = await evaluateAudienceSenderCoverage(readyRows, deps).catch(() => null)
+  const zones = {}
+  const markets = {}
+  for (const row of readyRows) {
+    const snapshot = metadataObject(metadataObject(row.metadata).candidate_snapshot)
+    const zone = resolveRecipientTimezone({ timezone: row.timezone, property_address_state: row.state, property_address_zip: snapshot.property_zip })
+    increment(zones, zone.ok ? zone.iana : 'unresolved')
+    increment(markets, clean(row.market) || 'unknown')
+  }
+  return {
+    ok: true,
+    queue_eligible_in_audience: total,
+    rows_read: rows.length,
+    capped_by_build_limit: total > CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT,
+    build_limit: CAMPAIGN_TARGET_GRAPH_BUILD_LIMIT,
+    ...planned.summary,
+    sendable_now: senders ? senders.sendable_now : null,
+    no_sendable_number: senders ? senders.no_sendable_number : null,
+    sender_markets: senders ? senders.markets : [],
+    ready_by_zone: zones,
+    ready_by_market: markets,
+    timings_ms: { read: readMs, total: Date.now() - startedAt },
+    warnings: uniqueClean(warnings),
+  }
+}
+
+/**
  * Record the built cohort's canonical market identity on the campaign
  * (campaign-market-identity.js). Re-reads the row so the metadata merge is
  * against the latest state (the status transition above just wrote it).

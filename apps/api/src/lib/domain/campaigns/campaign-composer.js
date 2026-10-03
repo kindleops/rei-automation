@@ -39,6 +39,7 @@ import {
   applyCampaignLifecycleAction,
   applyOwnerPersona,
   buildCampaignTargets,
+  countCampaignAudienceCohort,
   createCampaign,
   launchCandidateFromTarget,
   loadOwnerPersonas,
@@ -480,6 +481,48 @@ export async function readComposerAudience(spec = {}, deps = {}) {
     ? []
     : await renderComposerSamples(Array.isArray(preview.target_rows) ? preview.target_rows : [], { templateUseCase: strategy.use_case, stageCode, supabase }, deps).catch(() => [])
   return { ok: true, at: new Date().toISOString(), strategy: { use_case: strategy.use_case, stage_code: stageCode }, ...audience, samples }
+}
+
+/**
+ * The authoritative cohort count for any audience size (the build's own
+ * pipeline over every row Build could read — countCampaignAudienceCohort).
+ * Aggregates only. Cached briefly per spec: a composition is re-read often.
+ */
+const cohortCache = new Map()
+export async function readComposerCohort(spec = {}, deps = {}) {
+  const s = obj(spec)
+  const strategy = COMPOSER_STRATEGIES.find((x) => x.use_case === clean(s.template_use_case)) || COMPOSER_STRATEGIES[0]
+  const key = JSON.stringify({ f: obj(s.filters), u: strategy.use_case })
+  const hit = cohortCache.get(key)
+  if (!deps.fresh && hit && Date.now() - hit.at < 60_000) return { ...hit.value, cached: true }
+  const result = await (deps.countCampaignAudienceCohort || countCampaignAudienceCohort)({
+    filters: obj(s.filters),
+    template_use_case: strategy.use_case,
+    stage_code: strategy.stage_code,
+  }, deps)
+  if (!result?.ok) return { ok: false, error: clean(result?.error) || 'cohort_unavailable', message: clean(result?.message) || null }
+  const value = {
+    ok: true,
+    at: new Date().toISOString(),
+    queue_eligible_in_audience: result.queue_eligible_in_audience,
+    rows_read: result.rows_read,
+    capped_by_build_limit: result.capped_by_build_limit,
+    build_limit: result.build_limit,
+    recipients: result.recipients,
+    duplicates_collapsed: result.duplicate_phones_collapsed,
+    ready: result.ready,
+    held: result.held,
+    held_by_reason: result.held_by_reason,
+    sendable_now: result.sendable_now,
+    no_sendable_number: result.no_sendable_number,
+    sender_markets: (result.sender_markets || []).map((m) => ({ market: m.market, sellers: m.sellers, sendable: m.sendable ?? null, route_tier: m.route_tier || null, block_reason: m.block_reason || null, summary: m.summary || null })),
+    ready_by_zone: result.ready_by_zone,
+    ready_by_market: result.ready_by_market,
+    timings_ms: result.timings_ms,
+  }
+  cohortCache.set(key, { at: Date.now(), value })
+  if (cohortCache.size > 50) cohortCache.delete(cohortCache.keys().next().value)
+  return value
 }
 
 /* ── draft save ─────────────────────────────────────────────────────────── */

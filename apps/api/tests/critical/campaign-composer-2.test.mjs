@@ -317,3 +317,23 @@ test("fleet capacity counts only what the router would use; blocked and cooling 
   assert.equal(houston.capacity_per_day, 0);
   assert.equal(houston.unavailable_per_day, 800);
 });
+
+test("the whole-cohort count is the build pipeline's answer, aggregates only, cached per spec", async () => {
+  const { readComposerCohort } = await import("@/lib/domain/campaigns/campaign-composer.js");
+  let calls = 0;
+  const deps = {
+    countCampaignAudienceCohort: async (input) => {
+      calls += 1;
+      assert.deepEqual(input.filters, FILTERS);
+      return { ok: true, queue_eligible_in_audience: 62672, rows_read: 62672, capped_by_build_limit: false, build_limit: 100000, recipients: 54910, duplicate_phones_collapsed: 7762, ready: 43962, held: 10948, held_by_reason: {}, sendable_now: 5875, no_sendable_number: 38087, sender_markets: [{ market: "Dallas, TX", sellers: 3322, sendable: true, route_tier: "exact_market_match", target_rows: ["never"] }], ready_by_zone: { "America/Chicago": 14328 }, ready_by_market: {}, timings_ms: { read: 15464, total: 32619 }, rows: ["must not leak"] };
+    },
+  };
+  const a = await readComposerCohort({ filters: FILTERS, template_use_case: "ownership_check" }, deps);
+  assert.equal(a.sendable_now, 5875);
+  assert.equal(a.ready, 43962);
+  assert.equal("rows" in a, false, "no target rows leave the server");
+  assert.equal("target_rows" in a.sender_markets[0], false);
+  const b = await readComposerCohort({ filters: FILTERS, template_use_case: "ownership_check" }, deps);
+  assert.equal(b.cached, true);
+  assert.equal(calls, 1);
+});
