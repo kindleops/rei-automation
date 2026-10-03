@@ -174,7 +174,11 @@ export function applyFilters(query, params = {}) {
     next = next.eq('opportunity_status', 'dead');
   } else if (scope === 'suppressed') {
     next = next.eq('opportunity_status', 'suppressed');
-  } else if (scope === 'closed' || scope === 'archived') {
+  } else if (scope === 'archived') {
+    // Archived is its own operator state (bulk archive clears strays into it);
+    // it is not "closed", which also carries won/lost and the closed stage.
+    next = next.eq('opportunity_status', 'archived');
+  } else if (scope === 'closed') {
     next = next.or([
       'acquisition_stage.eq.closed',
       'opportunity_status.in.(archived,won,lost)',

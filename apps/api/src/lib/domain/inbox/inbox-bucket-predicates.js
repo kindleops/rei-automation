@@ -251,8 +251,12 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
       //
       // Genuine opt-outs are untouched: 309 threads carry opt_out and stay
       // blocked, as do the 173 carrier-level STOP records (TextGrid 21610).
+      // Archived leaves every bucket but Archived — the same rule the SQL flags
+      // (in_dead/in_suppressed/in_unlinked require !archived) already apply.
+      if (isArchivedThread(thread)) return false;
       return bucket === "dead" || isWrongNumberContact(thread) || isClosedDispositionThread(thread);
     case "suppressed":
+      if (isArchivedThread(thread)) return false;
       return bucket === "suppressed" || isSuppressedContact(thread);
     case "active":
       if (isArchivedThread(thread) || isTerminalNoContactThread(thread)) return false;
@@ -260,6 +264,7 @@ export function threadMatchesBucketFilter(thread = {}, filter = "all", nowMs = D
     case "waiting":
       return threadMatchesWaitingFacts(thread, nowMs);
     case "unlinked":
+      if (isArchivedThread(thread)) return false;
       return !thread.property_id;
     case "archived":
       // Without this case, "archived" fell through to `default: return true`,

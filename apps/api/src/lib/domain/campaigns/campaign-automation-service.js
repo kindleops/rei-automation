@@ -5949,7 +5949,12 @@ export async function listCampaigns(deps = {}) {
   let totalOptOut = 0
   let totalReplied = 0
   let deliveredTotal = 0
-  for (const campaign of summaries) {
+  // Archived campaigns stay in the list (their history is kept) but never feed
+  // the portfolio KPIs: archiving is how an operator clears a stray or retired
+  // campaign out of the numbers. Same rule as syncPortfolioMetrics and the
+  // market index (.neq('status','archived')).
+  const kpiCampaigns = summaries.filter((campaign) => normalizeCampaignStatus(campaign.status) !== 'archived')
+  for (const campaign of kpiCampaigns) {
     const status = normalizeCampaignStatus(campaign.status)
     const operator = campaign.operator_state
     if (
@@ -5977,14 +5982,14 @@ export async function listCampaigns(deps = {}) {
     truncated: (campaigns || []).length >= CAMPAIGN_LIST_CAP,
     kpis: {
       activeCampaigns,
-      totalTargets: summaries.reduce((sum, campaign) => sum + campaign.total_targets, 0),
-      readyTargets: summaries.reduce((sum, campaign) => sum + campaign.ready_targets, 0),
-      scheduledQueueRows: summaries.reduce((sum, campaign) => sum + Number(campaign.scheduled_queue_rows || 0), 0),
-      plannedTargets: summaries.reduce((sum, campaign) => sum + Number(campaign.planned_targets || 0), 0),
-      sentToday: summaries.reduce((sum, campaign) => sum + Number(campaign.sent_count || 0), 0),
+      totalTargets: kpiCampaigns.reduce((sum, campaign) => sum + campaign.total_targets, 0),
+      readyTargets: kpiCampaigns.reduce((sum, campaign) => sum + campaign.ready_targets, 0),
+      scheduledQueueRows: kpiCampaigns.reduce((sum, campaign) => sum + Number(campaign.scheduled_queue_rows || 0), 0),
+      plannedTargets: kpiCampaigns.reduce((sum, campaign) => sum + Number(campaign.planned_targets || 0), 0),
+      sentToday: kpiCampaigns.reduce((sum, campaign) => sum + Number(campaign.sent_count || 0), 0),
       deliveredToday: deliveredTotal,
       replyRate: deliveredTotal > 0 ? Math.round((totalReplied / deliveredTotal) * 1000) / 10 : 0,
-      positiveReplies: summaries.reduce((sum, campaign) => sum + campaign.positive_reply_count, 0),
+      positiveReplies: kpiCampaigns.reduce((sum, campaign) => sum + campaign.positive_reply_count, 0),
       optOutRate: totalSent > 0 ? Math.round((totalOptOut / totalSent) * 1000) / 10 : 0,
       failureRate: totalSent > 0 ? Math.round((totalFailed / totalSent) * 1000) / 10 : 0,
     },
